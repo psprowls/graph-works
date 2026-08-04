@@ -1,0 +1,19 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "okf-io"
+version = "0.1.0"
+description = "Read, derive from, and write back OKF v0.2 concept documents without disturbing bytes that did not change."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    # okf_io._yaml subclasses ruamel.yaml.emitter.Emitter, which is not a stable
+    # public contract. Bump deliberately and re-run the round-trip suite.
+    "ruamel.yaml>=0.18",
+    "markdown-it-py>=3.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/okf_io"]

@@ -1,0 +1,8 @@
+# The test fixture corpus is a byte-exact contract, not source code.
+#
+# `edge/encoding/crlf.md` is uniformly CRLF and `edge/encoding/bom.md` carries a
+# UTF-8 BOM on purpose; the vendored bundles are verbatim copies pinned to an
+# upstream commit. Git's end-of-line normalization (core.autocrlf, text=auto)
+# rewrites those bytes on checkout, which would break the very regressions the
+# fixtures exist to guard -- and do it silently, on someone else's machine.
+packages/okf-io/tests/fixtures/** -text

@@ -1,0 +1,34 @@
+error	computation.missing	concepts/computation-a.md	§10.3	An Attested Computation has neither an inline `# Computation` block nor a `computation:` path
+error	computation.runtime-missing	concepts/computation-a.md	§10.2	An Attested Computation has no `runtime`
+error	computation.duplicate	concepts/computation-b.md	§10.3	Both an inline `# Computation` block and a `computation:` path are present
+warn	computation.path-unresolved	concepts/computation-b.md	§6.2	`computation` `lib/revenue.sql` is not a bundle member
+warn	computation.parameter-incomplete	concepts/computation-c.md	§10.2	`parameters[0]` is missing `type`
+warn	computation.path-unresolved	concepts/computation-c.md	§6.2	`executor.resource` `sub/index.md` is not a bundle member (did you mean `/sub/index.md`?)
+warn	legacy.body-citations	concepts/legacy.md	§13.1	v0.1 body `# Citations` list; migrate to frontmatter `sources`
+warn	legacy.timestamp	concepts/legacy.md	§13.1	v0.1 top-level `timestamp`; migrate to `generated: { by, at }`
+error	lifecycle.stale-after-malformed	concepts/lifecycle.md	§5.5	`stale_after` 'soonish' is not `YYYY-MM-DD`
+error	lifecycle.status-unknown	concepts/lifecycle.md	§5.4	`status` 'archived' is outside draft / stable / deprecated
+warn	links.broken	concepts/links.md:11	§6.1	Link target `./nowhere.md` is not a bundle member
+warn	links.broken	concepts/links.md:13	§6.1	Link target `sub/index.md` is not a bundle member (did you mean `/sub/index.md`?)
+warn	links.broken	concepts/links.md:15	§6.1	Link target `../../outside.md` is not a bundle member
+warn	links.broken	concepts/links.md:21	§6.1	Image target `/assets/none.png` is not a bundle member
+error	frontmatter.missing	concepts/no-frontmatter.md	§11	No YAML frontmatter block
+warn	frontmatter.description-recommended	concepts/no-type.md	§4.1	No `description`
+error	frontmatter.missing-type	concepts/no-type.md	§4.1	`type` is absent or empty
+warn	frontmatter.title-recommended	concepts/no-type.md	§4.1	No `title`
+error	frontmatter.unreadable	concepts/not-utf8.md	§11	Member could not be read: not valid UTF-8: 'utf-8' codec can't decode byte 0xff in position 68: invalid start byte
+warn	provenance.footnote-unjoined	concepts/provenance.md	§5.1	Footnote `[^ghost]` matches no `sources[].id`
+error	provenance.source-resource-missing	concepts/provenance.md	§5.1	`sources[0]` has no `resource`
+warn	provenance.source-uncited	concepts/provenance.md	§5.1	`sources[].id` `lonely` is cited by no footnote
+warn	provenance.source-uncited	concepts/provenance.md	§5.1	`sources[].id` `no-resource` is cited by no footnote
+warn	provenance.usage-count-unframed	concepts/provenance.md	§5.1	`sources[1].usage_count` has no `usage_window` to frame it
+warn	lifecycle.stale	concepts/stale.md	§5.5	`stale_after` 2020-01-01 is on or before 2026-08-03
+error	trust.generated-by-missing	concepts/trust-a.md	§5.2	`generated` is present without `by`
+warn	trust.actor-convention	concepts/trust-b.md	§7	`generated.by` `team:data-platform` matches none of `human:`, `process:`, or `<producer>/<version>`
+warn	trust.timestamp-not-iso	concepts/trust-b.md	§5.2	`generated.at` is not ISO 8601: 'yesterday'
+warn	trust.verified-entry-incomplete	concepts/trust-b.md	§5.2	`verified[0]` is missing `at`
+error	frontmatter.unparseable	concepts/unterminated.md:1	§11	Frontmatter is present but unparseable (unterminated): Unterminated YAML frontmatter block
+error	reserved.index-extra-keys	index.md	§8	A root `index.md` carries keys beyond `okf_version`: title
+warn	reserved.okf-version-unknown	index.md	§12	`okf_version` '0.9' is neither 0.1 nor 0.2
+error	reserved.log-heading-not-date	log.md:7	§9	Log heading 'Q3 2026' is not an ISO 8601 date
+error	reserved.index-frontmatter	sub/index.md	§8	A non-root `index.md` carries frontmatter

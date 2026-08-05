@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {}},
+    {"kind": "type", "name": "MyId", "path": "PATH", "line": 1, "attrs": {"ts_kind": "type_alias"}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["type", "MyId", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["file", "PATH", "PATH"], "dst": ["type", "MyId", null], "kind": "exports", "attrs": {"symbol_kind": "type"}}
+  ]
+}

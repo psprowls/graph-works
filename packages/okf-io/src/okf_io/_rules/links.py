@@ -1,4 +1,4 @@
-"""The broken-link rule (OKF v0.2 §6.1, ADR-0004)."""
+"""The broken-link rule (OKF v0.2 §6.1)."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ CODES: tuple[str, ...] = ("links.broken",)
 def broken(ctx: RuleContext) -> Iterable[Finding]:
     """A link or image whose target is not a bundle member.
 
-    WARN, per ADR-0004: §6.1 and §11 are explicit that a broken link may simply
+    WARN: §6.1 and §11 are explicit that a broken link may simply
     be knowledge not yet written. okfcli reports ERROR; that is the precedent
     being rejected. ``strict=True`` still promotes it, which is the supported
     way for a CI job to be harsher than the spec.

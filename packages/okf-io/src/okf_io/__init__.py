@@ -1,10 +1,10 @@
 """okf-io — read, derive from, and write back OKF v0.2 concept documents.
 
 The core carries exactly **two runtime dependencies**, ``ruamel.yaml`` and
-``markdown-it-py``. Adding a third requires its own ADR: the list is a scope
-boundary, not an implementation detail.
+``markdown-it-py``. Adding a third is a deliberate decision: the list is a
+scope boundary, not an implementation detail.
 
-Two layers (ADR-0001). :class:`Document` owns the raw text and a
+Two layers. :class:`Document` owns the raw text and a
 round-trippable ``CommentedMap``; :class:`Frontmatter`, reachable as
 ``doc.fm``, is a frozen view built from it. Neither parsing nor building a view
 raises for content reasons — a malformed concept still yields a Document, with

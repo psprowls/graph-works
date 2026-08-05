@@ -1,0 +1,22 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {"kind": "function", "name": "identity", "language": "typescript", "package": "fixtures", "attrs": {}, "refs": [], "children": []},
+    {
+      "kind": "class",
+      "name": "Box",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": [
+        {"kind": "method", "name": "constructor", "language": "typescript", "package": "fixtures", "attrs": {"is_constructor": true}, "refs": [], "children": []}
+      ]
+    }
+  ]
+}

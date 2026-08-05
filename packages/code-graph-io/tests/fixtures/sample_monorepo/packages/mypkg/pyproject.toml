@@ -1,0 +1,6 @@
+[project]
+name = "mypkg"
+version = "0.0.0"
+
+[project.scripts]
+mypkg-run = "mypkg.foo:foo"

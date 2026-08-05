@@ -41,9 +41,7 @@ def scan(bundle: Bundle) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
     skipped: list[Skipped] = []
 
     for path, detail in sorted(bundle.unreadable.items()):
-        skipped.append(
-            Skipped(concept_id=_concept_id(path), path=path, reason="unreadable", detail=detail)
-        )
+        skipped.append(Skipped(concept_id=_concept_id(path), path=path, reason="unreadable", detail=detail))
 
     usable: list[str] = []
     for concept_id in sorted(bundle.concepts):
@@ -119,9 +117,7 @@ def inventory(bundle: Bundle, ctx: ExtContext | None = None) -> TagInventory:
 
     return TagInventory(
         counts=MappingProxyType(dict(sorted(counts.items()))),
-        concepts=MappingProxyType(
-            {tag: tuple(sorted(ids)) for tag, ids in sorted(concepts.items())}
-        ),
+        concepts=MappingProxyType({tag: tuple(sorted(ids)) for tag, ids in sorted(concepts.items())}),
         untagged=tuple(untagged),
         co_occurrence=MappingProxyType(dict(sorted(co_occurrence.items()))),
         skipped=skipped,
@@ -198,11 +194,7 @@ def clusters(
             # so the same bundle always names the same one.
             lead = min(pair, key=lambda name: (-weight[name], name))
             score = round(SequenceMatcher(None, pair[0], pair[1]).ratio(), 4)
-            similarity.append(
-                TagCluster(canonical=lead, members=pair, kind="similarity", score=score)
-            )
+            similarity.append(TagCluster(canonical=lead, members=pair, kind="similarity", score=score))
 
-    similarity.sort(
-        key=lambda cluster: (-(cluster.score or 0.0), cluster.canonical, cluster.members)
-    )
+    similarity.sort(key=lambda cluster: (-(cluster.score or 0.0), cluster.canonical, cluster.members))
     return normalization + tuple(similarity)

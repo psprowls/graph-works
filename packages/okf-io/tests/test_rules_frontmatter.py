@@ -56,9 +56,7 @@ def test_an_unterminated_block_is_unparseable_not_missing(tmp_path):
 
 
 def test_a_member_nobody_can_decode(tmp_path):
-    report, found = codes(
-        tmp_path, {"good.md": FULL}, raw={"bad.md": b"---\ntype: Metric\n---\n\n\xff\xfe\n"}
-    )
+    report, found = codes(tmp_path, {"good.md": FULL}, raw={"bad.md": b"---\ntype: Metric\n---\n\n\xff\xfe\n"})
     assert "frontmatter.unreadable" in found
     finding = report.by_code("frontmatter.unreadable")[0]
     assert finding.severity == "error"

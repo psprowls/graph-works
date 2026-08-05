@@ -1,10 +1,10 @@
 """Forced re-dump diagnostic (spec §4.2). **Non-gating by design.**
 
 Re-emits every fixture's frontmatter through ruamel regardless of dirtiness and
-reports the byte-identical ratio. This is the epic's ADR-0001 go/no-go signal in
-readable form. It always passes: a dialect quirk is a documented finding, not a
-blocked child — and since the line-splice write-back (plan §0) never re-emits an
-unchanged line, a low ratio here no longer implies unfaithful saves.
+reports the byte-identical ratio. This is the two-layer model's go/no-go signal
+in readable form. It always passes: a dialect quirk is a documented finding, not
+a blocker — and since the line-splice write-back never re-emits an unchanged
+line, a low ratio here no longer implies unfaithful saves.
 """
 
 from __future__ import annotations

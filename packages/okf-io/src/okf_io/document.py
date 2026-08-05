@@ -123,9 +123,7 @@ def _splice(orig: str, pristine: str, mutated: str) -> str | None:
 
     out: list[str] = []
     cursor = 0
-    for tag, i1, i2, j1, j2 in SequenceMatcher(
-        None, pristine_lines, mutated_lines, autojunk=False
-    ).get_opcodes():
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, pristine_lines, mutated_lines, autojunk=False).get_opcodes():
         if tag == "equal":
             continue
         start = to_orig(i1)
@@ -153,7 +151,7 @@ def _splice(orig: str, pristine: str, mutated: str) -> str | None:
 class Document:
     """A concept file as raw text plus a round-trippable frontmatter map.
 
-    ``fm_raw`` is the storage layer and ``fm`` the view layer (ADR-0001).
+    ``fm_raw`` is the storage layer and ``fm`` the view layer.
     Nested edits go through ``fm_raw`` directly; a caller doing so must call
     :meth:`refresh` and is responsible for the dirty flag, which is what
     :meth:`mark_dirty` is for. That pairing is the documented escape hatch —
@@ -341,8 +339,7 @@ class Document:
     def _require_mutable(self) -> None:
         if self.parse_error is not None:
             raise ValueError(
-                f"Cannot mutate a document that failed to parse "
-                f"({self.parse_error.kind}): {self.parse_error.message}"
+                f"Cannot mutate a document that failed to parse ({self.parse_error.kind}): {self.parse_error.message}"
             )
 
     def _insert_position(self, key: str) -> int:
@@ -460,7 +457,7 @@ class Document:
         target.write_bytes(self.serialize().encode("utf-8"))
 
     def fm_data(self, dates: DateMode = "iso") -> dict[str, Any]:
-        """Extension point #2 (ADR-0005): a plain projection of the frontmatter.
+        """Extension point #2: a plain projection of the frontmatter.
 
         External validators cannot consume a ``CommentedMap`` containing
         ``date`` objects. With ``dates="iso"`` the result survives

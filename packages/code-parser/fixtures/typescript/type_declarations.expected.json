@@ -1,0 +1,37 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {
+      "kind": "type",
+      "name": "IUser",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "interface"},
+      "refs": [],
+      "children": []
+    },
+    {
+      "kind": "type",
+      "name": "UserId",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "type_alias"},
+      "refs": [],
+      "children": []
+    },
+    {
+      "kind": "type",
+      "name": "Color",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "enum"},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

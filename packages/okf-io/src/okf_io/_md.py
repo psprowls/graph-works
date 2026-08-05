@@ -2,7 +2,7 @@
 
 Internal module and the bottom of the package's dependency stack: it imports
 markdown-it and stdlib only, which is what lets ``models`` use it for the
-ADR-0003 ``# Citations`` fallback without a cycle.
+``# Citations`` fallback without a cycle.
 
 Three behaviours come out of the token stream for free, and each is a bug in
 the regex scanners this replaces. Links inside fenced and indented code blocks
@@ -182,7 +182,7 @@ def parse_body(body: str) -> BodyIndex:
 
     Spec §9.3 requires one parse per body. Two call sites want the same one --
     ``links.build`` for the graph and ``models._scan_citations`` for the
-    ADR-0003 fallback -- so the guarantee is made structural here rather than
+    citations fallback -- so the guarantee is made structural here rather than
     left as a convention both modules have to remember. ``BodyIndex`` is
     frozen, so sharing one is safe.
     """

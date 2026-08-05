@@ -1,0 +1,23 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "python",
+  "package": "fixtures",
+  "attrs": {"_has_main_block": false, "_has_importable_symbols": true},
+  "refs": [],
+  "children": [
+    {"kind": "class", "name": "A", "language": "python", "package": "fixtures", "attrs": {}, "refs": [], "children": []},
+    {"kind": "class", "name": "B", "language": "python", "package": "fixtures", "attrs": {}, "refs": [], "children": []},
+    {
+      "kind": "class",
+      "name": "C",
+      "language": "python",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": [
+        {"kind": "method", "name": "go", "language": "python", "package": "fixtures", "attrs": {}, "refs": [], "children": []}
+      ]
+    }
+  ]
+}

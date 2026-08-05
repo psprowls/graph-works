@@ -100,11 +100,7 @@ def test_an_incomplete_parameter_names_what_is_missing(tmp_path):
 
 
 def test_every_path_field_is_resolved(tmp_path):
-    frontmatter = (
-        "runtime: bigquery\n"
-        "executor:\n  resource: skills/gone.md\n"
-        "attester:\n  resource: attesters/gone.py\n"
-    )
+    frontmatter = "runtime: bigquery\nexecutor:\n  resource: skills/gone.md\nattester:\n  resource: attesters/gone.py\n"
     report = report_for(tmp_path, {"a.md": concept(frontmatter, FENCE)})
     messages = [f.message for f in report.by_code("computation.path-unresolved")]
     assert any("executor.resource" in m for m in messages)
@@ -140,11 +136,7 @@ def test_the_acme_expectation_is_asserted_not_assumed():
     """acme_retail's relative executor/attester paths resolve against
     `computations/`, where they do not exist. WARN with a hint, not an error."""
     report = validate(bundle.load(BUNDLES / "acme_retail"), today=TODAY)
-    findings = [
-        f
-        for f in report.by_code("computation.path-unresolved")
-        if f.path == "computations/revenue-ytd.md"
-    ]
+    findings = [f for f in report.by_code("computation.path-unresolved") if f.path == "computations/revenue-ytd.md"]
     assert {f.severity for f in findings} == {"warn"}
     assert any("`/skills/run-on-bq.md`" in f.message for f in findings)
     assert report.ok is True

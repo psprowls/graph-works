@@ -1,0 +1,9 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {}},
+    {"kind": "function", "name": "greet", "path": "PATH", "line": 1, "attrs": {}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["function", "greet", "PATH"], "kind": "contains", "attrs": {}}
+  ]
+}

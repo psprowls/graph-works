@@ -1,0 +1,21 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "javascript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {
+      "kind": "function",
+      "name": "readIt",
+      "language": "javascript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [
+        {"kind": "call", "target_name": "readFileSync", "target_module": null, "attrs": {"is_member": true, "receiver": "fs"}}
+      ],
+      "children": []
+    }
+  ]
+}

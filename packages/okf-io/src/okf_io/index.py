@@ -80,7 +80,7 @@ class EntryTarget:
     document: Document | None
 
 
-#: Extension point #4 (ADR-0005). Returning ``None`` means "no description".
+#: Extension point #4. Returning ``None`` means "no description".
 Describe = Callable[[EntryTarget], str | None]
 
 
@@ -214,11 +214,7 @@ def _concepts_in(bundle: Bundle, directory: str) -> tuple[str, ...]:
 def _subdirectories_of(directories: frozenset[str], directory: str) -> tuple[str, ...]:
     prefix = f"{directory}/" if directory else ""
     return tuple(
-        sorted(
-            found
-            for found in directories
-            if found and found.startswith(prefix) and "/" not in found[len(prefix) :]
-        )
+        sorted(found for found in directories if found and found.startswith(prefix) and "/" not in found[len(prefix) :])
     )
 
 
@@ -241,9 +237,7 @@ def _has_content(bundle: Bundle, subdirectory: str) -> bool:
     return any(d == subdirectory or d.startswith(prefix) for d in bundle.logs)
 
 
-def _members_of(
-    bundle: Bundle, directories: frozenset[str], directory: str
-) -> tuple[EntryTarget, ...]:
+def _members_of(bundle: Bundle, directories: frozenset[str], directory: str) -> tuple[EntryTarget, ...]:
     """The members of *directory* that may be added. Assets are never among them.
 
     okf-io can name a concept (its ``title``) and a directory (its own name).
@@ -252,10 +246,7 @@ def _members_of(
     must then rewrite. Existing asset entries are honoured and pruned when
     dead; they are simply never created.
     """
-    out = [
-        EntryTarget(f"{cid}.md", "concept", bundle.concepts[cid])
-        for cid in _concepts_in(bundle, directory)
-    ]
+    out = [EntryTarget(f"{cid}.md", "concept", bundle.concepts[cid]) for cid in _concepts_in(bundle, directory)]
     out += [
         EntryTarget(sub, "subdirectory", bundle.indexes.get(sub))
         for sub in _subdirectories_of(directories, directory)
@@ -350,11 +341,7 @@ def _plan(bundle: Bundle, directory: str, directories: frozenset[str]) -> _Plan:
             dead.append(entry)
 
     frozen = frozenset(covered)
-    missing = tuple(
-        target
-        for target in _members_of(bundle, directories, directory)
-        if not _covers(frozen, target)
-    )
+    missing = tuple(target for target in _members_of(bundle, directories, directory) if not _covers(frozen, target))
     return _Plan(
         path=_index_path(directory),
         directory=directory,
@@ -419,9 +406,7 @@ def _type_of(bundle: Bundle, target: str) -> str | None:
 
 
 def _is_subdirectory_entry(directories: frozenset[str], target: str) -> bool:
-    return target in directories or (
-        target.endswith(f"/{INDEX_NAME}") and _parent_of(target) in directories
-    )
+    return target in directories or (target.endswith(f"/{INDEX_NAME}") and _parent_of(target) in directories)
 
 
 def _new_section_title(bundle: Bundle, target: EntryTarget) -> str:
@@ -456,9 +441,7 @@ def _sibling_heading(
     return False, None
 
 
-def _anchor_for(
-    body: str, items: Sequence[ListItem], headings: Sequence[Heading], key: str | None
-) -> int | None:
+def _anchor_for(body: str, items: Sequence[ListItem], headings: Sequence[Heading], key: str | None) -> int | None:
     """The 1-based line to insert after, for the section keyed *key*.
 
     The last surviving item of the section, else the line just past the
@@ -506,9 +489,7 @@ def _last_surviving_line(body: str, dead: Sequence[_Entry]) -> int:
     return line
 
 
-def _insert_after(
-    body: str, line: int, lines: Sequence[str], refreshed_lines: frozenset[int]
-) -> _edit.Edit:
+def _insert_after(body: str, line: int, lines: Sequence[str], refreshed_lines: frozenset[int]) -> _edit.Edit:
     """``_edit.insert_after``, aware that a refresh may already terminate *line*.
 
     ``insert_after``'s own no-trailing-newline correction reads the
@@ -611,18 +592,10 @@ def _update_one(
         else:
             by_anchor.setdefault(anchor, []).append(bullet)
             heading_text = _heading_text(headings, key)
-        changes.append(
-            IndexChange(
-                kind="add", target=target.path, heading=heading_text, text=bullet, line=None
-            )
-        )
+        changes.append(IndexChange(kind="add", target=target.path, heading=heading_text, text=bullet, line=None))
 
     for anchor, bullets in by_anchor.items():
-        edits.append(
-            _insert_after(
-                body, anchor, [f"{bullet}{newline}" for bullet in bullets], refreshed_lines
-            )
-        )
+        edits.append(_insert_after(body, anchor, [f"{bullet}{newline}" for bullet in bullets], refreshed_lines))
 
     if new_sections:
         tail = _last_surviving_line(body, plan.dead)
@@ -712,7 +685,7 @@ def update(
     ``descriptions="preserve"`` never touches existing entry text and reports
     what has drifted; ``"refresh"`` opts into the machine-generated regime and
     rewrites it, reporting every rewrite as a change. ``describe`` is
-    extension point #4 (ADR-0005).
+    extension point #4.
 
     Raises ``ValueError`` for a directory id the bundle does not contain --
     a caller error, not bundle content, and the tolerance rule (§11) is about
@@ -814,11 +787,7 @@ def _refresh_and_drift(
         lead_text = lead.group(0) if lead else ""
         # Falsy handling matches `_render`'s: a hook that answers "" means
         # "no description", not "an empty sentence with a dangling ` - `".
-        bullet = (
-            f"{lead_text}{entry.prefix}{_SEPARATOR}{description}"
-            if description
-            else f"{lead_text}{entry.prefix}"
-        )
+        bullet = f"{lead_text}{entry.prefix}{_SEPARATOR}{description}" if description else f"{lead_text}{entry.prefix}"
         rewrites.append(
             (
                 IndexChange(

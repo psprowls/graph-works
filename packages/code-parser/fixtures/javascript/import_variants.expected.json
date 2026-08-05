@@ -1,0 +1,14 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "javascript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "import", "target_name": "x", "target_module": "./a.js", "attrs": {}},
+    {"kind": "import", "target_name": "y", "target_module": "./b.js", "attrs": {}},
+    {"kind": "import", "target_name": "z", "target_module": "./b.js", "attrs": {}},
+    {"kind": "import", "target_name": "ns", "target_module": "./c.js", "attrs": {}}
+  ],
+  "children": []
+}

@@ -24,7 +24,7 @@ def test_generated_without_by_is_an_error(tmp_path):
 
 
 def test_a_v01_timestamp_is_not_a_trust_error(tmp_path):
-    """The ADR-0003 fallback synthesises `generated` with no `by`. Reading the
+    """The v0.1 read fallback synthesises `generated` with no `by`. Reading the
     view here would make every unmigrated v0.1 concept fail conformance."""
     report = report_for(tmp_path, "timestamp: 2024-05-01T00:00:00Z\n")
     assert report.by_code("trust.generated-by-missing") == ()
@@ -32,9 +32,7 @@ def test_a_v01_timestamp_is_not_a_trust_error(tmp_path):
 
 
 def test_unparseable_timestamps_name_their_field(tmp_path):
-    frontmatter = (
-        "generated: { by: human:a@b, at: yesterday }\nverified:\n  - { by: human:a@b, at: soon }\n"
-    )
+    frontmatter = "generated: { by: human:a@b, at: yesterday }\nverified:\n  - { by: human:a@b, at: soon }\n"
     report = report_for(tmp_path, frontmatter)
     messages = [f.message for f in report.by_code("trust.timestamp-not-iso")]
     assert any("generated.at" in m for m in messages)

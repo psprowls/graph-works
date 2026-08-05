@@ -1,0 +1,17 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "python",
+  "package": "fixtures",
+  "attrs": {"_has_main_block": false, "_has_importable_symbols": false},
+  "refs": [
+    {"kind": "import", "target_name": "os", "target_module": "os", "attrs": {}},
+    {"kind": "import", "target_name": "os", "target_module": "os.path", "attrs": {}},
+    {"kind": "import", "target_name": "j", "target_module": "json", "attrs": {"as": "j"}},
+    {"kind": "import", "target_name": "Any", "target_module": "typing", "attrs": {}},
+    {"kind": "import", "target_name": "D", "target_module": "typing", "attrs": {"as": "D", "original": "Dict"}},
+    {"kind": "import", "target_name": "L", "target_module": "typing", "attrs": {"as": "L", "original": "List"}},
+    {"kind": "import", "target_name": "sibling", "target_module": ".", "attrs": {}}
+  ],
+  "children": []
+}

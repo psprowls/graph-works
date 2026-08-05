@@ -1,0 +1,38 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "javascript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {
+      "kind": "class",
+      "name": "Greeter",
+      "language": "javascript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": [
+        {
+          "kind": "method",
+          "name": "constructor",
+          "language": "javascript",
+          "package": "fixtures",
+          "attrs": {"is_constructor": true},
+          "refs": [],
+          "children": []
+        },
+        {
+          "kind": "method",
+          "name": "greet",
+          "language": "javascript",
+          "package": "fixtures",
+          "attrs": {},
+          "refs": [],
+          "children": []
+        }
+      ]
+    }
+  ]
+}

@@ -33,7 +33,7 @@ def test_a_missing_image_warns_and_says_so(tmp_path):
 
 
 def test_broken_links_never_make_a_bundle_fail(tmp_path):
-    """ADR-0004: a broken link may be knowledge not yet written."""
+    """A broken link may be knowledge not yet written."""
     report = report_for(tmp_path, {"a.md": CONCEPT + "[x](./nope.md)\n"})
     assert report.ok is True
 

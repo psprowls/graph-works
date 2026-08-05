@@ -23,8 +23,7 @@ try:
     import jsonschema as _jsonschema  # noqa: F401  -- probed for its absence
 except ImportError as exc:  # pragma: no cover -- exercised by a subprocess test
     raise ImportError(
-        "The `schemas` capability needs `jsonschema`. Install it with "
-        "`pip install 'okf-ext[schemas]'`."
+        "The `schemas` capability needs `jsonschema`. Install it with `pip install 'okf-ext[schemas]'`."
     ) from exc
 
 from okf_ext.schemas.loader import (

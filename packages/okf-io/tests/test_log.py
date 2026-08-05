@@ -80,8 +80,8 @@ def test_entry_lines_are_body_relative_and_inclusive():
 
 def test_parse_preserves_document_order():
     """Document order is the invariant contract. Callers needing chronological
-    order must sort themselves. Task 8's _new_section_anchor assumes document
-    order and silently breaks if sections are sorted by date instead."""
+    order must sort themselves. `_new_section_anchor` assumes document order
+    and silently breaks if sections are sorted by date instead."""
     # Deliberately oldest-first, not newest-first
     doc = Document.parse("# H\n\n## 2026-01-01\n\n- Oldest.\n\n## 2026-06-01\n\n- Newest.\n")
     parsed = log.parse(doc)
@@ -115,24 +115,18 @@ BASE = (
 def test_appending_to_an_existing_date_section(tmp_path):
     result = append(BASE, on=date(2026, 7, 1))
     assert result.section_created is False
-    assert result.after == BASE.replace(
-        "- **Verified** the bundle.\n", f"- **Verified** the bundle.\n- {NEW}\n"
-    )
+    assert result.after == BASE.replace("- **Verified** the bundle.\n", f"- **Verified** the bundle.\n- {NEW}\n")
 
 
 def test_appending_a_new_newest_date():
     result = append(BASE, on=date(2026, 8, 1))
     assert result.section_created is True
-    assert result.after == BASE.replace(
-        "## 2026-07-01\n", f"## 2026-08-01\n\n- {NEW}\n\n## 2026-07-01\n"
-    )
+    assert result.after == BASE.replace("## 2026-07-01\n", f"## 2026-08-01\n\n- {NEW}\n\n## 2026-07-01\n")
 
 
 def test_backdating_inserts_in_date_order():
     result = append(BASE, on=date(2026, 5, 1))
-    assert result.after == BASE.replace(
-        "## 2026-04-15\n", f"## 2026-05-01\n\n- {NEW}\n\n## 2026-04-15\n"
-    )
+    assert result.after == BASE.replace("## 2026-04-15\n", f"## 2026-05-01\n\n- {NEW}\n\n## 2026-04-15\n")
 
 
 def test_backdating_past_every_dated_section_lands_at_the_end():
@@ -146,10 +140,7 @@ def test_an_undated_heading_keeps_its_place():
     Also the case that exercises ``_section_end``'s "the section following
     the last dated one, in document order, is itself undated" branch.
     """
-    text = (
-        "# Bundle history\n\n## 2026-07-01\n\n- Verified nothing.\n"
-        "\n## Q3 2026\n\n- Deliberately not a date.\n"
-    )
+    text = "# Bundle history\n\n## 2026-07-01\n\n- Verified nothing.\n\n## Q3 2026\n\n- Deliberately not a date.\n"
     result = append(text, on=date(2026, 6, 1))
     assert result.after == (
         "# Bundle history\n\n## 2026-07-01\n\n- Verified nothing.\n"
@@ -246,9 +237,7 @@ def test_appending_newer_than_a_later_inversion_still_succeeds():
     """
     text = "# H\n\n## 2026-07-01\n\n- a\n\n## 2026-04-15\n\n- b\n\n## 2026-05-01\n\n- c\n"
     result = append(text, on=date(2026, 9, 1))
-    assert result.after == text.replace(
-        "## 2026-07-01\n", f"## 2026-09-01\n\n- {NEW}\n\n## 2026-07-01\n"
-    )
+    assert result.after == text.replace("## 2026-07-01\n", f"## 2026-09-01\n\n- {NEW}\n\n## 2026-07-01\n")
 
 
 def test_a_middle_date_into_an_inversion_raises():

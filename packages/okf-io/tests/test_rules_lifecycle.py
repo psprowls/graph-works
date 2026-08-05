@@ -48,14 +48,10 @@ def test_a_well_formed_stale_after_is_silent(tmp_path):
 def test_staleness_is_a_function_of_the_injected_clock(tmp_path):
     """The boundary, in both directions, with no system clock anywhere."""
     frontmatter = "stale_after: 2026-12-31\n"
-    assert (
-        report_for(tmp_path, frontmatter, today=date(2026, 12, 30)).by_code("lifecycle.stale") == ()
-    )
+    assert report_for(tmp_path, frontmatter, today=date(2026, 12, 30)).by_code("lifecycle.stale") == ()
     on_the_day = report_for(tmp_path, frontmatter, today=date(2026, 12, 31))
     assert on_the_day.by_code("lifecycle.stale")[0].severity == "warn"
-    assert (
-        report_for(tmp_path, frontmatter, today=date(2027, 1, 1)).by_code("lifecycle.stale") != ()
-    )
+    assert report_for(tmp_path, frontmatter, today=date(2027, 1, 1)).by_code("lifecycle.stale") != ()
 
 
 def test_a_fully_uncoercible_stale_after_never_reports_stale(tmp_path):

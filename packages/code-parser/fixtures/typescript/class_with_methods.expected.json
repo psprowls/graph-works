@@ -1,0 +1,22 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {
+      "kind": "class",
+      "name": "Greeter",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": [
+        {"kind": "method", "name": "constructor", "language": "typescript", "package": "fixtures", "attrs": {"is_constructor": true}, "refs": [], "children": []},
+        {"kind": "method", "name": "greet", "language": "typescript", "package": "fixtures", "attrs": {}, "refs": [], "children": []}
+      ]
+    }
+  ]
+}

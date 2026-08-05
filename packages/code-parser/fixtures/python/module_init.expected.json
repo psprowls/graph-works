@@ -1,0 +1,14 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "python",
+  "package": "fixtures",
+  "attrs": {"_has_main_block": false, "_has_importable_symbols": false},
+  "refs": [
+    {"kind": "import", "target_name": "Service", "target_module": ".core", "attrs": {}},
+    {"kind": "import", "target_name": "helper", "target_module": ".util", "attrs": {}},
+    {"kind": "export", "target_name": "Service", "target_module": null, "attrs": {"via_all": true}},
+    {"kind": "export", "target_name": "helper", "target_module": null, "attrs": {"via_all": true}}
+  ],
+  "children": []
+}

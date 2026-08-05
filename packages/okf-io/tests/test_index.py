@@ -103,9 +103,7 @@ def test_a_dead_asset_entry_is_pruned(tmp_path):
         tmp_path,
         {"attesters/index.md": "# Attester\n\n* [x](sql_equality.py) - Checks.\n"},
     )
-    assert [entry.target for entry in plan(loaded, "attesters").dead] == [
-        "attesters/sql_equality.py"
-    ]
+    assert [entry.target for entry in plan(loaded, "attesters").dead] == ["attesters/sql_equality.py"]
 
 
 def test_a_live_asset_entry_survives_and_is_never_re_added(tmp_path):
@@ -134,9 +132,7 @@ def test_an_entry_into_another_directory_is_neither_dead_nor_duplicated(tmp_path
     loaded = make(
         tmp_path,
         {
-            "metrics/index.md": (
-                "# Metric\n\n* [R](revenue.md) - R.\n* [P](../policies/p.md) - See also.\n"
-            ),
+            "metrics/index.md": ("# Metric\n\n* [R](revenue.md) - R.\n* [P](../policies/p.md) - See also.\n"),
             "metrics/revenue.md": CONCEPT,
             "policies/p.md": CONCEPT,
             "policies/index.md": "# Policy\n\n* [P](p.md) - P.\n",
@@ -203,9 +199,7 @@ def test_entry_text_is_read_off_the_item(tmp_path):
     loaded = make(
         tmp_path,
         {
-            "metrics/index.md": (
-                "# Metric\n\n* [R](revenue.md) - Curated one-liner.\n* [M](margin.md)\n"
-            ),
+            "metrics/index.md": ("# Metric\n\n* [R](revenue.md) - Curated one-liner.\n* [M](margin.md)\n"),
             "metrics/revenue.md": CONCEPT,
             "metrics/margin.md": CONCEPT,
         },
@@ -291,9 +285,7 @@ def test_reconciling_a_vendored_bundle_changes_nothing(name, tmp_path):
     results = index.update(bundle.load(root), dry_run=False)
 
     assert [r.path for r in results] == sorted(r.path for r in results)
-    assert [r.path for r in results] == sorted(
-        before_path.relative_to(root).as_posix() for before_path in before
-    )
+    assert [r.path for r in results] == sorted(before_path.relative_to(root).as_posix() for before_path in before)
     for result in results:
         assert result.changed is False, f"{name}:{result.path}\n{result.diff()}"
         assert result.changes == ()
@@ -308,16 +300,13 @@ def test_adding_a_concept_adds_one_bullet_under_the_right_heading(tmp_path):
             "metrics/index.md": ("# Metric\n\n* [Revenue](revenue.md) - Recognized revenue.\n"),
             "metrics/revenue.md": CONCEPT,
             "metrics/margin.md": (
-                "---\ntype: Metric\ntitle: Gross Margin\n"
-                "description: Margin per policy.\n---\n\n# M\n"
+                "---\ntype: Metric\ntitle: Gross Margin\ndescription: Margin per policy.\n---\n\n# M\n"
             ),
         },
     )
     (result,) = index.update(loaded, directories=["metrics"])
     assert result.after == (
-        "# Metric\n\n"
-        "* [Revenue](revenue.md) - Recognized revenue.\n"
-        "* [Gross Margin](margin.md) - Margin per policy.\n"
+        "# Metric\n\n* [Revenue](revenue.md) - Recognized revenue.\n* [Gross Margin](margin.md) - Margin per policy.\n"
     )
     assert [(c.kind, c.target) for c in result.changes] == [("add", "metrics/margin.md")]
     assert result.changes[0].heading == "Metric"
@@ -353,17 +342,13 @@ def test_deleting_a_concept_removes_exactly_its_bullet(tmp_path):
     loaded = make(
         tmp_path,
         {
-            "metrics/index.md": (
-                "# Metric\n\n* [Revenue](revenue.md) - R.\n* [Gone](gone.md) - G.\n"
-            ),
+            "metrics/index.md": ("# Metric\n\n* [Revenue](revenue.md) - R.\n* [Gone](gone.md) - G.\n"),
             "metrics/revenue.md": CONCEPT,
         },
     )
     (result,) = index.update(loaded, directories=["metrics"])
     assert result.after == "# Metric\n\n* [Revenue](revenue.md) - R.\n"
-    assert [(c.kind, c.target, c.line) for c in result.changes] == [
-        ("remove", "metrics/gone.md", 4)
-    ]
+    assert [(c.kind, c.target, c.line) for c in result.changes] == [("remove", "metrics/gone.md", 4)]
 
 
 def test_prose_is_byte_identical_across_an_add_and_a_remove(tmp_path):
@@ -384,9 +369,7 @@ def test_prose_is_byte_identical_across_an_add_and_a_remove(tmp_path):
         {
             "metrics/index.md": body,
             "metrics/revenue.md": CONCEPT,
-            "metrics/margin.md": (
-                "---\ntype: Metric\ntitle: Margin\ndescription: Margin.\n---\n\n# M\n"
-            ),
+            "metrics/margin.md": ("---\ntype: Metric\ntitle: Margin\ndescription: Margin.\n---\n\n# M\n"),
         },
     )
     (result,) = index.update(loaded, directories=["metrics"])
@@ -406,9 +389,7 @@ def test_a_new_type_gets_its_own_section_at_the_end_of_the_body(tmp_path):
         },
     )
     (result,) = index.update(loaded, directories=["d"])
-    assert result.after == (
-        "# Metric\n\n* [Revenue](revenue.md) - R.\n\n# Policy\n\n* [P](p.md) - A policy.\n"
-    )
+    assert result.after == ("# Metric\n\n* [Revenue](revenue.md) - R.\n\n# Policy\n\n* [P](p.md) - A policy.\n")
     assert result.changes[0].heading == "Policy"
 
 
@@ -633,18 +614,14 @@ def test_two_new_entries_merge_into_the_same_freshly_created_section(tmp_path):
     )
     (result,) = index.update(loaded, directories=["d"])
     assert result.after == (
-        "# Metric\n\n* [Revenue](revenue.md) - R.\n\n"
-        "# Policy\n\n* [A](a.md) - A policy.\n* [B](b.md) - B policy.\n"
+        "# Metric\n\n* [Revenue](revenue.md) - R.\n\n# Policy\n\n* [A](a.md) - A policy.\n* [B](b.md) - B policy.\n"
     )
 
 
 def test_describe_overrides_the_concept_description_on_add(tmp_path):
-    """`describe=` is extension point #4, and already live on the addition
-    path in this task even though the plan frames it under Task 6."""
+    """`describe=` is extension point #4, live on the addition path."""
     loaded = make(tmp_path, {"d/index.md": "# Metric\n", "d/revenue.md": CONCEPT})
-    (result,) = index.update(
-        loaded, directories=["d"], describe=lambda target: f"custom:{target.path}"
-    )
+    (result,) = index.update(loaded, directories=["d"], describe=lambda target: f"custom:{target.path}")
     assert result.after == "# Metric\n* [T](revenue.md) - custom:d/revenue.md\n"
 
 
@@ -674,9 +651,7 @@ def test_refresh_rewrites_and_reports_every_rewrite(tmp_path):
         tmp_path,
         {
             "d/index.md": "# Metric\n\n* [Revenue](revenue.md) - Curated.\n",
-            "d/revenue.md": (
-                "---\ntype: Metric\ntitle: Revenue\ndescription: From frontmatter.\n---\n\n# R\n"
-            ),
+            "d/revenue.md": ("---\ntype: Metric\ntitle: Revenue\ndescription: From frontmatter.\n---\n\n# R\n"),
         },
     )
     (result,) = index.update(loaded, directories=["d"], descriptions="refresh")
@@ -738,7 +713,7 @@ def test_a_subdirectory_entry_is_never_drift(tmp_path):
 
 
 def test_describe_supplies_text_for_a_new_entry_from_outside_the_core(tmp_path):
-    """Extension point #4 (ADR-0005), exercised from outside okf-io."""
+    """Extension point #4, exercised from outside okf-io."""
     seen: list[tuple[str, str]] = []
 
     def describe(target: index.EntryTarget) -> str | None:
@@ -788,9 +763,7 @@ def test_describe_is_not_consulted_for_drift_under_preserve(tmp_path):
             "d/revenue.md": CONCEPT,
         },
     )
-    (result,) = index.update(
-        loaded, directories=["d"], describe=lambda target: "Something else entirely."
-    )
+    (result,) = index.update(loaded, directories=["d"], describe=lambda target: "Something else entirely.")
     assert result.drift == ()
     assert result.changed is False
 
@@ -824,13 +797,9 @@ def test_refresh_leaves_a_wrapped_entry_alone(tmp_path):
         tmp_path,
         {
             "d/index.md": (
-                "# Metric\n\n"
-                "* [Revenue](revenue.md) - Old text that\n"
-                "  continues on a second physical line.\n"
+                "# Metric\n\n* [Revenue](revenue.md) - Old text that\n  continues on a second physical line.\n"
             ),
-            "d/revenue.md": (
-                "---\ntype: Metric\ntitle: Revenue\ndescription: New description.\n---\n\n# R\n"
-            ),
+            "d/revenue.md": ("---\ntype: Metric\ntitle: Revenue\ndescription: New description.\n---\n\n# R\n"),
         },
     )
     (result,) = index.update(loaded, directories=["d"], descriptions="refresh")
@@ -853,9 +822,7 @@ def test_refresh_and_a_new_section_survive_a_newline_less_last_line(tmp_path):
         },
     )
     (result,) = index.update(loaded, directories=["d"], descriptions="refresh")
-    assert result.after == (
-        "# Metric\n\n* [Revenue](revenue.md) - New.\n\n# Policy\n\n* [P](p.md) - A policy.\n"
-    )
+    assert result.after == ("# Metric\n\n* [Revenue](revenue.md) - New.\n\n# Policy\n\n* [P](p.md) - A policy.\n")
 
 
 def test_refresh_and_a_sibling_addition_survive_a_newline_less_last_line(tmp_path):
@@ -869,15 +836,11 @@ def test_refresh_and_a_sibling_addition_survive_a_newline_less_last_line(tmp_pat
         {
             "d/index.md": "# Metric\n\n* [Revenue](revenue.md) - Old.",
             "d/revenue.md": ("---\ntype: Metric\ntitle: Revenue\ndescription: New.\n---\n\n# R\n"),
-            "d/margin.md": (
-                "---\ntype: Metric\ntitle: Margin\ndescription: A margin.\n---\n\n# M\n"
-            ),
+            "d/margin.md": ("---\ntype: Metric\ntitle: Margin\ndescription: A margin.\n---\n\n# M\n"),
         },
     )
     (result,) = index.update(loaded, directories=["d"], descriptions="refresh")
-    assert result.after == (
-        "# Metric\n\n* [Revenue](revenue.md) - New.\n* [Margin](margin.md) - A margin.\n"
-    )
+    assert result.after == ("# Metric\n\n* [Revenue](revenue.md) - New.\n* [Margin](margin.md) - A margin.\n")
 
 
 def test_refresh_change_reports_the_heading_verbatim(tmp_path):
@@ -907,9 +870,7 @@ def test_describe_returning_empty_string_produces_no_dangling_separator(tmp_path
         tmp_path,
         {"d/index.md": "# Metric\n\n* [R](revenue.md) - Old.\n", "d/revenue.md": CONCEPT},
     )
-    (result,) = index.update(
-        loaded, directories=["d"], descriptions="refresh", describe=lambda target: ""
-    )
+    (result,) = index.update(loaded, directories=["d"], descriptions="refresh", describe=lambda target: "")
     assert result.after == "# Metric\n\n* [R](revenue.md)\n"
 
 

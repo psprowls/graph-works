@@ -1,0 +1,11 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "python",
+  "package": "fixtures",
+  "attrs": {"_has_main_block": false, "_has_importable_symbols": false},
+  "refs": [],
+  "children": [
+    {"kind": "function", "name": "_hidden", "language": "python", "package": "fixtures", "attrs": {}, "refs": [], "children": []}
+  ]
+}

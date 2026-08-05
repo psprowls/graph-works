@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {}},
+    {"kind": "function", "name": "callsFoo", "path": "PATH", "line": 3, "attrs": {}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["function", "callsFoo", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["file", "PATH", "PATH"], "dst": ["file", "foo", "./foo.mjs"], "kind": "imports", "attrs": {}},
+    {"src": ["file", "PATH", "PATH"], "dst": ["function", "callsFoo", null], "kind": "exports", "attrs": {"symbol_kind": "function"}},
+    {"src": ["function", "callsFoo", "PATH"], "dst": ["function", "foo", null], "kind": "calls", "attrs": {"is_member": false}}
+  ]
+}

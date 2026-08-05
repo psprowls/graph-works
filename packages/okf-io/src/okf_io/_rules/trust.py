@@ -19,7 +19,7 @@ CODES: tuple[str, ...] = (
 def generated_block(ctx: RuleContext) -> Iterable[Finding]:
     """§5.2: a `generated` block records both `by` and `at`.
 
-    Keyed off ``fm_raw``, not the view. The ADR-0003 read fallback synthesises
+    Keyed off ``fm_raw``, not the view. The v0.1 read fallback synthesises
     a ``generated`` with no ``by`` from a v0.1 top-level ``timestamp``, and an
     unmigrated v0.1 concept is a ``legacy.timestamp`` hint -- not a conformance
     error. §11 forbids rejecting a concept for that.
@@ -46,7 +46,7 @@ def timestamps(ctx: RuleContext) -> Iterable[Finding]:
 
     Keyed off ``fm_raw`` for the generated block, just like ``generated_block``:
     if ``generated`` is missing from ``fm_raw``, the value reached the view
-    through the ADR-0003 fallback from a v0.1 top-level ``timestamp``, and the
+    through the read fallback from a v0.1 top-level ``timestamp``, and the
     message should name that original field. If ``generated`` IS present, keep
     naming ``generated.at``. An unparseable timestamp is worth reporting either
     way; only the field name reflects what the author wrote.
@@ -83,9 +83,7 @@ def verified_entries(ctx: RuleContext) -> Iterable[Finding]:
         path = member_path(concept_id)
         for position, event in enumerate(document.fm.verified):
             missing = [
-                name
-                for name, present in (("by", event.by is not None), ("at", event.at is not None))
-                if not present
+                name for name, present in (("by", event.by is not None), ("at", event.at is not None)) if not present
             ]
             if missing:
                 names = " and ".join(f"`{name}`" for name in missing)
@@ -122,8 +120,7 @@ def actor_convention(ctx: RuleContext) -> Iterable[Finding]:
                 yield Finding(
                     "trust.actor-convention",
                     "warn",
-                    f"`{field}` `{actor.raw}` matches none of `human:`, `process:`, "
-                    f"or `<producer>/<version>`",
+                    f"`{field}` `{actor.raw}` matches none of `human:`, `process:`, or `<producer>/<version>`",
                     "§7",
                     path,
                 )

@@ -103,7 +103,7 @@ def test_refresh_actually_rebuilds_the_view():
 
 
 def test_mark_dirty_makes_serialize_emit_the_mutation():
-    """The dirty path end to end. Task 9 replaces the branch this exercises."""
+    """The dirty path end to end."""
     text = read(EDGE / "dialect_indented.md")
     doc = Document.parse(text)
     doc.fm_raw["title"] = "Changed"
@@ -141,9 +141,7 @@ def test_parse_survives_frontmatter_nested_too_deeply():
 
 
 def changed_lines(before: str, after: str) -> list[str]:
-    diff = list(
-        difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True), n=0)
-    )
+    diff = list(difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True), n=0))
     return [line for line in diff[2:] if line.startswith(("+", "-"))]
 
 
@@ -403,17 +401,7 @@ def test_rendered_with_body_does_not_mutate_the_document():
 
 # --- frontmatter_line -------------------------------------------------------
 
-_NESTED = (
-    "---\n"
-    "type: Metric\n"
-    "title: Orders\n"
-    "owner:\n"
-    "  name: finance\n"
-    "tags: [ops, sales]\n"
-    "---\n"
-    "\n"
-    "# Orders\n"
-)
+_NESTED = "---\ntype: Metric\ntitle: Orders\nowner:\n  name: finance\ntags: [ops, sales]\n---\n\n# Orders\n"
 
 
 @pytest.mark.parametrize(

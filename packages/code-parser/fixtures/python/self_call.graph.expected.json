@@ -1,0 +1,14 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {"_has_main_block": false, "_has_importable_symbols": true}},
+    {"kind": "class", "name": "Worker", "path": "PATH", "line": 1, "attrs": {}},
+    {"kind": "method", "name": "Worker.run", "path": "PATH", "line": 2, "attrs": {}},
+    {"kind": "method", "name": "Worker.helper", "path": "PATH", "line": 5, "attrs": {}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["class", "Worker", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["class", "Worker", "PATH"], "dst": ["method", "Worker.run", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["class", "Worker", "PATH"], "dst": ["method", "Worker.helper", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["method", "Worker.run", "PATH"], "dst": ["function", "Worker.helper", null], "kind": "calls", "attrs": {"is_member": true, "receiver": "self"}}
+  ]
+}

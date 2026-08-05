@@ -87,10 +87,7 @@ def test_a_ref_with_a_fragment_resolves(tmp_path):
     registry = build_registry(schema_set.documents)
     schema = dict(schema_set.schemas["metric"])
     validator = validator_for(schema)(schema, registry=registry)
-    messages = [
-        e.message
-        for e in validator.iter_errors({"type": "Metric", "title": "T", "owner": {"name": 5}})
-    ]
+    messages = [e.message for e in validator.iter_errors({"type": "Metric", "title": "T", "owner": {"name": 5}})]
     assert any("is not of type 'string'" in m for m in messages)
 
 
@@ -111,20 +108,14 @@ def test_a_declared_draft_wins_over_the_default(tmp_path):
 
     root = write_set(
         tmp_path / "_schema",
-        **{
-            "old__schema__yaml": (
-                '$schema: "http://json-schema.org/draft-07/schema#"\ntype: object\n'
-            )
-        },
+        **{"old__schema__yaml": ('$schema: "http://json-schema.org/draft-07/schema#"\ntype: object\n')},
     )
     schema_set = load_schemas(root)
     assert validator_for(dict(schema_set.schemas["old"])) is Draft7Validator
 
 
 def test_a_str_path_is_accepted(tmp_path):
-    root = write_set(
-        tmp_path / "_schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE}
-    )
+    root = write_set(tmp_path / "_schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE})
     assert load_schemas(str(root)).types == ("metric",)
 
 
@@ -150,9 +141,7 @@ def test_a_bare_suffix_filename_claims_no_type(tmp_path):
 
 
 def test_a_subdirectory_is_not_walked(tmp_path):
-    root = write_set(
-        tmp_path / "_schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE}
-    )
+    root = write_set(tmp_path / "_schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE})
     nested = root / "nested.schema.yaml"
     nested.mkdir()
     assert load_schemas(root).types == ("metric",)
@@ -262,7 +251,5 @@ def test_a_missing_jsonschema_names_the_extra():
         "else:\n"
         "    print('NO RAISE')\n"
     )
-    result = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, check=True
-    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert result.stdout.strip() == "True"

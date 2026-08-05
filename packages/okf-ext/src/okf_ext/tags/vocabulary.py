@@ -6,13 +6,14 @@ magic this library performs.
 
 Auto-discovery mirroring okf-schema's `_schema/` was rejected: it invents
 format SPEC.md does not define and makes behaviour change because a file
-appeared — the trap ADR-0009 already caught once. Under this design a bundle
+appeared — a trap this project has been caught by before. Under this design
+a bundle
 carrying a `_tags.yaml` is an entirely ordinary OKF bundle to every other
 reader, and a house rule only fires when someone names it.
 
 The rule that turns a loaded `Vocabulary` into `Finding`s against a bundle
-(`vocabulary_rule`) is a separate concern and lands in a later task; this
-module only knows how to read the file.
+(`vocabulary_rule`) is a separate concern; this module only knows how to
+read the file.
 
 **Unknown keys are rejected, top level and per entry.** This is a small
 hand-edited house-rule file with no schema and no editor support to catch a
@@ -29,8 +30,8 @@ becoming an instant, legible error today.
 are two distinct entries as far as this loader is concerned, even though
 `okf_ext.tags.normalize.canonical` would fold them together. The vocabulary
 is the authority on exact spelling; a vocabulary that declares both is
-itself the mess `vocabulary_rule` (Task 6) and normalization-driven renames
-(Task 7) exist to surface, and canonicalizing here would quietly hide that
+itself the mess `vocabulary_rule` and normalization-driven renames exist to
+surface, and canonicalizing here would quietly hide that
 from the very tools meant to catch it.
 """
 
@@ -77,14 +78,11 @@ class VocabularyError(ValueError):
     """
 
 
-def _reject_unknown_keys(
-    mapping: Mapping[Any, Any], allowed_keys: frozenset[str], where: str, noun: str
-) -> None:
+def _reject_unknown_keys(mapping: Mapping[Any, Any], allowed_keys: frozenset[str], where: str, noun: str) -> None:
     unknown = sorted(str(key) for key in mapping if key not in allowed_keys)
     if unknown:
         raise VocabularyError(
-            f"{where}: unknown {noun} key(s) {unknown!r}; "
-            f"only {sorted(allowed_keys)!r} are recognized"
+            f"{where}: unknown {noun} key(s) {unknown!r}; only {sorted(allowed_keys)!r} are recognized"
         )
 
 
@@ -103,8 +101,7 @@ def _entries(data: Any, source: str) -> Sequence[Any]:  # noqa: ANN401 -- arbitr
         raise VocabularyError(f"{source}: `version` must be an integer, got {version!r}")
     if version != SUPPORTED_VERSION:
         raise VocabularyError(
-            f"{source}: unsupported vocabulary version {version!r}; "
-            f"this release reads version {SUPPORTED_VERSION}"
+            f"{source}: unsupported vocabulary version {version!r}; this release reads version {SUPPORTED_VERSION}"
         )
     raw = data.get("tags", [])
     if isinstance(raw, str) or not isinstance(raw, Sequence):
@@ -137,9 +134,7 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
     try:
         text = raw_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise VocabularyError(
-            f"{source}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}"
-        ) from exc
+        raise VocabularyError(f"{source}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}") from exc
     try:
         data = YAML(typ="safe").load(text)
     except YAMLError as exc:
@@ -168,27 +163,22 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
         description = entry.get("description")
         if description is not None:
             if not isinstance(description, str):
-                raise VocabularyError(
-                    f"{where}: `description` must be a string, got {description!r}"
-                )
+                raise VocabularyError(f"{where}: `description` must be a string, got {description!r}")
             descriptions[name] = description
 
-        # `deprecated` gates a rename instruction that Task 6 turns into a
-        # `Finding` and Task 7 into an actual file rewrite, so it must be a
+        # `deprecated` gates a rename instruction that the vocabulary rule turns
+        # into a `Finding` and the rename planner into an actual file rewrite, so
+        # it must be a
         # real boolean. A truthiness test would let a hand-written or
         # tool-stringified `deprecated: "false"` (or `"no"`, or `0`/`1`)
         # silently deprecate a tag — the worst failure mode this package has.
         raw_deprecated = entry.get("deprecated", False)
         if not isinstance(raw_deprecated, bool):
-            raise VocabularyError(
-                f"{where}: `deprecated` must be true or false, got {raw_deprecated!r}"
-            )
+            raise VocabularyError(f"{where}: `deprecated` must be true or false, got {raw_deprecated!r}")
 
         raw_replacement = entry.get("replaced_by")
         if raw_replacement is not None and not isinstance(raw_replacement, str):
-            raise VocabularyError(
-                f"{where}: `replaced_by` must be a string, got {raw_replacement!r}"
-            )
+            raise VocabularyError(f"{where}: `replaced_by` must be a string, got {raw_replacement!r}")
         replacement = raw_replacement.strip() if isinstance(raw_replacement, str) else None
         # An empty (or all-whitespace) `replaced_by` is not "replaced by
         # nothing" — that shape is spelled by omitting the key entirely — so
@@ -211,9 +201,7 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
 
     for name, replacement in sorted(replacements.items()):
         if replacement not in allowed:
-            raise VocabularyError(
-                f"{source}: `{name}` is replaced_by `{replacement}`, which is not an allowed tag"
-            )
+            raise VocabularyError(f"{source}: `{name}` is replaced_by `{replacement}`, which is not an allowed tag")
 
     return Vocabulary(
         allowed=frozenset(allowed),
@@ -288,11 +276,7 @@ def vocabulary_rule(vocab: Vocabulary, ctx: ExtContext | None = None) -> Rule:
                 lookup = tag if tag in vocab.known else form
                 if lookup in vocab.deprecated:
                     replacement = vocab.deprecated[lookup]
-                    detail = (
-                        f" Use `{replacement}` instead."
-                        if replacement is not None
-                        else " It has no replacement."
-                    )
+                    detail = f" Use `{replacement}` instead." if replacement is not None else " It has no replacement."
                     yield Finding(
                         code=_CODE_DEPRECATED,
                         severity="warn",

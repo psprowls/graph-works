@@ -258,9 +258,7 @@ def test_atomicity_a_file_deleted_after_planning_blocks_the_whole_batch(tmp_path
     ("fail_at", "failed_member"),
     [(1, "block.md"), (2, "merge_me.md"), (3, "underscore.md")],
 )
-def test_atomicity_a_mid_batch_write_failure_leaves_zero_files_changed(
-    tmp_path, monkeypatch, fail_at, failed_member
-):
+def test_atomicity_a_mid_batch_write_failure_leaves_zero_files_changed(tmp_path, monkeypatch, fail_at, failed_member):
     """The gap the pre-existing-unwritable-file test above cannot see: every
     target here passes the writability probe cleanly (nothing is chmod'd,
     nothing is deleted), and the failure only appears once staging actually
@@ -455,9 +453,7 @@ def test_two_edits_at_the_same_index_are_refused(tmp_path):
     stale index, parse-error concept, non-sequence `tags` -- and applying a
     rename immediately followed by a removal at the same position would
     otherwise silently discard the rename with nothing reported."""
-    (tmp_path / "dup.md").write_bytes(
-        b"---\ntype: Metric\ntitle: D\ndescription: D\ntags: [kpi, metric]\n---\n\n# D\n"
-    )
+    (tmp_path / "dup.md").write_bytes(b"---\ntype: Metric\ntitle: D\ndescription: D\ntags: [kpi, metric]\n---\n\n# D\n")
     bundle = load_bundle(tmp_path)
     before = (tmp_path / "dup.md").read_bytes()
     plan = RenamePlan(
@@ -518,8 +514,7 @@ def test_a_stale_plan_from_reordering_is_refused(tmp_path):
     plan = plan_rename(bundle, "ga4", "analytics")  # block.md, index 1
 
     (root / "block.md").write_text(
-        "---\ntype: Metric\ntitle: Orders\ndescription: D\n"
-        "tags:\n- ga4\n- Data Quality\n- kpi\n---\n\n# Orders\n",
+        "---\ntype: Metric\ntitle: Orders\ndescription: D\ntags:\n- ga4\n- Data Quality\n- kpi\n---\n\n# Orders\n",
         encoding="utf-8",
     )
     result = apply(load_bundle(root), plan)
@@ -536,8 +531,7 @@ def test_a_stale_plan_from_a_shortened_sequence_is_refused(tmp_path):
     plan = plan_rename(bundle, "ga4", "analytics")  # block.md, index 1
 
     (root / "block.md").write_text(
-        "---\ntype: Metric\ntitle: Orders\ndescription: D\n"
-        "tags:\n- Data Quality\n---\n\n# Orders\n",
+        "---\ntype: Metric\ntitle: Orders\ndescription: D\ntags:\n- Data Quality\n---\n\n# Orders\n",
         encoding="utf-8",
     )
     result = apply(load_bundle(root), plan)
@@ -560,8 +554,7 @@ def test_a_stale_document_does_not_block_its_siblings_in_the_same_plan(tmp_path)
     assert plan.concept_ids == ("block", "merge_me", "underscore")
 
     (root / "underscore.md").write_text(
-        "---\ntype: Reference\ntitle: Quality notes\ndescription: D\n"
-        "tags: [changed]\n---\n\n# Quality notes\n",
+        "---\ntype: Reference\ntitle: Quality notes\ndescription: D\ntags: [changed]\n---\n\n# Quality notes\n",
         encoding="utf-8",
     )
     result = apply(load_bundle(root), plan)
@@ -603,7 +596,7 @@ def test_reapplying_the_same_plan_is_refused_as_stale_against_the_same_bundle(tm
 def test_a_hand_built_plan_targeting_a_null_position_is_refused_as_stale(tmp_path):
     """The type-aware guard. `str(None) == "None"` would make a naive
     `str(sequence[edit.index]) != edit.old` guard accept `old="None"` as a
-    match for a null position -- exactly the coercion `_raw_tags` (Task 7)
+    match for a null position -- exactly the coercion `_raw_tags`
     exists to refuse. No planner can build this edit (a `None` sentinel is
     never a mapping key), so it is hand-built here to prove `apply()` itself
     refuses it, not just that the planners never offer it up."""
@@ -615,9 +608,7 @@ def test_a_hand_built_plan_targeting_a_null_position_is_refused_as_stale(tmp_pat
 
     plan = RenamePlan(
         root=bundle.root,
-        edits=(
-            TagEdit(concept_id="withnull", path="withnull.md", index=1, old="None", new="renamed"),
-        ),
+        edits=(TagEdit(concept_id="withnull", path="withnull.md", index=1, old="None", new="renamed"),),
         skipped=(),
     )
     result = apply(bundle, plan)
@@ -628,9 +619,7 @@ def test_a_hand_built_plan_targeting_a_null_position_is_refused_as_stale(tmp_pat
 
 
 def test_an_index_beyond_the_end_of_the_sequence_is_refused_as_stale(tmp_path):
-    (tmp_path / "short.md").write_bytes(
-        b"---\ntype: Metric\ntitle: S\ndescription: D\ntags: [kpi]\n---\n\n# S\n"
-    )
+    (tmp_path / "short.md").write_bytes(b"---\ntype: Metric\ntitle: S\ndescription: D\ntags: [kpi]\n---\n\n# S\n")
     bundle = load_bundle(tmp_path)
     plan = RenamePlan(
         root=bundle.root,
@@ -652,9 +641,7 @@ def test_a_hand_built_plan_over_a_parse_error_concept_is_refused(tmp_path):
     bundle = load_bundle(root)
     plan = RenamePlan(
         root=bundle.root,
-        edits=(
-            TagEdit(concept_id="broken", path="broken.md", index=0, old="finance", new="money"),
-        ),
+        edits=(TagEdit(concept_id="broken", path="broken.md", index=0, old="finance", new="money"),),
         skipped=(),
     )
     result = apply(bundle, plan)
@@ -665,9 +652,7 @@ def test_a_hand_built_plan_over_a_parse_error_concept_is_refused(tmp_path):
 
 
 def test_a_plan_naming_a_concept_absent_from_this_bundle_is_reported(tmp_path):
-    (tmp_path / "solo.md").write_bytes(
-        b"---\ntype: Metric\ntitle: S\ndescription: D\ntags: [kpi]\n---\n\n# S\n"
-    )
+    (tmp_path / "solo.md").write_bytes(b"---\ntype: Metric\ntitle: S\ndescription: D\ntags: [kpi]\n---\n\n# S\n")
     bundle = load_bundle(tmp_path)
     plan = RenamePlan(
         root=bundle.root,
@@ -710,8 +695,7 @@ def test_emptying_a_tag_list_writes_an_empty_sequence_not_a_removed_key(tmp_path
 
 def test_a_bom_document_survives_a_rename(tmp_path):
     (tmp_path / "bom.md").write_bytes(
-        "﻿---\ntype: Metric\ntitle: Bom\ndescription: D\ntags: [alpha, beta]\n"
-        "---\n\n# Bom\n".encode()
+        "﻿---\ntype: Metric\ntitle: Bom\ndescription: D\ntags: [alpha, beta]\n---\n\n# Bom\n".encode()
     )
     bundle = load_bundle(tmp_path)
     result = apply(bundle, plan_rename(bundle, "alpha", "gamma"))
@@ -726,10 +710,7 @@ def test_a_bom_document_survives_a_rename(tmp_path):
 
 
 def test_a_crlf_document_survives_a_rename(tmp_path):
-    text = (
-        "---\r\ntype: Metric\r\ntitle: Crlf\r\ndescription: D\r\n"
-        "tags:\r\n- alpha\r\n- beta\r\n---\r\n\r\n# Crlf\r\n"
-    )
+    text = "---\r\ntype: Metric\r\ntitle: Crlf\r\ndescription: D\r\ntags:\r\n- alpha\r\n- beta\r\n---\r\n\r\n# Crlf\r\n"
     (tmp_path / "crlf.md").write_bytes(text.encode("utf-8"))
     bundle = load_bundle(tmp_path)
     result = apply(bundle, plan_rename(bundle, "alpha", "gamma"))

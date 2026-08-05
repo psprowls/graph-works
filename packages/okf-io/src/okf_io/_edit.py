@@ -80,10 +80,7 @@ def _validate_edit(edit: Edit, body_line_count: int) -> None:
     - end <= body_line_count
     """
     if edit.start < 1 or edit.end < edit.start - 1 or edit.end > body_line_count:
-        raise ValueError(
-            f"Invalid edit range: start={edit.start}, end={edit.end}, "
-            f"body has {body_line_count} lines"
-        )
+        raise ValueError(f"Invalid edit range: start={edit.start}, end={edit.end}, body has {body_line_count} lines")
 
 
 def insert_after(body: str, line: int, lines: Sequence[str]) -> Edit:
@@ -99,8 +96,7 @@ def insert_after(body: str, line: int, lines: Sequence[str]) -> Edit:
     body_size = len(existing)
     if not (0 <= line <= body_size):
         raise ValueError(
-            f"Invalid line number: line={line}, body has {body_size} lines "
-            f"(valid range: 0 to {body_size})"
+            f"Invalid line number: line={line}, body has {body_size} lines (valid range: 0 to {body_size})"
         )
     if 0 < line == body_size and not existing[-1].endswith(("\n", "\r")):
         return Edit(line, line, (existing[-1] + newline_of(body), *lines))

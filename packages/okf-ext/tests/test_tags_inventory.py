@@ -38,7 +38,7 @@ def test_scan_reports_a_non_utf8_member_as_unreadable(tmp_path):
     """`bundle.unreadable` is the one `SkipReason` no markdown fixture in the
     corpus can trigger: `okf_io.load` only populates it on an OS-level read
     failure or invalid UTF-8 (`packages/okf-io/src/okf_io/bundle.py`), and
-    the Task 2 corpus is all valid UTF-8 markdown. Built here as an ad hoc
+    the corpus is all valid UTF-8 markdown. Built here as an ad hoc
     one-off bundle instead, following the pattern okf-io's own suite uses in
     `test_bundle.py::test_a_non_utf8_member_becomes_unreadable_not_an_exception`.
     """
@@ -115,12 +115,8 @@ def test_an_empty_or_whitespace_tag_is_counted_not_filtered(tmp_path):
     whitespace-only tag is a real, if malformed, value in `fm.tags`, and
     pinning that it survives into `counts` is what stops a future "helpful"
     filter from silently hiding the authoring mistake it represents."""
-    (tmp_path / "a.md").write_bytes(
-        b'---\ntype: Metric\ntitle: A\ndescription: D\ntags: ["", "kpi"]\n---\n\n# A\n'
-    )
-    (tmp_path / "b.md").write_bytes(
-        b'---\ntype: Metric\ntitle: B\ndescription: D\ntags: ["", "   "]\n---\n\n# B\n'
-    )
+    (tmp_path / "a.md").write_bytes(b'---\ntype: Metric\ntitle: A\ndescription: D\ntags: ["", "kpi"]\n---\n\n# A\n')
+    (tmp_path / "b.md").write_bytes(b'---\ntype: Metric\ntitle: B\ndescription: D\ntags: ["", "   "]\n---\n\n# B\n')
 
     inv = inventory(load_bundle(tmp_path))
 
@@ -256,9 +252,7 @@ def test_a_single_non_canonical_tag_normalizes_without_a_crash():
     found = clusters(_bare_inventory({"Finance": 3}))
     normalization = [c for c in found if c.kind == "normalization"]
     similarity = [c for c in found if c.kind == "similarity"]
-    assert normalization == [
-        TagCluster(canonical="finance", members=("Finance",), kind="normalization")
-    ]
+    assert normalization == [TagCluster(canonical="finance", members=("Finance",), kind="normalization")]
     assert similarity == []
 
 
@@ -335,9 +329,7 @@ def test_a_single_member_normalization_group_with_no_canonical_spelling_never_ph
     nobody wrote — the same phantom-match risk as the multi-member case,
     here with a normalization cluster of one."""
     found = clusters(_bare_inventory({"Data Quality": 3, "data-qualityx": 1}))
-    assert found == (
-        TagCluster(canonical="data-quality", members=("Data Quality",), kind="normalization"),
-    )
+    assert found == (TagCluster(canonical="data-quality", members=("Data Quality",), kind="normalization"),)
 
 
 def test_every_cluster_member_is_a_real_tag():

@@ -91,9 +91,7 @@ class TagInventory:
         """
         return tuple(
             (left, right, count)
-            for (left, right), count in sorted(
-                self.co_occurrence.items(), key=lambda item: (-item[1], item[0])
-            )
+            for (left, right), count in sorted(self.co_occurrence.items(), key=lambda item: (-item[1], item[0]))
             if count >= minimum
         )
 

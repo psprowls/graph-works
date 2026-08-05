@@ -1,0 +1,9 @@
+{
+  "name": "jspkg",
+  "version": "0.0.0",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./feature/*": "./src/feature/*.js"
+  }
+}

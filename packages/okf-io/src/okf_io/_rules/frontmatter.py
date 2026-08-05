@@ -20,7 +20,7 @@ CODES: tuple[str, ...] = (
 def unreadable(ctx: RuleContext) -> Iterable[Finding]:
     """§11 rule 1, extended to a member nobody can decode.
 
-    An addition to the epic's catalog. A concept-shaped file that is not valid
+    An addition to the rule catalog. A concept-shaped file that is not valid
     UTF-8 never reaches ``concepts`` -- the loader records it and keeps walking
     -- so without this rule it would vanish from the report entirely.
     """
@@ -71,15 +71,11 @@ def required_and_recommended_keys(ctx: RuleContext) -> Iterable[Finding]:
         path = member_path(concept_id)
         frontmatter = document.fm
         if not (frontmatter.type or "").strip():
-            yield Finding(
-                "frontmatter.missing-type", "error", "`type` is absent or empty", "§4.1", path
-            )
+            yield Finding("frontmatter.missing-type", "error", "`type` is absent or empty", "§4.1", path)
         if not (frontmatter.title or "").strip():
             yield Finding("frontmatter.title-recommended", "warn", "No `title`", "§4.1", path)
         if not (frontmatter.description or "").strip():
-            yield Finding(
-                "frontmatter.description-recommended", "warn", "No `description`", "§4.1", path
-            )
+            yield Finding("frontmatter.description-recommended", "warn", "No `description`", "§4.1", path)
 
 
 RULES: tuple[Rule, ...] = (

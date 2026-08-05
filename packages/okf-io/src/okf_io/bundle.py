@@ -50,11 +50,7 @@ class Bundle:
 
     def by_type(self, type_name: str) -> tuple[str, ...]:
         wanted = type_name.strip()
-        return tuple(
-            sorted(
-                cid for cid, doc in self.concepts.items() if (doc.fm.type or "").strip() == wanted
-            )
-        )
+        return tuple(sorted(cid for cid, doc in self.concepts.items() if (doc.fm.type or "").strip() == wanted))
 
     def by_tag(self, tag: str) -> tuple[str, ...]:
         return tuple(sorted(cid for cid, doc in self.concepts.items() if tag in doc.fm.tags))
@@ -66,9 +62,7 @@ class Bundle:
         default in one place is the point: every caller re-deriving it is how
         two consumers end up disagreeing about the same document.
         """
-        return tuple(
-            sorted(cid for cid, doc in self.concepts.items() if effective_status(doc.fm) == status)
-        )
+        return tuple(sorted(cid for cid, doc in self.concepts.items() if effective_status(doc.fm) == status))
 
     def has_member(self, path: str) -> bool:
         """Whether *path* (bundle-relative posix) names any member.

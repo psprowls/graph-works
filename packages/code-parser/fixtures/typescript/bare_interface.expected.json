@@ -1,0 +1,19 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {
+      "kind": "type",
+      "name": "IFoo",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "interface"},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

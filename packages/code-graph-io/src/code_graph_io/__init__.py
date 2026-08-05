@@ -32,7 +32,6 @@ from code_graph_io.queries import (
 from code_graph_io.schema import SCHEMA_VERSION
 from code_graph_io.source_meta import extension_languages
 from code_graph_io.store import GraphNotInitializedError, SchemaMismatchError
-from code_graph_io.sync_wiki import DriftReport, run_sync_wiki
 
 __all__ = [
     "SCHEMA_VERSION",
@@ -43,7 +42,6 @@ __all__ = [
     "CallRecord",
     "ChildNode",
     "DependencyDescription",
-    "DriftReport",
     "EntryPointDescription",
     "ExportRecord",
     "ExporterRecord",
@@ -63,5 +61,4 @@ __all__ = [
     "extension_languages",
     "open_reader",
     "open_writer",
-    "run_sync_wiki",
 ]

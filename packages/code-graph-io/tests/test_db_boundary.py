@@ -4,8 +4,7 @@ Only ``code-graph-io`` may build the ``code.db`` path, open a connection to it, 
 run SQL against the code graph. Every other package reaches the graph through
 ``code_graph_io.open_reader`` / ``code_graph_io.open_writer`` and the re-exported handle
 API, record dataclasses, and error classes. The conn-level modules (``queries``,
-``upsert``, ``resolve``, ``store``, ``sync_wiki``, ``schema``) are
-code-graph-io-internal.
+``upsert``, ``resolve``, ``store``, ``schema``) are code-graph-io-internal.
 
 This test walks every ``packages/*/src/**/*.py`` EXCEPT ``packages/code-graph-io/``
 and asserts none reference ``code.db`` directly or import the forbidden
@@ -24,10 +23,9 @@ _FORBIDDEN_MODULES = {
     "code_graph_io.queries",
     "code_graph_io.upsert",
     "code_graph_io.resolve",
-    "code_graph_io.sync_wiki",
     "code_graph_io.schema",
 }
-_FORBIDDEN_NAMES = {"store", "queries", "upsert", "resolve", "sync_wiki", "schema"}
+_FORBIDDEN_NAMES = {"store", "queries", "upsert", "resolve", "schema"}
 
 
 def _production_files():

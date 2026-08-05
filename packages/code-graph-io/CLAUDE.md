@@ -21,7 +21,7 @@ Only `code-graph-io` may build the `code.db` path, open a connection to it, or r
 SQL against the code graph. Every other package reaches the graph through a
 `GraphReader` / `GraphStore` obtained from `code_graph_io.open_reader(workspace)` /
 `code_graph_io.open_writer(workspace)`. The conn-level modules (`queries`, `upsert`,
-`resolve`, `store`, `sync_wiki`, `schema`) are code-graph-io-internal —
+`resolve`, `store`, `schema`) are code-graph-io-internal —
 callers import the handle API, record dataclasses, and error classes from the
 `code_graph_io` top level instead. Enforced by `tests/test_db_boundary.py`.
 

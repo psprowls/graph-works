@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 from typing import cast
 
 import tree_sitter
@@ -16,7 +16,7 @@ from code_parser.errors import UnsupportedLanguageError
 _KNOWN: frozenset[str] = frozenset({"python", "javascript", "typescript", "tsx"})
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_language(name: str) -> tree_sitter.Language:
     """Return the tree-sitter Language for a language name. Cached."""
     if name not in _KNOWN:

@@ -689,3 +689,103 @@ def test_format_path_threads_children() -> None:
     tree = [ChildNode(kind="function", uri=None, path="a.py", line=3)]
     out = render.format_path(desc, "human", children=tree, effective_depth=2)
     assert "children (depth 2)" in out and "└─ a.py:3" in out
+
+
+# ── render(): record-shape handling, importer batches, truncation ─────────────
+
+
+def test_render_accepts_plain_mappings_not_just_dataclasses() -> None:
+    """`_to_dict` takes the Mapping branch, so dict rows render like records."""
+    out = render.render([{"kind": "file", "name": "a.py"}], "json")
+    assert json.loads(out) == [{"kind": "file", "name": "a.py"}]
+
+
+def test_render_rejects_a_record_that_is_not_mapping_shaped() -> None:
+    with pytest.raises(TypeError, match="not renderable as a mapping"):
+        render.render(["just a string"], "json")
+
+
+def test_render_unknown_format_raises() -> None:
+    with pytest.raises(ValueError, match="unknown format"):
+        render.render([Row("file", "a", "a.py", 1)], "yaml")
+
+
+def test_render_human_with_no_rows_is_empty() -> None:
+    assert render.render([], "human") == ""
+
+
+def test_render_human_truncates_and_reports_the_total() -> None:
+    rows = [Row("file", f"n{i}", f"{i}.py", i) for i in range(5)]
+    seen: list[tuple[int, int]] = []
+    out = render.render(rows, "human", cap=2, on_truncate=lambda c, t: seen.append((c, t)))
+    assert out.splitlines()[-1] == "... showing 2 of 5 (truncated)"
+    assert seen == [(2, 5)], "on_truncate must receive (cap, total)"
+
+
+def test_render_json_truncates_silently() -> None:
+    """JSON truncation emits a flat capped array — no trailer, no envelope."""
+    rows = [Row("file", f"n{i}", f"{i}.py", i) for i in range(5)]
+    assert len(json.loads(render.render(rows, "json", cap=2))) == 2
+
+
+def test_render_does_not_invoke_on_truncate_below_the_cap() -> None:
+    seen: list[tuple[int, int]] = []
+    render.render([Row("file", "a", "a.py", 1)], "human", cap=9, on_truncate=lambda c, t: seen.append((c, t)))
+    assert seen == []
+
+
+@dataclass(frozen=True)
+class ImporterRecord:
+    """Name-matched stand-in — `_is_importer_batch` dispatches on type name."""
+
+    path: str
+    symbols: tuple[str, ...]
+    depth: int
+
+
+def test_render_importer_batch_human_aligns_and_parenthesizes_symbols() -> None:
+    rows = [ImporterRecord("a/long/path.py", ("x", "y"), 1), ImporterRecord("b.py", (), 2)]
+    lines = render.render(rows, "human").splitlines()
+    assert "(x, y)" in lines[0]
+    assert lines[1].startswith("b.py")
+    assert len({len(line) for line in lines}) == 1, "columns should be width-aligned"
+
+
+def test_render_importer_batch_json_flattens_one_row_per_symbol() -> None:
+    rows = [ImporterRecord("a.py", ("x", "y"), 1), ImporterRecord("b.py", (), 2)]
+    assert json.loads(render.render(rows, "json")) == [
+        {"path": "a.py", "symbol": "x", "depth": 1},
+        {"path": "a.py", "symbol": "y", "depth": 1},
+        {"path": "b.py", "symbol": None, "depth": 2},
+    ]
+
+
+def test_render_importer_batch_human_truncates() -> None:
+    rows = [ImporterRecord(f"{i}.py", (), i) for i in range(4)]
+    out = render.render(rows, "human", cap=1)
+    assert out.splitlines()[-1] == "... showing 1 of 4 (truncated)"
+
+
+def test_render_importer_batch_unknown_format_raises() -> None:
+    with pytest.raises(ValueError, match="unknown format"):
+        render.render([ImporterRecord("a.py", (), 1)], "yaml")
+
+
+# ── _pluralize ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("word", "n", "expected"),
+    [
+        ("file", 1, "file"),  # n == 1 is always the bare word
+        ("class", 2, "classes"),  # -s  -> -es
+        ("box", 2, "boxes"),  # -x  -> -es
+        ("match", 2, "matches"),  # -ch -> -es
+        ("dish", 2, "dishes"),  # -sh -> -es
+        ("dependency", 2, "dependencies"),  # consonant + y -> -ies
+        ("key", 2, "keys"),  # vowel + y -> -s
+        ("file", 2, "files"),  # default -> -s
+    ],
+)
+def test_pluralize(word: str, n: int, expected: str) -> None:
+    assert render._pluralize(word, n) == expected

@@ -27,6 +27,7 @@ be partial. AST migration is flagged as a deferred improvement.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import re
 import sqlite3
@@ -187,10 +188,8 @@ def _load_node_builtins(cache_dir: Path) -> frozenset[str]:
         return frozenset()
 
     cache_dir.mkdir(parents=True, exist_ok=True)
-    try:
+    with contextlib.suppress(OSError):  # best-effort — never raise
         cache_file.write_text(json.dumps(harvested))
-    except OSError:
-        pass  # best-effort — never raise
     return frozenset(harvested)
 
 
@@ -348,7 +347,7 @@ def refresh(
     pkg_rel_map: dict[str, str | None] = {}
     pkg_kind_map: dict[str, str] = {}
 
-    for pkg_name, pkg_rel, attrs_json, pkg_kind in pkg_rows:
+    for pkg_name, pkg_rel, _attrs_json, pkg_kind in pkg_rows:
         pkg_rel_map[pkg_name] = pkg_rel
         pkg_kind_map[pkg_name] = pkg_kind
 

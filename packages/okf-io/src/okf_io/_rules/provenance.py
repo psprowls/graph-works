@@ -30,9 +30,7 @@ def source_entries(ctx: RuleContext) -> Iterable[Finding]:
                     path,
                 )
             unframed = (
-                source.usage_count is not None
-                and source.usage_window is None
-                and frontmatter.usage_window is None
+                source.usage_count is not None and source.usage_window is None and frontmatter.usage_window is None
             )
             if unframed:
                 yield Finding(
@@ -55,9 +53,7 @@ def footnote_join(ctx: RuleContext) -> Iterable[Finding]:
     for concept_id, document in concepts(ctx):
         path = member_path(concept_id)
         labels = ctx.links.bodies[concept_id].footnote_labels
-        identifiers = {
-            source.id.strip() for source in document.fm.sources if source.id and source.id.strip()
-        }
+        identifiers = {source.id.strip() for source in document.fm.sources if source.id and source.id.strip()}
         for label in sorted(labels - identifiers):
             yield Finding(
                 "provenance.footnote-unjoined",

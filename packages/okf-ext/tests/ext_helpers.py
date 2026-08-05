@@ -46,11 +46,7 @@ def bundle_copy(tmp_path: Path) -> Path:
 
 def snapshot(root: Path) -> dict[str, bytes]:
     """Every file under *root*, keyed by relative posix path."""
-    return {
-        p.relative_to(root).as_posix(): p.read_bytes()
-        for p in sorted(root.rglob("*"))
-        if p.is_file()
-    }
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 SCHEMAD = FIXTURES / "schemad"

@@ -31,10 +31,7 @@ def test_a_v01_timestamp_is_a_migration_hint(tmp_path):
 
 def test_it_fires_even_alongside_generated(tmp_path):
     frontmatter = "timestamp: 2024-05-01\ngenerated: { by: human:a@b, at: 2026-06-30T14:00:00Z }\n"
-    assert (
-        report_for(tmp_path, {"a.md": concept(frontmatter, "# D\n")}).by_code("legacy.timestamp")
-        != ()
-    )
+    assert report_for(tmp_path, {"a.md": concept(frontmatter, "# D\n")}).by_code("legacy.timestamp") != ()
 
 
 def test_a_body_citations_list_is_a_migration_hint(tmp_path):

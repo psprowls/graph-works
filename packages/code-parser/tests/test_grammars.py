@@ -46,3 +46,24 @@ def test_lookup_is_cached():
     a = get_language("python")
     b = get_language("python")
     assert a is b
+
+
+def test_grammar_load_failure_is_wrapped_as_unsupported_language(monkeypatch):
+    """A known name whose grammar fails to load must not leak the raw exception.
+
+    `get_language` is the only place the language-pack is touched; callers are
+    promised a single error type, so a pack-level failure gets translated too —
+    not just an unknown name.
+    """
+    import code_parser.grammars as grammars_module
+
+    def _boom(_name):
+        raise RuntimeError("pack is broken")
+
+    monkeypatch.setattr(grammars_module, "_pack_get_language", _boom)
+    grammars_module.get_language.cache_clear()
+    try:
+        with pytest.raises(UnsupportedLanguageError, match="Failed to load grammar"):
+            grammars_module.get_language("python")
+    finally:
+        grammars_module.get_language.cache_clear()

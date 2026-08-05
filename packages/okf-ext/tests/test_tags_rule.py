@@ -102,8 +102,7 @@ def test_a_conformant_bundle_stays_conformant_with_house_rule(tmp_path):
     # Build a valid, conformant bundle that violates the vocabulary
     target = tmp_path / "valid.md"
     target.write_text(
-        "---\ntype: Metric\ntitle: Valid\ndescription: Good frontmatter\n"
-        "tags: [unknown_tag, kpi]\n---\n\n# Valid\n",
+        "---\ntype: Metric\ntitle: Valid\ndescription: Good frontmatter\ntags: [unknown_tag, kpi]\n---\n\n# Valid\n",
         encoding="utf-8",
     )
     vocab = load_vocabulary(VOCABULARY)
@@ -167,9 +166,7 @@ def test_claiming_a_built_in_prefix_raises():
     `tags.` really is ours to claim."""
 
     def colliding(_ctx):
-        yield Finding(
-            code="trust.invented", severity="warn", message="m", spec="x", path=None, line=None
-        )
+        yield Finding(code="trust.invented", severity="warn", message="m", spec="x", path=None, line=None)
 
     with pytest.raises(ValueError, match="topic prefix"):
         validate(tagged_bundle(), today=TODAY, extra_rules=[colliding])
@@ -219,38 +216,28 @@ def test_probe_deprecated_with_no_replacement(tmp_path):
 
     findings = [f for f in result.findings if f.code == "tags.deprecated"]
     assert findings, "Should have a deprecated finding"
-    assert all("no replacement" in f.message for f in findings), (
-        "Should explicitly state no replacement"
-    )
+    assert all("no replacement" in f.message for f in findings), "Should explicitly state no replacement"
 
 
 def test_probe_concept_with_parse_error_no_false_findings():
     """A concept with parse_error should produce zero tag findings.
     We must not report false things about documents we couldn't read."""
-    broken_findings = [
-        f for f in report().findings if f.path == "broken.md" and f.code.startswith("tags.")
-    ]
+    broken_findings = [f for f in report().findings if f.path == "broken.md" and f.code.startswith("tags.")]
     assert len(broken_findings) == 0, f"Expected zero findings for broken.md, got {broken_findings}"
 
 
 def test_probe_empty_tags_list():
     """A concept with no tags should produce no findings.
     (This is normal and expected behavior.)"""
-    untagged_findings = [
-        f for f in report().findings if f.path == "untagged.md" and f.code.startswith("tags.")
-    ]
+    untagged_findings = [f for f in report().findings if f.path == "untagged.md" and f.code.startswith("tags.")]
     assert len(untagged_findings) == 0
 
 
 def test_probe_tags_not_a_sequence_concept():
     """A concept with tags that is not a sequence (e.g., string) should
     produce no tag findings — we cannot read the tags."""
-    scalar_findings = [
-        f for f in report().findings if f.path == "scalar_tags.md" and f.code.startswith("tags.")
-    ]
-    assert len(scalar_findings) == 0, (
-        f"Expected zero findings for scalar_tags.md, got {scalar_findings}"
-    )
+    scalar_findings = [f for f in report().findings if f.path == "scalar_tags.md" and f.code.startswith("tags.")]
+    assert len(scalar_findings) == 0, f"Expected zero findings for scalar_tags.md, got {scalar_findings}"
 
 
 def test_probe_non_canonical_suppression_boundary_all_cases(tmp_path):
@@ -280,9 +267,7 @@ def test_probe_non_canonical_suppression_boundary_all_cases(tmp_path):
 
     doc_file = tmp_path / "doc.md"
     doc_file.write_text(
-        "---\ntype: Metric\ntitle: T\ndescription: D\n"
-        "tags: [Data Quality, KPI, E-Commerce, kpi]\n"
-        "---\n\n# T\n",
+        "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [Data Quality, KPI, E-Commerce, kpi]\n---\n\n# T\n",
         encoding="utf-8",
     )
 
@@ -343,9 +328,7 @@ def test_probe_non_canonical_suppression_boundary_all_cases(tmp_path):
     # Case 5: kpi → kpi (already canonical) → deprecated only
     kpi_canonical = [f for f in findings if "kpi" in f.message and "deprecated" in f.message]
     kpi_canonical_codes = {f.code for f in kpi_canonical}
-    assert kpi_canonical_codes == {"tags.deprecated"}, (
-        f"Case 5 kpi (canonical): {kpi_canonical_codes}"
-    )
+    assert kpi_canonical_codes == {"tags.deprecated"}, f"Case 5 kpi (canonical): {kpi_canonical_codes}"
     assert any("metric" in f.message for f in kpi_canonical if f.code == "tags.deprecated")
 
 
@@ -354,9 +337,7 @@ def test_probe_unknown_with_suggestion():
     findings = report().by_code("tags.unknown")
     # metrics is a close match for metric
     metrics_findings = [f for f in findings if "metrics" in f.message]
-    assert any("metric" in f.message for f in metrics_findings), (
-        "Should suggest 'metric' for unknown tag 'metrics'"
-    )
+    assert any("metric" in f.message for f in metrics_findings), "Should suggest 'metric' for unknown tag 'metrics'"
 
 
 def test_probe_unknown_without_suggestion():
@@ -365,9 +346,7 @@ def test_probe_unknown_without_suggestion():
     # ga4 has no close match
     ga4_findings = [f for f in findings if "ga4" in f.message]
     assert ga4_findings, "Should have unknown finding for ga4"
-    assert not any("Did you mean" in f.message for f in ga4_findings), (
-        "Should not suggest anything for 'ga4'"
-    )
+    assert not any("Did you mean" in f.message for f in ga4_findings), "Should not suggest anything for 'ga4'"
 
 
 def test_probe_unknown_suggestion_can_be_deprecated(tmp_path):
@@ -377,11 +356,7 @@ def test_probe_unknown_suggestion_can_be_deprecated(tmp_path):
     # Create a vocabulary where the suggested match is deprecated
     vocab_file = tmp_path / "_tags.yaml"
     vocab_file.write_text(
-        "version: 1\ntags:\n"
-        "  - name: metric\n"
-        "  - name: kpi\n"
-        "    deprecated: true\n"
-        "    replaced_by: metric\n",
+        "version: 1\ntags:\n  - name: metric\n  - name: kpi\n    deprecated: true\n    replaced_by: metric\n",
         encoding="utf-8",
     )
 
@@ -396,6 +371,4 @@ def test_probe_unknown_suggestion_can_be_deprecated(tmp_path):
     findings = [f for f in result.findings if f.code == "tags.unknown"]
     assert findings, "Should have unknown finding for kpis"
     # The suggestion is kpi, which is deprecated, but we still suggest it
-    assert any("kpi" in f.message for f in findings), (
-        "Should suggest 'kpi' even though it is deprecated"
-    )
+    assert any("kpi" in f.message for f in findings), "Should suggest 'kpi' even though it is deprecated"

@@ -22,9 +22,9 @@ import re
 import sqlite3
 import sys
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 from code_parser.projections.graph import GraphEdge, GraphNode
 
@@ -183,7 +183,7 @@ def _discover_test_roots(
             if files:
                 _add("tests", "repository")
 
-    # Package-local tests/ and __tests__/ 
+    # Package-local tests/ and __tests__/
     for pkg_name, pkg_rel, pkg_attrs_json in pkg_rows:
         pkg_attrs = json.loads(pkg_attrs_json) if pkg_attrs_json else {}
         lang = pkg_attrs.get("language")
@@ -205,7 +205,7 @@ def _discover_test_roots(
 
     # Config-driven roots — pyproject testpaths.
     pkg_index = _build_pkg_index(pkg_rows)
-    for pkg_name, pkg_rel, pkg_attrs_json in pkg_rows:
+    for _pkg_name, pkg_rel, pkg_attrs_json in pkg_rows:
         pkg_attrs = json.loads(pkg_attrs_json) if pkg_attrs_json else {}
         lang = pkg_attrs.get("language")
         pkg_dir = (repo_root / pkg_rel) if pkg_rel else repo_root
@@ -278,10 +278,9 @@ def emit(
         best: _TestRoot | None = None
         best_len = -1
         for r in roots:
-            if file_rel == r.rel_path or file_rel.startswith(r.rel_path + "/"):
-                if len(r.rel_path) > best_len:
-                    best_len = len(r.rel_path)
-                    best = r
+            if (file_rel == r.rel_path or file_rel.startswith(r.rel_path + "/")) and len(r.rel_path) > best_len:
+                best_len = len(r.rel_path)
+                best = r
         return best
 
     for _file_id, file_rel in test_file_rows:
@@ -337,10 +336,7 @@ def emit(
         # display name (already unique). Package-owned suites use a qualified name
         # <owner_name>-<kind>-tests so every node has a unique name even when multiple
         # packages have a tests/ directory (previously all resolved to basename 'tests').
-        if r.owner_kind == "repository":
-            suite_name = r.rel_path
-        else:
-            suite_name = f"{owner_name}-{kind_attr}-tests"
+        suite_name = r.rel_path if r.owner_kind == "repository" else f"{owner_name}-{kind_attr}-tests"
 
         attrs: dict = {
             "uri": test_suite_uri(ctx, r.rel_path),

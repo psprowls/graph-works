@@ -83,9 +83,7 @@ def verified_entries(ctx: RuleContext) -> Iterable[Finding]:
         path = member_path(concept_id)
         for position, event in enumerate(document.fm.verified):
             missing = [
-                name
-                for name, present in (("by", event.by is not None), ("at", event.at is not None))
-                if not present
+                name for name, present in (("by", event.by is not None), ("at", event.at is not None)) if not present
             ]
             if missing:
                 names = " and ".join(f"`{name}`" for name in missing)
@@ -122,8 +120,7 @@ def actor_convention(ctx: RuleContext) -> Iterable[Finding]:
                 yield Finding(
                     "trust.actor-convention",
                     "warn",
-                    f"`{field}` `{actor.raw}` matches none of `human:`, `process:`, "
-                    f"or `<producer>/<version>`",
+                    f"`{field}` `{actor.raw}` matches none of `human:`, `process:`, or `<producer>/<version>`",
                     "§7",
                     path,
                 )

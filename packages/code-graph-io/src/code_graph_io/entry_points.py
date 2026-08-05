@@ -3,7 +3,7 @@
 Reads declared entry points from pyproject.toml ([project.scripts],
 [project.entry-points.<group>]) and package.json (bin, main, module,
 exports) for every Package row written by packages.refresh. Emits
-EntryPoint nodes with strict path-qualified implemented_by resolution; 
+EntryPoint nodes with strict path-qualified implemented_by resolution;
 on miss, emits the EntryPoint with implemented_by=NULL plus a stderr warning.
 
 Conventional executable files (shebang scripts) do NOT produce EntryPoint
@@ -231,10 +231,7 @@ def _walk_exports(
                     source=source,
                 )
             elif k == "." or k.startswith("./"):
-                if key_path == ".":
-                    new_key = k
-                else:
-                    new_key = f"{key_path}/{k.removeprefix('./')}"
+                new_key = k if key_path == "." else f"{key_path}/{k.removeprefix('./')}"
                 _walk_exports(
                     v,
                     key_path=new_key,

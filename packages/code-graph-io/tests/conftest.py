@@ -12,7 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from code_graph_io.schema import apply_schema  # noqa: E402
+from code_graph_io.schema import apply_schema
 
 
 @pytest.fixture(scope="session", autouse=True)

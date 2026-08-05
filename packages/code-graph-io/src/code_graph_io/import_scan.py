@@ -13,7 +13,7 @@ import re
 import sqlite3
 from pathlib import Path
 
-from code_graph_io.structural_nodes import _owning_package, _resolve_import_root  # noqa: F401
+from code_graph_io.structural_nodes import _owning_package, _resolve_import_root
 
 PkgRow = tuple[str, str | None, str | None]
 """(pkg_name, pkg_rel, pkg_attrs_json) — the tuple shape callers pass in."""
@@ -127,10 +127,7 @@ def _match_js_import(
             return None
         return _owning_package(rel, pkg_index)
     # Bare specifier — split @scope/name (two segments) or name (one)
-    if spec.startswith("@"):
-        key = "/".join(spec.split("/", 2)[:2])
-    else:
-        key = spec.split("/", 1)[0]
+    key = "/".join(spec.split("/", 2)[:2]) if spec.startswith("@") else spec.split("/", 1)[0]
     return js_map.get(key)
 
 

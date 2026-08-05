@@ -1,3 +1,4 @@
+import dataclasses
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from code_parser import (
 
 def test_span_frozen():
     span = Span(0, 10, 1, 2, 0, 5)
-    with pytest.raises(Exception):
+    with pytest.raises(dataclasses.FrozenInstanceError):
         span.start_byte = 99
 
 

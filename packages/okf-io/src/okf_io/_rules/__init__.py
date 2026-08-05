@@ -55,8 +55,6 @@ CODES_BY_TOPIC: Mapping[str, tuple[str, ...]] = MappingProxyType(
 
 TOPICS: frozenset[str] = frozenset(RULES_BY_TOPIC)
 
-RULES: tuple[Rule, ...] = tuple(
-    rule for topic in sorted(RULES_BY_TOPIC) for rule in RULES_BY_TOPIC[topic]
-)
+RULES: tuple[Rule, ...] = tuple(rule for topic in sorted(RULES_BY_TOPIC) for rule in RULES_BY_TOPIC[topic])
 
 CATALOG: frozenset[str] = frozenset(code for codes in CODES_BY_TOPIC.values() for code in codes)

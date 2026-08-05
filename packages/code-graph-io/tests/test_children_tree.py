@@ -113,9 +113,9 @@ def test_unknown_node_returns_empty(seeded_db: sqlite3.Connection) -> None:
 def test_children_for_resolves_default_depth(seeded_db: sqlite3.Connection) -> None:
     row = seeded_db.execute("SELECT kind FROM nodes WHERE name='mypkg' AND kind IN ('package','app')").fetchone()
     kind = row[0]
-    tree, eff = queries.children_for(seeded_db, kind=kind, name="mypkg", depth=None)
+    _tree, eff = queries.children_for(seeded_db, kind=kind, name="mypkg", depth=None)
     assert eff == queries.default_child_depth(kind) == 1
-    tree2, eff2 = queries.children_for(seeded_db, kind=kind, name="mypkg", depth=2)
+    _tree2, eff2 = queries.children_for(seeded_db, kind=kind, name="mypkg", depth=2)
     assert eff2 == 2
 
 

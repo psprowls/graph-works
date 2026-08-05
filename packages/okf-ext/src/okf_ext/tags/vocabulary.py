@@ -78,14 +78,11 @@ class VocabularyError(ValueError):
     """
 
 
-def _reject_unknown_keys(
-    mapping: Mapping[Any, Any], allowed_keys: frozenset[str], where: str, noun: str
-) -> None:
+def _reject_unknown_keys(mapping: Mapping[Any, Any], allowed_keys: frozenset[str], where: str, noun: str) -> None:
     unknown = sorted(str(key) for key in mapping if key not in allowed_keys)
     if unknown:
         raise VocabularyError(
-            f"{where}: unknown {noun} key(s) {unknown!r}; "
-            f"only {sorted(allowed_keys)!r} are recognized"
+            f"{where}: unknown {noun} key(s) {unknown!r}; only {sorted(allowed_keys)!r} are recognized"
         )
 
 
@@ -104,8 +101,7 @@ def _entries(data: Any, source: str) -> Sequence[Any]:  # noqa: ANN401 -- arbitr
         raise VocabularyError(f"{source}: `version` must be an integer, got {version!r}")
     if version != SUPPORTED_VERSION:
         raise VocabularyError(
-            f"{source}: unsupported vocabulary version {version!r}; "
-            f"this release reads version {SUPPORTED_VERSION}"
+            f"{source}: unsupported vocabulary version {version!r}; this release reads version {SUPPORTED_VERSION}"
         )
     raw = data.get("tags", [])
     if isinstance(raw, str) or not isinstance(raw, Sequence):
@@ -138,9 +134,7 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
     try:
         text = raw_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise VocabularyError(
-            f"{source}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}"
-        ) from exc
+        raise VocabularyError(f"{source}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}") from exc
     try:
         data = YAML(typ="safe").load(text)
     except YAMLError as exc:
@@ -169,9 +163,7 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
         description = entry.get("description")
         if description is not None:
             if not isinstance(description, str):
-                raise VocabularyError(
-                    f"{where}: `description` must be a string, got {description!r}"
-                )
+                raise VocabularyError(f"{where}: `description` must be a string, got {description!r}")
             descriptions[name] = description
 
         # `deprecated` gates a rename instruction that the vocabulary rule turns
@@ -182,15 +174,11 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
         # silently deprecate a tag — the worst failure mode this package has.
         raw_deprecated = entry.get("deprecated", False)
         if not isinstance(raw_deprecated, bool):
-            raise VocabularyError(
-                f"{where}: `deprecated` must be true or false, got {raw_deprecated!r}"
-            )
+            raise VocabularyError(f"{where}: `deprecated` must be true or false, got {raw_deprecated!r}")
 
         raw_replacement = entry.get("replaced_by")
         if raw_replacement is not None and not isinstance(raw_replacement, str):
-            raise VocabularyError(
-                f"{where}: `replaced_by` must be a string, got {raw_replacement!r}"
-            )
+            raise VocabularyError(f"{where}: `replaced_by` must be a string, got {raw_replacement!r}")
         replacement = raw_replacement.strip() if isinstance(raw_replacement, str) else None
         # An empty (or all-whitespace) `replaced_by` is not "replaced by
         # nothing" — that shape is spelled by omitting the key entirely — so
@@ -213,9 +201,7 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
 
     for name, replacement in sorted(replacements.items()):
         if replacement not in allowed:
-            raise VocabularyError(
-                f"{source}: `{name}` is replaced_by `{replacement}`, which is not an allowed tag"
-            )
+            raise VocabularyError(f"{source}: `{name}` is replaced_by `{replacement}`, which is not an allowed tag")
 
     return Vocabulary(
         allowed=frozenset(allowed),
@@ -290,11 +276,7 @@ def vocabulary_rule(vocab: Vocabulary, ctx: ExtContext | None = None) -> Rule:
                 lookup = tag if tag in vocab.known else form
                 if lookup in vocab.deprecated:
                     replacement = vocab.deprecated[lookup]
-                    detail = (
-                        f" Use `{replacement}` instead."
-                        if replacement is not None
-                        else " It has no replacement."
-                    )
+                    detail = f" Use `{replacement}` instead." if replacement is not None else " It has no replacement."
                     yield Finding(
                         code=_CODE_DEPRECATED,
                         severity="warn",

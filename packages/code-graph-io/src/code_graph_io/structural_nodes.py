@@ -22,8 +22,8 @@ import fnmatch
 import json
 import os
 import sqlite3
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 from code_parser.projections.graph import GraphEdge, GraphNode
 
@@ -244,11 +244,9 @@ def _is_test_path(
                 import_root_rel = import_root.relative_to(repo_root).as_posix()
             except ValueError:
                 return True
-            if rel_path == import_root_rel or rel_path.startswith(import_root_rel + "/"):
-                return False
             # Inside the Package but outside its import root: keep filename
             # verdict (still is_test).
-            return True
+            return not (rel_path == import_root_rel or rel_path.startswith(import_root_rel + "/"))
 
         # JS/TS branch: the directory check at the top already ruled out
         # tests/ ancestors; being inside the Package means outside tests/
@@ -263,10 +261,7 @@ def _is_config_file(name: str) -> bool:
     """True if filename is in the curated allow-list or matches a config glob."""
     if name in _CONFIG_FILENAMES:
         return True
-    for glob in _CONFIG_GLOBS:
-        if fnmatch.fnmatch(name, glob):
-            return True
-    return False
+    return any(fnmatch.fnmatch(name, glob) for glob in _CONFIG_GLOBS)
 
 
 def _is_generated(path: Path, name: str, rel_path: str = "") -> bool:

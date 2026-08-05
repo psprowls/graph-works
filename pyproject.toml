@@ -45,6 +45,12 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/okf-ext/tests/**" = ["ANN"]
 "packages/code-parser/tests/**" = ["ANN"]
 "packages/code-graph-io/tests/**" = ["ANN"]
+# Annotation debt in the two imported packages. These are the same findings
+# `mypy --strict` reports as `no-untyped-def` / `type-arg` (125 of them), so
+# both get paid down together. Delete these two lines with that work, not
+# before — they are the only thing keeping `just lint` from measuring it.
+"packages/code-graph-io/src/**" = ["ANN"]
+"packages/code-parser/src/**" = ["ANN"]
 
 [tool.mypy]
 python_version = "3.12"

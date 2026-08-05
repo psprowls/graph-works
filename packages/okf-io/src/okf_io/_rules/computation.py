@@ -75,8 +75,7 @@ def contract_fields(ctx: RuleContext) -> Iterable[Finding]:
             yield Finding(
                 "computation.missing",
                 "error",
-                "An Attested Computation has neither an inline `# Computation` block "
-                "nor a `computation:` path",
+                "An Attested Computation has neither an inline `# Computation` block nor a `computation:` path",
                 "§10.3",
                 path,
             )

@@ -55,7 +55,7 @@ def resolve_file_imports(conn: sqlite3.Connection, repo_root: Path) -> None:
     deleted. Runs inside update's open transaction — does not open a new
     connection.
     """
-    from code_graph_io import import_scan  # noqa: PLC0415 — lazy to break import cycle
+    from code_graph_io import import_scan
 
     repo_root = Path(repo_root)
     # Specifier-stub imports edges: dst is a file node materialised from the

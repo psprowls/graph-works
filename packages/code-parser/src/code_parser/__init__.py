@@ -22,8 +22,8 @@ __all__ = [
     "SourceNode",
     "Span",
     "UnsupportedLanguageError",
+    "__version__",
     "parse_bytes",
     "parse_file",
     "to_graph_records",
-    "__version__",
 ]

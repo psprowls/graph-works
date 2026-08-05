@@ -27,10 +27,7 @@ def test_default_context_needs_no_arguments():
 
 
 def test_default_policy_matches_the_corpus_dialect():
-    assert (
-        NormalizationPolicy(case="lower", separator="-", unicode_form="NFC", strip=True)
-        == DEFAULT_NORMALIZATION
-    )
+    assert NormalizationPolicy(case="lower", separator="-", unicode_form="NFC", strip=True) == DEFAULT_NORMALIZATION
 
 
 def test_top_level_does_not_import_any_capability():
@@ -63,8 +60,7 @@ def test_the_top_level_still_imports_no_capability_now_that_there_are_two():
         [
             sys.executable,
             "-c",
-            "import okf_ext, sys\n"
-            "print(sorted(m for m in sys.modules if m.startswith('okf_ext.')))",
+            "import okf_ext, sys\nprint(sorted(m for m in sys.modules if m.startswith('okf_ext.')))",
         ],
         capture_output=True,
         text=True,

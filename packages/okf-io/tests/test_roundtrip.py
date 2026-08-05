@@ -15,9 +15,7 @@ from okf_io import Document
 
 
 def changed_lines(before: str, after: str) -> list[str]:
-    diff = list(
-        difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True), n=0)
-    )
+    diff = list(difflib.unified_diff(before.splitlines(keepends=True), after.splitlines(keepends=True), n=0))
     return [line for line in diff[2:] if line.startswith(("+", "-"))]
 
 
@@ -46,9 +44,7 @@ def test_mutation_touches_only_the_intended_line(path):
     # Match the key line exactly. A substring test would also exempt any line
     # that merely contains "status" (e.g. an `order_status` field).
     unrelated = [line for line in changed if not line[1:].lstrip().startswith("status:")]
-    assert not unrelated, (
-        f"{fixture_id(path)}: mutation rewrote unrelated lines:\n{''.join(changed)}"
-    )
+    assert not unrelated, f"{fixture_id(path)}: mutation rewrote unrelated lines:\n{''.join(changed)}"
 
     added = [line for line in changed if line.startswith("+")]
     removed = [line for line in changed if line.startswith("-")]
@@ -59,9 +55,7 @@ def test_mutation_touches_only_the_intended_line(path):
         # there is nothing to add or remove. This is a stronger, not weaker,
         # instance of the property -- zero changed lines is a subset of "only
         # the status line changed".
-        assert not added and not removed, (
-            f"{fixture_id(path)}: expected a true no-op, got +{added} -{removed}"
-        )
+        assert not added and not removed, f"{fixture_id(path)}: expected a true no-op, got +{added} -{removed}"
     else:
         assert len(added) == 1, f"expected one added line, got {added}"
         assert len(removed) == (1 if had_status else 0), f"unexpected removals: {removed}"
@@ -98,12 +92,9 @@ def test_mutating_any_key_leaves_a_valid_document(path):
         assert reparsed.parse_error is None, (
             f"{fixture_id(path)}: set({key!r}) produced unparseable YAML:\n{reparsed.parse_error}"
         )
-        assert reparsed.fm_raw.get(key) == "sentinel-value", (
-            f"{fixture_id(path)}: set({key!r}) did not take effect"
-        )
+        assert reparsed.fm_raw.get(key) == "sentinel-value", f"{fixture_id(path)}: set({key!r}) did not take effect"
         assert list(reparsed.fm_raw) == keys, (
-            f"{fixture_id(path)}: set({key!r}) changed the key set:\n"
-            f"  before {keys}\n  after  {list(reparsed.fm_raw)}"
+            f"{fixture_id(path)}: set({key!r}) changed the key set:\n  before {keys}\n  after  {list(reparsed.fm_raw)}"
         )
 
 
@@ -118,9 +109,7 @@ def test_deleting_any_key_leaves_a_valid_document(path):
         doc.delete(key)
         reparsed = Document.parse(doc.serialize())
 
-        assert reparsed.parse_error is None, (
-            f"{fixture_id(path)}: delete({key!r}) produced unparseable YAML"
-        )
+        assert reparsed.parse_error is None, f"{fixture_id(path)}: delete({key!r}) produced unparseable YAML"
         assert list(reparsed.fm_raw) == [k for k in keys if k != key], (
             f"{fixture_id(path)}: delete({key!r}) left the wrong key set: {list(reparsed.fm_raw)}"
         )

@@ -629,9 +629,7 @@ def test_seeded_db_fixture_audit(seeded_db: sqlite3.Connection) -> None:
     if n_ep_wildcard < 1:
         missing.append("need >= 1 wildcard EntryPoint (jspkg/package.json exports with '*')")
 
-    assert not missing, "sample_monorepo fixture is missing required items:\n" + "\n".join(
-        f"  - {m}" for m in missing
-    )
+    assert not missing, "sample_monorepo fixture is missing required items:\n" + "\n".join(f"  - {m}" for m in missing)
 
 
 # ============================================================================
@@ -921,7 +919,7 @@ def test_valid_kinds_includes_unresolved_symbol(conn: sqlite3.Connection) -> Non
 
 def test_valid_app_kinds_contents() -> None:
     """_VALID_APP_KINDS frozenset enumerates the framework strings."""
-    assert queries._VALID_APP_KINDS == frozenset({"cli", "electron", "expo", "nextjs", "spa"})
+    assert frozenset({"cli", "electron", "expo", "nextjs", "spa"}) == queries._VALID_APP_KINDS
 
 
 def test_builtin_uri_shape() -> None:

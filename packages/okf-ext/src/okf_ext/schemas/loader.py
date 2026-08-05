@@ -55,9 +55,7 @@ def _read(path: Path) -> Any:  # noqa: ANN401 -- arbitrary parsed schema documen
     try:
         text = path.read_bytes().decode("utf-8")
     except UnicodeDecodeError as exc:
-        raise SchemaError(
-            f"{path.name}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}"
-        ) from exc
+        raise SchemaError(f"{path.name}: not valid UTF-8 at byte offset {exc.start}: {exc.reason}") from exc
     if path.name.endswith(".schema.json"):
         try:
             return json.loads(text)
@@ -132,16 +130,12 @@ def load_schemas(path: str | Path) -> SchemaSet:
         if name.startswith("_"):
             continue
         if type_name in sources:
-            raise SchemaError(
-                f"{name}: type `{type_name}` is already claimed by `{sources[type_name]}`"
-            )
+            raise SchemaError(f"{name}: type `{type_name}` is already claimed by `{sources[type_name]}`")
         schemas[type_name] = documents[name]
         sources[type_name] = name
 
     if not documents:
-        raise SchemaError(
-            f"{root}: no schema files found; expected one or more of {list(SCHEMA_SUFFIXES)}"
-        )
+        raise SchemaError(f"{root}: no schema files found; expected one or more of {list(SCHEMA_SUFFIXES)}")
 
     return SchemaSet(
         schemas=MappingProxyType(dict(sorted(schemas.items()))),

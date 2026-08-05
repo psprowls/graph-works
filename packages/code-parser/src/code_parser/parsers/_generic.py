@@ -105,7 +105,7 @@ def _extract_calls(body: tree_sitter.Node, source: bytes, config: LanguageConfig
         for child in node.children:
             visit(
                 child,
-                inside_nested_fn=inside_nested_fn or descend_marks_nested and child is not node,
+                inside_nested_fn=inside_nested_fn or (descend_marks_nested and child is not node),
             )
         # The above check is overly conservative; walk the body of nested functions
         # via their own SourceNode instead. Practical effect: top-level walk skips
@@ -335,9 +335,11 @@ def _extract_imports(file_root: tree_sitter.Node, source: bytes, config: Languag
         # For v1 we collect each top-level identifier as a separate import.
         seen_names: list[str] = []
 
+        # Invoked immediately below, inside this same iteration, so the
+        # loop variables it closes over cannot be rebound before the call.
         def walk_names(n: tree_sitter.Node) -> None:
             if n.type == "identifier":
-                seen_names.append(_text(n, source))
+                seen_names.append(_text(n, source))  # noqa: B023
                 return
             for c in n.children:
                 walk_names(c)
@@ -417,9 +419,11 @@ def _extract_exports(file_root: tree_sitter.Node, source: bytes, config: Languag
             # For plain `export { x }`, symbol kind is unknown at parse time (None).
             reexport_kind: str | None = "type" if is_type_reexport else None
 
+            # Invoked immediately below, inside this same iteration, so the
+            # loop variables it closes over cannot be rebound before the call.
             def walk(n: tree_sitter.Node) -> None:
                 if n.type == "identifier":
-                    named.append((_text(n, source), reexport_kind))
+                    named.append((_text(n, source), reexport_kind))  # noqa: B023
                 for c in n.children:
                     walk(c)
 

@@ -427,12 +427,8 @@ def _build_sources(
                 title=_as_str(raw.get("title"), f"{path}.{i}.title", failures),
                 author=parse_actor(raw.get("author"), f"{path}.{i}.author", failures),
                 usage_count=_as_int(raw.get("usage_count"), f"{path}.{i}.usage_count", failures),
-                last_modified=_as_date(
-                    raw.get("last_modified"), f"{path}.{i}.last_modified", failures
-                ),
-                usage_window=_build_usage_window(
-                    raw.get("usage_window"), f"{path}.{i}.usage_window", failures
-                ),
+                last_modified=_as_date(raw.get("last_modified"), f"{path}.{i}.last_modified", failures),
+                usage_window=_build_usage_window(raw.get("usage_window"), f"{path}.{i}.usage_window", failures),
                 extra=_extra_of(raw, _SOURCE_KEYS),
             )
         )

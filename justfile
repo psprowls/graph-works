@@ -1,14 +1,24 @@
-# okf-io workspace task runner.
+# Workspace task runner — okf-io, okf-ext, code-graph-io, code-parser.
 # Each recipe is exactly the command a future CI job will call.
+#
+# okf-io and okf-ext share the root `testpaths` and run under a plain
+# `uv run`. code-graph-io and code-parser each resolve their own dependency
+# closure, so they run under `--package` and name their test directory.
 
 default: check
 
-# Lint and format check
+# Lint and format check — repo-wide, so every package is covered by both.
 lint:
     uv run ruff check .
     uv run ruff format --check .
 
-# Static types, strict
+# Static types, strict.
+#
+# code-graph-io and code-parser are deliberately NOT here yet: between them
+# they carry 125 `no-untyped-def` / `type-arg` findings. The same gap is
+# waived in ruff as ANN (see per-file-ignores in pyproject.toml), so it is
+# one debt recorded in two places. Add both src trees to this line when that
+# work lands, and delete the ruff waiver in the same change.
 types:
     uv run mypy --strict packages/okf-io/src packages/okf-ext/src
 
@@ -17,19 +27,23 @@ types:
 contracts:
     uv run lint-imports
 
-# Test suite
+# Full test suite, all four packages.
 test:
     uv run pytest
+    uv run --package code-graph-io pytest packages/code-graph-io/tests
+    uv run --package code-parser pytest packages/code-parser/tests
 
-# Branch coverage — GATED at 95% (child 3 spec §9; supersedes child 1's
-# reported-not-gated decision, which the epic's cross-cutting requirements
-# always called for).
+# Branch coverage — GATED, per package.
 #
-# The margin over the floor is thin, and `models.py` and `document.py` are
-# where the slack went — they carry the coverage debt. A failure here names
-# only a global percentage, so start with them and read `term-missing`.
+# okf-io / okf-ext hold the original 95% floor. The margin there is thin, and
+# `models.py` and `document.py` are where the slack went — they carry the debt.
+#
+# code-graph-io and code-parser gate at 90%. A failure here names only a global
+# percentage, so start with the lowest-covered module and read `term-missing`.
 cov:
     uv run pytest --cov=okf_io --cov=okf_ext --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package code-graph-io pytest packages/code-graph-io/tests --cov=code_graph_io --cov-branch --cov-report=term-missing --cov-fail-under=90
+    uv run --package code-parser pytest packages/code-parser/tests --cov=code_parser --cov-branch --cov-report=term-missing --cov-fail-under=90
 
-# Everything CI will run. `cov` runs the suite, so `test` is not repeated.
+# Everything CI will run. `cov` runs every suite, so `test` is not repeated.
 check: lint types contracts cov

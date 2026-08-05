@@ -32,3 +32,26 @@ def test_parse_bytes_dispatches_by_extension():
 def test_parse_bytes_language_override():
     tree = parse_bytes(b"def f(): pass\n", path=Path("foo.unknownext"), language="python")
     assert tree.language == "python"
+
+
+def test_resolve_call_target_defaults_to_a_no_op():
+    """The base parser's hook returns the reference untouched.
+
+    Only some languages can resolve a call within a file; the default must be
+    identity so a parser that does not override it stays correct.
+    """
+    from code_parser.parsers._base import LanguageParser
+    from code_parser.tree import Reference, Span
+
+    class _Bare(LanguageParser):
+        language = "bare"
+
+        @property
+        def grammar(self):  # pragma: no cover - never loaded
+            raise NotImplementedError
+
+        def parse(self, source, *, path, package=None):  # pragma: no cover - unused
+            raise NotImplementedError
+
+    ref = Reference(kind="call", target_name="f", target_module=None, site=Span(0, 1, 1, 1, 0, 1))
+    assert _Bare().resolve_call_target(ref, file_tree=None) is ref

@@ -188,8 +188,7 @@ def test_plan_merge_given_a_bare_string_raises_instead_of_iterating_characters()
 
 def test_plan_normalize_on_an_already_canonical_bundle_plans_nothing(tmp_path):
     (tmp_path / "clean.md").write_bytes(
-        b"---\ntype: Metric\ntitle: Clean\ndescription: D\n"
-        b"tags: [finance, metric]\n---\n\n# Clean\n"
+        b"---\ntype: Metric\ntitle: Clean\ndescription: D\ntags: [finance, metric]\n---\n\n# Clean\n"
     )
     assert plan_normalize(load_bundle(tmp_path)).is_empty
 
@@ -268,12 +267,8 @@ def test_a_null_entry_is_unmatchable_and_neighbouring_indices_stay_correct(tmp_p
     assert plan_rename(bundle, "None", "was-null").is_empty
 
     # The tags on either side of the null keep their raw-accurate indices.
-    assert edits_for(plan_rename(bundle, "kpi", "objective"), "withnull") == [
-        (0, "kpi", "objective")
-    ]
-    assert edits_for(plan_rename(bundle, "metric", "measure"), "withnull") == [
-        (2, "metric", "measure")
-    ]
+    assert edits_for(plan_rename(bundle, "kpi", "objective"), "withnull") == [(0, "kpi", "objective")]
+    assert edits_for(plan_rename(bundle, "metric", "measure"), "withnull") == [(2, "metric", "measure")]
 
 
 def test_a_nested_mapping_entry_is_unmatchable_and_still_lets_the_document_plan(tmp_path):
@@ -294,9 +289,7 @@ def test_a_nested_mapping_entry_is_unmatchable_and_still_lets_the_document_plan(
     # The tag after the mapping keeps index 2, proving the mapping's
     # position was preserved (as an unmatchable sentinel) rather than
     # dropped, which would have shifted this tag to index 1.
-    assert edits_for(plan_rename(bundle, "metric", "measure"), "withmap") == [
-        (2, "metric", "measure")
-    ]
+    assert edits_for(plan_rename(bundle, "metric", "measure"), "withmap") == [(2, "metric", "measure")]
 
 
 def test_an_integer_entry_is_unmatchable_even_though_the_typed_view_coerces_it(tmp_path):
@@ -313,9 +306,7 @@ def test_an_integer_entry_is_unmatchable_even_though_the_typed_view_coerces_it(t
 
     assert plan_rename(bundle, "42", "forty-two").is_empty
 
-    assert edits_for(plan_rename(bundle, "metric", "measure"), "withint") == [
-        (2, "metric", "measure")
-    ]
+    assert edits_for(plan_rename(bundle, "metric", "measure"), "withint") == [(2, "metric", "measure")]
 
 
 def test_edit_indices_are_valid_against_fm_raw_when_fm_tags_is_shorter(tmp_path):
@@ -324,8 +315,7 @@ def test_edit_indices_are_valid_against_fm_raw_when_fm_tags_is_shorter(tmp_path)
     `fm_raw`. Every edit's index must still resolve to the correct raw
     element -- the property `apply()` depends on completely."""
     (tmp_path / "mixed.md").write_bytes(
-        b"---\ntype: Metric\ntitle: Mixed\ndescription: D\n"
-        b"tags: [kpi, null, metric, {a: 1}, kpi]\n---\n\n# Mixed\n"
+        b"---\ntype: Metric\ntitle: Mixed\ndescription: D\ntags: [kpi, null, metric, {a: 1}, kpi]\n---\n\n# Mixed\n"
     )
     bundle = load_bundle(tmp_path)
     doc = bundle.concepts["mixed"]

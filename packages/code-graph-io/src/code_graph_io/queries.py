@@ -436,12 +436,12 @@ def build_menu(conn: sqlite3.Connection, matches: list[NodeRecord]) -> list[Matc
     packages = [containing_package(conn, path=m.path) if m.path else None for m in matches]
     # Group key (kind, name, package) -> count, to flag collisions.
     counts: dict[tuple[str, str, str | None], int] = {}
-    for m, pkg in zip(matches, packages):
+    for m, pkg in zip(matches, packages, strict=False):
         key = (m.kind, m.name, pkg)
         counts[key] = counts.get(key, 0) + 1
 
     out: list[MatchRecord] = []
-    for m, pkg in zip(matches, packages):
+    for m, pkg in zip(matches, packages, strict=False):
         # Menu label location: only code symbols have a line; line-less nodes
         # (packages, deps, files, …) render a blank address (no ":None").
         address = f"{m.path}:{m.line}" if m.line is not None else ""

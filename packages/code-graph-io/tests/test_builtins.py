@@ -1,6 +1,4 @@
-"""Tests for code_graph_io.builtins — Builtin node + used_by edge emission.
-
-"""
+"""Tests for code_graph_io.builtins — Builtin node + used_by edge emission."""
 
 from __future__ import annotations
 
@@ -18,8 +16,8 @@ from code_graph_io.builtins import (
     _load_node_builtins,
     _normalize_node_spec,
 )
-from code_graph_io.uri import RepoContext
 from code_graph_io.paths import graph_dir
+from code_graph_io.uri import RepoContext
 
 # ---------------------------------------------------------------------------
 # Shared helpers
@@ -201,7 +199,7 @@ def test_node_builtins_cache_lifecycle(tmp_path: Path) -> None:
     assert call_count_2 == 1, f"Expected 1 subprocess call (--version only) on cache hit, got {call_count_2}"
 
     # --- Third call with different major → re-harvest ---
-    sample_builtins_22 = sample_builtins + ["sqlite"]
+    sample_builtins_22 = [*sample_builtins, "sqlite"]
 
     def _fake_run_v22(cmd: list[str], **kwargs: Any):
         class _Res:

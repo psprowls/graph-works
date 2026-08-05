@@ -63,4 +63,6 @@ def test_no_graph_io_internal_imports(path: Path):
                 )
         if isinstance(node, ast.Import):
             for alias in node.names:
-                assert alias.name not in _FORBIDDEN_MODULES, f"{path} imports {alias.name}; use the code_graph_io handle API"
+                assert alias.name not in _FORBIDDEN_MODULES, (
+                    f"{path} imports {alias.name}; use the code_graph_io handle API"
+                )

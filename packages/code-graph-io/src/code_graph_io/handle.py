@@ -9,9 +9,10 @@ queries/upsert/resolve functions; callers never see a
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator
+from typing import TYPE_CHECKING
 
 from code_graph_io import graphml, queries, resolve, store, upsert
 from code_graph_io.paths import graph_dir
@@ -35,7 +36,7 @@ class GraphReader:
     def close(self) -> None:
         self._conn.close()
 
-    def __enter__(self) -> "GraphReader":
+    def __enter__(self) -> GraphReader:
         return self
 
     def __exit__(self, *exc) -> None:
@@ -214,7 +215,7 @@ class GraphReader:
 class GraphStore(GraphReader):
     """Read-write handle. Adds the mutating surface."""
 
-    def upsert_records(self, records: "GraphRecords") -> None:
+    def upsert_records(self, records: GraphRecords) -> None:
         upsert.upsert_records(self._conn, records)
 
     def set_current_repo(self, repo_uri: str | None) -> None:
@@ -230,7 +231,7 @@ class GraphStore(GraphReader):
         resolve.sweep_skip_dir_files(self._conn, skip_dirs)
 
     @contextmanager
-    def transaction(self) -> Iterator["GraphStore"]:
+    def transaction(self) -> Iterator[GraphStore]:
         with store.transaction(self._conn):
             yield self
 

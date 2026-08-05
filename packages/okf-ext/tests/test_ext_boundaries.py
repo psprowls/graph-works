@@ -77,9 +77,7 @@ def _find_repo_pyproject() -> Path:
             data = tomllib.load(handle)
         if "importlinter" in data.get("tool", {}):
             return candidate
-    raise AssertionError(
-        "no pyproject.toml with a [tool.importlinter] section found above this file"
-    )
+    raise AssertionError("no pyproject.toml with a [tool.importlinter] section found above this file")
 
 
 def _layer_names_in_contracts(pyproject_path: Path) -> set[str]:
@@ -178,9 +176,7 @@ def test_every_capability_is_named_in_the_layers_contract(modules: list[Path]) -
     """
     pyproject_path = _find_repo_pyproject()
     named = _layer_names_in_contracts(pyproject_path)
-    missing = sorted(
-        f"okf_ext.{name}" for name in capability_names(modules) if f"okf_ext.{name}" not in named
-    )
+    missing = sorted(f"okf_ext.{name}" for name in capability_names(modules) if f"okf_ext.{name}" not in named)
     assert not missing, (
         f"{missing} not named in any `layers` contract in {pyproject_path}; "
         "a layers contract only checks the layers it enumerates, so an unlisted "
@@ -211,9 +207,7 @@ def test_every_capability_is_named_in_the_independence_contract(modules: list[Pa
     """
     pyproject_path = _find_repo_pyproject()
     named = _independence_modules_in_contracts(pyproject_path)
-    missing = sorted(
-        f"okf_ext.{name}" for name in capability_names(modules) if f"okf_ext.{name}" not in named
-    )
+    missing = sorted(f"okf_ext.{name}" for name in capability_names(modules) if f"okf_ext.{name}" not in named)
     assert not missing, (
         f"{missing} not named in the `independence` contract's `modules` in "
         f"{pyproject_path}; an unlisted capability's imports of its siblings "
@@ -271,9 +265,7 @@ def test_all_lists_exactly_what_the_module_exports(capability) -> None:
     """A stale `__all__` is a public surface that lies, and an unsorted one
     would be silently reordered out from under this test by `ruff check
     --fix` (`RUF022`) the next time someone runs it."""
-    assert list(capability.__all__) == sorted(
-        capability.__all__, key=lambda name: (_ruf022_group(name), name)
-    )
+    assert list(capability.__all__) == sorted(capability.__all__, key=lambda name: (_ruf022_group(name), name))
     for name in capability.__all__:
         assert hasattr(capability, name), f"__all__ names {name}, which does not exist"
 

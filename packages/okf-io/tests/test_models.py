@@ -101,9 +101,7 @@ def test_wrong_shaped_tag_is_recorded_not_stringified():
 def test_wrong_shaped_receipt_entry_is_recorded_not_stringified():
     from ruamel.yaml.comments import CommentedMap
 
-    fm = build_frontmatter(
-        CommentedMap({"executor": {"resource": "r", "receipt": ["ok", {"a": 1}]}})
-    )
+    fm = build_frontmatter(CommentedMap({"executor": {"resource": "r", "receipt": ["ok", {"a": 1}]}}))
     assert fm.executor is not None
     assert fm.executor.receipt == ("ok",)
     assert "executor.receipt.1" in fm.coercion_failures

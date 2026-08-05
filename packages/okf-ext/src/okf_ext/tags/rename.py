@@ -113,14 +113,10 @@ def _plan_mapping(
             new = mapping[old]
             path = f"{concept_id}.md"
             if new in claimed:
-                edits.append(
-                    TagEdit(concept_id=concept_id, path=path, index=index, old=old, new=None)
-                )
+                edits.append(TagEdit(concept_id=concept_id, path=path, index=index, old=old, new=None))
             else:
                 claimed.add(new)
-                edits.append(
-                    TagEdit(concept_id=concept_id, path=path, index=index, old=old, new=new)
-                )
+                edits.append(TagEdit(concept_id=concept_id, path=path, index=index, old=old, new=new))
 
     edits.sort(key=lambda edit: (edit.concept_id, edit.index))
     return RenamePlan(root=bundle.root, edits=tuple(edits), skipped=tuple(skipped))
@@ -144,9 +140,7 @@ def plan_rename(bundle: Bundle, old: str, new: str, ctx: ExtContext | None = Non
     return _plan(bundle, {old: new})
 
 
-def plan_merge(
-    bundle: Bundle, sources: Sequence[str], into: str, ctx: ExtContext | None = None
-) -> RenamePlan:
+def plan_merge(bundle: Bundle, sources: Sequence[str], into: str, ctx: ExtContext | None = None) -> RenamePlan:
     """Collapse every tag in *sources* into *into*.
 
     A document carrying several sources keeps one and loses the rest, so the
@@ -196,9 +190,7 @@ def plan_normalize(bundle: Bundle, ctx: ExtContext | None = None) -> RenamePlan:
     return _plan_mapping(bundle, mapping, skipped, usable)
 
 
-def plan_from_vocabulary(
-    bundle: Bundle, vocab: Vocabulary, ctx: ExtContext | None = None
-) -> RenamePlan:
+def plan_from_vocabulary(bundle: Bundle, vocab: Vocabulary, ctx: ExtContext | None = None) -> RenamePlan:
     """Apply the vocabulary's `replaced_by` instructions.
 
     This is where the vocabulary's dual purpose lands: the same file that
@@ -214,11 +206,7 @@ def plan_from_vocabulary(
     """
     return _plan(
         bundle,
-        {
-            tag: replacement
-            for tag, replacement in vocab.deprecated.items()
-            if replacement is not None
-        },
+        {tag: replacement for tag, replacement in vocab.deprecated.items() if replacement is not None},
     )
 
 
@@ -325,9 +313,7 @@ def apply(bundle: Bundle, plan: RenamePlan) -> ApplyResult:
         document = bundle.concepts.get(concept_id)
         if document is None or document.path is None:
             failed.append(
-                WriteFailure(
-                    path=member, kind="not-a-member", error="concept is not a member of this bundle"
-                )
+                WriteFailure(path=member, kind="not-a-member", error="concept is not a member of this bundle")
             )
             continue
 
@@ -351,11 +337,7 @@ def apply(bundle: Bundle, plan: RenamePlan) -> ApplyResult:
 
         sequence = document.fm_raw.get("tags")
         if not isinstance(sequence, CommentedSeq):
-            failed.append(
-                WriteFailure(
-                    path=member, kind="tags-not-a-sequence", error="`tags` is no longer a sequence"
-                )
-            )
+            failed.append(WriteFailure(path=member, kind="tags-not-a-sequence", error="`tags` is no longer a sequence"))
             continue
 
         # Defence in depth, same class as the parse-error check above. No

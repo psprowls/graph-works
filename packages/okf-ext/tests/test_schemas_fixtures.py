@@ -50,9 +50,7 @@ def test_the_schema_set_reads_the_fixture_directory():
 
 
 def test_orders_anchors_both_of_its_errors():
-    found = sorted(
-        (f for f in findings() if f.path == "metrics/orders.md"), key=lambda f: f.line or 0
-    )
+    found = sorted((f for f in findings() if f.path == "metrics/orders.md"), key=lambda f: f.line or 0)
     assert [f.line for f in found] == [6, 7]
     assert "at `owner.name`" in found[0].message
     assert "at `tags.1`" in found[1].message
@@ -83,7 +81,5 @@ def test_the_vendored_bundles_stay_clean():
     vendored = SCHEMAD.parents[3] / "okf-io" / "tests" / "fixtures" / "bundles"
     schema_set = load_schemas(SCHEMA_DIR)
     for name in ("acme_retail", "ga4"):
-        report = validate(
-            load_bundle(vendored / name), today=TODAY, extra_rules=[schema_rule(schema_set)]
-        )
+        report = validate(load_bundle(vendored / name), today=TODAY, extra_rules=[schema_rule(schema_set)])
         assert report.ok, f"{name} lost its zero-error result"

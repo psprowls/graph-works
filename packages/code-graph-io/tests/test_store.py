@@ -69,10 +69,9 @@ def test_transaction_rolls_back_on_exception(tmp_path: Path) -> None:
     db = tmp_path / "code.db"
     conn = store.connect(db, create=True)
     try:
-        with pytest.raises(RuntimeError):
-            with store.transaction(conn):
-                conn.execute("INSERT INTO metadata(key, value) VALUES ('k', 'v')")
-                raise RuntimeError("boom")
+        with pytest.raises(RuntimeError), store.transaction(conn):
+            conn.execute("INSERT INTO metadata(key, value) VALUES ('k', 'v')")
+            raise RuntimeError("boom")
         row = conn.execute("SELECT value FROM metadata WHERE key='k'").fetchone()
         assert row is None
     finally:
@@ -133,3 +132,49 @@ def test_update_incremental_on_v1_db_raises_schema_mismatch(tmp_path: Path, monk
         update.run(tmp_path, workspace=tmp_path, full=False)
     assert excinfo.value.found == "1"
     assert excinfo.value.expected == schema.SCHEMA_VERSION
+
+
+def test_connect_on_schemaless_db_raises_graph_not_initialized(tmp_path: Path) -> None:
+    """An existing-but-empty DB file is functionally uninitialized.
+
+    `_check_schema_version` translates sqlite's "no such table: metadata" into
+    `GraphNotInitializedError` so callers need one guard, not two.
+    """
+    db = tmp_path / "code.db"
+    sqlite3.connect(db).close()  # a real DB file with no schema applied
+    with pytest.raises(store.GraphNotInitializedError):
+        store.connect(db, create=False)
+
+
+def test_read_only_connect_on_schemaless_db_raises_graph_not_initialized(tmp_path: Path) -> None:
+    db = tmp_path / "code.db"
+    sqlite3.connect(db).close()
+    with pytest.raises(store.GraphNotInitializedError):
+        store.read_only_connect(db)
+
+
+def test_read_only_connect_missing_file_raises_graph_not_initialized(tmp_path: Path) -> None:
+    with pytest.raises(store.GraphNotInitializedError):
+        store.read_only_connect(tmp_path / "absent.db")
+
+
+def _seed_wrong_schema_version(db: Path, version: str) -> None:
+    conn = store.connect(db, create=True)
+    conn.execute("UPDATE metadata SET value = ? WHERE key = 'schema_version'", (version,))
+    conn.commit()
+    conn.close()
+
+
+def test_connect_closes_the_connection_when_schema_version_mismatches(tmp_path: Path) -> None:
+    """The mismatch path must not leak the open handle it was checking."""
+    db = tmp_path / "code.db"
+    _seed_wrong_schema_version(db, "0")
+    with pytest.raises(store.SchemaMismatchError):
+        store.connect(db, create=False)
+
+
+def test_read_only_connect_closes_the_connection_when_schema_version_mismatches(tmp_path: Path) -> None:
+    db = tmp_path / "code.db"
+    _seed_wrong_schema_version(db, "0")
+    with pytest.raises(store.SchemaMismatchError):
+        store.read_only_connect(db)

@@ -17,11 +17,11 @@ PARSERS: dict[str, LanguageParser] = {
 EXTENSIONS: dict[str, LanguageParser] = {ext: parser for parser in PARSERS.values() for ext in parser.file_extensions}
 
 __all__ = [
-    "LanguageParser",
-    "LanguageConfig",
-    "PARSERS",
     "EXTENSIONS",
-    "PythonParser",
+    "PARSERS",
     "JavaScriptParser",
+    "LanguageConfig",
+    "LanguageParser",
+    "PythonParser",
     "TypeScriptParser",
 ]

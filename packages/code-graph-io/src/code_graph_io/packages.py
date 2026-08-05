@@ -80,9 +80,7 @@ def _dependency_registry_url(ecosystem: str, name: str) -> str:
 
 
 def _should_skip(manifest_path: Path, repo_root: Path, skip_dirs: frozenset[str]) -> bool:
-    if _ignore.should_skip(str(manifest_path), skip_dirs):
-        return True
-    return False
+    return bool(_ignore.should_skip(str(manifest_path), skip_dirs))
 
 
 def _is_plugin_root(manifest_dir: Path) -> bool:
@@ -242,7 +240,7 @@ def build_workspace_index(members: list[Path]) -> dict[str, tuple[str, str, str,
     Maps normalized package name -> (stored_kind, real_name, rel_path, repo_uri),
     rel_path relative to the package's OWN member repo root.
     """
-    from code_graph_io.repo_context import repo_context  # noqa: PLC0415 — avoid import cycle at module load
+    from code_graph_io.repo_context import repo_context
 
     index: dict[str, tuple[str, str, str, str]] = {}
     for member in members:

@@ -49,9 +49,7 @@ def build(tmp_path, **concepts):
 
 def run(tmp_path, *, severity="warn", strict=False, **concepts):
     bundle, schema_set = build(tmp_path, **concepts)
-    report = validate(
-        bundle, today=TODAY, extra_rules=[schema_rule(schema_set, severity=severity)], strict=strict
-    )
+    report = validate(bundle, today=TODAY, extra_rules=[schema_rule(schema_set, severity=severity)], strict=strict)
     return [f for f in report.findings if f.code.startswith(f"{TOPIC}.")]
 
 
@@ -140,9 +138,7 @@ def test_dates_reach_the_schema_as_iso_strings(tmp_path):
     )
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir()
-    (bundle_dir / "d.md").write_text(
-        "---\ntype: metric\ntitle: T\nupdated: 2026-08-04\n---\n\n# T\n", encoding="utf-8"
-    )
+    (bundle_dir / "d.md").write_text("---\ntype: metric\ntitle: T\nupdated: 2026-08-04\n---\n\n# T\n", encoding="utf-8")
     schema_set = load_schemas(schema_dir)
     report = validate(load_bundle(bundle_dir), today=TODAY, extra_rules=[schema_rule(schema_set)])
     assert [f for f in report.findings if f.code.startswith("schemas.")] == []
@@ -159,12 +155,8 @@ def test_additional_properties_false_sees_unknown_keys(tmp_path):
     )
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir()
-    (bundle_dir / "d.md").write_text(
-        "---\ntype: metric\nhouse_key: yes\n---\n\n# T\n", encoding="utf-8"
-    )
-    report = validate(
-        load_bundle(bundle_dir), today=TODAY, extra_rules=[schema_rule(load_schemas(schema_dir))]
-    )
+    (bundle_dir / "d.md").write_text("---\ntype: metric\nhouse_key: yes\n---\n\n# T\n", encoding="utf-8")
+    report = validate(load_bundle(bundle_dir), today=TODAY, extra_rules=[schema_rule(load_schemas(schema_dir))])
     found = [f for f in report.findings if f.code == "schemas.invalid"]
     assert found and "house_key" in found[0].message
 

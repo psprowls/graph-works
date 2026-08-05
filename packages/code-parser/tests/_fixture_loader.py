@@ -88,7 +88,7 @@ def diff(actual: dict[str, Any], expected: dict[str, Any], path: str = "") -> li
     elif isinstance(actual, list) and isinstance(expected, list):
         if len(actual) != len(expected):
             diffs.append(f"length mismatch at {path}: actual={len(actual)} expected={len(expected)}")
-        for i, (a, e) in enumerate(zip(actual, expected)):
+        for i, (a, e) in enumerate(zip(actual, expected, strict=False)):
             diffs.extend(diff(a, e, f"{path}[{i}]"))
     else:
         if actual != expected:

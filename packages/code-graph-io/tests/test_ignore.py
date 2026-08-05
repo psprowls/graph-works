@@ -8,19 +8,22 @@ from code_graph_io import _ignore
 
 
 def test_default_skip_dirs_contents() -> None:
-    assert _ignore.DEFAULT_SKIP_DIRS == frozenset(
-        {
-            ".git",
-            "node_modules",
-            ".worktrees",
-            ".venv",
-            "venv",
-            "dist",
-            "build",
-            "__pycache__",
-            ".tox",
-            ".nox",
-        }
+    assert (
+        frozenset(
+            {
+                ".git",
+                "node_modules",
+                ".worktrees",
+                ".venv",
+                "venv",
+                "dist",
+                "build",
+                "__pycache__",
+                ".tox",
+                ".nox",
+            }
+        )
+        == _ignore.DEFAULT_SKIP_DIRS
     )
 
 
@@ -33,7 +36,7 @@ def test_load_merges_graphignore_entries(tmp_path: Path) -> None:
     result = _ignore.load_skip_dirs(tmp_path)
     assert "generated" in result
     assert "vendor" in result
-    assert _ignore.DEFAULT_SKIP_DIRS <= result
+    assert result >= _ignore.DEFAULT_SKIP_DIRS
 
 
 def test_load_ignores_blanks_and_comments(tmp_path: Path) -> None:

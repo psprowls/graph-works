@@ -71,15 +71,11 @@ def required_and_recommended_keys(ctx: RuleContext) -> Iterable[Finding]:
         path = member_path(concept_id)
         frontmatter = document.fm
         if not (frontmatter.type or "").strip():
-            yield Finding(
-                "frontmatter.missing-type", "error", "`type` is absent or empty", "§4.1", path
-            )
+            yield Finding("frontmatter.missing-type", "error", "`type` is absent or empty", "§4.1", path)
         if not (frontmatter.title or "").strip():
             yield Finding("frontmatter.title-recommended", "warn", "No `title`", "§4.1", path)
         if not (frontmatter.description or "").strip():
-            yield Finding(
-                "frontmatter.description-recommended", "warn", "No `description`", "§4.1", path
-            )
+            yield Finding("frontmatter.description-recommended", "warn", "No `description`", "§4.1", path)
 
 
 RULES: tuple[Rule, ...] = (

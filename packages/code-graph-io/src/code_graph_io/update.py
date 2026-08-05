@@ -7,11 +7,12 @@ import os
 import sqlite3
 import subprocess
 import sys
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 from code_parser.parse import parse_bytes
 from code_parser.projections.graph import to_graph_records
+
 from code_graph_io import _ignore, builtins, packages, resolve, schema, store, tokens, upsert
 from code_graph_io.paths import graph_dir
 from code_graph_io.uri import repo_uri
@@ -38,7 +39,7 @@ class StrictTreeInvariantError(Exception):
     physically_contains edge before INSERTing the new one.
     """
 
-    def __init__(self, *, offending_child_ids: list[int]):
+    def __init__(self, *, offending_child_ids: list[int]) -> None:
         self.offending_child_ids = offending_child_ids
         count = len(offending_child_ids)
         sample = offending_child_ids[:20]
@@ -226,7 +227,7 @@ def _update_one_repo(
     """
     head = _head(repo_root)
     from code_graph_io.repo_context import (
-        repo_context,  # noqa: PLC0415 — repo_context imports _git/NotInGitRepoError from this module; deferred to avoid a cycle at module load
+        repo_context,
     )
 
     ctx = repo_context(repo_root)
@@ -283,7 +284,7 @@ def _update_one_repo(
         # test_suites -> update -> ... cycle (each reuses update._git /
         # NotInGitRepoError or imports from structural_nodes which imports from
         # update).
-        from code_graph_io import (  # noqa: PLC0415
+        from code_graph_io import (
             agent_plugins,
             entry_points,
             structural_nodes,
@@ -306,9 +307,7 @@ def _update_one_repo(
         upsert.set_current_repo(conn, None)
 
 
-def run(
-    repo_root: Path, *, workspace: Path, full: bool = False, lock_timeout_ms: int | None = None
-) -> None:
+def run(repo_root: Path, *, workspace: Path, full: bool = False, lock_timeout_ms: int | None = None) -> None:
     """Single-repo update — delegates to `run_workspace` with one member.
 
     `workspace` is always supplied by the caller: discovering it (from an
@@ -382,7 +381,7 @@ def run_workspace(
                 # downstream tooling (and the existing test suite) reads. Multi-
                 # repo workspaces have no single HEAD, so the key is left unset.
                 if len(members) == 1:
-                    from code_graph_io.repo_context import repo_context  # noqa: PLC0415 — see _update_one_repo
+                    from code_graph_io.repo_context import repo_context
 
                     only_uri = repo_uri(repo_context(members[0]))
                     only_commit = _get_metadata(conn, f"last_indexed_commit:{only_uri}")

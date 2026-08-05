@@ -35,5 +35,5 @@ class SourceNode:
     language: str  # 'python' | 'javascript' | 'typescript'
     package: str | None
     attrs: dict[str, Any] = field(default_factory=dict)
-    children: list["SourceNode"] = field(default_factory=list)
+    children: list[SourceNode] = field(default_factory=list)
     refs: list[Reference] = field(default_factory=list)

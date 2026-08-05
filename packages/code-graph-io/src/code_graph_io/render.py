@@ -14,8 +14,8 @@ from __future__ import annotations
 
 import dataclasses
 import json as _json
-from collections.abc import Mapping
-from typing import Any, Callable, Iterable, NamedTuple
+from collections.abc import Callable, Iterable, Mapping
+from typing import Any, NamedTuple
 
 
 def _to_dict(record: Any) -> dict[str, Any]:
@@ -69,12 +69,12 @@ class Attr(NamedTuple):
     json: object
 
     @classmethod
-    def scalar(cls, label: str, key: str, value: object) -> "Attr":
+    def scalar(cls, label: str, key: str, value: object) -> Attr:
         human = "(none)" if value is None or value == "" else str(value)
         return cls(label, key, human, value)
 
     @classmethod
-    def joined(cls, label: str, key: str, values: list[str]) -> "Attr":
+    def joined(cls, label: str, key: str, values: list[str]) -> Attr:
         return cls(label, key, ", ".join(values) or "(none)", list(values))
 
 
@@ -272,7 +272,7 @@ def render(
         if not dicts:
             return ""
         keys = list(dicts[0].keys())
-        widths = {k: max(len(str(r.get(k, ""))) for r in dicts + [dict.fromkeys(keys, k)]) for k in keys}
+        widths = {k: max(len(str(r.get(k, ""))) for r in [*dicts, dict.fromkeys(keys, k)]) for k in keys}
         lines = []
         for r in dicts:
             lines.append("  ".join(str(r.get(k, "")).ljust(widths[k]) for k in keys))

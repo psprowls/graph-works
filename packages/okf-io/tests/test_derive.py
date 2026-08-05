@@ -26,9 +26,7 @@ def test_process_actor_only_is_machine_confirmed():
     from okf_io.models import build_frontmatter
     from ruamel.yaml.comments import CommentedMap
 
-    fm = build_frontmatter(
-        CommentedMap({"verified": [{"by": "process:nightly", "at": "2026-07-01T00:00:00Z"}]})
-    )
+    fm = build_frontmatter(CommentedMap({"verified": [{"by": "process:nightly", "at": "2026-07-01T00:00:00Z"}]}))
     assert trust_tier(fm) == "machine-confirmed"
 
 
@@ -40,10 +38,7 @@ def test_effective_status_returns_known_and_unknown_values_verbatim():
     from okf_io.models import build_frontmatter
     from ruamel.yaml.comments import CommentedMap
 
-    assert (
-        effective_status(fm_of(BUNDLES / "acme_retail/metrics/gross-margin-legacy.md"))
-        == "deprecated"
-    )
+    assert effective_status(fm_of(BUNDLES / "acme_retail/metrics/gross-margin-legacy.md")) == "deprecated"
     fm = build_frontmatter(CommentedMap({"status": "under-review-by-legal"}))
     assert effective_status(fm) == "under-review-by-legal"
 

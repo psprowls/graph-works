@@ -16,7 +16,6 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any
 
 from code_graph_io import graphml, queries, resolve, store, upsert
-from code_graph_io.paths import graph_dir
 from code_graph_io.queries import (
     AgentPluginDescription,
     AppDescription,
@@ -42,8 +41,8 @@ if TYPE_CHECKING:
     from code_parser.projections.graph import GraphRecords
 
 
-def _db_path(workspace: Path) -> Path:
-    return graph_dir(Path(workspace)) / "code.db"
+def _db_path(graph_dir: Path) -> Path:
+    return Path(graph_dir) / "code.db"
 
 
 class GraphReader:
@@ -284,17 +283,24 @@ class GraphStore(GraphReader):
             yield self
 
 
-def open_reader(workspace: Path) -> GraphReader:
-    """Open a read-only GraphReader on ``<workspace>/.agent-workspace/code.db``.
+def open_reader(*, graph_dir: Path) -> GraphReader:
+    """Open a read-only GraphReader on ``<graph_dir>/code.db``.
+
+    ``graph_dir`` is keyword-only on purpose. It replaced a positional
+    ``workspace`` that pointed one level higher, and the two are
+    indistinguishable at runtime — a stale positional call would have silently
+    resolved against the wrong directory instead of failing. Workspace-shaped
+    callers spell it ``graph_dir=paths.graph_dir(ws)``.
 
     ``GraphNotInitializedError`` / ``SchemaMismatchError`` propagate from store.
     """
-    return GraphReader(store.read_only_connect(_db_path(workspace)))
+    return GraphReader(store.read_only_connect(_db_path(graph_dir)))
 
 
-def open_writer(workspace: Path, *, create: bool = False) -> GraphStore:
-    """Open a read-write GraphStore on ``<workspace>/.agent-workspace/code.db``.
+def open_writer(*, graph_dir: Path, create: bool = False) -> GraphStore:
+    """Open a read-write GraphStore on ``<graph_dir>/code.db``.
 
-    ``create=True`` initializes a fresh graph schema at the workspace.
+    ``create=True`` initializes a fresh graph schema there. Keyword-only for
+    the reason given on :func:`open_reader`.
     """
-    return GraphStore(store.connect(_db_path(workspace), create=create))
+    return GraphStore(store.connect(_db_path(graph_dir), create=create))

@@ -18,14 +18,14 @@ def _ro(repo: Path) -> sqlite3.Connection:
 def test_incremental_picks_up_modified_file(tmp_path: Path) -> None:
     init_repo(tmp_path)
     write_and_commit(tmp_path, {"a.py": "def foo():\n    return 1\n"}, "init")
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     head2 = write_and_commit(
         tmp_path,
         {"a.py": "def foo():\n    return 1\n\ndef bar():\n    return 2\n"},
         "add bar",
     )
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _ro(tmp_path)
     try:
@@ -43,10 +43,10 @@ def test_incremental_deletes_removed_file(tmp_path: Path) -> None:
         {"a.py": "def foo():\n    return 1\n", "b.py": "def bar():\n    return 2\n"},
         "init",
     )
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     remove_and_commit(tmp_path, ["b.py"], "remove b")
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _ro(tmp_path)
     try:
@@ -61,11 +61,11 @@ def test_incremental_deletes_removed_file(tmp_path: Path) -> None:
 def test_incremental_handles_rename(tmp_path: Path) -> None:
     init_repo(tmp_path)
     write_and_commit(tmp_path, {"a.py": "def foo():\n    return 1\n"}, "init")
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     subprocess.run(["git", "mv", "a.py", "b.py"], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "rename"], cwd=tmp_path, check=True)
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _ro(tmp_path)
     try:
@@ -103,7 +103,7 @@ def test_incremental_scan_leaves_no_external_import_stubs(tmp_path: Path) -> Non
         "init",
     )
 
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _ro(tmp_path)
     try:
@@ -145,7 +145,7 @@ def test_incremental_scan_stub_cleanup_is_idempotent(tmp_path: Path) -> None:
         },
         "init",
     )
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     # Second incremental scan re-processing BOTH files (so the import target is
     # re-upserted and passes through its transient uri IS NULL window).
@@ -157,7 +157,7 @@ def test_incremental_scan_stub_cleanup_is_idempotent(tmp_path: Path) -> None:
         },
         "touch both",
     )
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _ro(tmp_path)
     try:

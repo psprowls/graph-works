@@ -14,12 +14,7 @@ from code_parser.parse import parse_bytes
 from code_parser.projections.graph import to_graph_records
 
 from code_graph_io import _ignore, builtins, packages, resolve, schema, store, tokens, upsert
-from code_graph_io.paths import graph_dir
 from code_graph_io.uri import repo_uri
-
-# The `.agent-workspace/` dir holds only local machine state (graph DB + cache,
-# subagent traces, search index); ignore it wholesale.
-_GITIGNORE_BODY = "*\n"
 
 
 class NotInGitRepoError(Exception):
@@ -109,13 +104,6 @@ def _set_metadata(conn: sqlite3.Connection, key: str, value: str) -> None:
 def _get_metadata(conn: sqlite3.Connection, key: str) -> str | None:
     row = conn.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
-
-
-def _ensure_gitignore(workspace: Path) -> None:
-    target = graph_dir(workspace) / ".gitignore"
-    if not target.exists():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_GITIGNORE_BODY)
 
 
 def _changed_files(repo_root: Path, full: bool, prev: str | None) -> list[tuple[str, str]]:
@@ -209,7 +197,7 @@ def _unlink_db_files(db_path: Path) -> None:
 def _update_one_repo(
     conn: sqlite3.Connection,
     repo_root: Path,
-    workspace: Path,
+    graph_dir: Path,
     *,
     full: bool,
     global_workspace: dict[str, tuple[str, str, str, str]],
@@ -254,7 +242,7 @@ def _update_one_repo(
             global_workspace=global_workspace,
             deferred_cross_repo=deferred,
         )
-        builtins.refresh(conn, repo_root=repo_root, workspace=workspace, ctx=ctx)
+        builtins.refresh(conn, repo_root=repo_root, graph_dir=graph_dir, ctx=ctx)
         # Resolve file-import edges to real file nodes BEFORE the full-mode cleanup
         # DELETE (below). The cleanup purges specifier-path stub file nodes (not in
         # tracked_paths), cascade-deleting every imports edge still pointing at them.
@@ -307,21 +295,21 @@ def _update_one_repo(
         upsert.set_current_repo(conn, None)
 
 
-def run(repo_root: Path, *, workspace: Path, full: bool = False, lock_timeout_ms: int | None = None) -> None:
+def run(repo_root: Path, *, graph_dir: Path, full: bool = False, lock_timeout_ms: int | None = None) -> None:
     """Single-repo update — delegates to `run_workspace` with one member.
 
-    `workspace` is always supplied by the caller: discovering it (from an
+    `graph_dir` is always supplied by the caller: discovering it (from an
     env var, a manifest, or a directory walk) is the caller's job, not this
     package's. `update` is the bootstrap path that creates the graph DB
     before any manifest may exist, so it must not require one.
     """
     repo_root = Path(repo_root).resolve()
-    workspace = Path(workspace).resolve()
-    run_workspace([repo_root], workspace=workspace, full=full, lock_timeout_ms=lock_timeout_ms)
+    graph_dir = Path(graph_dir).resolve()
+    run_workspace([repo_root], graph_dir=graph_dir, full=full, lock_timeout_ms=lock_timeout_ms)
 
 
 def run_workspace(
-    members: list[Path], *, workspace: Path, full: bool = False, lock_timeout_ms: int | None = None
+    members: list[Path], *, graph_dir: Path, full: bool = False, lock_timeout_ms: int | None = None
 ) -> None:
     """Update the code graph for one or more member repos into one DB.
 
@@ -330,10 +318,13 @@ def run_workspace(
     member's `repo:` URI. After the member loop, cross-repo internal-package
     edges collected in `deferred` are emitted, then the global resolve /
     strict-tree / workspace-metadata steps run once.
+
+    `members` and `graph_dir` are independent: the graph directory need not sit
+    inside — or above — any member repo.
     """
     members = [Path(m).resolve() for m in members]
-    workspace = Path(workspace).resolve()
-    db_path = graph_dir(workspace) / "code.db"
+    graph_dir = Path(graph_dir).resolve()
+    db_path = graph_dir / "code.db"
     if db_path.exists():
         found = _read_schema_version_or_none(db_path)
         if found != str(schema.SCHEMA_VERSION):
@@ -351,7 +342,6 @@ def run_workspace(
     try:
         try:
             conn = store.connect(db_path, create=True, busy_timeout_ms=lock_timeout_ms)
-            _ensure_gitignore(workspace)
             stored_deriver = _get_metadata(conn, "deriver_version")
             db_nonempty = stored_deriver is not None
             if db_nonempty and stored_deriver != str(schema.DERIVER_VERSION):
@@ -368,7 +358,7 @@ def run_workspace(
                     _update_one_repo(
                         conn,
                         repo_root,
-                        workspace,
+                        graph_dir,
                         full=full,
                         global_workspace=global_workspace,
                         deferred=deferred,

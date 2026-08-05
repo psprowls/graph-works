@@ -646,7 +646,7 @@ def test_physically_contains_is_strict_tree(tmp_path: Path) -> None:
     subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
     subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     ws = tmp_path
     db_path = graph_dir(ws) / "code.db"

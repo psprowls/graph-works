@@ -95,7 +95,7 @@ def test_python_stdlib_emits_builtin_nodes(tmp_path: Path) -> None:
             "src/demo/__init__.py": "from pathlib import Path\nimport os\nimport sys\nimport json\n",
         },
     )
-    update.run(repo, workspace=repo, full=True)
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
 
     conn = _open_ro(repo)
     try:
@@ -122,7 +122,7 @@ def test_python_stdlib_top_level_only(tmp_path: Path) -> None:
         repo,
         {"src/demo/__init__.py": "from os.path import join\n"},
     )
-    update.run(repo, workspace=repo, full=True)
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
 
     conn = _open_ro(repo)
     try:
@@ -243,7 +243,7 @@ def test_node_stdlib_emits_builtin_nodes(tmp_path: Path) -> None:
         },
         "init",
     )
-    update.run(repo, workspace=repo, full=True)
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
 
     conn = _open_ro(repo)
     try:
@@ -286,7 +286,7 @@ def test_node_dependency_vs_builtin_classification(tmp_path: Path) -> None:
         },
         "init",
     )
-    update.run(repo, workspace=repo, full=True)
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
 
     conn = _open_ro(repo)
     try:
@@ -319,7 +319,7 @@ def test_used_by_edge_dedup_and_symbol_union(tmp_path: Path) -> None:
             "src/demo/b.py": "from os import getenv, path\n",
         },
     )
-    update.run(repo, workspace=repo, full=True)
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
 
     conn = _open_ro(repo)
     try:
@@ -359,7 +359,7 @@ def test_emit_is_idempotent(tmp_path: Path) -> None:
         {"src/demo/__init__.py": "import json\nimport re\n"},
     )
 
-    update.run(repo, workspace=repo, full=True)
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
     conn = _open_ro(repo)
     try:
         nodes_after_1 = {
@@ -372,7 +372,7 @@ def test_emit_is_idempotent(tmp_path: Path) -> None:
     finally:
         conn.close()
 
-    update.run(repo, workspace=repo, full=True)
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
     conn2 = _open_ro(repo)
     try:
         nodes_after_2 = {

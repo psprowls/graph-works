@@ -2,7 +2,7 @@
 
 Code-graph backend for agent-workspace. Owns:
 
-- SQLite schema + store at `<paths.graph_dir(workspace)>/code.db` (the workspace is supplied by the caller)
+- SQLite schema + store at `<graph_dir>/code.db` (the graph directory is supplied by the caller)
 - Upsert from `code-parser`'s `GraphRecords`
 - Manifest scanning (`pyproject.toml`, `package.json`) → `kind:package` nodes
 - Cross-file edge resolution sweep

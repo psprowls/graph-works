@@ -33,7 +33,7 @@ def test_full_build_stamps_language_on_nodes(tmp_path: Path) -> None:
         "init",
     )
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     conn = _open_ro(tmp_path)
     try:
@@ -65,7 +65,7 @@ def test_full_build_package_node_carries_language(tmp_path: Path) -> None:
         "init",
     )
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     conn = _open_ro(tmp_path)
     try:

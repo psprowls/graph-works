@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from code_graph_io import packages, store, structural_nodes, test_suites
+from code_graph_io.paths import graph_dir
 from code_graph_io.uri import RepoContext
 
 CTX = RepoContext(org="testorg", repo="testrepo")
@@ -444,17 +445,14 @@ def fixture_repo(tmp_path: Path) -> Path:
 
 
 def _db_path(repo_root: Path) -> Path:
-    from code_graph_io.paths import graph_dir
-
-    ws = repo_root
-    return graph_dir(ws) / "code.db"
+    return graph_dir(repo_root) / "code.db"
 
 
 def test_call_order_pitfall(fixture_repo: Path) -> None:
     """Fixture regression — re-parenting + suite kind + idempotency."""
     from code_graph_io import update
 
-    update.run(fixture_repo, workspace=fixture_repo, full=True)
+    update.run(fixture_repo, graph_dir=graph_dir(fixture_repo), full=True)
 
     db_path = _db_path(fixture_repo)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
@@ -521,7 +519,7 @@ def test_call_order_pitfall(fixture_repo: Path) -> None:
         conn.close()
 
     # Assertion 5: idempotency — second update.run produces identical counts.
-    update.run(fixture_repo, workspace=fixture_repo, full=True)
+    update.run(fixture_repo, graph_dir=graph_dir(fixture_repo), full=True)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         pc_count_2 = conn.execute("SELECT COUNT(*) FROM edges WHERE kind='physically_contains'").fetchone()[0]
@@ -544,7 +542,7 @@ def test_strict_tree_invariant_raises_on_duplicate_parent(fixture_repo: Path) ->
         _enforce_strict_tree_invariant,
     )
 
-    update.run(fixture_repo, workspace=fixture_repo, full=True)
+    update.run(fixture_repo, graph_dir=graph_dir(fixture_repo), full=True)
     db_path = _db_path(fixture_repo)
     conn = sqlite3.connect(db_path)
     try:
@@ -592,7 +590,7 @@ def test_anti_regression_describe_package_smoke(fixture_repo: Path) -> None:
     """
     from code_graph_io import update
 
-    update.run(fixture_repo, workspace=fixture_repo, full=True)
+    update.run(fixture_repo, graph_dir=graph_dir(fixture_repo), full=True)
     db_path = _db_path(fixture_repo)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
@@ -609,7 +607,7 @@ def test_shebang_script_in_fixture_does_not_emit_entry_point(
     Files, no EntryPoint emitted for them."""
     from code_graph_io import update
 
-    update.run(fixture_repo, workspace=fixture_repo, full=True)
+    update.run(fixture_repo, graph_dir=graph_dir(fixture_repo), full=True)
     db_path = _db_path(fixture_repo)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
@@ -632,7 +630,7 @@ def test_pyproject_scripts_entry_point_resolves_to_file(fixture_repo: Path) -> N
     path-qualified. Skipped when sample_monorepo has no [project.scripts]."""
     from code_graph_io import update
 
-    update.run(fixture_repo, workspace=fixture_repo, full=True)
+    update.run(fixture_repo, graph_dir=graph_dir(fixture_repo), full=True)
     db_path = _db_path(fixture_repo)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:

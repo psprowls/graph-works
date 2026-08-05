@@ -15,6 +15,7 @@ from pathlib import Path
 
 import pytest
 from code_graph_io import store, update
+from code_graph_io.paths import graph_dir
 from code_graph_io.uri import RepoContext, repo_uri
 
 pytestmark = pytest.mark.integration
@@ -45,9 +46,9 @@ def test_two_members_two_repositories_and_scoped_repo_column(tmp_path):
     a = _mk_py_repo(root, "alpha", "alpha")
     b = _mk_py_repo(root, "beta", "beta")
 
-    update.run_workspace([a, b], workspace=ws, full=True)
+    update.run_workspace([a, b], graph_dir=graph_dir(ws), full=True)
 
-    conn = store.read_only_connect(update.graph_dir(ws) / "code.db")
+    conn = store.read_only_connect(graph_dir(ws) / "code.db")
     repos = conn.execute("SELECT name FROM nodes WHERE kind='repository' ORDER BY name").fetchall()
     assert [r[0] for r in repos] == ["alpha", "beta"]
     nulls = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='file' AND repo IS NULL").fetchone()[0]
@@ -65,10 +66,10 @@ def test_full_rebuild_of_one_member_keeps_other(tmp_path):
     (ws / ".agent-workspace.yaml").write_text("version: 2\nmulti-repo: true\n")
     a = _mk_py_repo(root, "alpha", "alpha")
     b = _mk_py_repo(root, "beta", "beta")
-    update.run_workspace([a, b], workspace=ws, full=True)
+    update.run_workspace([a, b], graph_dir=graph_dir(ws), full=True)
 
-    update.run_workspace([a], workspace=ws, full=True)
-    conn = store.read_only_connect(update.graph_dir(ws) / "code.db")
+    update.run_workspace([a], graph_dir=graph_dir(ws), full=True)
+    conn = store.read_only_connect(graph_dir(ws) / "code.db")
     beta = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='repository' AND name='beta'").fetchone()[0]
     assert beta == 1
 
@@ -94,9 +95,9 @@ def test_colliding_relpaths_and_pkg_name_stay_distinct(tmp_path):
     b = _mk_py_repo(root, "beta", "shared")
 
     # Must not raise StrictTreeInvariantError.
-    update.run_workspace([a, b], workspace=ws, full=True)
+    update.run_workspace([a, b], graph_dir=graph_dir(ws), full=True)
 
-    conn = store.read_only_connect(update.graph_dir(ws) / "code.db")
+    conn = store.read_only_connect(graph_dir(ws) / "code.db")
     a_uri = repo_uri(RepoContext(org="local", repo="alpha"))
     b_uri = repo_uri(RepoContext(org="local", repo="beta"))
 
@@ -155,9 +156,9 @@ def test_root_package_entry_point_has_no_empty_uri_duplicate(tmp_path):
     a = _mk_js_repo_with_main(root, "common", "@sg/frontend-common")
     _mk_js_repo_with_main(root, "other", "@sg/other")
 
-    update.run_workspace([a, root / "other"], workspace=ws, full=True)
+    update.run_workspace([a, root / "other"], graph_dir=graph_dir(ws), full=True)
 
-    conn = store.read_only_connect(update.graph_dir(ws) / "code.db")
+    conn = store.read_only_connect(graph_dir(ws) / "code.db")
 
     # Exactly ONE package node named '@sg/frontend-common' — no empty-uri stub.
     rows = conn.execute("SELECT uri FROM nodes WHERE kind='package' AND name='@sg/frontend-common'").fetchall()
@@ -200,9 +201,9 @@ def test_shared_external_dependency_is_one_global_node(tmp_path):
     a = _mk_py_repo(root, "alpha", "alpha", dep="requests")
     b = _mk_py_repo(root, "beta", "beta", dep="requests")
 
-    update.run_workspace([a, b], workspace=ws, full=True)
+    update.run_workspace([a, b], graph_dir=graph_dir(ws), full=True)
 
-    conn = store.read_only_connect(update.graph_dir(ws) / "code.db")
+    conn = store.read_only_connect(graph_dir(ws) / "code.db")
 
     # Exactly ONE dependency node for the shared external name.
     dep_rows = conn.execute("SELECT repo, uri FROM nodes WHERE kind='dependency' AND name='requests'").fetchall()
@@ -237,9 +238,9 @@ def test_cross_repo_depends_on_package(tmp_path):
     (ws / ".agent-workspace.yaml").write_text("version: 2\nmulti-repo: true\n")
     a = _mk_py_repo(root, "alpha", "alpha")
     b = _mk_py_repo(root, "beta", "beta", dep="alpha")
-    update.run_workspace([a, b], workspace=ws, full=True)
+    update.run_workspace([a, b], graph_dir=graph_dir(ws), full=True)
 
-    conn = store.read_only_connect(update.graph_dir(ws) / "code.db")
+    conn = store.read_only_connect(graph_dir(ws) / "code.db")
     ext = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='alpha'").fetchone()[0]
     assert ext == 0
     rows = conn.execute(

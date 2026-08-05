@@ -5,8 +5,9 @@ graphs through the public handle). ``raw_conn`` -> a raw read-write
 ``sqlite3.Connection`` for bulk-INSERT fixture seeding — the single blessed
 escape hatch so conftests stop calling ``sqlite3.connect`` directly.
 
-Both take a bare file path (NOT a workspace), unlike ``open_reader`` /
-``open_writer``; schema is applied when ``create=True`` and the file is new.
+Both take a bare db file path, unlike ``open_reader`` / ``open_writer`` which
+take the containing ``graph_dir``; schema is applied when ``create=True`` and
+the file is new.
 """
 
 from __future__ import annotations

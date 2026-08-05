@@ -8,8 +8,8 @@ Decision references
 -------------------
 - Python stdlib source is `sys.stdlib_module_names` at the *scanner runtime*.
   Drift across Python versions is accepted — no ``requires-python`` parsing.
-- Node builtins are cached per workspace at
-  ``<workspace>/.agent-workspace/cache/node-builtins-<major>.json``.
+- Node builtins are cached per graph directory at
+  ``<graph_dir>/cache/node-builtins-<major>.json``.
 - When ``node`` is missing AND no cache exists, JS Builtin emission is silently
   skipped with zero exceptions and zero stderr output.
 - Top-level module only — ``from os.path import join`` → ``builtin:python/os``.
@@ -38,7 +38,6 @@ from pathlib import Path
 from code_parser.projections.graph import GraphEdge, GraphNode
 
 from code_graph_io import _ignore, upsert
-from code_graph_io.paths import graph_dir
 from code_graph_io.records import as_graph_records
 from code_graph_io.uri import RepoContext, builtin_uri, repo_uri
 
@@ -311,7 +310,7 @@ def refresh(
     conn: sqlite3.Connection,
     *,
     repo_root: Path,
-    workspace: Path,
+    graph_dir: Path,
     ctx: RepoContext,
 ) -> None:
     """Scan package files for stdlib imports and emit Builtin nodes + ``used_by`` edges.
@@ -324,7 +323,7 @@ def refresh(
     timeout, cache write failure, and unreadable files are all silently skipped.
     """
     repo_root = Path(repo_root).resolve()
-    workspace = Path(workspace).resolve()
+    graph_dir = Path(graph_dir).resolve()
     skip_dirs = _ignore.load_skip_dirs(repo_root)
 
     # Load all Package/App rows from the graph (written by packages.refresh before us).
@@ -340,7 +339,7 @@ def refresh(
         return
 
     # Load Node builtins once per refresh() call.
-    node_builtins = _load_node_builtins(graph_dir(workspace) / "cache")
+    node_builtins = _load_node_builtins(graph_dir / "cache")
 
     # Accumulator: (pkg_name, language, module_name) -> set[str] of imported symbols.
     edge_acc: dict[tuple[str, str, str], set[str]] = {}

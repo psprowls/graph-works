@@ -7,6 +7,7 @@ from pathlib import Path
 import code_graph_io
 import pytest
 from code_graph_io import GraphReader, GraphStore, graphml, open_reader, open_writer, queries, resolve, upsert
+from code_graph_io.paths import graph_dir
 from code_graph_io.store import GraphNotInitializedError
 
 
@@ -16,16 +17,16 @@ class _FakeConn:
 
 def test_open_reader_missing_db_raises(tmp_path: Path):
     with pytest.raises(GraphNotInitializedError):
-        open_reader(tmp_path)  # no .agent-workspace/code.db
+        open_reader(graph_dir=graph_dir(tmp_path))  # no .agent-workspace/code.db
 
 
 def test_reader_is_context_manager_and_closeable(seeded_workspace: Path):
     # context-manager form
-    with open_reader(seeded_workspace) as reader:
+    with open_reader(graph_dir=graph_dir(seeded_workspace)) as reader:
         assert isinstance(reader, GraphReader)
         assert isinstance(reader.list_packages(), list)  # smoke
     # explicit form
-    reader = open_reader(seeded_workspace)
+    reader = open_reader(graph_dir=graph_dir(seeded_workspace))
     try:
         reader.list_packages()
     finally:
@@ -33,13 +34,13 @@ def test_reader_is_context_manager_and_closeable(seeded_workspace: Path):
 
 
 def test_writer_subclasses_reader(seeded_workspace: Path):
-    with open_writer(seeded_workspace) as store:
+    with open_writer(graph_dir=graph_dir(seeded_workspace)) as store:
         assert isinstance(store, GraphStore)
         assert isinstance(store, GraphReader)
 
 
 def test_describe_package_delegates(seeded_workspace: Path):
-    with open_reader(seeded_workspace) as reader:
+    with open_reader(graph_dir=graph_dir(seeded_workspace)) as reader:
         # any package known to the seeded graph; assert structural fields exist
         pkgs = reader.list_packages()
         assert pkgs, "seed graph should contain packages"
@@ -48,7 +49,7 @@ def test_describe_package_delegates(seeded_workspace: Path):
 
 
 def test_to_graphml_smoke(seeded_workspace: Path):
-    with open_reader(seeded_workspace) as reader:
+    with open_reader(graph_dir=graph_dir(seeded_workspace)) as reader:
         xml = reader.to_graphml()
         assert isinstance(xml, str)
         assert "graphml" in xml
@@ -218,11 +219,11 @@ def test_reader_delegation_table_covers_every_public_method():
 
 
 def test_dump_sql_streams_from_the_connection(seeded_workspace: Path):
-    with open_reader(seeded_workspace) as reader:
+    with open_reader(graph_dir=graph_dir(seeded_workspace)) as reader:
         statements = list(reader.dump_sql())
     assert any("CREATE TABLE" in s for s in statements)
 
 
 def test_transaction_yields_the_same_store(seeded_workspace: Path):
-    with open_writer(seeded_workspace) as store_handle, store_handle.transaction() as txn:
+    with open_writer(graph_dir=graph_dir(seeded_workspace)) as store_handle, store_handle.transaction() as txn:
         assert txn is store_handle

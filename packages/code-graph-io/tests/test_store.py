@@ -104,7 +104,7 @@ def test_update_full_rebuilds_v1_db_to_current(tmp_path: Path, monkeypatch: pyte
 
     buf = io.StringIO()
     with redirect_stderr(buf):
-        update.run(tmp_path, workspace=tmp_path, full=True)
+        update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     stderr = buf.getvalue()
     # Wording is discretionary; substrings are the contract.
@@ -129,7 +129,7 @@ def test_update_incremental_on_v1_db_raises_schema_mismatch(tmp_path: Path, monk
     _seed_v1_db(tmp_path, monkeypatch)
 
     with pytest.raises(store.SchemaMismatchError) as excinfo:
-        update.run(tmp_path, workspace=tmp_path, full=False)
+        update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
     assert excinfo.value.found == "1"
     assert excinfo.value.expected == schema.SCHEMA_VERSION
 

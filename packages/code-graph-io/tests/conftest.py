@@ -12,6 +12,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from code_graph_io.paths import graph_dir
 from code_graph_io.schema import apply_schema
 
 
@@ -66,7 +67,7 @@ def seeded_workspace(tmp_path_factory) -> Path:
     ws = repo_root.parent / "agent-workspace"
     ws.mkdir(parents=True, exist_ok=True)
 
-    update.run(repo_root, workspace=ws, full=True)
+    update.run(repo_root, graph_dir=graph_dir(ws), full=True)
     return ws
 
 
@@ -78,8 +79,6 @@ def seeded_db(seeded_workspace):
     share the resulting `mode=ro` connection. Safe because every
     query helper opens read-only and issues no INSERT/UPDATE/DELETE.
     """
-    from code_graph_io.paths import graph_dir
-
     db_path = graph_dir(seeded_workspace) / "code.db"
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:

@@ -27,7 +27,7 @@ def test_update_full_populates_db(tmp_path: Path) -> None:
         "init",
     )
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     conn = _open_ro(tmp_path)
     try:
@@ -41,22 +41,11 @@ def test_update_full_populates_db(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_update_writes_gitignore(tmp_path: Path) -> None:
-    init_repo(tmp_path)
-    write_and_commit(tmp_path, {"a.py": "x = 1\n"}, "init")
-
-    update.run(tmp_path, workspace=tmp_path, full=True)
-
-    gitignore = (graph_dir(tmp_path) / ".gitignore").read_text()
-    # The whole .agent-workspace/ dir is local machine state — ignored wholesale.
-    assert gitignore.strip() == "*"
-
-
 def test_update_raises_outside_git(tmp_path: Path) -> None:
     import pytest
 
     with pytest.raises(update.NotInGitRepoError):
-        update.run(tmp_path, workspace=tmp_path, full=True)
+        update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
 
 def test_update_skips_default_skip_dirs(tmp_path: Path) -> None:
@@ -71,7 +60,7 @@ def test_update_skips_default_skip_dirs(tmp_path: Path) -> None:
         "init",
     )
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     conn = _open_ro(tmp_path)
     try:
@@ -103,7 +92,7 @@ def test_deriver_version_bump_forces_rebuild(tmp_path: Path) -> None:
     )
 
     # First full build — stamps deriver_version in metadata.
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     conn = _open_ro(tmp_path)
     try:
@@ -133,7 +122,7 @@ def test_deriver_version_bump_forces_rebuild(tmp_path: Path) -> None:
         conn.close()
 
     # Re-run with full=False at the *same* HEAD — mismatch must force rebuild.
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _open_ro(tmp_path)
     try:
@@ -159,7 +148,7 @@ def test_unchanged_deriver_version_still_short_circuits(tmp_path: Path) -> None:
         "init",
     )
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     # Delete function node — if short-circuit fires it stays gone (no rebuild).
     db = _db_path(tmp_path)
@@ -171,7 +160,7 @@ def test_unchanged_deriver_version_still_short_circuits(tmp_path: Path) -> None:
         wconn.close()
 
     # Re-run at same HEAD with matching deriver_version → must short-circuit.
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _open_ro(tmp_path)
     try:
@@ -195,7 +184,7 @@ def test_update_honors_graphignore(tmp_path: Path) -> None:
         "init",
     )
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     conn = _open_ro(tmp_path)
     try:

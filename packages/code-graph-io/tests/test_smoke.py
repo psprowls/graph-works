@@ -2,8 +2,21 @@
 
 from __future__ import annotations
 
+import importlib.metadata
+
 
 def test_package_imports() -> None:
     import code_graph_io
 
-    assert code_graph_io.__version__ == "0.1.1"
+    assert code_graph_io.__version__ == "0.3.0"
+
+
+def test_version_matches_package_metadata() -> None:
+    """The static version lives in two places; nothing else ties them together.
+
+    Without this check they drifted once already — `__init__` sat at 0.1.1
+    while `pyproject.toml` had moved to 0.2.1. Mirrors okf-io's guard.
+    """
+    import code_graph_io
+
+    assert code_graph_io.__version__ == importlib.metadata.version("code-graph-io")

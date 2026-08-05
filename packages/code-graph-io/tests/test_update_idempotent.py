@@ -49,7 +49,7 @@ def _structural_snapshot(db_path: Path) -> tuple[list, list]:
 def test_idle_rerun_is_noop(tmp_path: Path) -> None:
     init_repo(tmp_path)
     head = write_and_commit(tmp_path, {"a.py": "def foo():\n    return 1\n"}, "init")
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
 
     conn = _ro(tmp_path)
     try:
@@ -57,7 +57,7 @@ def test_idle_rerun_is_noop(tmp_path: Path) -> None:
     finally:
         conn.close()
 
-    update.run(tmp_path, workspace=tmp_path, full=False)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=False)
 
     conn = _ro(tmp_path)
     try:
@@ -94,10 +94,10 @@ def test_update_full_twice_produces_byte_identical_db(tmp_path: Path) -> None:
     )
     db = _db_path(tmp_path)
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
     structural_a = _structural_snapshot(db)
 
-    update.run(tmp_path, workspace=tmp_path, full=True)
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
     structural_b = _structural_snapshot(db)
 
     assert structural_a == structural_b

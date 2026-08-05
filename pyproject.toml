@@ -2,7 +2,11 @@
 name = "agent-workspace"
 version = "0.0.0"
 description = "uv workspace root for the okf-io packages. Not distributable."
-requires-python = ">=3.11"
+# 3.12 is the floor for the whole workspace. `okf_io.models.Frontmatter.extra`
+# defaults to `MappingProxyType({})`, which the dataclass machinery rejects as a
+# mutable default until `mappingproxy` became hashable in 3.12. On 3.11 both
+# packages install and then fail at import, so 3.11 was never really supported.
+requires-python = ">=3.12"
 
 [tool.uv]
 package = false
@@ -12,10 +16,13 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 okf-io = { workspace = true }
+okf-ext = { workspace = true }
 
 [dependency-groups]
 dev = [
+    "import-linter>=2.0",
     "mypy>=1.11",
+    "okf-ext",
     "okf-io",
     "pytest>=8.0",
     "pytest-cov>=5.0",
@@ -23,7 +30,7 @@ dev = [
 ]
 
 [tool.ruff]
-target-version = "py311"
+target-version = "py312"
 line-length = 100
 # Fixtures are a byte-exact corpus; `scripts/` is repo tooling that predates
 # this workspace and is not part of any package.
@@ -37,16 +44,43 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 
 [tool.ruff.lint.per-file-ignores]
 "packages/okf-io/tests/**" = ["ANN"]
+"packages/okf-ext/tests/**" = ["ANN"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 
 [tool.pytest.ini_options]
-testpaths = ["packages/okf-io/tests"]
-pythonpath = ["packages/okf-io/tests"]
+testpaths = ["packages/okf-io/tests", "packages/okf-ext/tests"]
+# Both test directories sit flat on this path with no `__init__.py` in either,
+# so a duplicate `test_*.py` basename fails loudly at collection ("import file
+# mismatch") — but a duplicate *plain* module basename (the `helpers.py` /
+# `ext_helpers.py` class of name) collides silently: whichever is imported
+# first wins, and the other suite quietly binds to the wrong module. Any new
+# plain helper module needs a name unique across both directories, not just
+# within its own.
+pythonpath = ["packages/okf-io/tests", "packages/okf-ext/tests"]
 addopts = "-q"
 
 [tool.coverage.run]
 branch = true
-source = ["okf_io"]
+source = ["okf_io", "okf_ext"]
+
+# The tier-2 internal boundary (okf-ext README, "Boundaries"). The shared
+# layer never imports a capability; capabilities may import the shared layer.
+#
+# The companion rule — a capability never importing the top-level `okf_ext`
+# package — is NOT here, because import-linter cannot express it: grimp does
+# not report an import of an ancestor package as a dependency, so a `forbidden`
+# contract naming `okf_ext` reports KEPT even when the import exists. That half
+# is `packages/okf-ext/tests/test_ext_boundaries.py`.
+#
+# The independence contract between sibling capabilities arrives with the
+# second capability; with one, it has nothing to assert.
+[tool.importlinter]
+root_package = "okf_ext"
+
+[[tool.importlinter.contracts]]
+name = "Capabilities sit above the shared context, never below it"
+type = "layers"
+layers = ["okf_ext.tags", "okf_ext.context"]

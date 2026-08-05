@@ -1,0 +1,5 @@
+version: 1
+tags:
+  - name: kpi
+    deprecated: true
+    replaced_by: nonexistent

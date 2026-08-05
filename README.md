@@ -7,6 +7,8 @@ it is not itself distributable.
 
 - [`packages/okf-io`](packages/okf-io) — read, derive from, and write back OKF
   v0.2 concept documents.
+- [`packages/okf-ext`](packages/okf-ext) — beyond-spec capabilities over any
+  bundle. Tier 2: extends `okf-io`, never modifies it. Tags today.
 
 ## Checks
 
@@ -16,13 +18,16 @@ deferred until the repository has a remote (child spec §3, decision 1).
 | Recipe | Command |
 |---|---|
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
-| `just types` | `uv run mypy --strict packages/okf-io/src` |
+| `just types` | `uv run mypy --strict packages/okf-io/src packages/okf-ext/src` |
+| `just contracts` | `uv run lint-imports` |
 | `just test` | `uv run pytest` |
-| `just cov` | `uv run pytest --cov=okf_io --cov-branch --cov-report=term-missing` |
+| `just cov` | `uv run pytest --cov=okf_io --cov=okf_ext --cov-branch --cov-report=term-missing --cov-fail-under=95` |
 | `just check` | all of the above |
 
-Coverage is **reported, not gated** (child spec §3, decision 2). The ≥95% branch
-target stands; enforcing it is a later child.
+Coverage is **gated at 95% branch coverage** across both packages. `just
+contracts` checks okf-ext's internal package boundaries; both it and the
+coverage gate are opt-in in the sense that CI does not yet run them — CI is
+deferred until the repository has a remote.
 
 If `just` is not installed, run the commands in the right-hand column directly.
 

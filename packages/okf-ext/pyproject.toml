@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "okf-ext"
+version = "0.1.0"
+description = "Beyond-spec capabilities over any OKF v0.2 bundle. Tier 2: extends okf-io, never modifies it."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    # Tier 2 depends on the core, never the other way round (ADR-0005).
+    # Pre-1.0 policy is minor = breaking (ADR-0007), so the ceiling is 0.2.
+    "okf-io>=0.1,<0.2",
+    # Read `_tags.yaml`. Declared rather than inherited through okf-io: an
+    # undeclared transitive import breaks the day the core swaps YAML libraries,
+    # and reaching into `okf_io._yaml` would couple this package to a private
+    # module of the one it sits above.
+    "ruamel.yaml>=0.18",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/okf_ext"]

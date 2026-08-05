@@ -7,7 +7,10 @@ name = "okf-io"
 version = "0.1.0"
 description = "Read, derive from, and write back OKF v0.2 concept documents without disturbing bytes that did not change."
 readme = "README.md"
-requires-python = ">=3.11"
+# See the workspace root's note: `Frontmatter.extra` defaults to
+# `MappingProxyType({})`, which 3.11's dataclass machinery rejects as a mutable
+# default. The package installed on 3.11 but could not be imported there.
+requires-python = ">=3.12"
 dependencies = [
     # okf_io._yaml subclasses ruamel.yaml.emitter.Emitter, which is not a stable
     # public contract. Bump deliberately and re-run the round-trip suite.

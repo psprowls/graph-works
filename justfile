@@ -10,7 +10,12 @@ lint:
 
 # Static types, strict
 types:
-    uv run mypy --strict packages/okf-io/src
+    uv run mypy --strict packages/okf-io/src packages/okf-ext/src
+
+# Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
+# exists: nothing enforces this but the person who runs it.
+contracts:
+    uv run lint-imports
 
 # Test suite
 test:
@@ -24,7 +29,7 @@ test:
 # where the slack went — they carry the coverage debt. A failure here names
 # only a global percentage, so start with them and read `term-missing`.
 cov:
-    uv run pytest --cov=okf_io --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run pytest --cov=okf_io --cov=okf_ext --cov-branch --cov-report=term-missing --cov-fail-under=95
 
 # Everything CI will run. `cov` runs the suite, so `test` is not repeated.
-check: lint types cov
+check: lint types contracts cov

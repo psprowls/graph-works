@@ -1,0 +1,12 @@
+version: 1
+tags:
+  - name: metric
+    description: A measurable quantity.
+  - name: finance
+    description: Finance-owned concepts.
+  - name: data-quality
+    description: Concerns about the fidelity of a number.
+  - name: revenue
+  - name: kpi
+    deprecated: true
+    replaced_by: metric

@@ -1,6 +1,6 @@
 # packages/code-graph-io
 
-Python ≥3.11. Tests are pytest.
+Python ≥3.12 (the workspace floor). Tests are pytest.
 
 ## Layout
 

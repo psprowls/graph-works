@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "code-parser"
-version = "0.1.1"
+version = "0.1.0"
 description = "Tree-sitter-backed Python package that turns source files into a span-bearing SourceTree, with a graph projection aligned to code-graph-io."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },

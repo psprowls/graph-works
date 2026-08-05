@@ -396,7 +396,7 @@ def test_describe_block_human_full() -> None:
             render.Attr("counts", "counts", "12 functions · 4 classes", {"function": 12, "class": 4}),
         ],
         relationships=[
-            render.Rel("internal deps", "internal_dependencies", ["workspace-io", "code-parser"]),
+            render.Rel("internal deps", "internal_dependencies", ["code-parser"]),
             render.Rel("internal dependents", "internal_dependents", ["agent-workspace-core"]),
         ],
         nav=["gw graph what-tests code-graph-io", "gw graph list-entry-points code-graph-io"],
@@ -413,7 +413,7 @@ def test_describe_block_human_full() -> None:
         "  counts:   12 functions · 4 classes\n"
         "\n"
         "relationships\n"
-        "  internal deps:       workspace-io, code-parser\n"
+        "  internal deps:       code-parser\n"
         "  internal dependents: agent-workspace-core\n"
         "\n"
         "→ gw graph what-tests code-graph-io\n"

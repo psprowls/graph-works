@@ -33,14 +33,9 @@ dev = [
 ]
 
 [tool.ruff]
+line-length = 120
+exclude = ["**/fixtures/**", ".claude/skills/**", "scripts"]
 target-version = "py312"
-line-length = 100
-# Fixtures are a byte-exact corpus; `scripts/` is repo tooling that predates
-# this workspace and is not part of any package.
-extend-exclude = [
-    "packages/okf-io/tests/fixtures",
-    "scripts",
-]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
@@ -48,6 +43,8 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 [tool.ruff.lint.per-file-ignores]
 "packages/okf-io/tests/**" = ["ANN"]
 "packages/okf-ext/tests/**" = ["ANN"]
+"packages/code-parser/tests/**" = ["ANN"]
+"packages/code-graph-io/tests/**" = ["ANN"]
 
 [tool.mypy]
 python_version = "3.12"

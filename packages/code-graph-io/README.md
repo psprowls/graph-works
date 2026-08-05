@@ -8,8 +8,6 @@ Code-graph backend for agent-workspace. Owns:
 - Cross-file edge resolution sweep
 - Read-only query layer (`find`, `callers`, `callees`, `imports`, `describe_package`, `describe_path`)
 
-The Claude Code plugin shell lives separately at `plugins/agent-workspace/`.
-
 ## Exit codes
 
 Stable from v1 forward — script consumers can rely on these:

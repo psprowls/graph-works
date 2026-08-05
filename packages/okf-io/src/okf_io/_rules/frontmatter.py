@@ -20,7 +20,7 @@ CODES: tuple[str, ...] = (
 def unreadable(ctx: RuleContext) -> Iterable[Finding]:
     """§11 rule 1, extended to a member nobody can decode.
 
-    An addition to the epic's catalog. A concept-shaped file that is not valid
+    An addition to the rule catalog. A concept-shaped file that is not valid
     UTF-8 never reaches ``concepts`` -- the loader records it and keeps walking
     -- so without this rule it would vanish from the report entirely.
     """

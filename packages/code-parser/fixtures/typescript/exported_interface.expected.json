@@ -1,0 +1,21 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "export", "target_name": "IBar", "target_module": null, "attrs": {"symbol_kind": "type"}}
+  ],
+  "children": [
+    {
+      "kind": "type",
+      "name": "IBar",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "interface"},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

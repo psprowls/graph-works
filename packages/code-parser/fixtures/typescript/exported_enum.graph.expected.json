@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {}},
+    {"kind": "type", "name": "Role", "path": "PATH", "line": 1, "attrs": {"ts_kind": "enum"}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["type", "Role", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["file", "PATH", "PATH"], "dst": ["type", "Role", null], "kind": "exports", "attrs": {"symbol_kind": "type"}}
+  ]
+}

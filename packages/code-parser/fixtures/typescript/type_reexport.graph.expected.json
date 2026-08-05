@@ -1,0 +1,8 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["type", "APIGatewayProxyEvent", null], "kind": "exports", "attrs": {"symbol_kind": "type"}}
+  ]
+}

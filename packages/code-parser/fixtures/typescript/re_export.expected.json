@@ -1,0 +1,11 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "export", "target_name": "thing", "target_module": null, "attrs": {}}
+  ],
+  "children": []
+}

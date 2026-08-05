@@ -1,0 +1,24 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "javascript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "import", "target_name": "foo", "target_module": "./foo.mjs", "attrs": {}},
+    {"kind": "export", "target_name": "callsFoo", "target_module": null, "attrs": {"symbol_kind": "function"}}
+  ],
+  "children": [
+    {
+      "kind": "function",
+      "name": "callsFoo",
+      "language": "javascript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [
+        {"kind": "call", "target_name": "foo", "target_module": null, "attrs": {"is_member": false}}
+      ],
+      "children": []
+    }
+  ]
+}

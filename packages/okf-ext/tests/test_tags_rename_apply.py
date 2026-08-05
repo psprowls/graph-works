@@ -603,7 +603,7 @@ def test_reapplying_the_same_plan_is_refused_as_stale_against_the_same_bundle(tm
 def test_a_hand_built_plan_targeting_a_null_position_is_refused_as_stale(tmp_path):
     """The type-aware guard. `str(None) == "None"` would make a naive
     `str(sequence[edit.index]) != edit.old` guard accept `old="None"` as a
-    match for a null position -- exactly the coercion `_raw_tags` (Task 7)
+    match for a null position -- exactly the coercion `_raw_tags`
     exists to refuse. No planner can build this edit (a `None` sentinel is
     never a mapping key), so it is hand-built here to prove `apply()` itself
     refuses it, not just that the planners never offer it up."""

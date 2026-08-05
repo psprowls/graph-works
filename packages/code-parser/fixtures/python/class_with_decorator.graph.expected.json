@@ -1,0 +1,12 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {"_has_main_block": false, "_has_importable_symbols": true}},
+    {"kind": "class", "name": "Greeter", "path": "PATH", "line": 5, "attrs": {}},
+    {"kind": "method", "name": "Greeter.greet", "path": "PATH", "line": 8, "attrs": {}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["class", "Greeter", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["class", "Greeter", "PATH"], "dst": ["method", "Greeter.greet", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["file", "PATH", "PATH"], "dst": ["file", "dataclass", "dataclasses"], "kind": "imports", "attrs": {}}
+  ]
+}

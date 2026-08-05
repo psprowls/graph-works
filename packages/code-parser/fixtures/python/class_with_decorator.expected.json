@@ -1,0 +1,23 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "python",
+  "package": "fixtures",
+  "attrs": {"_has_main_block": false, "_has_importable_symbols": true},
+  "refs": [
+    {"kind": "import", "target_name": "dataclass", "target_module": "dataclasses", "attrs": {}}
+  ],
+  "children": [
+    {
+      "kind": "class",
+      "name": "Greeter",
+      "language": "python",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": [
+        {"kind": "method", "name": "greet", "language": "python", "package": "fixtures", "attrs": {}, "refs": [], "children": []}
+      ]
+    }
+  ]
+}

@@ -103,7 +103,7 @@ def test_refresh_actually_rebuilds_the_view():
 
 
 def test_mark_dirty_makes_serialize_emit_the_mutation():
-    """The dirty path end to end. Task 9 replaces the branch this exercises."""
+    """The dirty path end to end."""
     text = read(EDGE / "dialect_indented.md")
     doc = Document.parse(text)
     doc.fm_raw["title"] = "Changed"

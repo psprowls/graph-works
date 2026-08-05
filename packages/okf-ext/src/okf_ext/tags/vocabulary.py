@@ -6,13 +6,14 @@ magic this library performs.
 
 Auto-discovery mirroring okf-schema's `_schema/` was rejected: it invents
 format SPEC.md does not define and makes behaviour change because a file
-appeared — the trap ADR-0009 already caught once. Under this design a bundle
+appeared — a trap this project has been caught by before. Under this design
+a bundle
 carrying a `_tags.yaml` is an entirely ordinary OKF bundle to every other
 reader, and a house rule only fires when someone names it.
 
 The rule that turns a loaded `Vocabulary` into `Finding`s against a bundle
-(`vocabulary_rule`) is a separate concern and lands in a later task; this
-module only knows how to read the file.
+(`vocabulary_rule`) is a separate concern; this module only knows how to
+read the file.
 
 **Unknown keys are rejected, top level and per entry.** This is a small
 hand-edited house-rule file with no schema and no editor support to catch a
@@ -29,8 +30,8 @@ becoming an instant, legible error today.
 are two distinct entries as far as this loader is concerned, even though
 `okf_ext.tags.normalize.canonical` would fold them together. The vocabulary
 is the authority on exact spelling; a vocabulary that declares both is
-itself the mess `vocabulary_rule` (Task 6) and normalization-driven renames
-(Task 7) exist to surface, and canonicalizing here would quietly hide that
+itself the mess `vocabulary_rule` and normalization-driven renames exist to
+surface, and canonicalizing here would quietly hide that
 from the very tools meant to catch it.
 """
 
@@ -173,8 +174,9 @@ def load_vocabulary(path: str | Path) -> Vocabulary:
                 )
             descriptions[name] = description
 
-        # `deprecated` gates a rename instruction that Task 6 turns into a
-        # `Finding` and Task 7 into an actual file rewrite, so it must be a
+        # `deprecated` gates a rename instruction that the vocabulary rule turns
+        # into a `Finding` and the rename planner into an actual file rewrite, so
+        # it must be a
         # real boolean. A truthiness test would let a hand-written or
         # tool-stringified `deprecated: "false"` (or `"no"`, or `0`/`1`)
         # silently deprecate a tag — the worst failure mode this package has.

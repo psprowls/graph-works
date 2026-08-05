@@ -1,0 +1,15 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "import", "target_name": "x", "target_module": "./a", "attrs": {}},
+    {"kind": "import", "target_name": "y", "target_module": "./b", "attrs": {}},
+    {"kind": "import", "target_name": "z", "target_module": "./b", "attrs": {}},
+    {"kind": "import", "target_name": "ns", "target_module": "./c", "attrs": {}},
+    {"kind": "import", "target_name": "T", "target_module": "./t", "attrs": {}}
+  ],
+  "children": []
+}

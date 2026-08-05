@@ -248,7 +248,7 @@ def test_the_untagged_concept_never_appears_in_any_plan():
 # with no trace it was ever a mapping -- indistinguishable afterwards from a
 # real tag someone actually wrote. `okf_io.models._str_tuple` refuses that
 # same conversion for `fm.tags`; `_raw_tags` must refuse it too, since
-# whatever it produces here is exactly what `apply()` (Task 8) will use to
+# whatever it produces here is exactly what `apply()` will use to
 # decide what a document "already says" before overwriting it.
 
 
@@ -322,7 +322,7 @@ def test_edit_indices_are_valid_against_fm_raw_when_fm_tags_is_shorter(tmp_path)
     """Combines a null, a nested mapping, and a repeated real tag in one
     document: `fm.tags` drops the first two, so it is strictly shorter than
     `fm_raw`. Every edit's index must still resolve to the correct raw
-    element -- the property Task 8's `apply()` depends on completely."""
+    element -- the property `apply()` depends on completely."""
     (tmp_path / "mixed.md").write_bytes(
         b"---\ntype: Metric\ntitle: Mixed\ndescription: D\n"
         b"tags: [kpi, null, metric, {a: 1}, kpi]\n---\n\n# Mixed\n"

@@ -1,0 +1,4 @@
+Placeholder so the __tests__/ directory is git-tracked even if its sole
+test file is ever deleted. Required by the fixture
+extension (the directory must exist for test_suites.emit's filesystem walk
+to discover it).

@@ -13,7 +13,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
 
 def test_version_is_static_and_pinned():
-    """ADR-0007: static `version`, never hatch-vcs."""
+    """Static `version`, never hatch-vcs."""
     assert okf_ext.__version__ == "0.1.0"
 
 

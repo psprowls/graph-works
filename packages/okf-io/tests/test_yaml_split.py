@@ -140,7 +140,7 @@ def test_padded_flow_braces_are_reproduced():
 
 
 def test_crlf_document_redumps_exactly():
-    """The CRLF counterpart of the padded-flow re-dump. Task 9 depends on it."""
+    """The CRLF counterpart of the padded-flow re-dump. The write-back depends on it."""
     fm = _fm(EDGE / "encoding/crlf.md")
     style = _yaml.sniff_style(fm)
     assert style.newline == "\r\n"

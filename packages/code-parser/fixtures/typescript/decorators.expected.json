@@ -1,0 +1,22 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {"kind": "function", "name": "log", "language": "typescript", "package": "fixtures", "attrs": {}, "refs": [], "children": []},
+    {
+      "kind": "class",
+      "name": "Service",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": [
+        {"kind": "method", "name": "do", "language": "typescript", "package": "fixtures", "attrs": {}, "refs": [], "children": []}
+      ]
+    }
+  ]
+}

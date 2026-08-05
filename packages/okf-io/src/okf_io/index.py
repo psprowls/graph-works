@@ -80,7 +80,7 @@ class EntryTarget:
     document: Document | None
 
 
-#: Extension point #4 (ADR-0005). Returning ``None`` means "no description".
+#: Extension point #4. Returning ``None`` means "no description".
 Describe = Callable[[EntryTarget], str | None]
 
 
@@ -712,7 +712,7 @@ def update(
     ``descriptions="preserve"`` never touches existing entry text and reports
     what has drifted; ``"refresh"`` opts into the machine-generated regime and
     rewrites it, reporting every rewrite as a change. ``describe`` is
-    extension point #4 (ADR-0005).
+    extension point #4.
 
     Raises ``ValueError`` for a directory id the bundle does not contain --
     a caller error, not bundle content, and the tolerance rule (§11) is about

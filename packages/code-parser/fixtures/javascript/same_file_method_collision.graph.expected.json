@@ -1,0 +1,15 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {}},
+    {"kind": "class", "name": "Foo", "path": "PATH", "line": 1, "attrs": {}},
+    {"kind": "method", "name": "Foo.save", "path": "PATH", "line": 2, "attrs": {}},
+    {"kind": "class", "name": "Bar", "path": "PATH", "line": 5, "attrs": {}},
+    {"kind": "method", "name": "Bar.save", "path": "PATH", "line": 6, "attrs": {}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["class", "Foo", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["class", "Foo", "PATH"], "dst": ["method", "Foo.save", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["file", "PATH", "PATH"], "dst": ["class", "Bar", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["class", "Bar", "PATH"], "dst": ["method", "Bar.save", "PATH"], "kind": "contains", "attrs": {}}
+  ]
+}

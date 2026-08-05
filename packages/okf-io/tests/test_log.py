@@ -80,8 +80,8 @@ def test_entry_lines_are_body_relative_and_inclusive():
 
 def test_parse_preserves_document_order():
     """Document order is the invariant contract. Callers needing chronological
-    order must sort themselves. Task 8's _new_section_anchor assumes document
-    order and silently breaks if sections are sorted by date instead."""
+    order must sort themselves. `_new_section_anchor` assumes document order
+    and silently breaks if sections are sorted by date instead."""
     # Deliberately oldest-first, not newest-first
     doc = Document.parse("# H\n\n## 2026-01-01\n\n- Oldest.\n\n## 2026-06-01\n\n- Newest.\n")
     parsed = log.parse(doc)

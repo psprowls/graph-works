@@ -30,7 +30,7 @@ raw-type information it currently has no reason to carry, or a fifth
 `SkipReason` for "counted but not a string at that position" threaded through
 every planner -- both are a bigger surface change than this deferral
 warrants, and `okf_io`'s coercion is itself the root cause, which this
-package does not modify (see `okf-io` untouched, ADR-0005).
+package does not modify.
 """
 
 from __future__ import annotations

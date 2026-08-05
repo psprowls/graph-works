@@ -639,8 +639,7 @@ def test_two_new_entries_merge_into_the_same_freshly_created_section(tmp_path):
 
 
 def test_describe_overrides_the_concept_description_on_add(tmp_path):
-    """`describe=` is extension point #4, and already live on the addition
-    path in this task even though the plan frames it under Task 6."""
+    """`describe=` is extension point #4, live on the addition path."""
     loaded = make(tmp_path, {"d/index.md": "# Metric\n", "d/revenue.md": CONCEPT})
     (result,) = index.update(
         loaded, directories=["d"], describe=lambda target: f"custom:{target.path}"
@@ -738,7 +737,7 @@ def test_a_subdirectory_entry_is_never_drift(tmp_path):
 
 
 def test_describe_supplies_text_for_a_new_entry_from_outside_the_core(tmp_path):
-    """Extension point #4 (ADR-0005), exercised from outside okf-io."""
+    """Extension point #4, exercised from outside okf-io."""
     seen: list[tuple[str, str]] = []
 
     def describe(target: index.EntryTarget) -> str | None:

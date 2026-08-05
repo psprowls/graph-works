@@ -1,0 +1,21 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "javascript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "export", "target_name": "makeGreeter", "target_module": null, "attrs": {"symbol_kind": "function"}}
+  ],
+  "children": [
+    {
+      "kind": "function",
+      "name": "makeGreeter",
+      "language": "javascript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

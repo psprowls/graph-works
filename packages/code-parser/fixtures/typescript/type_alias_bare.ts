@@ -1,0 +1,1 @@
+type MyAlias = string;

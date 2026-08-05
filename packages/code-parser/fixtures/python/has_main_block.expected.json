@@ -1,0 +1,21 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "python",
+  "package": "fixtures",
+  "attrs": {"_has_main_block": true, "_has_importable_symbols": true},
+  "refs": [],
+  "children": [
+    {
+      "kind": "function",
+      "name": "main",
+      "language": "python",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [
+        {"kind": "call", "target_name": "print", "target_module": null, "attrs": {"is_member": false}}
+      ],
+      "children": []
+    }
+  ]
+}

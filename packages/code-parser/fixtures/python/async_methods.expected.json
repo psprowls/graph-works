@@ -1,0 +1,33 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "python",
+  "package": "fixtures",
+  "attrs": {"_has_main_block": false, "_has_importable_symbols": true},
+  "refs": [
+    {"kind": "import", "target_name": "asyncio", "target_module": "asyncio", "attrs": {}}
+  ],
+  "children": [
+    {
+      "kind": "class",
+      "name": "Worker",
+      "language": "python",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": [
+        {
+          "kind": "method",
+          "name": "run",
+          "language": "python",
+          "package": "fixtures",
+          "attrs": {},
+          "refs": [
+            {"kind": "call", "target_name": "sleep", "target_module": null, "attrs": {"is_member": true, "receiver": "asyncio"}}
+          ],
+          "children": []
+        }
+      ]
+    }
+  ]
+}

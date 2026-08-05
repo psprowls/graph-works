@@ -1,8 +1,8 @@
 """The two §8 acceptance properties, over every fixture.
 
-Property 2 is the honest proof of ADR-0001. Property 1 is guaranteed by the
-clean short-circuit, so it exists to catch a regression in dirty-tracking, not
-to prove ruamel fidelity.
+Property 2 is the honest proof of the two-layer model. Property 1 is
+guaranteed by the clean short-circuit, so it exists to catch a regression in
+dirty-tracking, not to prove ruamel fidelity.
 """
 
 from __future__ import annotations

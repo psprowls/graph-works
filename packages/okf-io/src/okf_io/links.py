@@ -3,7 +3,8 @@
 Resolution is four steps, and each one is a rule an existing implementation
 gets wrong. The graph derived from them keeps backlinks *computed*, never
 written into a neighbour's frontmatter -- writing them is what dirties every
-neighbour on each edit, and ADR-0001's whole point is not doing that.
+neighbour on each edit, and not doing that is the whole point of the
+two-layer model.
 """
 
 from __future__ import annotations

@@ -38,7 +38,7 @@ def test_scan_reports_a_non_utf8_member_as_unreadable(tmp_path):
     """`bundle.unreadable` is the one `SkipReason` no markdown fixture in the
     corpus can trigger: `okf_io.load` only populates it on an OS-level read
     failure or invalid UTF-8 (`packages/okf-io/src/okf_io/bundle.py`), and
-    the Task 2 corpus is all valid UTF-8 markdown. Built here as an ad hoc
+    the corpus is all valid UTF-8 markdown. Built here as an ad hoc
     one-off bundle instead, following the pattern okf-io's own suite uses in
     `test_bundle.py::test_a_non_utf8_member_becomes_unreadable_not_an_exception`.
     """

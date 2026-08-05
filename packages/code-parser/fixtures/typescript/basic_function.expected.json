@@ -1,0 +1,19 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {
+      "kind": "function",
+      "name": "greet",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

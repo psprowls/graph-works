@@ -153,7 +153,7 @@ def _splice(orig: str, pristine: str, mutated: str) -> str | None:
 class Document:
     """A concept file as raw text plus a round-trippable frontmatter map.
 
-    ``fm_raw`` is the storage layer and ``fm`` the view layer (ADR-0001).
+    ``fm_raw`` is the storage layer and ``fm`` the view layer.
     Nested edits go through ``fm_raw`` directly; a caller doing so must call
     :meth:`refresh` and is responsible for the dirty flag, which is what
     :meth:`mark_dirty` is for. That pairing is the documented escape hatch —
@@ -460,7 +460,7 @@ class Document:
         target.write_bytes(self.serialize().encode("utf-8"))
 
     def fm_data(self, dates: DateMode = "iso") -> dict[str, Any]:
-        """Extension point #2 (ADR-0005): a plain projection of the frontmatter.
+        """Extension point #2: a plain projection of the frontmatter.
 
         External validators cannot consume a ``CommentedMap`` containing
         ``date`` objects. With ``dates="iso"`` the result survives

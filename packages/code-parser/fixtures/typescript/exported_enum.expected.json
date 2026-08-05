@@ -1,0 +1,21 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "export", "target_name": "Role", "target_module": null, "attrs": {"symbol_kind": "type"}}
+  ],
+  "children": [
+    {
+      "kind": "type",
+      "name": "Role",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "enum"},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

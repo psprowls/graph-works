@@ -14,7 +14,7 @@ def legacy_fields(ctx: RuleContext) -> Iterable[Finding]:
     """§13.1's two breaking changes, reported as hints rather than failures.
 
     Both are WARN. §13.1 says a v0.1 bundle *is* consumable by a v0.2 consumer
-    under the ADR-0003 fallbacks, so neither is a conformance failure -- these
+    under the v0.1 read fallbacks, so neither is a conformance failure -- these
     tell a producer what to migrate.
 
     ``legacy.body-citations`` keys off ``Frontmatter.fallbacks``, the one place

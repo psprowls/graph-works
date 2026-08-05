@@ -25,7 +25,7 @@ def trust_tier(fm: Frontmatter) -> TrustTier:
     nothing about an unattributed entry; this takes the reading that the
     presence of a ``verified`` record is itself the machine confirmation.
     Deciding whether an unattributed entry should count at all is a validation
-    question, and validation is child 2's.
+    question, and validation belongs to the ``validate`` module.
     """
     if not fm.verified:
         return "unverified"
@@ -38,7 +38,7 @@ def effective_status(fm: Frontmatter) -> str:
     """§5.4. Absent ⇒ ``stable``.
 
     An unrecognized value is **returned verbatim** — not coerced, not rejected
-    (§11 tolerance). Flagging it is child 2's Lifecycle rule. That includes the
+    (§11 tolerance). Flagging it is the Lifecycle rule's job. That includes the
     empty string: ``status: ""`` is an authored value, however odd, and only an
     *absent* status defaults.
     """

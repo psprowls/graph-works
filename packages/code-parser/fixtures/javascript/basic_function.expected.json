@@ -1,0 +1,19 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "javascript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [],
+  "children": [
+    {
+      "kind": "function",
+      "name": "greet",
+      "language": "javascript",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

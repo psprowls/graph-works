@@ -1,9 +1,9 @@
 """The typed, immutable view of a concept's frontmatter.
 
 Lenient normalization runs *here*, when the view is built — never in a
-constructor and never as a parse gate (ADR-0001). Building a view of a
-malformed concept is required to succeed (spec §11); shape and spec validation
-belong to the ``validate`` module (child 2).
+constructor and never as a parse gate. Building a view of a malformed
+concept is required to succeed (spec §11); shape and spec validation belong
+to the ``validate`` module.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ ActorKind = Literal["human", "process", "agent", "unknown"]
 
 #: Governs newly created documents and newly inserted keys **only**. Existing
 #: documents are never reordered: reordering is a diff bomb even when it is
-#: comment-safe (ADR-0001).
+#: comment-safe.
 PREFERRED_KEY_ORDER: tuple[str, ...] = (
     "type",
     "resource",
@@ -124,7 +124,7 @@ class Attester:
 class Frontmatter:
     """A frozen projection of ``fm_raw``. Absent fields are None or empty.
 
-    Three fields carry the interface to child 2:
+    Three fields carry the interface to the rule catalog:
 
     ``extra``
         Unknown keys, *mirroring* rather than replacing their presence in the
@@ -132,11 +132,11 @@ class Frontmatter:
         readable — attribute mapping would break on all three.
     ``coercion_failures``
         Dotted field paths whose raw value was the wrong shape. Without it the
-        view is silently lossy and child 2's rules would have to re-read
+        view is silently lossy and the rules would have to re-read
         ``fm_raw``; with it, rules fire off the view. The raw value always stays
         reachable through ``fm_raw``.
     ``fallbacks``
-        The ADR-0003 read-time fallbacks that fired, so a consumer can tell a
+        The v0.1 read-time fallbacks that fired, so a consumer can tell a
         fallback-derived value from a real one.
     """
 
@@ -536,7 +536,7 @@ def _scan_citations(body: str) -> tuple[Source, ...]:
 def build_frontmatter(fm_raw: Mapping[str, Any], *, body: str = "") -> Frontmatter:
     """Build the typed view. **Never raises.**
 
-    *body* feeds the ADR-0003 ``# Citations`` read fallback (see
+    *body* feeds the ``# Citations`` read fallback (see
     ``_scan_citations``): when a document has no ``sources`` in its
     frontmatter, *body* is scanned for a v0.1-era citations list.
     """
@@ -552,14 +552,14 @@ def build_frontmatter(fm_raw: Mapping[str, Any], *, body: str = "") -> Frontmatt
             failures.add("tags")
 
     generated = _build_generated(fm_raw.get("generated"), "generated", failures)
-    # ADR-0003 read fallback: v0.1 wrote a top-level `timestamp` and no `generated`.
+    # Read fallback: v0.1 wrote a top-level `timestamp` and no `generated`.
     if (generated is None or generated.at is None) and fm_raw.get("timestamp") is not None:
         at, at_dt = _as_timestamp(fm_raw.get("timestamp"), "timestamp", failures)
         generated = replace(generated or Generated(), at=at, at_dt=at_dt)
         fallbacks.add("generated.at")
 
     sources = _build_sources(fm_raw.get("sources"), "sources", failures)
-    # ADR-0003 read fallback: v0.1 put citations in the body, not in `sources`.
+    # Read fallback: v0.1 put citations in the body, not in `sources`.
     if not sources and body:
         cited = _scan_citations(body)
         if cited:

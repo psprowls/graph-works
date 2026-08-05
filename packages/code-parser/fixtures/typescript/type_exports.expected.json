@@ -1,0 +1,41 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "typescript",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "export", "target_name": "IResponse", "target_module": null, "attrs": {"symbol_kind": "type"}},
+    {"kind": "export", "target_name": "ResponseId", "target_module": null, "attrs": {"symbol_kind": "type"}},
+    {"kind": "export", "target_name": "Status", "target_module": null, "attrs": {"symbol_kind": "type"}}
+  ],
+  "children": [
+    {
+      "kind": "type",
+      "name": "IResponse",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "interface"},
+      "refs": [],
+      "children": []
+    },
+    {
+      "kind": "type",
+      "name": "ResponseId",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "type_alias"},
+      "refs": [],
+      "children": []
+    },
+    {
+      "kind": "type",
+      "name": "Status",
+      "language": "typescript",
+      "package": "fixtures",
+      "attrs": {"ts_kind": "enum"},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

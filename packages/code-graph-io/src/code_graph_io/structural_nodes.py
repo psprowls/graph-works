@@ -25,7 +25,7 @@ import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
-from code_parser.projections.graph import GraphEdge, GraphNode
+from code_parser.projections.graph import GraphEdge, GraphNode, NodeKey
 
 from code_graph_io import _ignore, upsert
 from code_graph_io.records import as_graph_records
@@ -569,6 +569,7 @@ def emit(
             )
 
             # Parent: deepest enclosing SubPackage, else Package
+            parent_src: NodeKey | None
             parent_dir = subpkg_dir.parent.resolve()
             if subpkg_dir.resolve() == import_root.resolve():
                 parent_src = pkg_key

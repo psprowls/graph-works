@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,13 @@ from code_parser.projections.graph import GraphNode
 from code_graph_io import _ignore, upsert
 from code_graph_io.records import as_graph_records
 from code_graph_io.uri import RepoContext, agent_plugin_uri
+
+# A component inventory entry. Heterogeneous by design — every parser below
+# emits an "id" plus its own keys, and the whole thing lands in attrs_json.
+Component = dict[str, Any]
+
+# `id_for`, the per-plugin stable-id minter built in `emit`: (kind, leaf) -> id.
+IdFor = Callable[[str, str], str]
 
 # Map file extension -> a coarse language label for the Scripts inventory.
 _LANG_BY_SUFFIX: dict[str, str] = {
@@ -34,7 +42,7 @@ _LANG_BY_SUFFIX: dict[str, str] = {
 }
 
 
-def _read_frontmatter(path: Path) -> dict:
+def _read_frontmatter(path: Path) -> dict[str, Any]:
     """Parse the leading `---\\n...\\n---` YAML frontmatter block of a markdown
     file. Returns {} when the file has no frontmatter, is unreadable, or the
     block is not a mapping. Avoids a python-frontmatter dependency — code-graph-io
@@ -55,7 +63,7 @@ def _read_frontmatter(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _read_json(path: Path) -> dict:
+def _read_json(path: Path) -> dict[str, Any]:
     """Read a JSON file into a dict; {} on any error or non-dict top level."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -64,7 +72,7 @@ def _read_json(path: Path) -> dict:
     return data if isinstance(data, dict) else {}
 
 
-def _as_str_list(value: Any) -> list[str]:
+def _as_str_list(value: object) -> list[str]:
     """Coerce a frontmatter value to a list of strings (tools/skills may be a
     YAML list or a single string)."""
     if isinstance(value, list):
@@ -74,8 +82,8 @@ def _as_str_list(value: Any) -> list[str]:
     return [str(value)]
 
 
-def _parse_commands(plugin_dir: Path, id_for) -> list[dict]:
-    out: list[dict] = []
+def _parse_commands(plugin_dir: Path, id_for: IdFor) -> list[Component]:
+    out: list[Component] = []
     for p in sorted(plugin_dir.glob("commands/*.md")):
         fm = _read_frontmatter(p)
         name = str(fm.get("name") or p.stem)
@@ -89,8 +97,8 @@ def _parse_commands(plugin_dir: Path, id_for) -> list[dict]:
     return out
 
 
-def _parse_agents(plugin_dir: Path, id_for) -> list[dict]:
-    out: list[dict] = []
+def _parse_agents(plugin_dir: Path, id_for: IdFor) -> list[Component]:
+    out: list[Component] = []
     for p in sorted(plugin_dir.glob("agents/*.md")):
         fm = _read_frontmatter(p)
         name = str(fm.get("name") or p.stem)
@@ -106,8 +114,8 @@ def _parse_agents(plugin_dir: Path, id_for) -> list[dict]:
     return out
 
 
-def _parse_skills(plugin_dir: Path, id_for) -> list[dict]:
-    out: list[dict] = []
+def _parse_skills(plugin_dir: Path, id_for: IdFor) -> list[Component]:
+    out: list[Component] = []
     for p in sorted(plugin_dir.glob("skills/*/SKILL.md")):
         fm = _read_frontmatter(p)
         name = str(fm.get("name") or p.parent.name)
@@ -121,11 +129,11 @@ def _parse_skills(plugin_dir: Path, id_for) -> list[dict]:
     return out
 
 
-def _parse_scripts(plugin_dir: Path, id_for) -> list[dict]:
+def _parse_scripts(plugin_dir: Path, id_for: IdFor) -> list[Component]:
     scripts_dir = plugin_dir / "scripts"
     if not scripts_dir.is_dir():
         return []
-    out: list[dict] = []
+    out: list[Component] = []
     for p in sorted(scripts_dir.rglob("*")):
         if not p.is_file():
             continue
@@ -142,12 +150,12 @@ def _parse_scripts(plugin_dir: Path, id_for) -> list[dict]:
     return out
 
 
-def _parse_hooks(plugin_dir: Path, id_for) -> list[dict]:
+def _parse_hooks(plugin_dir: Path, id_for: IdFor) -> list[Component]:
     data = _read_json(plugin_dir / "hooks" / "hooks.json")
     # claude-code hooks.json nests events under a top-level "hooks" map; tolerate
     # either {"hooks": {Event: [...]}} or a bare {Event: [...]} top level.
     events = data.get("hooks") if isinstance(data.get("hooks"), dict) else data
-    out: list[dict] = []
+    out: list[Component] = []
     if not isinstance(events, dict):
         return out
     for event, entries in sorted(events.items()):
@@ -166,10 +174,10 @@ def _parse_hooks(plugin_dir: Path, id_for) -> list[dict]:
     return out
 
 
-def _parse_mcp_servers(plugin_dir: Path, id_for) -> list[dict]:
+def _parse_mcp_servers(plugin_dir: Path, id_for: IdFor) -> list[Component]:
     data = _read_json(plugin_dir / ".mcp.json")
     servers = data.get("mcpServers")
-    out: list[dict] = []
+    out: list[Component] = []
     if not isinstance(servers, dict):
         return out
     for srv_name, cfg in sorted(servers.items()):

@@ -15,10 +15,30 @@ from __future__ import annotations
 import dataclasses
 import json as _json
 from collections.abc import Callable, Iterable, Mapping
-from typing import Any, NamedTuple
+from typing import TYPE_CHECKING, Any, NamedTuple
+
+if TYPE_CHECKING:
+    # Type-only: render must not import queries at module load (see the cycle
+    # note in `_is_importer_batch`). Annotations are strings under
+    # `from __future__ import annotations`, so this never runs.
+    from code_graph_io.queries import (
+        AgentPluginDescription,
+        AppDescription,
+        BuiltinDescription,
+        ChildNode,
+        DependencyDescription,
+        EntryPointDescription,
+        ExportRecord,
+        NodeRecord,
+        PackageDescription,
+        PathDescription,
+        RepoDescription,
+        SuiteDescription,
+        SymbolDescription,
+    )
 
 
-def _to_dict(record: Any) -> dict[str, Any]:
+def _to_dict(record: object) -> dict[str, Any]:
     if dataclasses.is_dataclass(record) and not isinstance(record, type):
         out: dict[str, Any] = dataclasses.asdict(record)
         return out
@@ -119,13 +139,13 @@ def _aligned_block(title: str, pairs: list[tuple[str, str]]) -> list[str]:
 _SYMBOL_KINDS = ("function", "class", "method", "type")
 
 
-def _child_label(child: Any) -> str:
+def _child_label(child: ChildNode) -> str:
     """Display identity for a children-tree node.
 
     Source-code symbols (function/class/method/type) have no uri, so show their
     node name. Everything else: uri -> path:line -> path.
     """
-    name = getattr(child, "name", None)
+    name = child.name
     if child.kind in _SYMBOL_KINDS and name:
         return name
     if child.uri:
@@ -137,7 +157,7 @@ def _child_label(child: Any) -> str:
     return "(unknown)"
 
 
-def _ascii_tree(children: list[Any], prefix: str = "") -> list[str]:
+def _ascii_tree(children: list[ChildNode], prefix: str = "") -> list[str]:
     """Depth-first box-drawing render of a ChildNode tree. 3-char connectors."""
     lines: list[str] = []
     for i, child in enumerate(children):
@@ -150,7 +170,7 @@ def _ascii_tree(children: list[Any], prefix: str = "") -> list[str]:
     return lines
 
 
-def _children_json(children: list[Any]) -> list[dict[str, Any]]:
+def _children_json(children: list[ChildNode]) -> list[dict[str, Any]]:
     """Nested {kind,uri,path,line,name,children} array mirroring the tree."""
     return [dataclasses.asdict(c) for c in children]
 
@@ -165,7 +185,7 @@ def describe_block(
     relationships: list[Rel],
     nav: list[str],
     fmt: str,
-    children: list[Any] | None = None,
+    children: list[ChildNode] | None = None,
     children_depth: int | None = None,
 ) -> str:
     """Single sectioned-spine builder shared by every format_<kind>.
@@ -287,7 +307,7 @@ def render(
 # ── Per-kind formatters (extracted from q_describe_*.py inline printers) ──────
 
 
-def _package_relationships(desc: Any) -> list[Rel]:
+def _package_relationships(desc: PackageDescription) -> list[Rel]:
     rels: list[Rel] = []
     if desc.internal_dependencies:
         rels.append(Rel("internal deps", "internal_dependencies", list(desc.internal_dependencies)))
@@ -305,7 +325,11 @@ def _package_nav(name: str) -> list[str]:
 
 
 def format_package(
-    desc: Any, fmt: str, *, children: list[Any] | None = None, effective_depth: int | None = None
+    desc: PackageDescription,
+    fmt: str,
+    *,
+    children: list[ChildNode] | None = None,
+    effective_depth: int | None = None,
 ) -> str:
     """Format a PackageDescription on the sectioned spine."""
     attributes = [
@@ -328,7 +352,9 @@ def format_package(
     )
 
 
-def format_app(desc: Any, fmt: str, *, children: list[Any] | None = None, effective_depth: int | None = None) -> str:
+def format_app(
+    desc: AppDescription, fmt: str, *, children: list[ChildNode] | None = None, effective_depth: int | None = None
+) -> str:
     """Format an AppDescription on the sectioned spine (including app_kind and signals)."""
     rels: list[Rel] = []
     if desc.entry_points:
@@ -357,7 +383,7 @@ def format_app(desc: Any, fmt: str, *, children: list[Any] | None = None, effect
     )
 
 
-def _node_label(rec: Any) -> str:
+def _node_label(rec: NodeRecord | ExportRecord) -> str:
     tc = (getattr(rec, "attrs", None) or {}).get("token_count")
     tok = f" ({tc} tokens)" if tc is not None else ""  # NodeRecord children carry it; ExportRecord has no attrs
     if getattr(rec, "line", None) is not None:
@@ -372,7 +398,9 @@ def _role_flags_human(role_flags: dict[str, bool] | None) -> str:
     return ", ".join(on) or "(none)"
 
 
-def format_path(desc: Any, fmt: str, *, children: list[Any] | None = None, effective_depth: int | None = None) -> str:
+def format_path(
+    desc: PathDescription, fmt: str, *, children: list[ChildNode] | None = None, effective_depth: int | None = None
+) -> str:
     """Format a PathDescription (a file node) on the spine."""
     attributes = [Attr("role_flags", "role_flags", _role_flags_human(desc.role_flags), desc.role_flags)]
     if desc.token_count is not None:  # deriver v7 file token_count (Design decision 8)
@@ -398,7 +426,9 @@ def format_path(desc: Any, fmt: str, *, children: list[Any] | None = None, effec
     )
 
 
-def format_repo(desc: Any, fmt: str, *, children: list[Any] | None = None, effective_depth: int | None = None) -> str:
+def format_repo(
+    desc: RepoDescription, fmt: str, *, children: list[ChildNode] | None = None, effective_depth: int | None = None
+) -> str:
     """Format a RepoDescription on the sectioned spine."""
     attributes = [
         Attr.scalar("url", "url", desc.url),
@@ -420,7 +450,7 @@ def format_repo(desc: Any, fmt: str, *, children: list[Any] | None = None, effec
     )
 
 
-def format_entry_point(desc: Any, fmt: str) -> str:
+def format_entry_point(desc: EntryPointDescription, fmt: str) -> str:
     """Format an EntryPointDescription on the sectioned spine."""
     attributes = [
         Attr.scalar("kind", "kind", desc.kind),
@@ -441,7 +471,9 @@ def format_entry_point(desc: Any, fmt: str) -> str:
     )
 
 
-def format_suite(desc: Any, fmt: str, *, children: list[Any] | None = None, effective_depth: int | None = None) -> str:
+def format_suite(
+    desc: SuiteDescription, fmt: str, *, children: list[ChildNode] | None = None, effective_depth: int | None = None
+) -> str:
     """Format a SuiteDescription on the sectioned spine."""
     attributes = [
         Attr.scalar("kind", "kind", desc.kind),
@@ -461,7 +493,7 @@ def format_suite(desc: Any, fmt: str, *, children: list[Any] | None = None, effe
     )
 
 
-def format_dependency(desc: Any, fmt: str) -> str:
+def format_dependency(desc: DependencyDescription, fmt: str) -> str:
     """Format a DependencyDescription on the sectioned spine."""
     attributes = [
         Attr.scalar("ecosystem", "ecosystem", desc.ecosystem),
@@ -480,7 +512,7 @@ def format_dependency(desc: Any, fmt: str) -> str:
     )
 
 
-def format_builtin(desc: Any, fmt: str) -> str:
+def format_builtin(desc: BuiltinDescription, fmt: str) -> str:
     """Format a BuiltinDescription on the sectioned spine."""
     attributes = [
         Attr.scalar("language", "language", desc.language),
@@ -499,7 +531,7 @@ def format_builtin(desc: Any, fmt: str) -> str:
     )
 
 
-def format_agent_plugin(desc: Any, fmt: str) -> str:
+def format_agent_plugin(desc: AgentPluginDescription, fmt: str) -> str:
     """Format an AgentPluginDescription on the sectioned spine."""
     attributes = [
         Attr.scalar("ecosystem", "ecosystem", desc.ecosystem),
@@ -523,7 +555,9 @@ def format_agent_plugin(desc: Any, fmt: str) -> str:
     )
 
 
-def format_symbol(desc: Any, fmt: str, *, children: list[Any] | None = None, effective_depth: int | None = None) -> str:
+def format_symbol(
+    desc: SymbolDescription, fmt: str, *, children: list[ChildNode] | None = None, effective_depth: int | None = None
+) -> str:
     """Format a SymbolDescription (function/class/method/type) on the spine."""
     loc = f"{desc.path}:{desc.line}" if desc.line is not None else (desc.path or "(unknown)")
     exported = f"yes (from {desc.exported_from})" if desc.exported_from else "no"

@@ -25,6 +25,11 @@ _DEP_NAME_RE = re.compile(r"^[A-Za-z0-9_.\-]+")
 # "depends_on" and this Package→Package "depends_on_package" are distinct rows.
 _DEPENDS_ON_PACKAGE_KIND = "depends_on_package"
 
+# One deferred cross-repo dependency, collected during `refresh` and drained by
+# `link_cross_repo_packages` once every workspace member exists:
+# (consumer_kind, consumer_name, consumer_rel, target_kind, target_name, target_rel).
+CrossRepoLink = tuple[str, str, str, str, str, str]
+
 
 def _normalize_name(name: str) -> str:
     """Canonicalize a package/dependency name for cross-form comparison.
@@ -263,7 +268,7 @@ def refresh(
     ctx: RepoContext,
     current_repo: str | None = None,
     global_workspace: dict[str, tuple[str, str, str, str]] | None = None,
-    deferred_cross_repo: list | None = None,
+    deferred_cross_repo: list[CrossRepoLink] | None = None,
 ) -> None:
     """Rescan manifests under `repo_root` and upsert kind:package nodes + contains edges.
 
@@ -558,7 +563,7 @@ def refresh(
         upsert.upsert_records(conn, as_graph_records(nodes=dep_nodes, edges=dep_edges))
 
 
-def link_cross_repo_packages(conn: sqlite3.Connection, deferred: list) -> None:
+def link_cross_repo_packages(conn: sqlite3.Connection, deferred: list[CrossRepoLink]) -> None:
     """Emit cross-repo used_by + depends_on_package edges after all members exist.
 
     `deferred` carries (consumer_kind, consumer_name, consumer_rel, target_kind,

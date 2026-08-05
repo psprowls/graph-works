@@ -17,6 +17,7 @@ import sqlite3
 import sys
 import tomllib
 from pathlib import Path
+from typing import Protocol
 
 from code_parser.projections.graph import GraphEdge, GraphNode
 
@@ -190,12 +191,32 @@ def _emit_pyproject_entries(
     return nodes, edges
 
 
+class _ExportCallback(Protocol):
+    """The `_emit_entry` closure `_walk_exports` calls for each string leaf.
+
+    Spelled as a Protocol rather than a `Callable[...]` because the callback is
+    invoked with keyword arguments, which `Callable` cannot express.
+    """
+
+    def __call__(
+        self,
+        ep_name: str,
+        value: str | None,
+        *,
+        entry_kind: str,
+        source: str,
+        condition: str | None = None,
+        is_wildcard: bool = False,
+        path_pattern: str | None = None,
+    ) -> None: ...
+
+
 def _walk_exports(
     obj: object,
     *,
     key_path: str,
     condition: str | None,
-    callback,
+    callback: _ExportCallback,
     source: str,
 ) -> None:
     """Recursively walk a package.json exports object, calling callback for

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import tree_sitter
 
@@ -48,8 +49,8 @@ def _resolve_body(node: tree_sitter.Node, config: LanguageConfig) -> tree_sitter
     return None
 
 
-def _collect_parse_errors(root: tree_sitter.Node) -> list[dict]:
-    errors: list[dict] = []
+def _collect_parse_errors(root: tree_sitter.Node) -> list[dict[str, int]]:
+    errors: list[dict[str, int]] = []
 
     def visit(node: tree_sitter.Node) -> None:
         if node.is_error or node.type == "ERROR":
@@ -68,13 +69,15 @@ def _collect_parse_errors(root: tree_sitter.Node) -> list[dict]:
     return errors
 
 
-def _extract_call_target(call_node: tree_sitter.Node, source: bytes, config: LanguageConfig) -> tuple[str, dict]:
+def _extract_call_target(
+    call_node: tree_sitter.Node, source: bytes, config: LanguageConfig
+) -> tuple[str, dict[str, Any]]:
     """Return (target_name, attrs) for a call expression."""
     fn = call_node.child_by_field_name(config.call_function_field)
     if fn is None:
         return ("<unknown>", {})
     if fn.type in config.call_member_node_types:
-        attrs: dict = {"is_member": True}
+        attrs: dict[str, Any] = {"is_member": True}
         obj = fn.child_by_field_name(config.call_member_object_field)
         if obj is not None:
             attrs["receiver"] = _text(obj, source)
@@ -429,7 +432,7 @@ def _extract_exports(file_root: tree_sitter.Node, source: bytes, config: Languag
 
             walk(child)
         for name, symbol_kind in named:
-            attrs: dict = {}
+            attrs: dict[str, Any] = {}
             if symbol_kind is not None:
                 attrs["symbol_kind"] = symbol_kind
             refs.append(

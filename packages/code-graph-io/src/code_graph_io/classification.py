@@ -15,6 +15,7 @@ implementation in code_graph_io.queries._VALID_APP_KINDS — keep both in sync.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from code_graph_io.queries import _VALID_APP_KINDS
 
@@ -25,7 +26,7 @@ _FRAMEWORK_PRECEDENCE = ("nextjs", "expo", "electron", "spa")
 
 
 def classify(
-    info: dict,
+    info: dict[str, Any],
     pkg_dir: Path,
 ) -> tuple[str, str | None, list[str]]:
     """Return (kind, app_kind, app_signals) for a manifest info dict.

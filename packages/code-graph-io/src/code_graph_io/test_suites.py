@@ -25,6 +25,7 @@ import tomllib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from code_parser.projections.graph import GraphEdge, GraphNode
 
@@ -338,7 +339,7 @@ def emit(
         # packages have a tests/ directory (previously all resolved to basename 'tests').
         suite_name = r.rel_path if r.owner_kind == "repository" else f"{owner_name}-{kind_attr}-tests"
 
-        attrs: dict = {
+        attrs: dict[str, Any] = {
             "uri": test_suite_uri(ctx, r.rel_path),
             "suite_kind": kind_attr,
             "path": r.rel_path,

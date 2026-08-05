@@ -7,6 +7,7 @@ Emits SourceNode/Reference of the same shape as the generic walker.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import tree_sitter
 
@@ -24,8 +25,8 @@ def _text(node: tree_sitter.Node, source: bytes) -> str:
     return source[node.start_byte : node.end_byte].decode("utf-8", errors="replace")
 
 
-def _collect_parse_errors(root: tree_sitter.Node) -> list[dict]:
-    errors: list[dict] = []
+def _collect_parse_errors(root: tree_sitter.Node) -> list[dict[str, int]]:
+    errors: list[dict[str, int]] = []
 
     def visit(node: tree_sitter.Node) -> None:
         if node.is_error or node.type == "ERROR":
@@ -65,7 +66,7 @@ def _calls_in(body: tree_sitter.Node, source: bytes) -> list[Reference]:
                 if fn.type == "attribute":
                     attr = fn.child_by_field_name("attribute")
                     name = _text(attr, source) if attr is not None else _text(fn, source)
-                    attrs: dict = {"is_member": True}
+                    attrs: dict[str, Any] = {"is_member": True}
                     obj = fn.child_by_field_name("object")
                     if obj is not None:
                         attrs["receiver"] = _text(obj, source)
@@ -263,6 +264,7 @@ def _all_exports_at(file_root: tree_sitter.Node, source: bytes) -> list[Referenc
     """
     refs: list[Reference] = []
     for child in file_root.children:
+        ass: tree_sitter.Node | None
         # tree-sitter-python: assignment is a direct child of module
         if child.type == "assignment":
             ass = child

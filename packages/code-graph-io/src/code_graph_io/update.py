@@ -92,21 +92,21 @@ def _is_parseable(path: str) -> bool:
     return Path(path).suffix in EXTENSIONS
 
 
-def _delete_file_nodes(conn, path: str, repo_uri_val: str) -> None:
+def _delete_file_nodes(conn: sqlite3.Connection, path: str, repo_uri_val: str) -> None:
     conn.execute(
         "DELETE FROM nodes WHERE path = ? AND (repo = ? OR repo IS NULL)",
         (path, repo_uri_val),
     )
 
 
-def _set_metadata(conn, key: str, value: str) -> None:
+def _set_metadata(conn: sqlite3.Connection, key: str, value: str) -> None:
     conn.execute(
         "INSERT INTO metadata(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value),
     )
 
 
-def _get_metadata(conn, key: str) -> str | None:
+def _get_metadata(conn: sqlite3.Connection, key: str) -> str | None:
     row = conn.execute("SELECT value FROM metadata WHERE key = ?", (key,)).fetchone()
     return row[0] if row else None
 
@@ -125,7 +125,7 @@ def _changed_files(repo_root: Path, full: bool, prev: str | None) -> list[tuple[
 
 
 def _process_files(
-    conn,
+    conn: sqlite3.Connection,
     repo_root: Path,
     changed: Iterable[tuple[str, str]],
     skip_dirs: frozenset[str],
@@ -207,13 +207,13 @@ def _unlink_db_files(db_path: Path) -> None:
 
 
 def _update_one_repo(
-    conn,
+    conn: sqlite3.Connection,
     repo_root: Path,
     workspace: Path,
     *,
     full: bool,
-    global_workspace: dict,
-    deferred: list,
+    global_workspace: dict[str, tuple[str, str, str, str]],
+    deferred: list[packages.CrossRepoLink],
 ) -> None:
     """Run the single-repo pipeline for one member, then stamp its nodes.
 
@@ -362,7 +362,7 @@ def run_workspace(
                 )
                 full = True
             global_workspace = packages.build_workspace_index(members)
-            deferred: list = []
+            deferred: list[packages.CrossRepoLink] = []
             with store.transaction(conn):
                 for repo_root in members:
                     _update_one_repo(

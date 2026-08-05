@@ -11,6 +11,7 @@ from code_parser.grammars import get_language
 from code_parser.parsers._base import LanguageParser
 from code_parser.parsers._generic import generic_walk
 from code_parser.parsers.javascript import JAVASCRIPT_CONFIG
+from code_parser.tree import SourceNode
 
 TYPESCRIPT_CONFIG = replace(
     JAVASCRIPT_CONFIG,
@@ -38,7 +39,7 @@ class TypeScriptParser(LanguageParser):
     def grammar(self) -> tree_sitter.Language:
         return get_language("typescript")
 
-    def parse(self, path, source, *, package=None):
+    def parse(self, path: Path, source: bytes, *, package: str | None = None) -> SourceNode:
         config = TSX_CONFIG if Path(path).suffix == ".tsx" else TYPESCRIPT_CONFIG
         return generic_walk(
             config,

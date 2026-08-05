@@ -12,15 +12,9 @@ lint:
     uv run ruff check .
     uv run ruff format --check .
 
-# Static types, strict.
-#
-# code-graph-io and code-parser are deliberately NOT here yet: between them
-# they carry 125 `no-untyped-def` / `type-arg` findings. The same gap is
-# waived in ruff as ANN (see per-file-ignores in pyproject.toml), so it is
-# one debt recorded in two places. Add both src trees to this line when that
-# work lands, and delete the ruff waiver in the same change.
+# Static types, strict — every package.
 types:
-    uv run mypy --strict packages/okf-io/src packages/okf-ext/src
+    uv run mypy --strict packages/okf-io/src packages/okf-ext/src packages/code-graph-io/src packages/code-parser/src
 
 # Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
 # exists: nothing enforces this but the person who runs it.

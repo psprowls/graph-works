@@ -21,7 +21,7 @@ no remote yet, ADR-0010).
 |---|---|
 | `just` / `just check` | `lint` + `types` + `cov` — the full gate |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
-| `just types` | `uv run mypy --strict packages/okf-io/src` |
+| `just types` | `uv run mypy --strict` over all four packages' `src` trees |
 | `just test` | `uv run pytest` |
 | `just cov` | pytest with branch coverage, **`--cov-fail-under=95`** |
 

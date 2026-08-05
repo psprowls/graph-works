@@ -153,9 +153,12 @@ def _harvest_node_builtins() -> list[str] | None:
     if out.returncode != 0:
         return None
     try:
-        return json.loads(out.stdout)
+        data = json.loads(out.stdout)
     except json.JSONDecodeError:
         return None
+    # A non-list payload means Node printed something we don't understand;
+    # that is the "any failure" case the docstring promises returns None.
+    return [str(m) for m in data] if isinstance(data, list) else None
 
 
 # ---------------------------------------------------------------------------

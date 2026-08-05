@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from typing import Any
+
+# A SQL bind-parameter list, built up alongside a WHERE clause. sqlite3 accepts
+# str / int / float / bytes / None, and these lists mix them freely.
+SqlParams = list[Any]
 
 # DB node kind -> the value accepted by `gw graph describe --kind`.
 # Entity kinds whose CLI value differs from the DB kind, plus the code kinds
@@ -90,7 +96,7 @@ class NodeRecord:
     name: str
     path: str | None
     line: int | None
-    attrs: dict
+    attrs: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -254,15 +260,15 @@ class AgentPluginDescription:
     ecosystem: str
     version: str
     description: str
-    commands: list[dict] = field(default_factory=list)
-    agents: list[dict] = field(default_factory=list)
-    skills: list[dict] = field(default_factory=list)
-    scripts: list[dict] = field(default_factory=list)
-    hooks: list[dict] = field(default_factory=list)
-    mcp_servers: list[dict] = field(default_factory=list)
+    commands: list[dict[str, Any]] = field(default_factory=list)
+    agents: list[dict[str, Any]] = field(default_factory=list)
+    skills: list[dict[str, Any]] = field(default_factory=list)
+    scripts: list[dict[str, Any]] = field(default_factory=list)
+    hooks: list[dict[str, Any]] = field(default_factory=list)
+    mcp_servers: list[dict[str, Any]] = field(default_factory=list)
 
 
-def _row_to_node(row) -> NodeRecord:
+def _row_to_node(row: Sequence[Any]) -> NodeRecord:
     """Project a SQL row into a NodeRecord.
 
     Accepts 5-column shape `(kind, name, path, line, attrs_json)`, 6-column
@@ -291,7 +297,7 @@ def _row_to_node(row) -> NodeRecord:
     return NodeRecord(kind=kind, name=name, path=path, line=line, attrs=attrs)
 
 
-def _load_entry_point_description(row) -> EntryPointDescription:
+def _load_entry_point_description(row: Sequence[Any]) -> EntryPointDescription:
     """Project a raw EntryPoint SQL row into a Description.
 
     Expected row shape: (name, uri, attrs_json, impl_path).
@@ -313,7 +319,7 @@ def _load_entry_point_description(row) -> EntryPointDescription:
     )
 
 
-def _load_suite_description(row) -> SuiteDescription:
+def _load_suite_description(row: Sequence[Any]) -> SuiteDescription:
     """Project a TestSuite row into a SuiteDescription.
 
     Expected row shape: (name, uri, attrs_json, file_count).
@@ -355,7 +361,7 @@ def find(
         raise ValueError("find requires at least one of name, kind, or in_package")
 
     where_parts: list[str] = []
-    params: list = []
+    params: SqlParams = []
     if name is not None:
         # Suffix-aware: a bare leaf matches both an exact node and any qualified
         # `*.name` node (e.g. `save` reaches `Foo.save`). LIKE '%.name' can't use
@@ -513,7 +519,7 @@ def describe_symbol(
     --include-tests` directly.
     """
     where = ["kind = ?", "(name = ? OR name LIKE '%.' || ?)"]
-    params: list = [kind, name, name]
+    params: SqlParams = [kind, name, name]
     if path is not None:
         where.append("path = ?")
         params.append(path)
@@ -969,20 +975,20 @@ def _node_id(conn: sqlite3.Connection, node: NodeRecord) -> int | None:
     if uri:
         row = conn.execute("SELECT id FROM nodes WHERE uri = ?", (uri,)).fetchone()
         if row:
-            return row[0]
+            return int(row[0])
     if node.path is not None and node.line is not None:
         row = conn.execute(
             "SELECT id FROM nodes WHERE kind = ? AND path = ? AND line = ?",
             (node.kind, node.path, node.line),
         ).fetchone()
         if row:
-            return row[0]
+            return int(row[0])
     if node.path is not None:
         row = conn.execute("SELECT id FROM nodes WHERE kind = ? AND path = ?", (node.kind, node.path)).fetchone()
         if row:
-            return row[0]
+            return int(row[0])
     row = conn.execute("SELECT id FROM nodes WHERE kind = ? AND name = ? LIMIT 1", (node.kind, node.name)).fetchone()
-    return row[0] if row else None
+    return int(row[0]) if row else None
 
 
 # Outgoing physically_contains, filtered to the given dst kinds, ordered
@@ -1342,7 +1348,7 @@ def imported_by(
     depth: int = 1,
 ) -> list[ImporterRecord]:
     symbol_filter = "AND dst.name = ?" if symbol is not None else ""
-    base_params: list = [path]
+    base_params: SqlParams = [path]
     if symbol is not None:
         base_params.append(symbol)
 
@@ -1522,7 +1528,7 @@ def node_count(conn: sqlite3.Connection) -> int:
 
     Source: graph_wiki_core/commands/query.py + graph.py (`SELECT COUNT(*) FROM nodes`).
     """
-    return conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+    return int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
 
 
 def node_counts_by_kind(conn: sqlite3.Connection) -> dict[str, int]:
@@ -1582,7 +1588,7 @@ def file_paths_in_package(conn: sqlite3.Connection, name: str) -> list[str]:
     return sorted({r[0] for r in rows if r[0]})
 
 
-def file_attrs(conn: sqlite3.Connection, path: str) -> dict | None:
+def file_attrs(conn: sqlite3.Connection, path: str) -> dict[str, Any] | None:
     """Parsed `attrs_json` for the `file` node at `path`, or None.
 
     Source: graph_wiki_core/commands/guidance_signals.py `_derive_path_languages`
@@ -1594,12 +1600,13 @@ def file_attrs(conn: sqlite3.Connection, path: str) -> dict | None:
     if not row or not row[0]:
         return None
     try:
-        return json.loads(row[0])
+        data = json.loads(row[0])
     except ValueError:
         return None
+    return data if isinstance(data, dict) else None
 
 
-def files_in_node(conn: sqlite3.Connection, node_id: int) -> list[tuple]:
+def files_in_node(conn: sqlite3.Connection, node_id: int) -> list[tuple[Any, ...]]:
     """`(id, path, attrs_json)` rows for `file` nodes contained by `node_id`.
 
     Matched via `contains` edge; filters `f.path IS NOT NULL`, ordered by `f.path`.
@@ -1617,7 +1624,7 @@ def files_in_node(conn: sqlite3.Connection, node_id: int) -> list[tuple]:
 
 def symbol_names_under_files(
     conn: sqlite3.Connection,
-    file_ids,
+    file_ids: Iterable[int],
     kinds: tuple[str, ...] = ("class", "function", "method"),
 ) -> list[str]:
     """Names of `kinds` symbols contained by any file in `file_ids`.
@@ -1626,21 +1633,21 @@ def symbol_names_under_files(
     (the symbol-haystack query) — SQL and `_SYMBOL_KINDS` default ported VERBATIM.
     Returns [] for empty `file_ids` (no SQL issued).
     """
-    file_ids = list(file_ids)
-    if not file_ids:
+    ids = list(file_ids)
+    if not ids:
         return []
-    placeholders = ",".join("?" for _ in file_ids)
+    placeholders = ",".join("?" for _ in ids)
     kind_ph = ",".join("?" for _ in kinds)
     rows = conn.execute(
         f"SELECT n.name FROM edges e JOIN nodes n ON e.dst = n.id "
         f"WHERE e.src IN ({placeholders}) AND e.kind='contains' "
         f"AND n.kind IN ({kind_ph}) AND n.name IS NOT NULL",
-        (*file_ids, *kinds),
+        (*ids, *kinds),
     ).fetchall()
     return [r[0] for r in rows]
 
 
-def declared_entry_points(conn: sqlite3.Connection) -> list[tuple]:
+def declared_entry_points(conn: sqlite3.Connection) -> list[tuple[Any, ...]]:
     """`(package_name, entry_point_path, callable)` for every declared entry point.
 
     Source: graph_cli/q_list_scripts.py (the declared-annotation lookup) — SQL
@@ -1704,7 +1711,7 @@ def entity_by_name(
     conn: sqlite3.Connection,
     name: str,
     kinds: tuple[str, ...] = _ENTITY_KINDS,
-) -> list[tuple]:
+) -> list[tuple[Any, ...]]:
     """Return ALL entity-kind nodes named `name` (with a non-null uri) as `(name, uri, kind)`.
 
     Returns the full `fetchall()` list (NOT a single row) so callers handle
@@ -1717,7 +1724,7 @@ def entity_by_name(
     return conn.execute(sql, [name, *kinds]).fetchall()
 
 
-def package_or_app_by_dir(conn: sqlite3.Connection, path: str) -> tuple | None:
+def package_or_app_by_dir(conn: sqlite3.Connection, path: str) -> tuple[Any, ...] | None:
     """Return `(uri, name, id)` of the package/app whose `path` equals `path`, or None.
 
     Matches via `kind IN ('package','app')`, exact `path = ?`,

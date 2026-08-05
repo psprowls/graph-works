@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "required": ["type", "title"],
+  "properties": {
+    "type": { "const": "Reference" },
+    "title": { "type": "string" }
+  }
+}

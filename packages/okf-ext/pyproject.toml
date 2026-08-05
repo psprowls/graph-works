@@ -21,3 +21,10 @@ dependencies = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/okf_ext"]
+
+[project.optional-dependencies]
+# The `schemas` capability, and only it, needs a JSONSchema engine. `>=4.18` is
+# where `referencing` landed, which is what resolves `$ref` across files.
+# `okf_ext/schemas/__init__.py` raises an ImportError naming this extra when it
+# is missing, per the README's dependency policy.
+schemas = ["jsonschema>=4.18"]

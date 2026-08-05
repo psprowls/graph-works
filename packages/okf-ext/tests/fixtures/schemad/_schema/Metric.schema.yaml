@@ -1,0 +1,10 @@
+type: object
+required: [type, title, owner]
+properties:
+  type: {const: Metric}
+  title: {type: string}
+  description: {type: string}
+  owner: {$ref: "_base.schema.yaml#/$defs/actor"}
+  tags:
+    type: array
+    items: {type: string}

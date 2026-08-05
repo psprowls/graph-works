@@ -25,6 +25,7 @@ shared layer past both `test_the_shared_layer_imports_no_capability`
 from __future__ import annotations
 
 import ast
+import importlib
 import tomllib
 from pathlib import Path
 
@@ -88,13 +89,14 @@ def _layer_names_in_contracts(pyproject_path: Path) -> set[str]:
     names: set[str] = set()
     for contract in contracts:
         for entry in contract.get("layers", []):
-            # A layers contract entry is either a single module name, or a
-            # list of module names that are siblings at the same level —
-            # either shape names a real layer and both count.
-            if isinstance(entry, str):
-                names.add(entry)
-            elif isinstance(entry, list):
-                names.update(str(item) for item in entry)
+            # A layers entry is either one module name, a list of names, or a
+            # `a : b` string naming siblings at one level. All three shapes name
+            # real layers and all three count -- treating the third as one
+            # opaque string is how a capability goes uncovered while the test
+            # still passes.
+            items = entry if isinstance(entry, list) else [entry]
+            for item in items:
+                names.update(part.strip() for part in str(item).split(":") if part.strip())
     return names
 
 
@@ -186,6 +188,39 @@ def test_every_capability_is_named_in_the_layers_contract(modules: list[Path]) -
     )
 
 
+def _independence_modules_in_contracts(pyproject_path: Path) -> set[str]:
+    with pyproject_path.open("rb") as handle:
+        data = tomllib.load(handle)
+    contracts = data["tool"]["importlinter"].get("contracts", [])
+    names: set[str] = set()
+    for contract in contracts:
+        if contract.get("type") == "independence":
+            names.update(str(item) for item in contract.get("modules", []))
+    return names
+
+
+def test_every_capability_is_named_in_the_independence_contract(modules: list[Path]) -> None:
+    """The `layers` contract's blind spot has a twin in `independence`: it too
+    only checks the modules it was told to enumerate, so a capability present
+    in the `layers` entry but missing from `independence.modules` would pass
+    `lint-imports` (`2 kept, 0 broken`) while a real cross-capability import
+    between it and a sibling goes undetected. Checked separately from the
+    `layers` contract above because the two use different TOML keys
+    (`layers` vs. `modules`) and a capability could drift out of either one
+    independently of the other.
+    """
+    pyproject_path = _find_repo_pyproject()
+    named = _independence_modules_in_contracts(pyproject_path)
+    missing = sorted(
+        f"okf_ext.{name}" for name in capability_names(modules) if f"okf_ext.{name}" not in named
+    )
+    assert not missing, (
+        f"{missing} not named in the `independence` contract's `modules` in "
+        f"{pyproject_path}; an unlisted capability's imports of its siblings "
+        "go unchecked by `lint-imports` even though the contract reports KEPT"
+    )
+
+
 def _ruf022_group(name: str) -> int:
     """`ruff`'s `RUF022` groups `__all__` into UPPER_SNAKE_CASE constants,
     then CapWords classes, then everything else, each group alphabetical —
@@ -201,33 +236,60 @@ def _ruf022_group(name: str) -> int:
     return 2
 
 
-def test_all_lists_exactly_what_the_module_exports() -> None:
+#: The eight topic prefixes okf-io's own catalog claims. Restated here rather
+#: than imported from `okf_io._rules`: nothing outside that package should reach
+#: into its underscore modules, and okf-io raises at runtime anyway the moment an
+#: external rule emits a colliding prefix. This says so up front instead of
+#: waiting for a bundle to trigger it.
+BUILT_IN_TOPICS = frozenset(
+    {
+        "computation",
+        "frontmatter",
+        "legacy",
+        "lifecycle",
+        "links",
+        "provenance",
+        "reserved",
+        "trust",
+    }
+)
+
+
+@pytest.fixture(params=["tags", "schemas"])
+def capability(request):
+    return importlib.import_module(f"okf_ext.{request.param}")
+
+
+def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path]) -> None:
+    """The `capability` fixture is a literal list, unlike `capability_names`.
+    This is what stops a third capability from being added without anyone
+    extending the surface tests below."""
+    assert capability_names(modules) == {"tags", "schemas"}
+
+
+def test_all_lists_exactly_what_the_module_exports(capability) -> None:
     """A stale `__all__` is a public surface that lies, and an unsorted one
     would be silently reordered out from under this test by `ruff check
     --fix` (`RUF022`) the next time someone runs it."""
-    from okf_ext import tags
+    assert list(capability.__all__) == sorted(
+        capability.__all__, key=lambda name: (_ruf022_group(name), name)
+    )
+    for name in capability.__all__:
+        assert hasattr(capability, name), f"__all__ names {name}, which does not exist"
 
-    assert list(tags.__all__) == sorted(tags.__all__, key=lambda name: (_ruf022_group(name), name))
-    for name in tags.__all__:
-        assert hasattr(tags, name), f"__all__ names {name}, which does not exist"
 
-
-def test_every_name_in_all_is_individually_importable() -> None:
+def test_every_name_in_all_is_individually_importable(capability) -> None:
     """`hasattr` alone would pass for a name that only resolves as an
     attribute of the already-imported module object, which is not the same
-    claim as "this name is importable". Each name gets its own
-    `from okf_ext.tags import <name>` statement, executed for real, which is
-    the exact form the module docstring advertises to callers."""
-    from okf_ext import tags
-
-    for name in tags.__all__:
+    claim as "this name is importable"."""
+    for name in capability.__all__:
         namespace: dict[str, object] = {}
-        exec(f"from okf_ext.tags import {name} as _value", namespace)
-        assert namespace["_value"] is getattr(tags, name)
+        exec(f"from {capability.__name__} import {name} as _value", namespace)
+        assert namespace["_value"] is getattr(capability, name)
 
 
-def test_the_documented_surface_is_present() -> None:
-    """Spec §12.4: the functions this work item promised to export."""
+def test_the_documented_tags_surface_is_present() -> None:
+    """Spec §12.4 of the tags work item."""
     from okf_ext import tags
 
     for name in (
@@ -243,3 +305,24 @@ def test_the_documented_surface_is_present() -> None:
         "apply",
     ):
         assert callable(getattr(tags, name))
+
+
+def test_the_documented_schemas_surface_is_present() -> None:
+    """Spec §5 of the schemas work item: two functions, two values, two codes."""
+    from okf_ext import schemas
+
+    assert callable(schemas.load_schemas)
+    assert callable(schemas.schema_rule)
+    assert schemas.TOPIC == "schemas"
+    assert schemas.CODES == ("schemas.invalid", "schemas.no-schema-for-type")
+    assert schemas.DEFAULT_SCHEMA_DIRNAME == "_schema"
+    assert schemas.DEFAULT_IGNORE == ("_schema/*", "*/_schema/*")
+
+
+def test_no_capability_claims_a_built_in_topic_prefix() -> None:
+    """Every capability's claim on a topic prefix, checked in one place."""
+    from okf_ext import schemas, tags
+
+    claimed = {tags.TOPIC, schemas.TOPIC}
+    assert len(claimed) == 2, "two capabilities claiming one prefix"
+    assert not (claimed & BUILT_IN_TOPICS)

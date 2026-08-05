@@ -22,11 +22,14 @@ okf-ext = { workspace = true }
 dev = [
     "import-linter>=2.0",
     "mypy>=1.11",
-    "okf-ext",
+    "okf-ext[schemas]",
     "okf-io",
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.6",
+    # `jsonschema` ships no `py.typed`, so `just types` fails without stubs.
+    # Dev tooling only — it is not a runtime dependency of any package.
+    "types-jsonschema",
 ]
 
 [tool.ruff]
@@ -75,12 +78,18 @@ source = ["okf_io", "okf_ext"]
 # contract naming `okf_ext` reports KEPT even when the import exists. That half
 # is `packages/okf-ext/tests/test_ext_boundaries.py`.
 #
-# The independence contract between sibling capabilities arrives with the
-# second capability; with one, it has nothing to assert.
+# The independence contract between sibling capabilities is stated explicitly
+# rather than left to the `a : b` layer syntax's same-level semantics: the rule
+# the README promises should be legible in the file, not inferred from a colon.
 [tool.importlinter]
 root_package = "okf_ext"
 
 [[tool.importlinter.contracts]]
 name = "Capabilities sit above the shared context, never below it"
 type = "layers"
-layers = ["okf_ext.tags", "okf_ext.context"]
+layers = ["okf_ext.schemas : okf_ext.tags", "okf_ext.context"]
+
+[[tool.importlinter.contracts]]
+name = "Capabilities never import each other"
+type = "independence"
+modules = ["okf_ext.tags", "okf_ext.schemas"]

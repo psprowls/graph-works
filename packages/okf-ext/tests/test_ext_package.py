@@ -54,3 +54,27 @@ def test_the_capability_is_still_reachable_as_a_submodule():
     from okf_ext import tags
 
     assert tags.DEFAULT_IGNORE == ("_tags.yaml", "*/_tags.yaml")
+
+
+def test_the_top_level_still_imports_no_capability_now_that_there_are_two():
+    """The claim in `test_top_level_does_not_import_any_capability` was made
+    when there was one capability to not import. Restated over both."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import okf_ext, sys\n"
+            "print(sorted(m for m in sys.modules if m.startswith('okf_ext.')))",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "okf_ext.tags" not in result.stdout
+    assert "okf_ext.schemas" not in result.stdout
+
+
+def test_the_second_capability_is_reachable_as_a_submodule():
+    from okf_ext import schemas
+
+    assert schemas.DEFAULT_IGNORE == ("_schema/*", "*/_schema/*")

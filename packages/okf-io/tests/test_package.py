@@ -7,7 +7,7 @@ import okf_io
 
 
 def test_version_is_static():
-    assert okf_io.__version__ == "0.1.0"
+    assert okf_io.__version__ == "0.1.1"
 
 
 def test_version_matches_package_metadata():

@@ -399,3 +399,79 @@ def test_rendered_with_body_does_not_mutate_the_document():
     assert rendered == "# Metric\n\n* [a](a.md)\n* [b](b.md)\n"
     assert doc.body == "# Metric\n\n* [a](a.md)\n"
     assert doc.serialize() == text
+
+
+# --- frontmatter_line -------------------------------------------------------
+
+_NESTED = (
+    "---\n"
+    "type: Metric\n"
+    "title: Orders\n"
+    "owner:\n"
+    "  name: finance\n"
+    "tags: [ops, sales]\n"
+    "---\n"
+    "\n"
+    "# Orders\n"
+)
+
+
+@pytest.mark.parametrize(
+    ("keys", "expected"),
+    [
+        (("type",), 2),
+        (("title",), 3),
+        (("owner",), 4),
+        (("owner", "name"), 5),
+        (("tags",), 6),
+        (("tags", 0), 6),
+        (("tags", 1), 6),
+    ],
+)
+def test_frontmatter_line_resolves_a_key_path(keys, expected):
+    assert Document.parse(_NESTED).frontmatter_line(*keys) == expected
+
+
+@pytest.mark.parametrize(
+    "keys",
+    [
+        (),  # the root has no line of its own
+        ("absent",),  # key not present
+        ("type", "deeper"),  # walked into a scalar
+        ("owner", "absent"),  # nested key not present
+        ("tags", 9),  # sequence index out of range
+        ("tags", "name"),  # a string index into a sequence
+        ("owner", 0),  # an integer index into a mapping
+    ],
+)
+def test_frontmatter_line_returns_none_rather_than_guessing(keys):
+    """A wrong line is worse than no line."""
+    assert Document.parse(_NESTED).frontmatter_line(*keys) is None
+
+
+@pytest.mark.parametrize("name", ["bom.md", "crlf.md"])
+def test_frontmatter_line_counts_the_bom_and_crlf_prefixes(name):
+    """Computed from the splitter's verbatim pieces, never by searching
+    `raw_text` — these two fixtures exist to catch exactly that mistake."""
+    doc = Document.parse(read(EDGE / "encoding" / name))
+    assert doc.frontmatter_line("type") == 2
+    assert doc.frontmatter_line("status") == 4
+
+
+def test_frontmatter_line_on_documents_with_nothing_to_anchor():
+    assert Document.parse("---\n---\n\n# T\n").frontmatter_line("type") is None
+    assert Document.parse("# body only\n").frontmatter_line("type") is None
+    assert Document.parse("---\ntype: [unclosed\n---\n").frontmatter_line("type") is None
+
+
+def test_frontmatter_line_returns_none_for_a_node_that_is_neither_mapping_nor_sequence():
+    """A ``!!set`` parses to a ``CommentedSet``: it carries ``.lc`` like a
+    mapping or sequence would, but is neither -- the bare ``else`` branch."""
+    doc = Document.parse("---\ntags: !!set\n  ? a\n  ? b\n---\n")
+    assert doc.frontmatter_line("tags", "a") is None
+
+
+def test_frontmatter_line_rejects_a_bool_as_a_sequence_index():
+    """`bool` is an `int` subclass; without an explicit guard `tags[True]` would
+    silently behave like `tags[1]`."""
+    assert Document.parse(_NESTED).frontmatter_line("tags", True) is None

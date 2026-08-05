@@ -1,0 +1,8 @@
+# A `$ref` target, never a type: no concept can carry `type: _base`.
+$defs:
+  actor:
+    type: object
+    required: [name]
+    properties:
+      name: {type: string}
+    additionalProperties: false

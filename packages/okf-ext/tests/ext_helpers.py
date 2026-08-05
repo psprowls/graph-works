@@ -51,3 +51,21 @@ def snapshot(root: Path) -> dict[str, bytes]:
         for p in sorted(root.rglob("*"))
         if p.is_file()
     }
+
+
+SCHEMAD = FIXTURES / "schemad"
+SCHEMA_DIR = SCHEMAD / "_schema"
+
+#: What the schema walk must report, as `(code, path)`. Asserted against rather
+#: than restated inside the test, so a fixture change cannot leave a test
+#: quietly asserting the old corpus.
+SCHEMA_EXPECTED = {
+    ("schemas.invalid", "metrics/orders.md"),
+    ("schemas.invalid", "metrics/orphan.md"),
+    ("schemas.no-schema-for-type", "glossary/term.md"),
+}
+
+
+def schemad_bundle(*, ignore=()):
+    """The schema corpus. Read-only -- nothing here mutates a bundle."""
+    return load_bundle(SCHEMAD, ignore=ignore)

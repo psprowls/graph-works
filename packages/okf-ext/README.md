@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags today; schema validation, richer query, budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags and schema validation today; richer query, budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -25,14 +25,24 @@ What does transfer is that everyone pays for an unconditional dependency:
 - **Promotion is never triggered by a dependency count** — only by the two
   conditions below.
 
-v0.1.0 declares two:
+v0.1.0 declares two unconditional dependencies:
 
 - **`okf-io>=0.1,<0.2`** — the bundle model this is built on. Pre-1.0, minor is
   breaking (ADR-0007), hence the ceiling.
-- **`ruamel.yaml>=0.18`** — `load_vocabulary` parses a YAML file. Declared
-  rather than inherited: relying on it arriving through `okf-io` breaks the day
-  the core swaps YAML libraries, and importing `okf_io._yaml` would couple this
-  package to a private module of the one it sits above.
+- **`ruamel.yaml>=0.18`** — `load_vocabulary` and `load_schemas` both parse YAML
+  files. Declared rather than inherited: relying on it arriving through `okf-io`
+  breaks the day the core swaps YAML libraries, and importing `okf_io._yaml`
+  would couple this package to a private module of the one it sits above.
+
+and one extra:
+
+- **`okf-ext[schemas]` → `jsonschema>=4.18`** — the worked example of the rule
+  above. `4.18` is where `referencing` landed, which is what resolves `$ref`
+  across schema files; a hand-rolled inliner was rejected in favour of a library
+  that is tested for fragments and cycles. Only the `schemas` capability imports
+  it, and `okf_ext/schemas/__init__.py` raises an `ImportError` naming the extra
+  when it is absent. Neither promotion trigger fires: the dependency is cleanly
+  optional, and nothing yet wants the capability without the rest.
 
 `requires-python` is `>=3.12`, matching the rest of the workspace.
 `okf_io.models.Frontmatter.extra` defaults to `MappingProxyType({})`, which the
@@ -56,25 +66,30 @@ Capabilities are self-contained subpackages of one distribution. A subpackage
 - it acquires a consumer that wants it without the rest.
 
 Graduation is a directory move plus a re-export shim in
-`okf_ext/<name>/__init__.py`, kept for one minor version. `okf-schemas` is
-expected to be **born already promoted** — it has a heavy dependency
-(`jsonschema`) on day one — and is out of scope here.
+`okf_ext/<name>/__init__.py`, kept for one minor version.
 
 ## Boundaries
 
-Two rules, enforced two different ways:
+Three rules, enforced two different ways:
 
 - **The shared layer never imports a capability.** An `import-linter` `layers`
   contract in the root `pyproject.toml`.
+- **Capabilities never import each other.** An `import-linter` `independence`
+  contract, stated explicitly rather than left to the `a : b` layer syntax's
+  same-level semantics — the rule should be legible in the file, not inferred
+  from a colon.
 - **A capability never imports the top-level `okf_ext` package.** An AST test
   (`tests/test_ext_boundaries.py`), because import-linter cannot express it:
   grimp does not report an import of an ancestor package as a dependency, so a
   `forbidden` contract on it passes even when the import is right there.
 
-The independence-between-siblings clause becomes load-bearing with the second
-capability. Writing the rules before they bite is the point — this is the
-contract a future capability is added *under*, not one retrofitted after two of
-them have grown into each other.
+The independence clause became load-bearing with `schemas`, the second
+capability. Writing the rules before they bite was the point — `schemas` was
+added *under* this contract rather than having it retrofitted after two
+capabilities had grown into each other. A `layers` contract only checks the
+layers it was told to enumerate, so `test_ext_boundaries.py` also derives the
+capability set from the filesystem and fails when one is missing from the
+contract.
 
 **Honest weakness:** CI is deferred until the repository has a remote, so both
 checks run from `just check` — a gate a human or agent must invoke, not one a

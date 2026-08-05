@@ -268,6 +268,53 @@ class Document:
         prefix = split.bom + split.open_delim + split.fm_text + split.close_delim + split.gap
         return sum(1 for line in _yaml._lines(prefix) if line.endswith(("\n", "\r")))
 
+    @property
+    def _fm_line_offset(self) -> int:
+        """How many whole lines precede ``fm_text`` in the file.
+
+        ruamel's ``.lc`` line numbers are 0-based *within* the frontmatter
+        text, so a file line is ``lc_line + 1 + _fm_line_offset``. Computed
+        from the splitter's verbatim pieces for the same reason
+        ``body_line_offset`` is: a search of ``raw_text`` mis-locates on the
+        BOM and CRLF fixtures.
+        """
+        split = self._split
+        prefix = split.bom + split.open_delim
+        return sum(1 for line in _yaml._lines(prefix) if line.endswith(("\n", "\r")))
+
+    def frontmatter_line(self, *keys: str | int) -> int | None:
+        """The 1-based file line of the frontmatter node at *keys*.
+
+        ``doc.frontmatter_line("owner", "name")`` walks mappings by key and
+        sequences by index. Returns ``None`` the moment a key path stops
+        resolving, a node carries no line information, or the caller asks for
+        the root -- **a wrong line is worse than no line**, so this never
+        guesses. Built for external validators that report a key path and need
+        somewhere to point; ``jsonschema``'s ``error.absolute_path`` unpacks
+        straight into it.
+        """
+        node: Any = self.fm_raw
+        line: int | None = None
+        for key in keys:
+            lc = getattr(node, "lc", None)
+            if lc is None:
+                return None
+            if isinstance(node, Mapping):
+                data = lc.data
+                if not isinstance(data, Mapping) or key not in data:
+                    return None
+                line = int(data[key][0])
+            elif isinstance(node, Sequence) and not isinstance(node, (str, bytes)):
+                if not isinstance(key, int) or isinstance(key, bool) or not 0 <= key < len(node):
+                    return None
+                line = int(lc.item(key)[0])
+            else:
+                return None
+            node = node[key]
+        if line is None:
+            return None
+        return line + 1 + self._fm_line_offset
+
     def mark_dirty(self) -> None:
         """Declare that ``fm_raw`` was mutated directly. Pairs with the escape hatch.
 

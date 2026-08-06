@@ -34,11 +34,23 @@ import pytest
 SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
 #: The shared layer. Everything else is a capability.
-SHARED = {"__init__.py", "context.py"}
+SHARED = {"__init__.py", "body.py", "context.py", "writing.py"}
 
 
 def capability_modules() -> list[Path]:
     return sorted(p for p in SRC.rglob("*.py") if p.relative_to(SRC).parts[0] not in SHARED)
+
+
+def all_modules() -> list[Path]:
+    """Every source module, shared layer included.
+
+    Spec §6: "neither new module, nor `tables`, may import the top-level
+    `okf_ext` package" applies to the shared modules themselves
+    (`body.py`, `writing.py`, `context.py`), not only to capabilities. A
+    `capability_modules()` filter would never see them, so the two AST
+    checks that state this rule use this wider list instead.
+    """
+    return sorted(SRC.rglob("*.py"))
 
 
 def module_id(path: Path) -> str:
@@ -49,6 +61,13 @@ def module_id(path: Path) -> str:
 def modules() -> list[Path]:
     found = capability_modules()
     assert found, "no capability modules found; the layout moved"
+    return found
+
+
+@pytest.fixture(scope="module")
+def source_modules() -> list[Path]:
+    found = all_modules()
+    assert found, "no source modules found; the layout moved"
     return found
 
 
@@ -98,16 +117,23 @@ def _layer_names_in_contracts(pyproject_path: Path) -> set[str]:
     return names
 
 
-def test_no_capability_imports_the_top_level_package(modules: list[Path]) -> None:
+def test_no_capability_imports_the_top_level_package(source_modules: list[Path]) -> None:
     """It would invert the re-export direction and make every capability load
     every other — the exact thing that turns option C into option A.
 
     Only the top-level package name is forbidden. `from okf_ext.context import
     X` is a legal import of a sibling shared module and must not be flagged —
     the rule is about the ancestor package, not its submodules.
+
+    Covers the shared layer too (`body.py`, `writing.py`, `context.py`), not
+    only capabilities: spec §6 states the rule for "neither new module, nor
+    `tables`", and this is the only check that can enforce it there --
+    `import-linter` provably cannot (see this module's docstring), and a
+    `from okf_ext import ExtContext` inside a shared module would import
+    cleanly at runtime.
     """
     offenders: list[str] = []
-    for path in modules:
+    for path in source_modules:
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module == "okf_ext":
@@ -121,13 +147,20 @@ def test_no_capability_imports_the_top_level_package(modules: list[Path]) -> Non
     assert not offenders, "\n".join(offenders)
 
 
-def test_no_module_uses_a_relative_import(modules: list[Path]) -> None:
+def test_no_module_uses_a_relative_import(source_modules: list[Path]) -> None:
     """A relative import hides which package a name came from, which is what
     makes a boundary check readable in the first place. okf-io is absolute
-    throughout; okf-ext matches it."""
+    throughout; okf-ext matches it.
+
+    Covers the shared layer too, alongside every capability -- the property
+    is not capability-specific, and `okf_ext/__init__.py`'s own
+    `from okf_ext.context import ...` is an absolute import of a sibling
+    module, not a relative one, so widening the module list to include it
+    does not introduce a false positive.
+    """
     offenders = [
         f"{module_id(path)}:{node.lineno}"
-        for path in modules
+        for path in source_modules
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
         if isinstance(node, ast.ImportFrom) and node.level > 0
     ]
@@ -249,16 +282,16 @@ BUILT_IN_TOPICS = frozenset(
 )
 
 
-@pytest.fixture(params=["tags", "schemas", "render", "health", "search"])
+@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables"])
 def capability(request):
     return importlib.import_module(f"okf_ext.{request.param}")
 
 
 def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path]) -> None:
     """The `capability` fixture is a literal list, unlike `capability_names`.
-    This is what stops a third capability from being added without anyone
+    This is what stops a fourth capability from being added without anyone
     extending the surface tests below."""
-    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search"}
+    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search", "tables"}
 
 
 def test_all_lists_exactly_what_the_module_exports(capability) -> None:
@@ -359,8 +392,9 @@ def test_no_capability_claims_a_built_in_topic_prefix(modules: list[Path]) -> No
     written to close.
 
     A capability with **no** `TOPIC` is legal and is skipped, not failed.
-    `search` is the first: it answers questions rather than filing `Finding`s,
-    so it claims no prefix and needs no entry in okf-io's code namespace. The
+    `search` and `tables` both claim none: search answers questions rather
+    than filing `Finding`s, and tables is a primitive rules are built on, not
+    a rule itself. Neither needs an entry in okf-io's code namespace. The
     assertion is therefore *every capability that defines `TOPIC` claims a
     prefix that is distinct and outside okf-io's built-in eight*, rather than
     *every capability defines one*.
@@ -376,3 +410,48 @@ def test_no_capability_claims_a_built_in_topic_prefix(modules: list[Path]) -> No
     assert claimed, "no capability claims a topic prefix at all; the layout moved"
     assert len(claimed) == len(set(claimed)), f"two capabilities claiming one prefix: {claimed}"
     assert not (set(claimed) & BUILT_IN_TOPICS)
+
+
+def test_the_documented_tables_surface_is_present() -> None:
+    """Spec §5 of the tables work item: two read levels, the text splice, and
+    the bundle pair."""
+    from okf_ext import tables
+
+    for name in ("read", "read_all", "read_section", "splice_text", "plan_row", "apply"):
+        assert callable(getattr(tables, name))
+
+
+def test_the_documented_body_surface_is_present() -> None:
+    """Spec §5.1. `okf_ext.body` is shared, so it is not covered by the
+    `capability` fixture -- asserted here so the surface is pinned somewhere."""
+    from okf_ext import body
+
+    for name in ("sections", "find_section", "prose_lines", "split_lines"):
+        assert callable(getattr(body, name))
+    assert body.Section.__dataclass_fields__.keys() == {"heading", "level", "start", "body_start", "stop"}
+
+
+def test_the_documented_writing_surface_is_present() -> None:
+    """`okf_ext.writing` is shared, so it is not covered by the `capability`
+    fixture -- asserted here for the same reason `body`'s surface is pinned
+    above. It is the module whose names `okf_ext.tags` re-exports, so an
+    accidental rename here breaks a shipped capability with nothing else in
+    the suite to catch it."""
+    from okf_ext import writing
+
+    assert callable(writing.write_all)
+    assert writing.PendingWrite.__dataclass_fields__.keys() == {"member", "path", "rendered", "on_written"}
+
+
+def test_the_tables_capability_claims_no_topic_prefix() -> None:
+    """`tables` is a primitive lint rules are built on, not a rule itself: it
+    emits no `Finding`, so it claims no topic and exports no codes. The
+    `rules` item is where `tables`-derived findings will get their topic.
+    Asserted rather than left implicit, because adding a `TOPIC` here would
+    also need adding to `test_no_capability_claims_a_built_in_topic_prefix`'s
+    `claimed` set, and a silent omission there is exactly the collision that
+    check exists to catch."""
+    from okf_ext import tables
+
+    assert not hasattr(tables, "TOPIC")
+    assert not hasattr(tables, "CODES")

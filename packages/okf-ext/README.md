@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, render correctness, bundle health and search today; budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, table read/splice, render correctness, bundle health and search today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -25,7 +25,7 @@ What does transfer is that everyone pays for an unconditional dependency:
 - **Promotion is never triggered by a dependency count** — only by the two
   conditions below.
 
-v0.1.1 declares three unconditional dependencies:
+v0.2.0 declares three unconditional dependencies:
 
 - **`okf-io>=0.1,<0.2`** — the bundle model this is built on. Pre-1.0, minor is
   breaking (ADR-0007), hence the ceiling.
@@ -33,18 +33,25 @@ v0.1.1 declares three unconditional dependencies:
   files. Declared rather than inherited: relying on it arriving through `okf-io`
   breaks the day the core swaps YAML libraries, and importing `okf_io._yaml`
   would couple this package to a private module of the one it sits above.
-- **`markdown-it-py>=3.0`** — the `render` capability parses markdown bodies.
-  Declared for the same reason `ruamel.yaml` is, and floored where okf-io floors
-  it.
+- **`markdown-it-py>=3.0`** — `okf_ext.body` bounds its tolerant table scan with a
+  real parse: heading lines and code-block ranges come from markdown-it, and the
+  scan runs only over the lines the parser says are prose. A hand-rolled fence
+  tracker was rejected — tilde fences, info strings, four-space indented blocks
+  and fences nested in list items make a correct one a small parser, and okf-io
+  declined to hand-roll exactly this for links. The `render` capability parses
+  markdown bodies too. Declared rather than inherited through `okf-io` for the
+  same reason `ruamel.yaml` is, and because `okf_io._md` is private, so the
+  core's parse cannot be reused even where it would suffice. Floored where
+  okf-io floors it.
 
   **This one is the documented exception to the extras rule above**, and the
-  exception is narrow. Only `render` imports it, so the rule says it should be
-  an extra with an `ImportError` naming that extra — but okf-io *hard-depends*
-  on `markdown-it-py`, so no installation of okf-ext can be missing it and the
-  guard could never fire. An extra whose guard is unfalsifiable is not a
-  boundary; it is an unreachable branch, and `just cov` gates at 95% with a thin
-  margin. The rule stands as written: it just does not reach a library the core
-  already requires.
+  exception is narrow. Only `body` and `render` import it, so the rule says it
+  should be an extra with an `ImportError` naming that extra — but okf-io
+  *hard-depends* on `markdown-it-py`, so no installation of okf-ext can be
+  missing it and the guard could never fire. An extra whose guard is
+  unfalsifiable is not a boundary; it is an unreachable branch, and `just cov`
+  gates at 95% with a thin margin. The rule stands as written: it just does not
+  reach a library the core already requires.
 
 and one extra:
 
@@ -154,6 +161,17 @@ layers it was told to enumerate, so `test_ext_boundaries.py` also derives the
 capability set from the filesystem and fails when one is missing from the
 contract.
 
+The shared layer means "configuration and block-structure primitives", not only
+cross-cutting configuration. `okf_ext.body` widened it: `find_section` is not
+table-specific — `generators` needs the same heading walk and the `diataxis.*`
+gates will too — and the independence contract forbids a capability importing a
+sibling, so a `find_section` shipped inside `tables` would force every other
+consumer to duplicate the walk or break the rule. `okf_ext.writing` is there for
+the same reason on the write side. Both are named in the `layers` contract and
+both are listed in `SHARED` in `tests/test_ext_boundaries.py`; a shared module
+missing from that set is classified as a capability, which silently makes the
+independence contract incomplete.
+
 **Honest weakness:** CI is deferred until the repository has a remote, so both
 checks run from `just check` — a gate a human or agent must invoke, not one a
 forge enforces. That is why the promotion triggers above are written down
@@ -238,3 +256,20 @@ ones worth retrying as-is; the rest name the remaining content failures
 `apply()` documents. This was cheap to add pre-1.0 (v0.1.0, no consumers yet)
 and is exactly the kind of API gap that gets expensive once someone is
 matching on `error`'s prose in production.
+
+**`tables` ships a primitive, not a rule.** It exports no `TOPIC` and no
+`CODES`, and emits no `Finding`. `diataxis.no-entries` and "Reference entries
+are structurally uniform" are the motivating consumers and both belong to the
+`rules` item or to tier 3 — a capability that both parses tables *and* judges
+them would make every future rule import the parser through a rule module.
+
+**Downstream adoption is out of scope here.** The work item's "wire the entity
+lane's file maps and the work lane's plan tables to one implementation" is not
+done in this repository: `wiki-io` and `work-io` live in `agent-research`. This
+package ships the primitive and proves it against vendored samples of all three
+consumer shapes; each lane's adoption is its own item in its own repository.
+
+**No lane vocabulary ships.** There is no `PLAN_TABLE` or `FILE_MAP` constant. A
+`TableSpec` is data a caller constructs; shipping one lane's column names in a
+bundle-agnostic package is the same hazard the `rules` item names for lifecycle
+rules.

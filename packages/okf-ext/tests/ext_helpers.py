@@ -157,3 +157,28 @@ def acme_retail_bundle() -> Bundle:
     """okf-io's vendored `acme_retail`. Never mutate it."""
     assert ACME_RETAIL.is_dir(), f"vendored bundle missing at {ACME_RETAIL}"
     return load_bundle(ACME_RETAIL)
+
+
+TABLED = FIXTURES / "tabled"
+
+#: What each fixture's `## Plan` section reads as under a three-column plan
+#: spec. Tests assert against this rather than restating the states inline, so
+#: a fixture change cannot leave a test quietly asserting the old corpus.
+TABLED_STATES = {
+    "plan_ok": "ok",
+    "plan_empty": "empty",
+    "plan_prose": "malformed",
+    "plan_absent": "missing",
+}
+
+
+def tabled_bundle() -> Bundle:
+    """The table corpus. Read-only -- never pass this to `apply()`."""
+    return load_bundle(TABLED)
+
+
+def tabled_copy(tmp_path: Path) -> Path:
+    """A writable byte-identical copy of the table corpus."""
+    target = tmp_path / "tabled"
+    shutil.copytree(TABLED, target, copy_function=shutil.copy2)
+    return target

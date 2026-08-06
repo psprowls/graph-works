@@ -85,9 +85,21 @@ root_package = "okf_ext"
 [[tool.importlinter.contracts]]
 name = "Capabilities sit above the shared context, never below it"
 type = "layers"
-layers = ["okf_ext.health : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.tags", "okf_ext.context"]
+layers = [
+    "okf_ext.health : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.tags : okf_ext.tables",
+    "okf_ext.writing",
+    "okf_ext.body",
+    "okf_ext.context",
+]
 
 [[tool.importlinter.contracts]]
 name = "Capabilities never import each other"
 type = "independence"
-modules = ["okf_ext.tags", "okf_ext.schemas", "okf_ext.render", "okf_ext.health", "okf_ext.search"]
+modules = [
+    "okf_ext.tags",
+    "okf_ext.schemas",
+    "okf_ext.render",
+    "okf_ext.health",
+    "okf_ext.search",
+    "okf_ext.tables",
+]

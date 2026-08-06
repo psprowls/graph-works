@@ -1,9 +1,13 @@
 """Frozen values the tags capability returns.
 
-All frozen and slotted, matching the core. `WriteFailure` stores a rendered
-message rather than a live exception so every one of these survives
-`json.dumps` — the habit `fm_data(dates="iso")` and `Severity`-as-`Literal`
-established in okf-io.
+All frozen and slotted, matching the core.
+
+`Skipped`, `SkipReason`, `WriteFailure`, `FailureKind` and `ApplyResult` are
+**re-exported from `okf_ext.writing`**, not defined here. They moved to the
+shared layer when `tables` needed the same write engine -- the independence
+contract forbids one capability importing them from another. They stay
+importable from `okf_ext.tags` so this capability's public surface is
+unchanged.
 """
 
 from __future__ import annotations
@@ -13,41 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-#: Why a member could not be considered. Content is never an exception (spec
-#: §10) — it is a `Finding` or one of these.
-SkipReason = Literal["parse-error", "tags-not-a-sequence", "unreadable"]
-
-#: Why one document did not land, machine-readable rather than substring-
-#: matched out of `WriteFailure.error`. Mirrors `apply()`'s three regimes:
-#: `not-a-member`, `parse-error`, `tags-not-a-sequence`, `duplicate-edit`, and
-#: `stale` are content failures, refused for that document alone; `unwritable`
-#: and `stage-error` are the all-or-nothing probe/staging regime; `commit-error`
-#: is the per-document commit regime. `serialize-error` is content-shaped
-#: (isolated per document) but named separately from the other content kinds
-#: because it is raised by the document itself, not detected by `apply()`.
-#: `stale` is the one a caller can act on by re-planning; `unwritable`,
-#: `stage-error`, and `commit-error` are the ones worth retrying as-is.
-FailureKind = Literal[
-    "not-a-member",
-    "parse-error",
-    "tags-not-a-sequence",
-    "duplicate-edit",
-    "stale",
-    "serialize-error",
-    "unwritable",
-    "stage-error",
-    "commit-error",
-]
-
-
-@dataclass(frozen=True, slots=True)
-class Skipped:
-    """A member the tag functions could not read, and why."""
-
-    concept_id: str
-    path: str  # bundle-relative posix
-    reason: SkipReason
-    detail: str
+from okf_ext.writing import ApplyResult, FailureKind, Skipped, SkipReason, WriteFailure
 
 
 @dataclass(frozen=True, slots=True)
@@ -168,28 +138,15 @@ class RenamePlan:
         return tuple(sorted({edit.concept_id for edit in self.edits}))
 
 
-@dataclass(frozen=True, slots=True)
-class WriteFailure:
-    """A document that did not land, the rendered reason, and its `kind`.
-
-    `kind` is the machine-readable discriminator; `error` stays the rendered
-    prose. A caller that wants to retry an I/O failure but re-plan on a stale
-    one needs `kind`, not a substring match against `error` — see `FailureKind`.
-    """
-
-    path: str
-    kind: FailureKind
-    error: str  # str(exc) — the message, not the live exception
-
-
-@dataclass(frozen=True, slots=True)
-class ApplyResult:
-    """What landed, what did not, and what was never considered."""
-
-    written: tuple[str, ...]
-    failed: tuple[WriteFailure, ...]
-    skipped: tuple[Skipped, ...]  # carried from the plan
-
-    @property
-    def ok(self) -> bool:
-        return not self.failed
+__all__ = [
+    "ApplyResult",
+    "FailureKind",
+    "RenamePlan",
+    "SkipReason",
+    "Skipped",
+    "TagCluster",
+    "TagEdit",
+    "TagInventory",
+    "Vocabulary",
+    "WriteFailure",
+]

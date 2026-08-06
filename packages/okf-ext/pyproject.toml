@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "okf-ext"
-version = "0.1.1"
+version = "0.2.0"
 description = "Beyond-spec capabilities over any OKF v0.2 bundle. Tier 2: extends okf-io, never modifies it."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -17,14 +17,19 @@ dependencies = [
     # and reaching into `okf_io._yaml` would couple this package to a private
     # module of the one it sits above.
     "ruamel.yaml>=0.18",
-    # Parse markdown bodies in the `render` capability. Declared for the same
-    # reason `ruamel.yaml` is, and floored where okf-io floors it.
+    # Parse markdown bodies: `okf_ext.body` bounds its tolerant table scan with
+    # a real parse (headings and code-block ranges come from markdown-it, and
+    # the scan runs only over lines the parser says are prose), and the
+    # `render` capability parses bodies directly. Declared rather than
+    # inherited through okf-io for the same reason `ruamel.yaml` is -- and
+    # `okf_io._md` is private, so the core's parse cannot be reused even where
+    # it would suffice. Floored where okf-io floors it.
     #
-    # Unconditional rather than an extra, despite only one capability using it:
-    # okf-io hard-depends on `markdown-it-py`, so the `ImportError` guard the
-    # README's extras policy requires could never fire. An extra whose guard is
-    # unfalsifiable is not a boundary, and the unreachable branch would cost
-    # coverage against a 95% floor with a thin margin.
+    # Unconditional rather than an extra, despite only some capabilities using
+    # it: okf-io hard-depends on `markdown-it-py`, so the `ImportError` guard
+    # the README's extras policy requires could never fire. An extra whose
+    # guard is unfalsifiable is not a boundary, and the unreachable branch
+    # would cost coverage against a 95% floor with a thin margin.
     "markdown-it-py>=3.0",
 ]
 

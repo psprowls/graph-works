@@ -35,12 +35,11 @@ package does not modify.
 
 from __future__ import annotations
 
-import contextlib
 import copy
-import uuid
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 
 from okf_io import Bundle, Document
@@ -49,8 +48,9 @@ from ruamel.yaml.error import YAMLError
 
 from okf_ext.context import ExtContext
 from okf_ext.tags.inventory import scan
-from okf_ext.tags.model import ApplyResult, RenamePlan, Skipped, TagEdit, Vocabulary, WriteFailure
+from okf_ext.tags.model import RenamePlan, TagEdit, Vocabulary
 from okf_ext.tags.normalize import canonical
+from okf_ext.writing import ApplyResult, PendingWrite, Skipped, WriteFailure, write_all
 
 
 def _raw_tags(bundle: Bundle, concept_id: str) -> list[str | None] | None:
@@ -210,6 +210,17 @@ def plan_from_vocabulary(bundle: Bundle, vocab: Vocabulary, ctx: ExtContext | No
     )
 
 
+def _commit_tags(document: Document, fm_raw: CommentedMap) -> None:
+    """Adopt the scratch frontmatter once this document's write has landed.
+
+    Only now does the shared Bundle learn about the edit: `by_tag` and every
+    other live view read `fm_raw`/`fm`, so the in-memory bundle stays coherent
+    with what is actually on disk, with no reload.
+    """
+    document.fm_raw = fm_raw
+    document.mark_dirty()
+
+
 def apply(bundle: Bundle, plan: RenamePlan) -> ApplyResult:
     """Write *plan* against *bundle*.
 
@@ -226,51 +237,9 @@ def apply(bundle: Bundle, plan: RenamePlan) -> ApplyResult:
        One document's content problem never stops a sibling that serialized
        fine from landing.
 
-    2. *Probe and staging failures are all-or-nothing: no live file is
-       touched.* The `path.open("r+b")` probe below fails fast, with a
-       clear message, for a target whose own permissions already forbid it
-       or one that no longer exists -- useful, but by itself only a probe:
-       a directory-level failure, or a permission change in the instant
-       after the probe closes, would sail through it undetected. The actual
-       guarantee comes from staging: every document that passes the probe
-       is first written to a `.<name>.<uuid>.tmp` sibling in the *same*
-       directory as its target -- which hits the same disk-full, quota, or
-       permission failures a live write would, and can leave a truncated
-       temp file behind on the way, which is why the cleanup below runs on
-       *every* exit from this step, not only the successful one. A staging
-       failure on any document, not only the first, aborts the whole batch
-       before any live file is touched, and every temp file created --
-       including the one that just failed partway -- is removed before
-       `apply` returns.
-
-    3. *Commit (`Path.replace`) failures are isolated per document, so
-       partial application is possible without any crash.* Only once every
-       staged write has succeeded does a second loop move each temp file
-       onto its target with `Path.replace` (a single filesystem rename,
-       atomic and metadata-only, so it does not fail for content or space
-       reasons the way a write can). That loop does not abort on a single
-       failure -- a caught `OSError` there is reported for that one
-       document and the loop continues, so a plan touching three documents
-       where the second one's replace fails can legitimately land the first
-       and third while the second is refused. This is the one place a
-       *caught* exception, not merely a crash, produces partial disk state;
-       say so here rather than leaving it to be inferred from "aborts the
-       whole batch" above, which is regime 2's guarantee, not this one's.
-
-    What regime 2 and 3 together still leave undefended, because nothing
-    short of okf-ext owning a journal closes it, is an abrupt process crash
-    *during* the replace loop itself: that loop is a sequence of renames,
-    not a sequence of content writes, so a crash partway through could still
-    leave some documents moved and others not. Serialization and writing
-    themselves cannot produce that outcome; only losing the process
-    mid-rename can. Relatedly, and also a deliberate non-goal: nothing here
-    calls `fsync` on a temp file or its containing directory, so a power
-    loss (as opposed to a process crash) could still lose an already-
-    replaced rename on a filesystem that does not order renames durably.
-    `fsync` alone would not close that gap without the same journal, and it
-    is real, measurable cost -- especially on a network filesystem -- for a
-    tag-renaming tool to pay on every call. Considered and declined, not
-    overlooked.
+    2. and 3. *Probe/staging is all-or-nothing; commit is isolated per
+       document.* Both live in `okf_ext.writing.write_all`, which documents
+       them in full -- including what they still leave undefended.
 
     Mutation always goes through a `copy.deepcopy` of `fm_raw`, never
     `doc.set("tags", ...)`: `set` replaces the value wholesale, dropping the
@@ -303,10 +272,7 @@ def apply(bundle: Bundle, plan: RenamePlan) -> ApplyResult:
         grouped.setdefault(edit.concept_id, []).append(edit)
 
     failed: list[WriteFailure] = []
-    # (the real document, its would-be new fm_raw, the rendered bytes, its
-    # member path). The real `document.fm_raw` is never touched until the
-    # write for that document has actually landed -- see the docstring.
-    pending: list[tuple[Document, CommentedMap, str, str]] = []
+    pending: list[PendingWrite] = []
 
     for concept_id, edits in sorted(grouped.items()):
         member = f"{concept_id}.md"
@@ -416,98 +382,14 @@ def apply(bundle: Bundle, plan: RenamePlan) -> ApplyResult:
         except (YAMLError, ValueError, RecursionError) as exc:
             failed.append(WriteFailure(path=member, kind="serialize-error", error=str(exc)))
             continue
-        pending.append((document, scratch_fm_raw, rendered, member))
+        assert document.path is not None  # guaranteed by the `document is None or document.path is None` check
+        pending.append(
+            PendingWrite(
+                member=member,
+                path=document.path,
+                rendered=rendered,
+                on_written=partial(_commit_tags, document, scratch_fm_raw),
+            )
+        )
 
-    # Every document that could serialize has now done so, in memory, against
-    # a private copy. This probe fails fast, with a clear, specific message,
-    # for a target whose own permissions already forbid it or one that no
-    # longer exists on disk (`FileNotFoundError`) -- but it is a probe, not
-    # the atomicity guarantee: a directory-level failure, or a permission
-    # change in the instant after it closes, would sail through undetected.
-    # See the staging step below for what actually provides the guarantee.
-    unwritable: list[tuple[str, OSError]] = []
-    for document, _scratch_fm_raw, _rendered, member in pending:
-        assert document.path is not None  # guaranteed by the loop above
-        try:
-            with document.path.open("r+b"):
-                pass
-        except OSError as exc:
-            unwritable.append((member, exc))
-
-    if unwritable:
-        for member, unwritable_exc in unwritable:
-            failed.append(WriteFailure(path=member, kind="unwritable", error=str(unwritable_exc)))
-        failed.sort(key=lambda failure: failure.path)
-        return ApplyResult(written=(), failed=tuple(failed), skipped=plan.skipped)
-
-    # Stage every write as a sibling temp file *before* any live file is
-    # touched. A temp write in the same directory hits the same disk-full,
-    # quota, or permission-changed-since-the-probe failures a live write
-    # would -- but because nothing live has been modified yet, a failure
-    # here, for any document and not only the first, aborts with every live
-    # file exactly as it was. This -- not the probe above -- is what keeps a
-    # failure on document N from leaving documents 1..N-1 already rewritten:
-    # the failure-prone work all happens before any live file changes, and
-    # every temp file created is removed on every exit from this step.
-    staged: list[tuple[Document, CommentedMap, Path, str]] = []
-    stage_failed = False
-    for document, scratch_fm_raw, rendered, member in pending:
-        assert document.path is not None
-        tmp_target = document.path.with_name(f".{document.path.name}.{uuid.uuid4().hex}.tmp")
-        try:
-            tmp_target.write_bytes(rendered.encode("utf-8"))
-        except OSError as exc:
-            # `write_bytes` opens for truncating write before it can fail --
-            # a disk-full error, say, can still land after some bytes are
-            # already on the temp file. Cleaning it up here (not only the
-            # ones that fully succeeded, below) is what keeps this step's
-            # own promise: no temp file survives an aborted batch. The
-            # cleanup is best-effort and must never mask the real failure,
-            # nor stop the rest of `staged` from being cleaned up too.
-            with contextlib.suppress(OSError):
-                tmp_target.unlink(missing_ok=True)
-            failed.append(WriteFailure(path=member, kind="stage-error", error=str(exc)))
-            stage_failed = True
-            continue
-        staged.append((document, scratch_fm_raw, tmp_target, member))
-
-    if stage_failed:
-        for _document, _scratch_fm_raw, tmp_target, _member in staged:
-            # Best-effort, same as above: one cleanup failure must not stop
-            # the rest of the batch's temp files from being cleaned up too.
-            with contextlib.suppress(OSError):
-                tmp_target.unlink(missing_ok=True)
-        failed.sort(key=lambda failure: failure.path)
-        return ApplyResult(written=(), failed=tuple(failed), skipped=plan.skipped)
-
-    # Every target now has a fully-written sibling temp file, and nothing
-    # live has changed yet. `Path.replace` is `os.replace` under the hood: a
-    # single filesystem rename, atomic and metadata-only, so it does not
-    # fail for the content- or space-related reasons a write can -- this
-    # loop is a sequence of renames, not a sequence of writes. That is the
-    # one window nothing short of okf-ext owning a journal closes: an
-    # abrupt process crash *during* this loop could still leave some
-    # documents moved and others not. Serialization and writing themselves
-    # cannot produce that outcome; only losing the process mid-rename can.
-    written: list[str] = []
-    for document, scratch_fm_raw, tmp_target, member in staged:
-        assert document.path is not None
-        try:
-            tmp_target.replace(document.path)
-        except OSError as exc:
-            failed.append(WriteFailure(path=member, kind="commit-error", error=str(exc)))
-            # Best-effort cleanup: a failed `replace` on most filesystems
-            # leaves the temp file exactly as it was, still worth removing,
-            # but a cleanup failure here must not mask the real error above.
-            with contextlib.suppress(OSError):
-                tmp_target.unlink(missing_ok=True)
-            continue
-        # Only now does the shared Bundle learn about the edit: `by_tag` and
-        # every other live view read `fm_raw`/`fm`, so the in-memory bundle
-        # stays coherent with what is actually on disk, with no reload.
-        document.fm_raw = scratch_fm_raw
-        document.mark_dirty()
-        written.append(member)
-
-    failed.sort(key=lambda failure: failure.path)
-    return ApplyResult(written=tuple(written), failed=tuple(failed), skipped=plan.skipped)
+    return write_all(pending, failed=failed, skipped=plan.skipped)

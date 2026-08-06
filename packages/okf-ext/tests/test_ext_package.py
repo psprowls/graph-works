@@ -14,7 +14,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
 def test_version_is_static_and_pinned():
     """Static `version`, never hatch-vcs."""
-    assert okf_ext.__version__ == "0.1.0"
+    assert okf_ext.__version__ == "0.1.1"
 
 
 def test_py_typed_marker_ships():
@@ -53,9 +53,9 @@ def test_the_capability_is_still_reachable_as_a_submodule():
     assert tags.DEFAULT_IGNORE == ("_tags.yaml", "*/_tags.yaml")
 
 
-def test_the_top_level_still_imports_no_capability_now_that_there_are_four():
+def test_the_top_level_still_imports_no_capability_now_that_there_are_five():
     """The claim in `test_top_level_does_not_import_any_capability` was made
-    when there was one capability to not import. Restated over all four."""
+    when there was one capability to not import. Restated over all five."""
     result = subprocess.run(
         [
             sys.executable,
@@ -70,9 +70,16 @@ def test_the_top_level_still_imports_no_capability_now_that_there_are_four():
     assert "okf_ext.schemas" not in result.stdout
     assert "okf_ext.render" not in result.stdout
     assert "okf_ext.health" not in result.stdout
+    assert "okf_ext.search" not in result.stdout
 
 
 def test_the_second_capability_is_reachable_as_a_submodule():
     from okf_ext import schemas
 
     assert schemas.DEFAULT_IGNORE == ("_schema/*", "*/_schema/*")
+
+
+def test_the_third_capability_is_reachable_as_a_submodule():
+    from okf_ext import search
+
+    assert search.DEFAULT_WEIGHTS == {"title": 3, "description": 2, "tags": 2, "body": 1}

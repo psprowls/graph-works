@@ -7,6 +7,7 @@ Named `ext_helpers` rather than `helpers`: both test directories are on
 from __future__ import annotations
 
 import shutil
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from okf_io import Bundle, load_bundle
@@ -112,12 +113,47 @@ def unhealthy_bundle():
     return load_bundle(UNHEALTHY)
 
 
+def write_bundle(root: Path, files: Mapping[str, str], *, ignore: Sequence[str] = ()) -> Bundle:
+    """Write *files* (bundle-relative posix path -> text) under *root* and load.
+
+    For suites that need a purpose-built corpus rather than one of the
+    committed fixture directories. Parent directories are created on demand.
+    """
+    for name, text in files.items():
+        target = root / name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text, encoding="utf-8")
+    return load_bundle(root, ignore=ignore)
+
+
+def _workspace_root() -> Path:
+    """Walk up from this file to the directory carrying okf-io's vendored
+    bundles, in the style of `test_ext_boundaries._find_repo_pyproject`.
+
+    Not a `parents[N]` index: that breaks silently when the repo root moves
+    relative to this file, and a silently-wrong fixture path is a test that
+    stops testing rather than one that fails.
+    """
+    here = Path(__file__).resolve()
+    for directory in here.parents:
+        candidate = directory / "packages" / "okf-io" / "tests" / "fixtures" / "bundles"
+        if candidate.is_dir():
+            return directory
+    raise AssertionError("no directory carrying packages/okf-io/tests/fixtures/bundles found above this file")
+
+
 #: The two bundles vendored verbatim from `GoogleCloudPlatform/knowledge-catalog`
 #: into okf-io's fixture tree. Reached by derived path rather than by importing
 #: okf-io's `helpers` module: both test directories are on `pythonpath`, so the
 #: import would work, but it would bind this suite to okf-io's test-module import
 #: order for one constant. Do not edit these bundles -- see
 #: `packages/okf-io/tests/fixtures/FIXTURES.md`.
-VENDORED_BUNDLES = Path(__file__).resolve().parents[2] / "okf-io" / "tests" / "fixtures" / "bundles"
+VENDORED_BUNDLES = _workspace_root() / "packages" / "okf-io" / "tests" / "fixtures" / "bundles"
 ACME_RETAIL = VENDORED_BUNDLES / "acme_retail"
 GA4 = VENDORED_BUNDLES / "ga4"
+
+
+def acme_retail_bundle() -> Bundle:
+    """okf-io's vendored `acme_retail`. Never mutate it."""
+    assert ACME_RETAIL.is_dir(), f"vendored bundle missing at {ACME_RETAIL}"
+    return load_bundle(ACME_RETAIL)

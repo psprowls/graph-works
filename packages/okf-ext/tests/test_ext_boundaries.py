@@ -249,7 +249,7 @@ BUILT_IN_TOPICS = frozenset(
 )
 
 
-@pytest.fixture(params=["tags", "schemas", "render", "health"])
+@pytest.fixture(params=["tags", "schemas", "render", "health", "search"])
 def capability(request):
     return importlib.import_module(f"okf_ext.{request.param}")
 
@@ -258,7 +258,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
     """The `capability` fixture is a literal list, unlike `capability_names`.
     This is what stops a third capability from being added without anyone
     extending the surface tests below."""
-    assert capability_names(modules) == {"tags", "schemas", "render", "health"}
+    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search"}
 
 
 def test_all_lists_exactly_what_the_module_exports(capability) -> None:
@@ -335,11 +335,44 @@ def test_the_documented_health_surface_is_present() -> None:
     assert health.CODES == ("health.uncited", "health.duplicate-title", "health.log-gap")
 
 
-def test_no_capability_claims_a_built_in_topic_prefix() -> None:
-    """Every capability's claim on a topic prefix, checked in one place."""
-    from okf_ext import health, render, schemas, tags
+def test_the_documented_search_surface_is_present() -> None:
+    """Spec §3 of the search work item: five functions, three values, and
+    deliberately no `TOPIC` — the first capability that reports nothing."""
+    from okf_ext import search
 
-    capabilities = (tags, schemas, render, health)
-    claimed = {capability.TOPIC for capability in capabilities}
-    assert len(claimed) == len(capabilities), "two capabilities claim the same topic prefix"
-    assert not (claimed & BUILT_IN_TOPICS)
+    for name in ("bm25_scores", "build_index", "search", "snippet", "tokenize"):
+        assert callable(getattr(search, name))
+    assert search.DEFAULT_WEIGHTS == {"title": 3, "description": 2, "tags": 2, "body": 1}
+    assert search.TOKEN_RE.pattern == r"[a-zA-Z0-9][a-zA-Z0-9_\-']+"
+    assert isinstance(search.STOPWORDS, frozenset)
+    assert not hasattr(search, "TOPIC"), "search answers questions; it files no findings"
+    assert not hasattr(search, "CODES")
+
+
+def test_no_capability_claims_a_built_in_topic_prefix(modules: list[Path]) -> None:
+    """Every capability's claim on a topic prefix, checked in one place.
+
+    The capability set is derived from the filesystem rather than hardcoded as
+    a literal tuple of capability modules. A hardcoded list does not fail when
+    a further capability lands — it simply stops covering the package, which is
+    the same silent blind spot the two contract-coverage tests above were
+    written to close.
+
+    A capability with **no** `TOPIC` is legal and is skipped, not failed.
+    `search` is the first: it answers questions rather than filing `Finding`s,
+    so it claims no prefix and needs no entry in okf-io's code namespace. The
+    assertion is therefore *every capability that defines `TOPIC` claims a
+    prefix that is distinct and outside okf-io's built-in eight*, rather than
+    *every capability defines one*.
+    """
+    claimed = [
+        topic
+        for topic in (
+            getattr(importlib.import_module(f"okf_ext.{name}"), "TOPIC", None)
+            for name in sorted(capability_names(modules))
+        )
+        if topic is not None
+    ]
+    assert claimed, "no capability claims a topic prefix at all; the layout moved"
+    assert len(claimed) == len(set(claimed)), f"two capabilities claiming one prefix: {claimed}"
+    assert not (set(claimed) & BUILT_IN_TOPICS)

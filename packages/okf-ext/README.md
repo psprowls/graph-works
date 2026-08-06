@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, render correctness and bundle health today; richer query, budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, render correctness, bundle health and search today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -25,7 +25,7 @@ What does transfer is that everyone pays for an unconditional dependency:
 - **Promotion is never triggered by a dependency count** — only by the two
   conditions below.
 
-v0.1.0 declares three unconditional dependencies:
+v0.1.1 declares three unconditional dependencies:
 
 - **`okf-io>=0.1,<0.2`** — the bundle model this is built on. Pre-1.0, minor is
   breaking (ADR-0007), hence the ceiling.
@@ -55,6 +55,16 @@ and one extra:
   it, and `okf_ext/schemas/__init__.py` raises an `ImportError` naming the extra
   when it is absent. Neither promotion trigger fires: the dependency is cleanly
   optional, and nothing yet wants the capability without the rest.
+
+and one capability that needs nothing at all:
+
+- **`search`** — the mirror image of the worked example above, and the case the
+  policy's "unconditional dependencies stay few" clause is actually protecting.
+  BM25 ranking and snippet extraction are `math`, `re` and `collections`, so
+  the capability lands with no extra, no `ImportError` guard in its
+  `__init__.py`, and no change to the unconditional list. A capability that
+  costs nothing to install is the outcome the rule is aiming at; `schemas`
+  shows what to do when one cannot be.
 
 `requires-python` is `>=3.12`, matching the rest of the workspace.
 `okf_io.models.Frontmatter.extra` defaults to `MappingProxyType({})`, which the
@@ -185,6 +195,36 @@ never modifying (see Boundaries, above; also ADR-0005). A caller who hits this
 today has one workaround: inspect the bundle's own `fm_raw` for the concepts
 `inventory()` attributes the suspicious tag to, and check whether the value at
 that position is actually a `str`.
+
+**`search` cannot tokenize non-ASCII text, so a document written in a
+non-Latin script is unreachable by any text query.** `TOKEN_RE` is
+`[a-zA-Z0-9][a-zA-Z0-9_\-']+`, inherited verbatim from the tool `search` was
+ported from. A document titled `数据质量` produces no tokens at all and so
+carries an empty term-frequency table: `Filters` and the empty-query browse
+find it, and nothing else does. Accented Latin is mangled rather than dropped,
+and mangled *symmetrically* — `Müller` becomes `ller` at index time and at
+query time alike, so searching the accented spelling works and searching
+`muller`, which is what a reader types, does not. Splitting on the accent also
+leaves junk behind: `naïve` indexes as `na` and `ve`, both matchable. Widening
+the character classes changes tokenization, therefore term frequencies,
+therefore every score, which is precisely what `tests/fixtures/bm25_golden.json`
+exists to make loud; the change is possible but it is a versioned one, and it
+belongs with a new golden and a note about the rankings it moves.
+
+**A `search()` query that cannot be tokenized returns the whole corpus rather
+than nothing, and looks identical to a deliberate browse.** An empty query, a
+query of nothing but stopwords, and a query in a script `TOKEN_RE` cannot
+represent all take the same path: the filtered set, every hit scored `0.0`, in
+concept-id order. That is the documented behaviour for the first two — "every
+`Metric` tagged `finance`" is a real request, and the empty query is the
+natural way to spell it. The third arrives there by accident. An ASCII query
+that genuinely matches nothing correctly returns `()`, so the one case that
+returns *everything* is the one where the caller's input was never understood.
+A caller who needs to tell them apart calls `search.tokenize(text)` first and
+treats an empty result as its own case. `search()` does not do this on their
+behalf because it cannot know which of the two the caller meant; separating
+them is an API change, and it is logged against `parse_query()` rather than
+patched in here.
 
 ## Design notes
 

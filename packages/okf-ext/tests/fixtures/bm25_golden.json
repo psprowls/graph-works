@@ -1,0 +1,55 @@
+{
+  "note": "Captured once from the reference implementation this capability was ported from, before the port. Spec §10.1. Regenerating this from the ported code proves nothing: the point is that the arithmetic survived the port, including the two defensive quirks a tidy-up would silently change.",
+  "k1": 1.5,
+  "b": 0.75,
+  "query": [
+    "revenue",
+    "margin",
+    "absent-term"
+  ],
+  "documents": [
+    [
+      "revenue",
+      "revenue",
+      "margin",
+      "policy"
+    ],
+    [
+      "margin",
+      "cogs",
+      "cogs",
+      "cogs",
+      "policy",
+      "standard"
+    ],
+    [
+      "revenue",
+      "policy",
+      "recognition",
+      "fiscal",
+      "year",
+      "orders",
+      "delivered"
+    ],
+    [
+      "skill",
+      "executor",
+      "bigquery"
+    ],
+    []
+  ],
+  "scores": [
+    [
+      0,
+      2.1261383621451855
+    ],
+    [
+      1,
+      0.7146683570235918
+    ],
+    [
+      2,
+      0.654556065311327
+    ]
+  ]
+}

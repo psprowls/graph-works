@@ -41,7 +41,8 @@ links      the link graph over a Bundle
 validate   Finding / Report / RuleContext / the runner
 _rules/*   the eight topic modules
   |
-index, log the two writers
+index, log the two index/log writers
+migrate    the v0.1 -> v0.2 rewriter (third writer)
 ```
 
 **One documented inversion:** `validate._registry()` imports `_rules` lazily
@@ -53,7 +54,7 @@ the package should import them, and nothing inside them may import upward.
 
 ## Two splices, at two levels
 
-Both writers preserve bytes the same way, but the mechanisms are separate:
+All three writers preserve bytes the same way, but the mechanisms are separate:
 
 - **Frontmatter** — `document._splice(orig, pristine, mutated)` diffs ruamel's
   render of the pristine data against its render of the mutated data and maps
@@ -62,8 +63,10 @@ Both writers preserve bytes the same way, but the mechanisms are separate:
 - **Body** — `_edit.Edit` is a replacement of a 1-based inclusive line range;
   an insertion is the empty range `end == start - 1`. `index.py` and `log.py`
   compute their changes as ranges over the original lines and copy everything
-  else through verbatim. **Never re-render a region in order to change one line
-  inside it** — that's how a writer destroys prose it never meant to touch.
+  else through verbatim. `migrate.py` is the third: it deletes a `# Citations`
+  range and appends footnote definitions, and touches nothing between them.
+  **Never re-render a region in order to change one line inside it** — that's
+  how a writer destroys prose it never meant to touch.
 
 `_yaml.sniff_style()` infers per-document emitter settings (mapping indent,
 sequence indent, dash offset, padded flow mappings, newline) from the source
@@ -90,7 +93,9 @@ the view instead of re-reading `fm_raw`:
 - `fallbacks` — which ADR-0003 read-time fallbacks fired, so a consumer can tell
   a fallback-derived value from an authored one. `_rules/legacy.py` keys off
   this rather than re-scanning the body, which would disagree with the view on a
-  migrated document that kept its old `# Citations` prose.
+  migrated document that kept its old `# Citations` prose. `migrate.py` keys off
+  it too, which is what makes reader, validator and writer one decision rather
+  than three.
 
 `Mapping` defaults are `MappingProxyType`, not `dict` — a plain dict default
 would make a directly-constructed `Frontmatter` writable while a built one isn't.
@@ -155,6 +160,10 @@ One module per source module (`test_document.py`, `test_links.py`, `test_log.py`
   through ruamel and reports the byte-identical ratio. It always passes; a
   dialect quirk is a documented finding, not a failure, because the splice never
   re-emits an unchanged line.
+- `test_migrate_properties.py` — the five §8.2 migration acceptance properties
+  over every v0.1 fixture, plus §8.3's guards on what must *not* have changed.
+  Separate from `test_migrate.py` for the same reason `test_roundtrip.py` is
+  separate from `test_document.py`: corpus-wide properties, not unit tests.
 
 `tests/helpers.py` holds fixture discovery (`conftest.py` is nearly empty by
 design). Fixtures deliberately unparseable are named in `helpers.MALFORMED`.

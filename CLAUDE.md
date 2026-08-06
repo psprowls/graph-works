@@ -114,10 +114,30 @@ overwritten; `descriptions="refresh"` opts into rewriting.
 `parse_log()` / `append_log_entry()` handle `log.md`; the append requires `on=`
 or `today=` (again, no clock).
 
-Both writers default to **`dry_run=True`**. `update_index()` also defaults to
-`create_missing=False`. `IndexUpdate` and `LogAppend` share one vocabulary:
-`before`, `after`, a `changed` property that renders nothing, and a `diff()`
-that writes nothing.
+`migrate()` is the third writer and the write half of ADR-0003: it rewrites a
+v0.1 bundle into v0.2 form — `timestamp` → `generated`, body `# Citations` →
+`sources[]`. **Its trigger is membership in `doc.fm.fallbacks`**, the same set
+`_rules/legacy.py` keys off, so reader, validator and writer can never disagree
+about what counts as v0.1; it never re-scans a document independently. Refusals
+are all-or-nothing per document and come back as `Unmigrated` entries with a
+closed `reason` vocabulary.
+
+Two places where the shipped code is wider than the spec that describes it. A
+**blank or non-instant `timestamp`** (any value the reader cannot coerce to a
+datetime — an int, a bool, a list, a mapping, an unparseable string) fires the
+read fallback but carries nothing to migrate, so the rewriter declines every
+such value — migrating one would only launder a broken value into v0.2 shape
+while silencing the warning that flags it. Only the blank/whitespace-only
+string stays silent about it, matching `_rules/legacy.py`'s own exemption;
+every other shape still fires `legacy.timestamp`, so the decline is reported
+too, as an `Unmigrated` with reason `"not-an-instant"`. And a **partial
+`generated`** — an authored `by` with no `at` — fires it too, so rewrite A
+fills `at` in place rather than inserting a block over the author.
+
+All three writers default to **`dry_run=True`**. `update_index()` also defaults
+to `create_missing=False`. `IndexUpdate`, `LogAppend`, and `Migration` share
+one vocabulary: `before`, `after`, a `changed` property that renders nothing,
+and a `diff()` that writes nothing.
 
 ## Invariants to respect
 

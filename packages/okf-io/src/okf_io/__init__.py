@@ -18,19 +18,22 @@ reads in-memory text, :func:`load` reads one file, :func:`load_bundle` reads
 a whole directory. The names are deliberately different for deliberately
 different things.
 
-Two write paths. :func:`update_index` reconciles a directory's ``index.md``
-against the bundle (§8) and :func:`append_log_entry` appends to ``log.md``
-(§9). Both default to ``dry_run=True``: writing is something a caller asks
-for. Under the default ``descriptions="preserve"``, neither rewrites text a
-person wrote -- okf-io owns which entries appear, the human owns what they
+Three write paths. :func:`update_index` reconciles a directory's ``index.md``
+against the bundle (§8), :func:`append_log_entry` appends to ``log.md`` (§9),
+and :func:`migrate` rewrites a v0.1 bundle into v0.2 form (§13.1). All three
+default to ``dry_run=True``: writing is something a caller asks for. Under the
+default ``descriptions="preserve"``, :func:`update_index` does not rewrite text
+a person wrote -- okf-io owns which entries appear, the human owns what they
 say. ``descriptions="refresh"`` rewrites entry text from concept descriptions,
 or from a supplied ``describe=`` hook.
 
-**Shadowing note:** ``okf_io.validate`` is the function, not the submodule.
-Import submodule names with ``from okf_io.validate import Finding, Report,
-RuleContext``. The idioms ``import okf_io.validate as m`` and ``from okf_io
-import validate as m`` both bind the function, so ``m.Finding`` will fail.
-This is deliberate: the function is what callers want at the front door.
+**Shadowing note:** ``okf_io.validate`` and ``okf_io.migrate`` are the
+functions, not the submodules. Import submodule names with ``from
+okf_io.validate import Finding, Report, RuleContext`` and ``from okf_io.migrate
+import Migration, Unmigrated``. The idioms ``import okf_io.validate as m`` and
+``from okf_io import validate as m`` both bind the function, so ``m.Finding``
+will fail. This is deliberate: the function is what callers want at the front
+door.
 """
 
 from __future__ import annotations
@@ -61,6 +64,14 @@ from okf_io.links import build as build_link_graph
 from okf_io.log import Log, LogAppend, LogEntry, LogSection
 from okf_io.log import append as append_log_entry
 from okf_io.log import parse as parse_log
+from okf_io.migrate import (
+    Migration,
+    MigrationChange,
+    MigrationChangeKind,
+    Unmigrated,
+    UnmigratedReason,
+    migrate,
+)
 from okf_io.models import (
     Actor,
     ActorKind,
@@ -102,6 +113,9 @@ __all__ = [
     "LogAppend",
     "LogEntry",
     "LogSection",
+    "Migration",
+    "MigrationChange",
+    "MigrationChangeKind",
     "Parameter",
     "ParseError",
     "Report",
@@ -110,6 +124,8 @@ __all__ = [
     "Severity",
     "Source",
     "TrustTier",
+    "Unmigrated",
+    "UnmigratedReason",
     "UsageWindow",
     "Verified",
     "__version__",
@@ -121,6 +137,7 @@ __all__ = [
     "last_verified_at",
     "load",
     "load_bundle",
+    "migrate",
     "parse",
     "parse_log",
     "trust_tier",

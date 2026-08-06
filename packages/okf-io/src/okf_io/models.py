@@ -507,25 +507,35 @@ def _build_attester(
 def _scan_citations(body: str) -> tuple[Source, ...]:
     """Collect a v0.1 body ``# Citations`` list.
 
-    Runs on ``_md``'s token stream, so a ``#`` inside a fenced block can no
-    longer end the scan early and an item inside one is no longer collected --
-    the two limits documented when this was a regex scanner. The item text is
-    now the item's full inline source, including lazily-continued lines, where
-    the regex scanner truncated at the first line; this is a deliberate
-    consequence of moving to the token stream and is the same class of
-    improvement as the fence fix.
+    Delegates to ``_md.citations_section``, the locator the migration rewriter
+    also uses. Sharing it is the point: the writer has to find the same
+    construct in order to delete it, and two independent definitions of "a
+    citations section" would eventually disagree about a document.
 
-    The consumer-visible contract is otherwise unchanged: the result is still
-    flagged in ``Frontmatter.fallbacks``, and an item that is not a markdown
-    link still becomes ``Source(title=text, resource=text)``. Changing that
-    second shape is a migration question, not a parser one.
+    Two consequences of that shared locator, both deliberate. The
+    bracketed-number dialect (``[1] [Title](url)`` paragraph lines, which
+    `crypto_bitcoin` writes) is now read where the list-item-only scan missed
+    it entirely -- an ADR-0003 read-side change, safe because the values arrive
+    flagged in ``fallbacks``. And entries stop at the next heading, so a second
+    ``# Citations`` section is no longer folded into the first.
+
+    The consumer-visible mapping is otherwise unchanged: an item that is not a
+    markdown link still becomes ``Source(title=text, resource=text)``. Changing
+    that second shape is a migration question, not a parser one -- and
+    ``migrate`` is where it is now answered.
+
+    ``pure`` is not consulted. Purity gates the *rewrite*; a section holding
+    prose beside its citations still carries citations to read.
     """
+    section = _md.citations_section(body)
+    if section is None:
+        return ()
     out: list[Source] = []
-    for item in _md.list_items_under(_md.parse_body(body), "citations"):
-        if item.link_target is not None:
-            out.append(Source(title=item.link_label or None, resource=item.link_target))
+    for entry in section.entries:
+        if entry.link_target is not None:
+            out.append(Source(title=entry.link_label or None, resource=entry.link_target))
         else:
-            out.append(Source(title=item.text, resource=item.text))
+            out.append(Source(title=entry.text, resource=entry.text))
     return tuple(out)
 
 

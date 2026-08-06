@@ -199,3 +199,69 @@ def test_a_directly_constructed_frontmatter_is_also_read_only():
     fm = Frontmatter()
     with pytest.raises(TypeError):
         fm.extra["injected"] = "surprise"  # type: ignore[index]
+
+
+def test_the_bracketed_number_dialect_now_populates_sources():
+    """The announced ADR-0003 read-side change (design spec §5.3).
+
+    `crypto_bitcoin` writes citations as `[n]` paragraph lines. They are not
+    list items, so the list-item-only scan returned nothing and the fallback
+    never fired on this dialect. It does now: the document really is v0.1 with
+    citations, and the values arrive flagged in `fallbacks` exactly as the
+    list dialect's do.
+    """
+    from ruamel.yaml.comments import CommentedMap
+
+    body = (
+        "# Schema\n\nText.\n\n# Citations\n\n"
+        "[1] [Bitcoin Transactions](https://x.example/t)\n"
+        "[2] [Bitcoin ETL](https://github.com/blockchain-etl/bitcoin-etl)\n"
+    )
+    fm = build_frontmatter(CommentedMap(), body=body)
+    assert "sources" in fm.fallbacks
+    assert [s.title for s in fm.sources] == ["Bitcoin Transactions", "Bitcoin ETL"]
+    assert [s.resource for s in fm.sources] == [
+        "https://x.example/t",
+        "https://github.com/blockchain-etl/bitcoin-etl",
+    ]
+
+
+def test_a_numbered_line_with_no_link_keeps_the_two_field_shape():
+    """Unchanged contract: a non-link entry is `Source(title=text, resource=text)`."""
+    from ruamel.yaml.comments import CommentedMap
+
+    body = "# Citations\n\n[1] See the FY2026 policy binder\n"
+    fm = build_frontmatter(CommentedMap(), body=body)
+    assert fm.sources[0].title == "See the FY2026 policy binder"
+    assert fm.sources[0].resource == "See the FY2026 policy binder"
+
+
+def test_an_impure_section_still_reads_its_entries():
+    """Purity gates the *rewrite*, never the read.
+
+    A section holding prose beside its citations is still a v0.1 document
+    carrying citations, and a reader that dropped them would lose data the
+    fallback exists to recover.
+    """
+    from ruamel.yaml.comments import CommentedMap
+
+    body = "# Citations\n\n- [Policy](p.md)\n\nSee also the binder.\n"
+    fm = build_frontmatter(CommentedMap(), body=body)
+    assert "sources" in fm.fallbacks
+    assert [s.resource for s in fm.sources] == ["p.md"]
+
+
+def test_a_second_citations_heading_is_not_folded_into_the_first():
+    """Entries stop at the next heading; a second section's entries never reach the view.
+
+    This behaviour is a deliberate consequence of delegating to the shared
+    locator: the rewriter finds the same construct in order to delete it, and
+    the locator stops at the next heading. The test exists so a future change
+    to the locator's boundary cannot move this behaviour unnoticed.
+    """
+    from ruamel.yaml.comments import CommentedMap
+
+    body = "# Citations\n\n[1] [First](first.md)\n\n# Citations\n\n[2] [Second](second.md)\n"
+    fm = build_frontmatter(CommentedMap(), body=body)
+    assert "sources" in fm.fallbacks
+    assert [s.resource for s in fm.sources] == ["first.md"]

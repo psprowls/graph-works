@@ -40,6 +40,9 @@ def test_public_surface():
         "LogAppend",
         "LogEntry",
         "LogSection",
+        "Migration",
+        "MigrationChange",
+        "MigrationChangeKind",
         "Parameter",
         "ParseError",
         "Report",
@@ -48,6 +51,8 @@ def test_public_surface():
         "Severity",
         "Source",
         "TrustTier",
+        "Unmigrated",
+        "UnmigratedReason",
         "UsageWindow",
         "Verified",
         "__version__",
@@ -59,6 +64,7 @@ def test_public_surface():
         "last_verified_at",
         "load",
         "load_bundle",
+        "migrate",
         "parse",
         "parse_log",
         "trust_tier",
@@ -72,6 +78,18 @@ def test_all_is_sorted_and_resolvable():
     assert list(okf_io.__all__) == sorted(okf_io.__all__)
     for name in okf_io.__all__:
         assert hasattr(okf_io, name), name
+
+
+def test_migrate_is_the_function_not_the_submodule():
+    """The same deliberate shadowing as `validate` (see the package docstring)."""
+    import okf_io.migrate as shadowed
+
+    assert callable(okf_io.migrate)
+    assert shadowed is okf_io.migrate
+    from okf_io.migrate import Migration, Unmigrated
+
+    assert Migration is okf_io.Migration
+    assert Unmigrated is okf_io.Unmigrated
 
 
 def test_nothing_private_is_exported():

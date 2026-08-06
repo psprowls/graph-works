@@ -32,6 +32,46 @@ quoted timestamps, and **long plain scalars pre-folded at ~80 columns**. That la
 property is why the line-splice write-back exists (plan §0): ruamel cannot
 reproduce those folds.
 
+## The v0.1 corpus
+
+`legacy/` is a **second** vendored set, pinned to a different commit and
+serving a different purpose. `780fe9d` is knowledge-catalog's entire v0.1 → v0.2
+migration; these files are taken from `780fe9d^`, the commit *before* it, which
+is the largest collection of real v0.1 documents that exists.
+
+| Fixture | Source | Archive commit | Vendored |
+|---|---|---|---|
+| `legacy/stackoverflow/references/badge_classes.md` | `okf/bundles/stackoverflow/references/badge_classes.md` | `780fe9d^` | 2026-08-05 |
+| `legacy/stackoverflow/tables/post_history.md` | `okf/bundles/stackoverflow/tables/post_history.md` | `780fe9d^` | 2026-08-05 |
+| `legacy/ga4/references/metrics/avg_pageviews.md` | `okf/bundles/ga4/references/metrics/avg_pageviews.md` | `780fe9d^` | 2026-08-05 |
+
+Upstream is `https://github.com/GoogleCloudPlatform/knowledge-catalog.git`, so
+`780fe9d^` resolves without the local clone: `git clone` it, `git show
+780fe9d^:<path>` each file. The directory names mirror the upstream bundles
+they came from; `legacy/` itself loads as one bundle, which is what the
+migration properties walk.
+
+**`780fe9d` is a corpus of inputs, not a golden target.** Reading the commit:
+all 65 files carrying a citations section before it carry none after, and the
+way they got there was an agent regenerating each document — prose rewritten,
+`id` values invented semantically (`ga4-demo-docs`), footnote references woven
+into newly written sentences, and the ga4 metrics files deleted and replaced
+outright. A mechanical rewriter cannot reproduce that and does not try. Compare
+against these inputs; never against that commit's outputs.
+
+### Why these three, and why not a fourth
+
+One per dialect that exists in the wild: `badge_classes.md` writes linked list
+items (64 of the 65 files), `avg_pageviews.md` writes a bare URL as a list item
+with no link, and `post_history.md` writes the bracketed-number form
+(`[1] [Title](url)`) — under a `### Citations` heading rather than `# Citations`,
+which is why the locator ignores heading level.
+
+The design spec asked for a fourth: a `timestamp`-only document with no
+citations. **No such document exists at `780fe9d^`** — every one of the 65
+timestamped v0.1 concepts carries a citations section. `edge/legacy_timestamp.md`
+is that document, hand-built.
+
 ## Edge fixtures
 
 `edge/` is hand-built, one file per item in the design document's §2.5 list plus

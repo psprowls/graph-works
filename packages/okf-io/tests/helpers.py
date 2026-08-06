@@ -8,6 +8,7 @@ from okf_io import _yaml
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BUNDLES = FIXTURES / "bundles"
+LEGACY = FIXTURES / "legacy"
 EDGE = FIXTURES / "edge"
 
 #: Fixtures that are deliberately unparseable.
@@ -26,8 +27,19 @@ def read(path: Path) -> str:
 
 
 def all_concept_files() -> list[Path]:
-    """Every `.md` fixture: both vendored bundles plus every edge case."""
-    return sorted(BUNDLES.rglob("*.md")) + sorted(EDGE.rglob("*.md"))
+    """Every `.md` fixture: both vendored bundles, the v0.1 corpus, every edge case."""
+    return sorted(BUNDLES.rglob("*.md")) + sorted(LEGACY.rglob("*.md")) + sorted(EDGE.rglob("*.md"))
+
+
+def legacy_files() -> list[Path]:
+    """Every v0.1 fixture: the vendored corpus plus the hand-built edge cases.
+
+    The migration acceptance properties run over exactly this set. Edge cases
+    are selected by the `legacy_` name prefix rather than listed, so adding a
+    regression fixture enrolls it in the properties automatically -- which is
+    the behaviour you want from a corpus whose whole job is to be walked.
+    """
+    return sorted(LEGACY.rglob("*.md")) + sorted(EDGE.rglob("legacy_*.md"))
 
 
 def has_frontmatter(path: Path) -> bool:

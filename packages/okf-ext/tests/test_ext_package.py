@@ -53,9 +53,9 @@ def test_the_capability_is_still_reachable_as_a_submodule():
     assert tags.DEFAULT_IGNORE == ("_tags.yaml", "*/_tags.yaml")
 
 
-def test_the_top_level_still_imports_no_capability_now_that_there_are_two():
+def test_the_top_level_still_imports_no_capability_now_that_there_are_four():
     """The claim in `test_top_level_does_not_import_any_capability` was made
-    when there was one capability to not import. Restated over both."""
+    when there was one capability to not import. Restated over all four."""
     result = subprocess.run(
         [
             sys.executable,
@@ -68,6 +68,8 @@ def test_the_top_level_still_imports_no_capability_now_that_there_are_two():
     )
     assert "okf_ext.tags" not in result.stdout
     assert "okf_ext.schemas" not in result.stdout
+    assert "okf_ext.render" not in result.stdout
+    assert "okf_ext.health" not in result.stdout
 
 
 def test_the_second_capability_is_reachable_as_a_submodule():

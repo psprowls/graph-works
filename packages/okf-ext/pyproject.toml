@@ -17,6 +17,15 @@ dependencies = [
     # and reaching into `okf_io._yaml` would couple this package to a private
     # module of the one it sits above.
     "ruamel.yaml>=0.18",
+    # Parse markdown bodies in the `render` capability. Declared for the same
+    # reason `ruamel.yaml` is, and floored where okf-io floors it.
+    #
+    # Unconditional rather than an extra, despite only one capability using it:
+    # okf-io hard-depends on `markdown-it-py`, so the `ImportError` guard the
+    # README's extras policy requires could never fire. An extra whose guard is
+    # unfalsifiable is not a boundary, and the unreachable branch would cost
+    # coverage against a 95% floor with a thin margin.
+    "markdown-it-py>=3.0",
 ]
 
 [tool.hatch.build.targets.wheel]

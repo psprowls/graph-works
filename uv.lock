@@ -563,6 +563,7 @@ name = "okf-ext"
 version = "0.1.0"
 source = { editable = "packages/okf-ext" }
 dependencies = [
+    { name = "markdown-it-py" },
     { name = "okf-io" },
     { name = "ruamel-yaml" },
 ]
@@ -575,6 +576,7 @@ schemas = [
 [package.metadata]
 requires-dist = [
     { name = "jsonschema", marker = "extra == 'schemas'", specifier = ">=4.18" },
+    { name = "markdown-it-py", specifier = ">=3.0" },
     { name = "okf-io", editable = "packages/okf-io" },
     { name = "ruamel-yaml", specifier = ">=0.18" },
 ]

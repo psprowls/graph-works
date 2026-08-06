@@ -249,7 +249,7 @@ BUILT_IN_TOPICS = frozenset(
 )
 
 
-@pytest.fixture(params=["tags", "schemas"])
+@pytest.fixture(params=["tags", "schemas", "render", "health"])
 def capability(request):
     return importlib.import_module(f"okf_ext.{request.param}")
 
@@ -258,7 +258,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
     """The `capability` fixture is a literal list, unlike `capability_names`.
     This is what stops a third capability from being added without anyone
     extending the surface tests below."""
-    assert capability_names(modules) == {"tags", "schemas"}
+    assert capability_names(modules) == {"tags", "schemas", "render", "health"}
 
 
 def test_all_lists_exactly_what_the_module_exports(capability) -> None:
@@ -311,10 +311,35 @@ def test_the_documented_schemas_surface_is_present() -> None:
     assert schemas.DEFAULT_IGNORE == ("_schema/*", "*/_schema/*")
 
 
+def test_the_documented_render_surface_is_present() -> None:
+    """Spec §3 and §6.3 of the render work item: one factory, one helper, four codes."""
+    from okf_ext import render
+
+    assert callable(render.render_rule)
+    assert callable(render.escape_angle_brackets)
+    assert render.TOPIC == "render"
+    assert render.CODES == (
+        "render.angle-bracket",
+        "render.callout",
+        "render.wikilink",
+        "render.table-pipe",
+    )
+
+
+def test_the_documented_health_surface_is_present() -> None:
+    """Spec §3 and §7 of the health work item: one factory, three codes."""
+    from okf_ext import health
+
+    assert callable(health.health_rule)
+    assert health.TOPIC == "health"
+    assert health.CODES == ("health.uncited", "health.duplicate-title", "health.log-gap")
+
+
 def test_no_capability_claims_a_built_in_topic_prefix() -> None:
     """Every capability's claim on a topic prefix, checked in one place."""
-    from okf_ext import schemas, tags
+    from okf_ext import health, render, schemas, tags
 
-    claimed = {tags.TOPIC, schemas.TOPIC}
-    assert len(claimed) == 2, "two capabilities claiming one prefix"
+    capabilities = (tags, schemas, render, health)
+    claimed = {capability.TOPIC for capability in capabilities}
+    assert len(claimed) == len(capabilities), "two capabilities claim the same topic prefix"
     assert not (claimed & BUILT_IN_TOPICS)

@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags and schema validation today; richer query, budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, render correctness and bundle health today; richer query, budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -25,7 +25,7 @@ What does transfer is that everyone pays for an unconditional dependency:
 - **Promotion is never triggered by a dependency count** — only by the two
   conditions below.
 
-v0.1.0 declares two unconditional dependencies:
+v0.1.0 declares three unconditional dependencies:
 
 - **`okf-io>=0.1,<0.2`** — the bundle model this is built on. Pre-1.0, minor is
   breaking (ADR-0007), hence the ceiling.
@@ -33,6 +33,18 @@ v0.1.0 declares two unconditional dependencies:
   files. Declared rather than inherited: relying on it arriving through `okf-io`
   breaks the day the core swaps YAML libraries, and importing `okf_io._yaml`
   would couple this package to a private module of the one it sits above.
+- **`markdown-it-py>=3.0`** — the `render` capability parses markdown bodies.
+  Declared for the same reason `ruamel.yaml` is, and floored where okf-io floors
+  it.
+
+  **This one is the documented exception to the extras rule above**, and the
+  exception is narrow. Only `render` imports it, so the rule says it should be
+  an extra with an `ImportError` naming that extra — but okf-io *hard-depends*
+  on `markdown-it-py`, so no installation of okf-ext can be missing it and the
+  guard could never fire. An extra whose guard is unfalsifiable is not a
+  boundary; it is an unreachable branch, and `just cov` gates at 95% with a thin
+  margin. The rule stands as written: it just does not reach a library the core
+  already requires.
 
 and one extra:
 
@@ -67,6 +79,47 @@ Capabilities are self-contained subpackages of one distribution. A subpackage
 
 Graduation is a directory move plus a re-export shim in
 `okf_ext/<name>/__init__.py`, kept for one minor version.
+
+## Where a rule belongs
+
+`okf-ext` ships four rule-emitting capabilities (`tags`, `schemas`, `render`,
+`health`). A fifth belongs here only if it passes one test:
+
+> **Does it hold for any OKF v0.2 bundle, whoever wrote it?**
+
+A malformed callout renders badly in anyone's vault. Two concepts sharing a
+title is a problem in anyone's bundle. Those are tier 2.
+
+A rule that encodes **one lane's vocabulary** belongs in that lane's tier-3
+package, not here. The two worked examples, both already surveyed and both
+deliberately out of scope:
+
+- the thirteen work-lane lifecycle rules that are not schema-expressible —
+  they key off `status`, `phase` and `effort` values that exist because one
+  workflow defines them
+- the five `diataxis.*` gates — they encode one documentation taxonomy's
+  section shapes
+
+**The hazard is specific:** a lane rule shipped from tier 2 puts *every*
+adopting bundle into a permanent finding state for a vocabulary it never
+adopted. A bundle with no `status` key would report a lifecycle violation
+forever, and the only remedy would be filtering the code out — at which point
+the rule was never really shipped, only shipped-and-suppressed.
+
+The boundary is not about difficulty or about who writes the rule. `health`'s
+`log-gap` reads a threshold and a date and is trivial; it is tier 2 because §9
+logs exist in every bundle. A lifecycle rule may be equally trivial and is still
+tier 3, because `phase: plan` means nothing outside one workflow.
+
+Two consequences worth stating, because both look like counter-examples:
+
+- **A tier-2 rule may still be wrong for a given bundle.** That is what
+  `severity=` and `Report.by_code()` are for. "Some bundles will not want this"
+  is not the test; "this is only meaningful under one workflow's vocabulary" is.
+- **A tier-3 package composes tier-2 rules rather than reimplementing them.**
+  `extra_rules=` takes a list, so a lane's validator passes its own rules
+  *alongside* `render_rule()` and `health_rule()`. Nothing here needs to know
+  the lane exists.
 
 ## Boundaries
 

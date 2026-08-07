@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search and member moves today; budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves and generator-side regeneration today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -106,6 +106,16 @@ Capabilities are self-contained subpackages of one distribution. A subpackage
 Graduation is a directory move plus a re-export shim in
 `okf_ext/<name>/__init__.py`, kept for one minor version.
 
+The same shim-for-one-minor-version recipe applies in reverse when a type
+hoists **out of** a capability and into the shared layer, not only when a
+capability graduates out of this distribution. **Current instance:**
+`SectionSpec`, `TypeSections`, `SectionSet`, `SectionError` and
+`load_sections` moved from `okf_ext.sections` to `okf_ext.shape` in `0.4.0`.
+`from okf_ext.sections import SectionSpec` still works — `okf_ext.sections`
+re-exports every moved name — but the canonical home is `okf_ext.shape` now,
+and the shim comes out one minor version after the move, at `0.5.0`. Import
+from `okf_ext.shape` directly in new code.
+
 ## Where a rule belongs
 
 `okf-ext` ships five rule-emitting capabilities (`tags`, `schemas`, `render`,
@@ -195,6 +205,18 @@ all five; leaving them private inside `tables/splice.py` would have forced a
 second verbatim copy of a helper set. It sits beside `okf_ext.writing` in the
 `layers` contract (neither imports the other) and is listed in `SHARED` in
 `tests/test_ext_boundaries.py`.
+
+The shared layer means "configuration, block-structure primitives, and the
+declaration shapes more than one capability reads". `okf_ext.shape` is the
+fourth hoist and the first shared module that **reads files** — a widening
+stated rather than smuggled: the layer already held `okf_ext.context`, which
+is configuration, and a declaration loader is configuration that happens to
+live on disk. `okf_ext.sections` seeds and validates against that declaration
+and `okf_ext.generators` regenerates from it; leaving the types inside
+`sections` would force `generators` to duplicate exactly the code whose value
+is that both capabilities agree about what a declaration means.
+`okf_ext.sections` re-exports every moved name for one minor version — the
+graduation recipe above, run in reverse.
 
 **Honest weakness:** CI is deferred until the repository has a remote, so both
 checks run from `just check` — a gate a human or agent must invoke, not one a
@@ -359,6 +381,44 @@ Worth stating because it is the one place the validation rules differ by mode.
 during review to close a gap where a move could fabricate an `index.md` or
 `log.md` that `update_index()` would then treat as genuine.
 
+**A caller supplying a string where the document holds a date rewrites that
+key on every run.** `fm_raw` holds real `date` objects, and
+`"2026-08-07" != date(2026, 8, 7)`, so the per-key idempotence check sees a
+change forever and every run reports an edit that changes nothing meaningful.
+Callers supply native types; nothing here coerces on their behalf, for the
+reason `okf_io.models._str_tuple` gives about coercion laundering a broken
+value into a plausible one.
+
+**Ownership is per type, not per document.** A single page that wants one
+section frozen has no way to say so; the declaration is the only lever, and
+it moves every document of that type at once. A per-document override would
+need a frontmatter key, which would need a name, which is a vocabulary
+decision tier 2 does not get to make.
+
+**A renamed heading on an optional generated section is reported nowhere a
+caller must look.** It produces a `section-missing` skip in the
+`ApplyResult`, which a caller may ignore, and no `Finding`, because
+`sections.missing` only fires for required sections. The alternative is a
+rule in a capability that ships none.
+
+**Nothing detects a section that stopped being generated.** Flipping
+`ownership: generated` to `prose` leaves the machine's last render sitting
+there as prose, indistinguishable from something a human wrote. Detecting it
+would need content provenance this capability does not record.
+
+**Supplied content containing a line that parses as a declared heading is
+written at the wrong place.** `regenerate_body` re-locates each section by
+heading against the body *as amended by the previous edit*, and the scan is
+first-match in document order with no notion of "the heading this function
+just wrote". So if a run supplies content for one section that itself
+contains a line reading as a *later* declared heading at a declared level,
+that later section is found early — at the injected line — and written
+there, while the real heading further down keeps its stale content, leaving
+two headings of that name. It is not detected: a detect-and-refuse guard was
+considered and deliberately deferred, not forgotten (see `_locate`'s
+docstring in `regenerate.py`). Supplying content that cannot be mistaken for
+a declared heading is the caller's responsibility.
+
 ## Design notes
 
 **`WriteFailure` carries a machine-readable `kind`, not only rendered prose.**
@@ -388,3 +448,48 @@ consumer shapes; each lane's adoption is its own item in its own repository.
 `TableSpec` is data a caller constructs; shipping one lane's column names in a
 bundle-agnostic package is the same hazard the `rules` item names for lifecycle
 rules.
+
+See `okf_ext.generators.__doc__` for a worked example of calling the
+capability end to end.
+
+**Two halves ship together because either one alone is a way to break a
+document.** Key-level frontmatter ownership says which keys a generator may
+claim; section ownership says which `## ` headings it may claim. A generator
+that owns the right keys but flattens hand-written prose into its render has
+still destroyed the page, and a generator that carries every section through
+untouched but stomps a human-edited `status` key has done the same thing to
+the other half. Shipping the merge without both axes would be shipping half a
+safety property.
+
+**`prose` is the ownership default**, on both axes: a declaration that says
+nothing about a key or a section gets the reading that cannot destroy
+anything, so the machine only claims territory by an explicit grant in
+`_sections/`. That is the same direction of default `sections` already made
+for required/optional; `generators` makes it again for who-may-write.
+
+**An omitted `owned` frontmatter key is deleted; an omitted `generated`
+section is left alone.** The asymmetry is deliberate, not an oversight. A
+frontmatter key is a small scalar or list a run recomputes wholesale each
+time, so "the run's values are the whole truth" is safe and useful — it is
+what lets a dependency that no longer applies disappear on its own without a
+caller remembering to delete it by hand. A section is a block of prose;
+`regenerate_body` never invents or removes one (`plan_sections` is the
+capability that creates a required section, and that is a separate step by
+design — see Boundaries). Leaving an unsupplied `generated` section exactly as
+it stood — the machine's own last render, most of the time — is the
+non-destructive reading; silently blanking it on every run a caller happens
+not to recompute that section would be the frontmatter behaviour applied
+somewhere it does not belong.
+
+**`template` implies `seeded_is_complete`.** A template section's content is
+its declared placeholder by construction — the generator supplies nothing for
+it, `_content` returns the placeholder unconditionally — so without
+`seeded_is_complete=True` baked into the load, every required template
+section would report `sections.unfilled` forever, for being in exactly the
+state it is supposed to be in.
+
+**No rule ships**, for the reason `tables` ships none: a capability that both
+writes documents and judges them would make every future rule import the
+writer through a rule module. The seeding axis this capability's output feeds
+is already covered — `sections.missing` and `sections.unfilled` read the same
+declaration.

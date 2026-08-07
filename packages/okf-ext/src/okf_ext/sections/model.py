@@ -7,81 +7,24 @@ Frozen, slotted and `MappingProxyType`-backed, matching `okf_ext.tags.model`,
 `section_rule` measures a document against *and* what `render_skeleton` and
 `plan_sections` write from -- the move `okf_io.migrate` makes with
 `doc.fm.fallbacks`, so reader, validator and writer cannot disagree about what
-counts.
+counts. Both now live in `okf_ext.shape`, because `okf_ext.generators` is a
+third reader and a capability may not import a sibling. `SectionSet` and
+`SectionSpec` are re-exported here too, so a caller that reached into this
+submodule directly -- rather than through `okf_ext.sections` -- keeps
+working for the same one-minor-version grace period the package-level shim
+grants.
 
 This module imports the shared layer and nothing else from its own package.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from okf_ext.shape import SectionSet as SectionSet
+from okf_ext.shape import SectionSpec as SectionSpec
 from okf_ext.writing import Skipped
-
-
-class SectionError(ValueError):
-    """A declaration set the caller got wrong.
-
-    Caller **configuration** is always an exception; bundle **content** never
-    is. One complaint at load beats the same confusion repeated against every
-    concept in the bundle.
-
-    Subclasses `ValueError` so a caller catching either works, mirroring
-    `okf_ext.tags.VocabularyError` and `okf_ext.schemas.SchemaError`.
-    """
-
-
-@dataclass(frozen=True, slots=True)
-class SectionSpec:
-    """One declared section.
-
-    `placeholder` is **already resolved**: no `placeholder_ref` survives
-    loading, which is what lets `render_skeleton` be a pure function of its
-    argument with no registry to consult.
-    """
-
-    heading: str
-    level: int = 2
-    required: bool = False
-    seeded_is_complete: bool = False
-    placeholder: str = ""
-
-
-@dataclass(frozen=True, slots=True)
-class TypeSections:
-    """What one `type` declares. `sections` is in declaration order, which is
-    what decides where an insert lands -- and nothing else (spec §5.4:
-    reordering sections is house style, not a defect)."""
-
-    sections: tuple[SectionSpec, ...]
-    additional_sections: bool = True
-
-
-@dataclass(frozen=True, slots=True)
-class SectionSet:
-    """A directory of declarations, read once.
-
-    `types` is the dispatch table; `sources` answers "what says so" so a
-    `Finding` can cite `feature.yaml` by name -- the move `Vocabulary.source`
-    and `SchemaSet.sources` both make. `fragments` is the union of every
-    `fragments:` mapping in the directory, `_`-prefixed files included, and is
-    kept after loading so a caller can see what a `placeholder_ref` resolved
-    to.
-    """
-
-    types: Mapping[str, TypeSections]  # type name -> declaration
-    sources: Mapping[str, str]  # type name -> filename
-    fragments: Mapping[str, str]  # fragment name -> text
-    root: Path  # the directory this was read from
-
-    @property
-    def type_names(self) -> tuple[str, ...]:
-        """Named `type_names` rather than `types` -- unlike `SchemaSet.types`,
-        which is the property, `types` here is the mapping field the spec
-        names."""
-        return tuple(sorted(self.types))
 
 
 @dataclass(frozen=True, slots=True)

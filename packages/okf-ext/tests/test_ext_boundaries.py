@@ -33,8 +33,19 @@ import pytest
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
-#: The shared layer. Everything else is a capability.
-SHARED = {"__init__.py", "body.py", "context.py", "splice.py", "writing.py"}
+#: The shared layer. Everything else is a capability. `shape` is a package
+#: rather than a single module, which is why `shared_modules()` expands a
+#: directory entry instead of assuming every name here is a file.
+SHARED = {"__init__.py", "body.py", "context.py", "shape", "splice.py", "writing.py"}
+
+
+def shared_modules() -> list[Path]:
+    """Every source file in the shared layer, packages expanded."""
+    found: list[Path] = []
+    for name in sorted(SHARED):
+        target = SRC / name
+        found.extend(sorted(target.rglob("*.py")) if target.is_dir() else [target])
+    return found
 
 
 def capability_modules() -> list[Path]:
@@ -181,18 +192,17 @@ def test_the_shared_layer_imports_no_capability(modules: list[Path]) -> None:
     """
     names = capability_names(modules)
     offenders: list[str] = []
-    for shared_name in sorted(SHARED):
-        path = SRC / shared_name
+    for path in shared_modules():
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
                 parts = node.module.split(".")
                 if len(parts) >= 2 and parts[0] == "okf_ext" and parts[1] in names:
-                    offenders.append(f"{shared_name}:{node.lineno} {node.module}")
+                    offenders.append(f"{module_id(path)}:{node.lineno} {node.module}")
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     parts = alias.name.split(".")
                     if len(parts) >= 2 and parts[0] == "okf_ext" and parts[1] in names:
-                        offenders.append(f"{shared_name}:{node.lineno} import {alias.name}")
+                        offenders.append(f"{module_id(path)}:{node.lineno} import {alias.name}")
     assert not offenders, "\n".join(offenders)
 
 
@@ -282,7 +292,7 @@ BUILT_IN_TOPICS = frozenset(
 )
 
 
-@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables", "moves", "sections"])
+@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables", "moves", "sections", "generators"])
 def capability(request):
     return importlib.import_module(f"okf_ext.{request.param}")
 
@@ -291,7 +301,17 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
     """The `capability` fixture is a literal list, unlike `capability_names`.
     This is what stops a fourth capability from being added without anyone
     extending the surface tests below."""
-    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search", "tables", "moves", "sections"}
+    assert capability_names(modules) == {
+        "tags",
+        "schemas",
+        "render",
+        "health",
+        "search",
+        "tables",
+        "moves",
+        "sections",
+        "generators",
+    }
 
 
 def test_all_lists_exactly_what_the_module_exports(capability) -> None:
@@ -496,3 +516,67 @@ def test_the_documented_splice_surface_is_present() -> None:
         assert callable(getattr(splice, name))
     assert (splice.CRLF, splice.LF, splice.CR) == ("\r\n", "\n", "\r")
     assert splice.TERMINATORS == ("\n", "\r")
+
+
+def test_the_documented_shape_surface_is_present() -> None:
+    """`okf_ext.shape` is shared, so it is not covered by the `capability`
+    fixture -- pinned here for the same reason `body`'s, `writing`'s and
+    `splice`'s surfaces are. `sections` and `generators` both read these
+    types, so a rename here breaks two capabilities at once."""
+    from okf_ext import shape
+
+    assert callable(shape.load_sections)
+    assert shape.DEFAULT_SECTIONS_DIRNAME == "_sections"
+    assert shape.SECTION_SUFFIXES == (".yaml", ".yml")
+    assert shape.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+    assert shape.SectionSpec.__dataclass_fields__.keys() == {
+        "heading",
+        "level",
+        "required",
+        "seeded_is_complete",
+        "placeholder",
+        "ownership",
+    }
+    assert shape.TypeSections.__dataclass_fields__.keys() == {"sections", "additional_sections", "frontmatter"}
+    assert shape.FrontmatterOwnership.__dataclass_fields__.keys() == {"owned", "provenance"}
+    assert list(shape.__all__) == sorted(shape.__all__, key=lambda name: (_ruf022_group(name), name))
+
+
+def test_the_documented_generators_surface_is_present() -> None:
+    """Spec §5 of the generators work item: one planner, one `apply`, and the
+    two pure halves the properties test directly.
+
+    Field sets pinned the same way `test_the_documented_shape_surface_is_present`
+    pins its three dataclasses, for the same reason: these are the
+    capability's public value types, and a rename on any of them is a
+    breaking change for a consumer that nothing else in the suite catches."""
+    from okf_ext import generators
+
+    for name in ("plan_regenerate", "apply", "key_edits", "regenerate_body"):
+        assert callable(getattr(generators, name))
+    assert generators.Render.__dataclass_fields__.keys() == {"frontmatter", "sections"}
+    assert generators.Render().frontmatter == {}
+    assert generators.Render().sections == {}
+    assert generators.KeyEdit.__dataclass_fields__.keys() == {"key", "action", "value"}
+    assert generators.SectionEdit.__dataclass_fields__.keys() == {"heading", "line"}
+    assert generators.Regeneration.__dataclass_fields__.keys() == {
+        "concept_id",
+        "path",
+        "key_edits",
+        "section_edits",
+        "digest",
+        "after",
+    }
+    assert generators.RegenerationPlan.__dataclass_fields__.keys() == {"root", "regenerations", "skipped"}
+
+
+def test_the_generators_capability_claims_no_topic_prefix() -> None:
+    """A primitive, exactly as `tables` is: a capability that both writes
+    documents *and* judges them would make every future rule import the
+    writer through a rule module. The seeding axis is already covered by
+    `sections.missing` and `sections.unfilled`, which read the same
+    declaration."""
+    from okf_ext import generators
+
+    assert not hasattr(generators, "TOPIC")
+    assert not hasattr(generators, "CODES")

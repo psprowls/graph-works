@@ -166,6 +166,14 @@ BAD = {
     "bad_level": "`level` must be an integer",
     "bad_required": "`required` must be true or false",
     "bad_seeded": "`seeded_is_complete` must be true or false",
+    "bad_ownership": "must be one of",
+    "ownership_not_a_string": "must be a string",
+    "template_without_placeholder": "needs a non-empty `placeholder`",
+    "frontmatter_not_a_mapping": "`frontmatter` must be a mapping",
+    "owned_not_a_list": "`owned` must be a list",
+    "owned_entry_not_a_string": "non-empty string, got 7",
+    "owned_duplicate": "names `title` twice",
+    "owned_and_provenance": "is in both `owned` and `provenance`",
 }
 
 

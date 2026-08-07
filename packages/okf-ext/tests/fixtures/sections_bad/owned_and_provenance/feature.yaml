@@ -1,0 +1,4 @@
+frontmatter:
+  owned: [title, content_hash]
+  provenance: [content_hash]
+sections: []

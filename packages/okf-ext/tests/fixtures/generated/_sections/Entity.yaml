@@ -1,0 +1,22 @@
+frontmatter:
+  owned: [title, sources]
+  provenance: [content_hash]
+
+sections:
+  - heading: Summary
+    required: true
+    placeholder: |
+      <!-- one paragraph: what this is -->
+
+  - heading: Sources
+    required: true
+    ownership: generated
+    seeded_is_complete: true
+
+  - heading: How this synthesis has changed
+    ownership: prose
+
+  - heading: About this page
+    ownership: template
+    placeholder: |
+      Generated from the code graph. Edits here are overwritten on the next run.

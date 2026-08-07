@@ -3,17 +3,19 @@
 **Nothing is auto-discovered.** `load_sections(path)` reads the directory the
 caller names and no other, following `load_vocabulary` and `load_schemas`.
 `_sections/` remains a documented convention tools may default to --
-`DEFAULT_SECTIONS_DIRNAME` and `okf_ext.sections.DEFAULT_IGNORE` exist for
-callers who want it -- not magic this library performs. Because the path is
-explicit, declarations need not live inside the bundle they describe.
+`DEFAULT_SECTIONS_DIRNAME` and `DEFAULT_IGNORE`, defined below in this same
+file, exist for callers who want it -- not magic this library performs.
+Because the path is explicit, declarations need not live inside the bundle
+they describe.
 
 **Unknown keys are tolerated, unlike `load_vocabulary`.** That loader rejects
 them because a typo in a hand-edited house-rule file is likelier than a
-forward-compatible extension. Here the opposite is true and stated: the filed
-`generators` capability adds an ownership field to `SectionSpec`, and the
-design spec calls that an *additive* change -- which it is not if a
-declaration written today against a newer field refuses to load. Type errors
-on keys this loader *does* know are still refused.
+forward-compatible extension. Here the opposite is true and stated: the
+shipped `generators` capability adds an ownership field to `SectionSpec`,
+defined below in this same file, and the design spec calls that an
+*additive* change -- which it is not if a declaration written today against
+a newer field refuses to load. Type errors on keys this loader *does* know
+are still refused.
 
 **Refs resolve at load**, in a second pass over the whole directory, so a
 `placeholder_ref` may name a fragment declared in any file -- not only in one
@@ -30,7 +32,14 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from okf_ext.sections.model import SectionError, SectionSet, SectionSpec, TypeSections
+from okf_ext.shape.model import (
+    FrontmatterOwnership,
+    Ownership,
+    SectionError,
+    SectionSet,
+    SectionSpec,
+    TypeSections,
+)
 
 #: The conventional directory name. A default tools may offer, never one this
 #: module reaches for.
@@ -39,6 +48,19 @@ DEFAULT_SECTIONS_DIRNAME = "_sections"
 #: Recognised suffixes. The filename stem is the type name -- there is no
 #: `type:` key, matching `_schema/<type>.schema.yaml`.
 SECTION_SUFFIXES = (".yaml", ".yml")
+
+#: The three values `ownership` may take. A tuple rather than a set so the
+#: refusal message can list them in a stable order.
+_OWNERSHIP_VALUES: tuple[Ownership, ...] = ("prose", "generated", "template")
+
+#: `_sections/` is a **documented convention, not magic** -- nothing here
+#: discovers it. A caller who keeps declarations inside the bundle they
+#: describe splices this into `okf_io.load_bundle(root, ignore=...)`, where an
+#: ignored member is "not a concept", not "not there". Two patterns because
+#: the first is anchored at the start and so never matches a nested
+#: `_sections/`; `tags.DEFAULT_IGNORE` and `schemas.DEFAULT_IGNORE` each carry
+#: two for the same reason.
+DEFAULT_IGNORE = ("_sections/*", "*/_sections/*")
 
 #: The deepest heading level a declaration may name. Markdown has six, and
 #: `okf_ext.body.Section.level` is read straight off `token.tag[1:]`, so a
@@ -81,6 +103,49 @@ def _file_fragments(name: str, data: Mapping[str, Any]) -> dict[str, str]:
     return found
 
 
+def _key_list(where: str, raw: Any, field: str) -> tuple[str, ...]:  # noqa: ANN401 -- arbitrary parsed YAML
+    """One `owned:` / `provenance:` list, refused for every shape §4.3 names.
+
+    A `str` is rejected explicitly: it is a `Sequence` and would iterate as
+    characters -- the trap `plan_merge` already guards against with a
+    `TypeError`.
+    """
+    if isinstance(raw, str) or not isinstance(raw, Sequence):
+        raise SectionError(f"{where}: `{field}` must be a list, got {type(raw).__name__}")
+    found: list[str] = []
+    for position, entry in enumerate(raw):
+        if not isinstance(entry, str) or not entry.strip():
+            raise SectionError(f"{where}: `{field}`[{position}] must be a non-empty string, got {entry!r}")
+        name = entry.strip()
+        if name in found:
+            raise SectionError(f"{where}: `{field}` names `{name}` twice; a duplicate key is a declaration error")
+        found.append(name)
+    return tuple(found)
+
+
+def _frontmatter(name: str, data: Mapping[str, Any]) -> FrontmatterOwnership:
+    """The `frontmatter:` block, or the empty ownership when absent.
+
+    Unknown keys inside it are tolerated, matching this loader's existing
+    policy for the same reason: a declaration written against a newer field
+    must not refuse to load in an older reader.
+    """
+    raw = data.get("frontmatter", {})
+    if not isinstance(raw, Mapping):
+        raise SectionError(f"{name}: `frontmatter` must be a mapping, got {type(raw).__name__}")
+    owned = _key_list(name, raw.get("owned", []), "owned")
+    provenance = _key_list(name, raw.get("provenance", []), "provenance")
+    # Not a type error but a semantic one: the two classes prescribe
+    # contradictory behaviour for the same key. Refusing at load is strictly
+    # stronger than the disjointness unit test the upstream keeps.
+    both = sorted(set(owned) & set(provenance))
+    if both:
+        raise SectionError(
+            f"{name}: `{both[0]}` is in both `owned` and `provenance`; the two prescribe different behaviour"
+        )
+    return FrontmatterOwnership(owned=owned, provenance=provenance)
+
+
 def _section_spec(where: str, entry: Mapping[str, Any], fragments: Mapping[str, str]) -> SectionSpec:
     raw_heading = entry.get("heading")
     if not isinstance(raw_heading, str) or not raw_heading.strip():
@@ -101,6 +166,23 @@ def _section_spec(where: str, entry: Mapping[str, Any], fragments: Mapping[str, 
     if not isinstance(seeded, bool):
         raise SectionError(f"{where}: `seeded_is_complete` must be true or false, got {seeded!r}")
 
+    # `bool` is a subclass of `str`? No -- but `ownership: true` would read as
+    # a truthy value under a bare falsy test, and `ownership: 2` under an `in`
+    # test against the tuple would simply miss. Both are type errors and both
+    # are named as such, so the message says what is wrong rather than only
+    # that something is.
+    raw_ownership = entry.get("ownership", "prose")
+    if not isinstance(raw_ownership, str):
+        raise SectionError(f"{where}: `ownership` must be a string, got {type(raw_ownership).__name__}")
+    if raw_ownership not in _OWNERSHIP_VALUES:
+        raise SectionError(f"{where}: `ownership` must be one of {list(_OWNERSHIP_VALUES)}, got {raw_ownership!r}")
+    # No `cast` and no `# type: ignore` here: the `not in _OWNERSHIP_VALUES`
+    # check above is a membership test against a `tuple[Ownership, ...]`, and
+    # mypy narrows `raw_ownership` to `Ownership` from that alone. A `cast`
+    # was tried first and mypy flagged it `redundant-cast` -- so re-adding one
+    # is not a fix, it is rediscovering this comment the hard way.
+    ownership: Ownership = raw_ownership
+
     literal = entry.get("placeholder")
     ref = entry.get("placeholder_ref")
     if literal is not None and ref is not None:
@@ -116,12 +198,24 @@ def _section_spec(where: str, entry: Mapping[str, Any], fragments: Mapping[str, 
     else:
         placeholder = ""
 
+    if ownership == "template":
+        if not placeholder.strip():
+            # It would silently blank the section on every run, and "always
+            # empty" is not a thing anyone declares this way.
+            raise SectionError(f"{where}: `ownership: template` needs a non-empty `placeholder`")
+        # A template section's content *is* its placeholder, by construction.
+        # Setting this at load beats leaving an author to remember it: the
+        # failure is silent in the direction that matters, and a permanent
+        # `sections.unfilled` trains a reader to ignore the code.
+        seeded = True
+
     return SectionSpec(
         heading=raw_heading.strip(),
         level=level,
         required=required,
         seeded_is_complete=seeded,
         placeholder=placeholder,
+        ownership=ownership,
     )
 
 
@@ -150,7 +244,11 @@ def _type_sections(name: str, data: Mapping[str, Any], fragments: Mapping[str, s
         seen[key] = spec.heading
         specs.append(spec)
 
-    return TypeSections(sections=tuple(specs), additional_sections=additional)
+    return TypeSections(
+        sections=tuple(specs),
+        additional_sections=additional,
+        frontmatter=_frontmatter(name, data),
+    )
 
 
 def load_sections(path: str | Path) -> SectionSet:

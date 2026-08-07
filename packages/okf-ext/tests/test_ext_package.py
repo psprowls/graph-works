@@ -2,23 +2,66 @@
 
 from __future__ import annotations
 
+import importlib.metadata
 import subprocess
 import sys
 from pathlib import Path
 
 import okf_ext
 from okf_ext import DEFAULT_NORMALIZATION, ExtContext, NormalizationPolicy
+from test_ext_boundaries import capability_modules, capability_names
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
+
+#: The capability set `test_the_top_level_still_imports_no_capability_now_that_there_are_nine`
+#: walks. A literal, not derived from the filesystem at collection time, so a
+#: tenth capability directory landing here is a choice a human makes rather
+#: than something this tuple silently starts covering on its own -- guarded
+#: against drift from the filesystem by
+#: `test_the_capability_tuple_matches_the_filesystem` below, the same pattern
+#: `test_ext_boundaries.py`'s own `capability` fixture uses.
+CAPABILITY_NAMES = ("tags", "schemas", "render", "health", "search", "tables", "moves", "sections", "generators")
 
 
 def test_version_is_static_and_pinned():
     """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking and patch
-    is compatible (ADR-0007): `sections` adds a capability and a shared module
-    and changes nothing that existed, so this is a patch. The primitives
-    hoisted into `okf_ext.splice` were private to `tables/splice.py`, and
-    `SkipReason` and `FailureKind` are unchanged."""
-    assert okf_ext.__version__ == "0.3.1"
+    is compatible (ADR-0007). `generators` adds a capability, but it also
+    moves `SectionSpec`, `TypeSections`, `SectionSet`, `SectionError` and
+    `load_sections` out of `okf_ext.sections` into `okf_ext.shape` -- a public
+    API moving behind a shim is a minor even though the shim keeps callers
+    working for a release."""
+    assert okf_ext.__version__ == "0.4.0"
+
+
+def test_the_distribution_version_matches_the_python_attribute():
+    """ADR-0007's static-version policy has two places to go stale, not one:
+    `packages/okf-ext/pyproject.toml`'s `[project].version` (what a wheel is
+    built and tagged `okf-ext-vX.Y.Z` as) and `okf_ext.__version__` (what a
+    caller reads at import time). Nothing connects them -- versions are
+    static here, never `hatch-vcs`-derived from a tag, so both are hand-edited
+    on every release, and every prior capability commit bumped them in
+    lockstep by hand with nothing enforcing it. A mismatch means a wheel
+    that would ship named `okf_ext-0.3.1-*.whl` while reporting a different
+    `__version__` at import time -- two sources of truth for one version,
+    disagreeing. `importlib.metadata.version` reads the installed
+    distribution's metadata, built from `pyproject.toml`, so this compares
+    the two independently of either one's own claim about itself."""
+    assert importlib.metadata.version("okf-ext") == okf_ext.__version__
+
+
+def test_the_capability_tuple_matches_the_filesystem() -> None:
+    """`test_ext_boundaries.py`'s `test_every_capability_on_disk_is_covered_by_these_tests`
+    guards its own capability literal against a filesystem walk so a new
+    capability added without extending that literal fails loudly rather than
+    silently going uncovered. `CAPABILITY_NAMES` above had no such guard until
+    this test: a tenth capability landing on disk without this tuple being
+    extended would not fail anything -- it would just silently stop being
+    checked for `sys.modules` leakage by the test below, the exact class of
+    bug this whole suite exists to catch. Derived from the same filesystem
+    walk `test_ext_boundaries.py` already performs
+    (`capability_names(capability_modules())`), not a second independent walk
+    that could itself drift from the first."""
+    assert set(CAPABILITY_NAMES) == capability_names(capability_modules())
 
 
 def test_py_typed_marker_ships():
@@ -57,9 +100,9 @@ def test_the_capability_is_still_reachable_as_a_submodule():
     assert tags.DEFAULT_IGNORE == ("_tags.yaml", "*/_tags.yaml")
 
 
-def test_the_top_level_still_imports_no_capability_now_that_there_are_eight():
+def test_the_top_level_still_imports_no_capability_now_that_there_are_nine():
     """The claim in `test_top_level_does_not_import_any_capability` was made
-    when there was one capability to not import. Restated over all eight."""
+    when there was one capability to not import. Restated over all nine."""
     result = subprocess.run(
         [
             sys.executable,
@@ -70,7 +113,7 @@ def test_the_top_level_still_imports_no_capability_now_that_there_are_eight():
         text=True,
         check=True,
     )
-    for name in ("tags", "schemas", "render", "health", "search", "tables", "moves", "sections"):
+    for name in CAPABILITY_NAMES:
         assert f"okf_ext.{name}" not in result.stdout
 
 

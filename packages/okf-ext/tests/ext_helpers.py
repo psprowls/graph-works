@@ -289,3 +289,33 @@ WORK_BODY_HEADINGS = {
     "tech-debt": ["Summary", "Current state", "Plan", "Notes / log"],
     "test-gap": ["Summary", "Coverage gap", "Plan", "Notes / log"],
 }
+
+GENERATED = FIXTURES / "generated"
+GENERATED_DIR = GENERATED / "_sections"
+
+#: What each concept in `generated/` is there to prove. Hand-written and
+#: asserted against rather than derived, so a fixture added or removed without
+#: intent fails loudly -- the habit `SCHEMA_EXPECTED` and `SECTIONS_EXPECTED`
+#: both set. A regeneration corpus is worth exactly as much as the reviewer's
+#: memory of why each file is in it.
+GENERATED_EXPECTED = {
+    "full": "every ownership class present and already canonical -- the idempotence case",
+    "drifted": "a stale generated section, an over-written template, a human-only key, and a stale provenance value",
+    "no_sources_section": "a declared generated section that is absent -- skipped, never created",
+    "empty_sections": "a heading with no body at all -- the body_start > stop splice path",
+    "untyped": "no `type`, so an empty granted set: any non-empty Render raises",
+    "unknown_type": "a type the declaration set does not cover -- same, by a different route",
+    "broken": "unterminated frontmatter -- a parse-error skip",
+}
+
+
+def generated_bundle(*, ignore=DEFAULT_IGNORE_SECTIONS):
+    """The regeneration corpus. Read-only -- never pass this to `apply()`."""
+    return load_bundle(GENERATED, ignore=ignore)
+
+
+def generated_copy(tmp_path: Path) -> Path:
+    """A writable byte-identical copy of the regeneration corpus."""
+    target = tmp_path / "generated"
+    shutil.copytree(GENERATED, target, copy_function=shutil.copy2)
+    return target

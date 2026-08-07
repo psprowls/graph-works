@@ -67,6 +67,32 @@ def assemble(lines: Sequence[str], newline: str, trailing: bool) -> str:
     return text
 
 
+def bare_lines(text: str) -> list[str]:
+    """*text* as bare, unterminated lines, blank ends dropped.
+
+    A YAML `|` block scalar always ends in a newline and a hand-written one
+    may open with a blank; neither should stack a second blank against the
+    ones a caller writes itself. Line endings are normalised here because
+    every caller re-terminates each line with the newline it asked for.
+    **The order of terminator normalisation is correctness-critical: CRLF must
+    collapse before bare CR, else `\\r\\n` becomes `\\n\\n` and CRLF documents
+    grow spurious blank lines.**
+
+    Shared rather than private, because this is the **second** instance --
+    `sections/scaffold.py` composed a section body with it and
+    `okf_ext.generators` composes a replacement body with the same shape, and
+    the two must agree byte for byte or a document scaffolded and then
+    regenerated differs from one regenerated directly.
+    """
+    flat = text.replace(CRLF, LF).replace(CR, LF)
+    lines = flat.split(LF)
+    while lines and not lines[0].strip():
+        lines.pop(0)
+    while lines and not lines[-1].strip():
+        lines.pop()
+    return lines
+
+
 def insert(lines: Sequence[str], at: int, new: Sequence[str], newline: str) -> list[str]:
     """Insert bare *new* lines before 1-based line *at*, terminating each.
 
@@ -83,6 +109,33 @@ def insert(lines: Sequence[str], at: int, new: Sequence[str], newline: str) -> l
     if at > len(head) and head and not head[-1].endswith(TERMINATORS):
         head[-1] = head[-1] + newline
     return [*head[: at - 1], *(item + newline for item in new), *head[at - 1 :]]
+
+
+def replace(lines: Sequence[str], start: int, stop: int, new: Sequence[str], newline: str) -> list[str]:
+    """Replace 1-based lines *start* through *stop* **inclusive** with bare
+    *new* lines, terminating each.
+
+    *start* and *stop* are 1-based; *start* is expected to be >= 1. Behaviour
+    for `start <= 0` is undefined and will not raise: negative indexing causes
+    Python's slice arithmetic to wrap around, silently duplicating content.
+    This is not guarded because callers pass `Section.body_start`, which cannot
+    be less than 1; a runtime check would only pay for a caller that does not
+    exist.
+
+    `stop < start` claims no existing line and is therefore exactly
+    `insert(lines, start, new, newline)` -- the path a section whose heading
+    carries no body takes, where `body_start > stop`. That equivalence is a
+    property in `test_splice.py`, not a coincidence to be rediscovered.
+
+    Carries `insert`'s terminator discipline for the same reason: when
+    *start* is one past the end, a previous last line lacking a terminator
+    gets one, or the first new line would run onto it. The body's own
+    trailing-newline state is restored by `assemble`, never here.
+    """
+    head = list(lines)
+    if start > len(head) and head and not head[-1].endswith(TERMINATORS):
+        head[-1] = head[-1] + newline
+    return [*head[: start - 1], *(item + newline for item in new), *head[max(stop, start - 1) :]]
 
 
 def needs_gap(lines: Sequence[str], at: int) -> bool:
@@ -105,8 +158,10 @@ __all__ = [
     "LF",
     "TERMINATORS",
     "assemble",
+    "bare_lines",
     "dominant_newline",
     "has_trailing_newline",
     "insert",
     "needs_gap",
+    "replace",
 ]

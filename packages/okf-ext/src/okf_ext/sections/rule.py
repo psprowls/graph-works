@@ -14,7 +14,7 @@ from collections.abc import Iterable, Iterator
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from okf_ext.body import Section, sections
-from okf_ext.sections.model import SectionSet, TypeSections
+from okf_ext.shape import SectionSet, TypeSections
 
 #: The topic prefix this rule set claims. `validate()` raises the moment an
 #: external rule emits a built-in prefix, and `sections` collides with none of

@@ -32,33 +32,17 @@ from okf_io.document import rendered_with_body
 from ruamel.yaml.error import YAMLError
 
 from okf_ext.body import Section, sections, split_lines
-from okf_ext.sections.model import (
-    SectionInsert,
-    SectionPlan,
-    SectionSet,
-    SectionSpec,
-    SectionSplice,
-    TypeSections,
+from okf_ext.sections.model import SectionInsert, SectionPlan, SectionSplice
+from okf_ext.shape import SectionSet, SectionSpec, TypeSections
+from okf_ext.splice import (
+    assemble,
+    bare_lines,
+    dominant_newline,
+    has_trailing_newline,
+    insert,
+    needs_gap,
 )
-from okf_ext.splice import CR, CRLF, LF, assemble, dominant_newline, has_trailing_newline, insert, needs_gap
 from okf_ext.writing import ApplyResult, PendingWrite, Skipped, WriteFailure, body_digest, write_all
-
-
-def _placeholder_lines(placeholder: str) -> list[str]:
-    """*placeholder* as bare, unterminated lines, blank ends dropped.
-
-    A YAML `|` block scalar always ends in a newline and a hand-written one
-    may open with a blank; neither should stack a second blank against the
-    ones `_block` writes itself. Line endings are normalised here because the
-    caller re-terminates every line with the newline it asked for.
-    """
-    flat = placeholder.replace(CRLF, LF).replace(CR, LF)
-    lines = flat.split(LF)
-    while lines and not lines[0].strip():
-        lines.pop(0)
-    while lines and not lines[-1].strip():
-        lines.pop()
-    return lines
 
 
 def _block(spec: SectionSpec) -> list[str]:
@@ -69,7 +53,7 @@ def _block(spec: SectionSpec) -> list[str]:
     contiguously without `needs_gap` stacking extra blanks between them.
     """
     lines = ["#" * spec.level + " " + spec.heading, ""]
-    body = _placeholder_lines(spec.placeholder)
+    body = bare_lines(spec.placeholder)
     if body:
         lines.extend(body)
         lines.append("")

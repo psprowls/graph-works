@@ -22,6 +22,7 @@ has to discriminate between.
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -42,6 +43,18 @@ SkipReason = Literal["parse-error", "section-missing", "tags-not-a-sequence", "u
 #: separately because it is raised by the document itself, not detected here.
 #: `stale` is the one a caller can act on by re-planning; `unwritable`,
 #: `stage-error`, and `commit-error` are the ones worth retrying as-is.
+#:
+#: The last four are `moves`': `mkdir-error` is a destination parent that
+#: could not be created, `asset-replace-error` an asset's direct source ->
+#: destination rename (never staged, because copying a large binary to a temp
+#: doubles the I/O and buys no guarantee a single atomic rename does not
+#: already give), `unlink-error` a source removal that itself failed, and
+#: `source-kept` a source removal *declined* because a referrer naming it did
+#: not land. The two replace kinds stay distinct from `commit-error` because
+#: they come from two different mechanisms, and a caller retrying one is not
+#: retrying the other. This union retains every member even where a given
+#: capability never emits it -- splitting it per capability buys a narrower
+#: annotation at the cost of two types every caller must discriminate between.
 FailureKind = Literal[
     "not-a-member",
     "parse-error",
@@ -52,6 +65,10 @@ FailureKind = Literal[
     "unwritable",
     "stage-error",
     "commit-error",
+    "mkdir-error",
+    "asset-replace-error",
+    "unlink-error",
+    "source-kept",
 ]
 
 
@@ -136,6 +153,25 @@ class PendingWrite:
     on_written: Callable[[], None]
 
 
+def body_digest(body: str) -> str:
+    """A stable fingerprint of *body*, for a plan to check staleness against.
+
+    **Shared, not per-capability, because "stale" is a promise to callers.**
+    `tables` refuses a splice whose body changed since it was planned and
+    `moves` refuses a repair for the same reason; two capabilities computing
+    that answer two ways is how one of them ends up meaning something
+    subtly different by the same word. The digest is over the body only --
+    frontmatter edits are position-free (they name a dotted key path) and
+    are checked by re-reading the path instead.
+
+    sha256 of the UTF-8 bytes. Not a security boundary: this guards against
+    concurrent edits and stale plans, not against an adversary constructing
+    a collision, and the choice is about a stable well-known digest rather
+    than about collision resistance.
+    """
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def write_all(
     pending: Sequence[PendingWrite],
     *,
@@ -143,6 +179,15 @@ def write_all(
     skipped: Sequence[Skipped] = (),
 ) -> ApplyResult:
     """Write every item in *pending*, in two regimes.
+
+    **Commits in the order given.** The staging and commit loops both iterate
+    *pending* as received and never sort it, and `ApplyResult.written` comes
+    back in that same order. This is a contract, not an accident of the loop:
+    `okf_ext.moves` commits a move's destinations before its referrers, and
+    that ordering is the whole basis of its "no partial outcome leaves a
+    dangling reference" invariant. Sorting here -- by path, say, which `tags`
+    would not notice -- would silently break it. Only `problems` is sorted,
+    and only because a failure list has no caller-meaningful order.
 
     *failed* carries the calling capability's own content failures -- the
     third regime, refused per document before anything reached here -- and is
@@ -276,5 +321,6 @@ __all__ = [
     "SkipReason",
     "Skipped",
     "WriteFailure",
+    "body_digest",
     "write_all",
 ]

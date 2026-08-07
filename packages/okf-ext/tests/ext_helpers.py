@@ -182,3 +182,58 @@ def tabled_copy(tmp_path: Path) -> Path:
     target = tmp_path / "tabled"
     shutil.copytree(TABLED, target, copy_function=shutil.copy2)
     return target
+
+
+LINKED = FIXTURES / "linked"
+LINKED_BAD = FIXTURES / "linked_bad"
+
+#: Every member of `linked/`, so a test asserting over the corpus cannot
+#: quietly drift from what is on disk.
+LINKED_MEMBERS = frozenset(
+    {
+        "index.md",
+        "log.md",
+        "assets/diagram.png",
+        "concepts/alpha.md",
+        "concepts/beta.md",
+        "concepts/café.md",
+        "concepts/crlf.md",
+        "concepts/decoy.md",
+        "concepts/encoded.md",
+        "concepts/frag.md",
+        "concepts/multi.md",
+        "concepts/spaced name.md",
+        "concepts/tabled.md",
+        "notes/gamma.md",
+        "notes/sub/keep.md",
+        "notes/sub/x.md",
+    }
+)
+
+
+def linked_bundle() -> Bundle:
+    """The clean locator corpus. Read-only -- never pass this to `apply()`."""
+    return load_bundle(LINKED)
+
+
+def linked_bad_bundle() -> Bundle:
+    """The refusal corpus: a reference-style link, a reference definition, a parse error."""
+    return load_bundle(LINKED_BAD)
+
+
+def linked_copy(tmp_path: Path) -> Path:
+    """A writable byte-identical copy of the clean corpus.
+
+    Every mutating test goes through this. `copy2` preserves bytes, which the
+    byte-fidelity property depends on.
+    """
+    target = tmp_path / "linked"
+    shutil.copytree(LINKED, target, copy_function=shutil.copy2)
+    return target
+
+
+def linked_bad_copy(tmp_path: Path) -> Path:
+    """A writable byte-identical copy of the refusal corpus."""
+    target = tmp_path / "linked_bad"
+    shutil.copytree(LINKED_BAD, target, copy_function=shutil.copy2)
+    return target

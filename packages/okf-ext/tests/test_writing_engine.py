@@ -162,3 +162,22 @@ def test_failures_are_sorted_by_path(tmp_path):
 @pytest.mark.parametrize("reason", ["parse-error", "section-missing", "tags-not-a-sequence", "unreadable"])
 def test_every_skip_reason_is_constructible(reason):
     assert Skipped(concept_id="c", path="c.md", reason=reason, detail="d").reason == reason
+
+
+def test_write_all_commits_in_the_order_it_is_given(tmp_path):
+    """Spec §10 of the moves item: `moves` commits destinations before
+    referrers, and that invariant rests on this loop preserving caller order
+    rather than sorting. Sorting would be a strictly stronger constraint that
+    happens to break it, so the guarantee is tested, not assumed.
+    """
+    order = ["zeta.md", "alpha.md", "mid.md"]
+    pending_list = []
+    for member in order:
+        target = tmp_path / member
+        target.write_text("before\n", encoding="utf-8")
+        pending_list.append(PendingWrite(member=member, path=target, rendered="after\n", on_written=lambda: None))
+
+    result = write_all(pending_list)
+
+    assert result.ok
+    assert list(result.written) == order, "write_all must not sort; moves depends on caller order"

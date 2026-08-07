@@ -282,7 +282,7 @@ BUILT_IN_TOPICS = frozenset(
 )
 
 
-@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables"])
+@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables", "moves"])
 def capability(request):
     return importlib.import_module(f"okf_ext.{request.param}")
 
@@ -291,7 +291,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
     """The `capability` fixture is a literal list, unlike `capability_names`.
     This is what stops a fourth capability from being added without anyone
     extending the surface tests below."""
-    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search", "tables"}
+    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search", "tables", "moves"}
 
 
 def test_all_lists_exactly_what_the_module_exports(capability) -> None:
@@ -441,6 +441,15 @@ def test_the_documented_writing_surface_is_present() -> None:
 
     assert callable(writing.write_all)
     assert writing.PendingWrite.__dataclass_fields__.keys() == {"member", "path", "rendered", "on_written"}
+
+
+def test_the_documented_moves_surface_is_present() -> None:
+    """Spec §4 of the moves work item: four planners, one `apply`."""
+    from okf_ext import moves
+
+    for name in ("plan_move", "plan_move_dir", "plan_move_many", "plan_repair", "apply"):
+        assert callable(getattr(moves, name))
+    assert moves.REFERENCE_KEYS[0] == "resource"
 
 
 def test_the_tables_capability_claims_no_topic_prefix() -> None:

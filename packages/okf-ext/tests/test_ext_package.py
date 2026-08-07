@@ -14,9 +14,10 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
 def test_version_is_static_and_pinned():
     """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking
-    (ADR-0007): `tags`' internals moved into `okf_ext.writing` for this
-    release even though its public names did not."""
-    assert okf_ext.__version__ == "0.2.0"
+    (ADR-0007): `moves` widened `FailureKind` and `RefusalKind` for this
+    release, breaking a caller that matches either union exhaustively, even
+    though most of the surface added is wholly new rather than changed."""
+    assert okf_ext.__version__ == "0.3.0"
 
 
 def test_py_typed_marker_ships():

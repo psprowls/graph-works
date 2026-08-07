@@ -20,7 +20,6 @@ nothing else from its own package.
 
 from __future__ import annotations
 
-import hashlib
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
@@ -33,7 +32,7 @@ from ruamel.yaml.error import YAMLError
 from okf_ext.body import Section, find_section, split_lines
 from okf_ext.tables.model import RowSplice, SpliceAction, SplicePlan, Table, TableSpec, TextSplice
 from okf_ext.tables.read import _data_row_lines, _match_headers, _split_cells, read_section
-from okf_ext.writing import ApplyResult, PendingWrite, Skipped, WriteFailure, write_all
+from okf_ext.writing import ApplyResult, PendingWrite, Skipped, WriteFailure, body_digest, write_all
 
 _CRLF, _LF, _CR = "\r\n", "\n", "\r"
 
@@ -355,10 +354,6 @@ def _create_section(
     return _splice_or_unchanged(body, after, "create-section", at)
 
 
-def _digest(body: str) -> str:
-    return hashlib.sha256(body.encode("utf-8")).hexdigest()
-
-
 def _body_committer(document: Document, body: str) -> Callable[[], None]:
     """What `write_all` runs once this document's bytes have landed.
 
@@ -463,7 +458,7 @@ def plan_row(
                 row=MappingProxyType(dict(row)),
                 action=splice.action,
                 line=splice.line,
-                digest=_digest(document.body),
+                digest=body_digest(document.body),
                 after=splice.after,
             )
         )
@@ -549,7 +544,7 @@ def apply(bundle: Bundle, plan: SplicePlan) -> ApplyResult:
             continue
 
         splice = splices[0]
-        if _digest(document.body) != splice.digest:
+        if body_digest(document.body) != splice.digest:
             failed.append(
                 WriteFailure(
                     path=member,

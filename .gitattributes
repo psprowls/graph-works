@@ -6,3 +6,8 @@
 # rewrites those bytes on checkout, which would break the very regressions the
 # fixtures exist to guard -- and do it silently, on someone else's machine.
 packages/okf-io/tests/fixtures/** -text
+
+# okf-ext's fixtures are a byte-exact contract for the same reason okf-io's
+# are: `linked/concepts/crlf.md` is uniformly CRLF on purpose, and EOL
+# normalization would silently break the regression it exists to guard.
+packages/okf-ext/tests/fixtures/** -text

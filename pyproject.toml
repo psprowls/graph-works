@@ -86,8 +86,8 @@ root_package = "okf_ext"
 name = "Capabilities sit above the shared context, never below it"
 type = "layers"
 layers = [
-    "okf_ext.health : okf_ext.moves : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.tags : okf_ext.tables",
-    "okf_ext.writing",
+    "okf_ext.health : okf_ext.moves : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
+    "okf_ext.splice : okf_ext.writing",
     "okf_ext.body",
     "okf_ext.context",
 ]
@@ -103,4 +103,5 @@ modules = [
     "okf_ext.search",
     "okf_ext.tables",
     "okf_ext.moves",
+    "okf_ext.sections",
 ]

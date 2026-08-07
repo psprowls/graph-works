@@ -34,7 +34,7 @@ import pytest
 SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
 #: The shared layer. Everything else is a capability.
-SHARED = {"__init__.py", "body.py", "context.py", "writing.py"}
+SHARED = {"__init__.py", "body.py", "context.py", "splice.py", "writing.py"}
 
 
 def capability_modules() -> list[Path]:
@@ -282,7 +282,7 @@ BUILT_IN_TOPICS = frozenset(
 )
 
 
-@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables", "moves"])
+@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables", "moves", "sections"])
 def capability(request):
     return importlib.import_module(f"okf_ext.{request.param}")
 
@@ -291,7 +291,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
     """The `capability` fixture is a literal list, unlike `capability_names`.
     This is what stops a fourth capability from being added without anyone
     extending the surface tests below."""
-    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search", "tables", "moves"}
+    assert capability_names(modules) == {"tags", "schemas", "render", "health", "search", "tables", "moves", "sections"}
 
 
 def test_all_lists_exactly_what_the_module_exports(capability) -> None:
@@ -464,3 +464,35 @@ def test_the_tables_capability_claims_no_topic_prefix() -> None:
 
     assert not hasattr(tables, "TOPIC")
     assert not hasattr(tables, "CODES")
+
+
+def test_the_documented_sections_surface_is_present() -> None:
+    """Spec §4, §5 and §6 of the sections work item: one loader, one rule
+    factory, one pure renderer, and the plan/apply pair."""
+    from okf_ext import sections
+
+    for name in ("load_sections", "section_rule", "render_skeleton", "plan_sections", "apply"):
+        assert callable(getattr(sections, name))
+    assert sections.TOPIC == "sections"
+    assert sections.CODES == (
+        "sections.missing",
+        "sections.unfilled",
+        "sections.unexpected",
+        "sections.no-declaration-for-type",
+    )
+    assert sections.DEFAULT_SECTIONS_DIRNAME == "_sections"
+    assert sections.SECTION_SUFFIXES == (".yaml", ".yml")
+    assert sections.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+
+
+def test_the_documented_splice_surface_is_present() -> None:
+    """`okf_ext.splice` is shared, so it is not covered by the `capability`
+    fixture -- pinned here for the same reason `body`'s and `writing`'s
+    surfaces are. `tables` and `sections` both depend on these five, so a
+    rename here breaks two shipped capabilities at once."""
+    from okf_ext import splice
+
+    for name in ("assemble", "dominant_newline", "has_trailing_newline", "insert", "needs_gap"):
+        assert callable(getattr(splice, name))
+    assert (splice.CRLF, splice.LF, splice.CR) == ("\r\n", "\n", "\r")
+    assert splice.TERMINATORS == ("\n", "\r")

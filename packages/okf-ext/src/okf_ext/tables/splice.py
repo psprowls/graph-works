@@ -14,8 +14,9 @@ byte. It surfaces as an unchanged result here and as an empty plan at the
 bundle level -- never as a boolean, which could not express "these 38 of
 these 40 would change".
 
-This module imports the shared layer and its own capability's modules, and
-nothing else from its own package.
+This module imports the shared layer (`okf_ext.body`, `okf_ext.splice`,
+`okf_ext.writing`) and its own capability's modules, and nothing else from
+its own package.
 """
 
 from __future__ import annotations
@@ -30,11 +31,20 @@ from okf_io.document import rendered_with_body
 from ruamel.yaml.error import YAMLError
 
 from okf_ext.body import Section, find_section, split_lines
+from okf_ext.splice import (
+    CR,
+    CRLF,
+    LF,
+    TERMINATORS,
+    assemble,
+    dominant_newline,
+    has_trailing_newline,
+    insert,
+    needs_gap,
+)
 from okf_ext.tables.model import RowSplice, SpliceAction, SplicePlan, Table, TableSpec, TextSplice
 from okf_ext.tables.read import _data_row_lines, _match_headers, _split_cells, read_section
 from okf_ext.writing import ApplyResult, PendingWrite, Skipped, WriteFailure, body_digest, write_all
-
-_CRLF, _LF, _CR = "\r\n", "\n", "\r"
 
 __all__ = ["apply", "plan_row", "splice_text"]
 
@@ -51,25 +61,13 @@ def _require_key(spec: TableSpec, key: str) -> None:
         raise ValueError(f"key {key!r} is not a column of this spec; expected one of {names!r}")
 
 
-def _dominant_newline(body: str) -> str:
-    """The body's own line ending. Ties prefer CRLF, then LF, then CR."""
-    crlf = body.count(_CRLF)
-    lf = body.count(_LF) - crlf
-    cr = body.count(_CR) - crlf
-    count, _, newline = max(
-        [(crlf, 0, _CRLF), (lf, 1, _LF), (cr, 2, _CR)],
-        key=lambda item: (item[0], -item[1]),
-    )
-    return newline if count else _LF
-
-
 def _normalize(value: str) -> str:
     """A cell's comparable form: newlines flattened to spaces, then stripped.
 
     No escaping -- `okf_ext.tables.read` returns cells already decoded, so
     this is the form both sides of a key comparison are in.
     """
-    return " ".join(value.replace(_CRLF, _LF).replace(_CR, _LF).split(_LF)).strip()
+    return " ".join(value.replace(CRLF, LF).replace(CR, LF).split(LF)).strip()
 
 
 def _escape(value: str) -> str:
@@ -112,32 +110,6 @@ def _header_row(names: Sequence[str]) -> str:
 
 def _delimiter_row(count: int) -> str:
     return "| " + " | ".join("---" for _ in range(count)) + " |"
-
-
-def _assemble(lines: Sequence[str], newline: str, trailing: bool) -> str:
-    """Join lines-with-terminators, restoring the body's trailing state."""
-    text = "".join(lines)
-    if not trailing and text.endswith(newline):
-        text = text[: -len(newline)]
-    return text
-
-
-def _insert(lines: Sequence[str], at: int, new: Sequence[str], newline: str) -> list[str]:
-    """Insert bare *new* lines before 1-based line *at*, terminating each.
-
-    When *at* is one past the end, the previous last line gets a terminator
-    if it lacked one -- otherwise the first inserted line would run onto it.
-    That previous last line's bytes do change (it gains a terminator), but
-    only ever the terminator: `at` being one past the end also means nothing
-    in the body follows it, so `line=at` still marks a span with no
-    unclaimed line below it, and the one line above it that changed differs
-    by exactly a terminator, forced by the body's own trailing-newline state
-    rather than chosen by the splice.
-    """
-    head = list(lines)
-    if at > len(head) and head and not head[-1].endswith((_LF, _CR)):
-        head[-1] = head[-1] + newline
-    return [*head[: at - 1], *(item + newline for item in new), *head[at - 1 :]]
 
 
 def splice_text(
@@ -198,9 +170,9 @@ def splice_text(
     """
     _require_key(spec, key)
 
-    newline = _dominant_newline(body)
+    newline = dominant_newline(body)
     lines = split_lines(body)
-    trailing = not lines or lines[-1].endswith((_LF, _CR))
+    trailing = has_trailing_newline(lines)
     values = {name: _normalize(value) for name, value in row.items()}
     unchanged = TextSplice(before=body, after=body, action=None, line=0)
 
@@ -232,7 +204,7 @@ def splice_text(
         return _update_row(body, lines, table, existing, names, values, key, newline=newline, trailing=trailing)
 
     at = table.stop + 1
-    after = _assemble(_insert(lines, at, [_render(values, names)], newline), newline, trailing)
+    after = assemble(insert(lines, at, [_render(values, names)], newline), newline, trailing)
     return _splice_or_unchanged(body, after, "append", at)
 
 
@@ -279,8 +251,8 @@ def _update_row(
 
     rendered = "| " + " | ".join(_escape(cell(position, name)) for position, name in enumerate(names)) + " |"
     rewritten = list(lines)
-    rewritten[number - 1] = rendered + (newline if lines[number - 1].endswith((_LF, _CR)) else "")
-    after = _assemble(rewritten, newline, trailing)
+    rewritten[number - 1] = rendered + (newline if lines[number - 1].endswith(TERMINATORS) else "")
+    after = assemble(rewritten, newline, trailing)
     return _splice_or_unchanged(body, after, "update", number)
 
 
@@ -317,7 +289,7 @@ def _create_table(
     already_blank = at - 1 < len(lines) and not lines[at - 1].strip()
     tail = [] if already_blank or at > len(lines) else [""]
     new = [_header_row(names), _delimiter_row(len(names)), _render(values, names), *tail]
-    after = _assemble(_insert(lines, at, new, newline), newline, trailing)
+    after = assemble(insert(lines, at, new, newline), newline, trailing)
     return _splice_or_unchanged(body, after, "create-table", at)
 
 
@@ -340,7 +312,8 @@ def _create_section(
     gap-shaped hole above it.
     """
     names = _spec_names(spec)
-    gap = [""] if lines and lines[-1].strip() else []
+    at = len(lines) + 1
+    gap = [""] if needs_gap(lines, at) else []
     new = [
         *gap,
         f"## {heading.strip()}",
@@ -349,8 +322,7 @@ def _create_section(
         _delimiter_row(len(names)),
         _render(values, names),
     ]
-    at = len(lines) + 1
-    after = _assemble(_insert(lines, at, new, newline), newline, trailing)
+    after = assemble(insert(lines, at, new, newline), newline, trailing)
     return _splice_or_unchanged(body, after, "create-section", at)
 
 

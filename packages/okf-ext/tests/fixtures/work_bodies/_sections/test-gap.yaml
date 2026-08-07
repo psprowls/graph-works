@@ -1,0 +1,9 @@
+sections:
+  - heading: Summary
+    required: true
+  - heading: Coverage gap
+  - heading: Plan
+    required: true
+    seeded_is_complete: true
+    placeholder_ref: plan-table
+  - heading: Notes / log

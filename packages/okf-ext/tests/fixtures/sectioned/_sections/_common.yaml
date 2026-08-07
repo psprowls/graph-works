@@ -1,0 +1,5 @@
+# A fragment source, never a type: no concept can carry `type: _common`.
+fragments:
+  plan-table: |
+    | Action | Done when | Rationale |
+    | --- | --- | --- |

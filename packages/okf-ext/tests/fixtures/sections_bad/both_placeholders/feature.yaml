@@ -1,0 +1,6 @@
+fragments:
+  plan-table: "| a |"
+sections:
+  - heading: Plan
+    placeholder: "literal"
+    placeholder_ref: plan-table

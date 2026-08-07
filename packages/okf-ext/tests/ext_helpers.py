@@ -10,6 +10,7 @@ import shutil
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
+from okf_ext.sections import DEFAULT_IGNORE as DEFAULT_IGNORE_SECTIONS
 from okf_io import Bundle, load_bundle
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
@@ -237,3 +238,54 @@ def linked_bad_copy(tmp_path: Path) -> Path:
     target = tmp_path / "linked_bad"
     shutil.copytree(LINKED_BAD, target, copy_function=shutil.copy2)
     return target
+
+
+SECTIONS_BAD = FIXTURES / "sections_bad"
+
+SECTIONED = FIXTURES / "sectioned"
+SECTIONS_DIR = SECTIONED / "_sections"
+
+#: What the sections walk must report over `sectioned/`, as `(code, path)`.
+#: Asserted against rather than restated inside the test, so a fixture change
+#: cannot leave a test quietly asserting the old corpus -- the habit
+#: `SCHEMA_EXPECTED` set. Every one of the four codes appears, which is what
+#: makes the "every member of CODES is emitted" contract test meaningful over
+#: this one bundle.
+SECTIONS_EXPECTED = {
+    ("sections.missing", "missing.md"),
+    ("sections.no-declaration-for-type", "undeclared.md"),
+    ("sections.unexpected", "extra.md"),
+    ("sections.unfilled", "unfilled.md"),
+}
+
+
+def sectioned_bundle(*, ignore=DEFAULT_IGNORE_SECTIONS):
+    """The sections corpus. Read-only -- never pass this to `apply()`."""
+    return load_bundle(SECTIONED, ignore=ignore)
+
+
+def sectioned_copy(tmp_path: Path) -> Path:
+    """A writable byte-identical copy of the sections corpus."""
+    target = tmp_path / "sectioned"
+    shutil.copytree(SECTIONED, target, copy_function=shutil.copy2)
+    return target
+
+
+WORK_BODIES = FIXTURES / "work_bodies" / "_sections"
+
+#: The nine per-kind section shapes, vendored from work-io's
+#: `assets/bodies/<kind>.md`. Restated here rather than derived, so a
+#: declaration edited without intent fails loudly -- and so the assertion is
+#: against the templates as they actually are, not against the declarations
+#: explaining themselves.
+WORK_BODY_HEADINGS = {
+    "bug": ["Summary", "Steps to reproduce", "Expected vs actual", "Plan", "Notes / log"],
+    "default": ["Summary", "Plan", "Notes / log"],
+    "epic": ["Summary", "Goal", "Plan", "Notes / log"],
+    "feature": ["Summary", "Options considered", "Plan", "Notes / log"],
+    "perf": ["Summary", "Baseline", "Target", "Plan", "Notes / log"],
+    "security": ["Summary", "Threat / attack vector", "Impact", "Plan", "Notes / log"],
+    "spike": ["Summary", "Question", "Findings", "Plan", "Notes / log"],
+    "tech-debt": ["Summary", "Current state", "Plan", "Notes / log"],
+    "test-gap": ["Summary", "Coverage gap", "Plan", "Notes / log"],
+}

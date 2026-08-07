@@ -1,0 +1,11 @@
+sections:
+  - heading: Summary
+    required: true
+    placeholder: |
+      <!-- one paragraph: what this changes and why -->
+  - heading: Options considered
+  - heading: Plan
+    required: true
+    seeded_is_complete: true
+    placeholder_ref: plan-table
+  - heading: Notes / log

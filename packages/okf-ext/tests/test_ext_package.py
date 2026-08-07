@@ -13,11 +13,12 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
 
 def test_version_is_static_and_pinned():
-    """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking
-    (ADR-0007): `moves` widened `FailureKind` and `RefusalKind` for this
-    release, breaking a caller that matches either union exhaustively, even
-    though most of the surface added is wholly new rather than changed."""
-    assert okf_ext.__version__ == "0.3.0"
+    """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking and patch
+    is compatible (ADR-0007): `sections` adds a capability and a shared module
+    and changes nothing that existed, so this is a patch. The primitives
+    hoisted into `okf_ext.splice` were private to `tables/splice.py`, and
+    `SkipReason` and `FailureKind` are unchanged."""
+    assert okf_ext.__version__ == "0.3.1"
 
 
 def test_py_typed_marker_ships():
@@ -56,9 +57,9 @@ def test_the_capability_is_still_reachable_as_a_submodule():
     assert tags.DEFAULT_IGNORE == ("_tags.yaml", "*/_tags.yaml")
 
 
-def test_the_top_level_still_imports_no_capability_now_that_there_are_six():
+def test_the_top_level_still_imports_no_capability_now_that_there_are_eight():
     """The claim in `test_top_level_does_not_import_any_capability` was made
-    when there was one capability to not import. Restated over all six."""
+    when there was one capability to not import. Restated over all eight."""
     result = subprocess.run(
         [
             sys.executable,
@@ -69,12 +70,8 @@ def test_the_top_level_still_imports_no_capability_now_that_there_are_six():
         text=True,
         check=True,
     )
-    assert "okf_ext.tags" not in result.stdout
-    assert "okf_ext.schemas" not in result.stdout
-    assert "okf_ext.render" not in result.stdout
-    assert "okf_ext.health" not in result.stdout
-    assert "okf_ext.search" not in result.stdout
-    assert "okf_ext.tables" not in result.stdout
+    for name in ("tags", "schemas", "render", "health", "search", "tables", "moves", "sections"):
+        assert f"okf_ext.{name}" not in result.stdout
 
 
 def test_the_second_capability_is_reachable_as_a_submodule():
@@ -93,3 +90,9 @@ def test_the_fourth_capability_is_reachable_as_a_submodule():
     from okf_ext import tables
 
     assert callable(tables.read_section)
+
+
+def test_the_fifth_capability_is_reachable_as_a_submodule():
+    from okf_ext import sections
+
+    assert sections.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")

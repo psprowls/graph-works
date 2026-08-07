@@ -1,0 +1,8 @@
+# A fragment source, never a type. The plan table is declared once here and
+# referenced by all nine kinds -- which is the whole point: work-io §7.6's
+# `{plan_table}` placeholder exists because nine copies of this header would
+# drift, and a named fragment makes that structurally impossible.
+fragments:
+  plan-table: |
+    | Action | Done when | Rationale |
+    | --- | --- | --- |

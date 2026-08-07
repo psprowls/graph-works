@@ -1,0 +1,6 @@
+additional_sections: false
+sections:
+  - heading: Summary
+    required: true
+  - heading: Entries
+    required: true

@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, table read/splice, render correctness, bundle health, search and member moves today; budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search and member moves today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -78,7 +78,9 @@ and one capability that needs nothing at all:
   the capability lands with no extra, no `ImportError` guard in its
   `__init__.py`, and no change to the unconditional list. A capability that
   costs nothing to install is the outcome the rule is aiming at; `schemas`
-  shows what to do when one cannot be.
+  shows what to do when one cannot be. `sections` is the second of these:
+  `ruamel.yaml` and `markdown-it-py` are both already unconditional, so it too
+  ships with no extra and no guard.
 
 `requires-python` is `>=3.12`, matching the rest of the workspace.
 `okf_io.models.Frontmatter.extra` defaults to `MappingProxyType({})`, which the
@@ -106,8 +108,8 @@ Graduation is a directory move plus a re-export shim in
 
 ## Where a rule belongs
 
-`okf-ext` ships four rule-emitting capabilities (`tags`, `schemas`, `render`,
-`health`). A fifth belongs here only if it passes one test:
+`okf-ext` ships five rule-emitting capabilities (`tags`, `schemas`, `render`,
+`health`, `sections`). A sixth belongs here only if it passes one test:
 
 > **Does it hold for any OKF v0.2 bundle, whoever wrote it?**
 
@@ -134,6 +136,13 @@ The boundary is not about difficulty or about who writes the rule. `health`'s
 `log-gap` reads a threshold and a date and is trivial; it is tier 2 because §9
 logs exist in every bundle. A lifecycle rule may be equally trivial and is still
 tier 3, because `phase: plan` means nothing outside one workflow.
+
+`sections` is the worked example of the mechanism/vocabulary split. The
+declaration format holds for any bundle; the section *names* do not ship. There
+is no `FEATURE_SECTIONS` constant and no Diátaxis skeleton in this package, for
+the same reason there is no `PLAN_TABLE` in `tables` — shipping one lane's
+section names from tier 2 would put every adopting bundle into a permanent
+finding state for a vocabulary it never adopted.
 
 Two consequences worth stating, because both look like counter-examples:
 
@@ -178,6 +187,14 @@ the same reason on the write side. Both are named in the `layers` contract and
 both are listed in `SHARED` in `tests/test_ext_boundaries.py`; a shared module
 missing from that set is classified as a capability, which silently makes the
 independence contract incomplete.
+
+`okf_ext.splice` widened it a second time, on the write side. The generic
+line-list primitives — dominant newline, trailing-newline state, assembly,
+insertion, the separating blank — are not table-specific, and `sections` needs
+all five; leaving them private inside `tables/splice.py` would have forced a
+second verbatim copy of a helper set. It sits beside `okf_ext.writing` in the
+`layers` contract (neither imports the other) and is listed in `SHARED` in
+`tests/test_ext_boundaries.py`.
 
 **Honest weakness:** CI is deferred until the repository has a remote, so both
 checks run from `just check` — a gate a human or agent must invoke, not one a

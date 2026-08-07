@@ -1,0 +1,1 @@
+This directory deliberately holds no declaration file.

@@ -1,0 +1,11 @@
+frontmatter:
+  owned: [package_count]
+  provenance: [generated, last_updated_commit, tokens]
+sections:
+  - heading: Overview
+    required: true
+    placeholder: |
+      > TODO: <One paragraph: what this repository is and what it contains.>
+  - heading: Layout
+    placeholder: |
+      > TODO: <Top-level directory layout and what lives where.>

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "code-wiki-okf"
+version = "0.1.0"
+description = "Generates and updates a standalone OKF v0.2 bundle from the shared code graph."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "okf-io>=0.1,<0.2",
+  "okf-ext[schemas]>=0.4,<0.5",
+  "code-graph-io",
+  "typer>=0.12",
+]
+
+[project.scripts]
+code-wiki-okf = "code_wiki_okf.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/code_wiki_okf"]
+
+[tool.uv.sources]
+okf-io = { workspace = true }
+okf-ext = { workspace = true }
+code-graph-io = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

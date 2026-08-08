@@ -1,0 +1,21 @@
+frontmatter:
+  owned: [language, version, depends_on, test_suites, entry_points]
+  provenance: [generated, last_updated_commit, tokens]
+sections:
+  - heading: Purpose
+    required: true
+    placeholder: |
+      > TODO: <One paragraph: what this app does, who uses it, why it exists.>
+  - heading: Platform & runtime
+    placeholder: |
+      > TODO: <Target platform(s) and runtime — e.g. web/Node, iOS, Electron.>
+  - heading: Routes / screens
+    placeholder: |
+      > TODO: <Table of Route | Purpose | Auth, or the equivalent for this platform.>
+  - heading: Provider chain
+    placeholder: |
+      > TODO: <Top-level providers/wrappers this app mounts, in order.>
+  - heading: Files
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_

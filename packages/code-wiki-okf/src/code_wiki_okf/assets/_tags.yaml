@@ -1,0 +1,8 @@
+version: 1
+tags: []
+# Add tags here as the bundle needs them, e.g.:
+#   - name: example-tag
+#     description: What this tag means.
+#     deprecated: false
+# See okf_ext.tags.load_vocabulary for the full shape (name, description,
+# deprecated, replaced_by).

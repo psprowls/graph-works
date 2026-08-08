@@ -1,0 +1,15 @@
+frontmatter:
+  owned: [language, version, depends_on, test_suites, entry_points]
+  provenance: [generated, last_updated_commit, tokens]
+sections:
+  - heading: Purpose
+    required: true
+    placeholder: |
+      > TODO: <One paragraph: what this package does, who uses it, why it exists.>
+  - heading: Public API
+    placeholder: |
+      > TODO: <Main exports and when to use them. Link code with backticked `path:line` references.>
+  - heading: Files
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_

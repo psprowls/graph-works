@@ -1,0 +1,35 @@
+frontmatter:
+  owned: [ecosystem, version]
+  provenance: [generated, last_updated_commit, tokens]
+sections:
+  - heading: Purpose
+    required: true
+    placeholder: |
+      > TODO: <One paragraph: what this agent plugin does and who uses it.>
+  - heading: Commands
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_
+  - heading: Agents
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_
+  - heading: Skills
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_
+  - heading: Scripts
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_
+  - heading: Hooks
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_
+  - heading: MCP servers
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_
+  - heading: How it fits together
+    placeholder: |
+      > TODO: <Inferred cross-component relationships.>

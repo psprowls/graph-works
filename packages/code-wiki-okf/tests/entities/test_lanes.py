@@ -1,0 +1,252 @@
+"""Tests for the top-level `sync()`: sync_entities + prune_lane per lane,
+touched-lane index reconciliation, and one log.md entry per run.
+
+Fixture graphs are seeded the same way `test_sync.py` does: directly through
+`code_graph_io.testing.open_store` (a writable `GraphStore` on an arbitrary
+db path). `code_graph_io.testing` carries no `build_records` helper and
+`code_graph_io` carries no `open_writer` -- both appear in an earlier plan
+draft but neither exists; `open_store` + `GraphRecords` is what the real
+package offers.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from datetime import UTC, date, datetime
+from pathlib import Path
+
+from code_graph_io import open_reader
+from code_graph_io.testing import open_store
+from code_parser.projections.graph import GraphNode, GraphRecords
+from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
+from code_wiki_okf.entities.lanes import sync
+from code_wiki_okf.init import init_bundle
+from okf_io import load_bundle
+
+_TODAY = date(2026, 1, 1)
+_AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+
+def _repo_node(org: str, repo: str) -> GraphNode:
+    return GraphNode(
+        kind="repository",
+        name=repo,
+        path="",
+        line=None,
+        attrs={"uri": f"repo:{org}/{repo}", "owner": org, "name": repo, "url": "", "default_branch": "main"},
+    )
+
+
+def _package_node(org: str, repo: str, name: str) -> GraphNode:
+    return GraphNode(
+        kind="package",
+        name=name,
+        path=f"packages/{name}/pyproject.toml",
+        line=None,
+        attrs={"uri": f"pkg:{org}/{repo}/{name}", "language": "python", "version": "0.1.0"},
+    )
+
+
+def _seed(graph_dir: Path, org: str, repo: str, packages: Sequence[str]) -> None:
+    """Write `graph_dir/code.db` with exactly the given packages for one
+    repo. `upsert_records` is additive only -- it never removes a node a
+    prior call inserted -- so simulating "a package disappeared from the
+    graph" between two `sync()` runs needs a **fresh** `graph_dir` for the
+    second seed, not a second call against the same one; every caller in
+    this module follows that rule."""
+    store = open_store(graph_dir / "code.db", create=True)
+    try:
+        store.set_current_repo(f"repo:{org}/{repo}")
+        nodes: list[GraphNode] = [_repo_node(org, repo)]
+        nodes += [_package_node(org, repo, name) for name in packages]
+        with store.transaction() as tx:
+            tx.upsert_records(GraphRecords(nodes=tuple(nodes), edges=()))
+        store.set_current_repo(None)
+    finally:
+        store.close()
+
+
+def _config(tmp_path: Path, graph_dir: Path, repo_name: str) -> Config:
+    return Config(
+        graph_dir=graph_dir,
+        repos=(RepoConfig(name=repo_name, path=tmp_path / repo_name, ignore=()),),
+        state_gate=StateGateConfig(enabled=False, branches=()),
+    )
+
+
+# --- dry_run=True (the default): nothing touches disk ------------------------
+
+
+def test_dry_run_default_touches_nothing(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, "acme", "repo-a", ["widgets"])
+    bundle_root = tmp_path / "bundle"
+    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a")
+
+    before_index = (bundle_root / "index.md").read_text(encoding="utf-8")
+    before_log = (bundle_root / "log.md").read_text(encoding="utf-8")
+    before_members = sorted(p.relative_to(bundle_root).as_posix() for p in bundle_root.rglob("*.md"))
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle = load_bundle(bundle_root)
+        result = sync(bundle, config, reader, today=_TODAY, at=_AT)  # dry_run defaults to True
+
+    assert result.written == ()
+    assert result.deleted == ()
+    assert not (bundle_root / "packages" / "widgets.md").exists()
+    assert (bundle_root / "index.md").read_text(encoding="utf-8") == before_index
+    assert (bundle_root / "log.md").read_text(encoding="utf-8") == before_log
+    after_members = sorted(p.relative_to(bundle_root).as_posix() for p in bundle_root.rglob("*.md"))
+    assert after_members == before_members
+
+
+def test_explicit_dry_run_true_also_touches_nothing(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, "acme", "repo-a", ["widgets"])
+    bundle_root = tmp_path / "bundle"
+    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle = load_bundle(bundle_root)
+        sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=True)
+
+    assert not (bundle_root / "packages" / "widgets.md").exists()
+
+
+# --- dry_run=False: the full pipeline runs ------------------------------------
+
+
+def test_sync_writes_pages_reconciles_index_and_appends_one_log_entry(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, "acme", "repo-a", ["widgets"])
+    bundle_root = tmp_path / "bundle"
+    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle = load_bundle(bundle_root)
+        result = sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    assert "packages/widgets" in result.written
+    assert (bundle_root / "packages" / "widgets.md").exists()
+    assert (bundle_root / "packages" / "index.md").exists()
+    index_text = (bundle_root / "packages" / "index.md").read_text(encoding="utf-8")
+    assert "widgets.md" in index_text
+
+    log_text = (bundle_root / "log.md").read_text(encoding="utf-8")
+    assert "created" in log_text.lower() or "written" in log_text.lower()
+
+
+def test_exactly_one_log_entry_per_run_even_when_nothing_changed(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, "acme", "repo-a", ["widgets"])
+    bundle_root = tmp_path / "bundle"
+    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle = load_bundle(bundle_root)
+        sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    # Second run: idempotent at the entity-sync level (nothing to write, per
+    # test_sync.py's own idempotency assertion) but sync() must still append
+    # exactly one more dated bullet naming the (zero) counts.
+    log_before = (bundle_root / "log.md").read_text(encoding="utf-8")
+    bullets_before = log_before.count("\n- ")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle2 = load_bundle(bundle_root)
+        result2 = sync(bundle2, config, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    assert result2.written == ()
+    assert result2.deleted == ()
+    log_after = (bundle_root / "log.md").read_text(encoding="utf-8")
+    bullets_after = log_after.count("\n- ")
+    assert bullets_after == bullets_before + 1
+
+
+# --- the deletion regression: a page whose entity disappeared gets deleted ---
+
+
+def test_page_whose_entity_disappeared_from_the_graph_is_deleted(tmp_path: Path) -> None:
+    """The exact bug the plan's draft `should_exist = set(resource_index(current).by_resource)`
+    would have hidden: that expression indexes whatever is CURRENTLY ON DISK,
+    which trivially includes the stale page itself, so nothing would ever be
+    absent from `should_exist` and `prune_lane` would never find a deletion
+    candidate. `sync()` must instead compute `should_exist` from
+    `EntitySync.current_resources` -- the resources this run's graph walk
+    actually named -- so a package removed from the graph is recognized as
+    gone and its page is pruned."""
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, "acme", "repo-a", ["widgets", "gadgets"])
+    bundle_root = tmp_path / "bundle"
+    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle = load_bundle(bundle_root)
+        sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    assert (bundle_root / "packages" / "widgets.md").exists()
+    assert (bundle_root / "packages" / "gadgets.md").exists()
+
+    # "widgets" disappears from the graph -- e.g. the package was removed
+    # from the repo. `upsert_records` is additive-only (see `_seed`'s own
+    # docstring), so a fresh `graph_dir` is what makes a node actually
+    # absent rather than merely un-reasserted. Its page's prose sections
+    # are untouched (fresh from `new_page_text`), so the prose guard must
+    # not decline it.
+    graph_dir2 = tmp_path / "graph2"
+    _seed(graph_dir2, "acme", "repo-a", ["gadgets"])
+    config2 = _config(tmp_path, graph_dir2, "repo-a")
+
+    with open_reader(graph_dir=graph_dir2) as reader:
+        bundle2 = load_bundle(bundle_root)
+        result2 = sync(bundle2, config2, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    assert not (bundle_root / "packages" / "widgets.md").exists()
+    assert (bundle_root / "packages" / "gadgets.md").exists()
+    assert "packages/widgets" in result2.deleted
+    assert result2.declined == ()
+
+    # The index must be reconciled too: the dead entry pruned, the survivor
+    # still listed.
+    index_text = (bundle_root / "packages" / "index.md").read_text(encoding="utf-8")
+    assert "widgets.md" not in index_text
+    assert "gadgets.md" in index_text
+
+    log_text = (bundle_root / "log.md").read_text(encoding="utf-8")
+    assert "deleted" in log_text.lower()
+
+
+def test_hand_edited_page_declines_deletion_and_is_reported(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, "acme", "repo-a", ["widgets"])
+    bundle_root = tmp_path / "bundle"
+    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle = load_bundle(bundle_root)
+        sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    page = bundle_root / "packages" / "widgets.md"
+    placeholder = "> TODO: <One paragraph: what this package does, who uses it, why it exists.>"
+    original = page.read_text(encoding="utf-8")
+    assert placeholder in original
+    page.write_text(original.replace(placeholder, "Hand-written, do not delete me."), encoding="utf-8")
+
+    graph_dir2 = tmp_path / "graph2"
+    _seed(graph_dir2, "acme", "repo-a", [])  # widgets gone from the graph
+    config2 = _config(tmp_path, graph_dir2, "repo-a")
+
+    with open_reader(graph_dir=graph_dir2) as reader:
+        bundle2 = load_bundle(bundle_root)
+        result2 = sync(bundle2, config2, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    assert page.exists()
+    assert "Hand-written, do not delete me." in page.read_text(encoding="utf-8")
+    assert result2.deleted == ()
+    assert ("packages/widgets", "prose-edited") in result2.declined

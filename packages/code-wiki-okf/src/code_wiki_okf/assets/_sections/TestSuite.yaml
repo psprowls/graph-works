@@ -1,0 +1,21 @@
+frontmatter:
+  owned: [tested_packages, suite_kind, file_count]
+  provenance: [generated, last_updated_commit, tokens]
+sections:
+  - heading: Purpose
+    required: true
+    placeholder: |
+      > TODO: <One paragraph: what this suite tests and why.>
+  - heading: How to run
+    placeholder: |
+      > TODO: <The exact command(s) to run this suite.>
+  - heading: Test conventions
+    placeholder: |
+      > TODO: <Naming, structure, and style conventions this suite follows.>
+  - heading: Fixtures
+    placeholder: |
+      > TODO: <Shared fixtures this suite relies on and where they live.>
+  - heading: Files
+    ownership: generated
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_

@@ -1,0 +1,11 @@
+frontmatter:
+  owned: [ecosystem, used_by, versions_in_use]
+  provenance: [generated, last_updated_commit, tokens]
+sections:
+  - heading: Why we depend on this
+    required: true
+    placeholder: |
+      > TODO: <Why the workspace depends on this and what it's used for.>
+  - heading: Gotchas / workarounds
+    placeholder: |
+      > TODO: <Known issues, version pins, or workarounds this dependency needs.>

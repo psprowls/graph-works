@@ -1,0 +1,23 @@
+# code-wiki-okf configuration — see the design spec for the full shape.
+#
+# graph_dir: directory holding the shared code.db (relative paths resolve
+# against this bundle's root).
+graph_dir: ../graphs/code
+
+# One entry per repository this bundle mirrors. The key names both
+# `repositories/<name>.md` and must match the graph's `repo:` URI member
+# name. Empty until a repo is added.
+repositories: {}
+#   agent-workspace:
+#     path: ../../agent-workspace   # checkout path, relative-to-root or ~-expanded
+#     ignore:                        # per-repo git glob pathspecs to exclude
+#       - "packages/*/tests/fixtures/**"
+
+# Global ignore patterns, merged into every repo's set.
+ignore: []
+#   - "*.lock"
+
+# Optional; these are the defaults when the block is absent.
+# state_gate:
+#   enabled: true
+#   branches: [main]

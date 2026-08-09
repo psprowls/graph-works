@@ -87,12 +87,12 @@ root_package = "okf_ext"
 name = "Capabilities sit above the shared context, never below it"
 type = "layers"
 # The capabilities line is appended to, alphabetically, on every new
-# capability; nine names and 161 characters as of `generators`, and it is
+# capability; ten names and 174 characters as of `proposals`, and it is
 # expected to keep growing one name at a time with no wrap strategy. Long is
 # fine -- `test_every_capability_is_named_in_the_layers_contract` is what
 # actually keeps it honest, not its width.
 layers = [
-    "okf_ext.generators : okf_ext.health : okf_ext.moves : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
+    "okf_ext.generators : okf_ext.health : okf_ext.moves : okf_ext.proposals : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
     "okf_ext.shape",
     "okf_ext.splice : okf_ext.writing",
     "okf_ext.body",
@@ -112,4 +112,5 @@ modules = [
     "okf_ext.moves",
     "okf_ext.sections",
     "okf_ext.generators",
+    "okf_ext.proposals",
 ]

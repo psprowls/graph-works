@@ -181,3 +181,89 @@ def test_write_all_commits_in_the_order_it_is_given(tmp_path):
 
     assert result.ok
     assert list(result.written) == order, "write_all must not sort; moves depends on caller order"
+
+
+def test_a_create_write_lands_in_a_directory_that_did_not_exist(tmp_path):
+    """The probe regime cannot help a file that is not there yet: `open("r+b")`
+    fails for exactly the case a create is. Creating the parent here is what
+    stops every writing capability from open-coding `moves`' regime 2."""
+    target = tmp_path / "pages" / "deep" / "new.md"
+    result = write_all(
+        [
+            PendingWrite(
+                member="pages/deep/new.md",
+                path=target,
+                rendered="---\ntype: Page\n---\nbody\n",
+                on_written=lambda: None,
+                create=True,
+            )
+        ]
+    )
+    assert result.ok
+    assert result.written == ("pages/deep/new.md",)
+    assert target.read_text(encoding="utf-8") == "---\ntype: Page\n---\nbody\n"
+
+
+def test_a_create_write_onto_an_existing_target_is_stale_and_aborts_the_batch(tmp_path):
+    """The planner already refused `target-exists`; a target that appeared
+    since is drift, and `stale` is the one `FailureKind` a caller acts on by
+    re-planning. All-or-nothing, because a create that lost its race says the
+    bundle is not what the plan was computed against."""
+    occupied = tmp_path / "taken.md"
+    occupied.write_text("original\n", encoding="utf-8")
+    sibling = tmp_path / "other.md"
+    sibling.write_text("untouched\n", encoding="utf-8")
+
+    result = write_all(
+        [
+            PendingWrite(member="taken.md", path=occupied, rendered="new\n", on_written=lambda: None, create=True),
+            PendingWrite(member="other.md", path=sibling, rendered="rewritten\n", on_written=lambda: None),
+        ]
+    )
+    assert not result.ok
+    assert [(f.path, f.kind) for f in result.failed] == [("taken.md", "stale")]
+    assert result.written == ()
+    assert occupied.read_text(encoding="utf-8") == "original\n"
+    assert sibling.read_text(encoding="utf-8") == "untouched\n"
+
+
+def test_a_create_write_whose_parent_cannot_be_made_is_a_mkdir_error(tmp_path):
+    """A file standing where the parent directory must go. `mkdir-error` is
+    already in `FailureKind` -- `moves` emits it for the same condition -- so
+    this widens no union."""
+    blocker = tmp_path / "pages"
+    blocker.write_text("i am a file\n", encoding="utf-8")
+
+    result = write_all(
+        [
+            PendingWrite(
+                member="pages/new.md",
+                path=tmp_path / "pages" / "new.md",
+                rendered="x\n",
+                on_written=lambda: None,
+                create=True,
+            )
+        ]
+    )
+    assert not result.ok
+    assert [(f.path, f.kind) for f in result.failed] == [("pages/new.md", "mkdir-error")]
+    assert result.written == ()
+
+
+def test_creates_and_updates_commit_together_in_the_order_given(tmp_path):
+    """One batch, both regimes. The order contract `moves` depends on holds
+    across the mix: `written` comes back exactly as handed in."""
+    existing = tmp_path / "ledger.md"
+    existing.write_text("before\n", encoding="utf-8")
+    fresh = tmp_path / "pages" / "fresh.md"
+
+    result = write_all(
+        [
+            PendingWrite(member="pages/fresh.md", path=fresh, rendered="page\n", on_written=lambda: None, create=True),
+            PendingWrite(member="ledger.md", path=existing, rendered="after\n", on_written=lambda: None),
+        ]
+    )
+    assert result.ok
+    assert result.written == ("pages/fresh.md", "ledger.md")
+    assert fresh.read_text(encoding="utf-8") == "page\n"
+    assert existing.read_text(encoding="utf-8") == "after\n"

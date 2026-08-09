@@ -292,7 +292,20 @@ BUILT_IN_TOPICS = frozenset(
 )
 
 
-@pytest.fixture(params=["tags", "schemas", "render", "health", "search", "tables", "moves", "sections", "generators"])
+@pytest.fixture(
+    params=[
+        "tags",
+        "schemas",
+        "render",
+        "health",
+        "search",
+        "tables",
+        "moves",
+        "sections",
+        "generators",
+        "proposals",
+    ]
+)
 def capability(request):
     return importlib.import_module(f"okf_ext.{request.param}")
 
@@ -311,6 +324,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
         "moves",
         "sections",
         "generators",
+        "proposals",
     }
 
 
@@ -460,7 +474,13 @@ def test_the_documented_writing_surface_is_present() -> None:
     from okf_ext import writing
 
     assert callable(writing.write_all)
-    assert writing.PendingWrite.__dataclass_fields__.keys() == {"member", "path", "rendered", "on_written"}
+    assert writing.PendingWrite.__dataclass_fields__.keys() == {
+        "member",
+        "path",
+        "rendered",
+        "on_written",
+        "create",
+    }
 
 
 def test_the_documented_moves_surface_is_present() -> None:
@@ -580,3 +600,48 @@ def test_the_generators_capability_claims_no_topic_prefix() -> None:
 
     assert not hasattr(generators, "TOPIC")
     assert not hasattr(generators, "CODES")
+
+
+def test_the_documented_proposals_surface_is_present() -> None:
+    """Spec §4 of the proposals work item: four planners, two readers, one
+    `apply`, and the pure renderer the determinism property tests directly."""
+    from okf_ext import proposals
+
+    for name in (
+        "plan_propose",
+        "plan_decide",
+        "plan_create",
+        "plan_promote",
+        "list_proposals",
+        "mode",
+        "apply",
+        "render_body",
+    ):
+        assert callable(getattr(proposals, name))
+    assert proposals.PROPOSAL_TYPE == "Proposal"
+    assert proposals.PAGE_STATUSES == ("proposed", "approved", "rejected", "created")
+    assert proposals.OWNED_PROVENANCE_KEYS == ("generated", "sources", "verified")
+    assert proposals.Proposal.__dataclass_fields__.keys() == {
+        "member",
+        "concept_id",
+        "target",
+        "title",
+        "description",
+        "page_status",
+        "raw_page_status",
+        "sources",
+        "verified",
+        "malformed",
+    }
+    assert proposals.Write.__dataclass_fields__.keys() == {"member", "mode", "text", "frontmatter", "body", "digest"}
+    assert proposals.PageRender.__dataclass_fields__.keys() == {"type", "body", "frontmatter"}
+
+
+def test_the_proposals_capability_claims_no_topic_prefix() -> None:
+    """A primitive, exactly as `tables` and `generators` are. `page_status` is
+    an extension key and a proposal carries no OKF `status`, so adopting the
+    capability adds no finding -- the failure a tier-2 ledger must not cause."""
+    from okf_ext import proposals
+
+    assert not hasattr(proposals, "TOPIC")
+    assert not hasattr(proposals, "CODES")

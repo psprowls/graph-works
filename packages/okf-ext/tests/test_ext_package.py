@@ -13,24 +13,34 @@ from test_ext_boundaries import capability_modules, capability_names
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 
-#: The capability set `test_the_top_level_still_imports_no_capability_now_that_there_are_nine`
-#: walks. A literal, not derived from the filesystem at collection time, so a
-#: tenth capability directory landing here is a choice a human makes rather
+#: The capability set `test_the_top_level_still_imports_no_capability_now_that_there_are_ten`
+#: walks. A literal, not derived from the filesystem at collection time, so an
+#: eleventh capability directory landing here is a choice a human makes rather
 #: than something this tuple silently starts covering on its own -- guarded
 #: against drift from the filesystem by
 #: `test_the_capability_tuple_matches_the_filesystem` below, the same pattern
 #: `test_ext_boundaries.py`'s own `capability` fixture uses.
-CAPABILITY_NAMES = ("tags", "schemas", "render", "health", "search", "tables", "moves", "sections", "generators")
+CAPABILITY_NAMES = (
+    "tags",
+    "schemas",
+    "render",
+    "health",
+    "search",
+    "tables",
+    "moves",
+    "sections",
+    "generators",
+    "proposals",
+)
 
 
 def test_version_is_static_and_pinned():
     """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking and patch
-    is compatible (ADR-0007). `generators` adds a capability, but it also
-    moves `SectionSpec`, `TypeSections`, `SectionSet`, `SectionError` and
-    `load_sections` out of `okf_ext.sections` into `okf_ext.shape` -- a public
-    API moving behind a shim is a minor even though the shim keeps callers
-    working for a release."""
-    assert okf_ext.__version__ == "0.4.0"
+    is compatible (ADR-0007). `proposals` adds a capability and widens
+    `PendingWrite` with a defaulted field -- both compatible -- so this is a
+    patch. `0.5.0` is not free: the README promises the `okf_ext.sections`
+    re-export shim comes out there."""
+    assert okf_ext.__version__ == "0.4.1"
 
 
 def test_the_distribution_version_matches_the_python_attribute():
@@ -100,9 +110,9 @@ def test_the_capability_is_still_reachable_as_a_submodule():
     assert tags.DEFAULT_IGNORE == ("_tags.yaml", "*/_tags.yaml")
 
 
-def test_the_top_level_still_imports_no_capability_now_that_there_are_nine():
+def test_the_top_level_still_imports_no_capability_now_that_there_are_ten():
     """The claim in `test_top_level_does_not_import_any_capability` was made
-    when there was one capability to not import. Restated over all nine."""
+    when there was one capability to not import. Restated over all ten."""
     result = subprocess.run(
         [
             sys.executable,
@@ -139,3 +149,9 @@ def test_the_fifth_capability_is_reachable_as_a_submodule():
     from okf_ext import sections
 
     assert sections.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+
+
+def test_the_sixth_capability_is_reachable_as_a_submodule():
+    from okf_ext import proposals
+
+    assert proposals.PROPOSAL_TYPE == "Proposal"

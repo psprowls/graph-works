@@ -319,3 +319,41 @@ def generated_copy(tmp_path: Path) -> Path:
     target = tmp_path / "generated"
     shutil.copytree(GENERATED, target, copy_function=shutil.copy2)
     return target
+
+
+PROPOSED = FIXTURES / "proposed"
+
+#: What each proposal in `proposed/` is there to prove. Hand-written and
+#: asserted against rather than derived, so a fixture added or removed without
+#: intent fails loudly -- the habit `SCHEMA_EXPECTED`, `SECTIONS_EXPECTED` and
+#: `GENERATED_EXPECTED` all set. A ledger corpus is worth exactly as much as
+#: the reviewer's memory of why each file is in it.
+PROPOSED_EXPECTED = {
+    "proposals/live": "page_status: proposed, target absent -- the merge and create-mode promotion case",
+    "proposals/approved-new": "approved, target absent -- promotion creates, and needs a render",
+    "proposals/approved-existing": "approved, target present with a disjoint source -- promotion merges "
+    "frontmatter only",
+    "proposals/approved-broken-target": "approved, target present but unparseable -- the `unreadable-target` refusal",
+    "proposals/rejected": "decided -- `already-decided` on propose, `not-approved` on promote",
+    "proposals/created": "the terminal state -- decided, and its target is present",
+    "proposals/no-target": "malformed: no `target` at all, so it never joins target lookup",
+    "proposals/bad-status": "malformed: a `page_status` outside the enum",
+    "proposals/escaping": (
+        '`target: ../outside.md` -- normalizes to `""` on read, so this fixture is `malformed` '
+        "(missing/unusable target), not a live `target-escapes-bundle` case; that refusal is exercised "
+        "by passing a raw escaping string as a caller-supplied `target` argument directly, in "
+        "test_proposals_plan.py and test_proposals_promote.py"
+    ),
+}
+
+
+def proposed_bundle():
+    """The proposal corpus. Read-only -- never pass this to `apply()`."""
+    return load_bundle(PROPOSED)
+
+
+def proposed_copy(tmp_path: Path) -> Path:
+    """A writable byte-identical copy of the proposal corpus."""
+    target = tmp_path / "proposed"
+    shutil.copytree(PROPOSED, target, copy_function=shutil.copy2)
+    return target

@@ -55,6 +55,11 @@ SkipReason = Literal["parse-error", "section-missing", "tags-not-a-sequence", "u
 #: retrying the other. This union retains every member even where a given
 #: capability never emits it -- splitting it per capability buys a narrower
 #: annotation at the cost of two types every caller must discriminate between.
+#:
+#: `mkdir-error` and `stale` are also what a `create=True` `PendingWrite`
+#: emits -- a parent that could not be made, and a target that appeared
+#: between plan and apply. Both were already in this union; the create path
+#: widens nothing.
 FailureKind = Literal[
     "not-a-member",
     "parse-error",
@@ -151,6 +156,16 @@ class PendingWrite:
     path: Path  # the live target
     rendered: str  # the whole file, as it will be written
     on_written: Callable[[], None]
+    create: bool = False
+    """Whether this write brings a **new** member into being.
+
+    The probe regime below cannot speak for a file that is not there yet:
+    `open("r+b")` fails for exactly the case a create is. A create item is
+    therefore probed the other way round -- its parent is made, and an already
+    occupied target is refused -- while staging and commit are the same two
+    steps an update goes through. Defaulting to `False` keeps every existing
+    construction site meaning what it meant.
+    """
 
 
 def body_digest(body: str) -> str:
@@ -211,6 +226,15 @@ def write_all(
        touched, and every temp file created -- including the one that just
        failed partway -- is removed before this returns.
 
+       A `create=True` item is checked the other way round instead: its parent
+       directory is made (`mkdir-error` on failure) and an already-occupied
+       target is refused as `stale`. Both are all-or-nothing exactly as the
+       probe is, so a create that lost its race leaves no live file touched.
+       The one residue such an abort can leave is an empty directory the
+       `mkdir` already made; `load_bundle` walks files, so it is invisible to
+       every reader and is left in place rather than unwound by a second
+       failure-prone step -- the same call `moves` makes for the same reason.
+
     2. *Commit (`Path.replace`) failures are isolated per document, so partial
        application is possible without any crash.* Only once every staged
        write has succeeded does a second loop move each temp file onto its
@@ -243,16 +267,41 @@ def write_all(
     """
     problems = list(failed)
 
-    unwritable: list[tuple[str, OSError]] = []
+    unwritable: list[WriteFailure] = []
     for item in pending:
+        if item.create:
+            try:
+                item.path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                unwritable.append(WriteFailure(path=item.member, kind="mkdir-error", error=str(exc)))
+                continue
+            if item.path.exists():
+                # The planner already refused `target-exists`; a target that
+                # appeared *since* is drift, and `stale` is the one kind a
+                # caller acts on by re-planning rather than by retrying. An
+                # empty directory this `mkdir` just made is left in place on
+                # the abort: `load_bundle` walks files, so it is invisible to
+                # every reader, and unwinding it would be a second
+                # failure-prone step buying nothing.
+                unwritable.append(
+                    WriteFailure(
+                        path=item.member,
+                        kind="stale",
+                        error=(
+                            "the target exists; it appeared since this plan was "
+                            "computed -- re-plan against the current bundle"
+                        ),
+                    )
+                )
+            continue
         try:
             with item.path.open("r+b"):
                 pass
         except OSError as exc:
-            unwritable.append((item.member, exc))
+            unwritable.append(WriteFailure(path=item.member, kind="unwritable", error=str(exc)))
 
     if unwritable:
-        problems.extend(WriteFailure(path=member, kind="unwritable", error=str(exc)) for member, exc in unwritable)
+        problems.extend(unwritable)
         problems.sort(key=lambda failure: failure.path)
         return ApplyResult(written=(), failed=tuple(problems), skipped=tuple(skipped))
 

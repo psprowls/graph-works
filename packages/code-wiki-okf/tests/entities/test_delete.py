@@ -2,7 +2,7 @@ from datetime import date
 from pathlib import Path
 
 from code_wiki_okf.entities.delete import prune_lane
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from okf_ext.shape import load_sections
 from okf_io import load_bundle
 
@@ -35,7 +35,7 @@ def _write_package_page(
 
 
 def test_untouched_prose_page_is_deleted(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_package_page(tmp_path, "gone", "pkg:acme/repo/gone")
     section_set = load_sections(tmp_path / "_sections")
     bundle = load_bundle(tmp_path)
@@ -48,7 +48,7 @@ def test_untouched_prose_page_is_deleted(tmp_path: Path) -> None:
 
 
 def test_hand_edited_required_prose_section_is_declined(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_package_page(
         tmp_path,
         "gone",
@@ -72,7 +72,7 @@ def test_hand_edited_optional_prose_section_is_also_declined(tmp_path: Path) -> 
     """`## Public API` is declared but not `required` in Package.yaml. The
     prose guard must protect it too -- deletion is not limited to required
     sections, unlike `sections.unfilled`."""
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_package_page(
         tmp_path,
         "gone",
@@ -93,7 +93,7 @@ def test_generated_section_edits_never_block_deletion(tmp_path: Path) -> None:
     """`## Files` is declared `ownership: generated` in Package.yaml. Content
     that differs from its seeded placeholder there must never be consulted by
     the prose-untouched check -- only `prose`-ownership sections count."""
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_package_page(
         tmp_path,
         "gone",
@@ -111,7 +111,7 @@ def test_generated_section_edits_never_block_deletion(tmp_path: Path) -> None:
 
 
 def test_page_still_in_should_exist_is_never_a_candidate(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_package_page(tmp_path, "still-here", "pkg:acme/repo/still-here")
     section_set = load_sections(tmp_path / "_sections")
     bundle = load_bundle(tmp_path)
@@ -127,7 +127,7 @@ def test_pages_outside_directory_are_ignored(tmp_path: Path) -> None:
     """A resource-having page in a different lane's directory must never be
     treated as a deletion candidate for this lane, even if its resource is
     absent from `should_exist`."""
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     # A Package page whose resource is gone, but pruning is scoped to
     # "dependencies/" here -- it must be left alone.
     _write_package_page(tmp_path, "gone", "pkg:acme/repo/gone")
@@ -147,7 +147,7 @@ def test_undeclared_type_is_declined_not_deleted(tmp_path: Path) -> None:
     types loaded from `_sections/` -- must decline rather than delete: with
     no declaration there is nothing to check prose against, and that is a
     reason for caution, not a reason to skip the check entirely."""
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     path = tmp_path / "packages" / "gone.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -165,7 +165,7 @@ def test_undeclared_type_is_declined_not_deleted(tmp_path: Path) -> None:
 
 
 def test_no_resource_candidates_yields_empty_result(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     section_set = load_sections(tmp_path / "_sections")
     bundle = load_bundle(tmp_path)
 
@@ -208,7 +208,7 @@ def test_exact_depth_leaves_mirror_file_pages_alone(tmp_path: Path) -> None:
     Repository entity page it shares a prefix with -- the bug the combined
     `sync` command surfaced (issue: entity-lane pruning deleted freshly
     mirrored File pages on a second `sync` run)."""
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_repository_page(tmp_path, "acme", "repo:acme/acme")
     _write_mirror_file_page(tmp_path, "acme", "src/mod.py", "file:acme/src/mod.py")
     section_set = load_sections(tmp_path / "_sections")
@@ -226,7 +226,7 @@ def test_without_exact_depth_the_mirror_subtree_is_incorrectly_swept(tmp_path: P
     still matches the old, unsafe behavior other lanes rely on (no nested
     subtree of their own), so this is deliberately still exercisable -- but
     callers touching the `repositories/` lane must pass `exact_depth=True`."""
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_repository_page(tmp_path, "acme", "repo:acme/acme")
     _write_mirror_file_page(tmp_path, "acme", "src/mod.py", "file:acme/src/mod.py")
     section_set = load_sections(tmp_path / "_sections")

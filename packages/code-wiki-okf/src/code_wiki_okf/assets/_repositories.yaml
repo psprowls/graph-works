@@ -4,6 +4,13 @@
 # against this bundle's root).
 graph_dir: ../graphs/code
 
+# Where this bundle's declarations live -- `_schema/`, `_sections/` and
+# `_tags.yaml`. Relative paths resolve against this bundle's root, which is
+# also the default when the key is absent. Relocating them lets one
+# declaration set serve several bundles; every package sharing this bundle
+# then has to agree, and nothing detects it if they do not.
+# declarations_dir: .
+
 # One entry per repository this bundle mirrors. The key names both
 # `repositories/<name>.md` and must match the graph's `repo:` URI member
 # name. Empty until a repo is added.

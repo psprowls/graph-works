@@ -43,6 +43,7 @@ class StateGateConfig:
 @dataclass(frozen=True, slots=True)
 class Config:
     graph_dir: Path
+    declarations_dir: Path
     repos: tuple[RepoConfig, ...]
     state_gate: StateGateConfig
 
@@ -110,11 +111,24 @@ def load_config(bundle_root: str | Path) -> Config:
     name = CONFIG_FILENAME
 
     doc = _require_mapping(raw, name=name, where="the document") if raw is not None else {}
-    allowed_top = {"graph_dir", "repositories", "ignore", "state_gate"}
+    allowed_top = {"graph_dir", "declarations_dir", "repositories", "ignore", "state_gate"}
     _reject_unknown_keys(doc, allowed=allowed_top, name=name, where="at top level")
 
     graph_dir_raw = _require_nonempty_string(doc.get("graph_dir"), name=name, where="`graph_dir`")
     graph_dir = _resolve(bundle_root, graph_dir_raw)
+
+    # Absent means "in the bundle", which is both the default layout and the
+    # only one that needs no coordination between the packages sharing a
+    # bundle. Present-but-blank is a typo, so it goes through the same
+    # non-empty check every other path key uses rather than falling back.
+    declarations_raw = doc.get("declarations_dir")
+    if declarations_raw is None:
+        declarations_dir = bundle_root
+    else:
+        declarations_dir = _resolve(
+            bundle_root,
+            _require_nonempty_string(declarations_raw, name=name, where="`declarations_dir`"),
+        )
 
     global_ignore = _string_list(doc.get("ignore"), name=name, where="`ignore`")
 
@@ -148,4 +162,9 @@ def load_config(bundle_root: str | Path) -> Config:
             branches = _DEFAULT_STATE_GATE_BRANCHES
         state_gate = StateGateConfig(enabled=enabled, branches=branches)
 
-    return Config(graph_dir=graph_dir, repos=tuple(repos), state_gate=state_gate)
+    return Config(
+        graph_dir=graph_dir,
+        declarations_dir=declarations_dir,
+        repos=tuple(repos),
+        state_gate=state_gate,
+    )

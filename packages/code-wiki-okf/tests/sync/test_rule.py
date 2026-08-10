@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from code_wiki_okf.sync.rule import CODES, TOPIC, sync_rule
 from code_wiki_okf.sync.snapshot import SyncSnapshot
 from okf_io import load_bundle, validate
@@ -26,7 +26,7 @@ def test_topic_is_sync() -> None:
 
 
 def test_empty_snapshot_yields_nothing(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     bundle = load_bundle(tmp_path)
     report = validate(bundle, today=_TODAY, extra_rules=[sync_rule(SyncSnapshot.empty())])
     assert not report.by_code("sync.stale-page")
@@ -35,7 +35,7 @@ def test_empty_snapshot_yields_nothing(tmp_path: Path) -> None:
 
 
 def test_missing_resource_yields_a_pathless_finding(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     bundle = load_bundle(tmp_path)
     snapshot = SyncSnapshot(missing=frozenset({"pkg:acme/repo-a/widgets"}))
     report = validate(bundle, today=_TODAY, extra_rules=[sync_rule(snapshot)])
@@ -46,7 +46,7 @@ def test_missing_resource_yields_a_pathless_finding(tmp_path: Path) -> None:
 
 
 def test_stale_resource_yields_a_finding_anchored_to_its_page(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_concept(tmp_path, "packages/widgets.md", "pkg:acme/repo-a/widgets")
     bundle = load_bundle(tmp_path)
     snapshot = SyncSnapshot(stale=frozenset({"pkg:acme/repo-a/widgets"}))
@@ -64,7 +64,7 @@ def test_stale_resource_with_no_matching_page_yields_nothing(tmp_path: Path) -> 
     resource (no page carries it) yields no finding at all, rather than a
     finding with a guessed or empty path.
     """
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     bundle = load_bundle(tmp_path)
     snapshot = SyncSnapshot(stale=frozenset({"pkg:acme/repo-a/nowhere"}))
     report = validate(bundle, today=_TODAY, extra_rules=[sync_rule(snapshot)])
@@ -72,7 +72,7 @@ def test_stale_resource_with_no_matching_page_yields_nothing(tmp_path: Path) -> 
 
 
 def test_orphaned_resource_yields_a_finding_anchored_to_its_page(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_concept(tmp_path, "packages/ghost.md", "pkg:acme/repo-a/ghost")
     bundle = load_bundle(tmp_path)
     snapshot = SyncSnapshot(orphaned=frozenset({"pkg:acme/repo-a/ghost"}))
@@ -87,7 +87,7 @@ def test_orphaned_resource_yields_a_finding_anchored_to_its_page(tmp_path: Path)
 
 def test_orphaned_resource_with_no_matching_page_yields_nothing(tmp_path: Path) -> None:
     """Same guard as `.stale`, exercised on the `.orphaned` branch."""
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     bundle = load_bundle(tmp_path)
     snapshot = SyncSnapshot(orphaned=frozenset({"pkg:acme/repo-a/nowhere"}))
     report = validate(bundle, today=_TODAY, extra_rules=[sync_rule(snapshot)])
@@ -95,7 +95,7 @@ def test_orphaned_resource_with_no_matching_page_yields_nothing(tmp_path: Path) 
 
 
 def test_strict_promotes_sync_findings_to_error(tmp_path: Path) -> None:
-    init_bundle(tmp_path, today=_TODAY, dry_run=False)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_concept(tmp_path, "packages/widgets.md", "pkg:acme/repo-a/widgets")
     _write_concept(tmp_path, "packages/ghost.md", "pkg:acme/repo-a/ghost")
     bundle = load_bundle(tmp_path)

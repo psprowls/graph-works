@@ -231,7 +231,7 @@ provides-extras = ["test"]
 
 [[package]]
 name = "code-wiki-okf"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/code-wiki-okf" }
 dependencies = [
     { name = "code-graph-io" },
@@ -589,7 +589,7 @@ wheels = [
 
 [[package]]
 name = "okf-ext"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "packages/okf-ext" }
 dependencies = [
     { name = "markdown-it-py" },

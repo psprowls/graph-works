@@ -25,7 +25,7 @@ import pytest
 from code_graph_io import open_reader
 from code_graph_io import update as graph_update
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from code_wiki_okf.mirror.apply import apply_mirror
 from code_wiki_okf.mirror.plan import plan_mirror
 from code_wiki_okf.mirror.walk import tracked_files
@@ -59,9 +59,10 @@ def synced_bundle(tmp_path: Path):
     graph_update.run_workspace([repo_root], graph_dir=graph_dir, full=True)
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = Config(
         graph_dir=graph_dir,
+        declarations_dir=bundle_root,
         repos=(RepoConfig(name="repo-a", path=repo_root, ignore=()),),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )

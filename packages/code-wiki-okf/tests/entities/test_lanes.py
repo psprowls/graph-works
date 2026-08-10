@@ -20,7 +20,7 @@ from code_graph_io.testing import open_store
 from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.lanes import sync
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
@@ -66,9 +66,10 @@ def _seed(graph_dir: Path, org: str, repo: str, packages: Sequence[str]) -> None
         store.close()
 
 
-def _config(tmp_path: Path, graph_dir: Path, repo_name: str) -> Config:
+def _config(tmp_path: Path, graph_dir: Path, repo_name: str, *, bundle_root: Path) -> Config:
     return Config(
         graph_dir=graph_dir,
+        declarations_dir=bundle_root,
         repos=(RepoConfig(name=repo_name, path=tmp_path / repo_name, ignore=()),),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
@@ -81,8 +82,8 @@ def test_dry_run_default_touches_nothing(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, "acme", "repo-a", ["widgets"])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, "repo-a")
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a", bundle_root=bundle_root)
 
     before_index = (bundle_root / "index.md").read_text(encoding="utf-8")
     before_log = (bundle_root / "log.md").read_text(encoding="utf-8")
@@ -105,8 +106,8 @@ def test_explicit_dry_run_true_also_touches_nothing(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, "acme", "repo-a", ["widgets"])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, "repo-a")
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a", bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -122,8 +123,8 @@ def test_sync_writes_pages_reconciles_index_and_appends_one_log_entry(tmp_path: 
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, "acme", "repo-a", ["widgets"])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, "repo-a")
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a", bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -143,8 +144,8 @@ def test_exactly_one_log_entry_per_run_even_when_nothing_changed(tmp_path: Path)
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, "acme", "repo-a", ["widgets"])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, "repo-a")
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a", bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -182,8 +183,8 @@ def test_page_whose_entity_disappeared_from_the_graph_is_deleted(tmp_path: Path)
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, "acme", "repo-a", ["widgets", "gadgets"])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, "repo-a")
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a", bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -200,7 +201,7 @@ def test_page_whose_entity_disappeared_from_the_graph_is_deleted(tmp_path: Path)
     # not decline it.
     graph_dir2 = tmp_path / "graph2"
     _seed(graph_dir2, "acme", "repo-a", ["gadgets"])
-    config2 = _config(tmp_path, graph_dir2, "repo-a")
+    config2 = _config(tmp_path, graph_dir2, "repo-a", bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir2) as reader:
         bundle2 = load_bundle(bundle_root)
@@ -225,8 +226,8 @@ def test_hand_edited_page_declines_deletion_and_is_reported(tmp_path: Path) -> N
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, "acme", "repo-a", ["widgets"])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, "repo-a")
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, "repo-a", bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -240,7 +241,7 @@ def test_hand_edited_page_declines_deletion_and_is_reported(tmp_path: Path) -> N
 
     graph_dir2 = tmp_path / "graph2"
     _seed(graph_dir2, "acme", "repo-a", [])  # widgets gone from the graph
-    config2 = _config(tmp_path, graph_dir2, "repo-a")
+    config2 = _config(tmp_path, graph_dir2, "repo-a", bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir2) as reader:
         bundle2 = load_bundle(bundle_root)

@@ -12,7 +12,7 @@ from code_graph_io.testing import open_store
 from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.sync import sync_entities
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from code_wiki_okf.sync.snapshot import snapshot_bundle
 from okf_io import load_bundle
 
@@ -44,9 +44,10 @@ def graph_dir(tmp_path: Path, mirror_repo: Path) -> Path:
     return graph_dir
 
 
-def _config(tmp_path: Path, graph_dir: Path, repo_path: Path) -> Config:
+def _config(tmp_path: Path, graph_dir: Path, repo_path: Path, *, bundle_root: Path) -> Config:
     return Config(
         graph_dir=graph_dir,
+        declarations_dir=bundle_root,
         repos=(RepoConfig(name="repo-a", path=repo_path, ignore=()),),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
@@ -108,9 +109,10 @@ def test_package_lane_orphan_is_detected_after_removal_from_graph(tmp_path: Path
     _seed_repo(graph_dir / "code.db", "acme", "repo-a", packages=["widgets"])
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = Config(
         graph_dir=graph_dir,
+        declarations_dir=bundle_root,
         repos=(RepoConfig(name="repo-a", path=tmp_path / "repo-a", ignore=()),),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
@@ -125,7 +127,12 @@ def test_package_lane_orphan_is_detected_after_removal_from_graph(tmp_path: Path
 
     graph_dir_after = tmp_path / "graph-after"
     _seed_repo(graph_dir_after / "code.db", "acme", "repo-a", packages=())
-    config_after = Config(graph_dir=graph_dir_after, repos=config.repos, state_gate=config.state_gate)
+    config_after = Config(
+        graph_dir=graph_dir_after,
+        declarations_dir=config.declarations_dir,
+        repos=config.repos,
+        state_gate=config.state_gate,
+    )
 
     with open_reader(graph_dir=graph_dir_after) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config_after, reader, at=_AT)
@@ -137,8 +144,8 @@ def test_untouched_bundle_reports_the_tracked_file_as_missing(
     tmp_path: Path, mirror_repo: Path, graph_dir: Path
 ) -> None:
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, mirror_repo)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
@@ -157,8 +164,8 @@ def test_synced_bundle_is_silent(tmp_path: Path, mirror_repo: Path, graph_dir: P
     from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, mirror_repo)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
     section_set = load_sections(bundle_root / "_sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
@@ -189,8 +196,8 @@ def test_orphan_after_source_removed(tmp_path: Path, mirror_repo: Path, graph_di
     from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, mirror_repo)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
     section_set = load_sections(bundle_root / "_sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
@@ -227,8 +234,8 @@ def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it
     from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, mirror_repo)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
     section_set = load_sections(bundle_root / "_sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
@@ -275,8 +282,8 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
     from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, mirror_repo)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
     section_set = load_sections(bundle_root / "_sections")
 
     with open_reader(graph_dir=graph_dir) as reader:

@@ -130,3 +130,46 @@ def test_load_config_state_gate_empty_branches_is_valid(tmp_path: Path) -> None:
     _write(tmp_path, "graph_dir: ../graphs/code\nstate_gate:\n  branches: []\n")
     config = load_config(tmp_path)
     assert config.state_gate == StateGateConfig(enabled=True, branches=())
+
+
+def test_declarations_dir_defaults_to_the_bundle_root(tmp_path: Path) -> None:
+    """The default is today's layout: a bundle describes itself, and the
+    question of relocating declarations does not arise until someone opts in."""
+    (tmp_path / "_repositories.yaml").write_text("graph_dir: ../graphs/code\n", encoding="utf-8")
+    config = load_config(tmp_path)
+    assert config.declarations_dir == tmp_path
+
+
+def test_declarations_dir_resolves_relative_to_the_bundle_root(tmp_path: Path) -> None:
+    """Resolved exactly as `graph_dir` is -- one rule for every path key."""
+    (tmp_path / "_repositories.yaml").write_text(
+        "graph_dir: ../graphs/code\ndeclarations_dir: ../shared-declarations\n", encoding="utf-8"
+    )
+    config = load_config(tmp_path)
+    assert config.declarations_dir == (tmp_path / ".." / "shared-declarations").resolve()
+
+
+def test_declarations_dir_accepts_an_absolute_path(tmp_path: Path) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    (tmp_path / "_repositories.yaml").write_text(
+        f"graph_dir: ../graphs/code\ndeclarations_dir: {elsewhere}\n", encoding="utf-8"
+    )
+    assert load_config(tmp_path).declarations_dir == elsewhere
+
+
+def test_declarations_dir_tilde_expands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / "_repositories.yaml").write_text(
+        "graph_dir: ../graphs/code\ndeclarations_dir: ~/shared-declarations\n", encoding="utf-8"
+    )
+    config = load_config(tmp_path)
+    assert config.declarations_dir == (tmp_path / "shared-declarations")
+
+
+def test_a_blank_declarations_dir_is_a_config_error(tmp_path: Path) -> None:
+    """Present-but-empty is a typo, not a request for the default."""
+    (tmp_path / "_repositories.yaml").write_text(
+        'graph_dir: ../graphs/code\ndeclarations_dir: "  "\n', encoding="utf-8"
+    )
+    with pytest.raises(ConfigError, match="declarations_dir"):
+        load_config(tmp_path)

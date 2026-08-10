@@ -21,7 +21,7 @@ from code_graph_io.handle import open_reader
 from code_graph_io.update import run_workspace
 from code_wiki_okf.config import RepoConfig
 from code_wiki_okf.git_state import ls_files
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from code_wiki_okf.mirror.apply import apply_mirror
 from code_wiki_okf.mirror.plan import plan_mirror
 from okf_ext.schemas import load_schemas, schema_rule
@@ -116,7 +116,7 @@ def _fixture_repo(tmp_path: Path) -> Path:
 
 def _new_bundle(tmp_path: Path) -> Path:
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     return bundle_root
 
 

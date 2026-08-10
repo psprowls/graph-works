@@ -6,7 +6,7 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
 
 - `src/code_wiki_okf/` — library + CLI (`cli.py`, `__main__.py`)
 - `src/code_wiki_okf/assets/` — package-data seed files copied byte-for-byte
-  by `init_bundle()`
+  by `plan_install()`
 - `tests/` — pytest tests
 
 ## Conventions

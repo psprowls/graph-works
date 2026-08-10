@@ -30,8 +30,16 @@ from pathlib import Path
 from typing import Literal
 
 #: Why a member could not be considered. Content is never an exception (spec
-#: §10) -- it is a `Finding` or one of these.
-SkipReason = Literal["parse-error", "section-missing", "tags-not-a-sequence", "unreadable"]
+#: §10) -- it is a `Finding` or one of these. `already-present` is `bundle`'s:
+#: a file the planner found in place and deliberately left alone, which is a
+#: *success* for an additive install and not a failure of any kind.
+SkipReason = Literal[
+    "already-present",
+    "parse-error",
+    "section-missing",
+    "tags-not-a-sequence",
+    "unreadable",
+]
 
 #: Why one document did not land, machine-readable rather than substring-
 #: matched out of `WriteFailure.error`. Mirrors the three regimes:
@@ -56,6 +64,12 @@ SkipReason = Literal["parse-error", "section-missing", "tags-not-a-sequence", "u
 #: capability never emits it -- splitting it per capability buys a narrower
 #: annotation at the cost of two types every caller must discriminate between.
 #:
+#: `foreign-content` is `bundle`'s, and is B-E's sentence -- "a file I own
+#: exists with content I did not write" -- made machine-readable rather than
+#: substring-matched out of the message. It is a content failure, refused for
+#: that one file while its neighbours still write, which is the whole point of
+#: narrowing the old all-or-nothing refusal.
+#:
 #: `mkdir-error` and `stale` are also what a `create=True` `PendingWrite`
 #: emits -- a parent that could not be made, and a target that appeared
 #: between plan and apply. Both were already in this union; the create path
@@ -65,6 +79,7 @@ FailureKind = Literal[
     "parse-error",
     "tags-not-a-sequence",
     "duplicate-edit",
+    "foreign-content",
     "stale",
     "serialize-error",
     "unwritable",

@@ -450,8 +450,8 @@ def sync_entities(
     new page's default path already occupied by a file with no matching
     `resource:`.
     """
-    schema_set = load_schemas(bundle.root / "_schema")
-    section_set = load_sections(bundle.root / "_sections")
+    schema_set = load_schemas(config.declarations_dir / "_schema")
+    section_set = load_sections(config.declarations_dir / "_sections")
     existing: dict[str, str] = {
         resource: entry.concept_id for resource, entry in resource_index(bundle).by_resource.items()
     }
@@ -531,8 +531,8 @@ def plan_entities(bundle: Bundle, config: Config, reader: GraphReader, *, at: da
     so `missing` reads off it directly rather than re-deriving existence a
     second way.
     """
-    schema_set = load_schemas(bundle.root / "_schema")
-    section_set = load_sections(bundle.root / "_sections")
+    schema_set = load_schemas(config.declarations_dir / "_schema")
+    section_set = load_sections(config.declarations_dir / "_sections")
     existing: dict[str, str] = {
         resource: entry.concept_id for resource, entry in resource_index(bundle).by_resource.items()
     }

@@ -115,7 +115,7 @@ def sync(
     # `sync_entities` already committed its writes; reload once so deletion
     # sees the pages it just created or regenerated.
     current = load_bundle(bundle.root)
-    section_set = load_sections(current.root / "_sections")
+    section_set = load_sections(config.declarations_dir / "_sections")
     should_exist = set(entity_result.current_resources)
 
     deleted: list[str] = []
@@ -143,7 +143,8 @@ def sync(
     log_document = reconciled.logs.get("")
     if log_document is None:
         raise ValueError(
-            f"{bundle.root}: no root log.md -- every code-wiki-okf bundle is created with one by init_bundle()"
+            f"{bundle.root}: no root log.md -- every code-wiki-okf bundle is created with one by "
+            "okf_ext.bundle's scaffold"
         )
 
     summary = SyncSummary(

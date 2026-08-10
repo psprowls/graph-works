@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration and the proposal ledger today; budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration, the proposal ledger and additive bundle setup today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -88,6 +88,11 @@ and one capability that needs nothing at all:
 
   `proposals` is the fourth: it writes documents through `okf-io` and the shared
   write engine, so it too ships with no extra and no guard.
+
+  `bundle` is the fifth: it creates files through the shared write engine and
+  reads `okf_io.parse` and `ruamel.yaml` to decide whether one is already
+  there, all three already declared, so it too ships with no extra and no
+  guard.
 
 `requires-python` is `>=3.12`, matching the rest of the workspace.
 `okf_io.models.Frontmatter.extra` defaults to `MappingProxyType({})`, which the

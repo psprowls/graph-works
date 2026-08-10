@@ -1,3 +1,5 @@
+import os
+import shutil
 import subprocess
 import sys
 from datetime import date
@@ -7,7 +9,7 @@ import pytest
 from code_graph_io.testing import open_store
 from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.cli import _echo_plan, _echo_result, app
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import SEED_ONLY, SEED_RELATIVE_PATHS, install_bundle
 from code_wiki_okf.mirror.model import DeclinedDeletion, MirrorPlan, MirrorResult
 from okf_ext.generators import Render
 from okf_ext.moves.model import Move, MovePlan
@@ -16,6 +18,13 @@ from typer.testing import CliRunner
 runner = CliRunner()
 
 _TODAY = date(2026, 1, 1)
+_IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
+
+#: `code-wiki-okf`'s own owned, non-human members -- picked from
+#: `SEED_RELATIVE_PATHS` rather than named by literal filename, so a test
+#: forcing a rewrite (deleting one) doesn't rot silently if that list's
+#: membership ever changes.
+_NON_SEED_ONLY_MEMBERS = [member for member in SEED_RELATIVE_PATHS if member not in SEED_ONLY]
 
 
 def test_init_command_writes_bundle(tmp_path: Path) -> None:
@@ -23,6 +32,11 @@ def test_init_command_writes_bundle(tmp_path: Path) -> None:
     result = runner.invoke(app, ["init", str(root)])
     assert result.exit_code == 0
     assert (root / "index.md").exists()
+    # Refusals go to stderr, never stdout -- a clean run should carry none of
+    # them, and the `wrote ...` lines belong on stdout so the command remains
+    # pipeable.
+    assert "wrote index.md" in result.stdout
+    assert "refused" not in result.stderr
 
 
 def test_init_command_dry_run_writes_nothing(tmp_path: Path) -> None:
@@ -33,13 +47,128 @@ def test_init_command_dry_run_writes_nothing(tmp_path: Path) -> None:
     assert "index.md" in result.output
 
 
-def test_init_command_refuses_non_empty_directory(tmp_path: Path) -> None:
+def test_init_command_installs_into_a_non_empty_directory(tmp_path: Path) -> None:
+    """The narrowed contract at the CLI: "not empty" is no longer a refusal."""
     root = tmp_path / "bundle"
     root.mkdir()
     (root / "existing.txt").write_text("hi", encoding="utf-8")
     result = runner.invoke(app, ["init", str(root)])
+    assert result.exit_code == 0
+    assert (root / "index.md").is_file()
+    assert (root / "existing.txt").read_text(encoding="utf-8") == "hi"
+
+
+def test_init_command_is_idempotent(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    assert runner.invoke(app, ["init", str(root)]).exit_code == 0
+    second = runner.invoke(app, ["init", str(root)])
+    assert second.exit_code == 0
+    assert "wrote " not in second.output
+    assert "skipped index.md" in second.output
+
+
+def test_init_command_refuses_a_hand_edited_seed_by_name(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    (root / "_schema").mkdir(parents=True)
+    (root / "_schema/File.schema.json").write_text('{"mine": true}\n', encoding="utf-8")
+    result = runner.invoke(app, ["init", str(root)])
     assert result.exit_code == 1
-    assert "not empty" in result.output
+    assert "_schema/File.schema.json" in result.output
+    assert "foreign-content" in result.output
+    # The refusal is a stderr-only concern: it must never leak onto stdout,
+    # where a caller piping `wrote ...` lines elsewhere would see it.
+    assert "refused" in result.stderr
+    assert "refused" not in result.stdout
+
+
+def test_init_command_rejects_a_config_dir_that_is_not_a_directory(tmp_path: Path) -> None:
+    not_a_dir = tmp_path / "file.txt"
+    not_a_dir.write_text("x", encoding="utf-8")
+    result = runner.invoke(app, ["init", str(tmp_path / "bundle"), "--config-dir", str(not_a_dir)])
+    assert result.exit_code == 1
+    assert "not a directory" in result.output
+
+
+def test_sync_command_rejects_a_config_dir_that_is_not_a_directory(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    assert runner.invoke(app, ["init", str(root)]).exit_code == 0
+    not_a_dir = tmp_path / "file.txt"
+    not_a_dir.write_text("x", encoding="utf-8")
+    result = runner.invoke(app, ["sync", str(root), "--config-dir", str(not_a_dir)])
+    assert result.exit_code == 1
+    assert "not a directory" in result.output
+
+
+def test_validate_command_rejects_a_config_dir_that_is_not_a_directory(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    assert runner.invoke(app, ["init", str(root)]).exit_code == 0
+    not_a_dir = tmp_path / "file.txt"
+    not_a_dir.write_text("x", encoding="utf-8")
+    result = runner.invoke(app, ["validate", str(root), "--config-dir", str(not_a_dir)])
+    assert result.exit_code == 1
+    assert "not a directory" in result.output
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+@pytest.mark.skipif(_IS_ROOT, reason="root bypasses permission bits")
+def test_init_command_reports_a_log_append_failure_and_exits_1(tmp_path: Path) -> None:
+    """A `log.md` that scaffolds fine but rejects the append itself (here: a
+    read-only file, an `OSError`) is `log_failure`, not `scaffold.failed` or
+    `install.failed` -- it must still be reported on stderr and still fail the
+    run, or the command exits 1 with nothing explaining why.
+    """
+    root = tmp_path / "bundle"
+    assert runner.invoke(app, ["init", str(root)]).exit_code == 0
+    log_path = root / "log.md"
+    assert log_path.is_file()
+    # Force the install half to write again, so `install_bundle` attempts the
+    # append -- a re-run with nothing to install never touches `log.md`. Which
+    # member is irrelevant, so it's picked programmatically rather than named
+    # by literal filename -- see `_NON_SEED_ONLY_MEMBERS`.
+    (root / _NON_SEED_ONLY_MEMBERS[0]).unlink()
+    log_path.chmod(0o444)
+    try:
+        result = runner.invoke(app, ["init", str(root)])
+    finally:
+        log_path.chmod(0o644)
+    assert result.exit_code == 1
+    assert "log.md" in result.output
+    assert "commit-error" in result.output
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+@pytest.mark.skipif(_IS_ROOT, reason="root bypasses permission bits")
+def test_init_command_reports_both_a_file_refusal_and_a_log_failure(tmp_path: Path) -> None:
+    """`BundleInstall` keeps `install.failed` and `log_failure` as two
+    separate channels -- `init` renders them in two independent blocks, and
+    nothing here forces the two to be tested together. A later "simplify
+    these two loops into one" change could drop the `log_failure` line
+    without any single-channel test noticing. This run produces both at once
+    and checks both lines land.
+    """
+    root = tmp_path / "bundle"
+    assert runner.invoke(app, ["init", str(root)]).exit_code == 0
+    log_path = root / "log.md"
+    assert log_path.is_file()
+
+    # One member deleted, to force the install half to write again (so the
+    # log append is attempted at all); a different member hand-edited, to
+    # produce an independent `install.failed` foreign-content refusal in the
+    # same run.
+    rewritten, foreign = _NON_SEED_ONLY_MEMBERS[0], _NON_SEED_ONLY_MEMBERS[1]
+    (root / rewritten).unlink()
+    (root / foreign).write_text("not what this package wrote\n", encoding="utf-8")
+    log_path.chmod(0o444)
+    try:
+        result = runner.invoke(app, ["init", str(root)])
+    finally:
+        log_path.chmod(0o644)
+
+    assert result.exit_code == 1
+    assert f"refused {foreign}" in result.stderr
+    assert "foreign-content" in result.stderr
+    assert "refused log.md" in result.stderr
+    assert "commit-error" in result.stderr
 
 
 def test_main_module_runs_init(tmp_path: Path) -> None:
@@ -135,7 +264,7 @@ def test_sync_command_dry_run_touches_nothing(tmp_path: Path) -> None:
     _seed_graph(graph_dir, "acme", "repo-a", ["widgets"])
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     _write_config(bundle_root, graph_dir, "repo-a")
 
     before_index = (bundle_root / "index.md").read_text(encoding="utf-8")
@@ -158,7 +287,7 @@ def test_sync_command_default_applies_entity_changes(tmp_path: Path) -> None:
     _seed_graph(graph_dir, "acme", "repo-a", ["widgets"])
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     _write_config(bundle_root, graph_dir, "repo-a")
 
     result = runner.invoke(app, ["sync", str(bundle_root)])
@@ -171,7 +300,7 @@ def test_sync_command_default_applies_entity_changes(tmp_path: Path) -> None:
 def test_sync_command_config_error_exits_1(tmp_path: Path) -> None:
     """A malformed _repositories.yaml should print to stderr and exit 1."""
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
 
     config_path = bundle_root / "_repositories.yaml"
     config_path.write_text("graph_dir: [this is invalid]\n", encoding="utf-8")
@@ -189,7 +318,7 @@ def test_sync_command_collision_error_exits_1(tmp_path: Path) -> None:
     _seed_graph_multi(graph_dir, [("acme", "repo-a", ["shared"]), ("acme", "repo-b", ["shared"])])
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     _write_config(bundle_root, graph_dir, ["repo-a", "repo-b"])
 
     result = runner.invoke(app, ["sync", str(bundle_root)])
@@ -321,6 +450,40 @@ def test_sync_command_reports_failure_and_still_processes_other_repos(
     assert "acme: sync failed: disk full" in result.output
 
 
+def test_sync_command_reports_missing_sections_cleanly(tmp_path: Path) -> None:
+    """`load_sections` propagates a bare `OSError` (`FileNotFoundError`) for a
+    missing `_sections` directory -- the mirror half's `load_sections` call
+    reads `config.declarations_dir` now, not this package's own bundled
+    assets, so a bundle whose `_sections/` is missing or not yet populated
+    (e.g. mid-`--config-dir` relocation) is a reachable state. `sync` must
+    catch that and exit 1 with a clean message, not dump a raw traceback."""
+    bundle_root = _scratch_workspace(tmp_path)
+    shutil.rmtree(bundle_root / "_sections")
+
+    result = runner.invoke(app, ["sync", str(bundle_root)])
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "_sections" in result.output
+
+
+def test_sync_command_dry_run_reports_missing_sections_cleanly(tmp_path: Path) -> None:
+    """`--dry-run` short-circuits the entity half (`lanes.sync` returns before
+    ever loading `_sections`) but still runs the mirror half's own preview,
+    which has its own `load_sections(config.declarations_dir / "_sections")`
+    call and its own guard -- this is the one path that actually exercises
+    it, distinct from the entity half's guard the non-dry-run test above
+    exercises."""
+    bundle_root = _scratch_workspace(tmp_path)
+    shutil.rmtree(bundle_root / "_sections")
+
+    result = runner.invoke(app, ["sync", str(bundle_root), "--dry-run"])
+
+    assert result.exit_code == 1
+    assert "Traceback" not in result.output
+    assert "_sections" in result.output
+
+
 def _empty_move_plan(bundle_root: Path) -> MovePlan:
     return MovePlan(root=bundle_root, moves=(), edits=(), refusals=(), unrebased=(), digests={})
 
@@ -410,7 +573,7 @@ def test_validate_command_collision_error_exits_1(tmp_path: Path) -> None:
     _seed_graph_multi(graph_dir, [("acme", "repo-a", ["shared"]), ("acme", "repo-b", ["shared"])])
 
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     _write_config(bundle_root, graph_dir, ["repo-a", "repo-b"])
 
     result = runner.invoke(app, ["validate", str(bundle_root)])
@@ -453,6 +616,22 @@ def _init_empty_graph(bundle_root: Path) -> None:
     graph_dir = bundle_root.parent / "graphs" / "code"
     graph_dir.mkdir(parents=True)
     open_store(graph_dir / "code.db", create=True).close()
+
+
+def test_config_dir_relocates_the_declarations_and_validate_follows(tmp_path: Path) -> None:
+    """The persistence half of S-F: the flag is given once at `init` and every
+    later command reads the answer out of `_repositories.yaml`."""
+    bundle_root = tmp_path / "bundle"
+    declarations = tmp_path / "declarations"
+    declarations.mkdir()
+    init_result = runner.invoke(app, ["init", str(bundle_root), "--config-dir", str(declarations)])
+    assert init_result.exit_code == 0, init_result.output
+    assert (declarations / "_schema" / "File.schema.json").is_file()
+    assert not (bundle_root / "_schema").exists()
+
+    _init_empty_graph(bundle_root)
+    validate_result = runner.invoke(app, ["validate", str(bundle_root)])
+    assert validate_result.exit_code == 0, validate_result.output
 
 
 def test_validate_reports_schema_violation(tmp_path: Path) -> None:

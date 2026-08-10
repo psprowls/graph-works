@@ -31,16 +31,17 @@ CAPABILITY_NAMES = (
     "sections",
     "generators",
     "proposals",
+    "bundle",
 )
 
 
 def test_version_is_static_and_pinned():
     """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking and patch
-    is compatible (ADR-0007). `proposals` adds a capability and widens
-    `PendingWrite` with a defaulted field -- both compatible -- so this is a
-    patch. `0.5.0` is not free: the README promises the `okf_ext.sections`
-    re-export shim comes out there."""
-    assert okf_ext.__version__ == "0.4.1"
+    is compatible (ADR-0007). `bundle` adds a capability and widens two shared
+    `Literal` unions with members no existing caller can be matching on -- both
+    compatible -- so this is a patch. `0.5.0` is still not free: the README
+    promises the `okf_ext.sections` re-export shim comes out there."""
+    assert okf_ext.__version__ == "0.4.2"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

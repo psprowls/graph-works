@@ -23,7 +23,12 @@ def _scratch_repo(tmp_path: Path, name: str) -> Path:
 
 
 def _config(repos: tuple[RepoConfig, ...]) -> Config:
-    return Config(graph_dir=Path("/graph"), repos=repos, state_gate=StateGateConfig(enabled=False, branches=()))
+    return Config(
+        graph_dir=Path("/graph"),
+        declarations_dir=Path("/declarations"),
+        repos=repos,
+        state_gate=StateGateConfig(enabled=False, branches=()),
+    )
 
 
 def test_tracked_files_one_repo(tmp_path: Path) -> None:

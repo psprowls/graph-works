@@ -21,7 +21,7 @@ from code_graph_io.testing import open_store
 from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.sync import plan_entities, sync_entities
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
@@ -177,9 +177,10 @@ def _bump_package_version(graph_dir: Path, *, org: str, repo: str, name: str, ve
         store.close()
 
 
-def _config(tmp_path: Path, graph_dir: Path, repo_names: Sequence[str]) -> Config:
+def _config(tmp_path: Path, graph_dir: Path, repo_names: Sequence[str], *, bundle_root: Path) -> Config:
     return Config(
         graph_dir=graph_dir,
+        declarations_dir=bundle_root,
         repos=tuple(RepoConfig(name=name, path=tmp_path / name, ignore=()) for name in repo_names),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
@@ -219,8 +220,8 @@ def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> Non
         dependencies=[_dependency_node("pypi", "requests")],
     )
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -256,7 +257,7 @@ def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> Non
     assert pkg_doc.fm_raw.get("test_suites") == []
     assert pkg_doc.fm_raw.get("entry_points") == []
     generated = pkg_doc.fm_raw.get("generated")
-    assert generated is not None and generated.get("by") == "code-wiki-okf/0.1.0"
+    assert generated is not None and generated.get("by") == "code-wiki-okf/0.2.0"
     assert isinstance(pkg_doc.fm_raw.get("tokens"), int)
     assert pkg_doc.fm_raw.get("tokens") >= 0
 
@@ -290,8 +291,8 @@ def test_sync_preserves_hand_edited_prose_section(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -317,8 +318,8 @@ def test_sync_page_moved_within_lane_is_updated_in_place_not_duplicated(tmp_path
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -360,8 +361,8 @@ def test_sync_two_repos_same_package_name_raises(tmp_path: Path) -> None:
         ],
     )
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a", "repo-b"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a", "repo-b"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -387,8 +388,8 @@ def test_sync_refuses_to_overwrite_unregistered_page_at_default_path(tmp_path: P
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     # Pre-place a page at the exact default path `sync_entities` would
     # compute for Package "widgets" (`packages/widgets.md`), authored before
@@ -429,8 +430,8 @@ def test_sync_repository_package_count_is_per_repo_not_global(tmp_path: Path) ->
         ],
     )
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a", "repo-b"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a", "repo-b"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
@@ -447,9 +448,9 @@ def test_plan_entities_reports_missing_for_a_page_that_does_not_exist_yet(tmp_pa
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     bundle = load_bundle(bundle_root)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_entities(bundle, config, reader, at=_AT)
@@ -463,8 +464,8 @@ def test_plan_entities_reports_stale_for_a_page_whose_content_changed(tmp_path: 
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)  # first sync: creates the page
@@ -482,8 +483,8 @@ def test_plan_entities_is_silent_once_synced_and_unchanged(tmp_path: Path) -> No
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         sync_result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
@@ -500,8 +501,8 @@ def test_plan_entities_ignores_a_fresh_generated_at_timestamp(tmp_path: Path) ->
     graph_dir = tmp_path / "graph"
     _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"])
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
         sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)

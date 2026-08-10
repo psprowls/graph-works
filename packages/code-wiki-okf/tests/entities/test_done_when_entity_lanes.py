@@ -33,7 +33,7 @@ from code_graph_io.testing import open_store
 from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.lanes import sync
-from code_wiki_okf.init import init_bundle
+from code_wiki_okf.init import install_bundle
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
@@ -83,9 +83,10 @@ def _seed(
         store.close()
 
 
-def _config(tmp_path: Path, graph_dir: Path, repo_names: Sequence[str]) -> Config:
+def _config(tmp_path: Path, graph_dir: Path, repo_names: Sequence[str], *, bundle_root: Path) -> Config:
     return Config(
         graph_dir=graph_dir,
+        declarations_dir=bundle_root,
         repos=tuple(RepoConfig(name=name, path=tmp_path / name, ignore=()) for name in repo_names),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
@@ -93,7 +94,7 @@ def _config(tmp_path: Path, graph_dir: Path, repo_names: Sequence[str]) -> Confi
 
 def test_entity_lanes_done_when(tmp_path: Path) -> None:
     bundle_root = tmp_path / "bundle"
-    init_bundle(bundle_root, today=_TODAY, dry_run=False)
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
 
     # --- Generation 1: a realistic two-repo graph -----------------------
     # repo-a carries two packages (one gets hand-edited prose, the other
@@ -102,7 +103,7 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
     graph_dir1 = tmp_path / "graph1"
     _seed(graph_dir1, "acme", "repo-a", ["widgets", "sprockets"])
     _seed(graph_dir1, "acme", "repo-b", ["gadgets"])
-    config1 = _config(tmp_path, graph_dir1, ["repo-a", "repo-b"])
+    config1 = _config(tmp_path, graph_dir1, ["repo-a", "repo-b"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir1) as reader:
         bundle = load_bundle(bundle_root)
@@ -207,7 +208,7 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
     graph_dir2 = tmp_path / "graph2"
     _seed(graph_dir2, "acme", "repo-a", ["widgets", "sprockets"], versions={"sprockets": "0.2.0"})
     _seed(graph_dir2, "acme", "repo-b", [])  # gadgets gone
-    config2 = _config(tmp_path, graph_dir2, ["repo-a", "repo-b"])
+    config2 = _config(tmp_path, graph_dir2, ["repo-a", "repo-b"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir2) as reader:
         bundle5 = load_bundle(bundle_root)
@@ -232,7 +233,7 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
     graph_dir3 = tmp_path / "graph3"
     _seed(graph_dir3, "acme", "repo-a", ["sprockets"], versions={"sprockets": "0.2.0"})  # widgets gone too
     _seed(graph_dir3, "acme", "repo-b", [])
-    config3 = _config(tmp_path, graph_dir3, ["repo-a", "repo-b"])
+    config3 = _config(tmp_path, graph_dir3, ["repo-a", "repo-b"], bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir3) as reader:
         bundle6 = load_bundle(bundle_root)
@@ -244,8 +245,8 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
     assert ("packages/widgets", "prose-edited") in result6.declined
 
     log_text = (bundle_root / "log.md").read_text(encoding="utf-8")
-    # One bullet from `init_bundle` plus six sync() calls, each of which --
-    # including the two idempotent / declined-only ones -- appends exactly
-    # one more (design spec: "One `okf_io.append_log_entry` call per
-    # `sync_entities` run").
-    assert log_text.count("\n- ") == 7
+    # Two bullets from `install_bundle` (the scaffold's, then the install's)
+    # plus six sync() calls, each of which -- including the two idempotent /
+    # declined-only ones -- appends exactly one more (design spec: "One
+    # `okf_io.append_log_entry` call per `sync_entities` run").
+    assert log_text.count("\n- ") == 8

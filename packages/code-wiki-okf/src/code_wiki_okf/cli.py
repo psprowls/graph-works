@@ -6,12 +6,13 @@ downstream takes `today` as an argument and never reads it itself.
 
 from __future__ import annotations
 
-import importlib.resources
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
 import typer
 from code_graph_io import open_reader
+from okf_ext.bundle import WriteFailure
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
@@ -19,10 +20,10 @@ from okf_ext.tags import load_vocabulary, vocabulary_rule
 from okf_io import append_log_entry, load_bundle
 from okf_io import validate as okf_validate
 
-from code_wiki_okf.config import ConfigError, load_config
+from code_wiki_okf.config import Config, ConfigError, load_config
 from code_wiki_okf.entities import lanes
 from code_wiki_okf.git_state import head_commit
-from code_wiki_okf.init import InitError, init_bundle
+from code_wiki_okf.init import InitError, install_bundle
 from code_wiki_okf.mirror.apply import apply_mirror
 from code_wiki_okf.mirror.model import MirrorPlan, MirrorResult
 from code_wiki_okf.mirror.plan import plan_mirror
@@ -43,22 +44,80 @@ def _callback() -> None:
     """Generate and update a standalone OKF v0.2 bundle from the shared code graph."""
 
 
+def _resolved_config_dir(config_dir: Path | None) -> Path | None:
+    """A `--config-dir` that is not a directory is a `ConfigError`.
+
+    It names where configuration lives, so it follows the rule the rest of
+    this package's configuration follows: config raises, content never does.
+    """
+    if config_dir is None:
+        return None
+    if not config_dir.is_dir():
+        raise ConfigError(f"--config-dir {config_dir}: not a directory")
+    return config_dir.resolve()
+
+
+def _with_config_dir(config: Config, config_dir: Path | None) -> Config:
+    """Apply a `--config-dir` override onto a loaded `Config`.
+
+    `dataclasses.replace` because `Config` is frozen. The flag wins over the
+    file for this one invocation and is not written back -- persisting it is
+    `init`'s job, where there is no file yet to read it from.
+    """
+    resolved = _resolved_config_dir(config_dir)
+    return config if resolved is None else replace(config, declarations_dir=resolved)
+
+
+def _echo_failure(failure: WriteFailure) -> None:
+    """One refusal line to stderr -- shared by the per-file loop and the
+    singleton `log_failure`, so the two channels can never drift in wording.
+    """
+    typer.echo(f"refused {failure.path} ({failure.kind}): {failure.error}", err=True)
+
+
 @app.command()
 def init(
-    bundle_root: Path = typer.Argument(..., help="Directory to initialize as a fresh OKF v0.2 bundle."),  # noqa: B008
-    dry_run: bool = typer.Option(False, "--dry-run", help="Print the would-be file list instead of writing."),
+    bundle_root: Path = typer.Argument(..., help="Directory to install this package into."),  # noqa: B008
+    config_dir: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config-dir",
+        help="Where `_schema/`, `_sections/` and `_tags.yaml` live. Defaults to BUNDLE_ROOT; "
+        "when given, it is written into the `_repositories.yaml` this command creates.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
 ) -> None:
-    """Initialize a fresh, empty-but-valid OKF v0.2 bundle at BUNDLE_ROOT."""
+    """Install code-wiki-okf into BUNDLE_ROOT, scaffolding it if it is new.
+
+    Additive and idempotent: a bundle another package already created is
+    installed into rather than refused, and a re-run writes nothing. The only
+    refusal left is a file this package owns that exists with content it did
+    not write, reported per file -- its neighbours still land.
+    """
     today = datetime.now(UTC).date()
     try:
-        result = init_bundle(bundle_root, today=today, dry_run=dry_run)
-    except InitError as exc:
+        result = install_bundle(
+            bundle_root,
+            today=today,
+            declarations_dir=_resolved_config_dir(config_dir),
+            dry_run=dry_run,
+        )
+    except (ConfigError, InitError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
     verb = "would write" if dry_run else "wrote"
-    for planned in result.files:
-        typer.echo(f"{verb} {planned.relative_path}")
+    for member in (*result.scaffold.written, *result.install.written):
+        typer.echo(f"{verb} {member}")
+    for item in (*result.scaffold.skipped, *result.install.skipped):
+        typer.echo(f"skipped {item.path}")
+    for failure in (*result.scaffold.failed, *result.install.failed):
+        _echo_failure(failure)
+    if result.log_failure is not None:
+        _echo_failure(result.log_failure)
+    if result.logged is not None:
+        typer.echo(f"{verb} log.md: {result.logged}")
+    if not result.ok:
+        raise typer.Exit(code=1)
 
 
 def _echo_plan(repo_name: str, plan: MirrorPlan) -> None:
@@ -105,6 +164,12 @@ def _echo_result(repo_name: str, result: MirrorResult) -> None:
 @app.command()
 def sync(
     bundle_root: Path = typer.Argument(..., help="Bundle root to sync (must already be initialized)."),  # noqa: B008
+    config_dir: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config-dir",
+        help="Where `_schema/`, `_sections/` and `_tags.yaml` live. "
+        "Defaults to the value in `_repositories.yaml`, or BUNDLE_ROOT. Applies to this run only -- not persisted.",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print each lane's plan instead of writing."),
 ) -> None:
     """Sync entity pages and the repository mirror lane against the code graph.
@@ -124,7 +189,7 @@ def sync(
     today = datetime.now(UTC).date()
     at = datetime.now(UTC)
     try:
-        config = load_config(bundle_root)
+        config = _with_config_dir(load_config(bundle_root), config_dir)
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -133,7 +198,12 @@ def sync(
     try:
         with open_reader(graph_dir=config.graph_dir) as reader:
             entity_result = lanes.sync(load_bundle(bundle_root), config, reader, today=today, at=at, dry_run=dry_run)
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
+        # `ValueError` for the two `_resolve_placements` collision cases;
+        # `OSError` because `lanes.sync` -> `sync_entities` loads
+        # `config.declarations_dir`'s `_schema`/`_sections` too, and a missing
+        # one is the same caller-configuration problem `validate` already
+        # guards against, not a raw traceback.
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
@@ -146,7 +216,21 @@ def sync(
         )
 
     # --- mirror half: one plan/apply pass per repo ---
-    section_set = load_sections(str(importlib.resources.files("code_wiki_okf") / "assets" / "_sections"))
+    # Reads the bundle's declarations, not this package's own assets. Normally
+    # the two are identical -- the install seeds byte-for-byte copies -- but
+    # they diverge the moment a human edits the bundle's `_sections/File.yaml`,
+    # and then `sync` writes pages from one shape while `validate` checks them
+    # against another. One bundle, one answer about what a `File` page looks
+    # like.
+    try:
+        section_set = load_sections(config.declarations_dir / "_sections")
+    except (OSError, ValueError) as exc:
+        # `load_sections` raises `SectionError` (a `ValueError`) for a
+        # malformed set and propagates `OSError` for a missing directory --
+        # a caller-configuration problem, matching `validate`'s identical
+        # guard on the same load, not a raw traceback.
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     failed_repos: list[str] = []
     mirror_created = 0
     mirror_regenerated = 0
@@ -189,7 +273,8 @@ def sync(
         log_document = load_bundle(bundle_root).logs.get("")
         if log_document is None:
             raise ValueError(
-                f"{bundle_root}: no root log.md -- every code-wiki-okf bundle is created with one by init_bundle()"
+                f"{bundle_root}: no root log.md -- every code-wiki-okf bundle is created with one by "
+                "okf_ext.bundle's scaffold"
             )
         append_log_entry(
             log_document,
@@ -206,13 +291,19 @@ def sync(
 @app.command()
 def validate(
     bundle_root: Path = typer.Argument(..., help="Bundle directory to validate."),  # noqa: B008
+    config_dir: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config-dir",
+        help="Where `_schema/`, `_sections/` and `_tags.yaml` live. "
+        "Defaults to the value in `_repositories.yaml`, or BUNDLE_ROOT. Applies to this run only -- not persisted.",
+    ),
     strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures."),
 ) -> None:
     """Report drift and conformance findings for BUNDLE_ROOT. Never writes."""
     today = datetime.now(UTC).date()
     at = datetime.now(UTC)
     try:
-        config = load_config(bundle_root)
+        config = _with_config_dir(load_config(bundle_root), config_dir)
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -226,9 +317,9 @@ def validate(
         raise typer.Exit(code=1) from exc
 
     try:
-        schema_set = load_schemas(bundle_root / "_schema")
-        section_set = load_sections(bundle_root / "_sections")
-        vocabulary = load_vocabulary(bundle_root / "_tags.yaml")
+        schema_set = load_schemas(config.declarations_dir / "_schema")
+        section_set = load_sections(config.declarations_dir / "_sections")
+        vocabulary = load_vocabulary(config.declarations_dir / "_tags.yaml")
     except (OSError, ValueError) as exc:
         # `load_schemas`/`load_sections` raise `SchemaError`/`SectionError`
         # (both `ValueError`) for a malformed set and propagate `OSError` for

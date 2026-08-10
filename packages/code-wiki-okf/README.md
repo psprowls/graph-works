@@ -6,11 +6,21 @@ in the graph-wiki workspace for the full architecture.
 
 ## Usage
 
-    code-wiki-okf init <bundle-root> [--dry-run]
+    code-wiki-okf init <bundle-root> [--dry-run] [--config-dir <path>]
 
-Initializes a fresh, empty-but-valid OKF v0.2 bundle: root `index.md`,
-`log.md`, `_repositories.yaml`, the seven `_schema/*.schema.json` files, the
-seven `_sections/*.yaml` declarations, and `_tags.yaml`.
+Installs this package's files into a bundle, additively and idempotently:
+root `index.md`, `log.md` and `_tags.yaml` (the shared scaffold every OKF
+bundle has, whoever installs into it first), `_repositories.yaml`, the seven
+`_schema/*.schema.json` files, and the seven `_sections/*.yaml` declarations.
+Running it again is a no-op; running it against a bundle another
+`code-wiki-okf`-adjacent package already created installs alongside that
+package's own files rather than refusing. The refusal narrows to the
+per-file case — a file this package owns already exists with content it did
+not write — so one hand-edited seed is reported by name without blocking its
+neighbours. `--config-dir` relocates the declaration files
+(`_schema/`, `_sections/`, `_tags.yaml`) to a directory shared across several
+bundles, stamped into `_repositories.yaml` so later commands read the same
+answer without the flag being retyped.
 
     code-wiki-okf sync <bundle-root> [--dry-run/--no-dry-run]
 

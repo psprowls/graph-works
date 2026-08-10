@@ -2,14 +2,14 @@
 shared code graph.
 
 This package (epic child 1) ships the package skeleton, `_repositories.yaml`
-config, `init_bundle()`, and the shared plumbing later children write
+config, `install_bundle()`, and the shared plumbing later children write
 through: find-by-resource (`resources.py`), provenance stamping
 (`provenance.py`), and a `git_state` port with the state gate.
 """
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from code_wiki_okf.config import (
     Config,
@@ -26,7 +26,7 @@ from code_wiki_okf.git_state import (
     is_clean_on_branches,
     ls_files,
 )
-from code_wiki_okf.init import BundleInit, InitError, PlannedFile, init_bundle
+from code_wiki_okf.init import BundleInstall, InitError, install_bundle, plan_install
 from code_wiki_okf.provenance import (
     generated_value,
     last_updated_commit_value,
@@ -39,11 +39,10 @@ from code_wiki_okf.resources import (
 )
 
 __all__ = [
-    "BundleInit",
+    "BundleInstall",
     "Config",
     "ConfigError",
     "InitError",
-    "PlannedFile",
     "RepoConfig",
     "ResourceEntry",
     "ResourceIndex",
@@ -54,11 +53,12 @@ __all__ = [
     "compute_state_gate",
     "generated_value",
     "head_commit",
-    "init_bundle",
+    "install_bundle",
     "is_clean_on_branches",
     "last_updated_commit_value",
     "load_config",
     "ls_files",
+    "plan_install",
     "resource_index",
     "tokens_value",
 ]

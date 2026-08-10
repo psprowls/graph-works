@@ -304,6 +304,7 @@ BUILT_IN_TOPICS = frozenset(
         "sections",
         "generators",
         "proposals",
+        "bundle",
     ]
 )
 def capability(request):
@@ -325,6 +326,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
         "sections",
         "generators",
         "proposals",
+        "bundle",
     }
 
 
@@ -645,3 +647,33 @@ def test_the_proposals_capability_claims_no_topic_prefix() -> None:
 
     assert not hasattr(proposals, "TOPIC")
     assert not hasattr(proposals, "CODES")
+
+
+def test_the_documented_bundle_surface_is_present() -> None:
+    """Spec S-A of the co-existence work item: two planners, one `apply`, and
+    the routing constants a caller relocating its declarations needs to read."""
+    from okf_ext import bundle
+
+    for name in ("plan_scaffold", "plan_install", "apply"):
+        assert callable(getattr(bundle, name))
+    assert bundle.DECLARATION_PREFIXES == ("_schema/", "_sections/")
+    assert bundle.DECLARATION_MEMBERS == ("_tags.yaml",)
+    assert bundle.PlannedFile.__dataclass_fields__.keys() == {"member", "path", "content"}
+    assert bundle.ScaffoldPlan.__dataclass_fields__.keys() == {
+        "root",
+        "declarations_dir",
+        "writes",
+        "skipped",
+        "refusals",
+    }
+    assert bundle.InstallPlan.__dataclass_fields__.keys() == bundle.ScaffoldPlan.__dataclass_fields__.keys()
+
+
+def test_the_bundle_capability_claims_no_topic_prefix() -> None:
+    """A primitive, as `tables`, `generators` and `proposals` are. Setting a
+    bundle up is not a judgement about it; the rules that judge one are the
+    caller's to run."""
+    from okf_ext import bundle
+
+    assert not hasattr(bundle, "TOPIC")
+    assert not hasattr(bundle, "CODES")

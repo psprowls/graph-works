@@ -16,6 +16,7 @@ lint:
 # Static types, strict — every package.
 types:
     uv run mypy --strict packages/okf-io/src packages/okf-ext/src packages/code-graph-io/src packages/code-parser/src packages/code-wiki-okf/src
+    uv run --package work-tracker-okf mypy --strict packages/work-tracker-okf/src
 
 # Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
 # exists: nothing enforces this but the person who runs it.
@@ -28,6 +29,7 @@ test:
     uv run --package code-graph-io pytest packages/code-graph-io/tests
     uv run --package code-parser pytest packages/code-parser/tests
     uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests
+    uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests
 
 # Branch coverage — GATED, per package.
 #
@@ -41,6 +43,7 @@ cov:
     uv run --package code-graph-io pytest packages/code-graph-io/tests --cov=code_graph_io --cov-branch --cov-report=term-missing --cov-fail-under=90
     uv run --package code-parser pytest packages/code-parser/tests --cov=code_parser --cov-branch --cov-report=term-missing --cov-fail-under=90
     uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests --cov=code_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests --cov=work_tracker_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
 
 # Everything CI will run. `cov` runs every suite, so `test` is not repeated.
 check: lint types contracts cov

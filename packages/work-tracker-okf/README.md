@@ -1,0 +1,319 @@
+# work-tracker-okf
+
+Work-item tracking as an OKF v0.2 lane — see
+`wiki/work/2026-08-10-epic-work-tracker-okf-port/01-design-spec.md` in the
+graph-wiki workspace for the full architecture, and
+`wiki/work/2026-08-10-epic-feature-package-scaffold-declarations-items/01-design-spec.md`
+for what this first slice ships.
+
+## The CLI
+
+    work-tracker-okf <command> <root> [options]
+
+Eight flat commands, no subgroups, `<root>` first everywhere — `code-wiki-okf`'s
+shape.
+
+| Command | Writes | `--today` | `--json` | What it does |
+|---|---|---|---|---|
+| `init` | yes | ✓ | — | Install this package's fourteen files into a bundle |
+| `file` | yes | ✓ | — | File one item, reconcile `work/index.md`, log the arrival |
+| `next` | never | — | ✓ | Report what to dispatch for a slug |
+| `advance` | yes | ✓ | — | Apply the next transition, stamp, ensure the plan row, then lint |
+| `archive` | yes | ✓ | — | Move terminal items to `work/_archive/` |
+| `lint` | never | ✓ | ✓ | Validate against the lane rule set |
+| `status` | never | — | ✓ | Count the active items, name the one worth resuming |
+| `sync-children` | yes | — | — | Refresh every parent's derived `children:` |
+
+`next` and `status` take no `--today` because neither reads a clock: routing
+and counting are pure functions of the item graph.
+
+### Declarations directory
+
+Four commands accept `--declarations-dir`: `init`, `file`, `lint`, `advance`. It
+relocates `_schema/` and `_sections/` for that invocation. It is **not**
+persisted: this package writes no configuration file, so a later command needs
+the flag again.
+
+See [the corresponding library sections](#the-writers) and [The decision layer](#the-decision-layer)
+for what each command does.
+
+### `--dry-run` means "stop after plan"
+
+Write-by-default, `--dry-run` to opt out — one rule across all four CLIs in this
+repo. It is **not a second code path**: three of the four writers have no
+`dry_run` parameter at all, so `--dry-run` skips the `apply()` call and prints
+the plan object the library already built. A dry run cannot drift from the real
+run, because it is the real run minus its last line.
+
+The one exception is `advance`, which cannot honestly show post-write findings
+and says so instead — see [The CLI's one asymmetry](#advance-lints-after-writing).
+
+### Exit codes
+
+Results to stdout, refusals to stderr. A caller-configuration error — a root
+that is not a directory, a malformed `_schema/`, an unparseable `--today` —
+exits 1 with a message rather than a traceback. A refused `FilingPlan`,
+`AdvancePlan` or `ArchivePlan` exits 1 with its refusal rendered: refusals are
+data all the way to the shell.
+
+`lint` exits 1 when `report.ok` is false. **`--strict` promotes every warning to
+an error first**, which is why it fails even a conformant vault — the seven
+standing warnings are correct, not defects — and why it must not be wired into
+an acceptance gate.
+
+### advance lints after writing
+
+`advance` re-validates the item it just wrote and prints only that item's
+findings. The stamp is unconditional (C6-G: a pointer at a not-yet-written
+artifact is `targets.artifact-missing`, a warning, surfaced immediately rather
+than waiting for the next `lint` run). This is why `--dry-run` cannot show
+post-write findings honestly and says the check was skipped instead.
+
+## The lane
+
+Six types — `Epic`, `Feature`, `Bug`, `TechDebt`, `TestGap`, `Spike`. They
+differ in how they route, not in frontmatter shape, which is why the six schema
+wrappers carry nothing but a `type` const over one shared base.
+
+## The layout
+
+An item page lives at `work/<slug>.md`, its artifacts at
+`work/<slug>/references/`, and an archived item at `work/_archive/<slug>.md` —
+the same shape, so nothing downstream branches on whether an item is archived.
+
+The slug is `<opened>-[epic-]<type-kebab>-<w1..w4>`: date-prefixed, so a bare
+directory listing is chronological, with `epic-` marking a child filed under an
+epic. `filing.compose_slug` composes the whole thing.
+
+`paths` returns one frozen carrier rather than a bare string, because only a
+leading slash separates the bundle-relative form from the root-absolute one and
+`okf_io.links.resolve_reference` makes the mistake silent:
+
+```python
+from work_tracker_okf.paths import artifact_path
+
+ref = artifact_path("2026-03-02-epic-feature-filing-writer", "design", "spec")
+ref.rel  # work/2026-03-02-epic-feature-filing-writer/references/01-design-spec.md
+ref.resource  # /work/2026-03-02-epic-feature-filing-writer/references/01-design-spec.md
+ref.source_id  # design-spec
+ref.path(root)  # <root>/work/.../references/01-design-spec.md
+```
+
+`artifact_path` derives the id from the same `(phase, kind)` it derives the
+filename from, so a caller cannot obtain a resource without its matching id.
+Note the flip, which predates the port: the filename is `<phase>-<kind>`
+(`03-execute-results`), the id is `<kind>-<phase>` (`results-execute`).
+
+## The writers
+
+| Module | Exports | Shape |
+|---|---|---|
+| `filing` | `slugify`, `compose_slug`, `FilingPlan`, `FilingRefusal`, `file_item`, `apply` | plan + apply; no `dry_run` flag and no `force=` |
+| `sources` | `upsert` | mutates a `Document` in memory, returns whether it changed; the caller saves |
+| `results` | `ResultsFacts`, `render`, `write_results` | the one direct write — a stub derived entirely from its facts |
+| `archive` | `SkipReason`, `Skipped`, `ArchivePlan`, `ArchiveResult`, `plan_archive`, `apply_archive` | plan + apply; no `dry_run` flag — the plan *is* the preview, and a dry run could not honestly report its `IndexUpdate`s |
+
+```python
+from datetime import date
+
+from okf_ext.shape import load_sections
+from work_tracker_okf.filing import apply, file_item
+
+plan = file_item(
+    root,
+    type="Feature",
+    title="The filing writer",
+    description="Owns where a work item lands.",
+    on=date(2026, 3, 2),
+    affects=("packages/work-tracker-okf",),
+    section_set=load_sections(root / "_sections"),
+)
+if plan.refusal is None:
+    apply(plan)  # not calling this is the dry run
+```
+
+Filing writes **one page**. `work/index.md` reconciliation and the `log.md` line
+stay a composing CLI's, out of okf-io's `update_index` and `append_log_entry`:
+index reconciliation is bundle-wide, and folding it in would make a `FilingPlan`
+span three files in two directories.
+
+## Archiving
+
+Archiving a terminal item is a **symmetric prefix move**: `work/<slug>.md` and
+everything under `work/<slug>/` relocate to their `work/_archive/` twins in one
+`okf_ext.moves` batch, every inbound reference is repaired, the emptied working
+directory is pruned, and both lane indexes are reconciled. **No frontmatter is
+written** — an item reaching this path is already terminal.
+
+```python
+from okf_io import load_bundle
+from work_tracker_okf import ARCHIVE_IGNORE
+from work_tracker_okf.archive import apply_archive, plan_archive
+
+bundle = load_bundle(root, ignore=ARCHIVE_IGNORE)  # note the recipe
+plan = plan_archive(bundle)  # sweep; pass slugs=[...] to target
+if plan.ok:
+    result = apply_archive(bundle, plan)  # not calling this is the dry run
+```
+
+Note the **second recipe**. `okf_ext.moves` builds its mapping from
+`bundle.concepts`, `bundle.assets`, `bundle.indexes` and `bundle.logs` — never
+from `bundle.ignored` — so a plan built through `IGNORE` reports `ok` while
+covering only the item page, leaving `references/` behind and every
+`sources[]` entry dangling. `ARCHIVE_IGNORE` is `IGNORE` minus
+`*/references/*`, and it is for planning moves and nothing else: it must never
+reach `validate()`, which would then schema-check every artifact in every
+`references/` tree.
+
+One walk serves both eligibility and the move, because `load_items` projects
+identically under either recipe. The reconcile that follows the move uses the
+*other* lens — a reload through `IGNORE` — for two independent reasons, either
+of which decides it: under the wider lens `update_index` would want a
+`# Subdirectories` entry for every item with a working directory, and
+`moves.apply` never updates the in-memory `Bundle` anyway.
+
+Sweep mode reports **no** skips: a sweep's non-candidates were never
+candidates. Targeted mode reports one `Skipped` per named slug that does not
+move — `unknown-slug`, `not-terminal` or `already-archived` — because there the
+caller named the slug and is owed an answer.
+
+**`[[wikilinks]]` are not repaired.** A wikilink is not a link form OKF v0.2
+defines, so nothing in `moves` can see one. A vault authored in wikilink form
+needs converting before its first archive.
+
+## Reading a vault
+
+```python
+from okf_io import load_bundle
+from work_tracker_okf import IGNORE, load_items
+
+bundle = load_bundle(root, ignore=IGNORE)
+items = load_items(bundle)
+```
+
+`IGNORE` is the **composed** recipe — this lane's `*/references/*` plus
+`okf_ext.schemas.DEFAULT_IGNORE` plus `okf_ext.shape.DEFAULT_IGNORE`. Every
+consumer of a vault carrying this lane needs all three, and three copies of the
+composition is how two consumers end up loading the same bundle differently.
+
+`load_items` never raises. A page whose fields are the wrong shape still
+projects, with the uncoercible fields at their empty value — the *rules*
+report malformed content, the *reader* does not refuse it.
+
+`IGNORE` is the right lens for everything above — routing, hierarchy, the
+decision layer, validation — but not for planning a move. Reach for
+`ARCHIVE_IGNORE` only inside the [Archiving](#archiving) path, where
+`okf_ext.moves` needs `work/<slug>/references/` visible to find what to move.
+**`ARCHIVE_IGNORE` must never reach `validate()` or `update_index`** — both
+would then walk every artifact under every `references/` tree as if it were a
+concept in its own right.
+
+## The decision layer
+
+Five modules, one public API surface — the one a CLI tier imports. No leading
+underscores on anything they export.
+
+| Module | Exports |
+|---|---|
+| `hierarchy` | `ChildRollup`, `DescendResult`, `child_rollup`, `unmet_depends_on`, `unknown_depends_on`, `child_gated_node`, `descend` |
+| `workflow` | `RouteState`, `Transition`, `Dispatch`, `RouteResult`, `Stage`, `Variant`, `PLAN_OR_EXECUTE`, `route`, `state_for` |
+| `advance` | `AdvancePlan`, `FieldChange`, `RefusalReason`, `advance`, `apply` |
+| `children` | `ChildrenSync`, `plan_children_sync`, `apply_children_sync` |
+| `projection` | `Rollup`, `ResumeItem`, `ResumeSelection`, `rollup`, `select_resume`, `resolve` |
+
+```python
+from datetime import date
+
+from okf_io import load_bundle
+from work_tracker_okf import IGNORE, load_items
+from work_tracker_okf.advance import advance, apply
+from work_tracker_okf.workflow import route, state_for
+
+bundle = load_bundle(root, ignore=IGNORE)
+items = load_items(bundle)
+
+state = state_for(items, "my-slug")  # None for an unknown slug
+if state is not None:
+    result = route(state)  # RouteResult: .dispatch (stage, variant) or .blockers
+plan = advance(items, "my-slug", today=date(2026, 8, 10))
+if plan.refusal is None:
+    apply(bundle.concepts["work/my-slug"], plan)
+```
+
+`route` returns a `(stage, variant)` pair, never a skill name: mapping the
+seven pairs to seven skills is the harness's job. `Stage` and `Variant` are
+`Literal` types, so that mapping is exhaustively checkable at the caller's end.
+
+`advance` **plans**; it does not mutate. Refusals are data — a closed
+`RefusalReason` vocabulary — and a refused plan carries no changes, so `apply`
+is safe by construction.
+
+Two of a transition's fields are handed onward rather than applied:
+`AdvancePlan.stamp_source` (the `sources[]` id to record) and
+`sync_plan_table` (the `## Plan` row to add). Both need path and table
+functions this package does not yet own; a composing CLI resolves them.
+
+## Linting a lane
+
+The lane's 25 rules ship as one `extra_rules=` bundle:
+
+```python
+from datetime import date
+
+from okf_io import load_bundle, validate
+from work_tracker_okf import IGNORE
+from work_tracker_okf.rules import lane_rules
+
+bundle = load_bundle(root, ignore=IGNORE)
+report = validate(bundle, today=date.today(), extra_rules=lane_rules(repo_root=repo))
+```
+
+`repo_root` is optional. Omitting it **skips** `targets.affects-missing` and
+`plan.action-target-missing` rather than reporting them: not knowing where the
+repo is says nothing about whether the paths are good.
+
+Compose it with the house rules the same way — they are all just rules:
+
+```python
+report = validate(
+    bundle,
+    today=today,
+    extra_rules=(
+        schema_rule(load_schemas(root / "_schema"), severity="error"),
+        section_rule(load_sections(root / "_sections"), severity="error"),
+        *lane_rules(repo_root=repo),
+    ),
+)
+```
+
+Codes are dotted and topic-prefixed (`state.stuck-open`,
+`graph.depends-on-cycle`), so `report.by_code(...)` and a
+`code.startswith("state.")` filter both work with no lookup table. Eleven codes
+are `error`; the other fourteen are `warn`, which means `Report.ok` stays a claim
+about conformance rather than about tidiness.
+
+Nothing in okf-io or okf-ext validates a `sources[].resource` **target** — the
+link graph reads body prose only, and `provenance.source-resource-missing`
+checks only that `resource` is present, never that it resolves.
+`targets.artifact-missing` is this lane's own check for that gap.
+
+## What this package deliberately does not do
+
+Settled, so nobody has to re-open it:
+
+- **No consumer cutover.** Repointing the graph-wiki plugin at this package is
+  its own work item (E-B), not part of this lane.
+- **No dispatch, no auto-drive, no `orchestrate`.** Mapping a `(stage, variant)`
+  pair to a skill name, and driving a pipeline, are the harness's (E-A).
+  `route()` returns `Literal` types precisely so that mapping stays
+  exhaustively checkable at the caller's end.
+- **No `work-index.json` and no `regen-index`.** The sidecar was a cache whose
+  invalidation nobody could see (E-H). `projection.resolve` is two stat calls,
+  which is what the cache existed to serve.
+- **`results` has no CLI command.** `ResultsFacts` needs a `start_sha`, and the
+  file that recorded where a phase began was tier 4's — deleted by E-H. Nothing
+  this package can reach knows where the phase started, so no honest stub can be
+  written from here. It stays a library function, called by whoever dispatched
+  the phase, which is the only layer that knows the range. This is the one
+  stated hole in "every capability is exercisable from the CLI", and naming it
+  is better than a command that guesses a sha.

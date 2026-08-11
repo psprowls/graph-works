@@ -1,0 +1,160 @@
+"""Where a work item's artifacts live — the layout contract, as one carrier.
+
+Every artifact needs three spellings and only a leading slash separates two of
+them: a filesystem `Path` for the writer, a bundle-relative string for `moves` and
+`Bundle.assets`, and a root-absolute string for `sources[].resource`. Returning a
+bare `str` for any of them makes the wrong one plausible at every call site, and
+`okf_io.links.resolve_reference` treats a value without a leading `/` as relative
+to the containing page's directory — so the mistake is silent, surfacing only as a
+broken-reference finding. Hence one frozen `ArtifactRef` (C2-B).
+
+`artifact_path` calls `source_id_for` and puts the result on the carrier, so **a
+caller cannot obtain a resource without the matching id** (C2-C). That is the seam
+child 3 left open when it deleted `artifact_slot` on the promise that the
+destination is derivable from `on_complete.stamp_source` plus the in-flight phase.
+
+`WORK_DIR` and `ARCHIVE_DIR` are hardcoded from `items.py` rather than read out of
+the base schema's `x-okf-directory`: reading the schema at path-composition time
+would make a pure string function do file I/O.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+
+from work_tracker_okf.items import ARCHIVE_DIR, WORK_DIR
+from work_tracker_okf.vocabulary import (
+    ARTIFACT_KINDS,
+    ARTIFACT_PHASES,
+    PLAN_SOURCE_ID,
+    SPEC_SOURCE_ID,
+)
+
+#: The per-item artifact directory's name, under `work/<slug>/`.
+REFERENCES_DIRNAME = "references"
+
+#: `<phase>` -> its two-digit filename ordinal, **derived** from
+#: `ARTIFACT_PHASES` rather than re-typed (C2-D). `work-io` hand-wrote the map and
+#: carried a synthetic `open: "00"` for an archive-time page rename that W-E
+#: deleted, so `00` has nothing left to name.
+PHASE_ORDINALS: dict[str, str] = {phase: f"{index:02d}" for index, phase in enumerate(ARTIFACT_PHASES, 1)}
+
+#: The two `(phase, kind)` pairs whose id is a shipped literal rather than the
+#: `<kind>-<phase>` rule, mapped to that literal. Neither can carry a suffix: the
+#: shipped `SOURCE_ID_PATTERN` has no suffixed form for either.
+_LITERAL_IDS: dict[tuple[str, str], str] = {
+    ("design", "spec"): SPEC_SOURCE_ID,
+    ("plan", "plan"): PLAN_SOURCE_ID,
+}
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactRef:
+    """One bundle location in all three spellings, plus the id that names it.
+
+    `source_id` is `None` for a location that is not an artifact — an item page,
+    the `references/` directory itself. One type rather than two: a second
+    near-identical dataclass buys nothing but a name, and composition costs every
+    caller a `.location.` hop.
+    """
+
+    rel: str
+    source_id: str | None = None
+
+    @property
+    def resource(self) -> str:
+        """The root-absolute form `sources[].resource` wants."""
+        return f"/{self.rel}"
+
+    def path(self, root: Path) -> Path:
+        """The filesystem form. The only place a root is needed, which is why no
+        composition function takes one."""
+        return root / self.rel
+
+
+def _lane_dir(archived: bool) -> str:
+    return ARCHIVE_DIR if archived else WORK_DIR
+
+
+def item_page(slug: str, *, archived: bool = False) -> ArtifactRef:
+    """`work/<slug>.md`, or its archived twin."""
+    return ArtifactRef(rel=f"{_lane_dir(archived)}/{slug}.md")
+
+
+def references_dir(slug: str, *, archived: bool = False) -> ArtifactRef:
+    """`work/<slug>/references`, or its archived twin. No trailing slash."""
+    return ArtifactRef(rel=f"{_lane_dir(archived)}/{slug}/{REFERENCES_DIRNAME}")
+
+
+def source_id_for(phase: str, kind: str, suffix: str | None = None) -> str:
+    """The `sources[].id` naming *phase*'s *kind* artifact.
+
+    Two literals plus a rule, because child 1's shipped ids are not uniform:
+    `("design", "spec")` is `design-spec` and `("plan", "plan")` is `plan`, not
+    `plan-plan`. Everything else is `f"{kind}-{phase}"` — note the flip against
+    the filename's `<phase>-<kind>`, which predates the port and is not
+    relitigated here.
+
+    This is the one raising door in this module; `artifact_path` calls it first
+    and adds no checks of its own. Raises `ValueError` for an unknown phase or
+    kind (caller error, the class `InitError` occupies — no bundle content
+    reaches here), for an invalid phase/kind combination (spec only in design,
+    plan only in plan), and for a *suffix* on either literal pair: the shipped
+    pattern refuses `design-spec-draft`, and dropping the suffix silently would
+    hand two distinct resources the same id.
+    """
+    if phase not in PHASE_ORDINALS:
+        raise ValueError(f"unknown phase {phase!r}; expected one of {sorted(PHASE_ORDINALS)}")
+    if kind not in ARTIFACT_KINDS:
+        raise ValueError(f"unknown kind {kind!r}; expected one of {sorted(ARTIFACT_KINDS)}")
+    literal = _LITERAL_IDS.get((phase, kind))
+    if literal is not None:
+        if suffix:
+            raise ValueError(f"`{literal}` cannot carry a suffix; {suffix!r} has no well-formed id")
+        return literal
+    # spec only valid in design phase, plan only valid in plan phase
+    if kind == "spec":
+        raise ValueError(f"kind {kind!r} is only valid with phase {'design'!r}, not phase {phase!r}")
+    if kind == "plan":
+        raise ValueError(f"kind {kind!r} is only valid with phase {'plan'!r}, not phase {phase!r}")
+    identifier = f"{kind}-{phase}"
+    return f"{identifier}-{suffix}" if suffix else identifier
+
+
+def artifact_path(
+    slug: str,
+    phase: str,
+    kind: str,
+    *,
+    suffix: str | None = None,
+    ext: str = "md",
+    archived: bool = False,
+) -> ArtifactRef:
+    """`work/<slug>/references/<NN>-<phase>-<kind>[-<suffix>].<ext>`, with its id.
+
+    `kind` is **required**, where `work-io` allowed `None` and emitted a bare
+    `01-design.md`. Nothing in the lane writes one, and the optional form is what
+    would make the id underivable — `f"{kind}-{phase}"` has no answer without a
+    kind. Dropping the option is what lets the carrier always hold both spellings.
+
+    Transcripts land flat here, as `03-execute-transcript.jsonl`, matching child
+    1's shipped fixture rather than the survey's `references/transcripts/` sketch.
+    """
+    source_id = source_id_for(phase, kind, suffix)
+    segments = [PHASE_ORDINALS[phase], phase, kind]
+    if suffix:
+        segments.append(suffix)
+    filename = f"{'-'.join(segments)}.{ext}"
+    return ArtifactRef(rel=f"{references_dir(slug, archived=archived).rel}/{filename}", source_id=source_id)
+
+
+__all__ = [
+    "PHASE_ORDINALS",
+    "REFERENCES_DIRNAME",
+    "ArtifactRef",
+    "artifact_path",
+    "item_page",
+    "references_dir",
+    "source_id_for",
+]

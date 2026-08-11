@@ -47,6 +47,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/code-parser/tests/**" = ["ANN"]
 "packages/code-graph-io/tests/**" = ["ANN"]
 "packages/code-wiki-okf/tests/**" = ["ANN"]
+"packages/work-tracker-okf/tests/**" = ["ANN"]
 
 [tool.mypy]
 python_version = "3.12"

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "work-tracker-okf"
+version = "0.1.0"
+description = "Work-item tracking as an OKF v0.2 lane: declarations, vocabulary, and the item view."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "okf-io>=0.1,<0.2",
+  "okf-ext[schemas]>=0.4.2,<0.5",
+  "typer>=0.12",
+]
+
+[project.scripts]
+work-tracker-okf = "work_tracker_okf.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/work_tracker_okf"]
+
+[tool.uv.sources]
+okf-io = { workspace = true }
+okf-ext = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

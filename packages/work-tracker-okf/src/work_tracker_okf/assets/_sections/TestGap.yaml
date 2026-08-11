@@ -1,0 +1,7 @@
+sections:
+  - heading: Coverage gap
+  - heading: Plan
+    required: true
+    ownership: template
+    placeholder_ref: plan_table
+  - heading: Notes / log

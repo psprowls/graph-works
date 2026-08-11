@@ -1,0 +1,8 @@
+sections:
+  - heading: Steps to reproduce
+  - heading: Expected vs actual
+  - heading: Plan
+    required: true
+    ownership: template
+    placeholder_ref: plan_table
+  - heading: Notes / log

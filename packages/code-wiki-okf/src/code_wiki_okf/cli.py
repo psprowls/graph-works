@@ -24,6 +24,7 @@ from code_wiki_okf.config import Config, ConfigError, load_config
 from code_wiki_okf.entities import lanes
 from code_wiki_okf.git_state import head_commit
 from code_wiki_okf.init import InitError, install_bundle
+from code_wiki_okf.lane.rule import lane_rule
 from code_wiki_okf.mirror.apply import apply_mirror
 from code_wiki_okf.mirror.model import MirrorPlan, MirrorResult
 from code_wiki_okf.mirror.plan import plan_mirror
@@ -338,6 +339,7 @@ def validate(
             schema_rule(schema_set),
             section_rule(section_set),
             vocabulary_rule(vocabulary),
+            lane_rule(schema_set),
         ],
         strict=strict,
     )

@@ -17,5 +17,6 @@ sections:
       > TODO: <Top-level providers/wrappers this app mounts, in order.>
   - heading: Files
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_

@@ -8,17 +8,21 @@ sections:
       > TODO: <Anything a reader should know about this file that the generated sections below don't capture.>
   - heading: Symbols
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: Imports
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: Exports
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: Imported By
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_

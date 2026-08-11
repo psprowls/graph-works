@@ -8,26 +8,32 @@ sections:
       > TODO: <One paragraph: what this agent plugin does and who uses it.>
   - heading: Commands
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: Agents
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: Skills
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: Scripts
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: Hooks
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: MCP servers
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: How it fits together

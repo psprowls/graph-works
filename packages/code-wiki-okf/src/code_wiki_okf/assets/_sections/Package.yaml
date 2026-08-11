@@ -11,5 +11,6 @@ sections:
       > TODO: <Main exports and when to use them. Link code with backticked `path:line` references.>
   - heading: Files
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_

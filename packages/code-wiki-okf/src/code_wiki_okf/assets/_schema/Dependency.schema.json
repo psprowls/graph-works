@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["type", "title", "resource"],
+  "required": ["type", "title", "resource", "ecosystem"],
   "additionalProperties": true,
   "properties": {
     "type": { "const": "Dependency" },

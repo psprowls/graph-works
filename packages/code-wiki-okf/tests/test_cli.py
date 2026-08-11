@@ -635,12 +635,13 @@ def test_config_dir_relocates_the_declarations_and_validate_follows(tmp_path: Pa
 
 
 def test_validate_reports_schema_violation(tmp_path: Path) -> None:
-    """Isolated from `sync.*`: the fixture page lives at the bundle root, not
-    under any `ENTITY_LANES` prefix (`packages/`, `apps/`, ...), so
-    `_existing_entity_resources` never picks it up and it cannot be
-    spuriously flagged `sync.orphan-page` -- `schemas.invalid` is the only
-    finding. `schema_rule`/`section_rule` dispatch purely on frontmatter
-    `type`, never on directory, so moving the page doesn't change what fires.
+    """Isolated from `sync.*` and from `lane.*`: the fixture page sits in
+    `packages/` -- its type's declared lane, so `lane.directory-mismatch`
+    cannot fire -- and carries no `resource:`, so `resource_index` skips it,
+    `_existing_entity_resources` never sees it, and it cannot be spuriously
+    flagged `sync.orphan-page`. `schema_rule`/`section_rule` dispatch purely
+    on frontmatter `type`, never on directory, so the move doesn't change
+    what fires.
 
     Every okf-ext rule defaults to `severity="warn"` (house rules can't make
     a conformant-looking bundle fail `Report.ok`), so a plain `validate` run
@@ -651,8 +652,9 @@ def test_validate_reports_schema_violation(tmp_path: Path) -> None:
     assert init_result.exit_code == 0
     bundle_root = tmp_path / "bundle"
     _init_empty_graph(bundle_root)
-    (bundle_root / "bad.md").write_text(
-        '---\ntype: Package\ntitle: "bad"\nresource: "pkg:x/y/bad"\nversion: 123\n---\n\n'
+    (bundle_root / "packages").mkdir()
+    (bundle_root / "packages" / "bad.md").write_text(
+        '---\ntype: Package\ntitle: "bad"\nversion: 123\n---\n\n'
         "## Purpose\n\nSome real purpose text goes here, filled in properly for this test.\n\n"
         "## Public API\n\n> TODO: <Main exports and when to use them. "
         "Link code with backticked `path:line` references.>\n\n"
@@ -671,16 +673,17 @@ def test_validate_reports_schema_violation(tmp_path: Path) -> None:
 
 def test_validate_reports_unfilled_required_section(tmp_path: Path) -> None:
     """Same isolation as `test_validate_reports_schema_violation`: the page
-    sits outside every entity lane, so `sections.unfilled` is the only
-    finding, and the same two-tier (plain exits 0, `--strict` exits 1)
-    behavior applies.
+    sits in its declared lane and carries no `resource:`, so neither
+    `sync.*` nor `lane.*` fires, and the same two-tier (plain exits 0,
+    `--strict` exits 1) behavior applies.
     """
     result_init = runner.invoke(app, ["init", str(tmp_path / "bundle")])
     assert result_init.exit_code == 0
     bundle_root = tmp_path / "bundle"
     _init_empty_graph(bundle_root)
-    (bundle_root / "stub.md").write_text(
-        '---\ntype: Package\ntitle: "stub"\nresource: "pkg:x/y/stub"\nversion: "0.1.0"\n---\n\n'
+    (bundle_root / "packages").mkdir()
+    (bundle_root / "packages" / "stub.md").write_text(
+        '---\ntype: Package\ntitle: "stub"\nversion: "0.1.0"\n---\n\n'
         "## Purpose\n\n> TODO: <One paragraph: what this package does, who uses it, why it exists.>\n\n"
         "## Public API\n\n> TODO: <Main exports and when to use them. "
         "Link code with backticked `path:line` references.>\n\n"
@@ -707,8 +710,9 @@ def test_validate_reports_undeclared_tag(tmp_path: Path) -> None:
     assert init_result.exit_code == 0
     bundle_root = tmp_path / "bundle"
     _init_empty_graph(bundle_root)
-    (bundle_root / "tagged.md").write_text(
-        '---\ntype: Package\ntitle: "tagged"\nresource: "pkg:x/y/tagged"\nversion: "0.1.0"\n'
+    (bundle_root / "packages").mkdir()
+    (bundle_root / "packages" / "tagged.md").write_text(
+        '---\ntype: Package\ntitle: "tagged"\nversion: "0.1.0"\n'
         'tags: ["nonexistent-tag"]\n---\n\n'
         "## Purpose\n\nSome real purpose text goes here, filled in properly for this test.\n\n"
         "## Public API\n\nSome real API docs go here too.\n\n"
@@ -723,6 +727,33 @@ def test_validate_reports_undeclared_tag(tmp_path: Path) -> None:
     strict_result = runner.invoke(app, ["validate", str(bundle_root), "--strict"])
     assert strict_result.exit_code == 1
     assert "tags.unknown" in strict_result.output
+
+
+def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
+    """Unlike every other house rule wired into this command, `lane.*` is
+    `error` by default: a page outside its declared lane is a state the
+    reconciler cannot leave, not advisory drift. So a plain `validate` run
+    already exits 1, and `cli.py` needs no `has_lane_finding` counterpart to
+    its `has_sync_finding` special case.
+    """
+    init_result = runner.invoke(app, ["init", str(tmp_path / "bundle")])
+    assert init_result.exit_code == 0
+    bundle_root = tmp_path / "bundle"
+    _init_empty_graph(bundle_root)
+    (bundle_root / "dependencies").mkdir()
+    (bundle_root / "dependencies" / "widgets.md").write_text(
+        '---\ntype: Package\ntitle: "widgets"\n---\n\n'
+        "## Purpose\n\nSome real purpose text goes here, filled in properly for this test.\n\n"
+        "## Public API\n\nSome real API docs go here too.\n\n"
+        "## Files\n\n_(none)_\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["validate", str(bundle_root)])
+
+    assert result.exit_code == 1
+    assert "lane.directory-mismatch" in result.output
+    assert "error" in result.output.lower()
 
 
 def test_validate_still_reports_sync_findings_alongside_new_rules(tmp_path: Path) -> None:

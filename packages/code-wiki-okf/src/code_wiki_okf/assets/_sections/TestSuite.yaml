@@ -17,5 +17,6 @@ sections:
       > TODO: <Shared fixtures this suite relies on and where they live.>
   - heading: Files
     ownership: generated
+    required: true
     placeholder: |
       _(populated by `code-wiki-okf sync` — not yet generated)_

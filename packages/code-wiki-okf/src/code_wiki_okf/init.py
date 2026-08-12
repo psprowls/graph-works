@@ -55,6 +55,7 @@ SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "_sections/Repository.yaml",
     "_sections/AgentPlugin.yaml",
     "_sections/File.yaml",
+    "_sections/_code-wiki-okf.yaml",
     "_repositories.yaml",
 )
 
@@ -96,7 +97,7 @@ class BundleInstall:
         """False on a re-run, which is the point: an idempotent installer that
         reports "changed" every time tells a human nothing. A failed log
         append does not flip this back to `False`: it is only ever attempted
-        once `install.written` is non-empty, so the 15 owned files already
+        once `install.written` is non-empty, so the 16 owned files already
         landed on disk by the time there is anything left to fail."""
         return bool(self.scaffold.written or self.install.written or self.logged)
 
@@ -191,7 +192,7 @@ def install_bundle(
     and parses can still fail the append itself: out-of-order dated sections,
     a permissions problem, anything else `okf_io.append_log_entry` can raise.
     That failure is caught and reported as `log_failure`, never raised --
-    content never raises here, and 15 files have already landed by that point.
+    content never raises here, and 16 files have already landed by that point.
 
     `today` is injected -- nothing below `cli.py` reads the clock. `dry_run`
     defaults to `True`, matching okf-io's writer convention: the default call

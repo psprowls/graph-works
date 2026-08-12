@@ -10,6 +10,20 @@ disk.
 is reported in `missing` and skipped; `sections.plan_sections` is what creates
 required sections, and the composition is scaffold-then-regenerate.
 
+**`create_missing` is the one exception, and it is for index documents.**
+A concept that is missing a declared section has a scaffolder --
+`sections.plan_sections`, and the composition is scaffold-then-regenerate.
+An index document has none: `plan_sections` walks `bundle.concepts`, and
+the bundle scaffold writes `index.md` as frontmatter plus an H1. So for an
+index a granted-but-absent section is not a division of labour, it is a
+dead end -- the grant could never be exercised. With *create_missing* the
+section is appended at the end of the body (heading, blank, content),
+separated by a blank line when the line above is not already one, and
+reported as a `SectionEdit` rather than in `missing`. It is appended
+rather than positioned in declaration order because an index's
+declaration is merged from several files, and no package may claim a
+position among another package's sections.
+
 This module imports the shared layer and its own capability's model, and
 nothing else from its own package.
 """
@@ -21,7 +35,15 @@ from collections.abc import Mapping
 from okf_ext.body import Section, sections, split_lines
 from okf_ext.generators.model import SectionEdit
 from okf_ext.shape import SectionSpec, TypeSections
-from okf_ext.splice import assemble, bare_lines, dominant_newline, has_trailing_newline, replace
+from okf_ext.splice import (
+    assemble,
+    bare_lines,
+    dominant_newline,
+    has_trailing_newline,
+    insert,
+    needs_gap,
+    replace,
+)
 
 
 def _locate(body: str, spec: SectionSpec, levels: frozenset[int]) -> Section | None:
@@ -108,6 +130,8 @@ def regenerate_body(
     body: str,
     declaration: TypeSections,
     supplied: Mapping[str, str],
+    *,
+    create_missing: bool = False,
 ) -> tuple[str, tuple[SectionEdit, ...], tuple[str, ...]]:
     """*body* with every owned section rewritten.
 
@@ -158,7 +182,14 @@ def regenerate_body(
             continue
         found = _locate(assemble(lines, newline, trailing), spec, levels)
         if found is None:
-            missing.append(spec.heading)
+            if not create_missing:
+                missing.append(spec.heading)
+                continue
+            at = len(lines) + 1
+            gap = [""] if needs_gap(lines, at) else []
+            heading = "#" * spec.level + " " + spec.heading
+            lines = insert(lines, at, [*gap, heading, "", *bare_lines(text)], newline)
+            edits.append(SectionEdit(heading=spec.heading, line=at))
             continue
         sentinel = [""] if _needs_trailing_sentinel(lines, found) else []
         candidate = replace(lines, found.body_start, found.stop, ["", *bare_lines(text), *sentinel], newline)

@@ -33,16 +33,16 @@ _EXPECTED_REQUIRED_PROSE_HEADING = {
     "File": "Notes",
 }
 
-#: Design spec §3.1: the count is thirteen, across five declarations.
-#: `Repository.yaml` and `Dependency.yaml` declare none -- matching
-#: `render_repository`/`render_dependency`, which pass no `sections`.
+#: Design spec §3.1, plus the root-index catalog's `Contents`: the count is
+#: fourteen, across six declarations. `Dependency.yaml` declares none --
+#: matching `render_dependency`, which passes no `sections`.
 _EXPECTED_GENERATED = {
     "Package": ("Files",),
     "App": ("Files",),
     "TestSuite": ("Files",),
     "AgentPlugin": ("Commands", "Agents", "Skills", "Scripts", "Hooks", "MCP servers"),
     "File": ("Symbols", "Imports", "Exports", "Imported By"),
-    "Repository": (),
+    "Repository": ("Contents",),
     "Dependency": (),
 }
 
@@ -93,7 +93,20 @@ def test_every_generated_section_is_required() -> None:
         # `_(none)_`), so a synced page never reports one.
         assert not any(s.seeded_is_complete for s in generated), type_name
         total += len(generated)
-    assert total == 13
+    assert total == 14
+
+
+def test_the_seed_declares_the_root_repositories_section() -> None:
+    """The root catalog's declaration lives in an underscore-prefixed file so
+    the two sibling tier-3 packages sharing this bundle can each declare their
+    own root section without arbitrating one shared file."""
+    section_set = _seed_sections()
+    assert tuple(section_set.indexes) == ("",)
+    (spec,) = section_set.indexes[""].sections
+    assert (spec.heading, spec.ownership, spec.required) == ("Repositories", "generated", True)
+    assert "not yet generated" in spec.placeholder
+    # A `_`-prefixed file claims no type.
+    assert set(section_set.type_names) == set(_EXPECTED_OWNED)
 
 
 def _bundle_with(tmp_path: Path, relative: str, text: str) -> Path:

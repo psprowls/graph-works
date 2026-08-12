@@ -8,8 +8,9 @@ import tokenize
 from pathlib import Path
 
 import pytest
-from ext_helpers import GENERATED_DIR, generated_copy, read
+from ext_helpers import GENERATED_DIR, generated_copy, read, write_bundle
 from okf_ext.generators import Regeneration, RegenerationPlan, Render, apply, plan_regenerate
+from okf_ext.sections import DEFAULT_IGNORE as DEFAULT_IGNORE_SECTIONS
 from okf_ext.shape import load_sections
 from okf_io import load_bundle
 
@@ -342,3 +343,63 @@ def test_apply_never_uses_rendered_with_body():
             offenders.append(path.name)
 
     assert offenders == []
+
+
+_INDEX_DECLARATION = """\
+directories:
+  "":
+    sections:
+      - heading: Repositories
+        ownership: generated
+        required: true
+        placeholder: |
+          _(not yet generated)_
+  packages:
+    sections:
+      - heading: Inventory
+        ownership: generated
+"""
+
+
+def test_two_index_targets_in_one_plan_both_write(tmp_path):
+    """The regression the `concept_id` grouping would cause: every index
+    carries `concept_id=""`, so grouping by id collapses them into one
+    `duplicate-edit` refusal and resolves neither."""
+    root = tmp_path / "kb"
+    files = {
+        "index.md": "---\nokf_version: 0.2\n---\n\n# Bundle\n",
+        "packages/index.md": "---\n---\n\n# Packages\n",
+        "_sections/_index.yaml": _INDEX_DECLARATION,
+    }
+    bundle = write_bundle(root, files, ignore=DEFAULT_IGNORE_SECTIONS)
+    section_set = load_sections(root / "_sections")
+    plan = plan_regenerate(
+        bundle,
+        section_set,
+        {},
+        index_renders={
+            "": Render(sections={"Repositories": "- [a](/repositories/a.md)"}),
+            "packages": Render(sections={"Inventory": "- widgets"}),
+        },
+    )
+    result = apply(bundle, plan)
+    assert result.ok
+    assert sorted(result.written) == ["index.md", "packages/index.md"]
+    assert "## Repositories" in (root / "index.md").read_text(encoding="utf-8")
+    assert "## Inventory" in (root / "packages" / "index.md").read_text(encoding="utf-8")
+
+
+def test_an_index_write_preserves_every_other_byte(tmp_path):
+    root = tmp_path / "kb"
+    before = "---\nokf_version: 0.2\n---\n\n# Bundle\n\nHand-written prose nobody may touch.\n"
+    bundle = write_bundle(
+        root, {"index.md": before, "_sections/_index.yaml": _INDEX_DECLARATION}, ignore=DEFAULT_IGNORE_SECTIONS
+    )
+    section_set = load_sections(root / "_sections")
+    index_renders = {"": Render(sections={"Repositories": "- [a](/a.md)"})}
+    plan = plan_regenerate(bundle, section_set, {}, index_renders=index_renders)
+    apply(bundle, plan)
+    after = (root / "index.md").read_text(encoding="utf-8")
+    assert after.startswith(before.rstrip("\n"))
+    assert "Hand-written prose nobody may touch." in after
+    assert after.endswith("## Repositories\n\n- [a](/a.md)\n")

@@ -12,6 +12,7 @@ package offers.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -19,8 +20,11 @@ from code_graph_io import open_reader
 from code_graph_io.testing import open_store
 from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
-from code_wiki_okf.entities.lanes import sync
+from code_wiki_okf.entities.catalog import render_repositories, repository_entries
+from code_wiki_okf.entities.lanes import SyncSummary, sync
 from code_wiki_okf.init import install_bundle
+from okf_ext.generators import Render, plan_regenerate
+from okf_ext.shape import load_sections
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
@@ -251,3 +255,130 @@ def test_hand_edited_page_declines_deletion_and_is_reported(tmp_path: Path) -> N
     assert "Hand-written, do not delete me." in page.read_text(encoding="utf-8")
     assert result2.deleted == ()
     assert ("packages/widgets", "prose-edited") in result2.declined
+
+
+# --- the root Repositories catalog ---------------------------------------
+
+
+def _two_repo_bundle(tmp_path: Path) -> tuple[Path, Path, Config]:
+    """Two repos in one graph, both configured, both with a described page."""
+    graph_dir = tmp_path / "graph"
+    store = open_store(graph_dir / "code.db", create=True)
+    try:
+        for org, repo, packages in (("acme", "repo-a", ["widgets"]), ("acme", "repo-b", ["gadgets"])):
+            store.set_current_repo(f"repo:{org}/{repo}")
+            nodes = [_repo_node(org, repo), *[_package_node(org, repo, name) for name in packages]]
+            with store.transaction() as tx:
+                tx.upsert_records(GraphRecords(nodes=tuple(nodes), edges=()))
+        store.set_current_repo(None)
+    finally:
+        store.close()
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = Config(
+        graph_dir=graph_dir,
+        declarations_dir=bundle_root,
+        repos=(
+            RepoConfig(name="repo-a", path=tmp_path / "repo-a", ignore=()),
+            RepoConfig(name="repo-b", path=tmp_path / "repo-b", ignore=()),
+        ),
+        state_gate=StateGateConfig(enabled=False, branches=()),
+    )
+    return graph_dir, bundle_root, config
+
+
+def _sync(graph_dir: Path, bundle_root: Path, config: Config) -> SyncSummary:
+    with open_reader(graph_dir=graph_dir) as reader:
+        return sync(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT, dry_run=False)
+
+
+def test_the_root_index_lists_every_repository(tmp_path: Path) -> None:
+    """AC 1."""
+    graph_dir, bundle_root, config = _two_repo_bundle(tmp_path)
+    index = bundle_root / "index.md"
+    index.write_text(index.read_text(encoding="utf-8") + "\nHand-written prose nobody may touch.\n", encoding="utf-8")
+    _sync(graph_dir, bundle_root, config)
+
+    # Describe both repositories, the way a human would, then sync again.
+    for name in ("repo-a", "repo-b"):
+        page = bundle_root / "repositories" / f"{name}.md"
+        page.write_text(
+            page.read_text(encoding="utf-8").replace('description: ""', f'description: "the {name} platform"'),
+            encoding="utf-8",
+        )
+    _sync(graph_dir, bundle_root, config)
+
+    body = index.read_text(encoding="utf-8")
+    assert "Hand-written prose nobody may touch." in body
+    assert "## Repositories" in body
+    assert "- [repo-a](/repositories/repo-a.md) — the repo-a platform" in body
+    assert "- [repo-b](/repositories/repo-b.md) — the repo-b platform" in body
+
+
+def test_a_second_sync_plans_no_root_catalog_change(tmp_path: Path) -> None:
+    """AC 3: idempotence surfaces as an empty plan, not as an unchanged write."""
+    graph_dir, bundle_root, config = _two_repo_bundle(tmp_path)
+    _sync(graph_dir, bundle_root, config)
+    before = (bundle_root / "index.md").read_bytes()
+    result = _sync(graph_dir, bundle_root, config)
+
+    assert result.catalog == ()
+    assert (bundle_root / "index.md").read_bytes() == before
+
+    bundle = load_bundle(bundle_root)
+    section_set = load_sections(bundle_root / "_sections")
+    plan = plan_regenerate(
+        bundle,
+        section_set,
+        {},
+        index_renders={"": Render(sections={"Repositories": render_repositories(repository_entries(bundle))})},
+    )
+    assert plan.is_empty
+
+
+def test_a_repository_removed_from_the_graph_loses_its_bullet(tmp_path: Path) -> None:
+    """AC 4. `upsert_records` is additive, so "a repo disappeared" needs a
+    fresh graph_dir for the second seed."""
+    graph_dir, bundle_root, config = _two_repo_bundle(tmp_path)
+    _sync(graph_dir, bundle_root, config)
+    assert "- [repo-b](/repositories/repo-b.md)" in (bundle_root / "index.md").read_text(encoding="utf-8")
+
+    second_graph = tmp_path / "graph2"
+    _seed(second_graph, "acme", "repo-a", ["widgets"])
+    narrowed = replace(
+        config, graph_dir=second_graph, repos=(RepoConfig(name="repo-a", path=tmp_path / "repo-a", ignore=()),)
+    )
+    _sync(second_graph, bundle_root, narrowed)
+
+    body = (bundle_root / "index.md").read_text(encoding="utf-8")
+    assert "- [repo-a](/repositories/repo-a.md)" in body
+    assert "repo-b" not in body
+    # Reconciliation added the lane as a subdirectory entry, not a second
+    # repository bullet inside `## Repositories`.
+    repositories_block = body.split("## Repositories", 1)[1].split("\n## ", 1)[0]
+    assert "/repositories/index.md" not in repositories_block
+    assert "(repositories)" not in repositories_block
+
+
+def test_the_root_is_always_reconciled(tmp_path: Path) -> None:
+    """`update_index(directories=[*touched_lanes, ""])`: the lane list at root
+    is reconciliation's half of the catalog, and it runs even on a sync that
+    touched no lane.
+
+    The heading level okf_io.index chooses for a newly-created section
+    follows the root index's *first* existing heading -- here the `# bundle`
+    H1 the scaffold writes -- not the level of a sibling section a different
+    writer created, so this checks for the "Subdirectories" heading without
+    pinning its level.
+    """
+    graph_dir, bundle_root, config = _two_repo_bundle(tmp_path)
+    _sync(graph_dir, bundle_root, config)
+    body = (bundle_root / "index.md").read_text(encoding="utf-8")
+    heading = next(line for line in body.splitlines() if line.lstrip("#").strip() == "Subdirectories")
+    assert "repositories" in body.split(heading, 1)[1]
+
+
+def test_the_log_line_names_the_catalog(tmp_path: Path) -> None:
+    graph_dir, bundle_root, config = _two_repo_bundle(tmp_path)
+    _sync(graph_dir, bundle_root, config)
+    assert "catalog" in (bundle_root / "log.md").read_text(encoding="utf-8")

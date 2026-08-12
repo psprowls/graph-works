@@ -23,6 +23,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal
 
 
@@ -109,6 +110,12 @@ class TypeSections:
     frontmatter: FrontmatterOwnership = FrontmatterOwnership()
 
 
+#: The empty index mapping every declaration set written before index
+#: declarations existed carries. A shared immutable rather than a
+#: `default_factory`, so two `SectionSet`s built without indexes are `==`.
+_NO_INDEXES: Mapping[str, TypeSections] = MappingProxyType({})
+
+
 @dataclass(frozen=True, slots=True)
 class SectionSet:
     """A directory of declarations, read once.
@@ -119,12 +126,19 @@ class SectionSet:
     `fragments:` mapping in the directory, `_`-prefixed files included, and is
     kept after loading so a caller can see what a `placeholder_ref` resolved
     to.
+
+    `indexes` is the second dispatch table, keyed by **directory id** (`""`
+    for the bundle root) rather than by type name, because a bundle-root
+    index has no type to dispatch on -- §8 gives it exactly one legal key,
+    `okf_version`. It is defaulted rather than required so a declaration set
+    written before index declarations existed loads unchanged.
     """
 
     types: Mapping[str, TypeSections]  # type name -> declaration
     sources: Mapping[str, str]  # type name -> filename
     fragments: Mapping[str, str]  # fragment name -> text
     root: Path  # the directory this was read from
+    indexes: Mapping[str, TypeSections] = _NO_INDEXES  # directory id -> declaration
 
     @property
     def type_names(self) -> tuple[str, ...]:

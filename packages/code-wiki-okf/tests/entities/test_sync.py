@@ -177,6 +177,21 @@ def _bump_package_version(graph_dir: Path, *, org: str, repo: str, name: str, ve
         store.close()
 
 
+def _add_app_to_repo(graph_dir: Path, *, org: str, repo: str, name: str) -> None:
+    """Add a new App node to an already-seeded repo, leaving its existing
+    Package/Repository rows untouched -- mirrors a human adding a new app to
+    a repo the wiki already has a page for, without bumping anything the
+    repo page's own owned frontmatter (`package_count`) would react to."""
+    store = open_store(graph_dir / "code.db", create=True)
+    try:
+        store.set_current_repo(f"repo:{org}/{repo}")
+        with store.transaction() as tx:
+            tx.upsert_records(GraphRecords(nodes=(_app_node(org, repo, name),), edges=()))
+        store.set_current_repo(None)
+    finally:
+        store.close()
+
+
 def _config(tmp_path: Path, graph_dir: Path, repo_names: Sequence[str], *, bundle_root: Path) -> Config:
     return Config(
         graph_dir=graph_dir,
@@ -513,3 +528,157 @@ def test_plan_entities_ignores_a_fresh_generated_at_timestamp(tmp_path: Path) ->
 
     assert "pkg:acme/repo-a/widgets" not in plan.stale
     assert "pkg:acme/repo-a/widgets" not in plan.missing
+
+
+# --- Repository contents / scaffold pass ------------------------------------
+
+
+def test_by_repository_groups_every_placed_page_under_its_repo(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(
+        graph_dir,
+        [_RepoSeed("acme", "repo-a", packages=["widgets", "gadgets"])],
+        dependencies=[_dependency_node("pypi", "requests")],
+    )
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+
+    assert set(result.by_repository) == {"repo-a"}
+    assert result.by_repository["repo-a"] == (
+        "packages/gadgets",
+        "packages/widgets",
+        "repositories/repo-a",
+    )
+    # Dependencies are ecosystem-wide and belong to no repository -- confirm
+    # the seeded one is absent from every `by_repository` value, not merely
+    # absent from `repo-a`'s (the only key this run happens to produce).
+    assert "dependencies/requests" not in {concept_id for ids in result.by_repository.values() for concept_id in ids}
+
+
+def test_the_repository_page_gains_a_contents_section(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+
+    page = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
+    assert "## Contents\n\n### Packages\n\n- [widgets](/packages/widgets.md)\n" in page
+    # Empty groups are omitted, and the repo does not list itself.
+    assert "### Apps" not in page
+    assert "/repositories/repo-a.md" not in page
+    # The owned key survived the sections-carrying render.
+    assert "package_count: 1" in page
+
+
+def test_a_repository_page_missing_contents_is_scaffolded_then_regenerated(tmp_path: Path) -> None:
+    """The upgrade path: a page created before `Contents` was declared. The
+    generators capability never creates a section for a concept, so without
+    the scaffold pass this page would report `section-missing` forever."""
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+    page = bundle_root / "repositories" / "repo-a.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        '---\ntype: Repository\ntitle: "repo-a"\nresource: "repo:acme/repo-a"\ndescription: ""\n---\n\n'
+        "## Overview\n\nHand-written prose.\n",
+        encoding="utf-8",
+    )
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+
+    after = page.read_text(encoding="utf-8")
+    assert "Hand-written prose." in after
+    assert "- [widgets](/packages/widgets.md)" in after
+    assert not [item for item in result.skipped if "section-missing" in item]
+
+
+def test_the_scaffold_pass_leaves_pages_this_run_did_not_place_alone(tmp_path: Path) -> None:
+    """`plan_sections` walks every concept in the bundle. A bundle three
+    tier-3 packages share is not this command's to repair wholesale, so the
+    plan is filtered to the pages this run placed."""
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+    stranger = bundle_root / "packages" / "not-in-the-graph.md"
+    stranger.parent.mkdir(parents=True, exist_ok=True)
+    before = '---\ntype: Package\ntitle: "orphan"\nresource: "pkg:x/y/orphan"\n---\n\nno sections at all\n'
+    stranger.write_text(before, encoding="utf-8")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+
+    assert stranger.read_text(encoding="utf-8") == before
+
+
+def test_plan_entities_flags_repo_as_stale_when_a_new_sibling_would_be_added(tmp_path: Path) -> None:
+    """Regression: AC6 requires `plan_entities`'s staleness preview to never
+    diverge from what `sync_entities` actually writes.
+
+    repo-a starts with one package and is synced -- its page gains
+    `## Contents` / `### Packages`. A new app is then added to repo-a in the
+    graph. That change touches no owned frontmatter key on the repo page
+    itself (`package_count` counts packages, and this is a new app, not a
+    new package); the repo page is stale ONLY because its Contents section
+    would gain an `### Apps` group listing the not-yet-created app page.
+
+    Before the fix, `plan_entities` computed that Contents preview against
+    the pre-creation bundle, which has no page for the new app yet, so the
+    group came back empty and `repo-a` never surfaced as stale -- while a
+    real `sync_entities` run in the very same state DOES rewrite the page,
+    because by the time it renders Contents it has already created the new
+    app's page on disk (phase 1) and reloaded the bundle.
+    """
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+
+    page_before = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
+    assert "### Packages" in page_before
+    assert "### Apps" not in page_before
+
+    _add_app_to_repo(graph_dir, org="acme", repo="repo-a", name="cli-app")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), config, reader, at=_AT)
+
+    assert "repo:acme/repo-a" in plan.stale  # the bug: this came back empty
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+
+    assert "repositories/repo-a" in result.written
+    page_after = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
+    assert "### Apps\n\n- [cli-app](/apps/cli-app.md)" in page_after
+
+
+def test_a_second_sync_with_no_graph_change_writes_nothing(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        second = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+
+    assert second.written == ()

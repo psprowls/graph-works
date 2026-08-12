@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from ext_helpers import GENERATED_DIR, generated_bundle, generated_copy
+from ext_helpers import GENERATED_DIR, generated_bundle, generated_copy, write_bundle
 from okf_ext.generators.model import Render
 from okf_ext.generators.plan import plan_regenerate
 from okf_ext.sections import DEFAULT_IGNORE as DEFAULT_IGNORE_SECTIONS
@@ -187,3 +187,104 @@ def test_the_combined_offense_message_names_both_the_key_and_the_heading():
                 )
             }
         )
+
+
+_INDEX_DECLARATION = """\
+directories:
+  "":
+    sections:
+      - heading: Repositories
+        ownership: generated
+        required: true
+        placeholder: |
+          _(not yet generated)_
+  packages:
+    sections:
+      - heading: Inventory
+        ownership: generated
+"""
+
+_ROOT_INDEX = "---\nokf_version: 0.2\n---\n\n# Bundle\n"
+
+
+def _indexed(tmp_path, files=None):
+    """A bundle with a root index and a `_sections/_index.yaml`."""
+    members = {"index.md": _ROOT_INDEX, "_sections/_index.yaml": _INDEX_DECLARATION}
+    members.update(files or {})
+    bundle = write_bundle(tmp_path / "kb", members, ignore=DEFAULT_IGNORE_SECTIONS)
+    return bundle, load_sections(bundle.root / "_sections")
+
+
+def test_an_index_target_is_planned_against_bundle_indexes(tmp_path):
+    bundle, section_set = _indexed(tmp_path)
+    plan = plan_regenerate(
+        bundle, section_set, {}, index_renders={"": Render(sections={"Repositories": "- [a](/repositories/a.md)"})}
+    )
+    assert not plan.is_empty
+    regeneration = plan.regenerations[0]
+    assert (regeneration.concept_id, regeneration.path) == ("", "index.md")
+    assert regeneration.key_edits == ()
+    assert regeneration.after.endswith("## Repositories\n\n- [a](/repositories/a.md)\n")
+
+
+def test_a_nested_index_target_carries_its_directory_path(tmp_path):
+    bundle, section_set = _indexed(tmp_path, {"packages/index.md": "---\n---\n\n# Packages\n"})
+    plan = plan_regenerate(bundle, section_set, {}, index_renders={"packages": Render(sections={"Inventory": "- x"})})
+    assert [r.path for r in plan.regenerations] == ["packages/index.md"]
+
+
+def test_regenerating_an_index_with_the_values_already_there_plans_nothing(tmp_path):
+    bundle, section_set = _indexed(tmp_path)
+    render = {"": Render(sections={"Repositories": "- [a](/repositories/a.md)"})}
+    first = plan_regenerate(bundle, section_set, {}, index_renders=render)
+    (bundle.root / "index.md").write_text(
+        _ROOT_INDEX.split("# Bundle")[0] + first.regenerations[0].after, encoding="utf-8"
+    )
+    reloaded = load_bundle(bundle.root, ignore=DEFAULT_IGNORE_SECTIONS)
+    assert plan_regenerate(reloaded, section_set, {}, index_renders=render).is_empty
+
+
+def test_frontmatter_in_an_index_render_raises(tmp_path):
+    """AC 7. §8 gives a bundle-root index exactly one legal key, so an index
+    declaration grants no frontmatter at all and the existing granted-set
+    refusal fires."""
+    bundle, section_set = _indexed(tmp_path)
+    with pytest.raises(ValueError, match="okf_version"):
+        plan_regenerate(bundle, section_set, {}, index_renders={"": Render(frontmatter={"title": "x"})})
+
+
+def test_an_ungranted_index_section_raises(tmp_path):
+    bundle, section_set = _indexed(tmp_path)
+    with pytest.raises(ValueError, match="Concepts"):
+        plan_regenerate(bundle, section_set, {}, index_renders={"": Render(sections={"Concepts": "- x"})})
+
+
+def test_an_index_with_no_declaration_raises_for_any_non_empty_render(tmp_path):
+    bundle, section_set = _indexed(tmp_path, {"work/index.md": "---\n---\n\n# Work\n"})
+    with pytest.raises(ValueError, match=r"no .*declaration"):
+        plan_regenerate(bundle, section_set, {}, index_renders={"work": Render(sections={"Items": "- x"})})
+
+
+def test_an_empty_index_render_against_no_declaration_is_a_no_op(tmp_path):
+    bundle, section_set = _indexed(tmp_path, {"work/index.md": "---\n---\n\n# Work\n"})
+    plan = plan_regenerate(bundle, section_set, {}, index_renders={"work": Render()})
+    assert plan.is_empty
+    assert plan.skipped == ()
+
+
+def test_an_index_that_is_not_a_member_is_skipped_as_unreadable(tmp_path):
+    bundle, section_set = _indexed(tmp_path)
+    plan = plan_regenerate(bundle, section_set, {}, index_renders={"nowhere": Render()})
+    assert [(s.concept_id, s.path, s.reason) for s in plan.skipped] == [("", "nowhere/index.md", "unreadable")]
+
+
+def test_an_unparseable_index_is_skipped(tmp_path):
+    bundle, section_set = _indexed(tmp_path, {"packages/index.md": "---\nnot: [closed\n"})
+    plan = plan_regenerate(bundle, section_set, {}, index_renders={"packages": Render(sections={"Inventory": "- x"})})
+    assert [(s.path, s.reason) for s in plan.skipped] == [("packages/index.md", "parse-error")]
+
+
+def test_concept_ids_does_not_report_an_index(tmp_path):
+    bundle, section_set = _indexed(tmp_path)
+    plan = plan_regenerate(bundle, section_set, {}, index_renders={"": Render(sections={"Repositories": "- x"})})
+    assert plan.concept_ids == ()

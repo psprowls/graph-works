@@ -117,3 +117,108 @@ def test_an_empty_frontmatter_block_is_the_empty_ownership(tmp_path):
     root.mkdir()
     (root / "entity.yaml").write_text("frontmatter: {}\nsections: []\n", encoding="utf-8")
     assert load_sections(root).types["entity"].frontmatter == FrontmatterOwnership()
+
+
+def _declared(tmp_path, files):
+    """A `_sections` directory written from `{filename: text}`."""
+    root = tmp_path / "_sections"
+    root.mkdir()
+    for name, text in files.items():
+        (root / name).write_text(text, encoding="utf-8")
+    return root
+
+
+_ROOT_INDEX = """\
+directories:
+  "":
+    sections:
+      - heading: Repositories
+        ownership: generated
+        required: true
+        placeholder: |
+          _(not yet generated)_
+"""
+
+
+def test_a_directories_key_becomes_an_index_declaration(tmp_path):
+    root = _declared(tmp_path, {"_index.yaml": _ROOT_INDEX, "Feature.yaml": "sections:\n  - heading: Summary\n"})
+    section_set = load_sections(root)
+    assert tuple(section_set.indexes) == ("",)
+    spec = section_set.indexes[""].sections[0]
+    assert (spec.heading, spec.ownership, spec.required) == ("Repositories", "generated", True)
+    assert spec.placeholder == "_(not yet generated)_\n"
+    # The type table is untouched: a `_`-prefixed file never claims a type.
+    assert section_set.type_names == ("Feature",)
+
+
+def test_a_declaration_set_with_no_directories_key_has_no_indexes(tmp_path):
+    """The additive promise: this is what every declaration written before
+    this feature looks like."""
+    root = _declared(tmp_path, {"Feature.yaml": "sections:\n  - heading: Summary\n"})
+    assert load_sections(root).indexes == {}
+
+
+def test_a_directory_id_is_normalized_to_the_bundle_indexes_key(tmp_path):
+    """`Bundle.indexes` is keyed by directory id with no trailing slash, and a
+    declaration that writes one anyway must not key a second, unreachable
+    entry."""
+    root = _declared(
+        tmp_path,
+        {"_index.yaml": 'directories:\n  "packages/":\n    sections:\n      - heading: Inventory\n'},
+    )
+    assert tuple(load_sections(root).indexes) == ("packages",)
+
+
+def test_two_underscore_files_may_each_declare_their_own_root_section(tmp_path):
+    """The merge this exists for: three tier-3 packages share one bundle and
+    each declares its own root section without arbitrating a shared file."""
+    root = _declared(
+        tmp_path,
+        {
+            "_a.yaml": 'directories:\n  "":\n    sections:\n      - heading: Repositories\n',
+            "_b.yaml": 'directories:\n  "":\n    sections:\n      - heading: Work\n',
+        },
+    )
+    assert [s.heading for s in load_sections(root).indexes[""].sections] == ["Repositories", "Work"]
+
+
+BAD_DIRECTORIES = {
+    "directories_in_typed_file": "underscore-prefixed",
+    "directories_heading_collision": "already declared by",
+    "directories_not_a_mapping": "`directories` must be a mapping",
+    "index_frontmatter": "not declarable for a directory index",
+}
+
+
+@pytest.mark.parametrize(("name", "expected"), sorted(BAD_DIRECTORIES.items()))
+def test_every_bad_directories_declaration_raises_a_legible_section_error(name, expected):
+    with pytest.raises(SectionError, match=expected):
+        load_sections(SECTIONS_BAD / name)
+
+
+def test_a_directory_entry_that_is_not_a_mapping_raises(tmp_path):
+    root = _declared(tmp_path, {"_index.yaml": 'directories:\n  "": 7\n'})
+    with pytest.raises(SectionError, match="must be a mapping"):
+        load_sections(root)
+
+
+def test_a_non_string_directory_id_raises(tmp_path):
+    root = _declared(tmp_path, {"_index.yaml": "directories:\n  7:\n    sections: []\n"})
+    with pytest.raises(SectionError, match="must be a string"):
+        load_sections(root)
+
+
+def test_two_directory_keys_in_one_file_that_normalize_alike_raise(tmp_path):
+    """`"packages/"` and `"packages"` are two YAML keys but one directory id
+    once normalized -- caught within a single file, not only across files."""
+    root = _declared(
+        tmp_path,
+        {
+            "_index.yaml": (
+                'directories:\n  "packages/":\n    sections:\n      - heading: A\n'
+                '  "packages":\n    sections:\n      - heading: B\n'
+            )
+        },
+    )
+    with pytest.raises(SectionError, match="already declared in this file"):
+        load_sections(root)

@@ -9,3 +9,8 @@ sections:
   - heading: Layout
     placeholder: |
       > TODO: <Top-level directory layout and what lives where.>
+  - heading: Contents
+    ownership: generated
+    required: true
+    placeholder: |
+      _(populated by `code-wiki-okf sync` — not yet generated)_

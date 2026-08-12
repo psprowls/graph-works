@@ -499,9 +499,13 @@ frontmatter key is a small scalar or list a run recomputes wholesale each
 time, so "the run's values are the whole truth" is safe and useful — it is
 what lets a dependency that no longer applies disappear on its own without a
 caller remembering to delete it by hand. A section is a block of prose;
-`regenerate_body` never invents or removes one (`plan_sections` is the
-capability that creates a required section, and that is a separate step by
-design — see Boundaries). Leaving an unsupplied `generated` section exactly as
+`regenerate_body` never invents or removes one for a concept — `plan_sections`
+is the capability that creates a required section, and that is a separate step
+by design (see Boundaries). The one exception is an **index** document, which
+has no scaffolder at all: `plan_sections` walks `bundle.concepts`, so a granted
+index section that is absent could never be written. `plan_regenerate` passes
+`create_missing=True` on that path alone, and appends the section at the end of
+the body. Leaving an unsupplied `generated` section exactly as
 it stood — the machine's own last render, most of the time — is the
 non-destructive reading; silently blanking it on every run a caller happens
 not to recompute that section would be the frontmatter behaviour applied

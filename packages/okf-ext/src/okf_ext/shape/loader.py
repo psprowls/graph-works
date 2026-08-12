@@ -251,6 +251,47 @@ def _type_sections(name: str, data: Mapping[str, Any], fragments: Mapping[str, s
     )
 
 
+def _index_sections(where: str, data: Mapping[str, Any], fragments: Mapping[str, str]) -> TypeSections:
+    """One directory's declaration.
+
+    **Frontmatter ownership is refused rather than ignored.** §8 gives a
+    bundle-root index exactly one legal key, `okf_version`; widening that is
+    a spec question, not a declaration's. Silently dropping a `frontmatter:`
+    block here would leave an author believing a grant they do not have.
+    """
+    if "frontmatter" in data:
+        raise SectionError(
+            f"{where}: `frontmatter` is not declarable for a directory index -- OKF v0.2 §8 gives a "
+            f"bundle-root index exactly one legal key, `okf_version`"
+        )
+    return _type_sections(where, data, fragments)
+
+
+def _directories(name: str, data: Mapping[str, Any], fragments: Mapping[str, str]) -> dict[str, TypeSections]:
+    """The `directories:` block of one file, keyed by normalized directory id.
+
+    The id is stripped of whitespace and slashes so `"packages/"` keys
+    `"packages"` -- the key `okf_io.Bundle.indexes` itself uses. Two spellings
+    of one directory in a single file are refused rather than silently
+    collapsed, for the reason a duplicate `owned` key is.
+    """
+    raw = data.get("directories", {})
+    if not isinstance(raw, Mapping):
+        raise SectionError(f"{name}: `directories` must be a mapping, got {type(raw).__name__}")
+    found: dict[str, TypeSections] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str):
+            raise SectionError(f"{name}: directory id {key!r} must be a string, got {type(key).__name__}")
+        directory = key.strip().strip("/")
+        where = f"{name}: directories[{directory!r}]"
+        if directory in found:
+            raise SectionError(f"{where}: this directory is already declared in this file")
+        if not isinstance(value, Mapping):
+            raise SectionError(f"{where}: must be a mapping, got {type(value).__name__}")
+        found[directory] = _index_sections(where, value, fragments)
+    return found
+
+
 def load_sections(path: str | Path) -> SectionSet:
     """Read every declaration file directly under *path*.
 
@@ -298,6 +339,37 @@ def load_sections(path: str | Path) -> SectionSet:
     if not parsed:
         raise SectionError(f"{root}: no declaration files found; expected one or more of {list(SECTION_SUFFIXES)}")
 
+    # Every `_`-prefixed file's `directories:` merges into one mapping, so the
+    # three tier-3 packages that share a bundle can each declare their own
+    # root section without arbitrating a single shared `_index.yaml` -- the
+    # `_tags.yaml` problem, not repeated. Two files claiming one
+    # `(directory, heading)` pair is refused at load, the disjointness move
+    # `FrontmatterOwnership` already makes for `owned`/`provenance`.
+    #
+    # `additional_sections` is not merged: it defaults to `True` and no file
+    # may claim "no additional sections" over an index it shares with another.
+    indexes: dict[str, list[SectionSpec]] = {}
+    index_sources: dict[tuple[str, str], str] = {}
+    for name, data in parsed:
+        if "directories" not in data:
+            continue
+        if not name.startswith("_"):
+            raise SectionError(
+                f"{name}: `directories` may only be declared by an underscore-prefixed file -- a typed "
+                f"file's sections belong to its type, so a directory declaration here is ambiguous"
+            )
+        for directory, declaration in _directories(name, data, fragments).items():
+            bucket = indexes.setdefault(directory, [])
+            for spec in declaration.sections:
+                index_key = (directory, spec.heading.casefold())
+                if index_key in index_sources:
+                    raise SectionError(
+                        f"{name}: heading `{spec.heading}` for directory `{directory}` is already declared "
+                        f"by `{index_sources[index_key]}`; two files may not declare one section of one index"
+                    )
+                index_sources[index_key] = name
+                bucket.append(spec)
+
     types: dict[str, TypeSections] = {}
     sources: dict[str, str] = {}
     for name, data in parsed:
@@ -315,4 +387,7 @@ def load_sections(path: str | Path) -> SectionSet:
         sources=MappingProxyType(dict(sorted(sources.items()))),
         fragments=MappingProxyType(dict(sorted(fragments.items()))),
         root=root,
+        indexes=MappingProxyType(
+            {directory: TypeSections(sections=tuple(specs)) for directory, specs in sorted(indexes.items())}
+        ),
     )

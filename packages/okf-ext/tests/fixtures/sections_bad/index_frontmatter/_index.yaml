@@ -1,0 +1,6 @@
+directories:
+  "":
+    frontmatter:
+      owned: [title]
+    sections:
+      - heading: Repositories

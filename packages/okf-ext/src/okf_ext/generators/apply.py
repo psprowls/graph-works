@@ -20,7 +20,7 @@ from __future__ import annotations
 import copy
 from dataclasses import replace
 from functools import partial
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from okf_io import Bundle, Document
 from ruamel.yaml.comments import CommentedMap
@@ -72,6 +72,19 @@ def _rendered(document: Document, regeneration: Regeneration) -> tuple[str, Comm
     return scratch.serialize(), scratch_fm, regeneration.after
 
 
+def _document_for(bundle: Bundle, regeneration: Regeneration) -> Document | None:
+    """The document a regeneration names.
+
+    A concept is looked up by id. An index carries `concept_id=""` -- there is
+    no id, because it is not a concept -- so it is looked up by the directory
+    its `path` names, the key `Bundle.indexes` uses.
+    """
+    if regeneration.concept_id:
+        return bundle.concepts.get(regeneration.concept_id)
+    parent = PurePosixPath(regeneration.path).parent.as_posix()
+    return bundle.indexes.get("" if parent == "." else parent)
+
+
 def apply(bundle: Bundle, plan: RegenerationPlan) -> ApplyResult:
     """Write *plan* against *bundle*.
 
@@ -92,6 +105,11 @@ def apply(bundle: Bundle, plan: RegenerationPlan) -> ApplyResult:
 
     Raises `ValueError` for a plan built against a different bundle: its
     digests and line numbers mean nothing anywhere else.
+
+    Index targets are written the same way, resolved through `bundle.indexes`
+    by the directory their `path` names. There is no frontmatter half for one
+    -- `plan_regenerate` grants an index no keys -- so `key_edits` is always
+    empty and the write is a body write.
     """
     if Path(plan.root).resolve() != Path(bundle.root).resolve():
         raise ValueError(
@@ -99,20 +117,22 @@ def apply(bundle: Bundle, plan: RegenerationPlan) -> ApplyResult:
             f"A plan's digests and line numbers mean nothing outside the bundle it was planned against."
         )
 
+    # Grouped by `path`, not by `concept_id`: every index target carries
+    # `concept_id=""`, so an id grouping would collapse two indexes into one
+    # `duplicate-edit` refusal and resolve neither. For a concept the two keys
+    # are a bijection (`path` is `f"{concept_id}.md"`), so nothing about the
+    # concept path changes.
     grouped: dict[str, list[Regeneration]] = {}
     for regeneration in plan.regenerations:
-        grouped.setdefault(regeneration.concept_id, []).append(regeneration)
+        grouped.setdefault(regeneration.path, []).append(regeneration)
 
     failed: list[WriteFailure] = []
     pending: list[PendingWrite] = []
 
-    for concept_id, items in sorted(grouped.items()):
-        member = f"{concept_id}.md"
-        document = bundle.concepts.get(concept_id)
+    for member, items in sorted(grouped.items()):
+        document = _document_for(bundle, items[0])
         if document is None or document.path is None:
-            failed.append(
-                WriteFailure(path=member, kind="not-a-member", error="concept is not a member of this bundle")
-            )
+            failed.append(WriteFailure(path=member, kind="not-a-member", error="not a member of this bundle"))
             continue
         if document.parse_error is not None:
             # Defence in depth: `plan_regenerate` already skips these, but a
@@ -136,7 +156,7 @@ def apply(bundle: Bundle, plan: RegenerationPlan) -> ApplyResult:
                     path=member,
                     kind="duplicate-edit",
                     error=(
-                        "plan carries more than one regeneration for this concept; "
+                        "plan carries more than one regeneration for this document; "
                         "refusing rather than silently applying only the last"
                     ),
                 )

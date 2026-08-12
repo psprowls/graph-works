@@ -239,3 +239,33 @@ def test_full_md_regenerates_to_itself_with_zero_edits():
     assert after == document.body
     assert edits == ()
     assert missing == ()
+
+
+def test_create_missing_appends_a_granted_section_that_is_absent():
+    declaration = TypeSections(sections=(SectionSpec(heading="Repositories", ownership="generated", required=True),))
+    after, edits, missing = regenerate_body(
+        "# Bundle\n", declaration, {"Repositories": "- [a](/repositories/a.md)"}, create_missing=True
+    )
+    assert after == "# Bundle\n\n## Repositories\n\n- [a](/repositories/a.md)\n"
+    assert [e.heading for e in edits] == ["Repositories"]
+    assert missing == ()
+
+
+def test_create_missing_is_off_by_default():
+    declaration = TypeSections(sections=(SectionSpec(heading="Repositories", ownership="generated", required=True),))
+    after, edits, missing = regenerate_body("# Bundle\n", declaration, {"Repositories": "- [a](/a.md)"})
+    assert after == "# Bundle\n"
+    assert edits == ()
+    assert missing == ("Repositories",)
+
+
+def test_a_created_section_is_idempotent_on_the_next_run():
+    """The property acceptance criterion 3 rests on: creating and then
+    regenerating the same content must plan nothing the second time."""
+    declaration = TypeSections(sections=(SectionSpec(heading="Repositories", ownership="generated", required=True),))
+    supplied = {"Repositories": "- [a](/repositories/a.md)"}
+    after, _edits, _missing = regenerate_body("# Bundle\n", declaration, supplied, create_missing=True)
+    again, edits, missing = regenerate_body(after, declaration, supplied, create_missing=True)
+    assert again == after
+    assert edits == ()
+    assert missing == ()

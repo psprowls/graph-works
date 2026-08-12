@@ -14,6 +14,7 @@ from okf_ext.sections import (
     SectionError,
     load_sections,
 )
+from test_shape_loader import BAD_DIRECTORIES
 
 COMMON = """
 fragments:
@@ -183,11 +184,21 @@ def test_every_bad_directory_raises_a_legible_section_error(name, expected):
         load_sections(SECTIONS_BAD / name)
 
 
+#: Fixture directories under `sections_bad/` covered by `test_shape_loader.py`'s
+#: own `BAD_DIRECTORIES` table instead of this file's `BAD` -- the
+#: `directories:` index declaration (§8), added after this table, and never
+#: routed through the legacy `okf_ext.sections` import path this file exists
+#: to cover. Imported, not restated: a name added to or dropped from
+#: `BAD_DIRECTORIES` without a matching change here would otherwise leave a
+#: fixture directory asserting nothing and nothing would catch it.
+COVERED_BY_SHAPE_LOADER_TESTS = set(BAD_DIRECTORIES)
+
+
 def test_every_bad_fixture_directory_is_covered_by_the_table():
     """A fixture directory added without a matching entry above would sit on
     disk asserting nothing -- the `SCHEMA_EXPECTED` habit, one layer down."""
     on_disk = {p.name for p in SECTIONS_BAD.iterdir() if p.is_dir()}
-    assert on_disk == set(BAD)
+    assert on_disk == set(BAD) | COVERED_BY_SHAPE_LOADER_TESTS
 
 
 def test_a_directory_of_fragments_alone_is_a_set_with_no_types(tmp_path):

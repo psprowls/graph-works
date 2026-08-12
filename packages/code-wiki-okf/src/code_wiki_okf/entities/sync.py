@@ -24,20 +24,24 @@ non-global-kind node while `set_current_repo` is active for that member).
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
+from types import MappingProxyType
 
 from code_graph_io import GraphReader, NodeRecord
 from code_graph_io.tokens import count_tokens
 from okf_ext.generators import Render, plan_regenerate
 from okf_ext.generators import apply as apply_regenerations
 from okf_ext.schemas import SchemaSet, load_schemas
+from okf_ext.sections import apply as apply_sections
+from okf_ext.sections import plan_sections
 from okf_ext.shape import load_sections
 from okf_io import Bundle, load_bundle
 
 from code_wiki_okf import __version__
 from code_wiki_okf.config import Config
+from code_wiki_okf.entities.catalog import CatalogEntry, contents_groups, render_contents
 from code_wiki_okf.entities.pages import default_concept_id, new_page_text
 from code_wiki_okf.entities.render import (
     render_agent_plugin,
@@ -50,6 +54,12 @@ from code_wiki_okf.entities.render import (
 from code_wiki_okf.git_state import head_commit
 from code_wiki_okf.provenance import generated_value, last_updated_commit_value, tokens_value
 from code_wiki_okf.resources import resource_index
+
+#: Shared empty `by_repository` default -- mirrors `generators/model.py`'s
+#: `_EMPTY_FM` and `shape/model.py`'s `_NO_INDEXES`: one frozen instance
+#: rather than a fresh `MappingProxyType({})` per default-constructed
+#: `EntitySync`.
+_NO_REPOSITORIES: Mapping[str, tuple[str, ...]] = MappingProxyType({})
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,11 +81,18 @@ class EntitySync:
     `resource_index(bundle)` cannot answer that -- it indexes whatever is
     *currently on disk*, which trivially includes every stale page too.
     Using "on disk" as "should exist" would make deletion a permanent no-op.
+
+    `by_repository` maps each configured repository's name to the sorted
+    concept ids this run placed under it -- the grouping `_resolve_placements`
+    already has in hand at `place(target, repo_label=repo_cfg.name)`, exposed
+    rather than re-derived from the graph. Dependencies are absent: they are
+    ecosystem-wide and belong to no repository.
     """
 
     written: tuple[str, ...] = field(default_factory=tuple)
     skipped: tuple[str, ...] = field(default_factory=tuple)
     current_resources: frozenset[str] = field(default_factory=frozenset)
+    by_repository: Mapping[str, tuple[str, ...]] = field(default=_NO_REPOSITORIES)
 
 
 #: `File.yaml`-style provenance keys that must never count as content drift
@@ -84,6 +101,11 @@ class EntitySync:
 #: `mirror.plan._render_matches_disk`'s own `_PROVENANCE_KEYS` exclusion, for
 #: the identical reason.
 _PROVENANCE_KEYS = frozenset({"generated", "last_updated_commit", "tokens"})
+
+#: The repo label `_resolve_placements` gives a dependency. A dependency node
+#: is one of code-graph-io's global kinds and is never repo-attributed, so it
+#: belongs to no repository's catalog.
+_ECOSYSTEM_WIDE = "(ecosystem-wide)"
 
 
 @dataclass(frozen=True, slots=True)
@@ -407,7 +429,7 @@ def _resolve_placements(
     for target in _dependency_targets(
         reader.list_dependencies(), reader, existing=existing, schema_set=schema_set, at=at
     ):
-        place(target, repo_label="(ecosystem-wide)")
+        place(target, repo_label=_ECOSYSTEM_WIDE)
 
     if collisions:
         raise ValueError(_collision_message(collisions))
@@ -426,6 +448,65 @@ def _resolve_placements(
         )
 
     return placed
+
+
+def _by_repository(placed: dict[str, tuple[_Target, str]]) -> Mapping[str, tuple[str, ...]]:
+    grouped: dict[str, list[str]] = {}
+    for target, repo_label in placed.values():
+        if repo_label == _ECOSYSTEM_WIDE:
+            continue
+        grouped.setdefault(repo_label, []).append(target.concept_id)
+    return MappingProxyType({name: tuple(sorted(ids)) for name, ids in sorted(grouped.items())})
+
+
+def _with_contents(
+    placed: dict[str, tuple[_Target, str]],
+    bundle: Bundle,
+    by_repository: Mapping[str, tuple[str, ...]],
+    existing: Mapping[str, str],
+) -> dict[str, tuple[_Target, str]]:
+    """Give every Repository target its `## Contents` render.
+
+    Computed here rather than in `render_repository`, and after phase 1,
+    because the section lists sibling *pages* and carries their
+    `description`s -- neither of which exists until the pages do, and neither
+    of which a `describe_*` record can see.
+
+    The section is folded into the render `sync_entities` already builds for
+    that page rather than written by a second `plan_regenerate` pass. A
+    sections-only `Render` against a declared type deletes every `owned`
+    frontmatter key it does not supply (`okf_ext.generators.Render`'s own
+    docstring), so a separate pass would silently drop `package_count`.
+
+    `existing` is the pre-placement `{resource: concept_id}` map both callers
+    already computed. A placed target whose resource is not in it is one
+    phase 1 would create -- or, for `sync_entities`'s post-reload call,
+    already did. Either way `bundle` might not have that page yet (it never
+    does for `plan_entities`'s preview, which never runs phase 1 at all), so
+    every such target is handed to `contents_groups` as a synthetic stand-in:
+    title and concept id straight from the target, description `""` to match
+    exactly what `new_page_text` seeds a freshly created page with. Without
+    this, a sibling entity this run is about to place gets silently dropped
+    from its repository's `## Contents` preview -- the id is genuinely absent
+    from `bundle`, not broken, so `contents_groups`'s ordinary "unreadable
+    page" drop must not apply to it.
+    """
+    synthetic = {
+        concept_id: (target.type_name, CatalogEntry(title=target.title, concept_id=concept_id, description=""))
+        for concept_id, (target, _repo_label) in placed.items()
+        if target.resource not in existing
+    }
+    out = dict(placed)
+    for concept_id, (target, repo_label) in placed.items():
+        if target.type_name != "Repository":
+            continue
+        groups = contents_groups(bundle, by_repository.get(target.title, ()), synthetic=synthetic)
+        render = Render(
+            frontmatter=target.render.frontmatter,
+            sections={**target.render.sections, "Contents": render_contents(groups)},
+        )
+        out[concept_id] = (replace(target, render=render), repo_label)
+    return out
 
 
 def sync_entities(
@@ -493,6 +574,31 @@ def sync_entities(
     # on its real write path.
     working_bundle = load_bundle(bundle.root) if created_any else bundle
 
+    # Scaffold before regenerate, the composition `okf_ext.sections` itself
+    # recommends. `regenerate_body` never creates a section for a concept, so
+    # a page created before its type declared a new required section would
+    # report `section-missing` on every run and never gain it -- exactly the
+    # case a Repository page predating `## Contents` is in.
+    #
+    # Filtered to the pages this run placed: `plan_sections` walks every
+    # concept in the bundle, and a bundle three tier-3 packages share is not
+    # this command's to repair wholesale. `apply` commits through
+    # `document.set_body`, so `working_bundle` agrees with disk immediately
+    # and the regenerate pass below sees the scaffolded body with no reload.
+    placed_ids = {target.concept_id for target, _repo_label in placed.values()}
+    scaffold = plan_sections(working_bundle, section_set)
+    mine = tuple(splice for splice in scaffold.splices if splice.concept_id in placed_ids)
+    scaffold_failed: tuple[str, ...] = ()
+    if mine:
+        scaffold_result = apply_sections(working_bundle, replace(scaffold, splices=mine, skipped=()))
+        # Folded into `skipped` below rather than asserted `.ok` -- a
+        # per-document scaffold failure must not abort every sibling this
+        # pass would otherwise fix.
+        scaffold_failed = tuple(f"{item.path}: {item.kind}: {item.error}" for item in scaffold_result.failed)
+
+    by_repository = _by_repository(placed)
+    placed = _with_contents(placed, working_bundle, by_repository, existing)
+
     content_plan = plan_regenerate(
         working_bundle,
         section_set,
@@ -515,9 +621,11 @@ def sync_entities(
     result = apply_regenerations(working_bundle, plan)
 
     written = tuple(member.removesuffix(".md") for member in result.written)
-    skipped = tuple(f"{item.path}: {item.reason}" for item in result.skipped)
+    skipped = scaffold_failed + tuple(f"{item.path}: {item.reason}" for item in result.skipped)
     current_resources = frozenset(target.resource for target, _repo_label in placed.values())
-    return EntitySync(written=written, skipped=skipped, current_resources=current_resources)
+    return EntitySync(
+        written=written, skipped=skipped, current_resources=current_resources, by_repository=by_repository
+    )
 
 
 def plan_entities(bundle: Bundle, config: Config, reader: GraphReader, *, at: datetime) -> EntityPlan:
@@ -537,6 +645,13 @@ def plan_entities(bundle: Bundle, config: Config, reader: GraphReader, *, at: da
         resource: entry.concept_id for resource, entry in resource_index(bundle).by_resource.items()
     }
     placed = _resolve_placements(bundle, config, reader, schema_set=schema_set, existing=existing, at=at)
+
+    # The preview must render what `sync_entities` writes, or its staleness
+    # answer diverges from the run it is previewing. `bundle` here is the
+    # pre-creation bundle passed in -- `plan_entities` never runs phase 1 --
+    # so `existing` (also pre-creation) is what tells `_with_contents` which
+    # placed siblings need a synthetic stand-in to be seen at all.
+    placed = _with_contents(placed, bundle, _by_repository(placed), existing)
 
     renders: dict[str, Render] = {}
     resource_by_concept: dict[str, str] = {}

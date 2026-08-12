@@ -694,3 +694,26 @@ def test_the_documented_placement_surface_is_present() -> None:
     assert placement.TOPIC == "placement"
     assert placement.CODES == ("placement.directory-mismatch", "placement.duplicate-resource")
     assert list(placement.__all__) == ["CODES", "TOPIC", "placement_rule"]
+
+
+def test_the_shape_surface_pins_the_index_dispatch_table() -> None:
+    """`SectionSet` gained a second dispatch table, and it is defaulted so a
+    caller constructing one without it still works. Both halves of that are
+    contract, not implementation."""
+    from okf_ext import shape
+
+    assert shape.SectionSet.__dataclass_fields__.keys() == {"types", "sources", "fragments", "root", "indexes"}
+    assert shape.SectionSet(types={}, sources={}, fragments={}, root=Path()).indexes == {}
+
+
+def test_plan_regenerate_accepts_index_renders() -> None:
+    """A separate parameter rather than an overload of `renders`, because a
+    directory id and a concept id genuinely collide: `packages` the lane and
+    `packages.md` the concept share a key."""
+    import inspect
+
+    from okf_ext import generators
+
+    parameters = inspect.signature(generators.plan_regenerate).parameters
+    assert "index_renders" in parameters
+    assert parameters["index_renders"].default == {}

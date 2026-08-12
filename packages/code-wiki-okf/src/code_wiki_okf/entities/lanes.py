@@ -21,10 +21,13 @@ from datetime import date, datetime
 from types import MappingProxyType
 
 from code_graph_io import GraphReader
+from okf_ext.generators import Render, plan_regenerate
+from okf_ext.generators import apply as apply_regenerations
 from okf_ext.shape import load_sections
 from okf_io import Bundle, append_log_entry, load_bundle, update_index
 
 from code_wiki_okf.config import Config
+from code_wiki_okf.entities.catalog import render_repositories, repository_entries
 from code_wiki_okf.entities.delete import prune_lane
 from code_wiki_okf.entities.sync import sync_entities
 
@@ -58,6 +61,9 @@ ENTITY_LANES: tuple[str, ...] = (
 #: `okf_ext.placement.placement_rule`, which holds no type names of its own.
 ENTITY_DEPTH: Mapping[str, str] = MappingProxyType({"Repository": "exact", "File": "nested"})
 
+#: The bundle-root directory id, the key `okf_io.Bundle.indexes` uses for it.
+_ROOT = ""
+
 
 @dataclass(frozen=True, slots=True)
 class SyncSummary:
@@ -65,13 +71,18 @@ class SyncSummary:
 
     `written` and `skipped` are `sync_entities`' own `EntitySync` fields,
     passed through unchanged. `deleted` and `declined` are `prune_lane`'s
-    results pooled across every lane in `ENTITY_LANES`.
+    results pooled across every lane in `ENTITY_LANES`. `catalog` and
+    `catalog_declined` are the root-index catalog pass's written members and
+    its refusals -- reported rather than raised, matching how every other
+    write failure in this pipeline surfaces.
     """
 
     written: tuple[str, ...] = field(default_factory=tuple)
     skipped: tuple[str, ...] = field(default_factory=tuple)
     deleted: tuple[str, ...] = field(default_factory=tuple)
     declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)  # (concept_id, reason)
+    catalog: tuple[str, ...] = field(default_factory=tuple)  # index members regenerated
+    catalog_declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)  # (path, kind)
 
 
 def _summary_text(summary: SyncSummary) -> str:
@@ -91,6 +102,11 @@ def _summary_text(summary: SyncSummary) -> str:
             reasons[reason] = reasons.get(reason, 0) + 1
         breakdown = ", ".join(f"{count} {reason}" for reason, count in sorted(reasons.items()))
         parts.append(f"{len(summary.declined)} deletion(s) declined ({breakdown})")
+    if summary.catalog:
+        parts.append(f"catalog: {len(summary.catalog)} index page(s) regenerated")
+    if summary.catalog_declined:
+        named = ", ".join(f"{path} ({kind})" for path, kind in sorted(summary.catalog_declined))
+        parts.append(f"catalog: {len(summary.catalog_declined)} index write(s) refused ({named})")
     return "; ".join(parts)
 
 
@@ -119,6 +135,11 @@ def sync(
     `log.md` entry is appended, naming this run's counts -- even a run that
     changed nothing gets one, so the log stays a complete record of every
     sync, not just the ones that did something.
+
+    Between deletion and reconciliation the root index's `## Repositories`
+    catalog is regenerated from the reloaded bundle -- every Repository page
+    it still holds, with each page's own `description` carried through. That
+    ordering is load-bearing; see the comment at the call site.
     """
     if dry_run:
         return SyncSummary()
@@ -150,8 +171,32 @@ def sync(
     # `bundle.has_member` -- which would still say "yes" against that now
     # stale snapshot.
     reconciled = load_bundle(current.root)
-    if touched_lanes:
-        update_index(reconciled, directories=sorted(touched_lanes), create_missing=True, dry_run=False)
+
+    # **Regenerate before reconcile, always.** Both writers touch the root
+    # index body, and the ordering is what keeps them from fighting: after
+    # regeneration the `## Repositories` bullets are correct, so
+    # reconciliation finds nothing dead among them. Verified against
+    # `okf_io.index`: a `/repositories/acme.md` bullet resolves (a leading `/`
+    # is bundle-root-relative), so `_alive` says live and it is never pruned;
+    # it does not satisfy `_covers` for the `repositories/` subdirectory
+    # target, so the lane still gets its own `## Subdirectories` bullet; and
+    # `_is_subdirectory_entry` is false for it, so `_sibling_heading` can
+    # never anchor a newly added lane bullet inside `## Repositories`.
+    #
+    # No third reload: `generators.apply` commits through `set_body`, so
+    # `reconciled`'s own root index document already agrees with disk by the
+    # time `update_index` reads it.
+    catalog_plan = plan_regenerate(
+        reconciled,
+        section_set,
+        {},
+        index_renders={_ROOT: Render(sections={"Repositories": render_repositories(repository_entries(reconciled))})},
+    )
+    catalog_result = apply_regenerations(reconciled, catalog_plan)
+
+    # The root is always in the reconcile set: reconciliation's half of the
+    # catalog is the lane list, and it is due whether or not a lane changed.
+    update_index(reconciled, directories=sorted({*touched_lanes, _ROOT}), create_missing=True, dry_run=False)
 
     log_document = reconciled.logs.get("")
     if log_document is None:
@@ -165,6 +210,8 @@ def sync(
         skipped=entity_result.skipped,
         deleted=tuple(deleted),
         declined=tuple(declined),
+        catalog=catalog_result.written,
+        catalog_declined=tuple((failure.path, failure.kind) for failure in catalog_result.failed),
     )
     append_log_entry(log_document, _summary_text(summary), today=today, dry_run=False)
     return summary

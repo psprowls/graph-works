@@ -82,7 +82,12 @@ class KeyEdit:
 @dataclass(frozen=True, slots=True)
 class SectionEdit:
     """One rewritten section. `line` is the first line the edit claims --
-    the section's `body_start`, never its heading, which this never touches."""
+    the section's `body_start`, never its heading, which this never touches.
+
+    The one exception is `create_missing` (index targets only): there, the
+    section did not exist to have a `body_start`, and `line` is instead the
+    position of the newly-inserted block -- including the separating blank
+    when one was needed, the same convention `SectionInsert.line` documents."""
 
     heading: str
     line: int  # 1-based, body-relative
@@ -101,6 +106,10 @@ class Regeneration:
     anywhere can move the lines an edit lands on, so "the section still looks
     the same" is a weaker check than it appears. There is deliberately no
     frontmatter digest -- see `okf_ext.generators.apply`.
+
+    `concept_id` is `""` for an **index** target and `path` carries the
+    identity -- the precedent `okf_ext.bundle`'s `_skip` sets, with the same
+    reason: nothing there is a concept, so there is no id to carry.
     """
 
     concept_id: str
@@ -132,4 +141,11 @@ class RegenerationPlan:
 
     @property
     def concept_ids(self) -> tuple[str, ...]:
-        return tuple(sorted({item.concept_id for item in self.regenerations}))
+        """The concepts this plan would change.
+
+        Index targets are excluded: they carry `concept_id=""` and are not
+        concepts, so reporting an empty id here would be a lie a caller
+        filtering on this property cannot see through. Read `path` off
+        `regenerations` for the full target list.
+        """
+        return tuple(sorted({item.concept_id for item in self.regenerations if item.concept_id}))

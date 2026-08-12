@@ -6,7 +6,7 @@ workspace: it extends `okf-io` and never modifies it.
 | Tier | What it is | Members |
 |---|---|---|
 | 1. Core | The spec, nothing else | `okf-io` |
-| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration, the proposal ledger and additive bundle setup today; budgeted context assembly later |
+| 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration, the proposal ledger, additive bundle setup and page placement today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
 ## Dependency policy
@@ -130,8 +130,9 @@ from `okf_ext.shape` directly in new code.
 
 ## Where a rule belongs
 
-`okf-ext` ships five rule-emitting capabilities (`tags`, `schemas`, `render`,
-`health`, `sections`). A sixth belongs here only if it passes one test:
+`okf-ext` ships six rule-emitting capabilities (`tags`, `schemas`, `render`,
+`health`, `sections`, `placement`). A seventh belongs here only if it passes one
+test:
 
 > **Does it hold for any OKF v0.2 bundle, whoever wrote it?**
 
@@ -165,6 +166,19 @@ is no `FEATURE_SECTIONS` constant and no Diátaxis skeleton in this package, for
 the same reason there is no `PLAN_TABLE` in `tables` — shipping one lane's
 section names from tier 2 would put every adopting bundle into a permanent
 finding state for a vocabulary it never adopted.
+
+`placement` is the same split on the other axis, and the harder-won case: it
+arrived as one tier-3 package's house rule, checking that a page sits in the
+directory its type's schema declares. What made it hoistable is that every
+decision it makes comes from the bundle's own declarations. `placement_rule`
+takes a `{type: directory}` map and holds no lane name, no type name and no
+taxonomy; a bundle that declares nothing gets no findings. Even the one case
+declarations cannot resolve — two types sharing a directory, one directly under
+it and one below — is an injected `depth` map rather than a constant here. It
+ships at `warn` like every other factory, because ADR-0012 is explicit that a
+directory annotation is a writer-side hint and a page sitting somewhere
+unexpected is a legal page; the caller whose own reconciler cannot recover is
+the one that passes `error`.
 
 Two consequences worth stating, because both look like counter-examples:
 

@@ -93,7 +93,7 @@ type = "layers"
 # fine -- `test_every_capability_is_named_in_the_layers_contract` is what
 # actually keeps it honest, not its width.
 layers = [
-    "okf_ext.bundle : okf_ext.generators : okf_ext.health : okf_ext.moves : okf_ext.proposals : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
+    "okf_ext.bundle : okf_ext.generators : okf_ext.health : okf_ext.moves : okf_ext.placement : okf_ext.proposals : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
     "okf_ext.shape",
     "okf_ext.splice : okf_ext.writing",
     "okf_ext.body",
@@ -115,4 +115,5 @@ modules = [
     "okf_ext.generators",
     "okf_ext.proposals",
     "okf_ext.bundle",
+    "okf_ext.placement",
 ]

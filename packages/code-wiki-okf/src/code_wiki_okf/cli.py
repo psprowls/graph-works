@@ -13,7 +13,8 @@ from pathlib import Path
 import typer
 from code_graph_io import open_reader
 from okf_ext.bundle import WriteFailure
-from okf_ext.schemas import load_schemas, schema_rule
+from okf_ext.placement import placement_rule
+from okf_ext.schemas import declared_directories, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
 from okf_ext.tags import load_vocabulary, vocabulary_rule
@@ -24,7 +25,6 @@ from code_wiki_okf.config import Config, ConfigError, load_config
 from code_wiki_okf.entities import lanes
 from code_wiki_okf.git_state import head_commit
 from code_wiki_okf.init import InitError, install_bundle
-from code_wiki_okf.lane.rule import lane_rule
 from code_wiki_okf.mirror.apply import apply_mirror
 from code_wiki_okf.mirror.model import MirrorPlan, MirrorResult
 from code_wiki_okf.mirror.plan import plan_mirror
@@ -339,7 +339,7 @@ def validate(
             schema_rule(schema_set),
             section_rule(section_set),
             vocabulary_rule(vocabulary),
-            lane_rule(schema_set),
+            placement_rule(declared_directories(schema_set), depth=lanes.ENTITY_DEPTH, severity="error"),
         ],
         strict=strict,
     )

@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 import pytest
-from okf_ext.schemas import DEFAULT_IGNORE, DEFAULT_SCHEMA_DIRNAME, SchemaError, load_schemas
+from okf_ext.schemas import DEFAULT_IGNORE, DEFAULT_SCHEMA_DIRNAME, SchemaError, declared_directories, load_schemas
 from okf_ext.schemas.loader import build_registry
 
 BASE = """
@@ -253,3 +253,57 @@ def test_a_missing_jsonschema_names_the_extra():
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert result.stdout.strip() == "True"
+
+
+# --- declared_directories ---------------------------------------------------
+
+
+def _annotated_set(tmp_path, **annotations):
+    """A schema directory whose per-type `x-okf-directory` the caller chooses.
+
+    A value of `...` means the annotation is omitted entirely, which is a
+    different fact from a blank one and has its own test below.
+    """
+    root = tmp_path / "_schema"
+    root.mkdir()
+    for type_name, directory in annotations.items():
+        document = {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": {"type": {"const": type_name}},
+        }
+        if directory is not ...:
+            document["x-okf-directory"] = directory
+        (root / f"{type_name}.schema.json").write_text(json.dumps(document), encoding="utf-8")
+    return load_schemas(root)
+
+
+def test_declared_directories_returns_every_annotated_type(tmp_path):
+    schema_set = _annotated_set(tmp_path, Widget="widgets/", Crate="crates/")
+    assert declared_directories(schema_set) == {"Widget": "widgets/", "Crate": "crates/"}
+
+
+def test_a_type_with_no_annotation_is_omitted(tmp_path):
+    """`x-okf-directory` is an extension annotation, not a JSONSchema keyword:
+    a hand-authored schema without it declares no lane."""
+    schema_set = _annotated_set(tmp_path, Widget="widgets/", Crate=...)
+    assert declared_directories(schema_set) == {"Widget": "widgets/"}
+
+
+def test_a_blank_annotation_is_omitted(tmp_path):
+    assert declared_directories(_annotated_set(tmp_path, Widget="   ")) == {}
+
+
+def test_a_non_string_annotation_is_omitted(tmp_path):
+    """Loading never raises for an annotation it does not understand -- the
+    value is a caller's declaration, and an unusable one declares nothing."""
+    assert declared_directories(_annotated_set(tmp_path, Widget=["widgets/"])) == {}
+
+
+def test_the_result_is_a_plain_mutable_dict(tmp_path):
+    """The caller passes it straight to `placement_rule`, which takes a
+    `Mapping`; returning a proxy would make merging in extra entries awkward
+    for no gain."""
+    found = declared_directories(_annotated_set(tmp_path, Widget="widgets/"))
+    found["Extra"] = "extra/"
+    assert found == {"Widget": "widgets/", "Extra": "extra/"}

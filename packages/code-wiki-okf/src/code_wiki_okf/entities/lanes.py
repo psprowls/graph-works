@@ -15,8 +15,10 @@ makes anything happen at all, including the entity sync step itself.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from types import MappingProxyType
 
 from code_graph_io import GraphReader
 from okf_ext.shape import load_sections
@@ -44,6 +46,17 @@ ENTITY_LANES: tuple[str, ...] = (
     "agent-plugins/",
     "repositories/",
 )
+
+#: The two types `x-okf-directory` alone cannot place, because both declare
+#: `repositories/`: the `Repository` entity page lives directly under it, and
+#: every mirror `File` page lives below that. The same distinction
+#: `entities/delete.py`'s `exact_depth=` and
+#: `sync/snapshot.py:_is_entity_repository_page` already make.
+#:
+#: It lives here, beside `ENTITY_LANES`, so this module stays the single answer
+#: to "what does this package know about its lanes" -- and it is passed into
+#: `okf_ext.placement.placement_rule`, which holds no type names of its own.
+ENTITY_DEPTH: Mapping[str, str] = MappingProxyType({"Repository": "exact", "File": "nested"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,4 +170,4 @@ def sync(
     return summary
 
 
-__all__ = ["ENTITY_LANES", "SyncSummary", "sync"]
+__all__ = ["ENTITY_DEPTH", "ENTITY_LANES", "SyncSummary", "sync"]

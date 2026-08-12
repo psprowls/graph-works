@@ -36,16 +36,19 @@ Defaults to `--dry-run` (touches nothing); pass `--no-dry-run` to apply.
 
 Reports drift and conformance findings; never writes. Runs okf-io's own
 catalog plus five house rules: `sync.*` (commit-derived staleness),
-`schemas.*`, `sections.*`, `tags.*`, and `lane.*`.
+`schemas.*`, `sections.*`, `tags.*`, and `placement.*`.
 
-The `lane.*` codes cover the page-to-lane correspondence `sync` assumes and
-never checks, and are **errors** rather than warnings because neither is
-drift a later run reconciles away:
+The `placement.*` codes are `okf_ext.placement`'s, composed here from what the
+bundle's own schemas declare — `placement_rule(declared_directories(schema_set),
+depth=ENTITY_DEPTH, severity="error")`. They cover the page-to-lane
+correspondence `sync` assumes and never checks. The capability defaults them to
+`warn`; this package raises both to **error**, because neither is drift a later
+run reconciles away:
 
 | code | what it catches |
 |---|---|
-| `lane.directory-mismatch` | the page's directory disagrees with its type's `x-okf-directory`. Deletion is scoped by lane prefix, so a misplaced page is outside `prune_lane`'s reach forever while sync keeps writing the page its type calls for — a duplicate no run can resolve. |
-| `lane.duplicate-resource` | two or more pages claim the same `resource:`. Find-by-resource keeps the first in bundle order, so every other one is unreachable by resource and invisible to deletion. |
+| `placement.directory-mismatch` | the page's directory disagrees with its type's `x-okf-directory`. Deletion is scoped by lane prefix, so a misplaced page is outside `prune_lane`'s reach forever while sync keeps writing the page its type calls for — a duplicate no run can resolve. |
+| `placement.duplicate-resource` | two or more pages claim the same `resource:`. Find-by-resource keeps the first in bundle order, so every other one is unreachable by resource and invisible to deletion. |
 
 Exits non-zero on any error-severity finding, and on any `sync.*` finding
 regardless of severity. `--strict` promotes every warning to an error first.

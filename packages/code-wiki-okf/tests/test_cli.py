@@ -635,8 +635,8 @@ def test_config_dir_relocates_the_declarations_and_validate_follows(tmp_path: Pa
 
 
 def test_validate_reports_schema_violation(tmp_path: Path) -> None:
-    """Isolated from `sync.*` and from `lane.*`: the fixture page sits in
-    `packages/` -- its type's declared lane, so `lane.directory-mismatch`
+    """Isolated from `sync.*` and from `placement.*`: the fixture page sits in
+    `packages/` -- its type's declared lane, so `placement.directory-mismatch`
     cannot fire -- and carries no `resource:`, so `resource_index` skips it,
     `_existing_entity_resources` never sees it, and it cannot be spuriously
     flagged `sync.orphan-page`. `schema_rule`/`section_rule` dispatch purely
@@ -674,7 +674,7 @@ def test_validate_reports_schema_violation(tmp_path: Path) -> None:
 def test_validate_reports_unfilled_required_section(tmp_path: Path) -> None:
     """Same isolation as `test_validate_reports_schema_violation`: the page
     sits in its declared lane and carries no `resource:`, so neither
-    `sync.*` nor `lane.*` fires, and the same two-tier (plain exits 0,
+    `sync.*` nor `placement.*` fires, and the same two-tier (plain exits 0,
     `--strict` exits 1) behavior applies.
     """
     result_init = runner.invoke(app, ["init", str(tmp_path / "bundle")])
@@ -730,11 +730,13 @@ def test_validate_reports_undeclared_tag(tmp_path: Path) -> None:
 
 
 def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
-    """Unlike every other house rule wired into this command, `lane.*` is
-    `error` by default: a page outside its declared lane is a state the
-    reconciler cannot leave, not advisory drift. So a plain `validate` run
-    already exits 1, and `cli.py` needs no `has_lane_finding` counterpart to
-    its `has_sync_finding` special case.
+    """Unlike every other house rule wired into this command, `placement.*` is
+    passed at `error`: a page outside its declared lane is a state the
+    reconciler cannot leave, not advisory drift. (The tier-2 factory itself
+    defaults to `warn`; the argument for raising it belongs to this package --
+    design spec §5.2.) So a plain `validate` run already exits 1, and `cli.py`
+    needs no `has_placement_finding` counterpart to its `has_sync_finding`
+    special case.
     """
     init_result = runner.invoke(app, ["init", str(tmp_path / "bundle")])
     assert init_result.exit_code == 0
@@ -752,7 +754,7 @@ def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", str(bundle_root)])
 
     assert result.exit_code == 1
-    assert "lane.directory-mismatch" in result.output
+    assert "placement.directory-mismatch" in result.output
     assert "error" in result.output.lower()
 
 

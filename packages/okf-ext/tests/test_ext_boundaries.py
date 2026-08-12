@@ -305,6 +305,7 @@ BUILT_IN_TOPICS = frozenset(
         "generators",
         "proposals",
         "bundle",
+        "placement",
     ]
 )
 def capability(request):
@@ -327,6 +328,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
         "generators",
         "proposals",
         "bundle",
+        "placement",
     }
 
 
@@ -369,11 +371,14 @@ def test_the_documented_tags_surface_is_present() -> None:
 
 
 def test_the_documented_schemas_surface_is_present() -> None:
-    """Spec §5 of the schemas work item: two functions, two values, two codes."""
+    """Spec §5 of the schemas work item: two functions, two values, two codes.
+    `declared_directories` is the third function, added for `okf_ext.placement`
+    to compose against -- the capability may not import this one."""
     from okf_ext import schemas
 
     assert callable(schemas.load_schemas)
     assert callable(schemas.schema_rule)
+    assert callable(schemas.declared_directories)
     assert schemas.TOPIC == "schemas"
     assert schemas.CODES == ("schemas.invalid", "schemas.no-schema-for-type")
     assert schemas.DEFAULT_SCHEMA_DIRNAME == "_schema"
@@ -677,3 +682,15 @@ def test_the_bundle_capability_claims_no_topic_prefix() -> None:
 
     assert not hasattr(bundle, "TOPIC")
     assert not hasattr(bundle, "CODES")
+
+
+def test_the_documented_placement_surface_is_present() -> None:
+    """Spec §3 of the curated-lane work item: one factory, two codes, and no
+    vocabulary -- the capability exports no lane map of its own, because the
+    map is the caller's."""
+    from okf_ext import placement
+
+    assert callable(placement.placement_rule)
+    assert placement.TOPIC == "placement"
+    assert placement.CODES == ("placement.directory-mismatch", "placement.duplicate-resource")
+    assert list(placement.__all__) == ["CODES", "TOPIC", "placement_rule"]

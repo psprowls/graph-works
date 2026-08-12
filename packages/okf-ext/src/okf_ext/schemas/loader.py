@@ -143,3 +143,24 @@ def load_schemas(path: str | Path) -> SchemaSet:
         documents=MappingProxyType(dict(sorted(documents.items()))),
         root=root,
     )
+
+
+def declared_directories(schema_set: SchemaSet) -> dict[str, str]:
+    """`{type: directory}` for every type in *schema_set* declaring one.
+
+    The inverse shape of a per-type lookup: one pass, so a caller building a
+    rule over the whole set does not re-walk it per document. Lives here rather
+    than in the capability that consumes it because `x-okf-directory` is a
+    schema annotation, and this is the module that already knows what a schema
+    document looks like.
+
+    A type declaring no annotation, a blank one, or a non-string one is omitted
+    rather than reported. Nothing about a missing annotation is an error: what
+    a caller does with the absence is the caller's rule.
+    """
+    found: dict[str, str] = {}
+    for type_name, schema in schema_set.schemas.items():
+        directory = schema.get("x-okf-directory")
+        if isinstance(directory, str) and directory.strip():
+            found[type_name] = directory
+    return found

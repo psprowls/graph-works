@@ -20,12 +20,13 @@ from pathlib import Path
 from code_graph_io.handle import open_reader
 from code_graph_io.update import run_workspace
 from code_wiki_okf.config import RepoConfig
+from code_wiki_okf.entities.lanes import ENTITY_DEPTH
 from code_wiki_okf.git_state import ls_files
 from code_wiki_okf.init import install_bundle
-from code_wiki_okf.lane.rule import lane_rule
 from code_wiki_okf.mirror.apply import apply_mirror
 from code_wiki_okf.mirror.plan import plan_mirror
-from okf_ext.schemas import load_schemas, schema_rule
+from okf_ext.placement import placement_rule
+from okf_ext.schemas import declared_directories, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
 from okf_ext.tags import load_vocabulary, vocabulary_rule
@@ -185,16 +186,16 @@ def test_synced_bundle_validates_clean(tmp_path: Path) -> None:
             schema_rule(schema_set),
             section_rule(section_set),
             vocabulary_rule(vocabulary),
-            lane_rule(schema_set),
+            placement_rule(declared_directories(schema_set), depth=ENTITY_DEPTH, severity="error"),
         ],
     )
     assert report.ok, report.errors
     # Every mirror page is a `File` at `repositories/<repo>/<rel>`; the
-    # depth half of `lane.directory-mismatch` (design spec §2.4) must not
+    # depth half of `placement.directory-mismatch` (design spec §3.1) must not
     # false-positive on any of them, and `Repository`/`File` sharing one
     # `x-okf-directory` is exactly the case a plain prefix check would miss.
-    assert not report.by_code("lane.directory-mismatch")
-    assert not report.by_code("lane.duplicate-resource")
+    assert not report.by_code("placement.directory-mismatch")
+    assert not report.by_code("placement.duplicate-resource")
 
 
 def test_rename_preserves_prose_and_repairs_inbound_links(tmp_path: Path) -> None:

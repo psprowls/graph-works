@@ -1,13 +1,10 @@
-"""This child's done-when, verbatim from the design spec §1:
+"""What this package still owns after the rule moved to tier 2.
 
-- both declared codes fire over a bundle built in `tmp_path`,
-- the catalog test asserts every code's prefix equals the module name,
-- and `install_bundle`'s seeded bundle still reports zero errors with
-  `lane_rule` added to the existing four.
-
-The last one is the property §3.1 could plausibly have broken -- it made
-thirteen previously-optional headings required -- so it is asserted with the
-full five-rule set, not with `lane_rule` alone.
+The rule's own behaviour is `packages/okf-ext/tests/test_placement_rule.py`'s.
+What is asserted here is the composition: that the seeded declarations really
+do declare every entity lane, that the depth map covers the one pair no
+annotation can separate, and that `install_bundle`'s bundle still reports zero
+errors under the full five-rule set `cli.py:validate` builds.
 """
 
 from __future__ import annotations
@@ -16,17 +13,23 @@ import importlib.resources
 from datetime import date
 from pathlib import Path
 
+from code_wiki_okf.entities.lanes import ENTITY_DEPTH
 from code_wiki_okf.init import install_bundle
-from code_wiki_okf.lane.rule import CODES, TOPIC, lane_rule
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import SyncSnapshot
-from okf_ext.schemas import load_schemas, schema_rule
+from okf_ext.placement import CODES, TOPIC, placement_rule
+from okf_ext.schemas import declared_directories, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
 from okf_ext.tags import load_vocabulary, vocabulary_rule
 from okf_io import Rule, load_bundle, validate
 
 _TODAY = date(2026, 1, 1)
+
+
+def _seed_schemas():
+    assets = importlib.resources.files("code_wiki_okf") / "assets" / "_schema"
+    return load_schemas(str(assets))
 
 
 def _five_rules(root: Path) -> list[Rule]:
@@ -42,16 +45,32 @@ def _five_rules(root: Path) -> list[Rule]:
         schema_rule(schema_set),
         section_rule(load_sections(root / "_sections")),
         vocabulary_rule(load_vocabulary(root / "_tags.yaml")),
-        lane_rule(schema_set),
+        placement_rule(declared_directories(schema_set), depth=ENTITY_DEPTH, severity="error"),
     ]
 
 
-def test_every_declared_code_has_the_module_name_as_its_prefix() -> None:
-    """okf-io's `test_catalog.py` invariant, applied mechanically to the one
-    module: the module name IS the code prefix."""
-    assert lane_rule.__module__ == f"code_wiki_okf.{TOPIC}.rule"
-    assert all(code.split(".", 1)[0] == TOPIC for code in CODES)
-    assert len(set(CODES)) == len(CODES)
+def test_the_seeded_schemas_declare_every_entity_lane() -> None:
+    """The composed call is only as good as what the assets declare: a schema
+    that loses its `x-okf-directory` would silently stop being checked, with
+    nothing else in the suite noticing."""
+    assert declared_directories(_seed_schemas()) == {
+        "AgentPlugin": "agent-plugins/",
+        "App": "apps/",
+        "Dependency": "dependencies/",
+        "File": "repositories/",
+        "Package": "packages/",
+        "Repository": "repositories/",
+        "TestSuite": "test-suites/",
+    }
+
+
+def test_the_depth_map_covers_the_one_pair_annotations_cannot_separate() -> None:
+    """`Repository` and `File` both declare `repositories/`. Every other type
+    owns its directory outright and needs no entry."""
+    declared = declared_directories(_seed_schemas())
+    shared = {name for name, directory in declared.items() if list(declared.values()).count(directory) > 1}
+    assert shared == set(ENTITY_DEPTH)
+    assert dict(ENTITY_DEPTH) == {"Repository": "exact", "File": "nested"}
 
 
 def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
@@ -78,14 +97,13 @@ def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
     report = validate(load_bundle(root), today=_TODAY, extra_rules=_five_rules(root))
     fired = {finding.code for finding in report.findings if finding.code.startswith(f"{TOPIC}.")}
     assert fired == set(CODES)
-    assert not report.ok  # both codes are `error`, so the report already fails
+    assert not report.ok  # this package passes `error`, so the report already fails
 
 
 def test_the_seeded_bundle_reports_zero_errors_under_all_five_rules(tmp_path: Path) -> None:
-    """The property §3.1 could plausibly have broken. Both `lane.*` codes are
-    `error`, so this asserts `report.ok` rather than only the absence of
-    `lane.*` -- a regression in either would surface here.
-    """
+    """Acceptance §7.5. Both `placement.*` codes are `error` here, so this
+    asserts `report.ok` rather than only the absence of `placement.*` -- a
+    regression in either would surface."""
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
     report = validate(load_bundle(root), today=_TODAY, extra_rules=_five_rules(root))

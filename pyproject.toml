@@ -63,6 +63,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/config-io/tests/**" = ["ANN"]
 "packages/models-io/tests/**" = ["ANN"]
 "packages/subagents-io/tests/**" = ["ANN"]
+"packages/doc-wiki-okf/tests/**" = ["ANN"]
 
 [tool.mypy]
 python_version = "3.12"

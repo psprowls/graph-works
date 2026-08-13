@@ -69,8 +69,16 @@ from okf_ext.proposals.model import (
     RefusalKind,
     Write,
 )
-from okf_ext.proposals.plan import list_proposals, mode, plan_create, plan_decide, plan_promote, plan_propose
-from okf_ext.proposals.render import HEADER, render_body
+from okf_ext.proposals.plan import (
+    list_proposals,
+    mode,
+    placement,
+    plan_create,
+    plan_decide,
+    plan_promote,
+    plan_propose,
+)
+from okf_ext.proposals.render import HEADER, BodyRenderer, render_body
 from okf_ext.writing import ApplyResult, FailureKind, Skipped, SkipReason, WriteFailure
 
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords classes, then lowercase
@@ -82,6 +90,7 @@ __all__ = [
     "PAGE_STATUSES",
     "PROPOSAL_TYPE",
     "ApplyResult",
+    "BodyRenderer",
     "Decision",
     "DecisionPlan",
     "FailureKind",
@@ -101,6 +110,7 @@ __all__ = [
     "apply",
     "list_proposals",
     "mode",
+    "placement",
     "plan_create",
     "plan_decide",
     "plan_promote",

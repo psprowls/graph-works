@@ -74,6 +74,25 @@ def test_nothing_is_rendered_as_an_autolink():
     assert "<" not in rendered.removeprefix(HEADER)
 
 
+def test_render_body_satisfies_the_body_renderer_protocol():
+    """The default *is* the protocol, which is what makes the seam additive."""
+    from okf_ext.proposals import BodyRenderer
+
+    assert isinstance(render_body, BodyRenderer)
+
+
+def test_a_keyword_only_callable_of_the_right_shape_satisfies_it():
+    from collections.abc import Mapping, Sequence
+    from typing import Any
+
+    from okf_ext.proposals import BodyRenderer
+
+    def other(*, description: str, sources: Sequence[Mapping[str, Any]], newline: str = "\n") -> str:
+        return description + newline
+
+    assert isinstance(other, BodyRenderer)
+
+
 def test_the_citation_marker_resolves_to_the_bundle_path_not_a_literal_bracket_string():
     """`okf_io`'s parser is plain CommonMark with no footnote extension, so
     `[^src-a]` in the bullet is itself a shortcut reference link resolving

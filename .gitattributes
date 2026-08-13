@@ -11,3 +11,10 @@ packages/okf-io/tests/fixtures/** -text
 # are: `linked/concepts/crlf.md` is uniformly CRLF on purpose, and EOL
 # normalization would silently break the regression it exists to guard.
 packages/okf-ext/tests/fixtures/** -text
+
+# doc-wiki-okf's proposal corpus is a byte-exact contract for the same reason
+# okf-io's and okf-ext's are: `tests/test_migrate_fixtures.py` asserts every
+# migrated body is byte-identical to the fixture it came from, and Git's
+# end-of-line normalization would rewrite those bytes on checkout -- silently,
+# on someone else's machine -- and break the very property they exist to prove.
+packages/doc-wiki-okf/tests/fixtures/** -text

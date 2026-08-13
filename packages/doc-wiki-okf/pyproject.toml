@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "doc-wiki-okf"
+version = "0.2.0"
+description = "The documentation-wiki lane over OKF v0.2: source reading, ingest briefs, and proposals."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "okf-io>=0.1,<0.2",
+  "okf-ext[schemas]>=0.4.4,<0.5",
+  "typer>=0.12",
+]
+
+[project.scripts]
+doc-wiki-okf = "doc_wiki_okf.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/doc_wiki_okf"]
+
+[tool.uv.sources]
+okf-io = { workspace = true }
+okf-ext = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

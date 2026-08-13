@@ -621,6 +621,7 @@ def test_the_documented_proposals_surface_is_present() -> None:
         "plan_promote",
         "list_proposals",
         "mode",
+        "placement",
         "apply",
         "render_body",
     ):
@@ -642,6 +643,19 @@ def test_the_documented_proposals_surface_is_present() -> None:
     }
     assert proposals.Write.__dataclass_fields__.keys() == {"member", "mode", "text", "frontmatter", "body", "digest"}
     assert proposals.PageRender.__dataclass_fields__.keys() == {"type", "body", "frontmatter"}
+
+
+def test_plan_propose_defaults_its_render_seam_to_render_body() -> None:
+    """`BodyRenderer` documents the seam's shape; this pins the default that
+    makes the seam additive -- every pre-existing caller of `plan_propose`
+    keeps getting exactly `render_body`'s output without passing `render=`."""
+    import inspect
+
+    from okf_ext import proposals
+
+    assert isinstance(proposals.render_body, proposals.BodyRenderer)
+    parameter = inspect.signature(proposals.plan_propose).parameters["render"]
+    assert parameter.default is proposals.render_body
 
 
 def test_the_proposals_capability_claims_no_topic_prefix() -> None:

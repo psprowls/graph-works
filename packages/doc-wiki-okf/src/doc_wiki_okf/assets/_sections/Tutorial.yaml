@@ -1,0 +1,15 @@
+sections:
+  - heading: What you will build
+    required: true
+    placeholder: |
+      > TODO: the one thing the reader will have working at the end.
+  - heading: Before you start
+    required: true
+    placeholder: |
+      > TODO: what must already be installed, running, or understood.
+  - heading: Steps
+    required: true
+    placeholder: |
+      > TODO: numbered steps, each ending in a result the reader can see.
+  - heading: What you learned
+additional_sections: true

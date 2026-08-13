@@ -32,7 +32,27 @@ This module imports stdlib only.
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, Protocol, runtime_checkable
+
+
+@runtime_checkable
+class BodyRenderer(Protocol):
+    """The shape `plan_propose`'s `render=` seam requires: `render_body`'s own
+    keyword-only signature, nothing more.
+
+    `runtime_checkable` so `isinstance(candidate, BodyRenderer)` works -- the
+    seam is structural, not nominal, and the default (`render_body` itself)
+    has to satisfy it without inheriting from anything.
+    """
+
+    def __call__(
+        self,
+        *,
+        description: str,
+        sources: Sequence[Mapping[str, Any]],
+        newline: str = "\n",
+    ) -> str: ...
+
 
 #: The machine-ownership notice. An HTML comment rather than a frontmatter
 #: flag: a human opening the file sees it, and nothing has to stay in sync with
@@ -91,4 +111,4 @@ def render_body(
     return newline.join(lines) + newline
 
 
-__all__ = ["HEADER", "render_body"]
+__all__ = ["HEADER", "BodyRenderer", "render_body"]

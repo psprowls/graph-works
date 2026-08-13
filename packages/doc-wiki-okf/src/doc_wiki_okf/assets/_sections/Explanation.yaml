@@ -1,0 +1,11 @@
+sections:
+  - heading: Context
+    required: true
+    placeholder: |
+      > TODO: what a reader needs to hold in mind before the idea itself.
+  - heading: Trade-offs
+    placeholder: |
+      > TODO: the alternatives, and what choosing this one costs.
+  - heading: See also
+    placeholder_ref: see_also
+additional_sections: true

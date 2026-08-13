@@ -1,0 +1,18 @@
+sections:
+  - heading: Goal
+    required: true
+    placeholder: |
+      > TODO: the problem this page solves, in one sentence.
+  - heading: Assumptions
+    required: true
+    placeholder: |
+      > TODO: what the reader already has, knows, or is running.
+  - heading: Steps
+    required: true
+    placeholder: |
+      > TODO: numbered steps, with alternatives noted where they exist.
+  - heading: Result
+    required: true
+    placeholder: |
+      > TODO: what the reader should observe once the steps are done.
+additional_sections: true

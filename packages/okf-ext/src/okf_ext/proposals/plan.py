@@ -45,7 +45,7 @@ from okf_ext.proposals.model import (
     RefusalKind,
     Write,
 )
-from okf_ext.proposals.render import render_body
+from okf_ext.proposals.render import BodyRenderer, render_body
 from okf_ext.splice import dominant_newline
 from okf_ext.writing import body_digest
 
@@ -161,7 +161,7 @@ def _slug(target: str) -> str:
     """A filename stem for *target*. Placement only -- never identity.
 
     Deterministic and lossy on purpose: two targets can slug the same, and the
-    caller of `_placement` disambiguates rather than refusing, because where a
+    caller of `placement` disambiguates rather than refusing, because where a
     proposal file sits is cosmetic and nothing reads it.
     """
     stem = target[:-3] if target.endswith(".md") else target
@@ -170,14 +170,25 @@ def _slug(target: str) -> str:
     return collapsed or "proposal"
 
 
-def _placement(bundle: Bundle, target: str) -> str:
+def placement(bundle: Bundle, target: str, *, directory: str = "proposals") -> str:
     """Where a new proposal for *target* goes, avoiding an occupied path.
 
-    `proposals/<slug>.md`, then `-2`, `-3`, ... until free. A collision is
+    `<directory>/<slug>.md`, then `-2`, `-3`, ... until free. A collision is
     worked around rather than refused: identity is the target, and refusing a
     file over a cosmetic name clash would make placement load-bearing.
+
+    *directory* is bundle-relative, leading and trailing slashes optional;
+    `""` places at the bundle root. It defaults to `proposals`, which is what
+    `plan_propose` passes and the only value that existed while this was
+    private. Public because there is now a second caller --
+    `doc_wiki_okf.proposals.migrate`, which re-places an old-dialect proposal
+    inside its **own** parent directory so an archived one stays archived --
+    and two definitions of where a proposal file goes is exactly the drift
+    this workspace argues against. The rule is substrate-neutral: a slug plus
+    a collision loop, no lane vocabulary, so it stays at tier 2.
     """
-    base = f"proposals/{_slug(target)}"
+    prefix = directory.strip("/")
+    base = f"{prefix}/{_slug(target)}" if prefix else _slug(target)
     candidate = f"{base}.md"
     counter = 2
     while bundle.has_member(candidate):
@@ -255,6 +266,7 @@ def plan_propose(
     description: str,
     by: str,
     at: datetime,
+    render: BodyRenderer = render_body,
 ) -> ProposalPlan:
     """Plan filing a proposal for *target*, or merging into the live one.
 
@@ -265,6 +277,12 @@ def plan_propose(
 
     Idempotence surfaces as an empty plan: incoming sources already present,
     with the title and description unchanged, plan nothing at all.
+
+    *render* defaults to this capability's own `render_body`, so every
+    pre-existing caller is unaffected. It is used on both the create body and
+    the merge body -- always from the merged/deduped `sources[]`, never the
+    raw incoming ones, so an injected renderer sees the same ledger a reader
+    of the resulting document would.
     """
     stamp = _require_aware(at)
     normalized = _normalize_target(target)
@@ -322,9 +340,9 @@ def plan_propose(
         )
 
     if live is None:
-        member = _placement(bundle, normalized)
+        member = placement(bundle, normalized)
         deduped, _changed = _merge_sources((), sources)
-        body = render_body(description=description, sources=deduped)
+        body = render(description=description, sources=deduped)
         text = _render_document(
             body=body,
             frontmatter={
@@ -358,7 +376,7 @@ def plan_propose(
         frontmatter["title"] = title.strip()
     if description.strip():
         frontmatter["description"] = description.strip()
-    body = render_body(
+    body = render(
         description=frontmatter.get("description", live.description),
         sources=merged,
         newline=dominant_newline(document.body),
@@ -646,4 +664,4 @@ def plan_promote(
     )
 
 
-__all__ = ["list_proposals", "mode", "plan_create", "plan_decide", "plan_promote", "plan_propose"]
+__all__ = ["list_proposals", "mode", "placement", "plan_create", "plan_decide", "plan_promote", "plan_propose"]

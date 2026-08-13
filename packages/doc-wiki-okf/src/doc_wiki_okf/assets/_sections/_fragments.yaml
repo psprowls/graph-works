@@ -1,0 +1,9 @@
+# `_`-prefixed so `load_sections` reads it for its `fragments:` mapping and
+# keeps it out of the type dispatch table.
+#
+# One fragment, shared by `Reference` and `Explanation`. Spec §3.3: the
+# placeholder names the link form to use and carries no wikilink to copy --
+# `okf_io.LinkGraph` reads markdown links and cannot see a wikilink at all.
+fragments:
+  see_also: |
+    > TODO: related pages, as root-absolute markdown links, one per line.

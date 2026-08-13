@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "_base-diataxis.schema.json",
+  "properties": {
+    "type": { "const": "HowTo" },
+    "prerequisites": { "type": "array", "items": { "type": "string" } },
+    "outcome": { "type": "string", "minLength": 1 }
+  },
+  "x-okf-directory": "how-tos/"
+}

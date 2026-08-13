@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 import ext_helpers
 import pytest
+from okf_ext.proposals.apply import apply
 from okf_ext.proposals.model import Proposal
 from okf_ext.proposals.plan import list_proposals, plan_decide, plan_propose
 from okf_ext.proposals.render import render_body
@@ -221,3 +222,113 @@ def test_a_naive_instant_raises(call):
             plan_propose(bundle, "pages/x.md", [NEW_SOURCE], title="X", description="d", by=BY, at=naive)
         else:
             plan_decide(bundle, _by_id(bundle)["proposals/live"], "approved", by="h:x", at=naive)
+
+
+def test_the_default_render_is_byte_identical_to_render_body(tmp_path):
+    """The seam is provably additive: omitting `render=` and passing
+    `render=render_body` produce the same bytes."""
+    bundle = ext_helpers.write_bundle(tmp_path, {})
+    sources = [{"id": "src-a", "resource": "/sources/a.md", "title": "A"}]
+    default = plan_propose(bundle, "pages/p.md", sources, title="T", description="D", by=BY, at=AT)
+    explicit = plan_propose(bundle, "pages/p.md", sources, title="T", description="D", by=BY, at=AT, render=render_body)
+    assert default.writes[0].text == explicit.writes[0].text
+
+
+def test_an_injected_render_writes_the_create_body(tmp_path):
+    def shouty(*, description, sources, newline="\n"):
+        return f"INJECTED {description} {len(sources)}{newline}"
+
+    bundle = ext_helpers.write_bundle(tmp_path, {})
+    plan = plan_propose(
+        bundle,
+        "pages/p.md",
+        [{"id": "a", "resource": "/s/a.md"}],
+        title="T",
+        description="D",
+        by=BY,
+        at=AT,
+        render=shouty,
+    )
+    assert "INJECTED D 1" in plan.writes[0].text
+
+
+def test_an_injected_render_sees_the_merged_sources_on_a_merge(tmp_path):
+    """The reason the seam is a callable rather than a string: only
+    `plan_propose` computes the merge, so only it can render from the result."""
+    seen: list[int] = []
+
+    def counting(*, description, sources, newline="\n"):
+        seen.append(len(sources))
+        return f"body {len(sources)}{newline}"
+
+    bundle = ext_helpers.write_bundle(tmp_path, {})
+    first = plan_propose(
+        bundle,
+        "pages/p.md",
+        [{"id": "a", "resource": "/s/a.md"}],
+        title="T",
+        description="D",
+        by=BY,
+        at=AT,
+        render=counting,
+    )
+    apply(bundle, first)
+    reloaded = load_bundle(tmp_path)
+    second = plan_propose(
+        reloaded,
+        "pages/p.md",
+        [{"id": "b", "resource": "/s/b.md"}],
+        title="T",
+        description="D",
+        by=BY,
+        at=AT,
+        render=counting,
+    )
+    assert seen[-1] == 2
+    assert second.writes[0].body is not None
+    assert "body 2" in second.writes[0].body
+
+
+def test_placement_defaults_to_the_proposals_directory(tmp_path):
+    """The pre-existing rule, now reachable by name. `plan_propose` passes the
+    default and its behaviour is unchanged."""
+    from okf_ext.proposals import placement
+
+    root = tmp_path / "b"
+    root.mkdir()
+    bundle = ext_helpers.write_bundle(root, {})
+    assert placement(bundle, "adrs/x.md") == "proposals/adrs-x.md"
+
+
+def test_placement_honours_a_caller_supplied_directory(tmp_path):
+    """The migrator re-places a proposal inside its **own** parent, which is
+    what keeps an archived proposal archived rather than resurrecting it."""
+    from okf_ext.proposals import placement
+
+    root = tmp_path / "b"
+    root.mkdir()
+    bundle = ext_helpers.write_bundle(root, {})
+    assert placement(bundle, "adrs/x.md", directory="proposals/_archive") == "proposals/_archive/adrs-x.md"
+    assert placement(bundle, "adrs/x.md", directory="/proposals/_archive/") == "proposals/_archive/adrs-x.md"
+
+
+def test_placement_at_the_bundle_root_carries_no_prefix(tmp_path):
+    from okf_ext.proposals import placement
+
+    root = tmp_path / "b"
+    root.mkdir()
+    bundle = ext_helpers.write_bundle(root, {})
+    assert placement(bundle, "adrs/x.md", directory="") == "adrs-x.md"
+
+
+def test_placement_disambiguates_inside_a_non_default_directory(tmp_path):
+    """A collision is worked around rather than refused, in every directory --
+    identity is the target and placement is cosmetic."""
+    from okf_ext.proposals import placement
+
+    root = tmp_path / "b"
+    occupied = root / "proposals" / "_archive" / "adrs-x.md"
+    occupied.parent.mkdir(parents=True, exist_ok=True)
+    occupied.write_text("---\ntype: Proposal\ntitle: Occupies it\n---\nbody\n", encoding="utf-8")
+    bundle = ext_helpers.write_bundle(root, {})
+    assert placement(bundle, "adrs/x.md", directory="proposals/_archive") == "proposals/_archive/adrs-x-2.md"

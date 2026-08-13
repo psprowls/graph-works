@@ -1,0 +1,8 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "_base-diataxis.schema.json",
+  "properties": {
+    "type": { "const": "Explanation" }
+  },
+  "x-okf-directory": "explanations/"
+}

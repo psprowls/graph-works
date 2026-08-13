@@ -1,0 +1,8 @@
+sections:
+  - heading: Summary
+    required: true
+    placeholder: |
+      > TODO: what this page is a reference for, and what it is true of.
+  - heading: See also
+    placeholder_ref: see_also
+additional_sections: true

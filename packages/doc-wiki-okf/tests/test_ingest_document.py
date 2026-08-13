@@ -1,0 +1,203 @@
+"""One file in, a fact sheet out — and the legacy dict out of `as_data()`.
+
+The parity cases are ported from `wiki-io`'s `test_ingest_source_prep.py`. That
+suite reached a real sqlite code graph to produce an entity match; here the
+matcher is a stub, because the graph is a seam now (design spec §5.2).
+"""
+
+import json
+from collections.abc import Mapping
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from doc_wiki_okf.ingest.document import PREVIEW_CHARS, DocumentBrief, plan_document_brief
+from doc_wiki_okf.ingest.layout import IngestLayout
+from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatch
+
+DAY = date(2026, 8, 12)
+GATE = {"scanned_at": "2026-08-11", "stale": True}
+
+
+def _gate(repo: Path, /, *, workspace: Path) -> Mapping[str, Any]:
+    return GATE
+
+
+def _matcher(repo: Path, source: Path, title: str, /) -> EntityMatch:
+    return EntityMatch(uri="pkg:o/r/graph-io", entity_filename="pkg_graph-io")
+
+
+def _workspace(tmp_path: Path) -> tuple[Path, Path]:
+    wiki = tmp_path / "wiki"
+    wiki.mkdir()
+    return tmp_path, wiki
+
+
+def _write(path: Path, text: str) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def test_a_raw_spec_is_typed_from_its_folder(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    source = _write(workspace / "raw" / "specs" / "auth.md", "# Auth Spec\n\nBody text.")
+
+    brief = plan_document_brief(source, wiki=wiki, repo=repo, workspace_root=workspace, today=DAY)
+
+    assert brief.source_type == "spec"
+    assert brief.in_repo_doc is False
+    assert brief.title == "Auth Spec"
+    assert brief.slug == "auth-spec"
+    assert brief.suggested_summary_path == "sources/2026-08-auth-spec.md"
+    assert brief.merge_mode is False
+    assert brief.word_count == 4
+
+
+def test_an_in_repo_doc_is_typed_doc(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "packages" / "graph-io" / "store.py", "# Graph IO Store\n\nBody text.")
+
+    brief = plan_document_brief(
+        Path("packages/graph-io/store.py"), wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY
+    )
+
+    assert brief.source_path == source
+    assert brief.source_type == "doc"
+    assert brief.in_repo_doc is True
+
+
+def test_a_title_falls_back_to_the_stem(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "raw" / "articles" / "some-long-read.txt", "no heading here")
+
+    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+
+    assert brief.title == "Some Long Read"
+    assert brief.slug == "some-long-read"
+
+
+def test_no_seams_means_two_nulls(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+
+    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+
+    assert brief.state_gate is None
+    assert brief.entity_match == NO_ENTITY
+
+
+def test_both_seams_ride_through(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+
+    brief = plan_document_brief(
+        source,
+        wiki=wiki,
+        repo=workspace,
+        workspace_root=workspace,
+        today=DAY,
+        state_gate=_gate,
+        match_entity=_matcher,
+    )
+
+    assert brief.state_gate == GATE
+    assert brief.entity_match == EntityMatch(uri="pkg:o/r/graph-io", entity_filename="pkg_graph-io")
+
+
+def test_today_decides_the_source_page(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+
+    january = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=date(2026, 1, 5))
+    august = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+
+    assert january.suggested_summary_path == "sources/2026-01-a.md"
+    assert august.suggested_summary_path == "sources/2026-08-a.md"
+
+
+def test_merge_mode_is_true_when_the_source_page_exists(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+    _write(wiki / "sources" / "2026-08-a.md", "# A\n")
+
+    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+
+    assert brief.merge_mode is True
+
+
+def test_a_long_document_is_truncated_and_says_so(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    body = "x " * PREVIEW_CHARS
+    source = _write(workspace / "raw" / "specs" / "long.md", f"# Long\n\n{body}")
+
+    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+
+    assert brief.preview.endswith("[TRUNCATED]")
+    assert len(brief.preview) == PREVIEW_CHARS + len("\n[TRUNCATED]")
+
+
+def test_a_short_document_is_not_truncated(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "raw" / "specs" / "short.md", "# Short\n\nbody")
+
+    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+
+    assert "[TRUNCATED]" not in brief.preview
+
+
+def test_the_layout_decides_the_source_page_template(tmp_path):
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "inbox" / "rfcs" / "a.md", "# A\n")
+    layout = IngestLayout(
+        raw_dir="inbox",
+        archive_dir="done",
+        source_types={"rfcs": "spec"},
+        batch_kinds=frozenset({"rfcs"}),
+        source_page_template="pages/{slug}-{month}.md",
+    )
+
+    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, layout=layout)
+
+    assert brief.source_type == "spec"
+    assert brief.suggested_summary_path == "pages/a-2026-08.md"
+
+
+def test_as_data_is_the_legacy_dict(tmp_path):
+    """The acceptance criterion is shape and key parity with the legacy dict.
+    `word_count` and `in_repo_doc` use corrected computation (the legacy formula
+    and fixtures were internally inconsistent); every other field matches exactly."""
+    workspace, wiki = _workspace(tmp_path)
+    source = _write(workspace / "raw" / "specs" / "auth.md", "# Auth Spec\n\nBody text.")
+
+    data = plan_document_brief(
+        source,
+        wiki=wiki,
+        repo=workspace,
+        workspace_root=workspace,
+        today=DAY,
+        state_gate=_gate,
+        match_entity=_matcher,
+    ).as_data()
+
+    assert data == {
+        "source_path": str(source),
+        "title": "Auth Spec",
+        "source_type": "spec",
+        "slug": "auth-spec",
+        "preview": "# Auth Spec\n\nBody text.",
+        "word_count": 4,
+        "suggested_summary_path": "sources/2026-08-auth-spec.md",
+        "merge_mode": False,
+        "in_repo_doc": False,
+        "entity_match": {"uri": "pkg:o/r/graph-io", "entity_filename": "pkg_graph-io"},
+        "state_gate": {"scanned_at": "2026-08-11", "stale": True},
+    }
+    assert json.loads(json.dumps(data)) == data
+
+
+def test_the_brief_is_frozen_and_carries_no_discriminator():
+    fields = {f.name for f in DocumentBrief.__dataclass_fields__.values()}
+    assert not fields & {"is_folder", "is_batch", "is_skill"}

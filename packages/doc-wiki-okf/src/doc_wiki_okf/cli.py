@@ -33,7 +33,7 @@ from okf_ext.proposals import (
     list_proposals,
     plan_decide,
 )
-from okf_ext.schemas import load_schemas
+from okf_ext.schemas import SchemaSet, load_schemas
 from okf_ext.shape import SectionSet, load_sections
 from okf_io import Bundle, load_bundle
 
@@ -52,15 +52,29 @@ from doc_wiki_okf.proposals.migrate import MigrationPlan, migrate_and_move, plan
 from doc_wiki_okf.proposals.promote import plan_promotion
 from doc_wiki_okf.proposals.render import ReviewRenderer
 from doc_wiki_okf.resources import seed_files
+from doc_wiki_okf.sources import SOURCE_TYPES, plan_ingest
 
-#: `_schema/` and `_sections/` are declarations, not concepts. Two patterns
-#: each, for the reason `okf_ext.schemas.DEFAULT_IGNORE` gives: the first is
-#: anchored at the start and so never matches a nested one.
-IGNORE = ("_schema/*", "*/_schema/*", "_sections/*", "*/_sections/*")
+#: `_schema/` and `_sections/` are declarations, not concepts, and
+#: `sources/references/` holds copies of ingested material. Two patterns each,
+#: for the reason `okf_ext.schemas.DEFAULT_IGNORE` gives: the first is anchored
+#: at the start and so never matches a nested one.
+#:
+#: Ignored still means present: `has_member` counts these, which is what the
+#: writer's occupancy check depends on.
+IGNORE = (
+    "_schema/*",
+    "*/_schema/*",
+    "_sections/*",
+    "*/_sections/*",
+    "sources/references/*",
+    "*/sources/references/*",
+)
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
 proposal_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Act on one proposal.")
 app.add_typer(proposal_app, name="proposal")
+source_app = typer.Typer(add_completion=False, no_args_is_help=True, help="Record ingested material.")
+app.add_typer(source_app, name="source")
 
 
 @app.callback()
@@ -98,12 +112,20 @@ def _bundle(root: Path) -> Bundle:
     return load_bundle(root, ignore=IGNORE)
 
 
-def _lanes(root: Path, declarations_dir: Path | None) -> LaneSet:
+def _schema_set(root: Path, declarations_dir: Path | None) -> SchemaSet:
     declarations = root if declarations_dir is None else declarations_dir
     try:
-        return lane_set(load_schemas(declarations / "_schema"))
+        return load_schemas(declarations / "_schema")
     except (OSError, ValueError, KeyError) as exc:
         typer.echo(f"{declarations / '_schema'}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _lanes(root: Path, declarations_dir: Path | None) -> LaneSet:
+    try:
+        return lane_set(_schema_set(root, declarations_dir))
+    except KeyError as exc:
+        typer.echo(f"{root}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
 
@@ -166,6 +188,28 @@ def _page_status(value: str | None) -> PageStatus | None:
         typer.echo(f"--page-status {value!r}: expected one of {list(PAGE_STATUSES)}", err=True)
         raise typer.Exit(code=1)
     return value
+
+
+def _source_type(value: str) -> str:
+    if value not in SOURCE_TYPES:
+        typer.echo(f"--source-type {value!r}: expected one of {list(SOURCE_TYPES)}", err=True)
+        raise typer.Exit(code=1)
+    return value
+
+
+def _material_text(material: Path) -> str:
+    """Decode MATERIAL as UTF-8. Exits 1 naming the file on failure."""
+    try:
+        return material.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        typer.echo(
+            f"{material}: not UTF-8 text. Binary reference material (PDFs, images) is not supported yet.",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    except OSError as exc:
+        typer.echo(f"{material}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 def _report(plan: Plan, *, dry_run: bool, bundle: Bundle, json_output: bool) -> None:
@@ -546,12 +590,14 @@ def _document_lines(brief: DocumentBrief) -> list[str]:
 def ingest(
     source: Path = typer.Argument(..., help="The file or directory to brief."),  # noqa: B008
     workspace: Path = typer.Option(  # noqa: B008
-        Path(), "--workspace", help="The workspace root: `raw/` and `wiki/` are its children."
+        Path(), "--workspace", help="The workspace root. `wiki/` is its child; the material need not be."
     ),
     wiki: Path | None = typer.Option(None, "--wiki", help="The bundle root. Defaults to <workspace>/wiki."),  # noqa: B008
     repo: Path | None = typer.Option(  # noqa: B008
         None, "--repo", help="What a relative SOURCE resolves against. Defaults to WORKSPACE."
     ),
+    kind: str | None = typer.Option(None, "--kind", help="Brief SOURCE as a batch of this kind, e.g. `articles`."),
+    source_type: str | None = typer.Option(None, "--source-type", help=f"One of {list(SOURCE_TYPES)}."),
     limit: int = typer.Option(10, "--limit", help="Cap a batch manifest at N units."),
     all_units: bool = typer.Option(False, "--all", help="No cap on a batch manifest; overrides --limit."),
     today_option: str | None = typer.Option(None, "--today", help="Compute the source page as of YYYY-MM-DD."),
@@ -559,13 +605,12 @@ def ingest(
 ) -> None:
     """Print the brief for SOURCE. Reads; never writes.
 
-    The cascade is batch -> folder -> single, because a command taking a path
-    has no choice but to decide what the path is. It is not offered as an API:
-    the three builders are the library surface, and there is no router among
-    them.
+    **Batch is opt-in.** `--kind` says "treat this directory as a batch of that
+    kind"; without it a directory briefs as a folder and a file briefs as a
+    single document.
 
-    Skill detection is deliberately absent. A skill directory briefs as a
-    folder here -- chunking one into guidance pages is a layer above this one.
+    Skill detection is deliberately absent. A skill directory briefs as a folder
+    here -- chunking one into guidance pages is a layer above this one.
     """
     today = _today(today_option)
     workspace = workspace.resolve()
@@ -577,8 +622,13 @@ def ingest(
         typer.echo(f"{source}: no such file or directory", err=True)
         raise typer.Exit(code=1)
 
-    batch = plan_batch_brief(source, repo=repo_root, workspace_root=workspace, limit=None if all_units else limit)
-    if batch is not None:
+    if kind is not None:
+        batch = plan_batch_brief(
+            source, kind=kind, repo=repo_root, workspace_root=workspace, limit=None if all_units else limit
+        )
+        if batch is None:
+            typer.echo(f"{source}: --kind briefs a directory, and this is not one", err=True)
+            raise typer.Exit(code=1)
         _emit_brief(batch.as_data(), _batch_lines(batch), json_output=json_output)
         return
 
@@ -592,7 +642,21 @@ def ingest(
             raise typer.Exit(code=1)
         return
 
-    document = plan_document_brief(source, wiki=wiki_root, repo=repo_root, workspace_root=workspace, today=today)
+    if source_type is None:
+        typer.echo(
+            f"--source-type is required for a single document; expected one of {list(SOURCE_TYPES)}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    document = plan_document_brief(
+        source,
+        wiki=wiki_root,
+        repo=repo_root,
+        workspace_root=workspace,
+        today=today,
+        source_type=_source_type(source_type),
+    )
     _emit_brief(document.as_data(), _document_lines(document), json_output=json_output)
 
 
@@ -603,3 +667,64 @@ def _emit_brief(payload: dict[str, Any], lines: list[str], *, json_output: bool)
         return
     for line in lines:
         typer.echo(line)
+
+
+@source_app.command("add")
+def source_add(
+    root: Path = typer.Argument(..., help="Bundle root to record into."),  # noqa: B008
+    material: Path = typer.Argument(..., help="The file to record. May live anywhere."),  # noqa: B008
+    title: str = typer.Option(..., "--title", help="The page's title; the slug derives from it."),
+    description: str = typer.Option(..., "--description", help="One line, the page's `description`."),
+    source_type: str = typer.Option(..., "--source-type", help=f"One of {list(SOURCE_TYPES)}."),
+    origin: str = typer.Option(..., "--origin", help="Where the material came from: URL, path, or how it arrived."),
+    entity_uri: str = typer.Option("", "--entity-uri", help="The code entity this material is about."),
+    authors: list[str] = typer.Option(None, "--author", help="Repeatable author name."),  # noqa: B008
+    source_date: str = typer.Option("", "--source-date", help="When the material itself was written, YYYY-MM-DD."),
+    tokens: int | None = typer.Option(None, "--tokens", help="Approximate token count of the material."),
+    by: str = typer.Option("agent:doc-wiki-okf", "--by", help="Stamped into `generated.by`."),
+    declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where the declarations live."),  # noqa: B008
+    today_option: str | None = typer.Option(None, "--today", help="Compute the page path as of YYYY-MM-DD."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
+) -> None:
+    """Record MATERIAL as a Source page, and copy it into the bundle beside it.
+
+    Two writes, one plan: `sources/<YYYY-MM>-<slug>.md` and
+    `sources/references/<YYYY-MM>-<slug><ext>`. They land together or not at
+    all.
+
+    The material is **copied**, never moved or archived -- it may live outside
+    this workspace entirely, and the copy is the only durable location it is
+    guaranteed to have. Re-recording material whose page already exists is
+    refused rather than merged: delete the page and re-run to redo one.
+
+    `--source-type` has no default. Guessing it from a folder name is what this
+    command's arrival retires.
+    """
+    today = _today(today_option)
+    checked = _source_type(source_type)
+    text = _material_text(material)
+    bundle = _bundle(root)
+    try:
+        plan = plan_ingest(
+            bundle,
+            _schema_set(root, declarations_dir),
+            _sections(root, declarations_dir),
+            material,
+            text=text,
+            title=title,
+            description=description,
+            source_type=checked,
+            origin=origin,
+            by=by,
+            at=_at(today),
+            today=today,
+            entity_uri=entity_uri,
+            authors=list(authors or ()),
+            source_date=source_date,
+            tokens=tokens,
+        )
+    except KeyError as exc:
+        typer.echo(f"{root}: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+    _report(plan, dry_run=dry_run, bundle=bundle, json_output=json_output)

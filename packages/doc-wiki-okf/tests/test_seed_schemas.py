@@ -8,13 +8,18 @@ from okf_ext.schemas import load_schemas, schema_rule
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
 
-_TYPES = ("Explanation", "HowTo", "Reference", "Tutorial")
+#: The four the rubric classifies. `Source` is declared but is not one of them.
+_DIATAXIS_TYPES = ("Explanation", "HowTo", "Reference", "Tutorial")
+
+#: Every type this package ships a schema for, sorted.
+_ALL_TYPES = ("Explanation", "HowTo", "Reference", "Source", "Tutorial")
 
 _LANES = {
     "Tutorial": "tutorials/",
     "HowTo": "how-tos/",
     "Reference": "references/",
     "Explanation": "explanations/",
+    "Source": "sources/",
 }
 
 
@@ -23,8 +28,8 @@ def _schema_set():
     return load_schemas(str(assets))
 
 
-def test_seed_schemas_load_as_exactly_the_four_types() -> None:
-    assert tuple(sorted(_schema_set().schemas)) == _TYPES
+def test_seed_schemas_load_as_exactly_the_five_types() -> None:
+    assert tuple(sorted(_schema_set().schemas)) == _ALL_TYPES
 
 
 def test_the_base_is_a_ref_target_not_a_type() -> None:
@@ -33,9 +38,9 @@ def test_the_base_is_a_ref_target_not_a_type() -> None:
     assert "_base-diataxis.schema.json" in schema_set.documents
 
 
-def test_each_wrapper_pins_the_const_to_its_own_stem() -> None:
+def test_each_diataxis_wrapper_pins_the_const_to_its_own_stem() -> None:
     schema_set = _schema_set()
-    for type_name in _TYPES:
+    for type_name in _DIATAXIS_TYPES:
         assert schema_set.schemas[type_name]["properties"]["type"] == {"const": type_name}
         assert schema_set.schemas[type_name]["$ref"] == "_base-diataxis.schema.json"
 
@@ -52,11 +57,13 @@ def test_the_base_declares_no_directory() -> None:
     assert "x-okf-directory" not in _schema_set().documents["_base-diataxis.schema.json"]
 
 
-def _findings(tmp_path: Path, frontmatter: str, code: str = "schemas.invalid") -> list[str]:
+def _findings(
+    tmp_path: Path, frontmatter: str, code: str = "schemas.invalid", lane: str = "tutorials", heading: str = "Steps"
+) -> list[str]:
     root = tmp_path / "bundle"
-    (root / "tutorials").mkdir(parents=True, exist_ok=True)
+    (root / lane).mkdir(parents=True, exist_ok=True)
     (root / "index.md").write_text("---\nokf_version: 0.2\n---\n\n# bundle\n", encoding="utf-8")
-    (root / "tutorials" / "page.md").write_text(f"---\n{frontmatter}---\n\n## Steps\n", encoding="utf-8")
+    (root / lane / "page.md").write_text(f"---\n{frontmatter}---\n\n## {heading}\n", encoding="utf-8")
     report = okf_validate(
         load_bundle(root),
         today=date(2026, 8, 12),
@@ -89,3 +96,60 @@ def test_a_mismatched_const_is_a_finding(tmp_path: Path) -> None:
     )
     assert len(messages) == 1
     assert "No schema for type `Tutorail`" in messages[0]
+
+
+def test_source_is_standalone_and_pins_its_own_const() -> None:
+    """S-B: `Source` is not a Diátaxis type, and inheriting the base's `status`
+    enum and property set would assert a kinship that does not exist."""
+    schema = _schema_set().schemas["Source"]
+    assert "$ref" not in schema
+    assert schema["properties"]["type"] == {"const": "Source"}
+    assert schema["type"] == "object"
+
+
+def test_source_requires_the_five_keys() -> None:
+    """S-J."""
+    assert sorted(_schema_set().schemas["Source"]["required"]) == [
+        "description",
+        "source_path",
+        "source_type",
+        "title",
+        "type",
+    ]
+
+
+def test_source_type_is_a_closed_vocabulary_of_nine() -> None:
+    enum = _schema_set().schemas["Source"]["properties"]["source_type"]["enum"]
+    assert enum == ["spec", "article", "pr", "ticket", "transcript", "example", "skill", "doc", "note"]
+
+
+def test_source_admits_the_vault_keys_it_does_not_declare() -> None:
+    """`additionalProperties: true` keeps the 18 `last_sync_commit` skill pages
+    and the 8 `source_url` pages valid without declaring vault keys."""
+    assert _schema_set().schemas["Source"]["additionalProperties"] is True
+
+
+_COMPLETE_SOURCE = (
+    "type: Source\n"
+    "title: A source\n"
+    "description: What it is.\n"
+    "source_type: spec\n"
+    "source_path: sources/references/2026-08-a-source.md\n"
+)
+
+
+def test_a_complete_source_page_produces_no_finding(tmp_path: Path) -> None:
+    assert _findings(tmp_path, _COMPLETE_SOURCE, lane="sources", heading="TL;DR") == []
+
+
+def test_a_source_page_missing_source_path_is_a_finding(tmp_path: Path) -> None:
+    """S-J's cost, measured: exactly one of 237 live pages fails this way."""
+    without = _COMPLETE_SOURCE.replace("source_path: sources/references/2026-08-a-source.md\n", "")
+    messages = _findings(tmp_path, without, lane="sources", heading="TL;DR")
+    assert any("'source_path' is a required property" in message for message in messages)
+
+
+def test_an_unknown_source_type_is_a_finding(tmp_path: Path) -> None:
+    bad_source = _COMPLETE_SOURCE.replace("source_type: spec", "source_type: blog")
+    messages = _findings(tmp_path, bad_source, lane="sources", heading="TL;DR")
+    assert any("'blog' is not one of" in message for message in messages)

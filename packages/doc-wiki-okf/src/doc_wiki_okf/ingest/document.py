@@ -21,7 +21,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout, guess_source_type, resolve_source_path
+from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout, resolve_source_path
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatch, EntityMatcher, StateGate, read_state_gate
 from doc_wiki_okf.reading import extract, slugify
 
@@ -81,6 +81,7 @@ def plan_document_brief(
     repo: Path,
     workspace_root: Path,
     today: date,
+    source_type: str,
     layout: IngestLayout = GRAPH_WIKI_LAYOUT,
     state_gate: StateGate | None = None,
     match_entity: EntityMatcher | None = None,
@@ -88,21 +89,22 @@ def plan_document_brief(
     """Compute the brief for one file. Writes nothing.
 
     `today` is required and has no default: `date.today()` is called in exactly
-    one place in this package, the CLI.
+    one place in this package, the CLI. `source_type` is required for the same
+    class of reason -- with `raw/` retired there is no folder to infer it from,
+    and whoever knows what the material is supplies it.
+
+    `workspace_root` is still taken: `read_state_gate` needs it. It no longer
+    classifies anything.
     """
     resolved = resolve_source_path(source_path, repo)
     text, title = extract(resolved)
     title_guess = title or resolved.stem.replace("-", " ").title()
     slug = slugify(title_guess)
 
-    rel_to_repo = _relative(resolved, repo)
-    rel_to_workspace = _relative(resolved, workspace_root)
-
     preview = text[:PREVIEW_CHARS]
     if len(text) > PREVIEW_CHARS:
         preview += TRUNCATION_MARKER
 
-    source_type = guess_source_type(rel_to_workspace, rel_to_repo, layout=layout)
     suggested = layout.source_page_template.format(month=today.strftime("%Y-%m"), slug=slug)
     return DocumentBrief(
         source_path=resolved,
@@ -113,16 +115,10 @@ def plan_document_brief(
         word_count=len(WORD_RE.findall(text)),
         suggested_summary_path=suggested,
         merge_mode=(wiki / suggested).exists(),
-        # Mirror guess_source_type's classification: true only when source fell
-        # through to generic "doc" type (not matched by raw/-folder rule, not under wiki).
+        # Unchanged in meaning: `doc` was always "an in-repo document", and it
+        # now arrives as a supplied value rather than an inferred one, so
+        # `as_data()`'s legacy shape is key-for-key identical.
         in_repo_doc=source_type == "doc",
         entity_match=NO_ENTITY if match_entity is None else match_entity(repo, resolved, title_guess),
         state_gate=read_state_gate(state_gate, repo, workspace_root),
     )
-
-
-def _relative(path: Path, base: Path) -> Path | None:
-    try:
-        return path.relative_to(base)
-    except ValueError:
-        return None

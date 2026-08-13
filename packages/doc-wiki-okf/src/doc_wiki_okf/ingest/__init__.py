@@ -36,7 +36,6 @@ from doc_wiki_okf.ingest.batch import (
     UnitType,
     enumerate_batch_units,
     plan_batch_brief,
-    resolve_batch_root,
 )
 from doc_wiki_okf.ingest.document import PREVIEW_CHARS, DocumentBrief, plan_document_brief
 from doc_wiki_okf.ingest.folder import (
@@ -51,13 +50,7 @@ from doc_wiki_okf.ingest.folder import (
     WarningKind,
     plan_folder_brief,
 )
-from doc_wiki_okf.ingest.layout import (
-    GRAPH_WIKI_LAYOUT,
-    IngestLayout,
-    archive_destination,
-    guess_source_type,
-    resolve_source_path,
-)
+from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout, resolve_source_path
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatch, EntityMatcher, StateGate
 
 __all__ = [
@@ -82,12 +75,9 @@ __all__ = [
     "StateGate",
     "UnitType",
     "WarningKind",
-    "archive_destination",
     "enumerate_batch_units",
-    "guess_source_type",
     "plan_batch_brief",
     "plan_document_brief",
     "plan_folder_brief",
-    "resolve_batch_root",
     "resolve_source_path",
 ]

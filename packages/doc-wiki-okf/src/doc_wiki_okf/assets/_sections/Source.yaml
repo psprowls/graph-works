@@ -1,0 +1,11 @@
+sections:
+  - heading: TL;DR
+    placeholder: |
+      > TODO: what this material is, in two or three sentences.
+  - heading: Key claims
+  - heading: Touches
+  - heading: Evidence / rationale
+  - heading: Surprises / contradictions
+  - heading: Decisions triggered
+  - heading: Where it's cited in this wiki
+additional_sections: true

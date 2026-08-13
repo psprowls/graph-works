@@ -452,16 +452,18 @@ def test_migrate_apply_on_a_missing_root_refuses(tmp_path) -> None:
 
 
 def _ingest_workspace(tmp_path):
-    """A workspace laid out the way the command expects: `raw/` beside `wiki/`."""
+    """A workspace with a `wiki/`, and material that need not live inside it."""
     (tmp_path / "wiki").mkdir()
-    (tmp_path / "raw" / "specs").mkdir(parents=True)
-    (tmp_path / "raw" / "specs" / "auth.md").write_text("# Auth Spec\n\nBody.", encoding="utf-8")
+    (tmp_path / "material" / "specs").mkdir(parents=True)
+    (tmp_path / "material" / "specs" / "auth.md").write_text("# Auth Spec\n\nBody.", encoding="utf-8")
     return tmp_path
 
 
 def test_ingest_briefs_a_batch(tmp_path):
     workspace = _ingest_workspace(tmp_path)
-    result = runner.invoke(app, ["ingest", str(workspace / "raw" / "specs"), "--workspace", str(workspace)])
+    result = runner.invoke(
+        app, ["ingest", str(workspace / "material" / "specs"), "--workspace", str(workspace), "--kind", "specs"]
+    )
     assert result.exit_code == 0
     assert "batch specs" in result.stdout
     assert "auth.md" in result.stdout
@@ -471,9 +473,14 @@ def test_ingest_batch_json_matches_as_data(tmp_path):
     from doc_wiki_okf.ingest import plan_batch_brief
 
     workspace = _ingest_workspace(tmp_path)
-    result = runner.invoke(app, ["ingest", str(workspace / "raw" / "specs"), "--workspace", str(workspace), "--json"])
+    result = runner.invoke(
+        app,
+        ["ingest", str(workspace / "material" / "specs"), "--workspace", str(workspace), "--kind", "specs", "--json"],
+    )
     assert result.exit_code == 0
-    expected = plan_batch_brief(workspace / "raw" / "specs", repo=workspace, workspace_root=workspace)
+    expected = plan_batch_brief(
+        workspace / "material" / "specs", kind="specs", repo=workspace, workspace_root=workspace
+    )
     assert expected is not None
     assert json.loads(result.stdout) == expected.as_data()
 
@@ -481,10 +488,23 @@ def test_ingest_batch_json_matches_as_data(tmp_path):
 def test_ingest_all_removes_the_cap(tmp_path):
     workspace = _ingest_workspace(tmp_path)
     for i in range(12):
-        (workspace / "raw" / "specs" / f"s{i:02d}.md").write_text("# S\n", encoding="utf-8")
-    capped = runner.invoke(app, ["ingest", str(workspace / "raw" / "specs"), "--workspace", str(workspace), "--json"])
+        (workspace / "material" / "specs" / f"s{i:02d}.md").write_text("# S\n", encoding="utf-8")
+    capped = runner.invoke(
+        app,
+        ["ingest", str(workspace / "material" / "specs"), "--workspace", str(workspace), "--kind", "specs", "--json"],
+    )
     uncapped = runner.invoke(
-        app, ["ingest", str(workspace / "raw" / "specs"), "--workspace", str(workspace), "--json", "--all"]
+        app,
+        [
+            "ingest",
+            str(workspace / "material" / "specs"),
+            "--workspace",
+            str(workspace),
+            "--kind",
+            "specs",
+            "--json",
+            "--all",
+        ],
     )
     assert json.loads(capped.stdout)["unit_count"] == 10
     assert json.loads(uncapped.stdout)["unit_count"] == 13
@@ -493,10 +513,20 @@ def test_ingest_all_removes_the_cap(tmp_path):
 def test_ingest_limit_sets_the_cap(tmp_path):
     workspace = _ingest_workspace(tmp_path)
     for i in range(5):
-        (workspace / "raw" / "specs" / f"s{i:02d}.md").write_text("# S\n", encoding="utf-8")
+        (workspace / "material" / "specs" / f"s{i:02d}.md").write_text("# S\n", encoding="utf-8")
     result = runner.invoke(
         app,
-        ["ingest", str(workspace / "raw" / "specs"), "--workspace", str(workspace), "--json", "--limit", "2"],
+        [
+            "ingest",
+            str(workspace / "material" / "specs"),
+            "--workspace",
+            str(workspace),
+            "--kind",
+            "specs",
+            "--json",
+            "--limit",
+            "2",
+        ],
     )
     payload = json.loads(result.stdout)
     assert payload["unit_count"] == 2
@@ -507,7 +537,7 @@ def test_ingest_briefs_a_plain_folder(tmp_path):
     from doc_wiki_okf.ingest import plan_folder_brief
 
     workspace = _ingest_workspace(tmp_path)
-    folder = workspace / "raw" / "examples" / "demo"
+    folder = workspace / "material" / "examples" / "demo"
     folder.mkdir(parents=True)
     (folder / "a.md").write_text("# A\n", encoding="utf-8")
 
@@ -522,7 +552,7 @@ def test_ingest_briefs_a_plain_folder(tmp_path):
 def test_ingest_briefs_a_skill_directory_as_a_folder(tmp_path):
     """Design spec §6.1: skill detection is absent from this cascade."""
     workspace = _ingest_workspace(tmp_path)
-    skill = workspace / "raw" / "skills" / "writing-plans"
+    skill = workspace / "material" / "skills" / "writing-plans"
     skill.mkdir(parents=True)
     (skill / "SKILL.md").write_text("# Writing Plans\n", encoding="utf-8")
 
@@ -534,7 +564,7 @@ def test_ingest_briefs_a_skill_directory_as_a_folder(tmp_path):
 
 def test_ingest_refuses_a_crowded_folder(tmp_path):
     workspace = _ingest_workspace(tmp_path)
-    folder = workspace / "raw" / "examples" / "huge"
+    folder = workspace / "material" / "examples" / "huge"
     folder.mkdir(parents=True)
     for i in range(201):
         (folder / f"f{i:03d}.md").write_text("x", encoding="utf-8")
@@ -545,15 +575,54 @@ def test_ingest_refuses_a_crowded_folder(tmp_path):
     assert "folder-too-large" in result.stderr
 
 
+def test_ingest_without_a_kind_briefs_a_directory_as_a_folder(tmp_path):
+    """S-H: the automatic batch arm is gone -- batch is what `--kind` asks for."""
+    workspace = _ingest_workspace(tmp_path)
+    result = runner.invoke(
+        app, ["ingest", str(workspace / "material" / "specs"), "--workspace", str(workspace), "--json"]
+    )
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["is_folder"] is True
+
+
+def test_ingest_a_single_document_without_a_source_type_exits_one(tmp_path):
+    workspace = _ingest_workspace(tmp_path)
+    source = workspace / "material" / "specs" / "auth.md"
+    result = runner.invoke(app, ["ingest", str(source), "--workspace", str(workspace)])
+    assert result.exit_code == 1
+    assert "--source-type is required" in result.stderr
+
+
+def test_ingest_kind_on_a_file_exits_one(tmp_path):
+    workspace = _ingest_workspace(tmp_path)
+    source = workspace / "material" / "specs" / "auth.md"
+    result = runner.invoke(app, ["ingest", str(source), "--workspace", str(workspace), "--kind", "specs"])
+    assert result.exit_code == 1
+    assert "--kind briefs a directory" in result.stderr
+
+
 def test_ingest_briefs_a_single_document(tmp_path):
     from doc_wiki_okf.ingest import plan_document_brief
 
     workspace = _ingest_workspace(tmp_path)
-    source = workspace / "raw" / "specs" / "auth.md"
+    source = workspace / "material" / "specs" / "auth.md"
 
-    human = runner.invoke(app, ["ingest", str(source), "--workspace", str(workspace), "--today", "2026-08-12"])
+    human = runner.invoke(
+        app, ["ingest", str(source), "--workspace", str(workspace), "--source-type", "spec", "--today", "2026-08-12"]
+    )
     payload = runner.invoke(
-        app, ["ingest", str(source), "--workspace", str(workspace), "--today", "2026-08-12", "--json"]
+        app,
+        [
+            "ingest",
+            str(source),
+            "--workspace",
+            str(workspace),
+            "--source-type",
+            "spec",
+            "--today",
+            "2026-08-12",
+            "--json",
+        ],
     )
 
     assert human.exit_code == 0
@@ -567,22 +636,36 @@ def test_ingest_briefs_a_single_document(tmp_path):
             repo=workspace,
             workspace_root=workspace,
             today=date(2026, 8, 12),
+            source_type="spec",
         ).as_data()
     )
 
 
 def test_ingest_today_decides_the_source_page(tmp_path):
     workspace = _ingest_workspace(tmp_path)
-    source = workspace / "raw" / "specs" / "auth.md"
+    source = workspace / "material" / "specs" / "auth.md"
     result = runner.invoke(
-        app, ["ingest", str(source), "--workspace", str(workspace), "--today", "2026-01-05", "--json"]
+        app,
+        [
+            "ingest",
+            str(source),
+            "--workspace",
+            str(workspace),
+            "--source-type",
+            "spec",
+            "--today",
+            "2026-01-05",
+            "--json",
+        ],
     )
     assert json.loads(result.stdout)["suggested_summary_path"] == "sources/2026-01-auth-spec.md"
 
 
 def test_ingest_rejects_a_path_that_is_not_there(tmp_path):
     workspace = _ingest_workspace(tmp_path)
-    result = runner.invoke(app, ["ingest", str(workspace / "raw" / "specs" / "nope.md"), "--workspace", str(workspace)])
+    result = runner.invoke(
+        app, ["ingest", str(workspace / "material" / "specs" / "nope.md"), "--workspace", str(workspace)]
+    )
     assert result.exit_code == 1
     assert "no such file or directory" in result.stderr
 
@@ -590,24 +673,34 @@ def test_ingest_rejects_a_path_that_is_not_there(tmp_path):
 def test_ingest_rejects_a_bad_today(tmp_path):
     workspace = _ingest_workspace(tmp_path)
     result = runner.invoke(
-        app, ["ingest", str(workspace / "raw" / "specs" / "auth.md"), "--workspace", str(workspace), "--today", "nope"]
+        app,
+        [
+            "ingest",
+            str(workspace / "material" / "specs" / "auth.md"),
+            "--workspace",
+            str(workspace),
+            "--source-type",
+            "spec",
+            "--today",
+            "nope",
+        ],
     )
     assert result.exit_code == 1
 
 
 def test_ingest_an_absolute_source_resolves_against_a_default_workspace(tmp_path, monkeypatch):
-    """An absolute SOURCE with `--workspace` omitted must still classify correctly.
+    """An absolute SOURCE with `--workspace` omitted must still resolve correctly.
 
     `--workspace` defaults to `Path(".")`, which only names the right directory
     once resolved against `cwd`. Regression for the bug where an unresolved
     relative default failed `relative_to` against the absolute, resolved
-    SOURCE and silently misclassified the document as `note`.
+    SOURCE.
     """
     workspace = _ingest_workspace(tmp_path)
     monkeypatch.chdir(workspace)
-    source = workspace / "raw" / "specs" / "auth.md"
+    source = workspace / "material" / "specs" / "auth.md"
 
-    result = runner.invoke(app, ["ingest", str(source), "--json"])
+    result = runner.invoke(app, ["ingest", str(source), "--source-type", "spec", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["source_type"] == "spec"
@@ -615,14 +708,13 @@ def test_ingest_an_absolute_source_resolves_against_a_default_workspace(tmp_path
 
 def test_ingest_a_relative_workspace_still_resolves_correctly(tmp_path, monkeypatch):
     """A relative `--workspace` (e.g. `.`) must resolve to the same effective
-    root as an absolute one, so classification of an absolute SOURCE doesn't
-    regress to `note`.
+    root as an absolute one.
     """
     workspace = _ingest_workspace(tmp_path)
     monkeypatch.chdir(workspace)
-    source = workspace / "raw" / "specs" / "auth.md"
+    source = workspace / "material" / "specs" / "auth.md"
 
-    result = runner.invoke(app, ["ingest", str(source), "--workspace", ".", "--json"])
+    result = runner.invoke(app, ["ingest", str(source), "--workspace", ".", "--source-type", "spec", "--json"])
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["source_type"] == "spec"
@@ -630,15 +722,17 @@ def test_ingest_a_relative_workspace_still_resolves_correctly(tmp_path, monkeypa
 
 def test_ingest_accepts_an_explicit_repo(tmp_path):
     """`--repo` is what a relative SOURCE resolves against; it need not equal
-    `--workspace`. Mirrors `test_a_raw_spec_is_typed_from_its_folder`'s use of
-    a separate, empty `repo` directory.
+    `--workspace`.
     """
     workspace = _ingest_workspace(tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
-    source = workspace / "raw" / "specs" / "auth.md"
+    source = workspace / "material" / "specs" / "auth.md"
 
-    result = runner.invoke(app, ["ingest", str(source), "--workspace", str(workspace), "--repo", str(repo), "--json"])
+    result = runner.invoke(
+        app,
+        ["ingest", str(source), "--workspace", str(workspace), "--repo", str(repo), "--source-type", "spec", "--json"],
+    )
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
@@ -654,7 +748,7 @@ def test_ingest_accepts_an_explicit_wiki(tmp_path):
     custom_wiki = tmp_path / "custom-wiki"
     (custom_wiki / "sources").mkdir(parents=True)
     (custom_wiki / "sources" / "2026-08-auth-spec.md").write_text("# Auth Spec\n", encoding="utf-8")
-    source = workspace / "raw" / "specs" / "auth.md"
+    source = workspace / "material" / "specs" / "auth.md"
 
     result = runner.invoke(
         app,
@@ -665,6 +759,8 @@ def test_ingest_accepts_an_explicit_wiki(tmp_path):
             str(workspace),
             "--wiki",
             str(custom_wiki),
+            "--source-type",
+            "spec",
             "--today",
             "2026-08-12",
             "--json",
@@ -673,3 +769,160 @@ def test_ingest_accepts_an_explicit_wiki(tmp_path):
 
     assert result.exit_code == 0
     assert json.loads(result.stdout)["merge_mode"] is True
+
+
+def _material(tmp_path, name="auth.md", data=b"# Auth Spec\n\nBody.\n"):
+    outside = tmp_path / "outside"
+    outside.mkdir(parents=True, exist_ok=True)
+    path = outside / name
+    path.write_bytes(data)
+    return path
+
+
+def _add_source(root, material, *flags, **overrides):
+    """The option-carrying invocation. *flags* carries bare flags like
+    `--dry-run`, which cannot ride the name/value mapping."""
+    args = {
+        "--title": "Auth Spec",
+        "--description": "The authentication specification.",
+        "--source-type": "spec",
+        "--origin": "https://example.invalid/auth-spec",
+        "--by": "agent:test",
+        "--today": DAY,
+    }
+    args.update(overrides)
+    flat = [item for pair in args.items() for item in pair]
+    return runner.invoke(app, ["source", "add", str(root), str(material), *flat, *flags])
+
+
+def test_source_add_writes_the_page_and_the_copy(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    result = _add_source(root, _material(tmp_path))
+
+    assert result.exit_code == 0, result.output
+    assert (root / "sources" / "2026-08-auth-spec.md").is_file()
+    assert (root / "sources" / "references" / "2026-08-auth-spec.md").read_text(encoding="utf-8") == (
+        "# Auth Spec\n\nBody.\n"
+    )
+    assert "wrote sources/2026-08-auth-spec.md" in result.stdout
+    assert "wrote sources/references/2026-08-auth-spec.md" in result.stdout
+
+
+def test_source_add_dry_run_writes_nothing(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    result = _add_source(root, _material(tmp_path), "--dry-run")
+
+    assert result.exit_code == 0
+    assert not (root / "sources").exists()
+    assert "would create sources/2026-08-auth-spec.md" in result.stdout
+
+
+def test_source_add_json_reports_both_writes(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    result = _add_source(root, _material(tmp_path), "--json", **{"--description": "d", "--origin": "o"})
+    payload = json.loads(result.stdout)
+    assert payload["ok"] is True
+    assert payload["applied"] is True
+    assert payload["writes"] == [
+        {"member": "sources/2026-08-auth-spec.md", "mode": "create"},
+        {"member": "sources/references/2026-08-auth-spec.md", "mode": "create"},
+    ]
+
+
+def test_source_add_twice_refuses(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    material = _material(tmp_path)
+    assert _add_source(root, material).exit_code == 0
+    second = _add_source(root, material)
+
+    assert second.exit_code == 1
+    assert "target-exists" in second.stderr
+
+
+def test_source_add_rejects_an_unknown_source_type(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    result = _add_source(root, _material(tmp_path), **{"--source-type": "blog"})
+
+    assert result.exit_code == 1
+    assert "--source-type 'blog'" in result.stderr
+    assert "spec" in result.stderr
+
+
+def test_source_add_rejects_binary_material(tmp_path) -> None:
+    """S-D: the first cut is UTF-8 text only. A PDF is refused by name, not
+    laundered into the bundle."""
+    root = tmp_path / "b"
+    _init(root)
+    material = _material(tmp_path, name="scan.pdf", data=b"%PDF-1.4\n\xff\xfe\x00binary")
+    result = _add_source(root, material)
+
+    assert result.exit_code == 1
+    assert "scan.pdf" in result.stderr
+    assert "UTF-8" in result.stderr
+    assert not (root / "sources").exists()
+
+
+def test_source_add_rejects_a_missing_material(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    result = _add_source(root, tmp_path / "outside" / "nope.md")
+
+    assert result.exit_code == 1
+    assert "nope.md" in result.stderr
+
+
+def test_source_add_carries_the_optional_frontmatter(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    result = runner.invoke(
+        app,
+        [
+            "source",
+            "add",
+            str(root),
+            str(_material(tmp_path)),
+            "--title",
+            "Auth Spec",
+            "--description",
+            "d",
+            "--source-type",
+            "spec",
+            "--origin",
+            "o",
+            "--today",
+            DAY,
+            "--entity-uri",
+            "pkg:o/r/auth",
+            "--author",
+            "Ada",
+            "--author",
+            "Grace",
+            "--source-date",
+            "2026-07-01",
+            "--tokens",
+            "1200",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    page = (root / "sources" / "2026-08-auth-spec.md").read_text(encoding="utf-8")
+    assert "entity_uri: pkg:o/r/auth" in page
+    assert "Ada" in page and "Grace" in page
+    assert "tokens: 1200" in page
+
+
+def test_the_ignore_list_covers_reference_copies() -> None:
+    from doc_wiki_okf.cli import IGNORE
+
+    assert IGNORE == (
+        "_schema/*",
+        "*/_schema/*",
+        "_sections/*",
+        "*/_sections/*",
+        "sources/references/*",
+        "*/sources/references/*",
+    )

@@ -92,7 +92,7 @@ point at a path, learn what you are about to deal with.
 |---|---|---|
 | `plan_document_brief` | one file | title, slug, source type, preview, word count, target source page, merge-or-create |
 | `plan_folder_brief` | a directory | file manifest with sizes and languages, representative file, refusals, warnings |
-| `plan_batch_brief` | `raw/<kind>/` | a manifest of ingest units, capped at a limit |
+| `plan_batch_brief` | a directory plus a `kind` | a manifest of ingest units, capped at a limit |
 
 Each returns a frozen brief carrying the fields its own mode needs. There is no
 abstract base and no `is_folder` / `is_batch` discriminator field — the type is
@@ -121,11 +121,15 @@ refusal, where legacy returned the sentinel and nothing else.
 
 ### The layout is a value, the clock and the code graph are arguments
 
-`IngestLayout` carries `raw_dir`, `archive_dir`, `source_types`, `batch_kinds`
-and `source_page_template`; `GRAPH_WIKI_LAYOUT` is today's values and the
-default for the two builders that take `layout=` — `plan_document_brief` and
-`plan_batch_brief` (`plan_folder_brief` takes no `layout` at all).
-`plan_document_brief` takes a **required** `today=` — the same
+`IngestLayout` carries one field, `source_page_template`; `GRAPH_WIKI_LAYOUT` is
+today's value and the default for `plan_document_brief` and
+`doc_wiki_okf.sources.plan_ingest`, which is what makes the brief's prediction
+and the writer's target provably the same string. `raw_dir`, `archive_dir`,
+`source_types` and `batch_kinds` are gone: material is ingested from outside the
+workspace, so there is no folder to infer a source type or a batch kind from,
+and `plan_document_brief` takes a required `source_type=` while
+`plan_batch_brief` takes a required `kind=`.
+`plan_document_brief` also takes a **required** `today=` — the same
 rule `okf_io.validate` and `append_log_entry` follow, and `date.today()` is
 called in exactly one place in this package, the CLI.
 
@@ -143,8 +147,12 @@ guidance-shaped brief — chunking a skill directory into
 `wiki/guidance/<topic>/<slug>.md` — and that is the guidance flow, a layer above
 this one. The substrate-neutral half already lives in
 `doc_wiki_okf.reading.skills` (`gather_skill_sources`, `SkillBundle`,
-`resolve_skill_anchor`) and is ready for whoever claims that layer. `raw/skills/`
-keeps mapping to source type `skill`, and `skills` stays a batch kind.
+`resolve_skill_anchor`) and is ready for whoever claims that layer.
+Folder-based inference is gone along with `raw/`: a skill directory briefs as
+an ordinary folder, like any other directory, unless the caller passes
+`--kind skills` explicitly. `skill` is still a valid `--source-type` value and
+`skills` is still a valid `--kind` value — both just have to be named, never
+inferred from a path.
 
 No brief carries a Diátaxis type, and `ingest/` does not import `diataxis/`. An
 ingested document produces a source page — a record of a document, not a document
@@ -153,15 +161,56 @@ five lanes.
 
 ### The command
 
-    doc-wiki-okf ingest SOURCE --workspace DIR         # human-readable
-    doc-wiki-okf ingest SOURCE --workspace DIR --json  # `as_data()`
-    doc-wiki-okf ingest DIR/raw/specs --workspace DIR --all   # no cap on the batch manifest
-    doc-wiki-okf ingest SOURCE --today 2026-08-12      # brief as of a date
+    doc-wiki-okf ingest SOURCE --source-type spec       # one document
+    doc-wiki-okf ingest DIR                             # a folder manifest
+    doc-wiki-okf ingest DIR --kind articles --all       # a batch, uncapped
+    doc-wiki-okf ingest SOURCE --source-type spec --json --today 2026-08-12
 
-The command runs a batch → folder → single cascade, because a command taking a
-path has no choice but to decide what the path is. The library offers no router:
-the three builders are the surface. Skill detection is absent — a skill directory
-briefs as a folder here.
+Batch is **opt-in**: `--kind` says "treat this directory as a batch of that
+kind". Without it a directory briefs as a folder and a file briefs as a single
+document. The old automatic cascade asked "is this path a batch?", and only
+`raw/`'s layout could answer that.
+
+## Source pages and reference copies
+
+`doc-wiki-okf source add ROOT MATERIAL` records ingested material: one `Source`
+page at `sources/<YYYY-MM>-<slug>.md`, and a copy of the material at
+`sources/references/<YYYY-MM>-<slug><ext>` beside it.
+
+    doc-wiki-okf source add ROOT MATERIAL \
+        --title "Auth Spec" --description "The authentication specification." \
+        --source-type spec --origin https://example.invalid/auth-spec
+
+The two are **one plan carrying two create writes**, so `write_all`'s
+probe-and-staging regime lands them together or not at all: a page recording
+material the bundle does not carry is a state this cannot reach.
+
+`source_path` names the **in-bundle copy**, so link and path validation resolve
+it; `origin` is an opaque string holding whatever named the material — a URL, a
+path on another machine, "pasted by hand" — and is never resolved. The material
+is copied, never moved or archived: it may live outside this workspace
+entirely, and the copy is the only durable location it is guaranteed to have.
+
+A second `source add` for material whose page exists is **refused**
+(`target-exists`), not merged and not forked. A human who genuinely wants to
+re-record one deletes the page and re-runs.
+
+The first cut is **UTF-8 text only**. `PendingWrite.rendered` is `str` and
+`write_all` encodes UTF-8, so PDFs and images are refused by name rather than
+laundered in; a bytes-carrying write in `okf-ext` is a tier-2 change and wants
+its own work item.
+
+`sources/references/*` is in the CLI's `IGNORE` list, so a copied markdown
+original is a member but not a concept — `ignore=` declares "this is not a
+concept", not "this is not there", and the writer's occupancy check depends on
+exactly that distinction.
+
+Declaring the `Source` schema creates **no proposal lane**. `lane_set()`
+iterates `DIATAXIS_LANES` plus the hardcoded ADR lane and does not enumerate
+the schema set — you do not propose a source, you record one. Filing the
+Diátaxis pages a source argues for stays the existing
+`doc-wiki-okf proposal file --resource sources/<page>.md`, whose `sources[]`
+entry `build_link_graph()` turns into a backlink.
 
 ## The proposal-state migrator
 

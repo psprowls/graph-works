@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["type", "title", "description", "source_type", "source_path"],
+  "additionalProperties": true,
+  "properties": {
+    "type": { "const": "Source" },
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": "string", "minLength": 1 },
+    "source_type": { "enum": ["spec", "article", "pr", "ticket", "transcript", "example", "skill", "doc", "note"] },
+    "source_path": { "type": "string", "minLength": 1 },
+    "origin": { "type": "string" },
+    "ingested": { "type": "string", "format": "date" },
+    "source_date": { "type": "string", "format": "date" },
+    "authors": { "type": "array", "items": { "type": "string" } },
+    "entity_uri": { "type": "string" },
+    "tokens": { "type": "integer" },
+    "tags": { "type": "array", "items": { "type": "string" } },
+    "sources": { "type": "array", "items": { "type": "object" } }
+  },
+  "x-okf-directory": "sources/"
+}

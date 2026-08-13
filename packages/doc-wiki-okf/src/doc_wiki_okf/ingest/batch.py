@@ -1,12 +1,16 @@
-"""`raw/<kind>/` in, a manifest of ingest units out.
+"""A directory in, a manifest of ingest units out.
 
 The manifest carries no file contents: a batch is briefed so a caller can show
 an honest "ingesting the first N of M" confirm, and the per-unit prep runs later
 against each unit on its own.
 
-`plan_batch_brief` returns `None` for any path that is not a kind-folder root.
-That keeps a caller's routing a single check, and it is what makes the CLI's
-batch -> folder -> single cascade a cascade.
+`kind` is an argument rather than a folder name. `raw/<kind>/` was what defined
+a batch, and `raw/` is retired; briefing thirty downloaded articles as "the
+first 10 of 30" is independently useful and survives the retirement, re-based on
+an explicit kind. `DIRECTORY_KINDS` and `LOOSE_FILE_KINDS` keep their meaning.
+
+`plan_batch_brief` returns `None` only for a path that is not a directory, so a
+caller's routing stays a single check.
 """
 
 from __future__ import annotations
@@ -16,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
-from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout, resolve_source_path
+from doc_wiki_okf.ingest.layout import resolve_source_path
 from doc_wiki_okf.ingest.seams import StateGate, read_state_gate
 
 #: Directory names that are never an ingest unit.
@@ -78,26 +82,6 @@ class BatchBrief:
         }
 
 
-def resolve_batch_root(
-    source_path: Path, workspace_root: Path, *, layout: IngestLayout = GRAPH_WIKI_LAYOUT
-) -> str | None:
-    """The kind name when *source_path* IS a top-level kind folder, else `None`.
-
-    Only the exact `<workspace>/<raw_dir>/<kind>` qualifies. Nested directories,
-    files, the raw directory itself, and paths outside the workspace are all the
-    single-source flow.
-    """
-    if not source_path.is_dir():
-        return None
-    try:
-        rel = source_path.resolve().relative_to(workspace_root.resolve())
-    except ValueError:
-        return None
-    if len(rel.parts) == 2 and rel.parts[0] == layout.raw_dir and rel.parts[1] in layout.batch_kinds:
-        return rel.parts[1]
-    return None
-
-
 def enumerate_batch_units(kind: str, root: Path) -> tuple[BatchUnit, ...]:
     """The ingest units inside a kind-folder root, sorted by path.
 
@@ -129,16 +113,19 @@ def enumerate_batch_units(kind: str, root: Path) -> tuple[BatchUnit, ...]:
 def plan_batch_brief(
     source_path: Path,
     *,
+    kind: str,
     repo: Path,
     workspace_root: Path,
     limit: int | None = DEFAULT_LIMIT,
-    layout: IngestLayout = GRAPH_WIKI_LAYOUT,
     state_gate: StateGate | None = None,
 ) -> BatchBrief | None:
-    """Compute the brief for a kind folder, or `None` for any other path."""
+    """Compute the brief for a directory of *kind*, or `None` for a non-directory.
+
+    `kind` decides enumeration, not location: `skills` takes each immediate
+    subdirectory, `examples` adds loose files, everything else recurses.
+    """
     root = resolve_source_path(source_path, repo)
-    kind = resolve_batch_root(root, workspace_root, layout=layout)
-    if kind is None:
+    if not root.is_dir():
         return None
     all_units = enumerate_batch_units(kind, root)
     return BatchBrief(

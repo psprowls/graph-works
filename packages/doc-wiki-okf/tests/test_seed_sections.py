@@ -10,6 +10,15 @@ _EXPECTED_HEADINGS = {
     "HowTo": ("Goal", "Assumptions", "Steps", "Result"),
     "Reference": ("Summary", "See also"),
     "Explanation": ("Context", "Trade-offs", "See also"),
+    "Source": (
+        "TL;DR",
+        "Key claims",
+        "Touches",
+        "Evidence / rationale",
+        "Surprises / contradictions",
+        "Decisions triggered",
+        "Where it's cited in this wiki",
+    ),
 }
 
 _EXPECTED_REQUIRED = {
@@ -17,6 +26,7 @@ _EXPECTED_REQUIRED = {
     "HowTo": ["Goal", "Assumptions", "Steps", "Result"],
     "Reference": ["Summary"],
     "Explanation": ["Context"],
+    "Source": [],
 }
 
 _SEE_ALSO = "> TODO: related pages, as root-absolute markdown links, one per line.\n"
@@ -27,7 +37,7 @@ def _section_set():
     return load_sections(str(assets))
 
 
-def test_seed_sections_load_as_exactly_the_four_types() -> None:
+def test_seed_sections_load_as_exactly_the_five_types() -> None:
     section_set = _section_set()
     assert set(section_set.type_names) == set(_EXPECTED_HEADINGS)
     assert "_fragments" not in section_set.types

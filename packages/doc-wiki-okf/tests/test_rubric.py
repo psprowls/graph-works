@@ -1,9 +1,18 @@
 """The taxonomy is complete, derived, and safe to embed."""
 
 import dataclasses
+from pathlib import Path
 
 from doc_wiki_okf.diataxis.rubric import RUBRIC, TYPE_NAMES, TypeRubric, brief
 from doc_wiki_okf.resources import SEED_RELATIVE_PATHS
+
+#: Declared by this package but deliberately outside `RUBRIC` (S-K). A
+#: `TypeRubric` carries `question`, `signals`, `anti_signals` and
+#: `title_pattern` — aids for a judgment call about author intent. There is no
+#: judgment to make about whether ingested material is a Source; it is one by
+#: construction, and filling those four fields would mean inventing content for
+#: a decision nobody makes.
+NON_RUBRIC_TYPES = frozenset({"Source"})
 
 
 def test_the_four_names_in_diataxis_order() -> None:
@@ -59,10 +68,37 @@ def test_every_rubric_type_has_both_declaration_files() -> None:
 
 
 def test_no_declaration_names_a_type_the_rubric_does_not() -> None:
-    """The other direction: a schema shipped for a type nothing can classify."""
+    """The other direction: a schema shipped for a type nothing can classify,
+    minus the types declared outside the rubric on purpose."""
     declared = {
         path.removeprefix("_schema/").removesuffix(".schema.json")
         for path in SEED_RELATIVE_PATHS
         if path.startswith("_schema/") and not path.startswith("_schema/_")
     }
-    assert declared == set(TYPE_NAMES)
+    assert declared - NON_RUBRIC_TYPES == set(TYPE_NAMES)
+    assert declared & NON_RUBRIC_TYPES == NON_RUBRIC_TYPES
+
+
+def test_a_non_rubric_type_is_still_refused_by_classify_and_retype(tmp_path: Path) -> None:
+    """Both gate on `TYPE_NAMES` before consulting the schema set, so declaring
+    `Source` does not make it a Diátaxis type anyone can classify a page into."""
+    import importlib.resources
+
+    from diataxis_helpers import build_bundle, schema_set
+    from doc_wiki_okf.diataxis.classify import Unclassified, classify
+    from doc_wiki_okf.diataxis.retype import plan_retype
+    from okf_ext.schemas import load_schemas
+
+    schemas = load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    outcome = classify(schemas, type_name="Source", title="A source", rationale="because", decided_by="agent:test")
+    assert isinstance(outcome, Unclassified)
+    assert outcome.reason == "unknown-type"
+
+    root: Path = tmp_path / "bundle"
+    bundle = build_bundle(
+        root,
+        {"explanations/test": "---\ntype: Explanation\ntitle: Test\ndescription: A test.\n---\n\n## Context\n"},
+    )
+    plan = plan_retype(bundle, schema_set(), "explanations/test", "Source")
+    assert plan.ok is False
+    assert [refusal.kind for refusal in plan.refusals] == ["unknown-type"]

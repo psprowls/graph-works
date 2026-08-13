@@ -3,7 +3,7 @@
 Tier 3 per ADR-0005: depends on `okf-io` and `okf-ext[schemas]`, and nothing
 depends on this package.
 
-Four subpackages. `doc_wiki_okf.reading` is substrate-neutral file and format
+Five subpackages. `doc_wiki_okf.reading` is substrate-neutral file and format
 inspection that knows nothing of OKF, wikis or workspaces:
 
     from doc_wiki_okf.reading import extract, gather_skill_sources, slugify
@@ -31,9 +31,14 @@ legacy dict verbatim:
 
     from doc_wiki_okf.ingest import plan_batch_brief, plan_document_brief, plan_folder_brief
 
+`doc_wiki_okf.sources` records ingested material: one `Source` page and a copy
+of the material beside it, as a single plan carrying two create writes:
+
+    from doc_wiki_okf.sources import plan_ingest
+
 `reading/` imports the standard library and itself, and nothing else; `ingest/`
 may import `reading/`; `diataxis/` may import `reading/`; `proposals/` may import
-both, and none of them imports `ingest/`. That is a test
+both, and none of them imports `ingest/` or `sources/`. That is a test
 (`tests/test_reading_boundaries.py`), not a convention.
 """
 

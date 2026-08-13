@@ -39,13 +39,13 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def test_a_raw_spec_is_typed_from_its_folder(tmp_path):
+def test_a_spec_carries_the_supplied_type(tmp_path):
     workspace, wiki = _workspace(tmp_path)
     repo = tmp_path / "repo"
     repo.mkdir()
-    source = _write(workspace / "raw" / "specs" / "auth.md", "# Auth Spec\n\nBody text.")
+    source = _write(workspace / "material" / "auth.md", "# Auth Spec\n\nBody text.")
 
-    brief = plan_document_brief(source, wiki=wiki, repo=repo, workspace_root=workspace, today=DAY)
+    brief = plan_document_brief(source, wiki=wiki, repo=repo, workspace_root=workspace, today=DAY, source_type="spec")
 
     assert brief.source_type == "spec"
     assert brief.in_repo_doc is False
@@ -56,12 +56,17 @@ def test_a_raw_spec_is_typed_from_its_folder(tmp_path):
     assert brief.word_count == 4
 
 
-def test_an_in_repo_doc_is_typed_doc(tmp_path):
+def test_doc_is_the_one_type_that_sets_in_repo_doc(tmp_path):
     workspace, wiki = _workspace(tmp_path)
     source = _write(workspace / "packages" / "graph-io" / "store.py", "# Graph IO Store\n\nBody text.")
 
     brief = plan_document_brief(
-        Path("packages/graph-io/store.py"), wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY
+        Path("packages/graph-io/store.py"),
+        wiki=wiki,
+        repo=workspace,
+        workspace_root=workspace,
+        today=DAY,
+        source_type="doc",
     )
 
     assert brief.source_path == source
@@ -69,11 +74,28 @@ def test_an_in_repo_doc_is_typed_doc(tmp_path):
     assert brief.in_repo_doc is True
 
 
+def test_material_outside_the_workspace_briefs_the_same(tmp_path, tmp_path_factory):
+    """S-H: material is ingested from outside the workspace now, and nothing in
+    the brief depends on where it sits."""
+    workspace, wiki = _workspace(tmp_path)
+    elsewhere = tmp_path_factory.mktemp("elsewhere")
+    source = _write(elsewhere / "auth.md", "# Auth Spec\n\nBody text.")
+
+    brief = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_type="spec"
+    )
+
+    assert brief.source_type == "spec"
+    assert brief.suggested_summary_path == "sources/2026-08-auth-spec.md"
+
+
 def test_a_title_falls_back_to_the_stem(tmp_path):
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "raw" / "articles" / "some-long-read.txt", "no heading here")
+    source = _write(workspace / "material" / "some-long-read.txt", "no heading here")
 
-    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+    brief = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_type="article"
+    )
 
     assert brief.title == "Some Long Read"
     assert brief.slug == "some-long-read"
@@ -81,9 +103,11 @@ def test_a_title_falls_back_to_the_stem(tmp_path):
 
 def test_no_seams_means_two_nulls(tmp_path):
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+    source = _write(workspace / "material" / "a.md", "# A\n")
 
-    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+    brief = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_type="spec"
+    )
 
     assert brief.state_gate is None
     assert brief.entity_match == NO_ENTITY
@@ -91,7 +115,7 @@ def test_no_seams_means_two_nulls(tmp_path):
 
 def test_both_seams_ride_through(tmp_path):
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+    source = _write(workspace / "material" / "a.md", "# A\n")
 
     brief = plan_document_brief(
         source,
@@ -99,6 +123,7 @@ def test_both_seams_ride_through(tmp_path):
         repo=workspace,
         workspace_root=workspace,
         today=DAY,
+        source_type="spec",
         state_gate=_gate,
         match_entity=_matcher,
     )
@@ -109,10 +134,14 @@ def test_both_seams_ride_through(tmp_path):
 
 def test_today_decides_the_source_page(tmp_path):
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+    source = _write(workspace / "material" / "a.md", "# A\n")
 
-    january = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=date(2026, 1, 5))
-    august = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+    january = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=date(2026, 1, 5), source_type="spec"
+    )
+    august = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_type="spec"
+    )
 
     assert january.suggested_summary_path == "sources/2026-01-a.md"
     assert august.suggested_summary_path == "sources/2026-08-a.md"
@@ -120,10 +149,12 @@ def test_today_decides_the_source_page(tmp_path):
 
 def test_merge_mode_is_true_when_the_source_page_exists(tmp_path):
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "raw" / "specs" / "a.md", "# A\n")
+    source = _write(workspace / "material" / "a.md", "# A\n")
     _write(wiki / "sources" / "2026-08-a.md", "# A\n")
 
-    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+    brief = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_type="spec"
+    )
 
     assert brief.merge_mode is True
 
@@ -131,9 +162,11 @@ def test_merge_mode_is_true_when_the_source_page_exists(tmp_path):
 def test_a_long_document_is_truncated_and_says_so(tmp_path):
     workspace, wiki = _workspace(tmp_path)
     body = "x " * PREVIEW_CHARS
-    source = _write(workspace / "raw" / "specs" / "long.md", f"# Long\n\n{body}")
+    source = _write(workspace / "material" / "long.md", f"# Long\n\n{body}")
 
-    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+    brief = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_type="spec"
+    )
 
     assert brief.preview.endswith("[TRUNCATED]")
     assert len(brief.preview) == PREVIEW_CHARS + len("\n[TRUNCATED]")
@@ -141,25 +174,29 @@ def test_a_long_document_is_truncated_and_says_so(tmp_path):
 
 def test_a_short_document_is_not_truncated(tmp_path):
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "raw" / "specs" / "short.md", "# Short\n\nbody")
+    source = _write(workspace / "material" / "short.md", "# Short\n\nbody")
 
-    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY)
+    brief = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_type="spec"
+    )
 
     assert "[TRUNCATED]" not in brief.preview
 
 
 def test_the_layout_decides_the_source_page_template(tmp_path):
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "inbox" / "rfcs" / "a.md", "# A\n")
-    layout = IngestLayout(
-        raw_dir="inbox",
-        archive_dir="done",
-        source_types={"rfcs": "spec"},
-        batch_kinds=frozenset({"rfcs"}),
-        source_page_template="pages/{slug}-{month}.md",
-    )
+    source = _write(workspace / "material" / "a.md", "# A\n")
+    layout = IngestLayout(source_page_template="pages/{slug}-{month}.md")
 
-    brief = plan_document_brief(source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, layout=layout)
+    brief = plan_document_brief(
+        source,
+        wiki=wiki,
+        repo=workspace,
+        workspace_root=workspace,
+        today=DAY,
+        source_type="spec",
+        layout=layout,
+    )
 
     assert brief.source_type == "spec"
     assert brief.suggested_summary_path == "pages/a-2026-08.md"
@@ -170,7 +207,7 @@ def test_as_data_is_the_legacy_dict(tmp_path):
     `word_count` and `in_repo_doc` use corrected computation (the legacy formula
     and fixtures were internally inconsistent); every other field matches exactly."""
     workspace, wiki = _workspace(tmp_path)
-    source = _write(workspace / "raw" / "specs" / "auth.md", "# Auth Spec\n\nBody text.")
+    source = _write(workspace / "material" / "auth.md", "# Auth Spec\n\nBody text.")
 
     data = plan_document_brief(
         source,
@@ -178,6 +215,7 @@ def test_as_data_is_the_legacy_dict(tmp_path):
         repo=workspace,
         workspace_root=workspace,
         today=DAY,
+        source_type="spec",
         state_gate=_gate,
         match_entity=_matcher,
     ).as_data()

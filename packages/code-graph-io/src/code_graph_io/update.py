@@ -10,10 +10,9 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from code_parser.parse import parse_bytes
-from code_parser.projections.graph import to_graph_records
-
 from code_graph_io import _ignore, builtins, packages, resolve, schema, store, tokens, upsert
+from code_graph_io.parser.parse import parse_bytes
+from code_graph_io.parser.projections.graph import to_graph_records
 from code_graph_io.uri import repo_uri
 
 
@@ -82,7 +81,7 @@ def _diff(cwd: Path, prev: str) -> list[tuple[str, str]]:
 
 
 def _is_parseable(path: str) -> bool:
-    from code_parser.parsers import EXTENSIONS
+    from code_graph_io.parser.parsers import EXTENSIONS
 
     return Path(path).suffix in EXTENSIONS
 

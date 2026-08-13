@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 from code_graph_io import store, structural_nodes, upsert
+from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.structural_nodes import _is_test_path
 from code_graph_io.uri import RepoContext
-from code_parser.projections.graph import GraphNode, GraphRecords
 
 _CTX = RepoContext(org="test", repo="repo")
 
@@ -478,8 +478,8 @@ def test_file_python_reads_sparser_has_main(conn: sqlite3.Connection, tmp_path: 
     (src_root / "main.py").write_text("def main(): pass\n\nif __name__ == '__main__':\n    main()\n")
 
     _seed_package(conn, name="mypkg", path="packages/mypkg", language="python")
-    # Pre-seed code-parser attrs on the File node (as _process_files would).
-    # `name=path` matches `code_parser.projections.graph._emit_node`'s
+    # Pre-seed parser attrs on the File node (as _process_files would).
+    # `name=path` matches `code_graph_io.parser.projections.graph._emit_node`'s
     # convention for file SourceNodes (name = str(node.path)).
     upsert.upsert_records(
         conn,

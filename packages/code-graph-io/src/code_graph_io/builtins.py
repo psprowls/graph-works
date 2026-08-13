@@ -35,10 +35,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from code_parser.projections.graph import GraphEdge, GraphNode
-
 from code_graph_io import _ignore, upsert
-from code_graph_io.records import as_graph_records
+from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
 from code_graph_io.uri import RepoContext, builtin_uri, repo_uri
 
 # ---------------------------------------------------------------------------

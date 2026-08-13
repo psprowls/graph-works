@@ -6,8 +6,8 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
-from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.cli import _echo_plan, _echo_result, app
 from code_wiki_okf.init import SEED_ONLY, SEED_RELATIVE_PATHS, install_bundle
 from code_wiki_okf.mirror.model import DeclinedDeletion, MirrorPlan, MirrorResult

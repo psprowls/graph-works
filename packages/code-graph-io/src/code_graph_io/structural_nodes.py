@@ -25,10 +25,8 @@ import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
 
-from code_parser.projections.graph import GraphEdge, GraphNode, NodeKey
-
 from code_graph_io import _ignore, upsert
-from code_graph_io.records import as_graph_records
+from code_graph_io.records import GraphEdge, GraphNode, NodeKey, as_graph_records
 from code_graph_io.update import NotInGitRepoError, _git
 from code_graph_io.uri import RepoContext, file_uri, repo_uri, subpkg_uri
 
@@ -687,8 +685,8 @@ def emit(
         if file_language is not None:
             file_attrs["language"] = file_language
 
-        # File node name matches the code-parser convention:
-        # `code_parser.projections.graph._emit_node` uses
+        # File node name matches the parser's convention:
+        # `code_graph_io.parser.projections.graph._emit_node` uses
         # `name = str(node.path)` for file SourceNodes. Using the same
         # name here means we update the existing File node in place
         # (single row per file) instead of creating a duplicate.

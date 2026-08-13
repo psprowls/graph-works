@@ -38,7 +38,7 @@ from code_graph_io.queries import (
 )
 
 if TYPE_CHECKING:
-    from code_parser.projections.graph import GraphRecords
+    from code_graph_io.records import GraphRecords
 
 
 def _db_path(graph_dir: Path) -> Path:

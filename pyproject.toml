@@ -17,14 +17,27 @@ members = ["packages/*"]
 [tool.uv.sources]
 okf-io = { workspace = true }
 okf-ext = { workspace = true }
+config-io = { workspace = true }
+models-io = { workspace = true }
+subagents-io = { workspace = true }
 
 [dependency-groups]
 dev = [
     "import-linter>=2.0",
+    # Not a dependency of `subagents-io` — its `[project] dependencies` is
+    # empty and stays that way. One test in that package's suite passes
+    # `price_lookup=cost_for_usage` as the contract test for the injection
+    # seam, and that import has to resolve under `uv run --package
+    # subagents-io pytest`.
+    "models-io",
     "mypy>=1.11",
     "okf-ext[schemas]",
     "okf-io",
     "pytest>=8.0",
+    # models-io and subagents-io are the packages with `async def test_*`.
+    # Each sets asyncio_mode = "auto" in its own [tool.pytest.ini_options];
+    # this is what makes that option resolvable.
+    "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "ruff>=0.6",
     # Neither `jsonschema` nor `pyyaml` ships a `py.typed`, so `just types`
@@ -44,14 +57,23 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 [tool.ruff.lint.per-file-ignores]
 "packages/okf-io/tests/**" = ["ANN"]
 "packages/okf-ext/tests/**" = ["ANN"]
-"packages/code-parser/tests/**" = ["ANN"]
 "packages/code-graph-io/tests/**" = ["ANN"]
 "packages/code-wiki-okf/tests/**" = ["ANN"]
 "packages/work-tracker-okf/tests/**" = ["ANN"]
+"packages/config-io/tests/**" = ["ANN"]
+"packages/models-io/tests/**" = ["ANN"]
+"packages/subagents-io/tests/**" = ["ANN"]
 
 [tool.mypy]
 python_version = "3.12"
 strict = true
+
+# botocore ships no py.typed and botocore-stubs is a large dev dependency for
+# one `except` clause and one `.response` read. models-io subclasses nothing
+# from botocore, so `disallow_subclassing_any` is not in play here.
+[[tool.mypy.overrides]]
+module = ["botocore.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["packages/okf-io/tests", "packages/okf-ext/tests"]
@@ -82,7 +104,7 @@ source = ["okf_io", "okf_ext"]
 # rather than left to the `a : b` layer syntax's same-level semantics: the rule
 # the README promises should be legible in the file, not inferred from a colon.
 [tool.importlinter]
-root_package = "okf_ext"
+root_packages = ["okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io"]
 
 [[tool.importlinter.contracts]]
 name = "Capabilities sit above the shared context, never below it"
@@ -117,3 +139,40 @@ modules = [
     "okf_ext.bundle",
     "okf_ext.placement",
 ]
+
+# Parsing sits below the rest of code-graph-io: a single `:`-joined top layer
+# because the package has intra-layer cycles (repo_context <-> update,
+# deferred inside functions; structural_nodes -> update), so the contract
+# states the one direction that matters (nothing may import parser back) and
+# stays silent about the rest. `exhaustive = true` means a module added later
+# fails the contract until classified.
+[[tool.importlinter.contracts]]
+name = "Parsing sits below the graph"
+type = "layers"
+containers = ["code_graph_io"]
+exhaustive = true
+layers = [
+    "_ignore : agent_plugins : builtins : classification : entry_points : exit_codes : graphml : handle : import_scan : packages : paths : queries : records : render : repo_context : resolve : schema : source_meta : store : structural_nodes : test_suites : testing : tokens : update : upsert : uri",
+    "parser",
+]
+
+# The band-1 rule, stated categorically rather than by enumerating permitted
+# edges: no foundation package imports any other. `independence` and not
+# `layers` — a `layers` contract needs a total order among the packages it
+# names, and there is no order to state here; the rule is that every direction
+# is forbidden. An earlier docstring in `subagents-io` concluded grimp could
+# not express this at all. It can; the contract type was wrong.
+#
+# `okf_ext` is a root package above but is deliberately absent from `modules`:
+# it is band 2 and depends on `okf-io` by design.
+#
+# This does not replace each package's `tests/test_boundaries.py`. The two fail
+# in different directions: the AST walks derive their sibling set from the
+# filesystem, so a package added later is covered with no edit, but each only
+# sees imports out of the package it lives in; this contract is workspace-level
+# and catches an edge introduced from the other side, but `modules` is
+# enumerated and a new band-1 package has to be added to it by hand.
+[[tool.importlinter.contracts]]
+name = "The foundation is a strict layer — band-1 packages never import each other"
+type = "independence"
+modules = ["okf_io", "code_graph_io", "config_io", "models_io", "subagents_io"]

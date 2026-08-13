@@ -13,7 +13,7 @@ experience them across repeated runs, rather than as isolated unit cases.
 
 Fixture graphs are seeded the same way `test_sync.py` / `test_lanes.py` do:
 directly through `code_graph_io.testing.open_store` (a writable `GraphStore`
-on an arbitrary db path) plus `code_parser.projections.graph.GraphNode` /
+on an arbitrary db path) plus `code_graph_io.records.GraphNode` /
 `GraphRecords`. `code_graph_io.testing` carries no `build_records` helper.
 `upsert_records` is additive-only -- it never removes a node a prior call
 inserted -- so simulating "a package disappeared from the graph" needs a
@@ -29,8 +29,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from code_graph_io import open_reader
+from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
-from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.lanes import sync
 from code_wiki_okf.init import install_bundle

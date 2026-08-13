@@ -17,10 +17,9 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from code_parser.projections.graph import GraphNode
 
 from code_graph_io import _ignore, upsert
-from code_graph_io.records import as_graph_records
+from code_graph_io.records import GraphNode, as_graph_records
 from code_graph_io.uri import RepoContext, agent_plugin_uri
 
 # A component inventory entry. Heterogeneous by design — every parser below

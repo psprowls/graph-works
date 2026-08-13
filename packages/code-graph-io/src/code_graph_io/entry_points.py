@@ -19,10 +19,8 @@ import tomllib
 from pathlib import Path
 from typing import Protocol
 
-from code_parser.projections.graph import GraphEdge, GraphNode
-
 from code_graph_io import upsert
-from code_graph_io.records import as_graph_records
+from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
 from code_graph_io.structural_nodes import _resolve_import_root
 from code_graph_io.uri import RepoContext, entry_point_uri, repo_uri
 

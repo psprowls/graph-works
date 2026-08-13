@@ -17,8 +17,8 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from code_graph_io import open_reader
+from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
-from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.catalog import render_repositories, repository_entries
 from code_wiki_okf.entities.lanes import SyncSummary, sync

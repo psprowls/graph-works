@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "subagents-io"
+version = "0.2.0"
+description = "A bounded async fan-out pool for role-bound model dispatch: per-item failure isolation, a JSONL trace record per invocation, and opt-in USD cost accounting."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+# One runtime dependency, and no extras. `runner.py` constructs SystemMessage
+# and HumanMessage for real, so langchain-core is declared rather than hidden
+# behind TYPE_CHECKING — it is pure Python and drags in no provider stack, no
+# boto3, and above all no workspace package. There is deliberately no
+# `[project.optional-dependencies]`: an optional dependency is still a
+# declared edge, so `subagents-io[bedrock]` is not a thing and cost accounting
+# still arrives as an injected callable. `tests/test_boundaries.py` holds the
+# import side of that, `tests/test_package.py` the packaging side.
+dependencies = ["langchain-core>=1.4"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/subagents_io"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Not decorative. The whole pool suite is `async def`, and under
+# `uv run --package subagents-io` pytest resolves rootdir to THIS file rather
+# than the workspace root — so the setting has to be repeated here, the same
+# reason models-io repeats it.
+asyncio_mode = "auto"

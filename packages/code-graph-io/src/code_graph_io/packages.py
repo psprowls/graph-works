@@ -10,11 +10,9 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from code_parser.projections.graph import GraphEdge, GraphNode
-
 from code_graph_io import _ignore, upsert
 from code_graph_io.classification import classify
-from code_graph_io.records import as_graph_records
+from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
 from code_graph_io.uri import RepoContext, app_uri, dependency_uri, pkg_uri, repo_uri
 
 # PEP 508 bare-name prefix: identifier characters before any version/extra/marker.

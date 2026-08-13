@@ -1,0 +1,52 @@
+"""The dispatch value types: what a planner hands a runner to start a worker.
+
+Band 1's half of the worker-dispatch seam. Both types are inert data — frozen,
+method-free, default-free. Their field names spell work-item concepts (`slug`,
+`phase`, `kind`, `effort`) because that is what a dispatch record carries; this
+package stores those strings and never decides what any of them means.
+
+The two frozensets are the other half of the split. How a worktree is obtained
+and how a worker relates to a human are *how to run a worker*, so they are
+exported vocabularies rather than the trailing comments they were in the
+source. The phase-to-mode mapping that picks one of them is a lifecycle fact
+and stays a band up.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+#: The legal values of `WorktreeAction.action`.
+WORKTREE_ACTIONS: frozenset[str] = frozenset({"reuse", "fork-child", "create-top-level"})
+
+#: The legal values of `PlannedDispatch.mode`.
+DISPATCH_MODES: frozenset[str] = frozenset({"autonomous", "attend", "relay"})
+
+
+@dataclass(frozen=True)
+class WorktreeAction:
+    """Where a dispatched worker runs, and on which branch."""
+
+    action: str  # one of WORKTREE_ACTIONS
+    path: str | None  # concrete only for "reuse"; None until the backend creates it
+    branch: str
+    base_branch: str | None  # set for fork-child / create-top-level
+    exists: bool | None  # best-effort stat; None when the path is unknown or the stat failed
+
+
+@dataclass(frozen=True)
+class PlannedDispatch:
+    """One worker to launch, fully resolved."""
+
+    key: str  # "<slug>#<phase>"
+    slug: str
+    phase: str
+    kind: str
+    effort: str | None
+    skill: str
+    mode: str  # one of DISPATCH_MODES
+    model: str | None  # None = inherit the session model
+    reasoning_effort: str | None
+    worktree: WorktreeAction
+    merge_target: str
+    prompt: str

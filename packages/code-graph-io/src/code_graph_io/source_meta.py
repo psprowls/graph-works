@@ -1,13 +1,13 @@
 """Source-language metadata projected from code-graph-io's parsing engine.
 
-code-parser stays code-graph-io-private (package-layering-review): consumers that
+Parsing stays code-graph-io-private (package-layering-review): consumers that
 need language metadata get it through this module instead of importing
-code_parser directly.
+code_graph_io.parser directly.
 """
 
 from __future__ import annotations
 
-from code_parser.parsers import EXTENSIONS
+from code_graph_io.parser.parsers import EXTENSIONS
 
 
 def extension_languages() -> dict[str, str]:

@@ -8,8 +8,8 @@ from pathlib import Path
 
 import pytest
 from code_graph_io import packages, store, upsert
+from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 from code_graph_io.uri import RepoContext
-from code_parser.projections.graph import GraphEdge, GraphNode, GraphRecords
 
 _CTX = RepoContext(org="test", repo="repo")
 

@@ -12,11 +12,8 @@ it is not itself distributable.
   validation, table read/splice, render correctness, bundle health and search
   today; budgeted context assembly later.
 - [`packages/code-graph-io`](packages/code-graph-io) — code-graph core for the
-  agent-workspace ecosystem: SQLite store, manifest scanning, and read-only
-  queries.
-- [`packages/code-parser`](packages/code-parser) — tree-sitter-backed package
-  that turns source files into a span-bearing `SourceTree`, with a graph
-  projection aligned to `code-graph-io`.
+  agent-workspace ecosystem: SQLite store, tree-sitter-backed source parsing,
+  manifest scanning, and read-only queries.
 
 ## Checks
 
@@ -28,12 +25,12 @@ deferred until the repository has a remote (child spec §3, decision 1).
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
 | `just types` | `uv run mypy --strict` over all four packages' `src` trees |
 | `just contracts` | `uv run lint-imports` |
-| `just test` | `uv run pytest`, plus `code-graph-io` and `code-parser`'s own suites |
+| `just test` | `uv run pytest`, plus `code-graph-io`'s own suite |
 | `just cov` | branch coverage per package, gated |
 | `just check` | `lint` + `types` + `contracts` + `cov` |
 
 Coverage is **gated at 95% branch coverage** for `okf-io`/`okf-ext` and **90%**
-for `code-graph-io`/`code-parser` — each package's suite runs and is gated
+for `code-graph-io` — each package's suite runs and is gated
 separately; see the `justfile` for the exact commands. `just contracts` checks
 okf-ext's internal package boundaries; both it and the coverage gate are
 opt-in in the sense that CI does not yet run them — CI is deferred until the

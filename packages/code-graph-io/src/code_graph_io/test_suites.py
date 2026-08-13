@@ -27,11 +27,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from code_parser.projections.graph import GraphEdge, GraphNode
-
 from code_graph_io import _ignore, upsert
 from code_graph_io.import_scan import scan_files_imports
-from code_graph_io.records import as_graph_records
+from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
 from code_graph_io.structural_nodes import (
     _owning_package,
 )

@@ -3,10 +3,28 @@
 Code-graph backend for agent-workspace. Owns:
 
 - SQLite schema + store at `<graph_dir>/code.db` (the graph directory is supplied by the caller)
-- Upsert from `code-parser`'s `GraphRecords`
+- Tree-sitter-backed source parsing (`code_graph_io.parser`) into a span-bearing
+  `SourceTree`, projected onto `GraphRecords` (`code_graph_io.records`)
+- Upsert from those `GraphRecords`
 - Manifest scanning (`pyproject.toml`, `package.json`) → `kind:package` nodes
 - Cross-file edge resolution sweep
 - Read-only query layer (`find`, `callers`, `callees`, `imports`, `describe_package`, `describe_path`)
+
+## Parsing quick start
+
+```python
+from pathlib import Path
+from code_graph_io.parser import parse_file, to_graph_records
+
+tree = parse_file(Path("src/foo.py"), package="my-package")
+records = to_graph_records(tree)
+print(records.nodes)
+print(records.edges)
+```
+
+v1 covers Python, JavaScript, and TypeScript with a single graph projection.
+`.tsx` files are parsed with the `tsx` tree-sitter grammar so JSX-bearing React
+components are preserved; plain `.ts` files continue to use `typescript`.
 
 ## Exit codes
 

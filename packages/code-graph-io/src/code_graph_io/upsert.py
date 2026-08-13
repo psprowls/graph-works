@@ -6,7 +6,7 @@ import json
 import sqlite3
 from typing import Any
 
-from code_parser.projections.graph import GraphEdge, GraphNode, GraphRecords
+from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 
 NodeKey = tuple[str, str, str | None]
 # Ecosystem-global node kinds: identity is never repo-scoped and they are never

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from code_graph_io import queries, resolve, store, upsert
-from code_parser.projections.graph import GraphEdge, GraphNode, GraphRecords
+from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 
 
 @pytest.fixture()

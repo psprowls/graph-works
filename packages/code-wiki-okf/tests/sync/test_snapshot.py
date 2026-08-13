@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from code_graph_io import open_reader
 from code_graph_io import update as graph_update
+from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
-from code_parser.projections.graph import GraphNode, GraphRecords
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.sync import sync_entities
 from code_wiki_okf.init import install_bundle

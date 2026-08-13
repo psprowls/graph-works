@@ -22,7 +22,7 @@ neighbours. `--config-dir` relocates the declaration files
 bundles, stamped into `_repositories.yaml` so later commands read the same
 answer without the flag being retyped.
 
-    code-wiki-okf sync <bundle-root> [--dry-run/--no-dry-run]
+    code-wiki-okf sync <bundle-root> [--dry-run] [--config-dir <path>]
 
 Syncs the bundle's entity lanes (Package, App, TestSuite, Dependency,
 AgentPlugin, Repository) against the shared code graph named in
@@ -30,7 +30,9 @@ AgentPlugin, Repository) against the shared code graph named in
 sections, creates pages for new entities, deletes pages for vanished ones
 (guarded — a page with hand-edited prose is declined, not deleted),
 reconciles every touched lane's `index.md`, and appends one `log.md` entry.
-Defaults to `--dry-run` (touches nothing); pass `--no-dry-run` to apply.
+Writes by default; pass `--dry-run` to print each lane's plan instead. This
+matches `init`'s convention — the flag opts out of writing, and there is no
+`--no-dry-run`.
 
     code-wiki-okf validate <bundle-root> [--config-dir <path>] [--strict]
 

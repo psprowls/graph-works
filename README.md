@@ -14,6 +14,23 @@ it is not itself distributable.
 - [`packages/code-graph-io`](packages/code-graph-io) — code-graph core for the
   agent-workspace ecosystem: SQLite store, tree-sitter-backed source parsing,
   manifest scanning, and read-only queries.
+- [`packages/workflow-local`](packages/workflow-local) — a subprocess
+  `DispatchBackend` for `subagents-io`: a durable per-session ledger, JSONL
+  event and reply files, and a reaper that settles a silent child.
+
+### Package naming
+
+The suffix is a band, and a permission:
+
+| Suffix | Band | What it may couple to |
+|---|---|---|
+| `-io` | 1, foundation | stdlib and declared third party only — never a sibling package, never a workspace path; `os` only where a package's own boundary test names a narrow, tested exemption |
+| `-okf` | 2, OKF-aware | band 1 plus the OKF document model |
+| `-core` | 3, application | everything below it; exactly one package knows what a workspace is |
+| `workflow-<backend>` | beside band 1 | **vendor and system coupling lives here** — one package per backend, `workflow-orca` beside `workflow-local` |
+
+`workflow-<backend>` exists so the band-1 seam can ship with a real
+implementation without the foundation carving out an exemption to hold it.
 
 ## Checks
 

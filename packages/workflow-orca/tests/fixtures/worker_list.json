@@ -1,0 +1,51 @@
+{
+  "id": "d87a9681-01b7-4f53-b631-a5bc47bf594e",
+  "ok": true,
+  "result": {
+    "workers": [
+      {
+        "dispatchId": "ctx_000000000001",
+        "taskId": "task_5ca8c19ffa5e",
+        "runId": "run_43b63f0bdf2b",
+        "workerState": "failed",
+        "dispatchStatus": "failed",
+        "agentTerminalHandle": "term_0000000000000001",
+        "terminalState": "released",
+        "resource": {"id": "wtr_0000000001", "releaseState": "released", "terminalHandle": "term_0000000000000001"}
+      },
+      {
+        "dispatchId": "ctx_817ed5bf5986",
+        "taskId": "task_5ca8c19ffa5e",
+        "runId": "run_43b63f0bdf2b",
+        "workerState": "succeeded",
+        "dispatchStatus": "completed",
+        "agentTerminalHandle": "term_10fb90d2-9735-42b5-84a0-dc73a7e1a66a",
+        "terminalState": "retained",
+        "resource": {
+          "id": "wtr_5a0434cfad78",
+          "ownershipState": "user_owned",
+          "releaseState": "retained",
+          "retainedReason": "user_takeover",
+          "terminalHandle": "term_10fb90d2-9735-42b5-84a0-dc73a7e1a66a",
+          "worktreeId": "0a0587cb::/Users/pat/orca/workspaces/agent-workspace/test-gap-code-wiki-smoke-script",
+          "originDispatchId": "ctx_817ed5bf5986",
+          "ownerDispatchId": "ctx_817ed5bf5986",
+          "releaseRequestedAt": null,
+          "releaseCompletedAt": null,
+          "releaseError": null
+        }
+      },
+      {
+        "dispatchId": "ctx_320c498114b8",
+        "taskId": "task_338800a1fa14",
+        "runId": "run_43b63f0bdf2b",
+        "workerState": "running",
+        "dispatchStatus": "dispatched",
+        "agentTerminalHandle": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53",
+        "terminalState": "active",
+        "resource": {"id": "wtr_f5ffa724faff", "releaseState": "active", "terminalHandle": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53"}
+      }
+    ],
+    "counts": {"retained": 1, "active": 1, "released": 1}
+  }
+}

@@ -16,7 +16,7 @@ def test_twelve_paths_schemas_before_sections() -> None:
 
 def test_the_fragment_file_is_a_member() -> None:
     """An installed `_sections/` without it cannot resolve a `placeholder_ref`."""
-    assert "_sections/_fragments.yaml" in SEED_RELATIVE_PATHS
+    assert "_sections/_fragments.doc_wiki.yaml" in SEED_RELATIVE_PATHS
 
 
 def test_no_scaffold_member_is_claimed() -> None:

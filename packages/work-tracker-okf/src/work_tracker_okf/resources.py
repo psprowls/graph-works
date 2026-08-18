@@ -17,11 +17,11 @@ from importlib.resources.abc import Traversable
 
 #: Every file this package owns, bundle-relative posix, in write order.
 #:
-#: Fourteen, not thirteen (C1-I): `_sections/_fragments.yaml` is a member like
-#: any other, and an installed `_sections/` without it cannot resolve a single
-#: `placeholder_ref`. `index.md`, `log.md` and `_tags.yaml` are absent because
-#: they belong to `okf_ext.bundle`'s scaffold, which any of the three tier-3
-#: packages sharing a bundle may be the first to run.
+#: Fourteen, not thirteen (C1-I): `_sections/_fragments.work_tracker.yaml` is a
+#: member like any other, and an installed `_sections/` without it cannot
+#: resolve a single `placeholder_ref`. `index.md`, `log.md` and `_tags.yaml`
+#: are absent because they belong to `okf_ext.bundle`'s scaffold, which any of
+#: the three tier-3 packages sharing a bundle may be the first to run.
 SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "_schema/_base.schema.json",
     "_schema/Epic.schema.json",
@@ -30,7 +30,7 @@ SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "_schema/TechDebt.schema.json",
     "_schema/TestGap.schema.json",
     "_schema/Spike.schema.json",
-    "_sections/_fragments.yaml",
+    "_sections/_fragments.work_tracker.yaml",
     "_sections/Epic.yaml",
     "_sections/Feature.yaml",
     "_sections/Bug.yaml",

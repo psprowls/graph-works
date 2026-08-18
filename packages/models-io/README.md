@@ -1,8 +1,8 @@
 # models-io
 
-Guarded chat-model constructors for AWS Bedrock and the Vercel AI Gateway: a
-closed access-denied taxonomy, list-content normalization at the model
-boundary, and provider stacks isolated behind extras.
+Guarded model constructors for AWS Bedrock and the Vercel AI Gateway — two chat
+models and one embeddings client: a closed access-denied taxonomy, list-content
+normalization at the model boundary, and provider stacks isolated behind extras.
 
 Band 1 of the graph-works layering. This package **never reads the process
 environment, never discovers a workspace, and never knows a file or directory
@@ -29,10 +29,18 @@ install — rather than a bare `ImportError` from an import you did not write.
 ## Usage
 
 ```python
-from models_io import BedrockAccessDenied, GatewayAccessDenied, make_bedrock_llm, make_gateway_llm
+from models_io import (
+    BedrockAccessDenied,
+    GatewayAccessDenied,
+    make_bedrock_llm,
+    make_gateway_llm,
+    make_bedrock_embeddings,
+)
 
 llm = make_bedrock_llm("qwen.qwen3-32b-v1:0", region="us-east-1", max_tokens=4096)
 llm.invoke("ping")  # AccessDeniedException -> BedrockAccessDenied, naming the ARN and the IAM action
+
+embedder = make_bedrock_embeddings("amazon.titan-embed-text-v2:0")  # bedrock extra; vectors, not messages
 ```
 
 ### Credentials are the caller's

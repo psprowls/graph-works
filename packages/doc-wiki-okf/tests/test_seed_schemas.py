@@ -107,20 +107,31 @@ def test_source_is_standalone_and_pins_its_own_const() -> None:
     assert schema["type"] == "object"
 
 
-def test_source_requires_the_five_keys() -> None:
-    """S-J."""
+def test_source_requires_the_four_keys() -> None:
+    """S-J, minus `source_kind`: K-C drops it from `required` because nothing
+    behavioural depends on the value, so forcing a classification on material
+    that genuinely has no genre buys nothing."""
     assert sorted(_schema_set().schemas["Source"]["required"]) == [
         "description",
         "source_path",
-        "source_type",
         "title",
         "type",
     ]
 
 
-def test_source_type_is_a_closed_vocabulary_of_nine() -> None:
-    enum = _schema_set().schemas["Source"]["properties"]["source_type"]["enum"]
-    assert enum == ["spec", "article", "pr", "ticket", "transcript", "example", "skill", "doc", "note"]
+def test_source_kind_is_a_closed_vocabulary_of_seven() -> None:
+    """K-B: nine values cut to seven -- `example` and `note` dropped, `pr`
+    widened to `code-review`. This is the one authored copy; a follow-up
+    deletes the duplicated `SOURCE_TYPES` tuple and the duplicated prose copy
+    in the ingestor prompt so that every consumer derives from this enum at
+    run time."""
+    enum = _schema_set().schemas["Source"]["properties"]["source_kind"]["enum"]
+    assert enum == ["spec", "article", "ticket", "skill", "doc", "transcript", "code-review"]
+
+
+def test_source_type_is_gone() -> None:
+    """K-A: the old key collided with OKF's own `type: Source` three lines up."""
+    assert "source_type" not in _schema_set().schemas["Source"]["properties"]
 
 
 def test_source_admits_the_vault_keys_it_does_not_declare() -> None:
@@ -133,7 +144,7 @@ _COMPLETE_SOURCE = (
     "type: Source\n"
     "title: A source\n"
     "description: What it is.\n"
-    "source_type: spec\n"
+    "source_kind: spec\n"
     "source_path: sources/references/2026-08-a-source.md\n"
 )
 
@@ -149,7 +160,13 @@ def test_a_source_page_missing_source_path_is_a_finding(tmp_path: Path) -> None:
     assert any("'source_path' is a required property" in message for message in messages)
 
 
-def test_an_unknown_source_type_is_a_finding(tmp_path: Path) -> None:
-    bad_source = _COMPLETE_SOURCE.replace("source_type: spec", "source_type: blog")
+def test_an_unknown_source_kind_is_a_finding(tmp_path: Path) -> None:
+    bad_source = _COMPLETE_SOURCE.replace("source_kind: spec", "source_kind: blog")
     messages = _findings(tmp_path, bad_source, lane="sources", heading="TL;DR")
     assert any("'blog' is not one of" in message for message in messages)
+
+
+def test_an_absent_source_kind_is_no_finding(tmp_path: Path) -> None:
+    """K-C: optional means an unclassified page is valid, not a warning."""
+    without = _COMPLETE_SOURCE.replace("source_kind: spec\n", "")
+    assert _findings(tmp_path, without, lane="sources", heading="TL;DR") == []

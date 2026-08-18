@@ -18,10 +18,10 @@ _ALL_FILES = _SCAFFOLD_FILES | _INSTALL_FILES
 
 
 def test_the_package_owns_exactly_fourteen_files() -> None:
-    """C1-I: the epic's count of thirteen missed `_sections/_fragments.yaml`."""
+    """C1-I: the epic's count of thirteen missed `_sections/_fragments.work_tracker.yaml`."""
     assert len(SEED_RELATIVE_PATHS) == 14
     assert len(set(SEED_RELATIVE_PATHS)) == 14
-    assert "_sections/_fragments.yaml" in SEED_RELATIVE_PATHS
+    assert "_sections/_fragments.work_tracker.yaml" in SEED_RELATIVE_PATHS
 
 
 def test_this_package_ships_none_of_the_scaffold_members() -> None:
@@ -227,7 +227,7 @@ def test_declarations_dir_relocates_the_declarations_and_stamps_nothing(tmp_path
     install_bundle(root, today=_TODAY, declarations_dir=elsewhere, dry_run=False)
 
     assert (elsewhere / "_schema/Epic.schema.json").is_file()
-    assert (elsewhere / "_sections/_fragments.yaml").is_file()
+    assert (elsewhere / "_sections/_fragments.work_tracker.yaml").is_file()
     assert not (root / "_schema").exists()
     assert not (root / "_repositories.yaml").exists()
     assert sorted(p.name for p in root.iterdir()) == ["index.md", "log.md"]

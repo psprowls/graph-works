@@ -4,6 +4,7 @@ error	graph.parent-type-invalid	work/2026-06-02-feature-accepted-no-plan.md	work
 error	plan.accepted-without-plan	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.plan	`workflow_status: accepted` but the `## Plan` table is missing
 warn	state.phase-status-incoherent	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.state	`workflow_status` 'accepted' expects `phase` in ['done', 'execute', 'finish'], got 'design'
 warn	state.stuck-accepted	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.state	`workflow_status: accepted` with no update in 124 days (over 60)
+warn	decisions.ledger-missing	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.decisions	`type: Epic` at `phase: execute` has no decisions ledger at `work/2026-07-01-epic-stalled-decomposition/references/00-decisions.md`
 warn	graph.epic-without-children	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.graph	`type: Epic` at `phase: execute` has no children
 warn	plan.table-malformed	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.plan	`## Plan` is present but carries no table matching its declared columns
 warn	state.stuck-open	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.state	`workflow_status: open` with no update in 94 days (over 30)
@@ -27,3 +28,9 @@ error	graph.depends-on-cycle	work/2026-07-08-bug-cycle-b.md	work_tracker_okf._ru
 error	graph.parent-cycle	work/2026-07-09-feature-parent-cycle-a.md	work_tracker_okf._rules.graph	`parent` chain participates in a cycle
 error	graph.parent-cycle	work/2026-07-10-feature-parent-cycle-b.md	work_tracker_okf._rules.graph	`parent` chain participates in a cycle
 error	state.in-progress-without-owner	work/2026-07-12-tech-debt-in-progress.md	work_tracker_okf._rules.state	`workflow_status: in-progress` with no `owner`
+error	decisions.entry-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-002: invalid status 'maybe'; expected one of ['answered', 'assumed', 'open', 'superseded']
+error	decisions.entry-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id 'D-002' is duplicated in the ledger
+error	decisions.entry-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id sequence has a gap: [3] missing between D-001 and D-004
+error	decisions.open-at-finish	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	`phase: finish` with 1 open decision(s): D-002
+error	decisions.supersedes-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-004 supersedes 'D-009', which does not exist in the ledger
+error	decisions.cite-missing	work/2026-07-14-epic-feature-ledger-citation.md	work_tracker_okf._rules.decisions	design spec cites 'D-011', which is not in epic '2026-07-13-epic-ledger-at-finish''s ledger

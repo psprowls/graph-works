@@ -34,6 +34,20 @@ ADR_DIRECTORY = "adrs/"
 ADR_TYPE = "Explanation"
 
 
+def is_adr(concept_id: str, type_name: str) -> bool:
+    """An ADR is the ADR lane's type **in** the ADR lane's directory.
+
+    Both halves are required: `ADR_TYPE` is `Explanation`, which the Diátaxis
+    explanation lane also uses, so the type alone would sweep every explanation
+    page into the ADR checks.
+
+    Takes the type name rather than a document, so the package that owns the
+    vocabulary needs no okf-io type in its interface; every caller already has
+    `(document.fm.type or "")` in hand.
+    """
+    return concept_id.startswith(ADR_DIRECTORY) and type_name.strip() == ADR_TYPE
+
+
 @dataclass(frozen=True, slots=True)
 class Lane:
     """A proposal lane (directory + type).

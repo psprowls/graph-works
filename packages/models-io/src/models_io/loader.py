@@ -1,4 +1,4 @@
-"""`provider-chat-model-constructors` — the two functions a caller needs.
+"""`provider-model-constructors` — the three functions a caller needs.
 
 Neither constructor imports its provider stack at module level. The import
 happens inside the function body, so `import models_io` costs nothing beyond
@@ -7,9 +7,9 @@ the reverse). An absent extra is a typed `ProviderNotInstalled` naming the
 extra to install, not a bare `ImportError` from an import the caller never
 wrote.
 
-`BaseChatModel` appears only as a return annotation, so it is imported under
-`TYPE_CHECKING` — which is what lets this package declare zero base runtime
-dependencies.
+`BaseChatModel` and `Embeddings` appear only as return annotations, so they
+are imported under `TYPE_CHECKING` — which is what lets this package declare
+zero base runtime dependencies.
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ from models_io.errors import (
 )
 
 if TYPE_CHECKING:
+    from langchain_core.embeddings import Embeddings
     from langchain_core.language_models import BaseChatModel
 
 _DEFAULT_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh/v1"
@@ -82,3 +83,20 @@ def make_gateway_llm(
         credential_hint=credential_hint,
         max_tokens=max_tokens,
     )
+
+
+def make_bedrock_embeddings(model_id: str, *, region: str = "us-east-1", normalize: bool = True) -> Embeddings:
+    """Build a Bedrock embeddings client from explicit config.
+
+    Unlike the chat constructors there is no guarded subclass — an embeddings
+    call returns a vector, so neither the access-denied translation nor the
+    content normalization has anything to attach to.
+
+    Requires the `bedrock` extra; raises `ProviderNotInstalled` without it.
+    AWS credentials are `boto3`'s to resolve, below this package.
+    """
+    try:
+        from models_io import embeddings
+    except ImportError as e:
+        raise ProviderNotInstalled(_format_missing_extra_message("bedrock", e)) from e
+    return embeddings.build(model_id, region=region, normalize=normalize)

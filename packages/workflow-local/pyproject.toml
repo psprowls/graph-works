@@ -1,0 +1,33 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "workflow-local"
+version = "0.1.0"
+description = "A subprocess DispatchBackend for subagents-io: a durable per-session ledger, JSONL event and reply files, and a reaper that settles a silent child."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+# One dependency, and it is the protocol this package implements. No third
+# party: the whole backend is `subprocess`, `signal`, `json` and `pathlib`.
+# There is deliberately no `[project.optional-dependencies]` — a vendor SDK
+# arriving here as an extra would make this the package that runs two backends,
+# and the naming rule is one package per backend.
+dependencies = ["subagents-io>=0.2,<0.3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/workflow_local"]
+
+[tool.uv.sources]
+subagents-io = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `conformance.py`, `fake.py` and `child.py` are plain sibling modules, not a
+# package. Stating the path here is what makes `from conformance import CASES`
+# resolve the same way under `pytest packages/workflow-local/tests` from the
+# repo root as it does under `--package workflow-local`.
+pythonpath = ["tests"]

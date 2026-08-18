@@ -23,9 +23,9 @@ what says which `route`, which `apply` and which `rollup` is meant, and
 hoisting them would put `apply` and `rollup` at the package's front door as
 bare names.
 
-The layout and writer surface is five more, on the same rule:
+The layout and writer surface is six more, on the same rule:
 
-    paths -> {filing, sources, results, archive}
+    paths -> {filing, sources, results, archive, decisions}
 
     from work_tracker_okf.paths import artifact_path, item_page
     from work_tracker_okf.filing import file_item
@@ -41,6 +41,12 @@ and `advance.apply` are different things, and the module name is what says which
 `archive` takes a bundle loaded through `ARCHIVE_IGNORE` rather than `IGNORE`:
 `okf_ext.moves` never reads `bundle.ignored`, so the narrow recipe would plan a
 move covering only the item page. It is the one path that wants the wider lens.
+
+`decisions` is the odd one out on the writer rule: its mutators write directly
+rather than planning first, because a plan over a ledger append would show
+nothing `render(preamble, entries)` does not already show. `advance` and
+`children` plan-then-apply because a caller needs to see a refusal before a
+write; a ledger mutation has no refusal that is not a caller error.
 
 `vocabulary` stays a submodule rather than being flattened into this namespace:
 its fourteen constants are read as `vocabulary.TERMINAL_STATUSES`, where the

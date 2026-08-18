@@ -247,6 +247,8 @@ def advance_and_stamp(
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
+    worktree: str | None = None,
+    branch: str | None = None,
     dry_run: bool = True,
 ) -> AdvanceOutcome:
     """Advance *slug*, stamp its artifact, ensure its plan row -- in **one save**.
@@ -277,7 +279,16 @@ def advance_and_stamp(
     `test_advance.py` already pins for `apply`.
     """
     items = load_items(bundle)
-    plan = advance(items, slug, today=today, effort=effort, owner=owner, resolved_in=resolved_in)
+    plan = advance(
+        items,
+        slug,
+        today=today,
+        effort=effort,
+        owner=owner,
+        resolved_in=resolved_in,
+        worktree=worktree,
+        branch=branch,
+    )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)
 

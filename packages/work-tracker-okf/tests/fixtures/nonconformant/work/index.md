@@ -11,3 +11,5 @@
 - [2026-07-09-feature-parent-cycle-a](2026-07-09-feature-parent-cycle-a.md) - half a parent cycle
 - [2026-07-10-feature-parent-cycle-b](2026-07-10-feature-parent-cycle-b.md) - the other half
 - [2026-07-12-tech-debt-in-progress](2026-07-12-tech-debt-in-progress.md) - in-progress with no owner
+- [2026-07-13-epic-ledger-at-finish](2026-07-13-epic-ledger-at-finish.md) - open decisions at finish, and a ledger wrong four ways
+- [2026-07-14-epic-feature-ledger-citation](2026-07-14-epic-feature-ledger-citation.md) - a spec citing a decision the ledger never recorded

@@ -163,3 +163,32 @@ def test_load_items_over_an_empty_bundle_is_empty(tmp_path) -> None:
     root.mkdir()
     (root / "index.md").write_text("---\nokf_version: 0.2\n---\n\n# bundle\n", encoding="utf-8")
     assert load_items(load_bundle(root)) == ()
+
+
+def test_worktree_and_branch_project_as_optional_text(tmp_path) -> None:
+    from okf_io import load_bundle
+    from work_helpers import write_item
+
+    write_item(
+        tmp_path,
+        "x",
+        "type: Feature\nworkflow_status: open\nopened: 2026-08-01\nupdated: 2026-08-01\n"
+        "worktree: /tmp/wt/x\nbranch: feature/x\n",
+    )
+    item = load_items(load_bundle(tmp_path))[0]
+    assert item.worktree == "/tmp/wt/x"
+    assert item.branch == "feature/x"
+
+
+def test_absent_and_empty_worktree_project_as_none(tmp_path) -> None:
+    from okf_io import load_bundle
+    from work_helpers import write_item
+
+    write_item(
+        tmp_path,
+        "x",
+        "type: Feature\nworkflow_status: open\nopened: 2026-08-01\nupdated: 2026-08-01\nworktree: ''\n",
+    )
+    item = load_items(load_bundle(tmp_path))[0]
+    assert item.worktree is None
+    assert item.branch is None

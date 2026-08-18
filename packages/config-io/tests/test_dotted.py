@@ -23,6 +23,28 @@ def test_get_through_a_scalar_is_none():
     assert dotted.get({"a": {"b": 1}}, "a.b.c") is None
 
 
+def test_has_sees_a_present_null():
+    # The whole reason `has` exists: `get` returns None for this and for an
+    # absent key alike, so a caller cannot tell "set to null" from "unset".
+    assert dotted.has({"a": {"b": None}}, "a.b") is True
+    assert dotted.get({"a": {"b": None}}, "a.b") is None
+
+
+def test_has_is_false_for_an_absent_key():
+    assert dotted.has({"a": {}}, "a.b") is False
+    assert dotted.has({}, "a") is False
+    assert dotted.has({"a": {"b": 1}}, "a.z") is False
+
+
+def test_has_through_a_scalar_is_false_and_does_not_raise():
+    # Total, like `get`: no shape of data and no shape of key raises.
+    assert dotted.has({"a": {"b": 1}}, "a.b.c") is False
+
+
+def test_has_sees_a_top_level_key():
+    assert dotted.has({"a": 1}, "a") is True
+
+
 def test_set_in_creates_intermediate_mappings():
     data: dict[str, object] = {}
     dotted.set_in(data, "a.b.c", 1)

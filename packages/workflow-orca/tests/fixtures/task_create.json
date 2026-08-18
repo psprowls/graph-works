@@ -1,0 +1,17 @@
+{
+  "id": "7d2f4a91-30ce-4c2f-9a48-4b7a1cbb90d2",
+  "ok": true,
+  "result": {
+    "task": {
+      "id": "task_new0000001",
+      "run_id": "run_43b63f0bdf2b",
+      "task_title": "2026-08-14-epic-feature-orca-dispatch-backend#execute",
+      "display_name": "2026-08-14-epic-feature-orca-dispatch-backend · execute",
+      "status": "pending",
+      "deps": "[]",
+      "result": null,
+      "created_at": "2026-08-14 14:10:00",
+      "completed_at": null
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "id": "15f68028-e628-4e2e-a4b5-692826cdecb0",
+  "ok": true,
+  "result": {
+    "dispatch": {
+      "id": "ctx_320c498114b8",
+      "run_id": "run_43b63f0bdf2b",
+      "task_id": "task_338800a1fa14",
+      "assignee_handle": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53",
+      "status": "dispatched",
+      "failure_count": 0,
+      "last_failure": null,
+      "dispatched_at": "2026-08-13 18:33:41",
+      "completed_at": null,
+      "last_heartbeat_at": "2026-08-13T18:38:36Z"
+    },
+    "worker": {
+      "dispatch_id": "ctx_320c498114b8",
+      "state": "running",
+      "stage": "working",
+      "agent_terminal_handle": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53",
+      "setup_state": "succeeded"
+    }
+  }
+}

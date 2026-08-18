@@ -1,0 +1,102 @@
+# The packaged role catalog. Ten roles — exactly the set `src/` binds, which
+# `test_models_catalog.py::test_the_catalog_and_the_bindings_agree` checks in
+# both directions.
+#
+# Omitted for two different reasons, kept apart because collapsing them is how
+# the catalog drifted in the first place. Seven roles serve harnesses this
+# package does not ship (skill_planner, skill_synthesizer, user_simulator,
+# judge_a, judge_b, guidance_classifier, guidance_orchestrator); they belong
+# with their harnesses if those arrive. Two more — preflight and scanner — had
+# no consumer anywhere, including in the predecessor package, and were carried
+# across verbatim; they return when something binds them.
+#
+# And no role carries `sweep_candidates`: that is an eval-harness concept with
+# no consumer here. The candidate sets were chosen in a dated tuning session
+# (2026-05-30, post-Haiku-purge) and remain recoverable from `agent-research`,
+# which is read-only, not deleted.
+#
+# Every value here is a default. `roles.<name>.<field>` in `workspace.yaml`
+# overrides any subset of it, field by field.
+
+[roles.librarian]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 2048
+max_concurrency = 5
+
+# The bundle-thin code-fallback role: reads source files directly when the
+# librarian fan-out returns no useful excerpts. Conservative on purpose — the
+# fallback is opt-in and bounded.
+[roles.code_reader]
+model_id        = "minimax.minimax-m2.5"
+region          = "us-east-1"
+max_tokens      = 2048
+max_concurrency = 3
+
+[roles.linter]
+model_id        = "us.amazon.nova-lite-v1:0"
+region          = "us-east-1"
+max_tokens      = 3000
+max_concurrency = 10
+
+[roles.ingestor]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 4096
+max_concurrency = 5
+
+# The ingest proposal-reasoning pass.
+[roles.proposal_reasoner]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 4096
+max_concurrency = 3
+
+# Per stale entity, refreshes narrative prose in one pass. Token budget sized
+# for multi-section structured output.
+[roles.prose_refresher]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 4096
+max_concurrency = 10
+
+# One orchestrator owns each query session; worker parallelism is the
+# librarian's and the code_reader's.
+[roles.query_orchestrator]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 4096
+max_concurrency = 1
+
+# The single answer-composition call on the fixed pipeline: takes the
+# librarian fan-out's excerpts (or the code fallback's) and writes the answer.
+# `commands/query.py` is the only consumer; the orchestrated path composes its
+# own answer and never calls this.
+[roles.synthesizer]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 4096
+max_concurrency = 3
+
+# Normalizes proposal_reasoner analysis into strict proposal YAML.
+[roles.extractor]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 2048
+max_concurrency = 5
+
+# The cross-page drift judge: one call per curated page suspected of going
+# stale, emitting one finding per entity that drives the staleness.
+#
+# `max_tokens` deviates from the predecessor's 512. Nothing caps entities per
+# target, and each finding carries a `stale_claim` and a `rationale`, so a
+# heavily-backlinked page can exceed 512 — and `parse_drift_propagator_verdict`
+# fails safe to *not-stale*, which would report that page as clean. 2048 matches
+# the catalog's other multi-item-output roles (`code_reader`, `extractor`).
+# `max_tokens` is a ceiling, not a reservation, so this costs nothing for the
+# short verdicts.
+[roles.drift_propagator]
+model_id        = "moonshotai.kimi-k2.5"
+region          = "us-east-1"
+max_tokens      = 2048
+max_concurrency = 10

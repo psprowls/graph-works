@@ -188,3 +188,33 @@ def test_the_in_progress_item_names_an_owner(conformant_root: Path) -> None:
     feature = next(item for item in items if item.slug == _FEATURE)
     assert feature.workflow_status == "in-progress"
     assert feature.owner
+
+
+def test_the_epics_ledger_is_a_member_but_not_a_concept(conformant_root: Path) -> None:
+    """§3.1: the ledger lives under `references/`, so `IGNORE`'s existing
+    `*/references/*` already covers it — it is present without being schema- or
+    section-checked."""
+    from work_tracker_okf.paths import decisions_ledger
+
+    bundle = load_bundle(conformant_root, ignore=IGNORE)
+    ref = decisions_ledger(_EPIC)
+    assert bundle.has_member(ref.rel)
+    assert ref.rel.removesuffix(".md") not in bundle.concepts
+
+
+def test_the_epics_ledger_parses_clean(conformant_root: Path) -> None:
+    """The other half of the zero-errors property: a well-formed ledger present,
+    not merely absent."""
+    from work_tracker_okf.decisions import counts, load
+    from work_tracker_okf.paths import decisions_ledger
+
+    parsed = load(decisions_ledger(_EPIC).path(conformant_root))
+    assert parsed.warnings == []
+    assert counts(parsed.entries) == {
+        "answered": 1,
+        "assumed": 1,
+        "open": 0,
+        "superseded": 1,
+        "invalid": 0,
+        "total": 3,
+    }

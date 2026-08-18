@@ -1,6 +1,6 @@
 frontmatter:
   owned: [tested_packages, suite_kind, file_count]
-  provenance: [generated, last_updated_commit, tokens]
+  provenance: [generated, last_updated_commit, tokens, prose_refreshed_commit, prose_refresh_attempts]
 sections:
   - heading: Purpose
     required: true

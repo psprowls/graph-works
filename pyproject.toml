@@ -20,6 +20,13 @@ okf-ext = { workspace = true }
 config-io = { workspace = true }
 models-io = { workspace = true }
 subagents-io = { workspace = true }
+code-graph-io = { workspace = true }
+code-wiki-okf = { workspace = true }
+work-tracker-okf = { workspace = true }
+doc-wiki-okf = { workspace = true }
+graph-works-core = { workspace = true }
+workflow-local = { workspace = true }
+workflow-orca = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -44,6 +51,10 @@ dev = [
     # fails without stubs. Dev tooling only — not runtime dependencies.
     "types-jsonschema",
     "types-PyYAML",
+    "doc-wiki-okf",
+    "graph-works-core",
+    "workflow-local",
+    "workflow-orca",
 ]
 
 [tool.ruff]
@@ -64,6 +75,14 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/models-io/tests/**" = ["ANN"]
 "packages/subagents-io/tests/**" = ["ANN"]
 "packages/doc-wiki-okf/tests/**" = ["ANN"]
+"packages/graph-works-core/tests/**" = ["ANN"]
+"packages/workflow-local/tests/**" = ["ANN"]
+"packages/workflow-orca/tests/**" = ["ANN"]
+"packages/graph-works-core/src/graph_works_core/prompts/_fragments/*.py" = ["E501"]
+"packages/graph-works-core/src/graph_works_core/query/prompts/code_reader.py" = ["E501"]
+"packages/graph-works-core/src/graph_works_core/query/prompts/synthesizer.py" = ["E501"]
+"packages/graph-works-core/src/graph_works_core/query/prompts/query_orchestrator.py" = ["E501"]
+"packages/graph-works-core/src/graph_works_core/query/prompts/librarian.py" = ["E501"]
 
 [tool.mypy]
 python_version = "3.12"
@@ -74,6 +93,12 @@ strict = true
 # from botocore, so `disallow_subclassing_any` is not in play here.
 [[tool.mypy.overrides]]
 module = ["botocore.*"]
+ignore_missing_imports = true
+
+# bm25s ships no py.typed marker or stub package. graph-works-core's index
+# build/query is a thin wrapper over its documented API.
+[[tool.mypy.overrides]]
+module = ["bm25s.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
@@ -105,7 +130,11 @@ source = ["okf_io", "okf_ext"]
 # rather than left to the `a : b` layer syntax's same-level semantics: the rule
 # the README promises should be legible in the file, not inferred from a colon.
 [tool.importlinter]
-root_packages = ["okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io"]
+root_packages = [
+    "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io",
+    "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "graph_works_core",
+    "workflow_local", "workflow_orca",
+]
 
 [[tool.importlinter.contracts]]
 name = "Capabilities sit above the shared context, never below it"
@@ -167,6 +196,11 @@ layers = [
 # `okf_ext` is a root package above but is deliberately absent from `modules`:
 # it is band 2 and depends on `okf-io` by design.
 #
+# `workflow_local` and `workflow_orca` are likewise absent, for the same
+# reason: neither is band 1 and both depend on `subagents_io` by design. The
+# direction that WOULD be a defect is the reverse one, and no existing contract
+# covers it — hence the `forbidden` contract below.
+#
 # This does not replace each package's `tests/test_boundaries.py`. The two fail
 # in different directions: the AST walks derive their sibling set from the
 # filesystem, so a package added later is covered with no edit, but each only
@@ -177,3 +211,66 @@ layers = [
 name = "The foundation is a strict layer — band-1 packages never import each other"
 type = "independence"
 modules = ["okf_io", "code_graph_io", "config_io", "models_io", "subagents_io"]
+
+# Constraint 1 is the reason this epic exists: exactly one package knows what a
+# workspace is, and every package below band 3 receives resolved paths as
+# arguments. Stating it here makes a violation a `just check` failure rather
+# than a code-review observation.
+[[tool.importlinter.contracts]]
+name = "Nothing below band 3 imports the application band"
+type = "forbidden"
+source_modules = [
+    "okf_io", "okf_ext", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf",
+    "config_io", "subagents_io", "models_io", "code_graph_io",
+]
+forbidden_modules = ["graph_works_core"]
+
+# The seam only works in one direction. `independence` forbids every edge AMONG
+# the band-1 packages; this forbids the one edge OUT of band 1 that would undo
+# the reason `workflow-local` (and now `workflow-orca`) are separate packages
+# at all — a protocol that imports its own implementation is a protocol with an
+# implementation in it. Both backends are named in one contract rather than one
+# contract each: the rule is about `subagents_io`, and it does not get a new
+# clause every time a backend ships.
+[[tool.importlinter.contracts]]
+name = "The dispatch protocol never imports a backend"
+type = "forbidden"
+source_modules = ["subagents_io"]
+forbidden_modules = ["workflow_local", "workflow_orca"]
+
+# Two backends importing each other is the defect no existing contract covers:
+# neither is band 1, so the foundation contract does not see them, and neither
+# sits above the other, so there is no layer to state.
+#
+# `workflow_orca` is likewise absent from the band-1 independence contract
+# above, for the same reason recorded there about `okf_ext` and
+# `workflow_local`: it is not band 1 and it depends on `subagents_io` by
+# design.
+[[tool.importlinter.contracts]]
+name = "Backends never import each other"
+type = "independence"
+modules = ["workflow_local", "workflow_orca"]
+
+[[tool.importlinter.contracts]]
+name = "graph_works_core verticals sit above shared substrate"
+type = "layers"
+containers = ["graph_works_core"]
+layers = [
+    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : work",
+    "agent_substrate : graph : prompts",
+    "workspace",
+]
+
+[[tool.importlinter.contracts]]
+name = "graph_works_core verticals never import each other"
+type = "independence"
+modules = [
+    "graph_works_core.ingest",
+    "graph_works_core.scan",
+    "graph_works_core.query",
+    "graph_works_core.lint_drift",
+    "graph_works_core.archive",
+    "graph_works_core.orchestrate",
+    "graph_works_core.wiki_stats",
+    "graph_works_core.work",
+]

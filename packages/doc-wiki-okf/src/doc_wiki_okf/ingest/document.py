@@ -1,15 +1,17 @@
 """One file in, the fact sheet printed before an ingest begins.
 
-Title, slug, source type, a preview, the source page it would land at, and
+Title, slug, source kind, a preview, the source page it would land at, and
 whether that page already exists. The clock is an argument (`today=`, required)
 and the code graph is two optional callables -- `okf_io.validate`'s rule for
 `today=` and this package's rule for its siblings.
 
-`as_data()` returns the dict `wiki_io.ingest_source.build_ingest_brief` returned,
-key for key, except `word_count` and `in_repo_doc` use corrected computation
-(the legacy formula and test fixtures were internally inconsistent—this port fixes
-a latent bug rather than reproducing it). That is what makes the port testable
-and what lets the plugin be repointed later without an argument about behaviour.
+`as_data()` returns the dict `wiki_io.ingest_source.build_ingest_brief` returned
+with two documented departures: `word_count` uses corrected computation (the
+legacy formula and test fixtures were internally inconsistent -- this port fixes
+a latent bug rather than reproducing it), and the classification key is
+`source_kind` rather than `source_type`, which is K-A's rename away from the
+collision with OKF's own `type:`. `in_repo_doc` is not here at all: it had no
+production consumer, and K-G deleted it rather than repairing its computation.
 """
 
 from __future__ import annotations
@@ -47,28 +49,28 @@ class DocumentBrief:
 
     source_path: Path
     title: str
-    source_type: str
+    source_kind: str
     slug: str
+    text: str
     preview: str
     word_count: int
     suggested_summary_path: str
     merge_mode: bool
-    in_repo_doc: bool
     entity_match: EntityMatch
     state_gate: Mapping[str, Any] | None
 
     def as_data(self) -> dict[str, Any]:
-        """The legacy dict, verbatim. Every value survives `json.dumps`."""
+        """The legacy dict, minus `in_repo_doc` and with the key renamed. Every
+        value survives `json.dumps`."""
         return {
             "source_path": str(self.source_path),
             "title": self.title,
-            "source_type": self.source_type,
+            "source_kind": self.source_kind,
             "slug": self.slug,
             "preview": self.preview,
             "word_count": self.word_count,
             "suggested_summary_path": self.suggested_summary_path,
             "merge_mode": self.merge_mode,
-            "in_repo_doc": self.in_repo_doc,
             "entity_match": self.entity_match.as_data(),
             "state_gate": None if self.state_gate is None else dict(self.state_gate),
         }
@@ -81,7 +83,7 @@ def plan_document_brief(
     repo: Path,
     workspace_root: Path,
     today: date,
-    source_type: str,
+    source_kind: str,
     layout: IngestLayout = GRAPH_WIKI_LAYOUT,
     state_gate: StateGate | None = None,
     match_entity: EntityMatcher | None = None,
@@ -89,9 +91,11 @@ def plan_document_brief(
     """Compute the brief for one file. Writes nothing.
 
     `today` is required and has no default: `date.today()` is called in exactly
-    one place in this package, the CLI. `source_type` is required for the same
+    one place in this package, the CLI. `source_kind` is required for the same
     class of reason -- with `raw/` retired there is no folder to infer it from,
-    and whoever knows what the material is supplies it.
+    and whoever knows what the material is supplies it. It is a *hint*: the
+    ingestor's model classifies from content and `validated_source_kind`
+    decides.
 
     `workspace_root` is still taken: `read_state_gate` needs it. It no longer
     classifies anything.
@@ -109,16 +113,13 @@ def plan_document_brief(
     return DocumentBrief(
         source_path=resolved,
         title=title_guess,
-        source_type=source_type,
+        source_kind=source_kind,
         slug=slug,
+        text=text,
         preview=preview,
         word_count=len(WORD_RE.findall(text)),
         suggested_summary_path=suggested,
         merge_mode=(wiki / suggested).exists(),
-        # Unchanged in meaning: `doc` was always "an in-repo document", and it
-        # now arrives as a supplied value rather than an inferred one, so
-        # `as_data()`'s legacy shape is key-for-key identical.
-        in_repo_doc=source_type == "doc",
         entity_match=NO_ENTITY if match_entity is None else match_entity(repo, resolved, title_guess),
         state_gate=read_state_gate(state_gate, repo, workspace_root),
     )

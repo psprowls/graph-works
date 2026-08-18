@@ -1,6 +1,6 @@
 frontmatter:
   owned: [ecosystem, used_by, versions_in_use]
-  provenance: [generated, last_updated_commit, tokens]
+  provenance: [generated, last_updated_commit, tokens, prose_refresh_attempts]
 sections:
   - heading: Why we depend on this
     required: true

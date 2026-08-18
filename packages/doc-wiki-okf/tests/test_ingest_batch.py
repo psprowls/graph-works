@@ -74,7 +74,10 @@ def test_skills_enumerates_immediate_subdirs_only(tmp_path):
     assert {u.unit_type for u in units} == {"dir"}
 
 
-def test_examples_enumerates_subdirs_plus_loose_files(tmp_path):
+def test_examples_is_a_flat_kind_now(tmp_path):
+    """K-I: `examples` was `LOOSE_FILE_KINDS`' only member, and its only effect
+    was counting loose files beside subdirectories. It recurses like any other
+    non-`skills` kind now."""
     workspace = _workspace(tmp_path)
     root = workspace / "material" / "examples"
     _write(root / "demo-app" / "index.ts")
@@ -82,7 +85,7 @@ def test_examples_enumerates_subdirs_plus_loose_files(tmp_path):
 
     units = enumerate_batch_units("examples", root)
 
-    assert {u.rel: u.unit_type for u in units} == {"demo-app": "dir", "loose.md": "file"}
+    assert {u.rel: u.unit_type for u in units} == {"demo-app/index.ts": "file", "loose.md": "file"}
 
 
 def test_archive_assets_and_dotfiles_are_excluded(tmp_path):

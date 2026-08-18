@@ -90,7 +90,7 @@ point at a path, learn what you are about to deal with.
 
 | Builder | Given | Answers |
 |---|---|---|
-| `plan_document_brief` | one file | title, slug, source type, preview, word count, target source page, merge-or-create |
+| `plan_document_brief` | one file | title, slug, source kind, preview, word count, target source page, merge-or-create |
 | `plan_folder_brief` | a directory | file manifest with sizes and languages, representative file, refusals, warnings |
 | `plan_batch_brief` | a directory plus a `kind` | a manifest of ingest units, capped at a limit |
 
@@ -102,9 +102,11 @@ off it and get `None`, because the attribute is not there.
 Each brief carries `as_data()`, which returns the dict the legacy
 `wiki_io.ingest_source` module returned for the same input, key for key —
 `_error` sentinel, bare-string `warnings`, `is_folder` / `is_batch` flags and
-all — with two exceptions: `word_count` and `in_repo_doc` on `DocumentBrief`
-use corrected computation, where the legacy formula was itself inconsistent
-with its own fixtures. That is the parity contract the port is tested against.
+all — with two documented departures: `word_count` uses corrected computation
+(the legacy formula was itself inconsistent with its own fixtures), and
+`source_type` is renamed to `source_kind` (K-A's rename away from the collision
+with OKF's own `type:`). `in_repo_doc` is not carried at all because nothing in
+production read it. That is the parity contract the port is tested against.
 
 ### Refusals and warnings are two vocabularies
 
@@ -127,7 +129,7 @@ today's value and the default for `plan_document_brief` and
 and the writer's target provably the same string. `raw_dir`, `archive_dir`,
 `source_types` and `batch_kinds` are gone: material is ingested from outside the
 workspace, so there is no folder to infer a source type or a batch kind from,
-and `plan_document_brief` takes a required `source_type=` while
+and `plan_document_brief` takes a required `source_kind=` while
 `plan_batch_brief` takes a required `kind=`.
 `plan_document_brief` also takes a **required** `today=` — the same
 rule `okf_io.validate` and `append_log_entry` follow, and `date.today()` is
@@ -150,7 +152,7 @@ this one. The substrate-neutral half already lives in
 `resolve_skill_anchor`) and is ready for whoever claims that layer.
 Folder-based inference is gone along with `raw/`: a skill directory briefs as
 an ordinary folder, like any other directory, unless the caller passes
-`--kind skills` explicitly. `skill` is still a valid `--source-type` value and
+`--kind skills` explicitly. `skill` is still a valid `--source-kind` value and
 `skills` is still a valid `--kind` value — both just have to be named, never
 inferred from a path.
 
@@ -161,10 +163,10 @@ five lanes.
 
 ### The command
 
-    doc-wiki-okf ingest SOURCE --source-type spec       # one document
+    doc-wiki-okf ingest SOURCE --source-kind spec       # one document
     doc-wiki-okf ingest DIR                             # a folder manifest
     doc-wiki-okf ingest DIR --kind articles --all       # a batch, uncapped
-    doc-wiki-okf ingest SOURCE --source-type spec --json --today 2026-08-12
+    doc-wiki-okf ingest SOURCE --source-kind spec --json --today 2026-08-12
 
 Batch is **opt-in**: `--kind` says "treat this directory as a batch of that
 kind". Without it a directory briefs as a folder and a file briefs as a single
@@ -179,7 +181,7 @@ page at `sources/<YYYY-MM>-<slug>.md`, and a copy of the material at
 
     doc-wiki-okf source add ROOT MATERIAL \
         --title "Auth Spec" --description "The authentication specification." \
-        --source-type spec --origin https://example.invalid/auth-spec
+        --source-kind spec --origin https://example.invalid/auth-spec
 
 The two are **one plan carrying two create writes**, so `write_all`'s
 probe-and-staging regime lands them together or not at all: a page recording

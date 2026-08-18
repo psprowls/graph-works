@@ -13,11 +13,14 @@ members = [
     "code-wiki-okf",
     "config-io",
     "doc-wiki-okf",
+    "graph-works-core",
     "models-io",
     "okf-ext",
     "okf-io",
     "subagents-io",
     "work-tracker-okf",
+    "workflow-local",
+    "workflow-orca",
 ]
 
 [[package]]
@@ -27,6 +30,8 @@ source = { virtual = "." }
 
 [package.dev-dependencies]
 dev = [
+    { name = "doc-wiki-okf" },
+    { name = "graph-works-core" },
     { name = "import-linter" },
     { name = "models-io" },
     { name = "mypy" },
@@ -38,12 +43,16 @@ dev = [
     { name = "ruff" },
     { name = "types-jsonschema" },
     { name = "types-pyyaml" },
+    { name = "workflow-local" },
+    { name = "workflow-orca" },
 ]
 
 [package.metadata]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
+    { name = "graph-works-core", editable = "packages/graph-works-core" },
     { name = "import-linter", specifier = ">=2.0" },
     { name = "models-io", editable = "packages/models-io" },
     { name = "mypy", specifier = ">=1.11" },
@@ -55,6 +64,8 @@ dev = [
     { name = "ruff", specifier = ">=0.6" },
     { name = "types-jsonschema" },
     { name = "types-pyyaml" },
+    { name = "workflow-local", editable = "packages/workflow-local" },
+    { name = "workflow-orca", editable = "packages/workflow-orca" },
 ]
 
 [[package]]
@@ -400,6 +411,44 @@ requires-dist = [
     { name = "okf-io", editable = "packages/okf-io" },
     { name = "typer", specifier = ">=0.12" },
 ]
+
+[[package]]
+name = "graph-works-core"
+version = "0.1.0"
+source = { editable = "packages/graph-works-core" }
+dependencies = [
+    { name = "code-graph-io" },
+    { name = "code-wiki-okf" },
+    { name = "config-io" },
+    { name = "doc-wiki-okf" },
+    { name = "langchain-core" },
+    { name = "models-io", extra = ["bedrock"] },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "subagents-io" },
+    { name = "work-tracker-okf" },
+]
+
+[package.optional-dependencies]
+vercel = [
+    { name = "models-io", extra = ["vercel"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "code-graph-io", editable = "packages/code-graph-io" },
+    { name = "code-wiki-okf", editable = "packages/code-wiki-okf" },
+    { name = "config-io", editable = "packages/config-io" },
+    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
+    { name = "langchain-core", specifier = ">=1.4" },
+    { name = "models-io", extras = ["bedrock"], editable = "packages/models-io" },
+    { name = "models-io", extras = ["vercel"], marker = "extra == 'vercel'", editable = "packages/models-io" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "subagents-io", editable = "packages/subagents-io" },
+    { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
+]
+provides-extras = ["vercel"]
 
 [[package]]
 name = "grimp"
@@ -871,7 +920,7 @@ wheels = [
 
 [[package]]
 name = "models-io"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "packages/models-io" }
 
 [package.optional-dependencies]
@@ -2040,6 +2089,28 @@ requires-dist = [
     { name = "okf-io", editable = "packages/okf-io" },
     { name = "typer", specifier = ">=0.12" },
 ]
+
+[[package]]
+name = "workflow-local"
+version = "0.1.0"
+source = { editable = "packages/workflow-local" }
+dependencies = [
+    { name = "subagents-io" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "subagents-io", editable = "packages/subagents-io" }]
+
+[[package]]
+name = "workflow-orca"
+version = "0.1.0"
+source = { editable = "packages/workflow-orca" }
+dependencies = [
+    { name = "subagents-io" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "subagents-io", editable = "packages/subagents-io" }]
 
 [[package]]
 name = "xxhash"

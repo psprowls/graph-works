@@ -1,0 +1,13 @@
+{
+  "id": "6a71b0f7-b9a0-4a1f-8f3a-1c0f5c7a1d90",
+  "ok": true,
+  "result": {
+    "dispatchId": "ctx_new000000001",
+    "taskId": "task_new0000001",
+    "runId": "run_43b63f0bdf2b",
+    "workerState": "ready",
+    "dispatchStatus": "dispatched",
+    "agentTerminalHandle": "term_new00000000001",
+    "terminalState": "active"
+  }
+}

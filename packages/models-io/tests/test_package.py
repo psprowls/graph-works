@@ -21,7 +21,7 @@ def _distribution_names(requirements: list[str]) -> set[str]:
 
 
 def test_version_is_static():
-    assert models_io.__version__ == "0.1.1"
+    assert models_io.__version__ == "0.2.0"
 
 
 def test_ships_a_py_typed_marker():
@@ -86,7 +86,7 @@ def test_all_is_sorted_and_bound():
 
 
 def test_the_public_surface_is_the_spec_s_module_table():
-    # Exactly these eight. `normalize_content` and `PRICES` are deliberately
+    # Exactly these nine. `normalize_content` and `PRICES` are deliberately
     # absent: in both cases the chartered concept is something else (the error
     # subclasses; the pricing function), so a caller can reach them at
     # models_io.normalize / models_io.pricing without them becoming supported
@@ -98,6 +98,7 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "ProviderNotInstalled",
         "UnknownModelError",
         "cost_for_usage",
+        "make_bedrock_embeddings",
         "make_bedrock_llm",
         "make_gateway_llm",
     }

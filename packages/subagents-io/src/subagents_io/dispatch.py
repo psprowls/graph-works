@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 #: The legal values of `WorktreeAction.action`.
-WORKTREE_ACTIONS: frozenset[str] = frozenset({"reuse", "fork-child", "create-top-level"})
+WORKTREE_ACTIONS: frozenset[str] = frozenset({"reuse", "fork-child", "create-top-level", "main"})
 
 #: The legal values of `PlannedDispatch.mode`.
 DISPATCH_MODES: frozenset[str] = frozenset({"autonomous", "attend", "relay"})
@@ -25,10 +25,18 @@ DISPATCH_MODES: frozenset[str] = frozenset({"autonomous", "attend", "relay"})
 
 @dataclass(frozen=True)
 class WorktreeAction:
-    """Where a dispatched worker runs, and on which branch."""
+    """Where a dispatched worker runs, and on which branch.
+
+    `"main"` is the repository's own shared checkout rather than a linked
+    worktree. It carries a concrete `path` like `"reuse"` does, but a worker
+    running there cannot infer its own provenance: git reports no worktree for
+    the main checkout, so `--git-dir` and `--git-common-dir` agree and every
+    detector answers "not a worktree". A planner that emits `"main"` therefore
+    owes the worker its path and branch explicitly.
+    """
 
     action: str  # one of WORKTREE_ACTIONS
-    path: str | None  # concrete only for "reuse"; None until the backend creates it
+    path: str | None  # concrete for "reuse" and "main"; None until the backend creates it
     branch: str
     base_branch: str | None  # set for fork-child / create-top-level
     exists: bool | None  # best-effort stat; None when the path is unknown or the stat failed

@@ -1,9 +1,10 @@
-"""Generic constructor tests — make_bedrock_llm / make_gateway_llm."""
+"""Generic constructor tests — make_bedrock_llm / make_gateway_llm / make_bedrock_embeddings."""
 
 from __future__ import annotations
 
 import pytest
-from models_io import GatewayAccessDenied, make_bedrock_llm, make_gateway_llm
+from langchain_aws import BedrockEmbeddings
+from models_io import GatewayAccessDenied, make_bedrock_embeddings, make_bedrock_llm, make_gateway_llm
 from models_io.bedrock import _GuardedChatBedrockConverse
 from models_io.vercel import _GuardedChatOpenAI
 
@@ -47,3 +48,17 @@ def test_make_gateway_llm_builds_when_key_present() -> None:
     # the hint reaches the instance that will raise on a 401.
     bare = make_gateway_llm("some/model", api_key="test-key", credential_hint="MY_KEY")
     assert bare._credential_hint_for_errors == "MY_KEY"
+
+
+def test_make_bedrock_embeddings_binds_model_id_region_and_normalize() -> None:
+    embedder = make_bedrock_embeddings("amazon.titan-embed-text-v2:0", region="us-west-2", normalize=False)
+    assert isinstance(embedder, BedrockEmbeddings)
+    assert embedder.model_id == "amazon.titan-embed-text-v2:0"
+    assert embedder.region_name == "us-west-2"
+    assert embedder.normalize is False
+
+
+def test_make_bedrock_embeddings_defaults() -> None:
+    embedder = make_bedrock_embeddings("amazon.titan-embed-text-v2:0")
+    assert embedder.region_name == "us-east-1"
+    assert embedder.normalize is True

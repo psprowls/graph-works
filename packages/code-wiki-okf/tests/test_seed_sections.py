@@ -19,6 +19,29 @@ _EXPECTED_OWNED = {
     "File": ("language", "package", "role_flags"),
 }
 
+#: `prose_refreshed_commit` is the prose anchor graph-works-core's scan vertical
+#: stamps (its design spec §4). Declared for the five repo-owned entity types only:
+#: a Dependency is owned by no repository, so `sync` passes `sha=None` for it and
+#: there is nothing to anchor against; mirror `File` pages are out of that
+#: vertical's scope.
+#:
+#: `prose_refresh_attempts` is that vertical's bound on a page whose prose the
+#: model keeps declining (its remediation spec D1). It is not SHA-based, so it
+#: is declared for `Dependency` too -- a dependency page has no repo, no root
+#: and no head, can therefore only ever `first_fill`, and is the population the
+#: counter protects most. `File` stays out, same as above.
+_BASE_PROVENANCE = ("generated", "last_updated_commit", "tokens")
+_PROSE_PROVENANCE = (*_BASE_PROVENANCE, "prose_refreshed_commit", "prose_refresh_attempts")
+_EXPECTED_PROVENANCE = {
+    "Package": _PROSE_PROVENANCE,
+    "App": _PROSE_PROVENANCE,
+    "TestSuite": _PROSE_PROVENANCE,
+    "AgentPlugin": _PROSE_PROVENANCE,
+    "Repository": _PROSE_PROVENANCE,
+    "Dependency": (*_BASE_PROVENANCE, "prose_refresh_attempts"),
+    "File": _BASE_PROVENANCE,
+}
+
 #: Each type's one required *prose* section -- the human's, and the first one
 #: declared. Every generated section is required too (see
 #: `test_every_generated_section_is_required`), so "the required one" is no
@@ -58,7 +81,7 @@ def test_seed_sections_load_and_declare_ownership() -> None:
     for type_name, owned in _EXPECTED_OWNED.items():
         declaration = section_set.types[type_name]
         assert declaration.frontmatter.owned == owned
-        assert declaration.frontmatter.provenance == ("generated", "last_updated_commit", "tokens")
+        assert declaration.frontmatter.provenance == _EXPECTED_PROVENANCE[type_name]
         prose_required = [s for s in declaration.sections if s.required and s.ownership == "prose"]
         assert len(prose_required) == 1
         assert prose_required[0].heading == _EXPECTED_REQUIRED_PROSE_HEADING[type_name]
@@ -162,3 +185,39 @@ def test_a_dependency_without_ecosystem_reports_schemas_invalid(tmp_path: Path) 
     findings = report.by_code("schemas.invalid")
     assert [f.path for f in findings] == ["dependencies/ruamel.yaml.md"]
     assert "ecosystem" in findings[0].message
+
+
+def test_only_repo_owned_types_declare_the_prose_anchor() -> None:
+    """`prose_refreshed_commit` is never `owned`: an owned key a run omits is
+    deleted, and entity sync never supplies this one."""
+    section_set = _seed_sections()
+    declaring = {
+        name
+        for name, declaration in section_set.types.items()
+        if "prose_refreshed_commit" in declaration.frontmatter.provenance
+    }
+    assert declaring == {"Package", "App", "TestSuite", "AgentPlugin", "Repository"}
+    for declaration in section_set.types.values():
+        assert "prose_refreshed_commit" not in declaration.frontmatter.owned
+
+
+def test_the_prose_anchor_stays_in_exactly_the_five_repo_owned_declarations() -> None:
+    """The property the remediation work item asks not to regress: adding the
+    attempt counter must not move `prose_refreshed_commit`."""
+    section_set = _seed_sections()
+    anchored = {
+        name
+        for name in section_set.type_names
+        if "prose_refreshed_commit" in section_set.types[name].frontmatter.provenance
+    }
+    assert anchored == {"Package", "App", "TestSuite", "AgentPlugin", "Repository"}
+
+
+def test_the_attempt_counter_is_declared_wherever_prose_is() -> None:
+    section_set = _seed_sections()
+    counted = {
+        name
+        for name in section_set.type_names
+        if "prose_refresh_attempts" in section_set.types[name].frontmatter.provenance
+    }
+    assert counted == {"Package", "App", "TestSuite", "AgentPlugin", "Repository", "Dependency"}

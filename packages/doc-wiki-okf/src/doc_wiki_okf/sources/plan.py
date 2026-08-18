@@ -20,6 +20,7 @@ closed and puts the check where the decoding actually happens.
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
@@ -32,25 +33,52 @@ from okf_io import Bundle
 
 from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout
 from doc_wiki_okf.reading import slugify
+from doc_wiki_okf.resources import seed_files
 
 #: The `type` this subpackage writes.
 SOURCE_TYPE = "Source"
 
-#: The nine values `_schema/Source.schema.json` enumerates, in its own order.
-#: Duplicated from the schema deliberately: the CLI validates against this
-#: before a plan is built, so a bad `--source-type` is a usage error rather than
-#: a `schemas.invalid` finding on a page that already landed.
-SOURCE_TYPES: tuple[str, ...] = (
-    "spec",
-    "article",
-    "pr",
-    "ticket",
-    "transcript",
-    "example",
-    "skill",
-    "doc",
-    "note",
-)
+#: What an unclassified document lands as. The catch-all `note` used to hold
+#: this role; K-C gave it to `doc`, whose old meaning ("an in-repo design
+#: document") died with the drift stamp.
+DEFAULT_SOURCE_KIND = "doc"
+
+
+def source_kinds(schema_set: SchemaSet) -> tuple[str, ...]:
+    """The `source_kind` vocabulary *schema_set*'s `Source` declares, in its order.
+
+    The vocabulary is authored in `_schema/Source.schema.json` and nowhere
+    else, so a vault that edits its own declarations changes what the CLI
+    accepts and what the ingestor prompt lists, in one edit.
+
+    Raises `KeyError` naming the declarations root when the set has no
+    `Source` -- the same message `plan_ingest` raises for the same cause, so a
+    caller catching one recognizes the other -- or naming the file when
+    `Source` declares no `source_kind` enum.
+    """
+    try:
+        schema = schema_set.schemas[SOURCE_TYPE]
+    except KeyError as exc:
+        raise KeyError(f"{SOURCE_TYPE}: no schema in `{schema_set.root.name}`") from exc
+    try:
+        enum = schema["properties"]["source_kind"]["enum"]
+    except KeyError as exc:
+        raise KeyError(f"{SOURCE_TYPE}: no `source_kind` enum in `{schema_set.root}`") from exc
+    return tuple(str(value) for value in enum)
+
+
+def seed_source_kinds() -> tuple[str, ...]:
+    """The vocabulary *this package's own* seed `Source` schema declares.
+
+    The answer for a caller with no bundle to read: `doc-wiki-okf ingest`
+    briefs a document against a `wiki/` that need not be initialized, and
+    refusing to brief it would be a regression for a command that writes
+    nothing. Still one authored list -- this reads the same file the installer
+    copies rather than restating its contents.
+    """
+    schema = json.loads(seed_files()["_schema/Source.schema.json"])
+    return tuple(str(value) for value in schema["properties"]["source_kind"]["enum"])
+
 
 #: Where the copy goes, relative to the source page's own directory. Derived
 #: rather than hardcoded to `sources/references/`, so a vault that replaces
@@ -85,6 +113,22 @@ def copy_target(page: str, material: Path) -> str:
     return str(page_path.parent / REFERENCES_DIRECTORY / f"{page_path.stem}{suffix}")
 
 
+def _existing_source_with_origin(bundle: Bundle, origin: str) -> str | None:
+    """The page path of an already-ingested `Source` carrying *origin*, or `None`.
+
+    `origin` is not one of `okf_io`'s spec-level `Frontmatter` fields, so a
+    document that carries it holds it in `.extra` -- confirmed via
+    `KNOWN_KEYS`/`_extra_of` in `okf_io.models`. A linear scan over
+    `bundle.concepts`, already held in memory by the one directory walk
+    `load_bundle` performed: no extra I/O, and trivial at this codebase's
+    target scale (a wiki's worth of `Source` pages).
+    """
+    for concept_id, document in bundle.concepts.items():
+        if document.fm.type == SOURCE_TYPE and document.fm.extra.get("origin") == origin:
+            return f"{concept_id}.md"
+    return None
+
+
 def plan_ingest(
     bundle: Bundle,
     schema_set: SchemaSet,
@@ -94,7 +138,7 @@ def plan_ingest(
     text: str,
     title: str,
     description: str,
-    source_type: str,
+    source_kind: str,
     origin: str,
     by: str,
     at: datetime,
@@ -127,7 +171,7 @@ def plan_ingest(
     frontmatter: dict[str, object] = {
         "title": title.strip(),
         "description": description.strip(),
-        "source_type": source_type,
+        "source_kind": source_kind,
         "source_path": copy,
         "origin": origin,
         "ingested": today.isoformat(),
@@ -142,6 +186,16 @@ def plan_ingest(
     plan = plan_create(bundle, page, render, by=by, at=at)
 
     refusals = plan.refusals
+    existing = _existing_source_with_origin(bundle, origin)
+    if existing is not None:
+        refusals = (
+            *refusals,
+            Refusal(
+                path=page,
+                kind="target-exists",
+                detail=f"already ingested (origin={origin!r}); a source with this origin already exists at {existing}",
+            ),
+        )
     if bundle.has_member(copy):
         refusals = (
             *refusals,
@@ -158,11 +212,13 @@ def plan_ingest(
 
 
 __all__ = [
+    "DEFAULT_SOURCE_KIND",
     "DEFAULT_SUFFIX",
     "REFERENCES_DIRECTORY",
     "SOURCE_TYPE",
-    "SOURCE_TYPES",
     "copy_target",
     "page_target",
     "plan_ingest",
+    "seed_source_kinds",
+    "source_kinds",
 ]

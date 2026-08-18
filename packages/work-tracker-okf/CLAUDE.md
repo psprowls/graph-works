@@ -13,9 +13,15 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   the one-save advance, and filing's index/log reconcile. Library rather than
   CLI because tier 4 drives this lane through the Python API, so anything in a
   Typer callback is something tier 4 has to reimplement.
-- `src/work_tracker_okf/_rules/` — the lane rule catalog: four topic modules
-  (`state`, `plan`, `graph`, `targets`) plus `_common.py` and the registry.
-  Exported as one `extra_rules=` bundle through `rules.py`'s `lane_rules()`.
+- `src/work_tracker_okf/_rules/` — the lane rule catalog: five topic modules
+  (`state`, `plan`, `graph`, `targets`, `decisions`) plus `_common.py` and the
+  registry. Exported as one `extra_rules=` bundle through `rules.py`'s
+  `lane_rules()`.
+- `src/work_tracker_okf/decisions.py` — the per-epic decisions ledger, in three
+  layers: pure text (`parse`/`render`/`prose_block`), file (`load`/`append`/
+  `set_fields`/`supersede`, each one read → mutate → render → write cycle under
+  one exclusive `flock`), and pure query (`query`/`counts`). It imports
+  `paths` and nothing else from the package.
 - `src/work_tracker_okf/assets/` — package-data seed files copied byte-for-byte
   by `plan_install()`: seven `_schema/` documents and seven `_sections/`
   declarations
@@ -48,6 +54,15 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   asserts their delta, because two constants drifting apart silently is the
   failure mode. `ARCHIVE_IGNORE` must never reach `validate()` or
   `update_index`.
+- The decisions ledger lives at `work/<slug>/references/00-decisions.md` and the
+  epic page does **not** point at it. Inside `references/`, so `IGNORE`'s
+  existing `*/references/*` covers it with no new pattern and it rides along on
+  archive for free; unstamped, so `SOURCE_ID_PATTERN` and `_base.schema.json`
+  are untouched — there is no `decisions` id, and adding one is a schema change.
+  `decisions.ledger-missing` is what replaces the `targets.artifact-missing`
+  the missing stamp would otherwise have bought, and it asks the sharper
+  question: not "is this stamped resource present" but "does an epic that has
+  moved past design have a ledger at all."
 
 ## Three things about `compose.py`
 
@@ -71,17 +86,23 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
 
 ## The rule catalog
 
-25 codes, 4 topics, 12 rule functions. **The module name is the code prefix**,
+30 codes, 5 topics, 14 rule functions. **The module name is the code prefix**,
 asserted mechanically in `test_lane_catalog.py` — the same move
 `okf_io/tests/test_catalog.py` makes for its own eight. Adding a code means
 adding it to its topic module's `CODES` *and* to the rule that emits it; a new
 topic means a new module plus an entry in `_rules/__init__.py`'s two mappings.
 
-The four prefixes had to clear thirteen taken names: okf-io's eight (which make
-`validate()` **raise**) and okf-ext's five (which do not raise and would still
-be wrong, because the conformant vault runs `schema_rule` and `section_rule` in
-the same report). `lifecycle` is among okf-io's eight, which is why the module
-that was literally called `lifecycle_lint` could not keep its name.
+The five prefixes had to clear eighteen taken names: okf-io's eight (which make
+`validate()` **raise**), okf-ext's six — `health`, `placement`, `render`,
+`schemas`, `sections`, `tags` — (which do not raise and would still be wrong,
+because the conformant vault runs `schema_rule` and `section_rule` in the same
+report), and, for `decisions`, this lane's own four. `lifecycle` is among
+okf-io's eight, which is why the module that was literally called
+`lifecycle_lint` could not keep its name.
+
+An earlier revision of this file undercounted the taken-name total, crediting
+okf-ext with one fewer module than it ships. The correct figure for that earlier
+state was fourteen. Nothing collided either way; the count was simply wrong.
 
 **The registry is a factory per topic, not a `RULES` tuple.** `RuleContext`
 deliberately carries no filesystem, and two codes (`targets.affects-missing`,
@@ -95,7 +116,7 @@ subjects.
 
 **No caching of the projection.** Each rule function calls
 `load_items(ctx.bundle)` itself: measured at 93 µs for 7 items, about 30 ms
-across all twelve on a 100-item vault. Twelve independent passes, no shared
+across all fourteen on a 100-item vault. Fourteen independent passes, no shared
 state, and no cache whose invalidation nobody can see.
 
 `Finding.spec` cites the **module that defines the rule** for every lane
@@ -126,7 +147,7 @@ leaving it to double-report.
 from the repo root.
 
 `tests/fixtures/nonconformant/` is the whole-catalog vault: one walk triggers
-every one of the 25 lane codes, and `nonconformant.golden.txt` is its reviewed
+every one of the 30 lane codes, and `nonconformant.golden.txt` is its reviewed
 output. Regenerating the golden alone proves nothing — what holds it honest is
 the hand-written `ERROR_CODES` set in `test_lane_catalog.py` and the conformant
 vault's zero-errors property. `tests/fixtures/nonconformant_repo/` is the

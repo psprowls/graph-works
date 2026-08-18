@@ -25,6 +25,13 @@ out over a worklist. `dispatch` and `routing` are the planning half: the value
 types a planner fills in to launch a worker, and the rules that decide which
 model runs it. Both are pure — the routing functions take their vocabularies as
 arguments, so nothing here has an opinion about what a `phase` or a `kind` is.
+
+`backend` is the third piece of that planning half and the seam itself: two
+Protocols a runner implements, the closed vocabularies a worker's lifecycle is
+spelled in, and a discriminated event union. It ships no implementation — the
+first one is `workflow-local`, a separate package, because that is where
+vendor and system coupling is allowed to live and this package carves nothing
+out.
 """
 
 from __future__ import annotations
@@ -40,6 +47,23 @@ from subagents_io.adapters import (
     Prepared,
     RunContext,
 )
+from subagents_io.backend import (
+    EVENT_KINDS,
+    WORKER_STATES,
+    BackendError,
+    DispatchBackend,
+    DispatchSession,
+    Escalation,
+    Heartbeat,
+    UnknownWorker,
+    UnsupportedMode,
+    WorkerDone,
+    WorkerEvent,
+    WorkerEventBase,
+    WorkerQuestion,
+    WorkerRecord,
+    WorktreeNotProvisioned,
+)
 from subagents_io.dispatch import DISPATCH_MODES, WORKTREE_ACTIONS, PlannedDispatch, WorktreeAction
 from subagents_io.pool import FanOutResult, PerItemError, SubagentPool, TaskResult
 from subagents_io.roles import RoleBinding, RoleSpec, resolve_role_spec
@@ -54,9 +78,15 @@ from subagents_io.trace import (
 
 __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural sort; test_all_is_sorted_and_bound holds this.
     "Adapter",
+    "BackendError",
     "Closeable",
     "DISPATCH_MODES",
+    "DispatchBackend",
+    "DispatchSession",
+    "EVENT_KINDS",
+    "Escalation",
     "FanOutResult",
+    "Heartbeat",
     "LoopAdapter",
     "LoopOutcome",
     "ModelResolution",
@@ -72,8 +102,17 @@ __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural
     "SubagentPool",
     "TRACE_LOGGER_NAME",
     "TaskResult",
+    "UnknownWorker",
+    "UnsupportedMode",
+    "WORKER_STATES",
     "WORKTREE_ACTIONS",
+    "WorkerDone",
+    "WorkerEvent",
+    "WorkerEventBase",
+    "WorkerQuestion",
+    "WorkerRecord",
     "WorktreeAction",
+    "WorktreeNotProvisioned",
     "render_trace_record",
     "resolve_model",
     "resolve_role_spec",

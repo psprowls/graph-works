@@ -7,7 +7,7 @@ against each unit on its own.
 `kind` is an argument rather than a folder name. `raw/<kind>/` was what defined
 a batch, and `raw/` is retired; briefing thirty downloaded articles as "the
 first 10 of 30" is independently useful and survives the retirement, re-based on
-an explicit kind. `DIRECTORY_KINDS` and `LOOSE_FILE_KINDS` keep their meaning.
+an explicit kind. `DIRECTORY_KINDS` keeps its meaning.
 
 `plan_batch_brief` returns `None` only for a path that is not a directory, so a
 caller's routing stays a single check.
@@ -26,11 +26,11 @@ from doc_wiki_okf.ingest.seams import StateGate, read_state_gate
 #: Directory names that are never an ingest unit.
 EXCLUDED_DIRS = frozenset({"_archive", "assets"})
 
-#: Kinds whose units are directories rather than files.
-DIRECTORY_KINDS = frozenset({"skills", "examples"})
-
-#: Directory kinds that additionally count a loose file as a unit.
-LOOSE_FILE_KINDS = frozenset({"examples"})
+#: Kinds whose units are directories rather than files. One rule, because
+#: `skills` is the one that earns its keep: a skill is a directory. `examples`
+#: was the other member and its only effect was that loose files alongside
+#: subdirectories also counted; it is a flat kind now like every other.
+DIRECTORY_KINDS = frozenset({"skills"})
 
 #: How many units a brief shows unless told otherwise.
 DEFAULT_LIMIT = 10
@@ -85,9 +85,9 @@ class BatchBrief:
 def enumerate_batch_units(kind: str, root: Path) -> tuple[BatchUnit, ...]:
     """The ingest units inside a kind-folder root, sorted by path.
 
-    Flat kinds take every file recursively; `skills` takes each immediate
-    subdirectory; `examples` takes each immediate subdirectory plus loose files.
-    `_archive` / `assets` components and dotfiles are excluded either way.
+    `skills` takes each immediate subdirectory; every other kind takes every
+    file recursively. `_archive` / `assets` components and dotfiles are
+    excluded either way.
     """
     units: list[BatchUnit] = []
 
@@ -97,8 +97,6 @@ def enumerate_batch_units(kind: str, root: Path) -> tuple[BatchUnit, ...]:
                 continue
             if child.is_dir():
                 units.append(_unit(child, root, "dir"))
-            elif kind in LOOSE_FILE_KINDS and child.is_file():
-                units.append(_unit(child, root, "file"))
         return tuple(units)
 
     for path in sorted(root.rglob("*")):
@@ -122,7 +120,7 @@ def plan_batch_brief(
     """Compute the brief for a directory of *kind*, or `None` for a non-directory.
 
     `kind` decides enumeration, not location: `skills` takes each immediate
-    subdirectory, `examples` adds loose files, everything else recurses.
+    subdirectory, everything else recurses.
     """
     root = resolve_source_path(source_path, repo)
     if not root.is_dir():

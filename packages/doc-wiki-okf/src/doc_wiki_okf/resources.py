@@ -12,8 +12,8 @@ from importlib.resources.abc import Traversable
 
 #: Every file this package owns, bundle-relative posix, in write order.
 #:
-#: Twelve, not ten: `_sections/_fragments.yaml` is a member like any other, and
-#: an installed `_sections/` without it cannot resolve a single
+#: Twelve, not ten: `_sections/_fragments.doc_wiki.yaml` is a member like any
+#: other, and an installed `_sections/` without it cannot resolve a single
 #: `placeholder_ref`; and `Source` ships a schema and a sections file like every
 #: other declared type, even though it sits outside `RUBRIC`. `index.md`,
 #: `log.md` and `_tags.yaml` are absent because they belong to
@@ -26,7 +26,7 @@ SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "_schema/Reference.schema.json",
     "_schema/Explanation.schema.json",
     "_schema/Source.schema.json",
-    "_sections/_fragments.yaml",
+    "_sections/_fragments.doc_wiki.yaml",
     "_sections/Tutorial.yaml",
     "_sections/HowTo.yaml",
     "_sections/Reference.yaml",

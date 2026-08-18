@@ -82,6 +82,8 @@ def advance(
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
+    worktree: str | None = None,
+    branch: str | None = None,
 ) -> AdvancePlan:
     """Plan the next transition for *slug*. Mutates nothing, reads no clock.
 
@@ -133,7 +135,16 @@ def advance(
         slug=slug,
         route=result,
         transition=transition,
-        changes=_changes(item, transition, today=today, effort=effort, owner=owner, resolved_in=resolved_in),
+        changes=_changes(
+            item,
+            transition,
+            today=today,
+            effort=effort,
+            owner=owner,
+            resolved_in=resolved_in,
+            worktree=worktree,
+            branch=branch,
+        ),
         stamp_source=transition.stamp_source,
         sync_plan_table=transition.sync_plan_table,
         refusal=None,
@@ -170,6 +181,8 @@ def _changes(
     effort: str | None,
     owner: str | None,
     resolved_in: str | None,
+    worktree: str | None = None,
+    branch: str | None = None,
 ) -> tuple[FieldChange, ...]:
     """The keys to write, in the order they are written -- which is also the
     order they append in on a page that lacks them."""
@@ -180,6 +193,8 @@ def _changes(
         ("effort", item.effort, effort),
         ("owner", item.owner, owner),
         ("resolved_in", item.resolved_in, resolved_in),
+        ("worktree", item.worktree, worktree),
+        ("branch", item.branch, branch),
     )
     changes = [
         FieldChange(key, before, after) for key, before, after in candidates if after is not None and after != before

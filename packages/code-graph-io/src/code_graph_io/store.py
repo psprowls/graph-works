@@ -78,12 +78,21 @@ def connect(db_path: Path, *, create: bool = False, busy_timeout_ms: int | None 
 
 
 def read_only_connect(db_path: Path) -> sqlite3.Connection:
-    """Open a read-only connection. Writes raise sqlite3.OperationalError."""
+    """Open a read-only connection. Writes raise sqlite3.OperationalError.
+
+    ``check_same_thread=False``: the returned connection is handed to a
+    ``GraphReader``, which callers may legitimately use from a thread other
+    than the one that opened it (e.g. a LangChain tool's sync `_run` running
+    inside `run_in_executor`). This only permits *sequential* cross-thread
+    use — raw sqlite3 connections are still not safe for *concurrent*
+    multi-thread access, so `GraphReader` additionally serializes query
+    execution with a lock. See `GraphReader._lock`.
+    """
     db_path = Path(db_path)
     if not db_path.exists():
         raise GraphNotInitializedError(f"graph DB not found at {db_path}; run `gw graph update --full` to initialize")
     uri = f"file:{db_path}?mode=ro"
-    conn = sqlite3.connect(uri, uri=True)
+    conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
     conn.execute("PRAGMA query_only = ON")
     try:
         _check_schema_version(conn)

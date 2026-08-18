@@ -1,18 +1,18 @@
-"""The lane rule catalog: 25 codes, four topic modules, twelve rule functions.
+"""The lane rule catalog: 30 codes, five topic modules, fourteen rule functions.
 
 **The module name is the code prefix**, asserted mechanically in
 `test_lane_catalog.py` exactly as okf-io's `test_catalog.py` asserts its own
 eight.
 
-The four prefixes had to clear thirteen taken names -- okf-io's eight
+The five prefixes had to clear eighteen taken names -- okf-io's eight
 (`computation`, `frontmatter`, `legacy`, `lifecycle`, `links`, `provenance`,
-`reserved`, `trust`) and okf-ext's five (`schemas`, `sections`, `health`,
-`render`, `tags`). Only the first eight make `validate()` raise; colliding with
-an okf-ext prefix is legal and still wrong, because the conformant vault runs
-`schema_rule` and `section_rule` in the same report. **`lifecycle` is among the
-taken eight**, so the module that was literally called `lifecycle_lint` could
-not keep its name -- which is the push that made the split worth doing rather
-than a rename worth arguing about.
+`reserved`, `trust`), okf-ext's six (`health`, `placement`, `render`, `schemas`,
+`sections`, `tags`) and, for `decisions`, this lane's own four. Only the first
+eight make `validate()` raise; colliding with an okf-ext prefix is legal and
+still wrong, because the conformant vault runs `schema_rule` and `section_rule`
+in the same report. **`lifecycle` is among the taken eight**, so the module that
+was literally called `lifecycle_lint` could not keep its name -- which is the
+push that made the split worth doing rather than a rename worth arguing about.
 
 Topics group by **what the rule reads**, which is okf-io's own organizing
 principle: `lifecycle.py` there is the rules for `status` and `stale_after`,
@@ -30,11 +30,12 @@ from types import MappingProxyType
 
 from okf_io import Rule
 
-from work_tracker_okf._rules import graph, plan, state, targets
+from work_tracker_okf._rules import decisions, graph, plan, state, targets
 from work_tracker_okf._rules._common import LaneConfig
 
 RULES_BY_TOPIC: Mapping[str, Callable[[LaneConfig], tuple[Rule, ...]]] = MappingProxyType(
     {
+        "decisions": decisions.rules,
         "graph": graph.rules,
         "plan": plan.rules,
         "state": state.rules,
@@ -44,6 +45,7 @@ RULES_BY_TOPIC: Mapping[str, Callable[[LaneConfig], tuple[Rule, ...]]] = Mapping
 
 CODES_BY_TOPIC: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
+        "decisions": decisions.CODES,
         "graph": graph.CODES,
         "plan": plan.CODES,
         "state": state.CODES,

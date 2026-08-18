@@ -36,6 +36,12 @@ of the material beside it, as a single plan carrying two create writes:
 
     from doc_wiki_okf.sources import plan_ingest
 
+`doc_wiki_okf.archive` mirrors `work_tracker_okf.archive`'s shape over this
+lane's seven page directories -- targeted archiving unconditional, sweep mode
+covering proposals only:
+
+    from doc_wiki_okf.archive import apply_archive, plan_archive
+
 `reading/` imports the standard library and itself, and nothing else; `ingest/`
 may import `reading/`; `diataxis/` may import `reading/`; `proposals/` may import
 both, and none of them imports `ingest/` or `sources/`. That is a test

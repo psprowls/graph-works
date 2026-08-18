@@ -34,6 +34,12 @@ from work_tracker_okf.vocabulary import (
 #: The per-item artifact directory's name, under `work/<slug>/`.
 REFERENCES_DIRNAME = "references"
 
+#: The decisions ledger's filename, under `work/<slug>/references/`. It lives
+#: here beside `REFERENCES_DIRNAME` because a filename is a layout fact, and
+#: because `decisions.py` derives its lock name from it — the other direction
+#: would be a cycle.
+LEDGER_FILENAME = "00-decisions.md"
+
 #: `<phase>` -> its two-digit filename ordinal, **derived** from
 #: `ARTIFACT_PHASES` rather than re-typed (C2-D). `work-io` hand-wrote the map and
 #: carried a synthetic `open: "00"` for an archive-time page rename that W-E
@@ -85,6 +91,22 @@ def item_page(slug: str, *, archived: bool = False) -> ArtifactRef:
 def references_dir(slug: str, *, archived: bool = False) -> ArtifactRef:
     """`work/<slug>/references`, or its archived twin. No trailing slash."""
     return ArtifactRef(rel=f"{_lane_dir(archived)}/{slug}/{REFERENCES_DIRNAME}")
+
+
+def decisions_ledger(slug: str, *, archived: bool = False) -> ArtifactRef:
+    """`work/<slug>/references/00-decisions.md`, or its archived twin.
+
+    `source_id` stays `None`: the epic page does not stamp its ledger into
+    `sources[]`, so there is no id to carry, and `references_dir`'s `.source_id`
+    is `None` for the same reason.
+
+    Composed over `references_dir` rather than through `artifact_path`, which
+    builds `<NN>-<phase>-<kind>` from `PHASE_ORDINALS` and `ARTIFACT_KINDS`. A
+    ledger has neither a phase nor a kind, and inventing a synthetic phase whose
+    only purpose is to reach `00` is exactly the mistake `work-io`'s deleted
+    `open: "00"` entry was.
+    """
+    return ArtifactRef(rel=f"{references_dir(slug, archived=archived).rel}/{LEDGER_FILENAME}")
 
 
 def source_id_for(phase: str, kind: str, suffix: str | None = None) -> str:
@@ -150,10 +172,12 @@ def artifact_path(
 
 
 __all__ = [
+    "LEDGER_FILENAME",
     "PHASE_ORDINALS",
     "REFERENCES_DIRNAME",
     "ArtifactRef",
     "artifact_path",
+    "decisions_ledger",
     "item_page",
     "references_dir",
     "source_id_for",

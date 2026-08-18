@@ -38,20 +38,26 @@ from work_tracker_okf.vocabulary import (
 PLAN_OR_EXECUTE = "plan-or-execute"
 
 Stage = Literal["design", "plan", "execute", "finish"]
-Variant = Literal["exploration", "diagnosis", "decompose", "single", "planned", "unplanned", "branch"]
+Variant = Literal["exploration", "diagnosis", "reconcile", "decompose", "single", "planned", "unplanned", "branch"]
 
 
 @dataclass(frozen=True, slots=True)
 class RouteState:
-    """The eight facts the table reads. Narrow on purpose (C3-B): it is what
-    keeps the table testable as a table, and two of the fields are properties
-    of a graph rather than of one item."""
+    """The ten facts the table reads. Narrow on purpose (C3-B): it is what
+    keeps the table testable as a table, and some of the fields are properties
+    of a graph (or of a decisions ledger) rather than of one item.
+
+    `has_open_decision` and `has_spec_doc` are both booleans a caller resolves
+    and passes in -- this module stays pure and never reads a decisions ledger
+    or the filesystem itself."""
 
     type: str
     workflow_status: str
     phase: str | None = None
     effort: str | None = None
     has_plan_doc: bool = False
+    has_spec_doc: bool = False
+    has_open_decision: bool = False
     depends_on: tuple[str, ...] = ()
     unmet_deps: tuple[str, ...] = ()
     child_rollup: ChildRollup | None = None
@@ -183,15 +189,22 @@ def _entry(state: RouteState) -> RouteResult:
                 phase="execute", workflow_status="accepted", sync_plan_table=True, stamp_source=PLAN_SOURCE_ID
             ),
         )
+    reason = (
+        f"{state.type} entering design with a pre-seeded spec: reconciling"
+        if state.has_spec_doc
+        else f"{state.type} entering the pipeline at design"
+    )
     return RouteResult(
         dispatch=Dispatch("design", _design_variant(state)),
-        reason=f"{state.type} entering the pipeline at design",
+        reason=reason,
         on_dispatch=Transition(phase="design"),
         on_complete=_design_complete(state),
     )
 
 
 def _design_variant(state: RouteState) -> Variant:
+    if state.has_spec_doc:
+        return "reconcile"
     return "diagnosis" if state.type in DIAGNOSIS_TYPES else "exploration"
 
 
@@ -217,9 +230,27 @@ def _design_complete(state: RouteState) -> Transition:
 
 
 def _design(state: RouteState) -> RouteResult:
+    # Order matters: a held item (a contradiction filed as an open decision by
+    # a previous reconciling-spec pass) must never fall through to another
+    # dispatch -- that is the infinite-redispatch loop this gate exists to
+    # stop. Checked before the spec-doc branch, deliberately.
+    if state.has_open_decision:
+        return RouteResult(
+            dispatch=None,
+            reason="design blocked: open decision needs a human answer",
+            blockers=(
+                "open decision(s) block re-dispatch: answer via "
+                "`gw work decision answer <slug> D-nnn --answer ...`, then re-run",
+            ),
+        )
+    reason = (
+        f"{state.type} at design stage with an existing spec: reconciling"
+        if state.has_spec_doc
+        else f"{state.type} at design stage"
+    )
     return RouteResult(
         dispatch=Dispatch("design", _design_variant(state)),
-        reason=f"{state.type} at design stage",
+        reason=reason,
         on_complete=_design_complete(state),
     )
 
@@ -311,7 +342,9 @@ def _finish(state: RouteState) -> RouteResult:
     )
 
 
-def state_for(items: Sequence[WorkItem], slug: str, *, effort: str | None = None) -> RouteState | None:
+def state_for(
+    items: Sequence[WorkItem], slug: str, *, effort: str | None = None, has_open_decision: bool = False
+) -> RouteState | None:
     """The `RouteState` for *slug*, or `None` when no item has that slug.
 
     Two rules a rewrite drops by not knowing about them:
@@ -326,6 +359,11 @@ def state_for(items: Sequence[WorkItem], slug: str, *, effort: str | None = None
 
     `effort=` overrides the item's own value: it is what lets a caller resolve
     the design-complete fork in the same call that supplies the size.
+
+    `has_open_decision=` is resolved by the caller, never by this module: a
+    decisions ledger read is IO, and this function stays pure. Default `False`
+    is correct for every caller that has no ledger to consult (a lone item, or
+    `advance`/`cli.next_stage`, neither of which currently resolves one).
     """
     item = next((candidate for candidate in items if candidate.slug == slug), None)
     if item is None:
@@ -341,6 +379,8 @@ def state_for(items: Sequence[WorkItem], slug: str, *, effort: str | None = None
         phase=item.phase,
         effort=effort or item.effort,
         has_plan_doc=item.has_plan_doc,
+        has_spec_doc=item.has_spec_doc,
+        has_open_decision=has_open_decision,
         depends_on=item.depends_on,
         unmet_deps=unmet_depends_on(items, item.depends_on),
         child_rollup=rollup,

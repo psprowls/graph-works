@@ -101,6 +101,34 @@ def child_gated_node(item: WorkItem, children: Sequence[WorkItem]) -> bool:
     return item.type == "Feature" and item.phase in ("execute", "finish")
 
 
+def nearest_epic(items: Sequence[WorkItem], slug: str) -> str | None:
+    """The nearest ancestor of *slug* whose `type` is `Epic`, or `None`.
+
+    *slug* itself counts: an epic is its own nearest epic. Cycle-safe and
+    bounded by `WALK_DEPTH_CAP`, the same cap `descend` walks this tree downward
+    under — a `parent` chain that closes on itself is `graph.parent-cycle`'s
+    finding, and this walk must return rather than diagnose it.
+
+    It lands here rather than in either consumer because it has two:
+    `_rules/decisions.citations` and the auto-drive shell. Writing it twice
+    means two walks that can disagree about cycles and depth.
+    """
+    by_slug = {item.slug: item for item in items}
+    seen: set[str] = set()
+    current: str | None = slug
+    for _ in range(WALK_DEPTH_CAP):
+        if current is None or current in seen:
+            return None
+        item = by_slug.get(current)
+        if item is None:
+            return None
+        if item.type == "Epic":
+            return item.slug
+        seen.add(current)
+        current = item.parent
+    return None
+
+
 def descend(items: Sequence[WorkItem], slug: str) -> DescendResult:
     """The next actionable leaf at or below *slug*. Cycle-safe and depth-capped.
 
@@ -159,6 +187,7 @@ __all__ = [
     "child_gated_node",
     "child_rollup",
     "descend",
+    "nearest_epic",
     "unknown_depends_on",
     "unmet_depends_on",
 ]

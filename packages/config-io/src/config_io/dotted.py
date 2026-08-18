@@ -23,6 +23,22 @@ def get(data: Mapping[str, object], key: str) -> object | None:
     return node
 
 
+def has(data: Mapping[str, object], key: str) -> bool:
+    """Whether `key` is present, including when its value is null.
+
+    The distinction `get` cannot make: it answers `None` for a stored null and
+    for an absent key alike. Total in the same way `get` is — a key that runs
+    past a scalar, or through a missing branch, is simply absent.
+    """
+    segments = key.split(".")
+    node: object = data
+    for seg in segments[:-1]:
+        if not isinstance(node, Mapping) or seg not in node:
+            return False
+        node = node[seg]
+    return isinstance(node, Mapping) and segments[-1] in node
+
+
 def set_in(data: dict[str, object], key: str, value: object) -> None:
     """Write `value` at `key`, creating (or replacing) intermediate mappings."""
     segs = key.split(".")

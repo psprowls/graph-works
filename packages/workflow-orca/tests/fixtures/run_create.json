@@ -1,0 +1,16 @@
+{
+  "id": "b1c0a4f2-9f2b-4a1e-8d61-7e3f0a9b2c11",
+  "ok": true,
+  "result": {
+    "run": {
+      "id": "run_9c1e837caf86",
+      "objective": "auto-drive:2026-08-14-epic-feature-orca-dispatch-backend",
+      "home_database": "this_database",
+      "coordinator_handle": "term_f2fe21d4-d465-425e-8364-4a7290ae5d2e",
+      "consumer_generation": 1,
+      "legacy": 0,
+      "created_at": "2026-08-14T14:00:00Z",
+      "updated_at": "2026-08-14T14:00:00Z"
+    }
+  }
+}

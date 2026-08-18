@@ -1,5 +1,6 @@
 # Workspace task runner — okf-io, okf-ext, code-graph-io, code-wiki-okf,
-# work-tracker-okf, config-io, models-io, subagents-io, doc-wiki-okf.
+# work-tracker-okf, config-io, models-io, subagents-io, doc-wiki-okf,
+# graph-works-core, workflow-local, workflow-orca.
 # Each recipe is exactly the command a future CI job will call.
 #
 # okf-io and okf-ext share the root `testpaths` and run under a plain
@@ -23,6 +24,9 @@ types:
     uv run --package models-io --extra bedrock --extra vercel mypy --strict packages/models-io/src
     uv run --package subagents-io mypy --strict packages/subagents-io/src
     uv run --package doc-wiki-okf mypy --strict packages/doc-wiki-okf/src
+    uv run --package graph-works-core mypy --strict packages/graph-works-core/src
+    uv run --package workflow-local mypy --strict packages/workflow-local/src
+    uv run --package workflow-orca mypy --strict packages/workflow-orca/src
 
 # Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
 # exists: nothing enforces this but the person who runs it.
@@ -39,6 +43,9 @@ test:
     uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests
     uv run --package subagents-io pytest packages/subagents-io/tests
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests
+    uv run --package graph-works-core pytest packages/graph-works-core/tests
+    uv run --package workflow-local pytest packages/workflow-local/tests
+    uv run --package workflow-orca pytest packages/workflow-orca/tests
 
 # Branch coverage — GATED, per package.
 #
@@ -57,6 +64,9 @@ cov:
     uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests --cov=models_io --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package workflow-local pytest packages/workflow-local/tests --cov=workflow_local --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95
 
 # Everything CI will run. `cov` runs every suite, so `test` is not repeated.
 check: lint types contracts cov

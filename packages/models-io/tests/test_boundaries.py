@@ -24,10 +24,19 @@ PACKAGES_DIR = Path(__file__).resolve().parents[3] / "packages"
 
 #: Every module in the package. `test_the_module_list_is_complete` is what
 #: makes a new module a decision rather than an omission.
-ALL_MODULES = ("__init__.py", "bedrock.py", "errors.py", "loader.py", "normalize.py", "pricing.py", "vercel.py")
+ALL_MODULES = (
+    "__init__.py",
+    "bedrock.py",
+    "embeddings.py",
+    "errors.py",
+    "loader.py",
+    "normalize.py",
+    "pricing.py",
+    "vercel.py",
+)
 
-#: The two modules chartered to import a provider stack, and nothing else.
-PROVIDER_MODULES = {"bedrock.py", "vercel.py"}
+#: The three modules chartered to import a provider stack, and nothing else.
+PROVIDER_MODULES = {"bedrock.py", "embeddings.py", "vercel.py"}
 
 #: `langchain_core` is deliberately absent: loader.py imports it under
 #: TYPE_CHECKING for a return annotation, which costs no runtime dependency
@@ -89,7 +98,7 @@ def test_no_module_imports_os(module):
 
 
 @pytest.mark.parametrize("module", modules(), ids=lambda p: p.name)
-def test_only_the_two_provider_modules_import_a_provider(module):
+def test_only_the_provider_modules_import_a_provider(module):
     found = import_roots(module) & PROVIDER_ROOTS
     if module.name in PROVIDER_MODULES:
         assert found, f"{module.name} is a provider module but imports no provider"

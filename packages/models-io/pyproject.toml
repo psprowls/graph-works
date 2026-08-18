@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "models-io"
-version = "0.1.1"
-description = "Guarded Bedrock and Vercel AI Gateway chat-model constructors: an access-denied taxonomy, content normalization, and caller-supplied credentials."
+version = "0.2.0"
+description = "Guarded Bedrock and Vercel AI Gateway model constructors — chat and embeddings: an access-denied taxonomy, content normalization, and caller-supplied credentials."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
 ]

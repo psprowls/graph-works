@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import code_graph_io
@@ -227,3 +229,61 @@ def test_dump_sql_streams_from_the_connection(seeded_workspace: Path):
 def test_transaction_yields_the_same_store(seeded_workspace: Path):
     with open_writer(graph_dir=graph_dir(seeded_workspace)) as store_handle, store_handle.transaction() as txn:
         assert txn is store_handle
+
+
+# ---------------------------------------------------------------------------
+# Cross-thread access
+#
+# The reader's sqlite3.Connection is opened on whichever thread calls
+# open_reader(). Consumers such as graph_works_core's LangChain tool wrappers
+# fall back to BaseTool.ainvoke() -> run_in_executor(None, self._run, ...),
+# which runs the sync query on a threadpool worker thread that is NOT the
+# thread that opened the connection. sqlite3's default check_same_thread=True
+# makes that a hard error unless the reader is built to tolerate it; these
+# tests pin that it does, and that concurrent cross-thread access is actually
+# serialized rather than merely permitted one-at-a-time.
+# ---------------------------------------------------------------------------
+
+
+def test_reader_usable_from_a_different_thread(seeded_workspace: Path):
+    """Open on this thread, query from another — mirrors run_in_executor()."""
+    reader = open_reader(graph_dir=graph_dir(seeded_workspace))
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            packages = pool.submit(reader.list_packages).result()
+        assert isinstance(packages, list)
+        assert packages, "seed graph should contain packages"
+    finally:
+        reader.close()
+
+
+def test_reader_serializes_concurrent_cross_thread_queries(seeded_workspace: Path):
+    """Several threads hammering the same reader concurrently must not race.
+
+    A raw sqlite3.Connection permits sequential use from a different thread
+    once check_same_thread=False is set, but is not safe for *concurrent*
+    multi-thread use. This simulates asyncio.gather() over several ainvoke()
+    calls, each landing on its own executor thread at (close to) the same
+    time, and asserts every call succeeds and returns the same, correct
+    result — proving the reader actually serializes access.
+    """
+    reader = open_reader(graph_dir=graph_dir(seeded_workspace))
+    try:
+        expected = {p.name for p in reader.list_packages()}
+        assert expected, "seed graph should contain packages"
+
+        barrier = threading.Barrier(8)
+
+        def query() -> set[str]:
+            barrier.wait(timeout=5)
+            return {p.name for p in reader.list_packages()}
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            futures = [pool.submit(query) for _ in range(8)]
+            results = [f.result() for f in futures]
+
+        assert len(results) == 8
+        for result in results:
+            assert result == expected
+    finally:
+        reader.close()

@@ -12,7 +12,15 @@ anything is written.
 from __future__ import annotations
 
 from doc_wiki_okf.proposals.filing import plan_file
-from doc_wiki_okf.proposals.lanes import ADR_DIRECTORY, ADR_TYPE, DIATAXIS_LANES, Lane, LaneSet, lane_set
+from doc_wiki_okf.proposals.lanes import (
+    ADR_DIRECTORY,
+    ADR_TYPE,
+    DIATAXIS_LANES,
+    Lane,
+    LaneSet,
+    is_adr,
+    lane_set,
+)
 from doc_wiki_okf.proposals.migrate import (
     MigrationOutcome,
     MigrationPlan,
@@ -35,6 +43,7 @@ __all__ = [
     "MigrationRefusal",
     "MigrationWrite",
     "ReviewRenderer",
+    "is_adr",
     "lane_set",
     "migrate_and_move",
     "page_render",

@@ -22,6 +22,8 @@
     "parent": { "type": "string", "minLength": 1 },
     "owner": { "type": "string", "minLength": 1 },
     "resolved_in": { "type": "string", "minLength": 1 },
+    "worktree": { "type": "string", "minLength": 1 },
+    "branch": { "type": "string", "minLength": 1 },
     "superseded_by": { "type": "string", "minLength": 1 },
     "mitigation": { "type": "string", "minLength": 1 },
     "rationale": { "type": "string", "minLength": 1 },

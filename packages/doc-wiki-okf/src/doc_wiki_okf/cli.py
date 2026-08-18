@@ -52,7 +52,7 @@ from doc_wiki_okf.proposals.migrate import MigrationPlan, migrate_and_move, plan
 from doc_wiki_okf.proposals.promote import plan_promotion
 from doc_wiki_okf.proposals.render import ReviewRenderer
 from doc_wiki_okf.resources import seed_files
-from doc_wiki_okf.sources import SOURCE_TYPES, plan_ingest
+from doc_wiki_okf.sources import SOURCE_TYPE, plan_ingest, seed_source_kinds, source_kinds
 
 #: `_schema/` and `_sections/` are declarations, not concepts, and
 #: `sources/references/` holds copies of ingested material. Two patterns each,
@@ -190,9 +190,44 @@ def _page_status(value: str | None) -> PageStatus | None:
     return value
 
 
-def _source_type(value: str) -> str:
-    if value not in SOURCE_TYPES:
-        typer.echo(f"--source-type {value!r}: expected one of {list(SOURCE_TYPES)}", err=True)
+def _bundle_source_kinds(root: Path, declarations_dir: Path | None) -> tuple[str, ...]:
+    """The vocabulary *this bundle* declares, or this package's seed when it
+    declares none.
+
+    K-D says the vault is the truth; the fallback is what makes that safe to
+    apply to `ingest`, which briefs a document against a `wiki/` that need not
+    be an initialized bundle and writes nothing.
+
+    A bundle that declares `Source` but gives it no `source_kind` enum is a
+    different thing from a bundle that declares nothing, and it does not fall
+    back: falling back would validate against a vocabulary this vault never
+    agreed to, silently, which is the failure the consolidation exists to
+    remove. It exits naming the file instead.
+    """
+    declarations = root if declarations_dir is None else declarations_dir
+    try:
+        schema_set = load_schemas(declarations / "_schema")
+    except (OSError, ValueError):
+        return seed_source_kinds()
+    if SOURCE_TYPE not in schema_set.schemas:
+        return seed_source_kinds()
+    try:
+        return source_kinds(schema_set)
+    except KeyError as exc:
+        typer.echo(exc.args[0], err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _source_kind(value: str, kinds: tuple[str, ...]) -> str:
+    """*value* if the bundle declares it, else exit 1 naming what it does declare.
+
+    The check runs *before* a plan is built, so a bad `--source-kind` is a
+    usage error rather than a `schemas.invalid` finding on a page that already
+    landed. That property predates K-D and survives it -- only the source of
+    the list changed.
+    """
+    if value not in kinds:
+        typer.echo(f"--source-kind {value!r}: expected one of {list(kinds)}", err=True)
         raise typer.Exit(code=1)
     return value
 
@@ -578,7 +613,7 @@ def _folder_lines(brief: FolderBrief) -> list[str]:
 def _document_lines(brief: DocumentBrief) -> list[str]:
     return [
         brief.title,
-        f"  type: {brief.source_type}",
+        f"  kind: {brief.source_kind}",
         f"  slug: {brief.slug}",
         f"  words: {brief.word_count}",
         f"  source page: {brief.suggested_summary_path} ({'merge' if brief.merge_mode else 'create'})",
@@ -597,7 +632,11 @@ def ingest(
         None, "--repo", help="What a relative SOURCE resolves against. Defaults to WORKSPACE."
     ),
     kind: str | None = typer.Option(None, "--kind", help="Brief SOURCE as a batch of this kind, e.g. `articles`."),
-    source_type: str | None = typer.Option(None, "--source-type", help=f"One of {list(SOURCE_TYPES)}."),
+    source_kind: str | None = typer.Option(
+        None,
+        "--source-kind",
+        help="The kind of material this is; one of the values this bundle's `Source` schema declares.",
+    ),
     limit: int = typer.Option(10, "--limit", help="Cap a batch manifest at N units."),
     all_units: bool = typer.Option(False, "--all", help="No cap on a batch manifest; overrides --limit."),
     today_option: str | None = typer.Option(None, "--today", help="Compute the source page as of YYYY-MM-DD."),
@@ -642,9 +681,10 @@ def ingest(
             raise typer.Exit(code=1)
         return
 
-    if source_type is None:
+    kinds = _bundle_source_kinds(wiki_root, None)
+    if source_kind is None:
         typer.echo(
-            f"--source-type is required for a single document; expected one of {list(SOURCE_TYPES)}",
+            f"--source-kind is required for a single document; expected one of {list(kinds)}",
             err=True,
         )
         raise typer.Exit(code=1)
@@ -655,7 +695,7 @@ def ingest(
         repo=repo_root,
         workspace_root=workspace,
         today=today,
-        source_type=_source_type(source_type),
+        source_kind=_source_kind(source_kind, kinds),
     )
     _emit_brief(document.as_data(), _document_lines(document), json_output=json_output)
 
@@ -675,7 +715,11 @@ def source_add(
     material: Path = typer.Argument(..., help="The file to record. May live anywhere."),  # noqa: B008
     title: str = typer.Option(..., "--title", help="The page's title; the slug derives from it."),
     description: str = typer.Option(..., "--description", help="One line, the page's `description`."),
-    source_type: str = typer.Option(..., "--source-type", help=f"One of {list(SOURCE_TYPES)}."),
+    source_kind: str = typer.Option(
+        ...,
+        "--source-kind",
+        help="The kind of material this is; one of the values this bundle's `Source` schema declares.",
+    ),
     origin: str = typer.Option(..., "--origin", help="Where the material came from: URL, path, or how it arrived."),
     entity_uri: str = typer.Option("", "--entity-uri", help="The code entity this material is about."),
     authors: list[str] = typer.Option(None, "--author", help="Repeatable author name."),  # noqa: B008
@@ -698,11 +742,13 @@ def source_add(
     guaranteed to have. Re-recording material whose page already exists is
     refused rather than merged: delete the page and re-run to redo one.
 
-    `--source-type` has no default. Guessing it from a folder name is what this
-    command's arrival retires.
+    `--source-kind` has no default. Guessing it from a folder name is what this
+    command's arrival retires, and a human running this by hand knows what the
+    material is -- the schema field is optional (K-C) for the agent path, not
+    for this one.
     """
     today = _today(today_option)
-    checked = _source_type(source_type)
+    checked = _source_kind(source_kind, _bundle_source_kinds(root, declarations_dir))
     text = _material_text(material)
     bundle = _bundle(root)
     try:
@@ -714,7 +760,7 @@ def source_add(
             text=text,
             title=title,
             description=description,
-            source_type=checked,
+            source_kind=checked,
             origin=origin,
             by=by,
             at=_at(today),

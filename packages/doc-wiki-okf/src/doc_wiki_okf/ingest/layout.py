@@ -13,7 +13,7 @@ constant you must edit, the shape `DIATAXIS_LANES` already ships in. One field
 is still worth a dataclass rather than a bare constant, for exactly that reason.
 
 `raw/` is gone. Material is ingested from outside the workspace, so
-`source_type` and batch `kind` are explicit arguments now rather than inferred
+`source_kind` and batch `kind` are explicit arguments now rather than inferred
 from a folder.
 """
 

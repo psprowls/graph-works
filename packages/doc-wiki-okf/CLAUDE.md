@@ -15,8 +15,9 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
 - `src/doc_wiki_okf/assets/` — the twelve files this package installs into a
   bundle: six `_schema/` JSON schemas (a `_base-diataxis` `$ref` target plus
   the four Diátaxis types plus `Source`) and six `_sections/` declarations
-  (`_fragments.yaml` plus the same five). Read through `importlib.resources`;
-  installed by `okf_ext.bundle.plan_install`, which is C3's call.
+  (`_fragments.doc_wiki.yaml` plus the same five). Read through
+  `importlib.resources`; installed by `okf_ext.bundle.plan_install`, which is
+  C3's call.
 - `src/doc_wiki_okf/resources.py` — `SEED_RELATIVE_PATHS`, `assets_root()`,
   `seed_files()`. The asset list without the installer.
 - `src/doc_wiki_okf/diataxis/` — the four types as code. `rubric.py` is the
@@ -94,7 +95,7 @@ boundary. `SkillBundle` became frozen, and its two file lists became tuples.
 ## Not here
 
 `raw/` itself. This package no longer reads or writes a `raw/` directory:
-material is ingested from anywhere, `source_type` and batch `kind` are explicit
+material is ingested from anywhere, `source_kind` and batch `kind` are explicit
 arguments, and the copy in `sources/references/` is the material's durable
 location. The three live vaults' own 610 `raw/` files are untouched — moving
 them is a data migration and belongs to the live-vault migration item.
@@ -111,6 +112,6 @@ lives in `agent-research` and nothing in this workspace can keep those command n
 declaring `Concept` here would pre-empt it. Retrofitting the live vault's nine
 concept pages is that epic's content sweep — this package makes it possible and
 does not perform it. `Source` is the one type declared here that the cutover
-epic did not defer: `sources/` has no contested legacy vocabulary, `source_type`
+epic did not defer: `sources/` has no contested legacy vocabulary, `source_kind`
 takes three values across three vaults, and the migration's 173
 `frontmatter.missing-type` source pages need a `type` value to be mapped *to*.

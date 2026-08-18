@@ -17,8 +17,8 @@ from work_helpers import (
 from work_tracker_okf import IGNORE, _rules
 from work_tracker_okf.rules import lane_rules
 
-#: Hand-written from the design spec's §2 tables, not derived from a run.
-#: Regenerating a golden file cannot satisfy this.
+#: Hand-written from the design spec's §2 tables plus §4.3's, not derived from a
+#: run. Regenerating a golden file cannot satisfy this.
 ERROR_CODES = frozenset(
     {
         "state.in-progress-without-owner",
@@ -32,18 +32,22 @@ ERROR_CODES = frozenset(
         "graph.parent-cycle",
         "graph.depends-on-cycle",
         "targets.affects-missing",
+        "decisions.entry-invalid",
+        "decisions.cite-missing",
+        "decisions.open-at-finish",
+        "decisions.supersedes-invalid",
     }
 )
 
-#: The thirteen prefixes the four lane topics had to clear. Written out rather
+#: The eighteen prefixes the five lane topics had to clear. Written out rather
 #: than imported: okf-io's `_rules.TOPICS` is private to okf-io, and okf-ext's
-#: five live one per capability module. `validate()` raises on the first eight at
-#: runtime; this test is what catches the other five, which are legal and still
+#: six live one per capability module. `validate()` raises on the first eight at
+#: runtime; this test is what catches the other six, which are legal and still
 #: wrong.
 OKF_IO_TOPICS = frozenset(
     {"computation", "frontmatter", "legacy", "lifecycle", "links", "provenance", "reserved", "trust"}
 )
-OKF_EXT_TOPICS = frozenset({"schemas", "sections", "health", "render", "tags"})
+OKF_EXT_TOPICS = frozenset({"schemas", "sections", "health", "render", "tags", "placement"})
 
 
 def test_every_declared_code_carries_its_module_prefix() -> None:
@@ -56,10 +60,10 @@ def test_every_declared_code_carries_its_module_prefix() -> None:
             assert code.startswith(f"{topic}."), (topic, code)
 
 
-def test_the_catalog_is_twenty_five_codes_across_four_topics() -> None:
-    assert len(_rules.CATALOG) == 25
-    assert len(_rules.TOPICS) == 4
-    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 25
+def test_the_catalog_is_thirty_codes_across_five_topics() -> None:
+    assert len(_rules.CATALOG) == 30
+    assert len(_rules.TOPICS) == 5
+    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 30
 
 
 def test_the_per_topic_counts_match_the_design_spec() -> None:
@@ -68,13 +72,14 @@ def test_the_per_topic_counts_match_the_design_spec() -> None:
         "plan": 4,
         "graph": 8,
         "targets": 3,
+        "decisions": 5,
     }
 
 
-def test_the_severity_split_is_eleven_errors_and_fourteen_warns() -> None:
-    assert len(ERROR_CODES) == 11
+def test_the_severity_split_is_fifteen_errors_and_fifteen_warns() -> None:
+    assert len(ERROR_CODES) == 15
     assert ERROR_CODES < _rules.CATALOG
-    assert len(_rules.CATALOG - ERROR_CODES) == 14
+    assert len(_rules.CATALOG - ERROR_CODES) == 15
 
 
 def test_no_lane_topic_collides_with_a_built_in_or_an_okf_ext_prefix() -> None:
@@ -90,12 +95,12 @@ def test_the_registry_is_homogeneous() -> None:
     assert set(_rules.RULES_BY_TOPIC) == set(_rules.CODES_BY_TOPIC)
 
 
-def test_lane_rules_is_twelve_functions_with_a_repo_root(tmp_path: Path) -> None:
-    assert len(lane_rules(repo_root=tmp_path)) == 12
+def test_lane_rules_is_fourteen_functions_with_a_repo_root(tmp_path: Path) -> None:
+    assert len(lane_rules(repo_root=tmp_path)) == 14
 
 
 def test_lane_rules_drops_the_two_repo_rules_without_one() -> None:
-    assert len(lane_rules()) == 10
+    assert len(lane_rules()) == 12
 
 
 def test_lane_rules_is_stable_across_calls(tmp_path: Path) -> None:
@@ -149,7 +154,7 @@ def test_no_rule_emits_an_undeclared_code(golden_report: Report) -> None:
     assert {f.code for f in _lane_findings(golden_report)} <= _rules.CATALOG
 
 
-def test_the_error_codes_are_exactly_the_eleven(golden_report: Report) -> None:
+def test_the_error_codes_are_exactly_the_fifteen(golden_report: Report) -> None:
     lane = _lane_findings(golden_report)
     assert {f.code for f in lane if f.severity == "error"} == ERROR_CODES
 

@@ -162,3 +162,21 @@ def test_lane_set_is_frozen() -> None:
 
     with pytest.raises(AttributeError):
         lanes_obj.lanes = ()  # type: ignore
+
+
+def test_is_adr_requires_both_the_directory_and_the_type() -> None:
+    """`ADR_TYPE` is `Explanation`, which the Diátaxis explanation lane also
+    uses — so the type alone would sweep every explanation page into the ADR
+    checks, and the directory alone would sweep every ADR-lane page."""
+    from doc_wiki_okf.proposals import is_adr
+
+    assert is_adr("adrs/0001-two-layer", "Explanation")
+    assert not is_adr("concepts/byte-fidelity", "Explanation")
+    assert not is_adr("adrs/0001-two-layer", "Reference")
+    assert not is_adr("adrs/0001-two-layer", "")
+
+
+def test_is_adr_tolerates_the_whitespace_a_frontmatter_reader_leaves() -> None:
+    from doc_wiki_okf.proposals import is_adr
+
+    assert is_adr("adrs/0001-two-layer", "  Explanation  ")

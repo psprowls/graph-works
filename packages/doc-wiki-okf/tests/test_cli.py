@@ -585,12 +585,12 @@ def test_ingest_without_a_kind_briefs_a_directory_as_a_folder(tmp_path):
     assert json.loads(result.stdout)["is_folder"] is True
 
 
-def test_ingest_a_single_document_without_a_source_type_exits_one(tmp_path):
+def test_ingest_a_single_document_without_a_source_kind_exits_one(tmp_path):
     workspace = _ingest_workspace(tmp_path)
     source = workspace / "material" / "specs" / "auth.md"
     result = runner.invoke(app, ["ingest", str(source), "--workspace", str(workspace)])
     assert result.exit_code == 1
-    assert "--source-type is required" in result.stderr
+    assert "--source-kind is required" in result.stderr
 
 
 def test_ingest_kind_on_a_file_exits_one(tmp_path):
@@ -608,7 +608,7 @@ def test_ingest_briefs_a_single_document(tmp_path):
     source = workspace / "material" / "specs" / "auth.md"
 
     human = runner.invoke(
-        app, ["ingest", str(source), "--workspace", str(workspace), "--source-type", "spec", "--today", "2026-08-12"]
+        app, ["ingest", str(source), "--workspace", str(workspace), "--source-kind", "spec", "--today", "2026-08-12"]
     )
     payload = runner.invoke(
         app,
@@ -617,7 +617,7 @@ def test_ingest_briefs_a_single_document(tmp_path):
             str(source),
             "--workspace",
             str(workspace),
-            "--source-type",
+            "--source-kind",
             "spec",
             "--today",
             "2026-08-12",
@@ -636,9 +636,31 @@ def test_ingest_briefs_a_single_document(tmp_path):
             repo=workspace,
             workspace_root=workspace,
             today=date(2026, 8, 12),
-            source_type="spec",
+            source_kind="spec",
         ).as_data()
     )
+
+
+def test_ingest_falls_back_to_the_seed_when_the_bundle_declares_no_source(tmp_path):
+    """A readable `_schema/` that declares no `Source` is not a misconfigured
+    vocabulary -- it is a bundle that has nothing to say about source kinds, so
+    the seed answers. Distinct from the malformed-enum case, which exits."""
+    workspace = _ingest_workspace(tmp_path)
+    declarations = workspace / "wiki" / "_schema"
+    declarations.mkdir(parents=True)
+    (declarations / "Explanation.schema.json").write_text(
+        '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
+        ' "required": ["type"], "properties": {"type": {"const": "Explanation"}}}',
+        encoding="utf-8",
+    )
+    source = workspace / "material" / "specs" / "auth.md"
+
+    result = runner.invoke(
+        app, ["ingest", str(source), "--workspace", str(workspace), "--source-kind", "spec", "--json"]
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["source_kind"] == "spec"
 
 
 def test_ingest_today_decides_the_source_page(tmp_path):
@@ -651,7 +673,7 @@ def test_ingest_today_decides_the_source_page(tmp_path):
             str(source),
             "--workspace",
             str(workspace),
-            "--source-type",
+            "--source-kind",
             "spec",
             "--today",
             "2026-01-05",
@@ -679,7 +701,7 @@ def test_ingest_rejects_a_bad_today(tmp_path):
             str(workspace / "material" / "specs" / "auth.md"),
             "--workspace",
             str(workspace),
-            "--source-type",
+            "--source-kind",
             "spec",
             "--today",
             "nope",
@@ -700,10 +722,10 @@ def test_ingest_an_absolute_source_resolves_against_a_default_workspace(tmp_path
     monkeypatch.chdir(workspace)
     source = workspace / "material" / "specs" / "auth.md"
 
-    result = runner.invoke(app, ["ingest", str(source), "--source-type", "spec", "--json"])
+    result = runner.invoke(app, ["ingest", str(source), "--source-kind", "spec", "--json"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["source_type"] == "spec"
+    assert json.loads(result.stdout)["source_kind"] == "spec"
 
 
 def test_ingest_a_relative_workspace_still_resolves_correctly(tmp_path, monkeypatch):
@@ -714,10 +736,10 @@ def test_ingest_a_relative_workspace_still_resolves_correctly(tmp_path, monkeypa
     monkeypatch.chdir(workspace)
     source = workspace / "material" / "specs" / "auth.md"
 
-    result = runner.invoke(app, ["ingest", str(source), "--workspace", ".", "--source-type", "spec", "--json"])
+    result = runner.invoke(app, ["ingest", str(source), "--workspace", ".", "--source-kind", "spec", "--json"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout)["source_type"] == "spec"
+    assert json.loads(result.stdout)["source_kind"] == "spec"
 
 
 def test_ingest_accepts_an_explicit_repo(tmp_path):
@@ -731,12 +753,12 @@ def test_ingest_accepts_an_explicit_repo(tmp_path):
 
     result = runner.invoke(
         app,
-        ["ingest", str(source), "--workspace", str(workspace), "--repo", str(repo), "--source-type", "spec", "--json"],
+        ["ingest", str(source), "--workspace", str(workspace), "--repo", str(repo), "--source-kind", "spec", "--json"],
     )
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["source_type"] == "spec"
+    assert payload["source_kind"] == "spec"
     assert payload["title"] == "Auth Spec"
 
 
@@ -759,7 +781,7 @@ def test_ingest_accepts_an_explicit_wiki(tmp_path):
             str(workspace),
             "--wiki",
             str(custom_wiki),
-            "--source-type",
+            "--source-kind",
             "spec",
             "--today",
             "2026-08-12",
@@ -785,7 +807,7 @@ def _add_source(root, material, *flags, **overrides):
     args = {
         "--title": "Auth Spec",
         "--description": "The authentication specification.",
-        "--source-type": "spec",
+        "--source-kind": "spec",
         "--origin": "https://example.invalid/auth-spec",
         "--by": "agent:test",
         "--today": DAY,
@@ -843,14 +865,49 @@ def test_source_add_twice_refuses(tmp_path) -> None:
     assert "target-exists" in second.stderr
 
 
-def test_source_add_rejects_an_unknown_source_type(tmp_path) -> None:
+def test_source_add_rejects_an_unknown_source_kind(tmp_path) -> None:
     root = tmp_path / "b"
     _init(root)
-    result = _add_source(root, _material(tmp_path), **{"--source-type": "blog"})
+    result = _add_source(root, _material(tmp_path), **{"--source-kind": "blog"})
 
     assert result.exit_code == 1
-    assert "--source-type 'blog'" in result.stderr
+    assert "--source-kind 'blog'" in result.stderr
     assert "spec" in result.stderr
+
+
+def test_source_add_checks_against_the_bundles_own_enum(tmp_path) -> None:
+    """K-D: a vault that edits `_schema/Source.schema.json` changes what the
+    CLI accepts, with no code change here."""
+    root = tmp_path / "b"
+    _init(root)
+    schema = root / "_schema" / "Source.schema.json"
+    document = json.loads(schema.read_text(encoding="utf-8"))
+    document["properties"]["source_kind"]["enum"] = ["memo"]
+    schema.write_text(json.dumps(document), encoding="utf-8")
+
+    rejected = _add_source(root, _material(tmp_path), **{"--source-kind": "spec"})
+    assert rejected.exit_code == 1
+    assert "expected one of ['memo']" in rejected.stderr
+
+    accepted = _add_source(root, _material(tmp_path), **{"--source-kind": "memo"})
+    assert accepted.exit_code == 0
+
+
+def test_source_add_refuses_a_source_schema_with_no_source_kind_enum(tmp_path) -> None:
+    """A declared `Source` with no `source_kind` enum is a misconfiguration,
+    not an uninitialized bundle: falling back to the seed here would validate
+    against a vocabulary this vault never declared."""
+    root = tmp_path / "b"
+    _init(root)
+    schema = root / "_schema" / "Source.schema.json"
+    document = json.loads(schema.read_text(encoding="utf-8"))
+    document["properties"]["source_kind"] = {"type": "string"}
+    schema.write_text(json.dumps(document), encoding="utf-8")
+
+    result = _add_source(root, _material(tmp_path), **{"--source-kind": "spec"})
+
+    assert result.exit_code == 1
+    assert "no `source_kind` enum" in result.stderr
 
 
 def test_source_add_rejects_binary_material(tmp_path) -> None:
@@ -890,7 +947,7 @@ def test_source_add_carries_the_optional_frontmatter(tmp_path) -> None:
             "Auth Spec",
             "--description",
             "d",
-            "--source-type",
+            "--source-kind",
             "spec",
             "--origin",
             "o",

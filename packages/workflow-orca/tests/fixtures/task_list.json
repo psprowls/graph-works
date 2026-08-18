@@ -1,0 +1,53 @@
+{
+  "id": "4e8cb10b-e795-4d13-971e-94401ba17ecd",
+  "ok": true,
+  "result": {
+    "runId": "run_43b63f0bdf2b",
+    "legacyReadOnly": false,
+    "tasks": [
+      {
+        "id": "task_5ca8c19ffa5e",
+        "run_id": "run_43b63f0bdf2b",
+        "parent_id": null,
+        "created_by_terminal_handle": "term_6e46730e-67a2-442a-986f-835911891ceb",
+        "task_title": "2026-08-13-test-gap-code-wiki-smoke-script#execute",
+        "display_name": "2026-08-13-test-gap-code-wiki-smoke-script · execute",
+        "spec": "Run /graph-wiki:next 2026-08-13-test-gap-code-wiki-smoke-script.",
+        "status": "completed",
+        "deps": "[]",
+        "result": "{\"provenance\":\"worker_report\",\"outcome\":\"succeeded\",\"messageId\":\"msg_b84fb919772e\",\"subject\":\"wiki_smoke.py closes the coverage gap\",\"body\":\"Added scripts/wiki_smoke.py and its tests.\",\"filesModified\":[\"scripts/wiki_smoke.py\",\"scripts/tests/test_wiki_smoke.py\"],\"reportPath\":null,\"completedAt\":\"2026-08-13T18:31:58.365Z\"}",
+        "created_at": "2026-08-13 18:21:48",
+        "completed_at": "2026-08-13T18:32:04.645Z"
+      },
+      {
+        "id": "task_338800a1fa14",
+        "run_id": "run_43b63f0bdf2b",
+        "parent_id": null,
+        "created_by_terminal_handle": "term_6e46730e-67a2-442a-986f-835911891ceb",
+        "task_title": "2026-08-13-test-gap-code-wiki-smoke-script#finish",
+        "display_name": "2026-08-13-test-gap-code-wiki-smoke-script · finish",
+        "spec": "Run /graph-wiki:next 2026-08-13-test-gap-code-wiki-smoke-script.",
+        "status": "dispatched",
+        "deps": "[]",
+        "result": null,
+        "created_at": "2026-08-13 18:33:38",
+        "completed_at": null
+      },
+      {
+        "id": "task_0a0b0c0d0e0f",
+        "run_id": "run_43b63f0bdf2b",
+        "parent_id": null,
+        "created_by_terminal_handle": "term_6e46730e-67a2-442a-986f-835911891ceb",
+        "task_title": "2026-08-13-orphan#plan",
+        "display_name": "2026-08-13-orphan · plan",
+        "spec": "Run /graph-wiki:next 2026-08-13-orphan.",
+        "status": "pending",
+        "deps": "[]",
+        "result": null,
+        "created_at": "2026-08-13 18:34:00",
+        "completed_at": null
+      }
+    ],
+    "count": 3
+  }
+}

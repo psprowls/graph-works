@@ -45,24 +45,30 @@ def test_all_is_sorted_and_bound():
 
 
 def test_the_public_surface_is_the_spec_s_module_table():
-    # Exactly these thirty. The two writers are surface because they have real
-    # consumers with no pool in sight; `PriceLookup` is surface because it is
-    # the type of a parameter two of those callables accept, so a caller
-    # writing its own lookup cannot annotate against the API without it. The
-    # dispatch seven are surface because they exist for a consumer that has not
-    # been written yet — an unexported value type would be unreachable.
+    # Exactly these forty-five. The two writers are surface because they have
+    # real consumers with no pool in sight; `PriceLookup` is surface because it
+    # is the type of a parameter two of those callables accept. The dispatch
+    # seven are surface because they exist for a consumer that has not been
+    # written yet — an unexported value type would be unreachable.
     #
-    # The fifteen the runner port added: the three entry points and
-    # `stream_and_parse` are the package's reason to exist, and the adapter and
-    # role types are what a consumer implements and injects against.
-    # `Closeable` is surface because it bounds `RunContext`'s type parameter and
-    # a caller annotating the generic cannot name the bound without it; the type
-    # parameter itself is not, being an implementation detail of the annotation.
+    # The fifteen the backend seam added: the two Protocols and the two
+    # vocabularies are the contract a backend implements; the record and the
+    # four event members are what a coordinator reads; the four errors are
+    # what it catches, `BackendError` being the base a caller catches to get
+    # all of them. `WorkerEventBase` is surface because a coordinator writing
+    # a generic ack/dedupe helper annotates against it, and `WorkerEvent`
+    # because that is the union it matches on.
     assert set(subagents_io.__all__) == {
         "Adapter",
+        "BackendError",
         "Closeable",
         "DISPATCH_MODES",
+        "DispatchBackend",
+        "DispatchSession",
+        "EVENT_KINDS",
+        "Escalation",
         "FanOutResult",
+        "Heartbeat",
         "LoopAdapter",
         "LoopOutcome",
         "ModelResolution",
@@ -78,8 +84,17 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "SubagentPool",
         "TRACE_LOGGER_NAME",
         "TaskResult",
+        "UnknownWorker",
+        "UnsupportedMode",
+        "WORKER_STATES",
         "WORKTREE_ACTIONS",
+        "WorkerDone",
+        "WorkerEvent",
+        "WorkerEventBase",
+        "WorkerQuestion",
+        "WorkerRecord",
         "WorktreeAction",
+        "WorktreeNotProvisioned",
         "render_trace_record",
         "resolve_model",
         "resolve_role_spec",

@@ -15,7 +15,7 @@ import sys
 
 import models_io
 import pytest
-from models_io import ProviderNotInstalled, make_bedrock_llm, make_gateway_llm
+from models_io import ProviderNotInstalled, make_bedrock_embeddings, make_bedrock_llm, make_gateway_llm
 
 PROVIDER_ROOTS = ("boto3", "botocore", "langchain_aws", "langchain_openai", "openai")
 
@@ -53,6 +53,17 @@ def test_make_gateway_llm_without_the_extra_raises_provider_not_installed(monkey
 
     msg = str(exc_info.value)
     assert "models-io[vercel]" in msg
+    assert isinstance(exc_info.value.__cause__, ImportError)
+
+
+def test_make_bedrock_embeddings_without_the_extra_raises_provider_not_installed(monkeypatch):
+    _hide(monkeypatch, "langchain_aws", "embeddings")
+
+    with pytest.raises(ProviderNotInstalled) as exc_info:
+        make_bedrock_embeddings("amazon.titan-embed-text-v2:0")
+
+    msg = str(exc_info.value)
+    assert "models-io[bedrock]" in msg
     assert isinstance(exc_info.value.__cause__, ImportError)
 
 

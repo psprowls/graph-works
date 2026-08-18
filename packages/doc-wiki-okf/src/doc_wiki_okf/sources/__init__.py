@@ -13,21 +13,25 @@ nothing in `ingest/` may import this one.
 from __future__ import annotations
 
 from doc_wiki_okf.sources.plan import (
+    DEFAULT_SOURCE_KIND,
     DEFAULT_SUFFIX,
     REFERENCES_DIRECTORY,
     SOURCE_TYPE,
-    SOURCE_TYPES,
     copy_target,
     page_target,
     plan_ingest,
+    seed_source_kinds,
+    source_kinds,
 )
 
 __all__ = [
+    "DEFAULT_SOURCE_KIND",
     "DEFAULT_SUFFIX",
     "REFERENCES_DIRECTORY",
     "SOURCE_TYPE",
-    "SOURCE_TYPES",
     "copy_target",
     "page_target",
     "plan_ingest",
+    "seed_source_kinds",
+    "source_kinds",
 ]

@@ -5,9 +5,14 @@ added -- `type: Source` and `description` -- which is exactly what the live-vaul
 migration will stamp. Inlined rather than read from the vault, following
 `test_live_proposal_shapes.py`: this suite depends on nothing outside the repo.
 
-What it keeps honest is S-J's measured claim that requiring `source_type` and
-`source_path` costs exactly one of 237 live pages at the level of key
-*presence*. If a future schema edit widens the required set, this fails.
+What it keeps honest is S-J's measured claim that requiring `source_path` costs
+exactly one of 237 live pages at the level of key *presence*. If a future schema
+edit widens the required set, this fails.
+
+`source_type: spec` below is deliberate and is **not** a stale copy of the key
+K-A renamed. Live pages keep it until the live-vault migration rewrites them;
+until then it is an undeclared extra property, and this suite is what asserts
+`additionalProperties: true` still tolerates it.
 """
 
 from __future__ import annotations

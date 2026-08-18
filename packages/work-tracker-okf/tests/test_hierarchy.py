@@ -5,6 +5,7 @@ from work_tracker_okf.hierarchy import (
     child_gated_node,
     child_rollup,
     descend,
+    nearest_epic,
     unknown_depends_on,
     unmet_depends_on,
 )
@@ -158,3 +159,49 @@ def test_descend_stops_at_the_depth_cap():
     assert result.leaf is None
     assert f"depth cap ({WALK_DEPTH_CAP})" in (result.reason or "")
     assert len(result.path) == WALK_DEPTH_CAP
+
+
+def _lineage():
+    return [
+        make_item("epic-top", type="Epic"),
+        make_item("feature-mid", type="Feature", parent="epic-top"),
+        make_item("bug-leaf", type="Bug", parent="feature-mid"),
+        make_item("orphan", type="Bug"),
+        make_item("lost", type="Bug", parent="no-such-item"),
+    ]
+
+
+def test_nearest_epic_walks_past_a_feature_parent():
+    assert nearest_epic(_lineage(), "bug-leaf") == "epic-top"
+
+
+def test_an_epic_is_its_own_nearest_epic():
+    assert nearest_epic(_lineage(), "epic-top") == "epic-top"
+
+
+def test_nearest_epic_of_a_parentless_non_epic_is_none():
+    assert nearest_epic(_lineage(), "orphan") is None
+
+
+def test_nearest_epic_of_an_unknown_parent_is_none():
+    assert nearest_epic(_lineage(), "lost") is None
+
+
+def test_nearest_epic_of_an_unknown_slug_is_none():
+    assert nearest_epic(_lineage(), "nobody") is None
+
+
+def test_nearest_epic_terminates_on_a_parent_cycle():
+    """A `parent` chain that closes on itself is `graph.parent-cycle`'s finding,
+    not this walk's problem — it must return, not loop."""
+    cycle = [
+        make_item("a", type="Bug", parent="b"),
+        make_item("b", type="Bug", parent="a"),
+    ]
+    assert nearest_epic(cycle, "a") is None
+
+
+def test_nearest_epic_is_bounded_by_the_shared_depth_cap():
+    chain = [make_item(f"n{i}", type="Bug", parent=f"n{i + 1}") for i in range(WALK_DEPTH_CAP + 5)]
+    chain.append(make_item(f"n{WALK_DEPTH_CAP + 5}", type="Epic"))
+    assert nearest_epic(chain, "n0") is None

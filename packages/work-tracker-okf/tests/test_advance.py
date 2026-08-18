@@ -268,3 +268,23 @@ def test_apply_raises_nothing_of_its_own_on_an_unparseable_document():
     assert plan.refusal == "unknown-slug"
     with pytest.raises(AssertionError):
         apply(document, plan)
+
+
+def test_advance_stamps_worktree_and_branch_when_supplied() -> None:
+    items = (make_item("x", type="Feature", workflow_status="open", phase="design"),)
+    plan = _plan_for(items, "x", worktree="/tmp/wt/x", branch="feature/x")
+    assert plan.refusal is None
+    changed = {change.key: change.after for change in plan.changes}
+    assert changed["worktree"] == "/tmp/wt/x"
+    assert changed["branch"] == "feature/x"
+
+
+def test_advance_without_provenance_keywords_changes_nothing_extra() -> None:
+    items = (make_item("x", type="Feature", workflow_status="open", phase="design"),)
+    assert "worktree" not in _keys(_plan_for(items, "x"))
+    assert "branch" not in _keys(_plan_for(items, "x"))
+
+
+def test_advance_does_not_rewrite_an_unchanged_worktree() -> None:
+    items = (make_item("x", type="Feature", workflow_status="open", phase="design", worktree="/tmp/wt/x"),)
+    assert "worktree" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x"))

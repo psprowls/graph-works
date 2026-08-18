@@ -9,10 +9,11 @@ from work_tracker_okf.workflow import (
     route,
 )
 
-#: Epic §2.2's seven stage/variant pairs, written out rather than derived.
-SEVEN_PAIRS = {
+#: Epic §2.2's eight stage/variant pairs, written out rather than derived.
+EIGHT_PAIRS = {
     ("design", "exploration"),
     ("design", "diagnosis"),
+    ("design", "reconcile"),
     ("plan", "decompose"),
     ("plan", "single"),
     ("execute", "planned"),
@@ -45,16 +46,24 @@ def test_route_never_raises_and_always_answers():
         )
 
 
-def test_the_table_produces_exactly_seven_distinct_pairs():
+def test_the_table_produces_exactly_eight_distinct_pairs():
     seen = set()
     for type_, status, phase, effort in _sweep():
         for has_plan in (False, True):
-            result = route(
-                _state(type=type_, workflow_status=status, phase=phase, effort=effort, has_plan_doc=has_plan)
-            )
-            if result.dispatch is not None:
-                seen.add((result.dispatch.stage, result.dispatch.variant))
-    assert seen == SEVEN_PAIRS
+            for has_spec in (False, True):
+                result = route(
+                    _state(
+                        type=type_,
+                        workflow_status=status,
+                        phase=phase,
+                        effort=effort,
+                        has_plan_doc=has_plan,
+                        has_spec_doc=has_spec,
+                    )
+                )
+                if result.dispatch is not None:
+                    seen.add((result.dispatch.stage, result.dispatch.variant))
+    assert seen == EIGHT_PAIRS
 
 
 def test_the_sentinel_phase_is_not_a_real_phase():
@@ -113,6 +122,49 @@ def test_entry_routes_a_bug_to_diagnosis_and_everything_else_to_exploration():
     assert route(_state(type="Bug")).dispatch == Dispatch("design", "diagnosis")
     for type_ in ("Feature", "Epic", "Spike", "TechDebt"):
         assert route(_state(type=type_)).dispatch == Dispatch("design", "exploration"), type_
+
+
+def test_entry_with_a_pre_seeded_spec_reconciles_instead_of_restarting():
+    """A pre-seeded spec (e.g. filed from a template) means design has
+    something to reconcile against, not a blank page to brainstorm from --
+    and this beats the diagnosis/exploration split for every type."""
+    for type_ in ("Bug", "Feature"):
+        result = route(_state(type=type_, has_spec_doc=True))
+        assert result.dispatch == Dispatch("design", "reconcile"), type_
+
+
+def test_design_reentry_with_an_existing_spec_reconciles_rather_than_restarts():
+    result = route(_state(type="Feature", phase="design", has_spec_doc=True))
+    assert result.dispatch == Dispatch("design", "reconcile")
+
+
+def test_design_reentry_without_a_spec_still_brainstorms_or_diagnoses():
+    assert route(_state(type="Bug", phase="design")).dispatch == Dispatch("design", "diagnosis")
+    assert route(_state(type="Feature", phase="design")).dispatch == Dispatch("design", "exploration")
+
+
+def test_an_open_decision_blocks_design_redispatch():
+    """A held item (a contradiction filed as an open decision by a previous
+    reconciling-spec pass) must never fall through to another dispatch --
+    that is the infinite-redispatch loop this gate exists to stop."""
+    result = route(_state(type="Feature", phase="design", has_open_decision=True))
+    assert result.dispatch is None
+    assert "open decision" in result.blockers[0]
+
+
+def test_an_open_decision_takes_priority_over_the_spec_doc_branch():
+    """Checked before has_spec_doc, deliberately: an item with both a spec and
+    an open decision is still held, not silently reconciled."""
+    result = route(_state(type="Feature", phase="design", has_open_decision=True, has_spec_doc=True))
+    assert result.dispatch is None
+    assert "open decision" in result.blockers[0]
+
+
+def test_an_open_decision_does_not_block_first_entry():
+    """The gate exists for RE-dispatch specifically -- first entry into design
+    has no prior reconcile pass to have filed the decision from."""
+    result = route(_state(type="Feature", has_open_decision=True))
+    assert result.dispatch == Dispatch("design", "exploration")
 
 
 def test_entry_sets_the_design_phase_on_dispatch():

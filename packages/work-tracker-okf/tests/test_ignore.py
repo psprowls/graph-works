@@ -74,7 +74,7 @@ def test_the_recipe_keeps_this_packages_own_declarations_out_of_concepts(tmp_pat
     bundle = load_bundle(root, ignore=IGNORE)
     assert dict(bundle.concepts) == {}
     assert bundle.has_member("_schema/_base.schema.json")
-    assert bundle.has_member("_sections/_fragments.yaml")
+    assert bundle.has_member("_sections/_fragments.work_tracker.yaml")
 
 
 #: Written out literally for the same reason `_EXPECTED` is: this is the
@@ -115,3 +115,34 @@ def test_load_items_is_lens_independent(minimal_root: Path) -> None:
     assert load_items(load_bundle(minimal_root, ignore=IGNORE)) == load_items(
         load_bundle(minimal_root, ignore=ARCHIVE_IGNORE)
     )
+
+
+def test_the_ledger_is_ignored_by_the_reader_recipe(conformant_root: Path) -> None:
+    """§3.1: the ledger lives inside `references/`, so `*/references/*` already
+    covers it. No new pattern, and no `IGNORE` / `ARCHIVE_IGNORE` delta churn."""
+    from work_tracker_okf.paths import decisions_ledger
+
+    ref = decisions_ledger("2026-03-01-epic-conformant-vault")
+    bundle = load_bundle(conformant_root, ignore=IGNORE)
+    assert ref.rel in bundle.ignored
+    assert bundle.has_member(ref.rel)
+
+
+def test_the_ledger_is_visible_to_the_archive_recipe(conformant_root: Path) -> None:
+    """The other half: `ARCHIVE_IGNORE` is `IGNORE` minus `*/references/*`, so
+    `okf_ext.moves` — which never reads `bundle.ignored` — sees the ledger and
+    the archive carries it along."""
+    from work_tracker_okf.paths import decisions_ledger
+
+    ref = decisions_ledger("2026-03-01-epic-conformant-vault")
+    bundle = load_bundle(conformant_root, ignore=ARCHIVE_IGNORE)
+    assert ref.rel.removesuffix(".md") in bundle.concepts
+
+
+def test_adding_the_ledger_grew_no_ignore_pattern() -> None:
+    """The claim §3.1 buys: `_EXPECTED` above is unchanged by this port."""
+    from work_tracker_okf.paths import LEDGER_FILENAME
+
+    stem = LEDGER_FILENAME.removesuffix(".md")
+    assert stem not in " ".join(IGNORE)
+    assert stem not in " ".join(ARCHIVE_IGNORE)

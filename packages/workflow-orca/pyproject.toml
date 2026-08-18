@@ -1,0 +1,39 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "workflow-orca"
+version = "0.1.0"
+description = "The Orca DispatchBackend: launch, enumerate, supervise and resume workers on an Orca Run."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+# Exactly one dependency, and it is a workspace package. This is the package
+# where vendor coupling is allowed to live, so the `orca` CLI is reached
+# through `subprocess` (stdlib) rather than through a client library — there
+# is no Python SDK, and adding a third-party HTTP stack to talk to a local
+# binary would be a dependency bought for nothing.
+dependencies = ["subagents-io>=0.2,<0.3"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/workflow_orca"]
+
+[tool.uv.sources]
+subagents-io = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `conformance.py` and `test_conformance.py` are plain sibling modules living
+# in `workflow-local`'s own `tests/`, not a package — the same mechanism the
+# root `pyproject.toml` uses to share `helpers.py` across okf-io/okf-ext.
+# `test_conformance_orca.py` imports the scenarios from there rather than
+# copying them: a scenario added to the sibling runs here with no edit. The
+# one basename collision between the two test directories, `test_package.py`,
+# is a `test_*` module collected independently by each package's own
+# `testpaths = ["tests"]`, never both in the same pytest session — not the
+# silent-plain-module-shadowing hazard this mechanism otherwise guards
+# against, so it did not need a rename.
+pythonpath = ["tests", "../workflow-local/tests"]

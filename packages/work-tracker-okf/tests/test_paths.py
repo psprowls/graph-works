@@ -3,9 +3,11 @@ from pathlib import Path
 import pytest
 from work_tracker_okf import vocabulary
 from work_tracker_okf.paths import (
+    LEDGER_FILENAME,
     PHASE_ORDINALS,
     ArtifactRef,
     artifact_path,
+    decisions_ledger,
     item_page,
     references_dir,
     source_id_for,
@@ -154,3 +156,25 @@ def test_spec_and_plan_only_valid_in_their_phases(phase, kind) -> None:
 def test_an_empty_suffix_is_no_suffix() -> None:
     assert source_id_for("design", "spec", "") == "design-spec"
     assert artifact_path(_SLUG, "plan", "guidance", suffix="").rel.endswith("02-plan-guidance.md")
+
+
+def test_the_ledger_sits_under_references_beside_the_other_artifacts() -> None:
+    """§3.1: inside `references/`, so `IGNORE`'s existing `*/references/*`
+    already covers it — no new ignore pattern, no `test_ignore.py` churn."""
+    assert decisions_ledger(_SLUG).rel == f"work/{_SLUG}/references/00-decisions.md"
+    assert decisions_ledger(_SLUG).resource == f"/work/{_SLUG}/references/00-decisions.md"
+
+
+def test_the_archived_ledger_is_the_symmetric_twin() -> None:
+    assert decisions_ledger(_SLUG, archived=True).rel == f"work/_archive/{_SLUG}/references/00-decisions.md"
+
+
+def test_the_ledger_carries_no_source_id() -> None:
+    """§3.2: the epic page does not stamp its ledger into `sources[]`, so there
+    is no id to carry — `references_dir`'s `.source_id` is `None` for the same reason."""
+    assert decisions_ledger(_SLUG).source_id is None
+
+
+def test_the_ledger_filename_is_the_module_constant() -> None:
+    assert LEDGER_FILENAME == "00-decisions.md"
+    assert decisions_ledger(_SLUG).rel.endswith(LEDGER_FILENAME)

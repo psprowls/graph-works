@@ -1,0 +1,25 @@
+{
+  "id": "aa2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+  "ok": true,
+  "result": {
+    "dispatch": {
+      "id": "ctx_new000000001",
+      "run_id": "run_43b63f0bdf2b",
+      "task_id": "task_new0000001",
+      "assignee_handle": "term_new00000000001",
+      "status": "dispatched",
+      "failure_count": 0,
+      "last_failure": null,
+      "dispatched_at": "2026-08-14 14:10:03",
+      "completed_at": null,
+      "last_heartbeat_at": null
+    },
+    "worker": {
+      "dispatch_id": "ctx_new000000001",
+      "state": "ready",
+      "stage": "launched",
+      "agent_terminal_handle": "term_new00000000001",
+      "setup_state": "succeeded"
+    }
+  }
+}

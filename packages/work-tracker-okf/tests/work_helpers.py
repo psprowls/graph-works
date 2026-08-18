@@ -35,6 +35,8 @@ _DEFAULTS: dict[str, Any] = {
     "children": (),
     "owner": None,
     "resolved_in": None,
+    "worktree": None,
+    "branch": None,
     "superseded_by": None,
     "tags": (),
     "sources": (),
@@ -65,10 +67,12 @@ CONFORMANT_TODAY = date(2026, 3, 7)
 def make_terminal(root: Path, slug: str, *, status: str = "resolved") -> None:
     """Flip an item page's `workflow_status` in a **copied** vault.
 
-    The conformant vault's only working directory belongs to an in-progress
-    item, and its only terminal active item has no working directory. Every
-    two-path assertion needs one item that is both, and manufacturing it on the
-    copy is cheaper — and more honest — than a second fixture vault whose only
+    The conformant vault's only working directory with real artifacts (a
+    design spec, a plan, a transcript) belongs to an in-progress item — the
+    epic's own working directory holds nothing but its decisions ledger — and
+    its only terminal active item has no working directory. Every two-path
+    assertion needs one item that is both, and manufacturing it on the copy is
+    cheaper — and more honest — than a second fixture vault whose only
     difference is one word.
     """
     page = item_page(slug).path(root)
@@ -84,8 +88,9 @@ NONCONFORMANT_REPO = Path(__file__).parent / "fixtures" / "nonconformant_repo"
 NONCONFORMANT_GOLDEN = Path(__file__).parent / "fixtures" / "nonconformant.golden.txt"
 NONCONFORMANT_TODAY = date(2026, 8, 3)
 
-#: The empty plan table `assets/_sections/_fragments.yaml` seeds, so a page
-#: written by `write_item` reads back as `empty` rather than `missing`.
+#: The empty plan table `assets/_sections/_fragments.work_tracker.yaml` seeds,
+#: so a page written by `write_item` reads back as `empty` rather than
+#: `missing`.
 EMPTY_PLAN_BODY = "\n## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n"
 
 

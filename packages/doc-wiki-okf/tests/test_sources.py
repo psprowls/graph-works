@@ -20,7 +20,7 @@ def _plan(root: Path, path: Path, text: str, *, bundle=None, **overrides):
     kwargs = {
         "title": "Auth Spec",
         "description": "The authentication specification.",
-        "source_type": "spec",
+        "source_kind": "spec",
         "origin": "https://example.invalid/auth-spec",
         "by": BY,
         "at": AT,
@@ -49,7 +49,7 @@ def test_the_page_carries_the_type_the_required_keys_and_the_origin(tmp_path: Pa
     assert "type: Source" in rendered
     assert "title: Auth Spec" in rendered
     assert "description: The authentication specification." in rendered
-    assert "source_type: spec" in rendered
+    assert "source_kind: spec" in rendered
     assert f"source_path: {COPY}" in rendered
     assert "origin: https://example.invalid/auth-spec" in rendered
     assert "ingested: '2026-08-12'" in rendered or "ingested: 2026-08-12" in rendered
@@ -131,6 +131,40 @@ def test_an_occupied_copy_refuses_even_when_the_page_is_free(tmp_path: Path) -> 
     assert [(r.kind, r.path) for r in plan.refusals] == [("target-exists", COPY)]
 
 
+def test_a_reingest_with_a_different_title_but_the_same_origin_is_refused(tmp_path: Path) -> None:
+    """The duplicate check is keyed on `origin`, not just the title-derived
+    page path: a re-ingest whose model picks a different title still
+    refuses, citing the existing page's own path."""
+    path, text = material(tmp_path)
+    existing_page = "sources/2026-07-existing-title.md"
+    bundle = build_bundle(
+        tmp_path / "bundle",
+        {
+            existing_page: (
+                "---\n"
+                "type: Source\n"
+                "title: Existing Title\n"
+                "description: d\n"
+                "source_kind: spec\n"
+                "source_path: sources/references/2026-07-existing-title.md\n"
+                "origin: https://example.invalid/auth-spec\n"
+                "ingested: '2026-07-01'\n"
+                "generated:\n"
+                "  by: agent:test\n"
+                "  at: 2026-07-01T00:00:00+00:00\n"
+                "---\n\n"
+                "body\n"
+            )
+        },
+    )
+    plan, _ = _plan(tmp_path / "bundle", path, text, bundle=bundle, title="A New Title")
+
+    assert not plan.ok
+    assert plan.writes == ()
+    assert [(r.kind, r.path) for r in plan.refusals] == [("target-exists", "sources/2026-08-a-new-title.md")]
+    assert existing_page in plan.refusals[0].detail
+
+
 def test_an_occupied_copy_is_seen_through_the_ignore_list(tmp_path: Path) -> None:
     """`has_member` counts ignored members: `ignore=` declares 'this is not a
     concept', not 'this is not there'. Component 3 ignores `sources/references/*`,
@@ -152,8 +186,12 @@ def test_a_title_that_slugs_to_nothing_lands_at_untitled(tmp_path: Path) -> None
     assert plan.writes[1].member == "sources/references/2026-08-untitled.md"
 
 
-def test_an_undeclared_source_type_raises(tmp_path: Path) -> None:
-    """Caller configuration, not bundle content -- matching `new_page_text`."""
+def test_an_undeclared_source_schema_raises(tmp_path: Path) -> None:
+    """Caller configuration, not bundle content -- matching `new_page_text`.
+
+    The `Source` *type*, not the `source_kind` vocabulary: this is the one
+    `plan_ingest` checks before it builds anything.
+    """
     path, text = material(tmp_path)
     bundle = build_bundle(tmp_path / "bundle")
     stripped = replace(schema_set(), schemas={k: v for k, v in schema_set().schemas.items() if k != "Source"})
@@ -166,7 +204,7 @@ def test_an_undeclared_source_type_raises(tmp_path: Path) -> None:
             text=text,
             title="Auth Spec",
             description="d",
-            source_type="spec",
+            source_kind="spec",
             origin="o",
             by=BY,
             at=AT,
@@ -248,3 +286,61 @@ def test_the_two_step_flow_yields_a_backlink(tmp_path: Path) -> None:
     # so that is the id that appears -- `filing.proposal` is exactly it.
     assert filing.proposal == "proposals/explanations-why-auth-works-this-way.md"
     assert "proposals/explanations-why-auth-works-this-way" in graph.backlinks["sources/2026-08-auth-spec"]
+
+
+def test_source_kinds_reads_the_bundles_own_enum(tmp_path: Path) -> None:
+    """K-D: a vault that edits its declarations is the truth everywhere."""
+    from doc_wiki_okf.sources import source_kinds
+    from okf_ext.schemas import load_schemas
+
+    declarations = tmp_path / "_schema"
+    declarations.mkdir()
+    (declarations / "Source.schema.json").write_text(
+        '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
+        ' "required": ["type"], "properties": {"type": {"const": "Source"},'
+        ' "source_kind": {"enum": ["alpha", "beta"]}}}',
+        encoding="utf-8",
+    )
+    assert source_kinds(load_schemas(str(declarations))) == ("alpha", "beta")
+
+
+def test_source_kinds_raises_no_schema_when_source_itself_is_absent(tmp_path: Path) -> None:
+    """Distinct from the enum-absent case below: a bundle with no `Source`
+    schema at all gets `plan_ingest`'s own "no schema" wording, not the
+    "no `source_kind` enum" message that belongs to the other cause."""
+    from doc_wiki_okf.sources import source_kinds
+    from okf_ext.schemas import load_schemas
+
+    declarations = tmp_path / "_schema"
+    declarations.mkdir()
+    (declarations / "Explanation.schema.json").write_text(
+        '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
+        ' "required": ["type"], "properties": {"type": {"const": "Explanation"}}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(KeyError, match="no schema"):
+        source_kinds(load_schemas(str(declarations)))
+
+
+def test_source_kinds_raises_naming_the_root_when_the_enum_is_absent(tmp_path: Path) -> None:
+    from doc_wiki_okf.sources import source_kinds
+    from okf_ext.schemas import load_schemas
+
+    declarations = tmp_path / "_schema"
+    declarations.mkdir()
+    (declarations / "Source.schema.json").write_text(
+        '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
+        ' "required": ["type"], "properties": {"type": {"const": "Source"}}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(KeyError, match="no `source_kind` enum"):
+        source_kinds(load_schemas(str(declarations)))
+
+
+def test_seed_source_kinds_is_the_shipped_seven() -> None:
+    """It reads the seed file rather than restating it, so this assertion and
+    `test_seed_schemas.test_source_kind_is_a_closed_vocabulary_of_seven` cannot
+    drift apart -- there is one authored list behind both."""
+    from doc_wiki_okf.sources import seed_source_kinds
+
+    assert seed_source_kinds() == ("spec", "article", "ticket", "skill", "doc", "transcript", "code-review")

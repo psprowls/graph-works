@@ -98,7 +98,7 @@ def test_planned_dispatch_composes_a_worktree_action():
 
 
 def test_worktree_actions_membership():
-    assert frozenset({"reuse", "fork-child", "create-top-level"}) == WORKTREE_ACTIONS
+    assert frozenset({"reuse", "fork-child", "create-top-level", "main"}) == WORKTREE_ACTIONS
 
 
 def test_dispatch_modes_membership():

@@ -1,0 +1,24 @@
+{
+  "id": "d9fddbb5-0636-4803-b243-ca92462f0552",
+  "ok": true,
+  "result": {
+    "dispatchId": "ctx_new000000001",
+    "source": "transcript",
+    "sourceIdentity": "SSbx1Q-_4cehq5XUGCJMkHNzANFLNfya",
+    "provider": "claude",
+    "transcript": {
+      "messages": [
+        {
+          "id": "a63230db-6744-4f1d-9653-8d8868da11db",
+          "role": "tool",
+          "blocks": [{"type": "tool-result", "output": "ok"}],
+          "timestamp": 1786740618767,
+          "source": "transcript"
+        }
+      ],
+      "limited": true,
+      "returnedMessageCount": 1
+    },
+    "status": {"worker": "ready"}
+  }
+}

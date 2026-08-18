@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graph-works-core"
+version = "0.1.0"
+description = "What a workspace is: discovery, the layout object, the manifest, and init."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+# Only what this package composes today. Each entry has its consumer in the
+# change that added it -- C1's bar, kept.
+#
+# `code-graph-io` arrived with C7, the graph surface in `commands/graph.py`;
+# read again by C4's entity matcher via the same `GraphReader`, and by C6's
+# drift propagator, which resolves an entity's `resource` to a repo-relative
+# node path through it. `doc-wiki-okf` arrived with C4: the ingest vertical
+# calls `ingest.plan_document_brief`, `sources.plan_ingest`,
+# `proposals.plan_file` and `diataxis.classify`; C6 reads it again for
+# `proposals.lanes.ADR_TYPE`, the ADR group's selector, which is that lane's
+# declaration and not this package's to restate. `code-wiki-okf` was already
+# here for C1 and now also supplies `git_state.compute_state_gate` and the
+# `entities.pages` naming rule. The other three arrived for C2: `langchain-core`
+# because `agent_loop` constructs `ToolMessage` and takes `BaseTool` for real,
+# `subagents-io` for `RoleSpec`/`RoleBinding`/`resolve_role_spec`, and
+# `models-io[bedrock]` because Bedrock is the only backend the packaged
+# catalog names.
+dependencies = [
+  "okf-io>=0.1,<0.2",
+  "okf-ext[schemas]>=0.4.2,<0.5",
+  "code-wiki-okf>=0.2,<0.3",
+  "doc-wiki-okf>=0.2,<0.3",
+  "code-graph-io>=0.1,<0.2",
+  "work-tracker-okf>=0.1,<0.2",
+  "config-io>=0.1,<0.2",
+  "langchain-core>=1.4",
+  "subagents-io>=0.2,<0.3",
+  "models-io[bedrock]>=0.2,<0.3",
+]
+
+# The gateway backend is reachable by declaration rather than by a documented
+# `pip install` incantation. Without it a `backend = "vercel"` override raises
+# models-io's own `ProviderNotInstalled`, which is the correct failure.
+[project.optional-dependencies]
+vercel = ["models-io[vercel]"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graph_works_core"]
+
+[tool.uv.sources]
+okf-io = { workspace = true }
+okf-ext = { workspace = true }
+code-wiki-okf = { workspace = true }
+doc-wiki-okf = { workspace = true }
+code-graph-io = { workspace = true }
+work-tracker-okf = { workspace = true }
+config-io = { workspace = true }
+subagents-io = { workspace = true }
+models-io = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# `test_agent_loop.py` is entirely `async def`, and under
+# `uv run --package graph-works-core` pytest resolves rootdir to THIS file
+# rather than the workspace root — so the setting has to be repeated here, the
+# same reason models-io and subagents-io repeat it.
+asyncio_mode = "auto"

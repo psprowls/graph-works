@@ -86,6 +86,12 @@ class WorkItem:
     children: tuple[str, ...]
     owner: str | None
     resolved_in: str | None
+    #: Git provenance, written by `advance` from the session that ran a stage.
+    #: Nothing in this package reads either: they sit in the same category as
+    #: `owner` — caller-supplied facts the lane stores and the dispatch tier
+    #: above it consumes.
+    worktree: str | None
+    branch: str | None
     superseded_by: str | None
     tags: tuple[str, ...]
     sources: tuple[Source, ...]
@@ -179,6 +185,8 @@ def _project(concept_id: str, slug: str, archived: bool, document: Document) -> 
         children=(),
         owner=_optional_text(data.get("owner")),
         resolved_in=_optional_text(data.get("resolved_in")),
+        worktree=_optional_text(data.get("worktree")),
+        branch=_optional_text(data.get("branch")),
         superseded_by=_optional_text(data.get("superseded_by")),
         tags=fm.tags,
         sources=fm.sources,

@@ -145,3 +145,13 @@ def test_the_four_conditional_requirements_stay_rules_not_schema_if_then() -> No
     schema = _base_schema()
     assert set(schema["if"]["properties"]) == {"status"}
     assert schema["else"]["required"] == ["effort", "affects"]
+
+
+def test_the_two_provenance_keys_are_declared() -> None:
+    """`worktree` and `branch` sit in the same category as `owner` and
+    `resolved_in`: caller-supplied provenance, optional, never enumerated."""
+    properties = _base_schema()["properties"]
+    required = _base_schema()["required"]
+    for key in ("worktree", "branch"):
+        assert properties[key] == {"type": "string", "minLength": 1}, key
+        assert key not in required

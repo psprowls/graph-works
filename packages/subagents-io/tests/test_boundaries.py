@@ -38,6 +38,7 @@ PACKAGES_DIR = Path(__file__).resolve().parents[3] / "packages"
 ALL_MODULES = (
     "__init__.py",
     "adapters.py",
+    "backend.py",
     "dispatch.py",
     "pool.py",
     "roles.py",

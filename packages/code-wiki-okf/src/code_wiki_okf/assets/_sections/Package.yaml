@@ -1,6 +1,6 @@
 frontmatter:
   owned: [language, version, depends_on, test_suites, entry_points]
-  provenance: [generated, last_updated_commit, tokens]
+  provenance: [generated, last_updated_commit, tokens, prose_refreshed_commit, prose_refresh_attempts]
 sections:
   - heading: Purpose
     required: true

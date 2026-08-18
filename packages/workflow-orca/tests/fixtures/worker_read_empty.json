@@ -1,0 +1,12 @@
+{
+  "id": "c0ffee00-0000-4000-8000-000000000001",
+  "ok": true,
+  "result": {
+    "dispatchId": "ctx_new000000001",
+    "source": "transcript",
+    "sourceIdentity": "SSbx1Q-_4cehq5XUGCJMkHNzANFLNfya",
+    "provider": "claude",
+    "transcript": {"messages": [], "limited": false, "returnedMessageCount": 0},
+    "status": {"worker": "ready"}
+  }
+}

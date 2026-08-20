@@ -136,7 +136,7 @@ def test_the_optional_frontmatter_rides_through_and_blanks_do_not():
     )
     assert frontmatter["authors"] == ["A"]
     assert frontmatter["source_date"] == "2026-08-01"
-    assert frontmatter["tokens"] == 12
+    assert "tokens" not in frontmatter
     assert "tags" not in frontmatter
     assert "title" not in frontmatter
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import doc_wiki_okf.cli
 import pytest
@@ -254,6 +255,41 @@ async def test_a_re_ingest_is_refused_and_lands_neither(workspace, monkeypatch):
     assert not (layout.bundle_dir / first.copy).exists()
 
 
+async def test_a_predicted_page_collision_refuses_before_constructing_an_llm(workspace, monkeypatch):
+    layout, repo, material = workspace
+    target_page = layout.bundle_dir / "sources" / "2026-08-a-thing.md"
+    target_page.parent.mkdir(parents=True, exist_ok=True)
+    target_page.write_text("---\ntype: Source\n---\n\n## TL;DR\n", encoding="utf-8")
+
+    def fail_if_constructed(*args, **kwargs):
+        raise AssertionError("LLM constructed")
+
+    monkeypatch.setattr("graph_works_core.ingest.commands.make_llm", fail_if_constructed)
+    result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
+
+    assert result.ok is False
+    assert result.written == ()
+    assert any("already a member" in refusal for refusal in result.refusals)
+
+
+async def test_a_duplicate_origin_refuses_before_constructing_an_llm(workspace, monkeypatch):
+    layout, repo, material = workspace
+    origin = "https://example.invalid/already-ingested"
+    existing = layout.bundle_dir / "sources" / "existing.md"
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("---\ntype: Source\norigin: https://example.invalid/already-ingested\n---\n", encoding="utf-8")
+
+    def fail_if_constructed(*args, **kwargs):
+        raise AssertionError("LLM constructed")
+
+    monkeypatch.setattr("graph_works_core.ingest.commands.make_llm", fail_if_constructed)
+    result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT, origin=origin)
+
+    assert result.ok is False
+    assert result.written == ()
+    assert any("already ingested" in refusal for refusal in result.refusals)
+
+
 async def test_a_retitled_reingest_with_the_same_origin_is_refused(workspace, monkeypatch):
     """Fix A end to end: `origin` defaults to the material's own path and is
     unchanged between the two calls, so a retitled re-ingest is refused now
@@ -271,6 +307,98 @@ async def test_a_retitled_reingest_with_the_same_origin_is_refused(workspace, mo
     assert second.written == ()
     assert any("already ingested" in refusal for refusal in second.refusals)
     assert not (layout.bundle_dir / "sources" / "2026-08-the-splicing-writer.md").exists()
+
+
+async def test_relative_and_absolute_spellings_share_one_canonical_fallback_origin(workspace, monkeypatch):
+    """Origin identity must refuse a changed predicted path before model construction."""
+    layout, repo, material = workspace
+    monkeypatch.chdir(repo)
+    _models(monkeypatch)
+    first = await run_ingest_source(Path("docs/thing.md"), layout=layout, repo=repo, today=TODAY, at=AT)
+    assert first.ok
+
+    material.write_text("# A Different Prediction\n\nChanged prose.\n", encoding="utf-8")
+
+    def fail_if_constructed(*args, **kwargs):
+        raise AssertionError("duplicate origin must refuse before constructing an LLM")
+
+    monkeypatch.setattr("graph_works_core.ingest.commands.make_llm", fail_if_constructed)
+    second = await run_ingest_source(
+        material.resolve(),
+        layout=layout,
+        repo=repo,
+        today=TODAY.replace(month=9),
+        at=AT,
+    )
+
+    assert not second.ok
+    assert second.written == ()
+    assert any("already ingested" in refusal for refusal in second.refusals)
+    assert not (layout.bundle_dir / "sources" / "2026-09-a-different-prediction.md").exists()
+
+
+async def test_absolute_dot_segment_alias_shares_the_canonical_fallback_origin(workspace, monkeypatch):
+    """An absolute ``..`` spelling must refuse before any model construction."""
+    layout, repo, material = workspace
+    _models(monkeypatch)
+    first = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
+    assert first.ok
+
+    alias_parent = material.parent / "alias-parent"
+    alias_parent.mkdir()
+    alias = alias_parent / ".." / material.name
+    assert alias.is_absolute()
+    assert ".." in alias.parts
+    material.write_text("# A Dot Segment Prediction\n\nChanged prose.\n", encoding="utf-8")
+
+    def fail_if_constructed(*args, **kwargs):
+        raise AssertionError("canonical origin must refuse before constructing an LLM")
+
+    monkeypatch.setattr("graph_works_core.ingest.commands.make_llm", fail_if_constructed)
+    second = await run_ingest_source(
+        alias,
+        layout=layout,
+        repo=repo,
+        today=TODAY.replace(month=9),
+        at=AT,
+    )
+
+    assert not second.ok
+    assert second.written == ()
+    assert any("already ingested" in refusal for refusal in second.refusals)
+    assert not (layout.bundle_dir / "sources" / "2026-09-a-dot-segment-prediction.md").exists()
+
+
+async def test_symlink_alias_shares_the_canonical_fallback_origin(workspace, monkeypatch):
+    """A symlink spelling must refuse before any model construction."""
+    layout, repo, material = workspace
+    _models(monkeypatch)
+    first = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
+    assert first.ok
+
+    alias = material.parent / "thing-alias.md"
+    try:
+        alias.symlink_to(material)
+    except (NotImplementedError, OSError) as exc:
+        pytest.skip(f"symlinks are unavailable: {exc}")
+    material.write_text("# A Symlink Prediction\n\nChanged prose.\n", encoding="utf-8")
+
+    def fail_if_constructed(*args, **kwargs):
+        raise AssertionError("canonical origin must refuse before constructing an LLM")
+
+    monkeypatch.setattr("graph_works_core.ingest.commands.make_llm", fail_if_constructed)
+    second = await run_ingest_source(
+        alias,
+        layout=layout,
+        repo=repo,
+        today=TODAY.replace(month=9),
+        at=AT,
+    )
+
+    assert not second.ok
+    assert second.written == ()
+    assert any("already ingested" in refusal for refusal in second.refusals)
+    assert not (layout.bundle_dir / "sources" / "2026-09-a-symlink-prediction.md").exists()
 
 
 async def test_exactly_one_write_reaches_the_source_page(workspace, monkeypatch):
@@ -365,6 +493,7 @@ async def test_a_successful_suggest_files_a_proposal(workspace, monkeypatch):
     result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
     assert [report["target"] for report in result.proposals] == ["explanations/why-the-thing.md"]
     assert result.proposal_status["proposals"] == 1
+    assert "proposals" in result.indexes_updated
 
 
 async def test_the_index_and_the_log_are_reconciled(workspace, monkeypatch):
@@ -896,10 +1025,23 @@ async def test_the_entity_match_is_not_re_run_when_the_model_agrees(workspace, m
         return NO_ENTITY
 
     _models(monkeypatch)
-    await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT, match_entity=counting)
+    first = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT, match_entity=counting)
     assert seen == ["A Thing"]
 
+    # The next call exercises the model-title path rather than re-ingest
+    # protection, so remove the first page and copy that now intentionally
+    # refuse the same predicted identity before a model can run.
+    (layout.bundle_dir / first.page).unlink()
+    (layout.bundle_dir / first.copy).unlink()
     seen.clear()
     _models(monkeypatch, ingestor=_RETITLED)
-    await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT, match_entity=counting)
+    await run_ingest_source(
+        material,
+        layout=layout,
+        repo=repo,
+        today=TODAY,
+        at=AT,
+        match_entity=counting,
+        origin="https://example.invalid/retitled",
+    )
     assert seen == ["A Thing", "The Splicing Writer"]

@@ -1,3 +1,4 @@
+import importlib.resources
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -5,13 +6,13 @@ from pathlib import Path
 from code_graph_io.handle import open_reader
 from code_graph_io.update import run_workspace
 from code_wiki_okf.config import RepoConfig
+from code_wiki_okf.mirror import plan as plan_module
 from code_wiki_okf.mirror.plan import plan_mirror
+from okf_ext.sections import load_sections
 from okf_io import load_bundle
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
-_PLACEHOLDER = (
-    "> TODO: <Anything a reader should know about this file that the generated sections below don't capture.>"
-)
+_PLACEHOLDER = "> TODO: anything a reader should know about this file that the generated sections below don't capture."
 
 
 def _git(repo: Path, *args: str) -> None:
@@ -37,7 +38,7 @@ def _scratch_repo(tmp_path: Path) -> Path:
 
 
 def _write_page(bundle_root: Path, repo_name: str, rel_path: str, *, notes: str, last_commit: str | None) -> None:
-    path = bundle_root / "repositories" / repo_name / f"{rel_path}.md"
+    path = bundle_root / "repositories" / repo_name / "fs" / f"{rel_path}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     commit_line = f"last_updated_commit: {last_commit}\n" if last_commit else ""
     path.write_text(
@@ -98,7 +99,7 @@ def test_vanished_path_with_edited_notes_is_declined(tmp_path: Path) -> None:
     assert plan.deletions == ()
     assert len(plan.declined_deletions) == 1
     assert plan.declined_deletions[0].reason == "prose-edited"
-    assert plan.declined_deletions[0].path == "repositories/acme/gone.py.md"
+    assert plan.declined_deletions[0].path == "repositories/acme/fs/gone.py.md"
     reader.close()
 
 
@@ -121,8 +122,8 @@ def test_git_rename_becomes_a_move_not_a_delete_plus_create(tmp_path: Path) -> N
 
     assert len(plan.moves.moves) == 1
     move = plan.moves.moves[0]
-    assert move.source == "repositories/acme/a.py.md"
-    assert move.dest == "repositories/acme/renamed.py.md"
+    assert move.source == "repositories/acme/fs/a.py.md"
+    assert move.dest == "repositories/acme/fs/renamed.py.md"
     assert "renamed.py" not in plan.creates
     assert plan.deletions == ()
     assert plan.declined_deletions == ()
@@ -197,9 +198,19 @@ def test_rename_is_found_when_another_deletion_candidates_stamp_is_more_recent(t
 
     assert len(plan.moves.moves) == 1
     move = plan.moves.moves[0]
-    assert move.source == "repositories/acme/a.py.md"
-    assert move.dest == "repositories/acme/renamed.py.md"
+    assert move.source == "repositories/acme/fs/a.py.md"
+    assert move.dest == "repositories/acme/fs/renamed.py.md"
     assert "renamed.py" not in plan.creates
     assert plan.deletions == ("other.py",)
     reader.close()
     reader.close()
+
+
+def test_the_notes_placeholder_constant_matches_the_declared_file_notes_section() -> None:
+    """`plan.py` hardcodes `_NOTES_PLACEHOLDER` rather than depending on a
+    loaded `SectionSet` (see its own docstring), which means nothing ties it
+    to `File.yaml` today. This guards the two from drifting apart silently."""
+    assets = importlib.resources.files("code_wiki_okf") / "assets" / "_sections"
+    section_set = load_sections(str(assets))
+    notes = next(s for s in section_set.types["File"].sections if s.heading == "Notes")
+    assert plan_module._NOTES_PLACEHOLDER.strip() == notes.placeholder.strip()

@@ -5,10 +5,10 @@ sections:
   - heading: Overview
     required: true
     placeholder: |
-      > TODO: <One paragraph: what this repository is and what it contains.>
+      > TODO: what this repository is and what it contains, in one paragraph.
   - heading: Layout
     placeholder: |
-      > TODO: <Top-level directory layout and what lives where.>
+      > TODO: the top-level directory layout, and what lives where.
   - heading: Contents
     ownership: generated
     required: true

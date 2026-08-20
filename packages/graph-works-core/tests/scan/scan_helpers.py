@@ -248,34 +248,34 @@ def _page(
 #: `is_unfilled` calls a first fill.
 PLACEHOLDERS: dict[str, dict[str, str]] = {
     "Package": {
-        "Purpose": "> TODO: <One paragraph: what this package does, who uses it, why it exists.>",
+        "Purpose": "> TODO: what this package does, who uses it, and why it exists, in one paragraph.",
         "Public API": (
-            "> TODO: <Main exports and when to use them. Link code with backticked `path:line` references.>"
+            "> TODO: the main exports and when to use them. Link code with backticked `path:line` references."
         ),
     },
     "App": {
-        "Purpose": "> TODO: <One paragraph: what this app does, who uses it, why it exists.>",
-        "Platform & runtime": "> TODO: <Target platform(s) and runtime — e.g. web/Node, iOS, Electron.>",
-        "Routes / screens": "> TODO: <Table of Route | Purpose | Auth, or the equivalent for this platform.>",
-        "Provider chain": "> TODO: <Top-level providers/wrappers this app mounts, in order.>",
+        "Purpose": "> TODO: what this app does, who uses it, and why it exists, in one paragraph.",
+        "Platform & runtime": "> TODO: the target platform(s) and runtime — e.g. web/Node, iOS, Electron.",
+        "Routes / screens": "> TODO: a table of Route | Purpose | Auth, or the equivalent for this platform.",
+        "Provider chain": "> TODO: the top-level providers/wrappers this app mounts, in order.",
     },
     "TestSuite": {
-        "Purpose": "> TODO: <One paragraph: what this suite tests and why.>",
-        "How to run": "> TODO: <The exact command(s) to run this suite.>",
-        "Test conventions": "> TODO: <Naming, structure, and style conventions this suite follows.>",
-        "Fixtures": "> TODO: <Shared fixtures this suite relies on and where they live.>",
+        "Purpose": "> TODO: what this suite tests and why, in one paragraph.",
+        "How to run": "> TODO: the exact command(s) to run this suite.",
+        "Test conventions": "> TODO: the naming, structure, and style conventions this suite follows.",
+        "Fixtures": "> TODO: the shared fixtures this suite relies on, and where they live.",
     },
     "AgentPlugin": {
-        "Purpose": "> TODO: <One paragraph: what this agent plugin does and who uses it.>",
-        "How it fits together": "> TODO: <Inferred cross-component relationships.>",
+        "Purpose": "> TODO: what this agent plugin does and who uses it, in one paragraph.",
+        "How it fits together": "> TODO: the inferred cross-component relationships.",
     },
     "Repository": {
-        "Overview": "> TODO: <One paragraph: what this repository is and what it contains.>",
-        "Layout": "> TODO: <Top-level directory layout and what lives where.>",
+        "Overview": "> TODO: what this repository is and what it contains, in one paragraph.",
+        "Layout": "> TODO: the top-level directory layout, and what lives where.",
     },
     "Dependency": {
-        "Why we depend on this": "> TODO: <Why the workspace depends on this and what it's used for.>",
-        "Gotchas / workarounds": ("> TODO: <Known issues, version pins, or workarounds this dependency needs.>"),
+        "Why we depend on this": "> TODO: why the workspace depends on this, and what it is used for.",
+        "Gotchas / workarounds": ("> TODO: known issues, version pins, or workarounds this dependency needs."),
     },
 }
 
@@ -332,9 +332,9 @@ def entity_page(
 
 def package_page(
     *,
-    purpose: str = "> TODO: <One paragraph: what this package does, who uses it, why it exists.>",
+    purpose: str = "> TODO: what this package does, who uses it, and why it exists, in one paragraph.",
     public_api: str = (
-        "> TODO: <Main exports and when to use them. Link code with backticked `path:line` references.>"
+        "> TODO: the main exports and when to use them. Link code with backticked `path:line` references."
     ),
     last_updated_commit: str | None = None,
     prose_refreshed_commit: str | None = None,

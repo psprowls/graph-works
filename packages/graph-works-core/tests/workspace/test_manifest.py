@@ -19,6 +19,8 @@ from graph_works_core.workspace.manifest import (
     defaults,
     read,
     render_initial,
+    resolve_checked_all,
+    resolve_checked_key,
     set_value,
 )
 
@@ -357,6 +359,20 @@ def test_checked_str_refuses_a_non_string_and_an_explicit_null(tmp_path):
     layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    permission_mode: null\n")
     with pytest.raises(WorkspaceError, match="explicitly null"):
         checked_str(layout, "workflow.auto_drive.permission_mode")
+
+
+def test_resolve_checked_key_refuses_a_hand_edited_invalid_type(tmp_path):
+    layout = _layout(tmp_path, "version: 1\nlayout:\n  cache_dir: []\n")
+
+    with pytest.raises(WorkspaceError, match=r"layout\.cache_dir: expects a string"):
+        resolve_checked_key(layout, "layout.cache_dir", environ={})
+
+
+def test_resolve_checked_all_refuses_a_hand_edited_explicit_null(tmp_path):
+    layout = _layout(tmp_path, "version: 1\nlayout:\n  cache_dir: null\n")
+
+    with pytest.raises(WorkspaceError, match=r"layout\.cache_dir: is explicitly null"):
+        resolve_checked_all(layout, environ={})
 
 
 # --- the seeded relay tail --------------------------------------------------

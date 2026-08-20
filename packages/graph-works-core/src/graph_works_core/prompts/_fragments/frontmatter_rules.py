@@ -19,7 +19,6 @@ Optional, emitted when the material supports them:
 - `authors`: who wrote the material.
 - `source_date`: the date the material itself carries, not today's date.
 - `tags`: short topic labels.
-- `tokens`: the material's approximate length in tokens, if you can tell.
 
 Emit no other keys. Anything else is dropped on read, so a field invented here
 is silently lost rather than stored.\

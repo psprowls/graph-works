@@ -1,4 +1,5 @@
 from work_helpers import make_item
+from work_tracker_okf.dependencies import DependencyEdge, DependencyFact
 from work_tracker_okf.hierarchy import ChildRollup
 from work_tracker_okf.workflow import state_for
 
@@ -42,13 +43,23 @@ def test_an_archived_dependency_reads_as_met():
     """work-io needed a second loader for this and documented the bug it fixed:
     a resolved-and-archived dependency reading back as unmet."""
     items = [
-        make_item("item", depends_on=("gone",)),
+        make_item("item", depends_on=(DependencyEdge("gone"),)),
         make_item("gone", archived=True, workflow_status="resolved"),
     ]
     state = state_for(items, "item")
     assert state is not None
-    assert state.depends_on == ("gone",)
-    assert state.unmet_deps == ()
+    assert state.dependency_edges == (DependencyEdge("gone"),)
+    assert state.dependency_facts == (DependencyFact("gone", known=True, terminal=True, status="resolved"),)
+
+
+def test_a_terminal_parent_dependency_is_still_a_structural_issue():
+    items = [
+        make_item("parent", type="Epic", workflow_status="resolved"),
+        make_item("child", parent="parent", phase="execute", depends_on=(DependencyEdge("parent"),)),
+    ]
+    state = state_for(items, "child")
+    assert state is not None
+    assert {issue.code for issue in state.dependency_issues} == {"targets-parent"}
 
 
 def test_an_archived_child_counts_toward_terminal():

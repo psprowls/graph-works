@@ -5,7 +5,7 @@ sections:
   - heading: Purpose
     required: true
     placeholder: |
-      > TODO: <One paragraph: what this agent plugin does and who uses it.>
+      > TODO: what this agent plugin does and who uses it, in one paragraph.
   - heading: Commands
     ownership: generated
     required: true
@@ -38,4 +38,4 @@ sections:
       _(populated by `code-wiki-okf sync` — not yet generated)_
   - heading: How it fits together
     placeholder: |
-      > TODO: <Inferred cross-component relationships.>
+      > TODO: the inferred cross-component relationships.

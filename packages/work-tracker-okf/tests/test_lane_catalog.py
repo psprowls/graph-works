@@ -29,6 +29,7 @@ ERROR_CODES = frozenset(
         "graph.parent-missing",
         "graph.parent-type-invalid",
         "graph.depends-on-missing",
+        "graph.depends-on-invalid",
         "graph.parent-cycle",
         "graph.depends-on-cycle",
         "targets.affects-missing",
@@ -60,24 +61,24 @@ def test_every_declared_code_carries_its_module_prefix() -> None:
             assert code.startswith(f"{topic}."), (topic, code)
 
 
-def test_the_catalog_is_thirty_codes_across_five_topics() -> None:
-    assert len(_rules.CATALOG) == 30
+def test_the_catalog_is_thirty_one_codes_across_five_topics() -> None:
+    assert len(_rules.CATALOG) == 31
     assert len(_rules.TOPICS) == 5
-    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 30
+    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 31
 
 
 def test_the_per_topic_counts_match_the_design_spec() -> None:
     assert {topic: len(codes) for topic, codes in _rules.CODES_BY_TOPIC.items()} == {
         "state": 10,
         "plan": 4,
-        "graph": 8,
+        "graph": 9,
         "targets": 3,
         "decisions": 5,
     }
 
 
-def test_the_severity_split_is_fifteen_errors_and_fifteen_warns() -> None:
-    assert len(ERROR_CODES) == 15
+def test_the_severity_split_is_sixteen_errors_and_fifteen_warns() -> None:
+    assert len(ERROR_CODES) == 16
     assert ERROR_CODES < _rules.CATALOG
     assert len(_rules.CATALOG - ERROR_CODES) == 15
 
@@ -146,7 +147,7 @@ def golden_report() -> Report:
 
 
 def test_the_vault_triggers_every_catalog_code(golden_report: Report) -> None:
-    """One walk, all 25. This is what catches a rule that stops firing."""
+    """One walk, all 31. This is what catches a rule that stops firing."""
     assert {f.code for f in _lane_findings(golden_report)} == _rules.CATALOG
 
 
@@ -154,7 +155,7 @@ def test_no_rule_emits_an_undeclared_code(golden_report: Report) -> None:
     assert {f.code for f in _lane_findings(golden_report)} <= _rules.CATALOG
 
 
-def test_the_error_codes_are_exactly_the_fifteen(golden_report: Report) -> None:
+def test_the_error_codes_are_exactly_the_sixteen(golden_report: Report) -> None:
     lane = _lane_findings(golden_report)
     assert {f.code for f in lane if f.severity == "error"} == ERROR_CODES
 

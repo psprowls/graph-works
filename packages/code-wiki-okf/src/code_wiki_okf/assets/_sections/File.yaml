@@ -5,7 +5,7 @@ sections:
   - heading: Notes
     required: true
     placeholder: |
-      > TODO: <Anything a reader should know about this file that the generated sections below don't capture.>
+      > TODO: anything a reader should know about this file that the generated sections below don't capture.
   - heading: Symbols
     ownership: generated
     required: true

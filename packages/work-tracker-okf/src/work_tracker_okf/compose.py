@@ -20,10 +20,13 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
+from types import MappingProxyType
+from typing import Literal
 
+from okf_ext.logs import append_entry, atomic_replace, locked_log
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionSet, load_sections
@@ -32,16 +35,18 @@ from okf_io import (
     Bundle,
     Document,
     IndexUpdate,
+    LogAppend,
     Rule,
     append_log_entry,
     load,
     load_bundle,
+    parse,
     update_index,
 )
 
 from work_tracker_okf.advance import AdvancePlan, advance
 from work_tracker_okf.advance import apply as apply_advance
-from work_tracker_okf.filing import FilingPlan, file_item
+from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, _materialize_frontmatter, plan_filing
 from work_tracker_okf.filing import apply as apply_filing
 from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items
 from work_tracker_okf.paths import ArtifactRef, artifact_path
@@ -318,22 +323,213 @@ def advance_and_stamp(
 
 
 @dataclass(frozen=True, slots=True)
+class FilingApplication:
+    page: Path | None = None
+    indexes: tuple[IndexUpdate, ...] = ()
+    log: LogAppend | None = None
+    written: bool = False
+
+
+FilingCompositionRefusal = FilingRefusal | Literal["index-refused", "log-refused"]
+
+
+@dataclass(frozen=True, slots=True)
+class FilingCompositionPlan:
+    filing: FilingPlan
+    index: IndexUpdate
+    log: LogAppend | None
+    refusal: FilingCompositionRefusal | None = None
+    warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
 class FilingOutcome:
-    """What one filing did across its three files.
+    plan: FilingCompositionPlan
+    application: FilingApplication = FilingApplication()
 
-    `plan` is the `FilingPlan` -- its `refusal` and `warnings` are the caller's
-    to report. `path` is `None` for a dry run and for a refusal, which is the
-    same statement: nothing landed.
-    """
 
-    plan: FilingPlan
-    path: Path | None
-    indexes: tuple[IndexUpdate, ...]
-    logged: str | None
+class FilingApplyError(OSError):
+    def __init__(self, message: str, application: FilingApplication) -> None:
+        super().__init__(message)
+        self.application = application
 
-    @property
-    def changed(self) -> bool:
-        return self.path is not None
+
+class FilingPlanStaleError(FilingApplyError):
+    """A preflighted log snapshot no longer matches the file being applied."""
+
+    def __init__(
+        self,
+        message: str,
+        application: FilingApplication,
+        *,
+        expected: bytes,
+        actual: bytes | None,
+    ) -> None:
+        super().__init__(message, application)
+        self.expected = expected
+        self.actual = actual
+
+
+def _planned_document(filing: FilingPlan) -> Document:
+    document = parse("", path=filing.target)
+    for key, value in _materialize_frontmatter(filing.frontmatter).items():
+        document.set(key, value)
+    document.set_body(filing.body)
+    return document
+
+
+def _unchanged_work_index(bundle: Bundle) -> IndexUpdate:
+    document = bundle.indexes.get(WORK_DIR)
+    before = "" if document is None else document.raw_text
+    return IndexUpdate(
+        path=f"{WORK_DIR}/index.md",
+        before=before,
+        after=before,
+        changes=(),
+        drift=(),
+        created=document is None,
+    )
+
+
+def plan_file_and_reconcile(
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+    seed: FilingSeed,
+    section_set: SectionSet,
+) -> FilingOutcome:
+    """Plan the page, lane index, and root log without writing any of them."""
+    filing = plan_filing(bundle.root, items, seed, section_set)
+    if filing.refusal is not None:
+        return FilingOutcome(
+            plan=FilingCompositionPlan(
+                filing=filing,
+                index=_unchanged_work_index(bundle),
+                log=None,
+                refusal=filing.refusal,
+                warnings=filing.warnings,
+            )
+        )
+
+    document = _planned_document(filing)
+    planned_id = filing.target.relative_to(bundle.root).with_suffix("").as_posix()
+    synthetic = replace(
+        bundle,
+        concepts=MappingProxyType({**bundle.concepts, planned_id: document}),
+    )
+    try:
+        (index,) = update_index(
+            synthetic,
+            directories=[WORK_DIR],
+            create_missing=True,
+            dry_run=True,
+        )
+    except ValueError as exc:
+        return FilingOutcome(
+            plan=FilingCompositionPlan(
+                filing=filing,
+                index=_unchanged_work_index(bundle),
+                log=None,
+                refusal="index-refused",
+                warnings=(*filing.warnings, str(exc)),
+            )
+        )
+
+    log_document = bundle.logs.get("")
+    if log_document is None or log_document.parse_error is not None:
+        detail = "root log.md is missing" if log_document is None else str(log_document.parse_error)
+        return FilingOutcome(
+            plan=FilingCompositionPlan(
+                filing=filing,
+                index=index,
+                log=None,
+                refusal="log-refused",
+                warnings=(*filing.warnings, detail),
+            )
+        )
+    try:
+        log = append_log_entry(
+            log_document,
+            f"filed {filing.slug} ({seed.type})",
+            on=seed.on,
+            dry_run=True,
+        )
+    except ValueError as exc:
+        return FilingOutcome(
+            plan=FilingCompositionPlan(
+                filing=filing,
+                index=index,
+                log=None,
+                refusal="log-refused",
+                warnings=(*filing.warnings, str(exc)),
+            )
+        )
+    return FilingOutcome(
+        plan=FilingCompositionPlan(
+            filing=filing,
+            index=index,
+            log=log,
+            warnings=filing.warnings,
+        )
+    )
+
+
+def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
+    """Apply a fully preflighted filing composition."""
+    if plan.refusal is not None:
+        return FilingApplication()
+
+    application = FilingApplication()
+    root = plan.filing.target.parent.parent
+    try:
+        if plan.filing.target.exists():
+            raise FileExistsError(f"{plan.filing.target}: a page already exists here")
+        if plan.filing.work_directory.exists():
+            raise FileExistsError(f"{plan.filing.work_directory}: a working directory already exists here")
+
+        page = apply_filing(plan.filing)
+        application = FilingApplication(page=page)
+
+        indexes = update_index(
+            load_bundle(root, ignore=IGNORE),
+            directories=[WORK_DIR],
+            create_missing=True,
+            dry_run=False,
+        )
+        application = FilingApplication(page=page, indexes=indexes)
+
+        if plan.log is not None:
+            log_path = Path(plan.log.path) if plan.log.path is not None else root / "log.md"
+            expected = plan.log.before.encode("utf-8")
+            with locked_log(log_path):
+                try:
+                    actual = log_path.read_bytes()
+                except FileNotFoundError as exc:
+                    raise FilingPlanStaleError(
+                        f"{log_path}: log disappeared after filing was planned",
+                        application,
+                        expected=expected,
+                        actual=None,
+                    ) from exc
+                if actual != expected:
+                    raise FilingPlanStaleError(
+                        f"{log_path}: log changed after filing was planned",
+                        application,
+                        expected=expected,
+                        actual=actual,
+                    )
+                atomic_replace(log_path, plan.log.after.encode("utf-8"))
+            application = FilingApplication(page=page, indexes=indexes, log=plan.log)
+    except FilingPlanStaleError:
+        raise
+    except OSError as exc:
+        raise FilingApplyError(str(exc), application) from exc
+
+    return FilingApplication(
+        page=application.page,
+        indexes=application.indexes,
+        log=application.log,
+        written=True,
+    )
 
 
 def append_lane_log(root: Path, entry: str, *, on: date) -> str | None:
@@ -351,95 +547,22 @@ def append_lane_log(root: Path, entry: str, *, on: date) -> str | None:
     that already happened. `init.install_bundle` makes the same call for the
     same reason.
     """
-    log_document = load_bundle(root).logs.get("")
-    if log_document is None or log_document.parse_error is not None:
-        return None
-    try:
-        append_log_entry(log_document, entry, on=on, dry_run=False)
-    except (ValueError, OSError):
-        return None
-    return entry
-
-
-def file_and_reconcile(
-    root: Path,
-    *,
-    type: str,  # the lane's own field name, as `filing.file_item`'s already is
-    title: str,
-    description: str,
-    on: date,
-    words: str | None = None,
-    epic_child: bool = False,
-    parent: str | None = None,
-    depends_on: Sequence[str] = (),
-    affects: Sequence[str] = (),
-    tags: Sequence[str] = (),
-    section_set: SectionSet,
-    dry_run: bool = True,
-) -> FilingOutcome:
-    """File one item, reconcile `work/index.md`, append one `log.md` line.
-
-    This is the composition `README.md`'s filing section defers to "a composing
-    CLI's": filing writes **one page** (C2-F), because index reconciliation is
-    bundle-wide and folding it in would make a per-item writer span three files
-    in two directories.
-
-    The bundle is loaded **after** the page lands, through `IGNORE`: the
-    reconcile has to see the new page, and `ARCHIVE_IGNORE` would make
-    `update_index` want a `# Subdirectories` entry for every working directory.
-    Same reload `archive.apply_archive` does, for the same reasons.
-
-    `create_missing=True` for `work/` alone, on C4-D's argument transferred:
-    `init` scaffolds neither lane index, so a vault whose first act is `file`
-    would otherwise never get one.
-
-    `descriptions="preserve"` is okf-io's default and stays: okf-io owns
-    *which* entries appear, the human owns *what they say* (ADR-0009).
-
-    `dry_run=True` matches every other writer here. A refusal writes nothing at
-    all -- not the page, not the index, not the log -- because `apply` is never
-    reached.
-    """
-    plan = file_item(
-        root,
-        type=type,
-        title=title,
-        description=description,
-        on=on,
-        words=words,
-        epic_child=epic_child,
-        parent=parent,
-        depends_on=depends_on,
-        affects=affects,
-        tags=tags,
-        section_set=section_set,
-    )
-    if plan.refusal is not None or dry_run:
-        return FilingOutcome(plan=plan, path=None, indexes=(), logged=None)
-
-    landed = apply_filing(plan)
-    indexes = update_index(
-        load_bundle(root, ignore=IGNORE),
-        directories=[WORK_DIR],
-        create_missing=True,
-        dry_run=False,
-    )
-    return FilingOutcome(
-        plan=plan,
-        path=landed,
-        indexes=indexes,
-        logged=append_lane_log(root, f"filed {plan.slug} ({type})", on=on),
-    )
+    return append_entry(root, entry, on=on)
 
 
 __all__ = [
     "PLAN_HEADING",
     "AdvanceOutcome",
+    "FilingApplication",
+    "FilingApplyError",
+    "FilingCompositionPlan",
     "FilingOutcome",
+    "FilingPlanStaleError",
     "advance_and_stamp",
     "append_lane_log",
+    "apply_file_and_reconcile",
     "ensure_plan_row",
-    "file_and_reconcile",
+    "plan_file_and_reconcile",
     "plan_row_splice",
     "rule_set",
     "stamp_for",

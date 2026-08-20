@@ -21,11 +21,12 @@ from okf_io import Bundle, Document
 from code_wiki_okf.config import RepoConfig
 from code_wiki_okf.git_state import earliest_common_ancestor, find_renames
 from code_wiki_okf.mirror.model import DeclinedDeletion, MirrorPlan
+from code_wiki_okf.mirror.paths import mirror_prefix
 from code_wiki_okf.mirror.render import render_file
 from code_wiki_okf.resources import resource_index
 
 _NOTES_PLACEHOLDER = (
-    "> TODO: <Anything a reader should know about this file that the generated sections below don't capture.>"
+    "> TODO: anything a reader should know about this file that the generated sections below don't capture."
 )
 
 # `File.yaml`'s declared `provenance:` keys -- always freshly computed
@@ -38,10 +39,6 @@ _NOTES_PLACEHOLDER = (
 # a loaded `SectionSet` -- this module takes no such dependency (see
 # `_render_matches_disk`'s own docstring).
 _PROVENANCE_KEYS = frozenset({"generated", "last_updated_commit", "tokens"})
-
-
-def _mirror_prefix(repo_name: str) -> str:
-    return f"repositories/{repo_name}"
 
 
 def _heading_body(body: str, heading: str) -> str | None:
@@ -71,18 +68,22 @@ def _render_matches_disk(document: Document, render: Render) -> bool:
     what's on disk, and every generated section's body already equals too.
 
     `render.frontmatter` also carries `File.yaml`'s `provenance` keys
-    (`generated`, `last_updated_commit`, `tokens`) alongside the owned ones --
-    see `render_file`'s docstring. Provenance is *always* freshly computed
+    `generated` and `last_updated_commit` alongside the owned ones -- see
+    `render_file`'s docstring. Provenance is *always* freshly computed
     (`generated.at` is a new wall-clock timestamp on every real sync run), so
     it can never equal what's already on disk even when the file's content
     hasn't changed at all. Comparing it here would make `_render_matches_disk`
     return `False` for every rich page on every run, in production, even
     though the underlying content is unchanged -- an idempotence check that
-    always fails is not one. `_PROVENANCE_KEYS` is excluded so this only ever
-    compares what a human or the graph could actually have changed: `owned`
-    keys and section bodies. A page recognized as unchanged this way is never
-    proposed as an update, so its provenance stamp is correctly left alone
-    rather than silently refreshed.
+    always fails is not one. `_PROVENANCE_KEYS` also carries `tokens`, though
+    `render_file` no longer stamps it: `run_tokens_update` (graph-works-core)
+    is that key's sole writer now, so a *foreign* process changes it between
+    runs, and comparing it here would make every page look stale on the first
+    `gw util tokens` after a scan -- the same failure mode, a different cause.
+    The exclusion is so this only ever compares what a human or the graph
+    could actually have changed: `owned` keys and section bodies. A page
+    recognized as unchanged this way is never proposed as an update, so its
+    provenance stamp is correctly left alone rather than silently refreshed.
 
     The full write-time idempotence check lives in
     `okf_ext.generators.plan_regenerate` (declaration-aware, section-splice-
@@ -108,7 +109,7 @@ def plan_mirror(
     at: datetime,
 ) -> MirrorPlan:
     """Plan this repo's mirror sync: creates, rich-page updates, renames, deletions."""
-    prefix = _mirror_prefix(repo.name)
+    prefix = mirror_prefix(repo.name)
     index = resource_index(bundle)
     previous: dict[str, str] = {}  # rel_path -> concept_id, for this repo's mirror only
     resource_prefix = f"file:{repo.name}/"

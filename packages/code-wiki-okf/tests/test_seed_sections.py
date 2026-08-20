@@ -2,9 +2,11 @@ import importlib.resources
 from datetime import date
 from pathlib import Path
 
+import pytest
 from code_wiki_okf.init import install_bundle
+from okf_ext.render import render_rule
 from okf_ext.schemas import load_schemas, schema_rule
-from okf_ext.sections import load_sections, section_rule
+from okf_ext.sections import load_sections, render_skeleton, section_rule
 from okf_io import load_bundle, validate
 
 _TODAY = date(2026, 1, 1)
@@ -221,3 +223,28 @@ def test_the_attempt_counter_is_declared_wherever_prose_is() -> None:
         if "prose_refresh_attempts" in section_set.types[name].frontmatter.provenance
     }
     assert counted == {"Package", "App", "TestSuite", "AgentPlugin", "Repository", "Dependency"}
+
+
+def test_no_placeholder_carries_an_angle_bracket_or_a_wikilink() -> None:
+    """A bare `<...>` renders as swallowed inline HTML (`render.angle-bracket`);
+    a shipped placeholder needs no slot syntax to carry its instruction."""
+    section_set = _seed_sections()
+    for type_name in _EXPECTED_OWNED:
+        for section in section_set.types[type_name].sections:
+            assert "<" not in section.placeholder
+            assert "[[" not in section.placeholder
+            assert "]]" not in section.placeholder
+
+
+@pytest.mark.parametrize("type_name", sorted(_EXPECTED_OWNED))
+def test_a_raw_skeleton_carries_no_render_breakage(tmp_path: Path, type_name: str) -> None:
+    """A freshly bootstrapped, freshly scanned workspace must not fail its own
+    lint on content the tool itself installed."""
+    body = render_skeleton(_seed_sections().types[type_name])
+    root = _bundle_with(
+        tmp_path,
+        f"lane/{type_name.lower()}.md",
+        f"---\ntype: {type_name}\ntitle: A page\ndescription: A page.\n---\n\n{body}",
+    )
+    report = validate(load_bundle(root), today=_TODAY, extra_rules=[render_rule()])
+    assert report.by_code("render.angle-bracket") == ()

@@ -8,6 +8,7 @@ from datetime import date
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
+from okf_io import load
 
 TODAY = date(2026, 8, 17)
 
@@ -148,3 +149,13 @@ def test_repo_root_none_skips_the_affects_check_but_a_real_root_enforces_it(tmp_
     with_root = work.run_lint(layout, _config(layout), today=TODAY, repo_root=repo)
     assert any(f.code == "targets.affects-missing" for f in with_root.findings)
     assert not with_root.ok
+
+
+def test_lint_reports_bad_edge_without_crashing(tmp_path) -> None:
+    layout = _workspace(tmp_path)
+    _write(layout, "2026-08-01-feature-a", _FEATURE)
+    document = load(layout.bundle_dir / "work/2026-08-01-feature-a.md")
+    document.set("depends_on", [{"slug": "missing", "blocks": "build"}])
+    document.save()
+    report = work.run_lint(layout, _config(layout), today=TODAY)
+    assert any(finding.code == "graph.depends-on-invalid" for finding in report.findings)

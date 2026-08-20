@@ -1,11 +1,20 @@
 """`graph_works_core.hooks.apply` over a temp repo_root and a temp scripts_dir
 -- one scenario per behavior the ported merge/remove primitive locks: enable,
-disable, idempotency, dedup, the gates permissions.deny pairing, and the
-unrelated-content round trip."""
+disable, idempotency, dedup, and the unrelated-content round trip.
+
+`transcript` is the only feature since `gates` was retired, so it is the
+subject of every scenario. The multi-wiring cases `gates` used to carry are
+gone with it -- `for_feature` still returns a tuple, and the enable/disable
+loops still iterate, but nothing exercises them at length > 1 any more."""
 
 from __future__ import annotations
 
 import json
+import os
+import re
+import subprocess
+import sys
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -15,13 +24,6 @@ from graph_works_core.hooks import HooksError, HookWiring, apply
 def _write_script(scripts_dir: Path, name: str) -> None:
     scripts_dir.mkdir(parents=True, exist_ok=True)
     (scripts_dir / name).write_text("#!/bin/sh\n", encoding="utf-8")
-
-
-def _gates_scripts_dir(tmp_path: Path) -> Path:
-    scripts = tmp_path / "scripts"
-    _write_script(scripts, "post-task-complete-revalidate.sh")
-    _write_script(scripts, "stop-revalidate-user-gates.sh")
-    return scripts
 
 
 def _transcript_scripts_dir(tmp_path: Path) -> Path:
@@ -38,37 +40,13 @@ def _settings(repo_root: Path) -> dict:
     return json.loads(_settings_file(repo_root).read_text(encoding="utf-8"))
 
 
-def _seed_settings(repo_root: Path, data: dict) -> None:
+def _seed_settings(repo_root: Path, data: object) -> None:
     path = _settings_file(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def test_enable_gates_adds_both_hooks_and_the_enterplanmode_deny(tmp_path):
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    scripts = _gates_scripts_dir(tmp_path)
-
-    result = apply("enable", "gates", repo_root, scripts_dir=scripts)
-
-    assert result.changed is True
-    assert result.added == ("post-task-complete-revalidate.sh", "stop-revalidate-user-gates.sh")
-    assert result.removed == ()
-    assert result.skipped == ()
-
-    settings = _settings(repo_root)
-    assert settings["permissions"]["deny"] == ["EnterPlanMode"]
-    post_tool_use = settings["hooks"]["PostToolUse"]
-    assert len(post_tool_use) == 1
-    assert post_tool_use[0]["matcher"] == "TaskUpdate"
-    assert "post-task-complete-revalidate.sh" in post_tool_use[0]["hooks"][0]["command"]
-    stop = settings["hooks"]["Stop"]
-    assert len(stop) == 1
-    assert stop[0]["matcher"] == ""
-    assert "stop-revalidate-user-gates.sh" in stop[0]["hooks"][0]["command"]
-
-
-def test_enable_transcript_adds_the_hook_with_no_deny_line(tmp_path):
+def test_enable_registers_the_feature_hook_under_its_event(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     scripts = _transcript_scripts_dir(tmp_path)
@@ -77,35 +55,40 @@ def test_enable_transcript_adds_the_hook_with_no_deny_line(tmp_path):
 
     assert result.changed is True
     assert result.added == ("session-end-transcript-capture.sh",)
+    assert result.removed == ()
+    assert result.skipped == ()
 
     settings = _settings(repo_root)
+    # No feature manages `permissions` since `gates` was retired; `apply` must
+    # not invent the block on the way past.
     assert "permissions" not in settings
     session_end = settings["hooks"]["SessionEnd"]
     assert len(session_end) == 1
+    assert session_end[0]["matcher"] == ""
     assert "session-end-transcript-capture.sh" in session_end[0]["hooks"][0]["command"]
 
 
 def test_double_enable_is_idempotent(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    scripts = _gates_scripts_dir(tmp_path)
+    scripts = _transcript_scripts_dir(tmp_path)
 
-    first = apply("enable", "gates", repo_root, scripts_dir=scripts)
-    second = apply("enable", "gates", repo_root, scripts_dir=scripts)
+    first = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+    second = apply("enable", "transcript", repo_root, scripts_dir=scripts)
 
     assert first.changed is True
     assert second.changed is False
     assert second.added == ()
-    assert second.skipped == ("post-task-complete-revalidate.sh", "stop-revalidate-user-gates.sh")
+    assert second.skipped == ("session-end-transcript-capture.sh",)
 
 
 def test_disable_removes_exactly_what_enable_added(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    scripts = _gates_scripts_dir(tmp_path)
+    scripts = _transcript_scripts_dir(tmp_path)
 
-    enabled = apply("enable", "gates", repo_root, scripts_dir=scripts)
-    disabled = apply("disable", "gates", repo_root, scripts_dir=scripts)
+    enabled = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+    disabled = apply("disable", "transcript", repo_root, scripts_dir=scripts)
 
     assert disabled.changed is True
     assert disabled.removed == enabled.added
@@ -124,11 +107,11 @@ def test_disable_trims_a_mixed_hooks_entry_and_leaves_other_events_alone(tmp_pat
                 "PreToolUse": [
                     {"matcher": "Bash", "hooks": [{"type": "command", "command": 'bash "/other/thing.sh"'}]}
                 ],
-                "Stop": [
+                "SessionEnd": [
                     {
                         "matcher": "",
                         "hooks": [
-                            {"type": "command", "command": 'bash "/x/stop-revalidate-user-gates.sh"'},
+                            {"type": "command", "command": 'bash "/x/session-end-transcript-capture.sh"'},
                             {"type": "command", "command": 'bash "/x/unrelated.sh"'},
                         ],
                     }
@@ -136,16 +119,16 @@ def test_disable_trims_a_mixed_hooks_entry_and_leaves_other_events_alone(tmp_pat
             }
         },
     )
-    scripts = _gates_scripts_dir(tmp_path)
+    scripts = _transcript_scripts_dir(tmp_path)
 
-    result = apply("disable", "gates", repo_root, scripts_dir=scripts)
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
 
-    assert "stop-revalidate-user-gates.sh" in result.removed
+    assert "session-end-transcript-capture.sh" in result.removed
     settings = _settings(repo_root)
-    stop = settings["hooks"]["Stop"]
-    assert len(stop) == 1
-    assert len(stop[0]["hooks"]) == 1
-    assert "unrelated.sh" in stop[0]["hooks"][0]["command"]
+    session_end = settings["hooks"]["SessionEnd"]
+    assert len(session_end) == 1
+    assert len(session_end[0]["hooks"]) == 1
+    assert "unrelated.sh" in session_end[0]["hooks"][0]["command"]
     assert settings["hooks"]["PreToolUse"] == [
         {"matcher": "Bash", "hooks": [{"type": "command", "command": 'bash "/other/thing.sh"'}]}
     ]
@@ -154,25 +137,44 @@ def test_disable_trims_a_mixed_hooks_entry_and_leaves_other_events_alone(tmp_pat
 def test_disable_when_absent_is_a_noop_and_does_not_create_the_settings_file(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    scripts = _gates_scripts_dir(tmp_path)
 
-    result = apply("disable", "gates", repo_root, scripts_dir=scripts)
+    result = apply("disable", "transcript", repo_root)
 
     assert result.changed is False
     assert result.removed == ()
     assert not _settings_file(repo_root).exists()
 
 
-def test_disable_preserves_a_user_owned_deny_when_no_gates_hook_was_removed(tmp_path):
+def test_a_user_owned_permissions_deny_survives_a_write(tmp_path):
+    """The retired `gates` feature managed `permissions.deny: ["EnterPlanMode"]`.
+
+    Nothing manages it now, so the entry is ordinary user content: a `disable`
+    that actually rewrites the file must carry it through untouched. Seeded
+    alongside a real hook so the write path runs -- a no-op `disable` would
+    prove nothing, because it never writes.
+    """
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    _seed_settings(repo_root, {"permissions": {"deny": ["EnterPlanMode"]}})
-    scripts = _gates_scripts_dir(tmp_path)
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": 'bash "/x/session-end-transcript-capture.sh"'}],
+                    }
+                ]
+            },
+            "permissions": {"deny": ["EnterPlanMode"]},
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
 
-    result = apply("disable", "gates", repo_root, scripts_dir=scripts)
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
 
-    assert result.changed is False
-    assert result.removed == ()
+    assert result.changed is True
+    assert result.removed == ("session-end-transcript-capture.sh",)
     settings = _settings(repo_root)
     assert settings["permissions"]["deny"] == ["EnterPlanMode"]
 
@@ -184,9 +186,74 @@ def test_enable_raises_hookserror_when_the_script_file_is_missing(tmp_path):
     empty_scripts.mkdir()
 
     with pytest.raises(HooksError):
-        apply("enable", "gates", repo_root, scripts_dir=empty_scripts)
+        apply("enable", "transcript", repo_root, scripts_dir=empty_scripts)
 
     assert not _settings_file(repo_root).exists()
+
+
+def test_malformed_settings_json_raises_hookserror(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    target = _settings_file(repo_root)
+    target.parent.mkdir()
+    target.write_text("{", encoding="utf-8")
+
+    with pytest.raises(HooksError, match="is not valid JSON"):
+        apply("disable", "transcript", repo_root)
+
+
+@pytest.mark.parametrize(
+    ("settings", "message"),
+    [
+        ([], "top-level JSON value must be an object, got array"),
+        ({"hooks": []}, "`hooks` must be an object, got array"),
+        ({"hooks": {"Stop": {}}}, "`hooks.Stop` must be an array, got object"),
+        ({"hooks": {"Stop": [None]}}, "`hooks.Stop[0]` must be an object, got null"),
+        (
+            {"hooks": {"Stop": [{"hooks": {}}]}},
+            "`hooks.Stop[0].hooks` must be an array, got object",
+        ),
+        (
+            {"hooks": {"Stop": [{"hooks": [None]}]}},
+            "`hooks.Stop[0].hooks[0]` must be an object, got null",
+        ),
+        (
+            {"hooks": {"Stop": [{"hooks": [{"command": 7}]}]}},
+            "`hooks.Stop[0].hooks[0].command` must be a string, got integer",
+        ),
+        ({"permissions": []}, "`permissions` must be an object, got array"),
+        ({"permissions": {"deny": {}}}, "`permissions.deny` must be an array, got object"),
+        (
+            {"permissions": {"deny": [7]}},
+            "`permissions.deny[0]` must be a string, got integer",
+        ),
+    ],
+)
+def test_malformed_settings_shapes_raise_hookserror(tmp_path, settings, message):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(repo_root, settings)
+
+    with pytest.raises(HooksError, match=re.escape(message)):
+        apply("disable", "transcript", repo_root)
+
+
+def test_settings_write_failure_raises_hookserror(tmp_path, monkeypatch):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scripts = _transcript_scripts_dir(tmp_path)
+    target = _settings_file(repo_root)
+    real_write_text = Path.write_text
+
+    def fail_target_write(path: Path, *args, **kwargs):
+        if path == target:
+            raise OSError("disk full")
+        return real_write_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_target_write)
+
+    with pytest.raises(HooksError, match=r"could not write settings.*disk full"):
+        apply("enable", "transcript", repo_root, scripts_dir=scripts)
 
 
 def test_unrelated_existing_settings_content_round_trips_through_enable(tmp_path):
@@ -222,14 +289,14 @@ def test_disable_leaves_an_unrelated_entry_on_the_same_event_untouched(tmp_path)
         repo_root,
         {
             "hooks": {
-                "Stop": [
+                "SessionEnd": [
                     {
                         "matcher": "SomeOtherMatcher",
-                        "hooks": [{"type": "command", "command": 'bash "/x/unrelated-stop-hook.sh"'}],
+                        "hooks": [{"type": "command", "command": 'bash "/x/unrelated-session-end-hook.sh"'}],
                     },
                     {
                         "matcher": "",
-                        "hooks": [{"type": "command", "command": 'bash "/x/stop-revalidate-user-gates.sh"'}],
+                        "hooks": [{"type": "command", "command": 'bash "/x/session-end-transcript-capture.sh"'}],
                     },
                 ]
             },
@@ -237,14 +304,17 @@ def test_disable_leaves_an_unrelated_entry_on_the_same_event_untouched(tmp_path)
             "env": {"FOO": "bar"},
         },
     )
-    scripts = _gates_scripts_dir(tmp_path)
+    scripts = _transcript_scripts_dir(tmp_path)
 
-    result = apply("disable", "gates", repo_root, scripts_dir=scripts)
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
 
-    assert "stop-revalidate-user-gates.sh" in result.removed
+    assert "session-end-transcript-capture.sh" in result.removed
     settings = _settings(repo_root)
-    assert settings["hooks"]["Stop"] == [
-        {"matcher": "SomeOtherMatcher", "hooks": [{"type": "command", "command": 'bash "/x/unrelated-stop-hook.sh"'}]}
+    assert settings["hooks"]["SessionEnd"] == [
+        {
+            "matcher": "SomeOtherMatcher",
+            "hooks": [{"type": "command", "command": 'bash "/x/unrelated-session-end-hook.sh"'}],
+        }
     ]
     assert settings["permissions"] == {"allow": ["Read"]}
     assert settings["env"] == {"FOO": "bar"}
@@ -253,10 +323,10 @@ def test_disable_leaves_an_unrelated_entry_on_the_same_event_untouched(tmp_path)
 def test_apply_raises_hookserror_on_unknown_action(tmp_path):
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    scripts = _gates_scripts_dir(tmp_path)
+    scripts = _transcript_scripts_dir(tmp_path)
 
     with pytest.raises(HooksError):
-        apply("bogus", "gates", repo_root, scripts_dir=scripts)  # type: ignore[arg-type]
+        apply("bogus", "transcript", repo_root, scripts_dir=scripts)  # type: ignore[arg-type]
 
 
 def test_for_feature_raises_hookserror_on_unknown_feature():
@@ -264,14 +334,106 @@ def test_for_feature_raises_hookserror_on_unknown_feature():
         HookWiring.for_feature("bogus")  # type: ignore[arg-type]
 
 
-@pytest.mark.xfail(
-    reason="plugins/graph-works/hooks/examples/ lands with epic/graph-works-plugin-fork's merge to main",
-    strict=False,
-)
 def test_default_scripts_dir_resolves_every_wiring_script():
     from graph_works_core.hooks import _default_scripts_dir
 
     default_dir = _default_scripts_dir()
-    for feature in ("gates", "transcript"):
-        for wiring in HookWiring.for_feature(feature):
-            assert (default_dir / wiring.script).is_file()
+    for wiring in HookWiring.for_feature("transcript"):
+        assert (default_dir / wiring.script).is_file()
+
+
+def _assert_wheel_enables_every_hook(wheel: Path, tmp_path: Path) -> None:
+    site_packages = tmp_path / "site-packages"
+    with zipfile.ZipFile(wheel) as archive:
+        archive.extractall(site_packages)
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    smoke = """
+import json
+import sys
+from pathlib import Path
+
+from graph_works_core.hooks import apply
+
+repo_root = Path(sys.argv[1])
+transcript = apply("enable", "transcript", repo_root)
+settings = json.loads(transcript.settings_path.read_text(encoding="utf-8"))
+commands = [
+    hook["command"]
+    for entries in settings["hooks"].values()
+    for entry in entries
+    for hook in entry["hooks"]
+]
+assert transcript.added == ("session-end-transcript-capture.sh",)
+assert len(commands) == 1
+assert all("graph_works_core/_hook_scripts/" in command for command in commands)
+assert all(Path(command.removeprefix('bash "').removesuffix('"')).is_file() for command in commands)
+"""
+    environ = os.environ.copy()
+    environ["PYTHONPATH"] = str(site_packages)
+    completed = subprocess.run(
+        [sys.executable, "-c", smoke, str(repo_root)],
+        cwd=tmp_path,
+        env=environ,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_built_wheel_enables_every_hook_from_packaged_scripts(tmp_path):
+    """A wheel install must not depend on the monorepo's plugin checkout."""
+    workspace_root = Path(__file__).resolve().parents[3]
+    dist_dir = tmp_path / "dist"
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--package",
+            "graph-works-core",
+            "--wheel",
+            "--out-dir",
+            str(dist_dir),
+        ],
+        cwd=workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    wheel = next(dist_dir.glob("graph_works_core-*.whl"))
+
+    _assert_wheel_enables_every_hook(wheel, tmp_path)
+
+
+def test_sdist_builds_a_wheel_with_every_packaged_hook(tmp_path):
+    """The source distribution must carry everything needed for its wheel."""
+    workspace_root = Path(__file__).resolve().parents[3]
+    sdist_dir = tmp_path / "sdist"
+    subprocess.run(
+        [
+            "uv",
+            "build",
+            "--package",
+            "graph-works-core",
+            "--sdist",
+            "--out-dir",
+            str(sdist_dir),
+        ],
+        cwd=workspace_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    sdist = next(sdist_dir.glob("graph_works_core-*.tar.gz"))
+    wheel_dir = tmp_path / "wheel-from-sdist"
+    completed = subprocess.run(
+        ["uv", "build", str(sdist), "--wheel", "--out-dir", str(wheel_dir)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    wheel = next(wheel_dir.glob("graph_works_core-*.whl"))
+
+    _assert_wheel_enables_every_hook(wheel, tmp_path / "smoke")

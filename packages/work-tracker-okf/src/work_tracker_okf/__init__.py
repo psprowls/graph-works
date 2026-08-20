@@ -28,7 +28,7 @@ The layout and writer surface is six more, on the same rule:
     paths -> {filing, sources, results, archive, decisions}
 
     from work_tracker_okf.paths import artifact_path, item_page
-    from work_tracker_okf.filing import file_item
+    from work_tracker_okf.filing import plan_filing
     from work_tracker_okf.sources import upsert
     from work_tracker_okf.archive import apply_archive, plan_archive
 
@@ -42,11 +42,11 @@ and `advance.apply` are different things, and the module name is what says which
 `okf_ext.moves` never reads `bundle.ignored`, so the narrow recipe would plan a
 move covering only the item page. It is the one path that wants the wider lens.
 
-`decisions` is the odd one out on the writer rule: its mutators write directly
-rather than planning first, because a plan over a ledger append would show
-nothing `render(preamble, entries)` does not already show. `advance` and
-`children` plan-then-apply because a caller needs to see a refusal before a
-write; a ledger mutation has no refusal that is not a caller error.
+Decision and adoption mutations use immutable plan/apply pairs. Planning
+captures every expected refusal without writing; decision apply rechecks its
+ledger snapshot under the existing exclusive lock, and adoption apply never
+discovers a workspace or invokes Git. The modules remain qualified because
+their generic `apply` names need the module owner to stay legible.
 
 `vocabulary` stays a submodule rather than being flattened into this namespace:
 its fourteen constants are read as `vocabulary.TERMINAL_STATUSES`, where the
@@ -56,7 +56,7 @@ module name says which vocabulary is meant, and hoisting them would make
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from work_tracker_okf.init import BundleInstall, InitError, install_bundle, plan_install
 from work_tracker_okf.items import ARCHIVE_DIR, ARCHIVE_IGNORE, IGNORE, WORK_DIR, WorkItem, load_items

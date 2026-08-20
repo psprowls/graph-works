@@ -17,7 +17,7 @@ def test_write_new_page_creates_file_at_mirrored_path(tmp_path: Path) -> None:
     section_set = load_sections(_SECTIONS_DIR)
     frontmatter = {"type": "File", "title": "base.py", "resource": "file:acme/src/pkg/base.py", "language": "python"}
     write_new_page(tmp_path, _repo(), "src/pkg/base.py", frontmatter, section_set=section_set)
-    target = tmp_path / "repositories" / "acme" / "src" / "pkg" / "base.py.md"
+    target = tmp_path / "repositories" / "acme" / "fs" / "src" / "pkg" / "base.py.md"
     assert target.exists()
 
 
@@ -34,7 +34,7 @@ def test_write_new_page_frontmatter_round_trips(tmp_path: Path) -> None:
         "last_updated_commit": "a" * 40,
     }
     write_new_page(tmp_path, _repo(), "src/pkg/base.py", frontmatter, section_set=section_set)
-    target = tmp_path / "repositories" / "acme" / "src" / "pkg" / "base.py.md"
+    target = tmp_path / "repositories" / "acme" / "fs" / "src" / "pkg" / "base.py.md"
     document = parse(target.read_text(encoding="utf-8"))
     assert document.parse_error is None
     assert document.fm.type == "File"
@@ -54,7 +54,7 @@ def test_write_new_page_drops_keys_outside_key_order(tmp_path: Path) -> None:
         "not_a_declared_key": "should never be written",
     }
     write_new_page(tmp_path, _repo(), "src/pkg/base.py", frontmatter, section_set=section_set)
-    target = tmp_path / "repositories" / "acme" / "src" / "pkg" / "base.py.md"
+    target = tmp_path / "repositories" / "acme" / "fs" / "src" / "pkg" / "base.py.md"
     text = target.read_text(encoding="utf-8")
     assert "not_a_declared_key" not in text
     document = parse(text)
@@ -66,7 +66,7 @@ def test_write_new_page_body_carries_every_declared_section(tmp_path: Path) -> N
     section_set = load_sections(_SECTIONS_DIR)
     frontmatter = {"type": "File", "title": "base.py", "resource": "file:acme/src/pkg/base.py"}
     write_new_page(tmp_path, _repo(), "src/pkg/base.py", frontmatter, section_set=section_set)
-    target = tmp_path / "repositories" / "acme" / "src" / "pkg" / "base.py.md"
+    target = tmp_path / "repositories" / "acme" / "fs" / "src" / "pkg" / "base.py.md"
     body = target.read_text(encoding="utf-8")
     for heading in ("Notes", "Symbols", "Imports", "Exports", "Imported By"):
         assert f"## {heading}" in body

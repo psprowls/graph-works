@@ -5,9 +5,11 @@ that talks to a model. Phase 3 is deterministic and decides *what lands*. The
 split is what makes a scan resumable: a run that dies after phase 1 replays from
 `worklist.json` without re-walking the graph.
 
-**The structural half is not here.** `code_wiki_okf.entities.sync` creates,
-regenerates, prunes, reconciles indexes and appends its own log entry; this
-module calls it and reports its `SyncSummary` unchanged.
+**The structural half is not here.** `code_wiki_okf.entities.lanes.sync` and
+`code_wiki_okf.mirror.lanes.sync_mirror` between them create, regenerate,
+prune, reconcile indexes and append their own log entries; this module calls
+both, in that order, and reports their summaries unchanged as a
+`StructuralSummary`.
 
 **Drift propagation is not here either** (design spec §3.1). This vertical emits
 and applies prose-refresh work and nothing else; the lint vertical builds its own
@@ -44,6 +46,7 @@ from code_graph_io import (
 from code_wiki_okf.config import Config, RepoConfig
 from code_wiki_okf.entities.lanes import ENTITY_LANES, SyncSummary, sync
 from code_wiki_okf.git_state import changed_files_since, head_commit
+from code_wiki_okf.mirror.lanes import MirrorSummary, sync_mirror
 from langchain_core.tools import BaseTool
 from okf_ext.body import find_section, split_lines
 from okf_ext.shape import SectionSet, SectionSpec, load_sections
@@ -91,14 +94,20 @@ PROSE_ATTEMPTS_KEY = "prose_refresh_attempts"
 #: code always earns a fresh attempt and the counter self-heals.
 MAX_PROSE_ATTEMPTS = 3
 
-#: The mirror lane's okf type. Its pages live under `repositories/<repo>/` --
-#: inside an entity lane -- but design spec §3.3 puts them outside this
-#: vertical, so they are not "skipped": they were never candidates.
+#: The mirror lane's okf type. Its pages live under `repositories/<repo>/fs/`,
+#: inside an entity lane, and this vertical's structural pass now writes them
+#: (`mirror.lanes.sync_mirror`). It is named here for one narrower reason:
+#: `File` declares no prose sections, so a mirror page is neither a
+#: prose-refresh candidate nor an `unknown-type` `SkippedPage` -- without this
+#: constant `_classify_pages` would report every one of them as walked past
+#: for a reason that does not apply. Not dead code, and not a claim that the
+#: vertical leaves the lane alone.
 _MIRROR_TYPE = "File"
 
-#: The okf type of each entity lane this vertical fills, mapped to the graph
-#: kind `graph_tools.describe` renders it under. Mirror `File` is absent by
-#: decision (design spec §3.3).
+#: The okf type of each entity lane whose *prose* this vertical fills, mapped
+#: to the graph kind `graph_tools.describe` renders it under. Mirror `File` is
+#: absent because it has no prose lane to fill -- not because the structural
+#: pass does not touch it; it does (`mirror.lanes.sync_mirror`).
 LANE_TYPES: Mapping[str, str] = {
     "Package": "package",
     "App": "app",
@@ -574,12 +583,24 @@ async def build_scan_worklist(
     at: datetime,
     max_entities: int | None = None,
     dry_run: bool = True,
-) -> tuple[ScanWorklist, SyncSummary]:
+) -> tuple[ScanWorklist, StructuralSummary]:
     """Refresh the graph, run the structural pass, and decide what needs prose.
 
-    Returns the worklist **and** `entities.sync`'s own summary, unaltered, so a
-    caller can report the mechanical result independently of whether any prose
-    ran.
+    Returns the worklist **and** the structural pass's own summary, unaltered,
+    so a caller can report the mechanical result independently of whether any
+    prose ran.
+
+    The structural pass is **both** lanes: `entities.lanes.sync` then
+    `mirror.lanes.sync_mirror`, in that order, sharing one open reader. Running
+    only the first is what left every `## Files` link this vertical renders
+    pointing at a page nothing created -- 1311 `links.broken` warnings in the
+    first production run of `gw bootstrap` + `gw scan`.
+
+    The two lanes' `dry_run` semantics differ, deliberately and at their own
+    level: `entities.lanes.sync(dry_run=True)` calls nothing and returns an
+    empty summary, while `mirror.lanes.sync_mirror(dry_run=True)` genuinely
+    plans and returns the plans. Both write nothing, which is all this
+    function's own `dry_run` promises.
 
     `async` for signature uniformity with `run_scan`; nothing here awaits.
 
@@ -604,10 +625,24 @@ async def build_scan_worklist(
 
     reader = _open_reader(target)
     try:
-        summary = sync(load_bundle(layout.bundle_dir), config, reader, today=today, at=at, dry_run=dry_run)
-        # `sync` committed its writes; reload so the classifier reads the pages
-        # it just created and re-stamped rather than the pre-sync snapshot.
-        # Under `dry_run` it wrote nothing, so this is the same snapshot.
+        entity_summary = sync(load_bundle(layout.bundle_dir), config, reader, today=today, at=at, dry_run=dry_run)
+        # **Entity lane first, mirror lane second, and the order is
+        # load-bearing** -- it is the order `code-wiki-okf sync` has always
+        # used. The entity half regenerates the root index's `## Repositories`
+        # catalog and reconciles the top-level lanes; the mirror half then
+        # reconciles only `repositories/<repo>/fs/**`. Reversed, the entity
+        # pass would reconcile a `repositories/` lane whose subtree is about
+        # to change underneath it.
+        #
+        # The open `reader` is reused across both lanes -- one graph
+        # connection for the whole structural pass, which `cli.py` opens twice
+        # and does not manage.
+        mirror_summary = sync_mirror(layout.bundle_dir, config, reader, today=today, at=at, dry_run=dry_run)
+        summary = StructuralSummary(entities=entity_summary, mirror=mirror_summary)
+        # Both lanes committed their writes; reload so the classifier reads the
+        # pages they just created and re-stamped rather than the pre-sync
+        # snapshot. Under `dry_run` neither wrote anything, so this is the same
+        # snapshot.
         bundle = load_bundle(layout.bundle_dir)
         section_set = load_sections(config.declarations_dir / "_sections")
         refs = entity_refs(reader, config)
@@ -855,14 +890,48 @@ PROSE_REFRESHER_ROLE = "prose_refresher"
 
 
 @dataclass(frozen=True, slots=True)
+class StructuralSummary:
+    """What the structural pass did, both lanes.
+
+    A named pair rather than a three-tuple return from `build_scan_worklist`:
+    both halves answer the same question -- "what did the mechanical pass
+    do" -- and a pair survives the next lane without changing every caller's
+    unpack.
+
+    Runtime-only, and therefore here rather than in `scan_contract`: that
+    module's contract is that nothing in it imports a package that reads a
+    file, and both summaries come from `code_wiki_okf` modules that do.
+    Neither is ever serialized -- `emit_scan_worklist` writes `ScanWorklist`
+    alone -- so `SCHEMA_VERSION` is unaffected.
+    """
+
+    entities: SyncSummary = field(default_factory=SyncSummary)
+    mirror: MirrorSummary = field(default_factory=MirrorSummary)
+
+    @property
+    def errors(self) -> tuple[str, ...]:
+        """Every structural failure, in the shape `ScanResult.errors` takes.
+
+        The entity lane's index refusals and the mirror lane's per-repo
+        failures are both reported-not-raised, and both must reach a caller's
+        exit code -- `gw scan` writing 755 pages and exiting 0 on a lane that
+        failed is the defect class this whole epic closes.
+        """
+        return tuple(f"{path}: {kind}" for path, kind in self.entities.catalog_declined) + tuple(
+            f"{repo}: mirror sync failed: {error}" for repo, error in self.mirror.failed_repos
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ScanResult:
     """One whole run: the mechanical result, the worklist, and what landed.
 
-    `sync` is `entities.sync`'s own summary, so a `narrate=False` run still
-    reports everything the structural pass did.
+    `structural` is both structural lanes' own summaries, so a `narrate=False`
+    run still reports everything the mechanical pass did -- entity pages and
+    mirror pages alike.
     """
 
-    sync: SyncSummary
+    structural: StructuralSummary
     worklist: ScanWorklist
     applied: ApplyResult = field(default_factory=ApplyResult)
     errors: tuple[str, ...] = ()
@@ -942,10 +1011,12 @@ async def run_scan(
     and the CLI wires the builder in. Absent, the refresher runs on its file
     tools alone -- a narrower grounding, not a failure.
     """
-    worklist, summary = await build_scan_worklist(
+    worklist, structural = await build_scan_worklist(
         layout, config, today=today, at=at, max_entities=max_entities, dry_run=dry_run
     )
-    result = ScanResult(sync=summary, worklist=worklist)
+    # Both lanes' reported-not-raised failures, so a mirror repo that blew up
+    # mid-write exits non-zero exactly as an index refusal already does.
+    result = ScanResult(structural=structural, worklist=worklist, errors=structural.errors)
     if dry_run or not narrate or not worklist.prose_tasks:
         return result
 
@@ -956,7 +1027,7 @@ async def run_scan(
         graph_tools_for_refresh=graph_tools_for_refresh,
     )
     applied = apply_scan_results(worklist, results, layout.bundle_dir, config, today=today, dry_run=False)
-    return replace(result, applied=applied, errors=results.provider_errors + applied.entity_errors)
+    return replace(result, applied=applied, errors=result.errors + results.provider_errors + applied.entity_errors)
 
 
 #: The worklist artifact's filename inside the scan cache directory.
@@ -964,6 +1035,9 @@ WORKLIST_FILENAME = "worklist.json"
 
 #: Where the rendered per-task briefs go, relative to that directory.
 BRIEFS_DIRNAME = "briefs"
+
+#: Where per-task result files go, relative to the scan cache directory.
+RESULTS_DIRNAME = "results"
 
 _SLUG_UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -976,6 +1050,11 @@ def scan_cache_dir(layout: WorkspaceLayout) -> Path:
     moves the artifacts with it.
     """
     return layout.cache_dir / "scan"
+
+
+def scan_results_dir(layout: WorkspaceLayout) -> Path:
+    """Where this vertical's per-task result artifacts live."""
+    return scan_cache_dir(layout) / RESULTS_DIRNAME
 
 
 def brief_slug(uri: str) -> str:
@@ -1006,6 +1085,8 @@ def emit_scan_worklist(worklist: ScanWorklist, *, out_dir: Path) -> tuple[str, .
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     briefs = out_dir / BRIEFS_DIRNAME
+    if briefs.is_symlink():
+        briefs.unlink()
     briefs.mkdir(parents=True, exist_ok=True)
     for stale in briefs.glob("*.md"):
         # `missing_ok`: `glob` enumerating a path and this call deleting it are
@@ -1015,6 +1096,8 @@ def emit_scan_worklist(worklist: ScanWorklist, *, out_dir: Path) -> tuple[str, .
         stale.unlink(missing_ok=True)
 
     worklist_path = out_dir / WORKLIST_FILENAME
+    if worklist_path.is_symlink():
+        worklist_path.unlink()
     worklist_path.write_text(json.dumps(worklist_payload(worklist), indent=2, sort_keys=True), encoding="utf-8")
     written = [str(worklist_path)]
     seen: dict[str, int] = {}
@@ -1066,6 +1149,7 @@ def load_results_dir(directory: Path) -> ScanResults:
 def apply_scan_worklist(
     *,
     worklist_path: Path,
+    worklist: ScanWorklist | None = None,
     results_dir: Path,
     bundle_root: Path,
     config: Config,
@@ -1078,10 +1162,14 @@ def apply_scan_worklist(
     two loaders over the one `apply_scan_results` both paths share -- which is
     what makes the file surface get exactly the same sanitizing, splicing and
     refill gate the in-process path gets, `dry_run` included.
+
+    A caller that already loaded and validated *worklist* can pass that exact
+    object to prevent a second read of *worklist_path*. Existing callers omit
+    it and retain the path-loading behavior.
     """
-    worklist = load_worklist(worklist_path)
+    resolved_worklist = load_worklist(worklist_path) if worklist is None else worklist
     results = load_results_dir(results_dir)
-    applied = apply_scan_results(worklist, results, bundle_root, config, today=today, dry_run=dry_run)
+    applied = apply_scan_results(resolved_worklist, results, bundle_root, config, today=today, dry_run=dry_run)
     if not results.provider_errors:
         return applied
     return replace(applied, entity_errors=results.provider_errors + applied.entity_errors)
@@ -1097,9 +1185,11 @@ __all__ = [
     "PROSE_ANCHOR_KEY",
     "PROSE_ATTEMPTS_KEY",
     "PROSE_REFRESHER_ROLE",
+    "RESULTS_DIRNAME",
     "TRACES_DIRNAME",
     "WORKLIST_FILENAME",
     "ScanResult",
+    "StructuralSummary",
     "apply_scan_results",
     "apply_scan_worklist",
     "brief_slug",
@@ -1114,5 +1204,6 @@ __all__ = [
     "run_prose_fan_out",
     "run_scan",
     "scan_cache_dir",
+    "scan_results_dir",
     "splice_sections",
 ]

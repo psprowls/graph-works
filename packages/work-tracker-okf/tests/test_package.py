@@ -2,7 +2,7 @@ import work_tracker_okf
 
 
 def test_version() -> None:
-    assert work_tracker_okf.__version__ == "0.1.0"
+    assert work_tracker_okf.__version__ == "0.2.0"
 
 
 def test_dependencies_are_exactly_the_three_the_spec_allows() -> None:

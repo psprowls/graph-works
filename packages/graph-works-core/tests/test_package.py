@@ -9,7 +9,7 @@ from graph_works_core.workspace.errors import InitError, WorkspaceError, Workspa
 
 
 def test_version_is_static_and_matches_the_distribution():
-    assert graph_works_core.__version__ == "0.1.0"
+    assert graph_works_core.__version__ == "0.2.0"
 
 
 def test_all_is_sorted_and_every_name_is_bound():
@@ -206,3 +206,8 @@ def test_the_query_error_is_exported():
 
     assert issubclass(QueryError, WorkspaceError)
     assert "QueryError" in graph_works_core.__all__
+
+
+def test_the_util_vertical_is_exported():
+    for name in ("LogAppendResult", "SkippedPage", "TokenStamp", "TokensUpdate", "run_log", "run_tokens_update"):
+        assert name in graph_works_core.__all__

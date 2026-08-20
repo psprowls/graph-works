@@ -133,16 +133,18 @@ def test_rich_file_without_language_or_package_omits_both_keys(graph_repo) -> No
     assert render != Render()
 
 
-def test_rich_file_stamps_tokens(graph_repo) -> None:
-    frontmatter, render = render_file(graph_repo.reader, _repo(graph_repo), "src/pkg/user.py", at=_AT, sha=_SHA)
-    assert isinstance(frontmatter["tokens"], int)
-    assert frontmatter["tokens"] > 0
-    assert render.frontmatter["tokens"] == frontmatter["tokens"]
+def test_neither_rich_nor_minimal_file_stamps_tokens(graph_repo) -> None:
+    # `run_tokens_update` (graph-works-core) is `tokens`'s sole writer now --
+    # see 2026-08-19-tech-debt-tokens-metric-proxy-string. This lane must not
+    # stamp it, rich or minimal, in either the returned frontmatter or Render.
+    rich_frontmatter, rich_render = render_file(
+        graph_repo.reader, _repo(graph_repo), "src/pkg/user.py", at=_AT, sha=_SHA
+    )
+    assert "tokens" not in rich_frontmatter
+    assert "tokens" not in rich_render.frontmatter
 
-
-def test_minimal_file_stamps_zero_tokens(graph_repo) -> None:
-    frontmatter, render = render_file(
+    minimal_frontmatter, minimal_render = render_file(
         graph_repo.reader, _repo(graph_repo), "node_modules/dep/index.js", at=_AT, sha=_SHA
     )
-    assert frontmatter["tokens"] == 0
-    assert render == Render()
+    assert "tokens" not in minimal_frontmatter
+    assert "tokens" not in minimal_render.frontmatter

@@ -246,10 +246,10 @@ def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=walked[repo.name], sha=sha, at=_AT)
         apply_mirror(load_bundle(bundle_root), plan, repo, section_set=section_set)
 
-    page_path = bundle_root / "repositories" / "repo-a" / "src" / "mod.py.md"
+    page_path = bundle_root / "repositories" / "repo-a" / "fs" / "src" / "mod.py.md"
     assert page_path.exists()
     placeholder = (
-        "> TODO: <Anything a reader should know about this file that the generated sections below don't capture.>"
+        "> TODO: anything a reader should know about this file that the generated sections below don't capture."
     )
     text = page_path.read_text()
     assert placeholder in text
@@ -269,7 +269,7 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
     tmp_path: Path, mirror_repo: Path, graph_dir: Path
 ) -> None:
     """`repositories/repo-a` (the Repository entity page) and
-    `repositories/repo-a/src/mod.py` (a mirror File page) coexist under the
+    `repositories/repo-a/fs/src/mod.py` (a mirror File page) coexist under the
     same `repositories/` prefix. Removing the mirrored file's *source* must
     orphan only the mirror page, never the Repository entity page whose own
     resource (`repo:...`) is unrelated and still current. This is the

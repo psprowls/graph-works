@@ -85,7 +85,7 @@ sections:
   - heading: What this covers
     required: true
     placeholder: |
-      > TODO: <What this topic covers.>
+      > TODO: what this topic covers.
 """
 
 _TOPIC_PAGE = """---

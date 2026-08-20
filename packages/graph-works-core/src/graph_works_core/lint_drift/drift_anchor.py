@@ -3,10 +3,10 @@ its curated targets were last judged at.
 
 `<cache_dir>/drift/propagated.json`, not a frontmatter stamp. The ported code
 wrote `drift_propagated_commit` onto each entity page, but that key is outside
-`code_wiki_okf.entities.sync`'s owned set (`generated`, `last_updated_commit`,
-`tokens`), so a re-scan would drop it — preserving it would mean widening a
-sibling package's provenance contract for a key that lane has no other use
-for. `layout.gitignore_entries` already derives `/_cache/`, so the anchor is
+`code_wiki_okf.entities.sync`'s owned set (`generated`, `last_updated_commit`),
+so a re-scan would drop it — preserving it would mean widening a sibling
+package's provenance contract for a key that lane has no other use for.
+`layout.gitignore_entries` already derives `/_cache/`, so the anchor is
 gitignored and scanner-excluded with no new entry.
 
 **Nothing here raises.** The anchor is regenerable state: a lost anchor costs

@@ -49,8 +49,8 @@ def test_render_package_owned_frontmatter_and_files_section() -> None:
         "entry_points": ["okf-io"],
     }
     assert render.sections.keys() == {"Files"}
-    assert "/repositories/agent-workspace/packages/okf-io/src/okf_io/bundle.py.md" in render.sections["Files"]
-    assert "/repositories/agent-workspace/packages/okf-io/src/okf_io/document.py.md" in render.sections["Files"]
+    assert "/repositories/agent-workspace/fs/packages/okf-io/src/okf_io/bundle.py.md" in render.sections["Files"]
+    assert "/repositories/agent-workspace/fs/packages/okf-io/src/okf_io/document.py.md" in render.sections["Files"]
 
 
 def test_render_package_empty_files_renders_none_placeholder() -> None:
@@ -79,18 +79,36 @@ def test_render_app_mirrors_package_shape() -> None:
         "test_suites": [],
         "entry_points": [],
     }
-    assert "/repositories/agent-workspace/apps/cli/src/index.ts.md" in render.sections["Files"]
+    assert "/repositories/agent-workspace/fs/apps/cli/src/index.ts.md" in render.sections["Files"]
 
 
 def test_render_test_suite_uses_passed_in_tested_packages() -> None:
     desc = SuiteDescription(name="okf-io-tests", uri="test_suite:x/y/okf-io-tests", kind="pytest", file_count=12)
-    render = render_test_suite(desc, tested_packages=["okf-io", "okf-ext"])
+    render = render_test_suite(desc, tested_packages=["okf-io", "okf-ext"], repo_name="agent-workspace")
     assert render.frontmatter == {
         "tested_packages": ["okf-io", "okf-ext"],
         "suite_kind": "pytest",
         "file_count": 12,
     }
     assert render.sections.keys() == {"Files"}
+
+
+def test_render_test_suite_lists_files_like_package_and_app() -> None:
+    desc = SuiteDescription(
+        name="okf-io-tests",
+        uri="test_suite:x/y/okf-io-tests",
+        kind="pytest",
+        file_count=1,
+        files=["packages/okf-io/tests/test_document.py"],
+    )
+    render = render_test_suite(desc, tested_packages=["okf-io"], repo_name="agent-workspace")
+    assert "/repositories/agent-workspace/fs/packages/okf-io/tests/test_document.py.md" in render.sections["Files"]
+
+
+def test_render_test_suite_empty_files_renders_none_placeholder() -> None:
+    desc = SuiteDescription(name="okf-io-tests", uri="test_suite:x/y/okf-io-tests", kind="pytest", file_count=0)
+    render = render_test_suite(desc, tested_packages=["okf-io"], repo_name="agent-workspace")
+    assert render.sections["Files"].strip() == "_(none)_"
 
 
 def test_render_dependency_has_no_generated_sections() -> None:

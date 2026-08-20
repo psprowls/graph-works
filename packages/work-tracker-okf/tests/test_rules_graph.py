@@ -3,7 +3,11 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from work_helpers import lane_report, write_item
+import pytest
+from okf_io import load
+from work_helpers import lane_report, make_item, write_item
+from work_tracker_okf._rules.graph import _phase_dependency_graph
+from work_tracker_okf.dependencies import DependencyEdge
 
 TODAY = date(2026, 8, 3)
 
@@ -108,6 +112,96 @@ def test_a_parentless_item_never_reports_not_sibling(tmp_path: Path) -> None:
     assert "graph.depends-on-not-sibling" not in codes_for(tmp_path)
 
 
+@pytest.mark.parametrize(
+    ("depends_on", "needle"),
+    [
+        ([{"blocks": "plan"}], "missing slug"),
+        ([{"slug": "a", "extra": "x"}], "unknown keys"),
+        ([{"slug": "a", "blocks": "build"}], "invalid blocks"),
+        ([{"slug": "a", "needs": "started"}], "invalid needs"),
+        (["a", "a"], "duplicate edge"),
+    ],
+)
+def test_dependency_edge_lint_reports_authored_problem(tmp_path: Path, depends_on, needle: str) -> None:
+    write_item(tmp_path, "parent", "type: Epic\nworkflow_status: open\n")
+    document = load(tmp_path / "work/parent.md")
+    document.set("depends_on", depends_on)
+    document.save()
+    assert any(needle in finding.message for finding in lane_report(tmp_path).findings)
+
+
+def test_dependency_naming_its_parent_is_invalid(tmp_path: Path) -> None:
+    write_item(tmp_path, "parent", "type: Epic\nworkflow_status: open\n")
+    write_item(
+        tmp_path,
+        "child",
+        "type: Feature\nworkflow_status: open\nparent: parent\ndepends_on:\n  - parent\n",
+    )
+    findings = lane_report(tmp_path).by_code("graph.depends-on-invalid")
+    assert any("names its parent" in finding.message for finding in findings)
+
+
+def test_distinct_same_slug_gates_are_not_duplicates(tmp_path: Path) -> None:
+    write_item(tmp_path, "a", "type: Feature\nworkflow_status: open\n")
+    write_item(tmp_path, "b", "type: Feature\nworkflow_status: open\n")
+    document = load(tmp_path / "work/b.md")
+    document.set(
+        "depends_on",
+        [
+            {"slug": "a", "blocks": "plan", "needs": "design"},
+            {"slug": "a", "blocks": "execute", "needs": "resolved"},
+        ],
+    )
+    document.save()
+    findings = lane_report(tmp_path).findings
+    assert not any("duplicate edge" in finding.message for finding in findings)
+
+
+def test_phase_compatible_slug_cycle_is_not_reported(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "a",
+        "type: Feature\nworkflow_status: open\ndepends_on:\n  - slug: b\n    blocks: execute\n    needs: design\n",
+    )
+    write_item(
+        tmp_path,
+        "b",
+        "type: Feature\nworkflow_status: open\ndepends_on:\n  - slug: a\n    blocks: plan\n    needs: design\n",
+    )
+    findings = lane_report(tmp_path).findings
+    assert not any(finding.code == "graph.depends-on-cycle" for finding in findings)
+
+
+def test_completion_boundary_schedule_is_not_reported_as_a_dependency_cycle(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "a",
+        "type: Feature\nworkflow_status: open\ndepends_on:\n  - slug: b\n    blocks: finish\n    needs: resolved\n",
+    )
+    write_item(
+        tmp_path,
+        "b",
+        "type: Feature\nworkflow_status: open\ndepends_on:\n  - slug: a\n    blocks: execute\n    needs: execute\n",
+    )
+
+    findings = lane_report(tmp_path).by_code("graph.depends-on-cycle")
+
+    assert findings == ()
+
+
+def test_dependency_completion_gates_the_blocked_phase_entry() -> None:
+    dependency = make_item("dependency")
+    dependent = make_item(
+        "dependent",
+        depends_on=(DependencyEdge("dependency", blocks="execute", needs="plan"),),
+    )
+
+    graph = _phase_dependency_graph((dependency, dependent))
+
+    assert "dependent#execute:entry" in graph["dependency#plan:complete"]
+    assert "dependent#execute:complete" not in graph["dependency#plan:complete"]
+
+
 # --- the two cycles ---------------------------------------------------------
 
 
@@ -118,6 +212,20 @@ def test_a_depends_on_cycle_names_every_participant(tmp_path: Path) -> None:
         "work/2026-08-01-bug-a.md",
         "work/2026-08-02-bug-b.md",
     }
+
+
+def test_a_terminal_dependency_does_not_form_a_phase_cycle(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "a",
+        "type: Feature\nworkflow_status: open\ndepends_on:\n  - b\n",
+    )
+    write_item(
+        tmp_path,
+        "b",
+        "type: Feature\nworkflow_status: resolved\ndepends_on:\n  - a\n",
+    )
+    assert "graph.depends-on-cycle" not in codes_for(tmp_path)
 
 
 def test_a_parent_cycle_names_every_participant(tmp_path: Path) -> None:
@@ -207,11 +315,12 @@ def test_an_item_with_no_children_and_no_key_is_silent(tmp_path: Path) -> None:
 # --- the module's shape -----------------------------------------------------
 
 
-def test_the_module_declares_eight_codes_all_prefixed_graph() -> None:
+def test_the_module_declares_nine_codes_all_prefixed_graph() -> None:
     from work_tracker_okf._rules import graph
 
-    assert len(graph.CODES) == 8
+    assert len(graph.CODES) == 9
     assert all(code.startswith("graph.") for code in graph.CODES)
+    assert "graph.depends-on-invalid" in graph.CODES
 
 
 def test_the_renamed_code_names_type_not_kind() -> None:

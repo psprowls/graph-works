@@ -1,4 +1,5 @@
 from work_helpers import make_item
+from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.hierarchy import (
     WALK_DEPTH_CAP,
     ChildRollup,
@@ -7,7 +8,6 @@ from work_tracker_okf.hierarchy import (
     descend,
     nearest_epic,
     unknown_depends_on,
-    unmet_depends_on,
 )
 
 
@@ -35,33 +35,19 @@ def test_an_archived_child_still_counts_toward_terminal():
     assert child_rollup(_family(), "epic-a").terminal == 2
 
 
-def test_unmet_depends_on_keeps_the_unfinished_and_drops_the_terminal():
-    items = _family()
-    assert unmet_depends_on(items, ("kid-done", "kid-open")) == ("kid-open",)
-
-
-def test_an_unknown_dependency_is_unmet_not_ignored():
-    """Fail-safe: a typo blocks rather than silently letting a stage run."""
-    assert unmet_depends_on(_family(), ("typo-slug",)) == ("typo-slug",)
-
-
-def test_unmet_depends_on_preserves_the_declared_order():
-    items = _family()
-    assert unmet_depends_on(items, ("zzz-unknown", "kid-open")) == ("zzz-unknown", "kid-open")
-
-
 def test_unknown_depends_on_hints_at_a_single_date_prefixed_match():
     items = [make_item("2026-01-01-fix-the-thing"), make_item("other")]
-    assert unknown_depends_on(items, ("fix-the-thing",)) == {"fix-the-thing": "2026-01-01-fix-the-thing"}
+    edges = (DependencyEdge("fix-the-thing"),)
+    assert unknown_depends_on(items, edges) == {"fix-the-thing": "2026-01-01-fix-the-thing"}
 
 
 def test_unknown_depends_on_gives_no_hint_when_two_slugs_match():
     items = [make_item("2026-01-01-dupe"), make_item("2026-02-01-dupe")]
-    assert unknown_depends_on(items, ("dupe",)) == {"dupe": None}
+    assert unknown_depends_on(items, (DependencyEdge("dupe"),)) == {"dupe": None}
 
 
 def test_unknown_depends_on_skips_values_that_name_a_real_item():
-    assert unknown_depends_on(_family(), ("kid-open",)) == {}
+    assert unknown_depends_on(_family(), (DependencyEdge("kid-open"),)) == {}
 
 
 def test_an_epic_at_plan_is_its_own_leaf_not_a_gated_node():
@@ -112,6 +98,23 @@ def test_descend_prefers_in_progress_then_accepted_then_oldest_open():
     assert descend(items, "epic-a").leaf == "a-live"
 
 
+def test_descend_prefers_an_active_childs_parent_over_its_archived_twin() -> None:
+    items = [
+        make_item("epic", type="Epic", phase="execute"),
+        make_item("other", type="Epic", phase="execute"),
+        make_item("child", parent="other", workflow_status="open"),
+        make_item(
+            "child",
+            parent="epic",
+            workflow_status="open",
+            archived=True,
+            path="work/_archive/child.md",
+        ),
+    ]
+
+    assert descend(items, "epic").leaf == "epic"
+
+
 def test_a_mitigated_child_holds_the_gate_but_is_never_the_target():
     items = [
         make_item("epic-a", type="Epic", phase="execute"),
@@ -126,10 +129,44 @@ def test_a_mitigated_child_holds_the_gate_but_is_never_the_target():
 def test_a_child_blocked_on_an_unfinished_dependency_is_not_a_candidate():
     items = [
         make_item("epic-a", type="Epic", phase="execute"),
-        make_item("kid", parent="epic-a", workflow_status="open", depends_on=("blocker",)),
+        make_item(
+            "kid",
+            parent="epic-a",
+            phase="execute",
+            workflow_status="open",
+            depends_on=(DependencyEdge("blocker"),),
+        ),
         make_item("blocker", workflow_status="open"),
     ]
     assert descend(items, "epic-a").leaf is None
+
+
+def test_descend_skips_a_child_blocked_at_its_next_phase() -> None:
+    items = (
+        make_item("epic", type="Epic", phase="execute"),
+        make_item("blocked", parent="epic", phase=None, depends_on=(DependencyEdge("dep", blocks="design"),)),
+        make_item("ready", parent="epic", phase=None, opened="2026-08-02"),
+        make_item("dep", phase="execute", workflow_status="in-progress"),
+    )
+    assert descend(items, "epic").leaf == "ready"
+
+
+def test_descend_allows_repeated_slug_when_only_one_gate_is_satisfied() -> None:
+    child = make_item(
+        "child",
+        parent="epic",
+        phase="plan",
+        depends_on=(
+            DependencyEdge("dep", blocks="plan", needs="design"),
+            DependencyEdge("dep", blocks="plan", needs="execute"),
+        ),
+    )
+    result = descend(
+        (make_item("epic", type="Epic", phase="execute"), child, make_item("dep", phase="plan")),
+        "epic",
+    )
+    assert result.leaf is None
+    assert result.blocked_at == "epic"
 
 
 def test_descend_of_an_unknown_slug_reports_it():
@@ -173,6 +210,17 @@ def _lineage():
 
 def test_nearest_epic_walks_past_a_feature_parent():
     assert nearest_epic(_lineage(), "bug-leaf") == "epic-top"
+
+
+def test_nearest_epic_prefers_an_active_items_parent_over_its_archived_twin():
+    items = [
+        make_item("current", type="Epic"),
+        make_item("historical", type="Epic", archived=True),
+        make_item("child", parent="current"),
+        make_item("child", parent="historical", archived=True, path="work/_archive/child.md"),
+    ]
+
+    assert nearest_epic(items, "child") == "current"
 
 
 def test_an_epic_is_its_own_nearest_epic():

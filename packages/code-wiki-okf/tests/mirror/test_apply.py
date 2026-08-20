@@ -69,7 +69,7 @@ def test_apply_creates_and_fills_generated_sections_in_one_pass(tmp_path: Path) 
     result = apply_mirror(bundle, plan, repo, section_set=section_set)
 
     assert result.created == ("a.py",)
-    target = bundle_root / "repositories" / "acme" / "a.py.md"
+    target = bundle_root / "repositories" / "acme" / "fs" / "a.py.md"
     assert target.exists()
     assert "not yet generated" not in target.read_text(encoding="utf-8")
     reader.close()
@@ -178,10 +178,12 @@ def test_apply_guarded_deletion_removes_file_and_reconciles_index(tmp_path: Path
     apply_mirror(bundle, plan, repo, section_set=section_set)
     reader.close()
 
-    a_target = bundle_root / "repositories" / "acme" / "a.py.md"
-    index_target = bundle_root / "repositories" / "acme" / "index.md"
+    a_target = bundle_root / "repositories" / "acme" / "fs" / "a.py.md"
+    index_target = bundle_root / "repositories" / "acme" / "fs" / "index.md"
+    repo_index_target = bundle_root / "repositories" / "acme" / "index.md"
     assert a_target.exists()
     assert "a.py.md" in index_target.read_text(encoding="utf-8")
+    assert repo_index_target.exists()
 
     # `a.py`'s Notes section is untouched (still the placeholder), so the
     # deletion guard admits it -- unlike test_apply_declined_deletion, this
@@ -243,7 +245,7 @@ def test_apply_rename_preserves_notes_and_removes_old_path(tmp_path: Path) -> No
     apply_mirror(bundle, plan, repo, section_set=section_set)
     reader.close()
 
-    old_target = bundle_root / "repositories" / "acme" / "a.py.md"
+    old_target = bundle_root / "repositories" / "acme" / "fs" / "a.py.md"
     custom_notes = "A human wrote this specific detail about a.py."
     _set_notes(old_target, custom_notes)
 
@@ -257,11 +259,11 @@ def test_apply_rename_preserves_notes_and_removes_old_path(tmp_path: Path) -> No
     plan2 = plan_mirror(bundle2, reader, repo, tracked=("renamed.py",), sha=sha_after, at=_AT)
     result2 = apply_mirror(bundle2, plan2, repo, section_set=section_set)
 
-    new_target = bundle_root / "repositories" / "acme" / "renamed.py.md"
+    new_target = bundle_root / "repositories" / "acme" / "fs" / "renamed.py.md"
     assert new_target.exists()
     assert _notes_body(new_target.read_text(encoding="utf-8")) == custom_notes
     assert not old_target.exists()
-    assert result2.moved == (("repositories/acme/a.py.md", "repositories/acme/renamed.py.md"),)
+    assert result2.moved == (("repositories/acme/fs/a.py.md", "repositories/acme/fs/renamed.py.md"),)
     reader.close()
 
 
@@ -289,7 +291,7 @@ def test_apply_declined_deletion_leaves_file_and_is_reported(tmp_path: Path) -> 
     apply_mirror(bundle, plan, repo, section_set=section_set)
     reader.close()
 
-    a_target = bundle_root / "repositories" / "acme" / "a.py.md"
+    a_target = bundle_root / "repositories" / "acme" / "fs" / "a.py.md"
     _set_notes(a_target, "A human wrote this and does not want a.py's page deleted.")
 
     run_workspace([repo_root], graph_dir=graph_dir, full=True)
@@ -300,5 +302,5 @@ def test_apply_declined_deletion_leaves_file_and_is_reported(tmp_path: Path) -> 
 
     assert a_target.exists()
     assert len(result2.declined_deletions) == 1
-    assert result2.declined_deletions[0].path == "repositories/acme/a.py.md"
+    assert result2.declined_deletions[0].path == "repositories/acme/fs/a.py.md"
     reader.close()

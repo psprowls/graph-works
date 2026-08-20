@@ -257,7 +257,7 @@ name = "graph_works_core verticals sit above shared substrate"
 type = "layers"
 containers = ["graph_works_core"]
 layers = [
-    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : work",
+    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : work : util",
     "agent_substrate : graph : prompts",
     "workspace",
 ]
@@ -274,4 +274,5 @@ modules = [
     "graph_works_core.orchestrate",
     "graph_works_core.wiki_stats",
     "graph_works_core.work",
+    "graph_works_core.util",
 ]

@@ -24,14 +24,16 @@ against a target with no usable declaration.
 Universal frontmatter (`type`, `title`, `resource`) is supplied on every page,
 rich or minimal -- these are the page's own identity, not something a
 generator has opinions about, so they go straight into the returned
-`frontmatter` dict and never into `Render.frontmatter`. `generated`,
-`last_updated_commit`, and `tokens` are this lane's write-time stamp, supplied
-on every page too, but they *are* `File.yaml`'s declared `provenance` keys --
-so for a rich page (the only kind `plan_regenerate` ever sees, per
-`mirror/plan.py`'s `if render.sections` guard) they also go into
-`Render.frontmatter`, alongside whichever of `language`/`package`/`role_flags`
-this rich page has, so a later regeneration pass restamps provenance and
-re-verifies owned keys instead of only refreshing section bodies.
+`frontmatter` dict and never into `Render.frontmatter`. `generated` and
+`last_updated_commit` are this lane's write-time stamp, supplied on every page
+too, but they *are* `File.yaml`'s declared `provenance` keys -- so for a rich
+page (the only kind `plan_regenerate` ever sees, per `mirror/plan.py`'s
+`if render.sections` guard) they also go into `Render.frontmatter`, alongside
+whichever of `language`/`package`/`role_flags` this rich page has, so a later
+regeneration pass restamps provenance and re-verifies owned keys instead of
+only refreshing section bodies. `tokens` is also a declared `provenance` key
+but is not stamped by this lane -- `run_tokens_update` (graph-works-core) is
+its sole writer; see 2026-08-19-tech-debt-tokens-metric-proxy-string.
 """
 
 from __future__ import annotations
@@ -43,12 +45,11 @@ from typing import Any
 from code_graph_io import ExportRecord, ImporterRecord, ImportRecord, NodeRecord
 from code_graph_io.handle import GraphReader
 from code_graph_io.source_meta import extension_languages
-from code_graph_io.tokens import count_tokens
 from okf_ext.generators import Render
 
 from code_wiki_okf import __version__
 from code_wiki_okf.config import RepoConfig
-from code_wiki_okf.provenance import generated_value, last_updated_commit_value, tokens_value
+from code_wiki_okf.provenance import generated_value, last_updated_commit_value
 
 _NONE_MARKER = "_(none)_"
 _GENERATOR_ID = f"code-wiki-okf/{__version__}"
@@ -113,7 +114,6 @@ def render_file(
     if description is None:
         frontmatter["generated"] = generated_value(by=_GENERATOR_ID, at=at)
         frontmatter["last_updated_commit"] = last_updated_commit_value(sha)
-        frontmatter["tokens"] = tokens_value(count_tokens(""))
         return frontmatter, Render()
 
     language = extension_languages().get(Path(rel_path).suffix)
@@ -129,11 +129,9 @@ def render_file(
     imports = _render_imports(reader.imports(path=rel_path))
     exports = _render_exports(description.exports)
     imported_by = _render_imported_by(reader.imported_by(path=rel_path, depth=1))
-    tokens_source = "\n".join((symbols, imports, exports, imported_by))
 
     frontmatter["generated"] = generated_value(by=_GENERATOR_ID, at=at)
     frontmatter["last_updated_commit"] = last_updated_commit_value(sha)
-    frontmatter["tokens"] = tokens_value(count_tokens(tokens_source))
 
     render_frontmatter = {key: value for key, value in frontmatter.items() if key not in {"type", "title", "resource"}}
     render = Render(

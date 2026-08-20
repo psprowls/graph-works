@@ -7,14 +7,15 @@ moving, carrying an `**If wrong:**` blast-radius line), `open` (surfaced,
 unanswered), and `superseded` (replaced by a later entry, never deleted).
 
 Three layers, one module, because they are cohesive rather than merely
-co-located: `render` is `parse`'s inverse, and each mutator is one
-read -> mutate -> render -> write cycle, so splitting text from file would put
-both halves of a single round trip in different modules.
+co-located: `render` is `parse`'s inverse, planners hold immutable snapshots,
+and `apply_plan` enforces each snapshot under the same lock as the replacement
+write.
 
-    text (pure)    parse / render / prose_block — never raises on bad input
-    file           load / append / set_fields / supersede — every mutation
-                   serialized behind an exclusive flock on a sibling dotfile,
-                   written via temp file + `Path.replace`
+    text (pure)    parse / render / prose helpers — never raises on bad input
+    mutation       plan_* (write-free) / apply_plan (stale-safe); legacy direct
+                   mutators remain compatibility wrappers
+    file           exclusive flock on a sibling dotfile, then temp file +
+                   `Path.replace`
     query (pure)   query / counts over already-parsed entries
 
 `parse` is deliberately tolerant, which is the package rule ("nothing on the
@@ -40,11 +41,22 @@ import re
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
+from datetime import date
 from pathlib import Path
+from typing import Literal
 
 from work_tracker_okf.paths import LEDGER_FILENAME
 
 VALID_STATUSES = frozenset({"answered", "assumed", "open", "superseded"})
+
+DecisionRefusal = Literal[
+    "answer-required",
+    "if-wrong-required",
+    "status-disallowed",
+    "transition-disallowed",
+    "unknown-decision",
+    "superseded-decision",
+]
 
 #: Derived from the ledger's own filename rather than re-typed, so renaming the
 #: ledger cannot orphan its lock.
@@ -106,6 +118,37 @@ class LedgerParse:
     preamble: str = ""
     entries: list[Decision] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerSnapshot:
+    """The exact ledger text a mutation plan was derived from."""
+
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionPlan:
+    """An inspectable, write-free decision-ledger mutation."""
+
+    ledger: Path
+    snapshot: LedgerSnapshot
+    before: tuple[Decision, ...]
+    after: tuple[Decision, ...]
+    primary: Decision | None
+    superseded: Decision | None
+    warnings: tuple[str, ...]
+    refusal: DecisionRefusal | None
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionApplication:
+    """The observable result of applying a decision plan."""
+
+    entries: tuple[Decision, ...] = ()
+    written: bool = False
+    stale: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -300,6 +343,62 @@ def prose_block(decision: Decision, label: str) -> str | None:
     return None
 
 
+_PROSE_LABELS = ("Answer", "Rationale", "If wrong")
+
+
+def compose_prose(*, answer: str | None = None, rationale: str | None = None, if_wrong: str | None = None) -> str:
+    """Compose the ledger's recognized bold-labelled prose in canonical order."""
+    values = (("Answer", answer), ("Rationale", rationale), ("If wrong", if_wrong))
+    return "\n\n".join(f"**{label}:** {value.strip()}" for label, value in values if value is not None)
+
+
+def _prose_blocks(prose: str) -> list[str]:
+    return [block.strip("\n") for block in re.split(r"\n[ \t]*\n", prose.strip("\n")) if block.strip()]
+
+
+def _prose_label(block: str) -> str | None:
+    first_line = block.splitlines()[0].lstrip()
+    return next((label for label in _PROSE_LABELS if first_line.startswith(f"**{label}:**")), None)
+
+
+def merge_prose(existing: str, replacement: str) -> str:
+    """Replace recognized labelled blocks while preserving unrelated prose.
+
+    A newly supplied label is placed beside the earlier canonical labels rather
+    than appended after an unrelated note. Recognized labels omitted from
+    *replacement* stay untouched.
+    """
+    blocks = _prose_blocks(existing)
+    replacements = {label: block for block in _prose_blocks(replacement) if (label := _prose_label(block))}
+    for label in _PROSE_LABELS:
+        new_block = replacements.get(label)
+        if new_block is None:
+            continue
+        found = [index for index, block in enumerate(blocks) if _prose_label(block) == label]
+        if found:
+            first = found[0]
+            blocks[first] = new_block
+            blocks = [block for index, block in enumerate(blocks) if index == first or _prose_label(block) != label]
+            continue
+        earlier = set(_PROSE_LABELS[: _PROSE_LABELS.index(label)])
+        insertion = max(
+            (index + 1 for index, block in enumerate(blocks) if _prose_label(block) in earlier),
+            default=0,
+        )
+        blocks.insert(insertion, new_block)
+    blocks.extend(block for block in _prose_blocks(replacement) if _prose_label(block) is None)
+    return "\n\n".join(blocks)
+
+
+def _without_prose_labels(prose: str, labels: frozenset[str]) -> str:
+    return "\n\n".join(block for block in _prose_blocks(prose) if _prose_label(block) not in labels)
+
+
+def decided_stamp(on: date, decided_by: str) -> str:
+    """Format a decision stamp using caller-supplied values only."""
+    return f"{on.isoformat()} by {decided_by}"
+
+
 def id_number(decision_id: str) -> int:
     """`'D-014'` / `'014'` / `'14'` -> `14`. Raises `ValueError` on anything else.
 
@@ -313,6 +412,29 @@ def id_number(decision_id: str) -> int:
     if not digits.isdigit():
         raise ValueError(f"malformed decision id {decision_id!r}; expected a form like 'D-014'")
     return int(digits)
+
+
+def extract_cited_decisions(text: str) -> tuple[str, ...]:
+    """Every `D-nnn` id referenced in *text*, deduped, first-seen order.
+
+    Reuses this module's `_ID_RE` rather than restating the pattern — a fourth
+    copy of it in the package is what splitting the reconcile scans by concern
+    exists to avoid.
+
+    Ids come back **verbatim**, so `D-14` and `D-014` stay distinct strings;
+    the caller unifies them by number through `id_number`, exactly as `query`'s
+    `cites` filter already does. The scan cannot distinguish a live citation
+    from an illustrative id — which is why documentation discussing the ledger
+    writes the pattern with letters rather than concrete digits.
+    """
+    seen: set[str] = set()
+    found: list[str] = []
+    for match in _ID_RE.finditer(text):
+        raw = match.group(0)
+        if raw not in seen:
+            seen.add(raw)
+            found.append(raw)
+    return tuple(found)
 
 
 # ---------------------------------------------------------------------------
@@ -338,15 +460,18 @@ class Unset:
 UNSET = Unset()
 
 
+def _read_text(ledger: Path) -> str:
+    """Read exact ledger text; absence is the empty snapshot."""
+    return "" if not ledger.exists() else ledger.read_bytes().decode("utf-8")
+
+
 def load(ledger: Path) -> LedgerParse:
     """Parse the ledger at *ledger*; an absent file reads as empty.
 
     Reads never fail on content or on absence — a pre-design epic legitimately
     has no ledger.
     """
-    if not ledger.exists():
-        return LedgerParse()
-    return parse(ledger.read_text(encoding="utf-8"))
+    return parse(_read_text(ledger))
 
 
 @contextmanager
@@ -400,6 +525,264 @@ def _check_status(status: str) -> str:
     return status
 
 
+def _plan_refusal(
+    ledger: Path,
+    snapshot: LedgerSnapshot,
+    parsed: LedgerParse,
+    refusal: DecisionRefusal,
+    detail: str,
+) -> DecisionPlan:
+    before = tuple(parsed.entries)
+    return DecisionPlan(
+        ledger=ledger,
+        snapshot=snapshot,
+        before=before,
+        after=before,
+        primary=None,
+        superseded=None,
+        warnings=tuple(parsed.warnings),
+        refusal=refusal,
+        detail=detail,
+    )
+
+
+def plan_append(
+    ledger: Path,
+    *,
+    question: str,
+    status: str,
+    answer: str | None,
+    rationale: str | None,
+    if_wrong: str | None,
+    affects: Sequence[str],
+    on: date,
+    decided_by: str,
+) -> DecisionPlan:
+    """Plan a decision append from an immutable byte-for-byte snapshot."""
+    snapshot = LedgerSnapshot(_read_text(ledger))
+    parsed = parse(snapshot.text)
+    if status not in {"open", "assumed", "answered"}:
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "status-disallowed",
+            f"status {status!r} cannot be appended",
+        )
+    if status in {"assumed", "answered"} and (answer is None or not answer.strip()):
+        return _plan_refusal(ledger, snapshot, parsed, "answer-required", f"status {status!r} requires an answer")
+    if status == "assumed" and (if_wrong is None or not if_wrong.strip()):
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "if-wrong-required",
+            "status 'assumed' requires an if-wrong consequence",
+        )
+
+    entry_id, number = _next_id(parsed.entries)
+    decided = decided_stamp(on, decided_by) if status in {"answered", "assumed"} else None
+    entry = Decision(
+        id=entry_id,
+        number=number,
+        question=question.strip(),
+        status=status,
+        affects=tuple(affects),
+        decided=decided,
+        prose=compose_prose(answer=answer, rationale=rationale, if_wrong=if_wrong),
+        _present_keys=_present_keys_for(affects=affects, decided=decided),
+    )
+    before = tuple(parsed.entries)
+    return DecisionPlan(
+        ledger=ledger,
+        snapshot=snapshot,
+        before=before,
+        after=(*before, entry),
+        primary=entry,
+        superseded=None,
+        warnings=tuple(parsed.warnings),
+        refusal=None,
+        detail=f"append {entry.id}",
+    )
+
+
+def _find(entries: Sequence[Decision], decision_id: str) -> tuple[Decision, int] | None:
+    try:
+        number = id_number(decision_id)
+    except ValueError:
+        return None
+    return next(((entry, index) for index, entry in enumerate(entries) if entry.number == number), None)
+
+
+def plan_update(
+    ledger: Path,
+    decision_id: str,
+    *,
+    answer: str,
+    rationale: str | None,
+    on: date,
+    decided_by: str,
+) -> DecisionPlan:
+    """Plan answering an `open` or `assumed` decision. Writes nothing."""
+    snapshot = LedgerSnapshot(_read_text(ledger))
+    parsed = parse(snapshot.text)
+    found = _find(parsed.entries, decision_id)
+    if found is None:
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "unknown-decision",
+            f"no decision {decision_id!r} in this ledger",
+        )
+    entry, index = found
+    if entry.status == "superseded":
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "superseded-decision",
+            f"{entry.id} is superseded; answer the entry that replaced it",
+        )
+    if entry.status not in {"open", "assumed"}:
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "transition-disallowed",
+            f"{entry.id} has status {entry.status!r}; only open or assumed decisions can be answered",
+        )
+    if not answer.strip():
+        return _plan_refusal(ledger, snapshot, parsed, "answer-required", "answer must not be empty")
+
+    retained = _without_prose_labels(entry.prose, frozenset({"Answer", "Rationale"}))
+    prose = merge_prose(retained, compose_prose(answer=answer, rationale=rationale))
+    updated = replace(
+        entry,
+        status="answered",
+        decided=decided_stamp(on, decided_by),
+        prose=prose,
+        _present_keys=entry._present_keys | frozenset({"decided"}),
+    )
+    after = list(parsed.entries)
+    after[index] = updated
+    return DecisionPlan(
+        ledger=ledger,
+        snapshot=snapshot,
+        before=tuple(parsed.entries),
+        after=tuple(after),
+        primary=updated,
+        superseded=None,
+        warnings=tuple(parsed.warnings),
+        refusal=None,
+        detail=f"answer {updated.id}",
+    )
+
+
+def plan_supersede(
+    ledger: Path,
+    old_id: str,
+    *,
+    question: str,
+    answer: str,
+    rationale: str | None,
+    on: date,
+    decided_by: str,
+    affects: Sequence[str] | None = None,
+) -> DecisionPlan:
+    """Plan retiring one decision and appending its answered replacement."""
+    snapshot = LedgerSnapshot(_read_text(ledger))
+    parsed = parse(snapshot.text)
+    found = _find(parsed.entries, old_id)
+    if found is None:
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "unknown-decision",
+            f"no decision {old_id!r} in this ledger",
+        )
+    old, index = found
+    if old.status == "superseded":
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "superseded-decision",
+            f"{old.id} is already superseded; supersede the entry that replaced it",
+        )
+    if not answer.strip():
+        return _plan_refusal(ledger, snapshot, parsed, "answer-required", "answer must not be empty")
+
+    entry_id, number = _next_id(parsed.entries)
+    retired = replace(old, status="superseded")
+    final_affects = tuple(affects) if affects is not None else old.affects
+    stamp = decided_stamp(on, decided_by)
+    replacement = Decision(
+        id=entry_id,
+        number=number,
+        question=question.strip(),
+        status="answered",
+        affects=final_affects,
+        decided=stamp,
+        supersedes=old.id,
+        prose=compose_prose(answer=answer, rationale=rationale),
+        _present_keys=_present_keys_for(affects=final_affects, decided=stamp, supersedes=old.id),
+    )
+    after = list(parsed.entries)
+    after[index] = retired
+    after.append(replacement)
+    return DecisionPlan(
+        ledger=ledger,
+        snapshot=snapshot,
+        before=tuple(parsed.entries),
+        after=tuple(after),
+        primary=replacement,
+        superseded=retired,
+        warnings=tuple(parsed.warnings),
+        refusal=None,
+        detail=f"supersede {retired.id} with {replacement.id}",
+    )
+
+
+def _apply_plan_locked(plan: DecisionPlan) -> DecisionApplication:
+    current = _read_text(plan.ledger)
+    if current != plan.snapshot.text:
+        return DecisionApplication(stale=True)
+    _write(plan.ledger, render(parse(current).preamble, plan.after))
+    return DecisionApplication(entries=plan.after, written=True)
+
+
+def apply_plan(plan: DecisionPlan) -> DecisionApplication:
+    """Apply a non-refused plan only when its snapshot is still current."""
+    if plan.refusal is not None:
+        return DecisionApplication()
+    with _locked(plan.ledger):
+        return _apply_plan_locked(plan)
+
+
+def _apply_compatibly(planner: Callable[[], DecisionPlan]) -> DecisionPlan:
+    """Apply a legacy direct mutator, re-planning after concurrent writes."""
+    while True:
+        plan = planner()
+        application = apply_plan(plan)
+        if application.stale:
+            continue
+        if not application.written:
+            raise AssertionError("compatibility mutation unexpectedly refused")
+        return plan
+
+
+def _apply_compatibly_under_lock(planner: Callable[[], DecisionPlan], ledger: Path) -> DecisionPlan:
+    """Plan and apply once under one lock for callback-dependent mutations."""
+    with _locked(ledger):
+        plan = planner()
+        application = _apply_plan_locked(plan)
+    if not application.written:
+        raise AssertionError("lock-held compatibility mutation unexpectedly went stale")
+    return plan
+
+
 def append(
     ledger: Path,
     *,
@@ -410,14 +793,16 @@ def append(
     decided: str | None = None,
     supersedes: str | None = None,
 ) -> Decision:
-    """Allocate the next id and append an entry.
+    """Compatibility wrapper that plans and applies a low-level append.
 
-    Read -> allocate -> write happens inside one exclusive lock, so concurrent
-    fan-out writers never collide.
+    A stale application is re-planned from the newer ledger, preserving the
+    original API's cross-process max-plus-one allocation guarantee.
     """
     _check_status(status)
-    with _locked(ledger):
-        parsed = load(ledger)
+
+    def plan() -> DecisionPlan:
+        snapshot = LedgerSnapshot(_read_text(ledger))
+        parsed = parse(snapshot.text)
         entry_id, number = _next_id(parsed.entries)
         entry = Decision(
             id=entry_id,
@@ -430,9 +815,22 @@ def append(
             prose=prose.strip("\n"),
             _present_keys=_present_keys_for(affects=affects, decided=decided, supersedes=supersedes),
         )
-        parsed.entries.append(entry)
-        _write(ledger, render(parsed.preamble, parsed.entries))
-    return entry
+        before = tuple(parsed.entries)
+        return DecisionPlan(
+            ledger=ledger,
+            snapshot=snapshot,
+            before=before,
+            after=(*before, entry),
+            primary=entry,
+            superseded=None,
+            warnings=tuple(parsed.warnings),
+            refusal=None,
+            detail=f"append {entry.id}",
+        )
+
+    applied = _apply_compatibly(plan)
+    assert applied.primary is not None
+    return applied.primary
 
 
 def set_fields(
@@ -468,8 +866,9 @@ def set_fields(
     if not isinstance(status, Unset):
         _check_status(status)
 
-    with _locked(ledger):
-        parsed = load(ledger)
+    def plan() -> DecisionPlan:
+        snapshot = LedgerSnapshot(_read_text(ledger))
+        parsed = parse(snapshot.text)
         entry, index = _require(parsed.entries, decision_id)
         if entry.status == "superseded":
             raise ValueError(f"{entry.id} is superseded; edit the entry that replaced it instead")
@@ -498,9 +897,23 @@ def set_fields(
             _present_keys=entry._present_keys
             | _present_keys_for(affects=new_affects, decided=new_decided, supersedes=new_supersedes),
         )
-        parsed.entries[index] = updated
-        _write(ledger, render(parsed.preamble, parsed.entries))
-    return updated
+        after = list(parsed.entries)
+        after[index] = updated
+        return DecisionPlan(
+            ledger=ledger,
+            snapshot=snapshot,
+            before=tuple(parsed.entries),
+            after=tuple(after),
+            primary=updated,
+            superseded=None,
+            warnings=tuple(parsed.warnings),
+            refusal=None,
+            detail=f"update {updated.id}",
+        )
+
+    applied = _apply_compatibly_under_lock(plan, ledger) if prose_merge is not None else _apply_compatibly(plan)
+    assert applied.primary is not None
+    return applied.primary
 
 
 def supersede(
@@ -518,8 +931,10 @@ def supersede(
     pair half-applied. Returns `(retired, replacement)`; `affects` defaults to
     the old entry's.
     """
-    with _locked(ledger):
-        parsed = load(ledger)
+
+    def plan() -> DecisionPlan:
+        snapshot = LedgerSnapshot(_read_text(ledger))
+        parsed = parse(snapshot.text)
         old, index = _require(parsed.entries, old_id)
         if old.status == "superseded":
             raise ValueError(f"{old.id} is already superseded; supersede the entry that replaced it instead")
@@ -537,10 +952,24 @@ def supersede(
             prose=prose.strip("\n"),
             _present_keys=_present_keys_for(affects=final_affects, decided=decided, supersedes=old.id),
         )
-        parsed.entries[index] = retired
-        parsed.entries.append(replacement)
-        _write(ledger, render(parsed.preamble, parsed.entries))
-    return retired, replacement
+        after = list(parsed.entries)
+        after[index] = retired
+        after.append(replacement)
+        return DecisionPlan(
+            ledger=ledger,
+            snapshot=snapshot,
+            before=tuple(parsed.entries),
+            after=tuple(after),
+            primary=replacement,
+            superseded=retired,
+            warnings=tuple(parsed.warnings),
+            refusal=None,
+            detail=f"supersede {retired.id} with {replacement.id}",
+        )
+
+    applied = _apply_compatibly(plan)
+    assert applied.superseded is not None and applied.primary is not None
+    return applied.superseded, applied.primary
 
 
 # ---------------------------------------------------------------------------
@@ -600,13 +1029,25 @@ __all__ = [
     "UNSET",
     "VALID_STATUSES",
     "Decision",
+    "DecisionApplication",
+    "DecisionPlan",
+    "DecisionRefusal",
     "LedgerParse",
+    "LedgerSnapshot",
     "Unset",
     "append",
+    "apply_plan",
+    "compose_prose",
     "counts",
+    "decided_stamp",
+    "extract_cited_decisions",
     "id_number",
     "load",
+    "merge_prose",
     "parse",
+    "plan_append",
+    "plan_supersede",
+    "plan_update",
     "prose_block",
     "query",
     "render",

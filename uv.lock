@@ -280,7 +280,7 @@ requires-dist = [
 
 [[package]]
 name = "code-wiki-okf"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "packages/code-wiki-okf" }
 dependencies = [
     { name = "code-graph-io" },
@@ -414,7 +414,7 @@ requires-dist = [
 
 [[package]]
 name = "graph-works-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/graph-works-core" }
 dependencies = [
     { name = "code-graph-io" },
@@ -2075,7 +2075,7 @@ wheels = [
 
 [[package]]
 name = "work-tracker-okf"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/work-tracker-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },

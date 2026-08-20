@@ -255,6 +255,23 @@ def test_file_dry_run_writes_nothing(tmp_path) -> None:
 
 def test_file_carries_every_optional_field(tmp_path) -> None:
     _init(tmp_path)
+    for type_, title in (("Epic", "Parent"), ("Feature", "A"), ("Feature", "B")):
+        seeded = runner.invoke(
+            app,
+            [
+                "file",
+                str(tmp_path),
+                "--type",
+                type_,
+                "--title",
+                title,
+                "--description",
+                "D",
+                "--today",
+                "2026-08-11",
+            ],
+        )
+        assert seeded.exit_code == 0, seeded.output
     result = runner.invoke(
         app,
         [
@@ -268,13 +285,12 @@ def test_file_carries_every_optional_field(tmp_path) -> None:
             "D",
             "--words",
             "child feature",
-            "--epic-child",
             "--parent",
             "2026-08-11-epic-parent",
             "--depends-on",
-            "a",
+            "2026-08-11-feature-a",
             "--depends-on",
-            "b",
+            "2026-08-11-feature-b",
             "--affects",
             "packages/work-tracker-okf",
             "--tags",
@@ -288,7 +304,7 @@ def test_file_carries_every_optional_field(tmp_path) -> None:
     assert result.exit_code == 0
     text = (tmp_path / "work" / "2026-08-11-epic-feature-child-feature.md").read_text(encoding="utf-8")
     assert "parent: 2026-08-11-epic-parent" in text
-    assert "- a" in text and "- b" in text
+    assert "- 2026-08-11-feature-a" in text and "- 2026-08-11-feature-b" in text
     assert "- port" in text and "- cli" in text
 
 

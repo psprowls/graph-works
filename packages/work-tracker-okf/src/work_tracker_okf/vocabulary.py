@@ -39,6 +39,9 @@ EFFORTS: frozenset[str] = frozenset({"xtra-small", "small", "medium", "large", "
 #: W-D's axis: OKF's own document status, not the work one.
 DOCUMENT_STATUSES: frozenset[str] = frozenset({"draft", "stable", "deprecated"})
 
+#: The filing scope carried by a work item when it is created.
+BLAST_RADII: frozenset[str] = frozenset({"file", "package", "domain", "system"})
+
 #: The three `workflow_status` values that end a pipeline. Archive eligibility
 #: (child 4) is membership in this set and nothing else.
 TERMINAL_STATUSES: frozenset[str] = frozenset({"resolved", "wontfix", "superseded"})
@@ -124,6 +127,7 @@ def is_source_id(value: str) -> bool:
 __all__ = [
     "ARTIFACT_KINDS",
     "ARTIFACT_PHASES",
+    "BLAST_RADII",
     "BUG_LIKE_TYPES",
     "DIAGNOSIS_TYPES",
     "DOCUMENT_STATUSES",

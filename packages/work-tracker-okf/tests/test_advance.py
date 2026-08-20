@@ -5,6 +5,7 @@ import pytest
 from okf_io import Bundle, parse
 from work_helpers import make_item
 from work_tracker_okf.advance import AdvancePlan, FieldChange, advance, apply
+from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import load_items
 from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition
 
@@ -32,6 +33,25 @@ def test_a_blocked_route_is_refused_with_the_blockers_as_detail():
     plan = _plan_for([make_item("a", type="Widget")], "a")
     assert plan.refusal == "blocked"
     assert "Widget" in plan.detail
+
+
+def test_advance_only_blocks_at_the_dependency_edge_phase() -> None:
+    dependency = make_item("dep", phase="design", workflow_status="in-progress")
+    edge = DependencyEdge("dep", blocks="execute", needs="resolved")
+    before_gate = _plan_for([make_item("feature", phase="plan", depends_on=(edge,)), dependency], "feature")
+    at_gate = _plan_for([make_item("feature", phase="execute", depends_on=(edge,)), dependency], "feature")
+    assert before_gate.refusal is None
+    assert at_gate.refusal == "blocked"
+
+
+def test_advance_refuses_a_satisfied_but_invalid_parent_dependency() -> None:
+    items = [
+        make_item("parent", type="Epic", workflow_status="resolved"),
+        make_item("child", parent="parent", phase="execute", depends_on=(DependencyEdge("parent"),)),
+    ]
+    plan = _plan_for(items, "child")
+    assert plan.refusal == "blocked"
+    assert "targets-parent" in plan.detail
 
 
 def test_a_satisfied_gate_with_nothing_to_advance_is_still_advanceable():

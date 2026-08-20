@@ -5,16 +5,16 @@ sections:
   - heading: Purpose
     required: true
     placeholder: |
-      > TODO: <One paragraph: what this suite tests and why.>
+      > TODO: what this suite tests and why, in one paragraph.
   - heading: How to run
     placeholder: |
-      > TODO: <The exact command(s) to run this suite.>
+      > TODO: the exact command(s) to run this suite.
   - heading: Test conventions
     placeholder: |
-      > TODO: <Naming, structure, and style conventions this suite follows.>
+      > TODO: the naming, structure, and style conventions this suite follows.
   - heading: Fixtures
     placeholder: |
-      > TODO: <Shared fixtures this suite relies on and where they live.>
+      > TODO: the shared fixtures this suite relies on, and where they live.
   - heading: Files
     ownership: generated
     required: true

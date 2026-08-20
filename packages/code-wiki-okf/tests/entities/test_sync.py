@@ -15,13 +15,15 @@ from collections.abc import Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
+import code_wiki_okf
 import pytest
 from code_graph_io import open_reader
 from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
-from code_wiki_okf.entities.sync import plan_entities, sync_entities
+from code_wiki_okf.entities.sync import _stamp_provenance, plan_entities, sync_entities
 from code_wiki_okf.init import install_bundle
+from okf_ext.generators import Render
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
@@ -215,6 +217,18 @@ def test_fixture_seed_round_trips_through_open_reader(tmp_path: Path) -> None:
         assert desc.language == "python"
 
 
+# --- tokens is no longer a sync-owned key ------------------------------------
+# `run_tokens_update` (graph-works-core) is the field's sole writer now; a
+# per-kind proxy string here would double-write it. See
+# 2026-08-19-tech-debt-tokens-metric-proxy-string.
+
+
+def test_stamp_provenance_does_not_write_tokens() -> None:
+    render = _stamp_provenance(Render(), sha="deadbeef", at=_AT)
+
+    assert "tokens" not in render.frontmatter
+
+
 # --- Acceptance criteria -----------------------------------------------------
 
 
@@ -272,9 +286,8 @@ def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> Non
     assert pkg_doc.fm_raw.get("test_suites") == []
     assert pkg_doc.fm_raw.get("entry_points") == []
     generated = pkg_doc.fm_raw.get("generated")
-    assert generated is not None and generated.get("by") == "code-wiki-okf/0.2.0"
-    assert isinstance(pkg_doc.fm_raw.get("tokens"), int)
-    assert pkg_doc.fm_raw.get("tokens") >= 0
+    assert generated is not None and generated.get("by") == f"code-wiki-okf/{code_wiki_okf.__version__}"
+    assert "tokens" not in pkg_doc.fm_raw
 
     app_doc = bundle_after.concept("apps/cli-app")
     assert app_doc is not None
@@ -315,7 +328,7 @@ def test_sync_preserves_hand_edited_prose_section(tmp_path: Path) -> None:
 
     page = bundle_root / "packages" / "widgets.md"
     original = page.read_text(encoding="utf-8")
-    placeholder = "> TODO: <One paragraph: what this package does, who uses it, why it exists.>"
+    placeholder = "> TODO: what this package does, who uses it, and why it exists, in one paragraph."
     assert placeholder in original
     edited = original.replace(placeholder, "Widgets, hand-built for the acme storefront.")
     page.write_text(edited, encoding="utf-8")

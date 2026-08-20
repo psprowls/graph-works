@@ -60,7 +60,7 @@ async def test_a_placeholder_body_is_a_first_fill(scanned):
     assert task.trigger == "first_fill"
     assert set(task.prose_sections) == {"## Purpose", "## Public API"}
     assert task.page_path == "packages/widgets.md"
-    assert summary.written  # the structural pass ran and wrote pages
+    assert summary.entities.written  # the structural pass ran and wrote pages
 
 
 async def test_equal_anchors_on_a_written_page_are_not_stale(scanned):

@@ -1,5 +1,9 @@
-from okf_io import Bundle
-from work_tracker_okf.items import WorkItem, load_items
+from pathlib import Path
+
+from okf_io import Bundle, load_bundle
+from work_helpers import write_item
+from work_tracker_okf.dependencies import DependencyEdge
+from work_tracker_okf.items import IGNORE, WorkItem, load_items
 
 
 def _by_slug(bundle: Bundle) -> dict[str, WorkItem]:
@@ -56,7 +60,7 @@ def test_an_active_item_projects_every_field(minimal_bundle: Bundle) -> None:
     assert item.updated == "2026-02-02"
     assert item.affects == ("packages/work-tracker-okf",)
     assert item.parent == "epic-alpha"
-    assert item.depends_on == ("spike-zeta",)
+    assert item.depends_on == (DependencyEdge("spike-zeta"),)
     assert item.owner is None
     assert item.resolved_in is None
     assert item.superseded_by is None
@@ -145,7 +149,33 @@ def test_a_bare_string_where_a_list_belongs_is_empty_not_characters(minimal_bund
 
 
 def test_non_string_entries_are_dropped_from_a_list_field(minimal_bundle: Bundle) -> None:
-    assert _by_slug(minimal_bundle)["broken-eta"].depends_on == ("good-slug",)
+    assert _by_slug(minimal_bundle)["broken-eta"].depends_on == (DependencyEdge("good-slug"),)
+
+
+def test_dependency_strings_and_mappings_project_to_edges(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "item",
+        "type: Feature\nworkflow_status: open\nstatus: draft\n"
+        "depends_on:\n  - a\n  - slug: b\n    blocks: plan\n    needs: design\n",
+    )
+    item = load_items(load_bundle(tmp_path, ignore=IGNORE))[0]
+    assert item.depends_on == (
+        DependencyEdge("a"),
+        DependencyEdge("b", blocks="plan", needs="design"),
+    )
+
+
+def test_bad_dependency_shapes_remain_lintable(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "item",
+        "type: Feature\nworkflow_status: open\nstatus: draft\n"
+        "depends_on:\n  - slug: a\n    blocks: build\n    extra: 1\n",
+    )
+    item = load_items(load_bundle(tmp_path, ignore=IGNORE))[0]
+    assert item.depends_on == (DependencyEdge("a", blocks="build"),)
+    assert {issue.code for issue in item.dependency_issues} == {"invalid-blocks", "unknown-keys"}
 
 
 def test_items_are_frozen_and_sorted_by_slug(minimal_bundle: Bundle) -> None:

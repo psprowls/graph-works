@@ -35,10 +35,12 @@ _ENTITY_LANE_PREFIXES: tuple[str, ...] = tuple(lane for lane in ENTITY_LANES if 
 
 def _is_entity_repository_page(concept_id: str) -> bool:
     """`repositories/<name>` (the Repository entity page) -- never
-    `repositories/<name>/<rel_path...>` (a mirror File page). A plain
+    `repositories/<name>/fs/<rel_path...>` (a mirror File page). A plain
     `startswith("repositories/")` cannot tell the two apart; `entities/delete.py`'s
     own docstring warns callers to keep the distinction, which this makes by
-    checking depth instead of prefix alone.
+    checking depth instead of prefix alone. The depth check is root-agnostic:
+    it asks "is there anything below `<name>`", so `mirror/paths.MIRROR_SUBDIR`
+    moving the mirror down a level did not change it.
     """
     rest = concept_id.removeprefix("repositories/")
     return rest != concept_id and "/" not in rest

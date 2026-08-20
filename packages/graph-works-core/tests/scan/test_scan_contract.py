@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
+from graph_works_core.scan.commands import scan_results_dir
 from graph_works_core.scan.scan_contract import (
     SCHEMA_VERSION,
     ApplyResult,
@@ -19,6 +21,12 @@ from graph_works_core.scan.scan_contract import (
     worklist_from_payload,
     worklist_payload,
 )
+from graph_works_core.workspace.layout import layout_for
+
+
+def test_scan_results_dir_is_beside_the_worklist_and_briefs(tmp_path: Path) -> None:
+    layout = layout_for(tmp_path, cache_dir="custom-cache")
+    assert scan_results_dir(layout) == tmp_path / "custom-cache" / "scan" / "results"
 
 
 def _task(uri: str, *, diff: str | None = "packages/widgets/src/a.py") -> ProseRefreshTask:

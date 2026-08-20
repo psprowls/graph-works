@@ -18,17 +18,14 @@ from okf_ext.schemas import declared_directories, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
 from okf_ext.tags import load_vocabulary, vocabulary_rule
-from okf_io import append_log_entry, load_bundle
+from okf_io import load_bundle
 from okf_io import validate as okf_validate
 
 from code_wiki_okf.config import Config, ConfigError, load_config
 from code_wiki_okf.entities import lanes
-from code_wiki_okf.git_state import head_commit
 from code_wiki_okf.init import InitError, install_bundle
-from code_wiki_okf.mirror.apply import apply_mirror
+from code_wiki_okf.mirror.lanes import sync_mirror
 from code_wiki_okf.mirror.model import MirrorPlan, MirrorResult
-from code_wiki_okf.mirror.plan import plan_mirror
-from code_wiki_okf.mirror.walk import tracked_files
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import snapshot_bundle
 
@@ -216,76 +213,37 @@ def sync(
             f"declined {len(entity_result.declined)}"
         )
 
-    # --- mirror half: one plan/apply pass per repo ---
-    # Reads the bundle's declarations, not this package's own assets. Normally
-    # the two are identical -- the install seeds byte-for-byte copies -- but
-    # they diverge the moment a human edits the bundle's `_sections/File.yaml`,
-    # and then `sync` writes pages from one shape while `validate` checks them
-    # against another. One bundle, one answer about what a `File` page looks
-    # like.
+    # --- mirror half: one library call, every configured repo in one pass ---
+    # The loop that used to live here is `mirror.lanes.sync_mirror` -- an
+    # inline loop in a CLI body is reachable by exactly one caller, and
+    # `graph_works_core.scan` being the second one is why this moved.
+    # Everything below is presentation: this command's per-repo output is a
+    # stable contract `test_cli.py` matches on.
     try:
-        section_set = load_sections(config.declarations_dir / "_sections")
+        with open_reader(graph_dir=config.graph_dir) as reader:
+            mirror = sync_mirror(bundle_root, config, reader, today=today, at=at, dry_run=dry_run)
     except (OSError, ValueError) as exc:
         # `load_sections` raises `SectionError` (a `ValueError`) for a
         # malformed set and propagates `OSError` for a missing directory --
         # a caller-configuration problem, matching `validate`'s identical
-        # guard on the same load, not a raw traceback.
+        # guard on the same load, not a raw traceback. `sync_mirror` lets
+        # both through deliberately; turning them into an exit code is this
+        # band's job.
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
-    failed_repos: list[str] = []
-    mirror_created = 0
-    mirror_regenerated = 0
-    mirror_moved = 0
-    mirror_deleted = 0
-    mirror_declined = 0
-    any_mirror_write = False
 
-    with open_reader(graph_dir=config.graph_dir) as reader:
-        walked = tracked_files(config)
-        for repo in config.repos:
-            sha = head_commit(repo.path)
-            if sha is None:
-                typer.echo(f"{repo.name}: not a git checkout, skipping", err=True)
-                continue
-            try:
-                bundle = load_bundle(bundle_root)
-                plan = plan_mirror(bundle, reader, repo, tracked=walked[repo.name], sha=sha, at=at)
-                if dry_run:
-                    _echo_plan(repo.name, plan)
-                    continue
-                result = apply_mirror(bundle, plan, repo, section_set=section_set)
-                _echo_result(repo.name, result)
-                any_mirror_write = True
-                mirror_created += len(result.created)
-                mirror_regenerated += len(result.regenerated)
-                mirror_moved += len(result.moved)
-                mirror_deleted += len(result.deleted)
-                mirror_declined += len(result.declined_deletions)
-            except Exception as exc:
-                # One repo's filesystem error (a locked file, a permissions
-                # problem, disk full mid-write) must not crash the whole
-                # multi-repo run with a raw traceback, and must not silently
-                # skip reporting it either -- every other repo still gets its
-                # turn, and the command still exits non-zero afterward.
-                typer.echo(f"{repo.name}: sync failed: {exc}", err=True)
-                failed_repos.append(repo.name)
+    for repo_name in mirror.skipped_repos:
+        typer.echo(f"{repo_name}: not a git checkout, skipping", err=True)
+    if dry_run:
+        for plan in mirror.plans:
+            _echo_plan(plan.repo, plan)
+    else:
+        for result in mirror.results:
+            _echo_result(result.repo, result)
+    for repo_name, error in mirror.failed_repos:
+        typer.echo(f"{repo_name}: sync failed: {error}", err=True)
 
-    if not dry_run and any_mirror_write:
-        log_document = load_bundle(bundle_root).logs.get("")
-        if log_document is None:
-            raise ValueError(
-                f"{bundle_root}: no root log.md -- every code-wiki-okf bundle is created with one by "
-                "okf_ext.bundle's scaffold"
-            )
-        append_log_entry(
-            log_document,
-            f"mirror sync: {mirror_created} created, {mirror_regenerated} updated, "
-            f"{mirror_moved} moved, {mirror_deleted} deleted, {mirror_declined} deletion(s) declined",
-            today=today,
-            dry_run=False,
-        )
-
-    if failed_repos:
+    if not mirror.ok:
         raise typer.Exit(code=1)
 
 

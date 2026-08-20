@@ -2,6 +2,7 @@ import importlib.resources
 from datetime import date
 from pathlib import Path
 
+import pytest
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
@@ -73,6 +74,21 @@ def test_a_non_draft_item_must_carry_effort_and_affects(tmp_path: Path) -> None:
 
 def test_a_draft_item_is_exempt_from_effort_and_affects(tmp_path: Path) -> None:
     assert _findings(tmp_path, _COMPLETE + "status: draft\n") == []
+
+
+def test_base_schema_accepts_structured_edges_and_filing_metadata(tmp_path: Path) -> None:
+    messages = _findings(
+        tmp_path,
+        _COMPLETE
+        + "status: draft\nblast_radius: package\ntarget: 2026-Q4\n"
+        + "depends_on:\n  - slug: a\n    blocks: plan\n    needs: design\n",
+    )
+    assert messages == []
+
+
+@pytest.mark.parametrize("target", ["Q4-2026", "2026-Q5", "2026-13", "2026"])
+def test_base_schema_rejects_bad_targets(tmp_path: Path, target: str) -> None:
+    assert _findings(tmp_path, _COMPLETE + f"status: draft\ntarget: {target}\n")
 
 
 def test_the_base_enums_reach_the_wrapper_through_the_ref(tmp_path: Path) -> None:

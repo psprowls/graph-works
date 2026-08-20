@@ -56,7 +56,7 @@ keep their em dash because `descriptions="preserve"` never rewrites them.
 
 ## `nonconformant/` and `nonconformant_repo/`
 
-The whole-catalog vault: one walk triggers **every one of the lane's 25 codes**,
+The whole-catalog vault: one walk triggers **every one of the lane's 31 codes**,
 and its reviewed output is `nonconformant.golden.txt`. Mirrors okf-io's
 `nonconformant/` fixture exactly, including the part that does the actual work —
 a **hand-written code set in the test**. Regenerating the golden alone proves

@@ -6,6 +6,7 @@ import json
 
 import pytest
 from code_wiki_okf.config import load_config
+from graph_works_core.scan import commands as scan_commands
 from graph_works_core.scan.commands import (
     WORKLIST_FILENAME,
     apply_scan_worklist,
@@ -158,6 +159,31 @@ def test_emit_into_a_fresh_directory_prunes_nothing(tmp_path):
     assert len(written) == 2
 
 
+def test_emit_replaces_canonical_leaf_symlinks_without_touching_external_targets(tmp_path):
+    """Artifact leaves must never redirect pruning or writes outside the cache."""
+    out_dir = tmp_path / "scan"
+    out_dir.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    brief_sentinel = external / "stale.md"
+    brief_sentinel.write_text("external brief\n", encoding="utf-8")
+    worklist_sentinel = external / "worklist.json"
+    worklist_sentinel.write_text("external worklist\n", encoding="utf-8")
+    (out_dir / "briefs").symlink_to(external, target_is_directory=True)
+    (out_dir / WORKLIST_FILENAME).symlink_to(worklist_sentinel)
+    worklist = ScanWorklist(prose_tasks=(_dep_task("dep:npm/foo"),))
+
+    emit_scan_worklist(worklist, out_dir=out_dir)
+
+    assert brief_sentinel.read_text(encoding="utf-8") == "external brief\n"
+    assert worklist_sentinel.read_text(encoding="utf-8") == "external worklist\n"
+    assert (out_dir / "briefs").is_dir()
+    assert not (out_dir / "briefs").is_symlink()
+    assert len(list((out_dir / "briefs").glob("*.md"))) == 1
+    assert (out_dir / WORKLIST_FILENAME).is_file()
+    assert not (out_dir / WORKLIST_FILENAME).is_symlink()
+
+
 async def test_apply_scan_worklist_carries_provider_errors_through(emitted):
     """F11: an unreadable result file's error must survive `apply_scan_worklist`
     alongside whatever `apply_scan_results` itself reports, not be swallowed."""
@@ -196,3 +222,34 @@ async def test_apply_scan_worklist_lands_the_same_page_the_in_process_path_does(
     assert applied.narrated == 1
     assert applied.stamped == 1
     assert FILLED in (layout.bundle_dir / "packages" / "widgets.md").read_text(encoding="utf-8")
+
+
+async def test_apply_scan_worklist_uses_a_supplied_worklist_after_the_artifact_changes(emitted, monkeypatch):
+    """The caller's validated object, not a second path read, controls apply."""
+    layout, config, worklist, out_dir, _written = emitted
+    worklist_path = out_dir / WORKLIST_FILENAME
+    worklist_path.write_text("{not valid JSON", encoding="utf-8")
+    received: list[ScanWorklist] = []
+
+    def fake_apply_scan_results(
+        supplied: ScanWorklist,
+        *_args: object,
+        **_kwargs: object,
+    ) -> scan_commands.ApplyResult:
+        received.append(supplied)
+        return scan_commands.ApplyResult()
+
+    monkeypatch.setattr(scan_commands, "apply_scan_results", fake_apply_scan_results)
+
+    result = apply_scan_worklist(
+        worklist_path=worklist_path,
+        worklist=worklist,
+        results_dir=out_dir / "results",
+        bundle_root=layout.bundle_dir,
+        config=config,
+        today=TODAY,
+        dry_run=False,
+    )
+
+    assert result == scan_commands.ApplyResult()
+    assert received == [worklist]

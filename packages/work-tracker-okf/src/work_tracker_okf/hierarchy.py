@@ -15,6 +15,8 @@ import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
+from work_tracker_okf._selection import active_preferred_slug_index
+from work_tracker_okf.dependencies import DependencyEdge, entry_phase, resolve_facts, unmet
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
@@ -57,19 +59,7 @@ def child_rollup(items: Sequence[WorkItem], parent_slug: str) -> ChildRollup:
     return ChildRollup(total=len(children), terminal=terminal, open_slugs=open_slugs)
 
 
-def unmet_depends_on(items: Sequence[WorkItem], depends_on: Sequence[str]) -> tuple[str, ...]:
-    """The subset of *depends_on* that is not yet terminal, in declared order.
-
-    A slug matching no item is **unmet**, not ignored: a typo blocks the stage
-    rather than silently letting it run.
-    """
-    by_slug = {item.slug: item for item in items}
-    return tuple(
-        slug for slug in depends_on if slug not in by_slug or by_slug[slug].workflow_status not in TERMINAL_STATUSES
-    )
-
-
-def unknown_depends_on(items: Sequence[WorkItem], depends_on: Sequence[str]) -> dict[str, str | None]:
+def unknown_depends_on(items: Sequence[WorkItem], depends_on: Sequence[DependencyEdge]) -> dict[str, str | None]:
     """Values naming no item at all, mapped to a same-title hint or `None`.
 
     The hint fires only on an unambiguous match: exactly one known slug equal
@@ -77,11 +67,11 @@ def unknown_depends_on(items: Sequence[WorkItem], depends_on: Sequence[str]) -> 
     """
     known = {item.slug for item in items}
     unknown: dict[str, str | None] = {}
-    for value in depends_on:
-        if value in known:
+    for edge in depends_on:
+        if edge.slug in known:
             continue
-        matches = sorted(slug for slug in known if _DATE_PREFIX_RE.sub("", slug) == value)
-        unknown[value] = matches[0] if len(matches) == 1 else None
+        matches = sorted(slug for slug in known if _DATE_PREFIX_RE.sub("", slug) == edge.slug)
+        unknown[edge.slug] = matches[0] if len(matches) == 1 else None
     return unknown
 
 
@@ -113,7 +103,7 @@ def nearest_epic(items: Sequence[WorkItem], slug: str) -> str | None:
     `_rules/decisions.citations` and the auto-drive shell. Writing it twice
     means two walks that can disagree about cycles and depth.
     """
-    by_slug = {item.slug: item for item in items}
+    by_slug = active_preferred_slug_index(items)
     seen: set[str] = set()
     current: str | None = slug
     for _ in range(WALK_DEPTH_CAP):
@@ -129,27 +119,35 @@ def nearest_epic(items: Sequence[WorkItem], slug: str) -> str | None:
     return None
 
 
+def _child_dependency_blocked(items: Sequence[WorkItem], child: WorkItem) -> bool:
+    phase = child.phase or entry_phase(child.type, child.effort)
+    if phase is None:
+        return False
+    return bool(unmet(child.depends_on, resolve_facts(items, child.depends_on), phase))
+
+
 def descend(items: Sequence[WorkItem], slug: str) -> DescendResult:
     """The next actionable leaf at or below *slug*. Cycle-safe and depth-capped.
 
     At each level the candidates are children whose `workflow_status` is in
-    `PICK_ORDER` and whose own `depends_on` are all terminal, ordered by that
-    rank then `(opened, slug)`.
+    `PICK_ORDER` and whose own next-phase dependency gates are satisfied,
+    ordered by that rank then `(opened, slug)`.
     """
-    by_slug = {item.slug: item for item in items}
+    by_slug = active_preferred_slug_index(items)
+    selected_items = tuple(by_slug.values())
     node = by_slug.get(slug)
     if node is None:
         return DescendResult(path=(slug,), leaf=None, blocked_at=slug, reason=f"unknown slug {slug!r}")
     path = [slug]
     visited = {slug}
     while True:
-        children = [item for item in items if item.parent == node.slug]
+        children = [item for item in selected_items if item.parent == node.slug]
         if not child_gated_node(node, children):
             return DescendResult(path=tuple(path), leaf=node.slug)
         candidates = [
             child
             for child in children
-            if child.workflow_status in PICK_ORDER and not unmet_depends_on(items, child.depends_on)
+            if child.workflow_status in PICK_ORDER and not _child_dependency_blocked(selected_items, child)
         ]
         if not candidates:
             return DescendResult(
@@ -189,5 +187,4 @@ __all__ = [
     "descend",
     "nearest_epic",
     "unknown_depends_on",
-    "unmet_depends_on",
 ]

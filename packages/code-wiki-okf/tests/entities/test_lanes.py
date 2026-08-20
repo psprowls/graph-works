@@ -238,7 +238,7 @@ def test_hand_edited_page_declines_deletion_and_is_reported(tmp_path: Path) -> N
         sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
 
     page = bundle_root / "packages" / "widgets.md"
-    placeholder = "> TODO: <One paragraph: what this package does, who uses it, why it exists.>"
+    placeholder = "> TODO: what this package does, who uses it, and why it exists, in one paragraph."
     original = page.read_text(encoding="utf-8")
     assert placeholder in original
     page.write_text(original.replace(placeholder, "Hand-written, do not delete me."), encoding="utf-8")

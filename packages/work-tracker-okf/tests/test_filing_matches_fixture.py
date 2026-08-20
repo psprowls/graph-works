@@ -6,7 +6,7 @@ from okf_ext.body import sections as body_sections
 from okf_io import load_bundle, parse
 from work_helpers import CONFORMANT_TODAY
 from work_tracker_okf import IGNORE, load_items
-from work_tracker_okf.filing import apply, file_item
+from work_tracker_okf.filing import FilingPlan, FilingSeed, apply, plan_filing
 
 _ON = date(2026, 3, 10)
 
@@ -30,6 +30,24 @@ def _vault_page(root: Path, slug: str) -> str:
     return (root / "work" / f"{slug}.md").read_text(encoding="utf-8")
 
 
+def _plan(root: Path, section_set, type_name: str) -> FilingPlan:
+    bundle = load_bundle(root, ignore=IGNORE)
+    return plan_filing(
+        root,
+        load_items(bundle),
+        FilingSeed(
+            type=type_name,
+            title="A freshly filed item",
+            description="Filed by the writer, into a copy of the vault.",
+            on=_ON,
+            words="freshly filed item",
+            affects=("packages/work-tracker-okf",),
+            tags=("fixture",),
+        ),
+        section_set,
+    )
+
+
 @pytest.mark.parametrize(("type_name", "exemplar"), sorted(_EXEMPLARS.items()))
 def test_filing_reproduces_the_shape_the_vault_shows(conformant_root: Path, section_set, type_name, exemplar) -> None:
     """The agreement that would be unenforceable if the vault and the writer
@@ -41,17 +59,7 @@ def test_filing_reproduces_the_shape_the_vault_shows(conformant_root: Path, sect
     The assertion is therefore on the *restricted* sequence: every key the writer
     emits appears in the vault page in the same relative order.
     """
-    plan = file_item(
-        conformant_root,
-        type=type_name,
-        title="A freshly filed item",
-        description="Filed by the writer, into a copy of the vault.",
-        on=_ON,
-        words="freshly filed item",
-        affects=("packages/work-tracker-okf",),
-        tags=("fixture",),
-        section_set=section_set,
-    )
+    plan = _plan(conformant_root, section_set, type_name)
     assert plan.refusal is None, plan.diff()
     filed_text = apply(plan).read_text(encoding="utf-8")
 
@@ -64,33 +72,13 @@ def test_filing_reproduces_the_shape_the_vault_shows(conformant_root: Path, sect
 def test_filing_reproduces_the_body_headings_the_vault_shows(
     conformant_root: Path, section_set, type_name, exemplar
 ) -> None:
-    plan = file_item(
-        conformant_root,
-        type=type_name,
-        title="A freshly filed item",
-        description="Filed by the writer, into a copy of the vault.",
-        on=_ON,
-        words="freshly filed item",
-        affects=("packages/work-tracker-okf",),
-        tags=("fixture",),
-        section_set=section_set,
-    )
+    plan = _plan(conformant_root, section_set, type_name)
     filed_text = apply(plan).read_text(encoding="utf-8")
     assert _headings(filed_text) == _headings(_vault_page(conformant_root, exemplar))
 
 
 def test_the_filed_page_joins_the_vaults_own_items(conformant_root: Path, section_set) -> None:
-    plan = file_item(
-        conformant_root,
-        type="Feature",
-        title="A freshly filed item",
-        description="Filed by the writer, into a copy of the vault.",
-        on=_ON,
-        words="freshly filed item",
-        affects=("packages/work-tracker-okf",),
-        tags=("fixture",),
-        section_set=section_set,
-    )
+    plan = _plan(conformant_root, section_set, "Feature")
     apply(plan)
     items = load_items(load_bundle(conformant_root, ignore=IGNORE))
     assert plan.slug in {item.slug for item in items}

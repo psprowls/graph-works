@@ -96,7 +96,7 @@ def test_the_ingestor_says_nothing_about_raw_or_page_type_or_stripping(tmp_path)
 def test_output_format_defers_to_frontmatter_rules_not_a_partial_list(tmp_path):
     """The Output format section must point at Frontmatter rules rather than
     re-enumerate fields -- a partial list here is exactly how authors,
-    source_date, tags and tokens got silently dropped from ingested pages."""
+    source_date and tags got silently dropped from ingested pages."""
     text = _system(tmp_path)
     section = text.split("## Output format")[1].split("## Frontmatter format")[0]
     assert "Frontmatter rules" in section

@@ -1,23 +1,30 @@
 from datetime import date
 from pathlib import Path
+from typing import Literal, get_type_hints
 
+import pytest
+import work_tracker_okf.compose as compose
 from okf_ext.shape import load_sections
 from okf_ext.tables import read_section
-from okf_io import load, load_bundle, validate
+from okf_io import Bundle, load, load_bundle, validate
 from work_helpers import CONFORMANT_TODAY, make_item, write_item
-from work_tracker_okf import IGNORE
+from work_tracker_okf import IGNORE, load_items
 from work_tracker_okf.compose import (
     PLAN_HEADING,
     AdvanceOutcome,
-    FilingOutcome,
+    FilingApplication,
+    FilingApplyError,
+    FilingCompositionPlan,
     advance_and_stamp,
     append_lane_log,
+    apply_file_and_reconcile,
     ensure_plan_row,
-    file_and_reconcile,
+    plan_file_and_reconcile,
     plan_row_splice,
     rule_set,
     stamp_for,
 )
+from work_tracker_okf.filing import FilingRefusal, FilingSeed
 from work_tracker_okf.init import install_bundle
 from work_tracker_okf.paths import artifact_path
 from work_tracker_okf.resources import assets_root
@@ -25,6 +32,129 @@ from work_tracker_okf.rules import PLAN_TABLE_SPEC, lane_rules
 from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID
 
 _FEATURE = "2026-03-02-epic-feature-filing-writer"
+
+
+def snapshot_bytes(root: Path) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
+
+
+@pytest.fixture
+def bundle(tmp_path: Path) -> Bundle:
+    root = tmp_path / "bundle"
+    install_bundle(root, today=date(2026, 8, 18), dry_run=False)
+    return load_bundle(root, ignore=IGNORE)
+
+
+@pytest.fixture
+def section_set():
+    return load_sections(assets_root() / "_sections")
+
+
+def seed() -> FilingSeed:
+    return FilingSeed(
+        type="Feature",
+        title="Child",
+        description="d",
+        on=date(2026, 8, 18),
+        affects=("packages/work-tracker-okf",),
+    )
+
+
+def break_log_order(path: Path) -> None:
+    path.write_text(
+        "# Log\n\n## 2026-12-01\n\n- newer\n\n## 2026-12-15\n\n- misplaced\n",
+        encoding="utf-8",
+    )
+
+
+def test_composed_dry_run_preflights_page_index_and_log_without_writing(bundle, section_set) -> None:
+    before = snapshot_bytes(bundle.root)
+    outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed(), section_set)
+    assert outcome.plan.filing.refusal is None
+    assert outcome.plan.index.changed
+    assert outcome.plan.log is not None and outcome.plan.log.changed
+    assert outcome.application == FilingApplication()
+    assert snapshot_bytes(bundle.root) == before
+
+
+def test_filing_composition_refusal_annotation_is_closed() -> None:
+    expected = FilingRefusal | Literal["index-refused", "log-refused"] | None
+
+    assert get_type_hints(FilingCompositionPlan)["refusal"] == expected
+
+
+def test_expected_index_or_log_refusal_prevents_every_write(bundle, section_set) -> None:
+    break_log_order(bundle.root / "log.md")
+    before = snapshot_bytes(bundle.root)
+    broken_bundle = load_bundle(bundle.root, ignore=IGNORE)
+    outcome = plan_file_and_reconcile(broken_bundle, load_items(broken_bundle), seed(), section_set)
+    assert outcome.plan.refusal == "log-refused"
+    assert apply_file_and_reconcile(outcome.plan).written is False
+    assert snapshot_bytes(bundle.root) == before
+
+
+def test_composed_plan_uses_the_loaded_log_snapshot_if_the_file_disappears(bundle, section_set) -> None:
+    log_path = bundle.root / "log.md"
+    log_path.unlink()
+    outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed(), section_set)
+    assert outcome.plan.refusal is None
+    assert outcome.plan.log is not None and outcome.plan.log.changed
+    assert not log_path.exists()
+
+
+def test_apply_file_and_reconcile_commits_the_preflighted_effects(bundle, section_set) -> None:
+    outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed(), section_set)
+    application = apply_file_and_reconcile(outcome.plan)
+    assert application.page == outcome.plan.filing.target
+    assert application.indexes == (outcome.plan.index,)
+    assert application.log == outcome.plan.log
+    assert application.written is True
+    assert application.page.is_file()
+    assert f"({outcome.plan.filing.slug}.md)" in (bundle.root / "work" / "index.md").read_text(encoding="utf-8")
+    assert outcome.plan.log is not None
+    assert outcome.plan.log.entry in (bundle.root / "log.md").read_text(encoding="utf-8")
+
+
+def test_stale_log_snapshot_preserves_concurrent_bytes_and_reports_partial_application(bundle, section_set) -> None:
+    outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed(), section_set)
+    assert outcome.plan.log is not None
+    log_path = bundle.root / "log.md"
+    concurrent = outcome.plan.log.before.encode("utf-8") + b"\nconcurrent append\n"
+    log_path.write_bytes(concurrent)
+
+    with pytest.raises(FilingApplyError) as raised:
+        apply_file_and_reconcile(outcome.plan)
+
+    assert isinstance(raised.value, compose.FilingPlanStaleError)
+    assert raised.value.application.page == outcome.plan.filing.target
+    assert raised.value.application.indexes == (outcome.plan.index,)
+    assert raised.value.application.log is None
+    assert raised.value.application.written is False
+    assert raised.value.expected == outcome.plan.log.before.encode("utf-8")
+    assert raised.value.actual == concurrent
+    assert log_path.read_bytes() == concurrent
+
+
+@pytest.mark.parametrize("collision", ["page", "work-directory"])
+def test_apply_rechecks_filing_collisions_created_after_planning(bundle, section_set, collision) -> None:
+    outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed(), section_set)
+    if collision == "page":
+        outcome.plan.filing.target.parent.mkdir(parents=True, exist_ok=True)
+        outcome.plan.filing.target.write_bytes(b"foreign page")
+    else:
+        outcome.plan.filing.work_directory.mkdir(parents=True)
+    before = snapshot_bytes(bundle.root)
+
+    with pytest.raises(FilingApplyError) as raised:
+        apply_file_and_reconcile(outcome.plan)
+
+    assert raised.value.application == FilingApplication()
+    assert isinstance(raised.value.__cause__, FileExistsError)
+    assert snapshot_bytes(bundle.root) == before
+    if collision == "page":
+        assert outcome.plan.filing.target.read_bytes() == b"foreign page"
+    else:
+        assert not outcome.plan.filing.target.exists()
 
 
 def test_rule_set_is_the_tuple_the_gate_is_asserted_against(conformant_root: Path) -> None:
@@ -281,87 +411,85 @@ def test_the_plan_row_lands_on_the_plan_complete_transition(tmp_path: Path) -> N
     assert "id: plan" in text
 
 
-def _installed(tmp_path: Path):
-    install_bundle(tmp_path, today=_TODAY, dry_run=False)
-    return load_sections(Path(str(assets_root() / "_sections")))
-
-
-def test_file_and_reconcile_defaults_to_dry_run(tmp_path: Path) -> None:
-    sections = _installed(tmp_path)
-    outcome = file_and_reconcile(
-        tmp_path,
-        type="Feature",
-        title="A dry filing",
-        description="D",
-        on=_TODAY,
-        affects=("packages/work-tracker-okf",),
-        section_set=sections,
+def _plan_at(root: Path, filing_seed: FilingSeed):
+    loaded = load_bundle(root, ignore=IGNORE)
+    return plan_file_and_reconcile(
+        loaded,
+        load_items(loaded),
+        filing_seed,
+        load_sections(assets_root() / "_sections"),
     )
-    assert isinstance(outcome, FilingOutcome)
-    assert outcome.path is None
-    assert outcome.logged is None
-    assert not (tmp_path / "work").exists()
-
-
-def test_file_and_reconcile_writes_page_index_and_log(tmp_path: Path) -> None:
-    sections = _installed(tmp_path)
-    outcome = file_and_reconcile(
-        tmp_path,
-        type="Feature",
-        title="A real filing",
-        description="D",
-        on=_TODAY,
-        affects=("packages/work-tracker-okf",),
-        section_set=sections,
-        dry_run=False,
-    )
-    assert outcome.path is not None and outcome.path.is_file()
-    index = (tmp_path / "work" / "index.md").read_text(encoding="utf-8")
-    assert f"({outcome.plan.slug}.md)" in index
-    assert outcome.logged is not None
-    assert outcome.logged in (tmp_path / "log.md").read_text(encoding="utf-8")
 
 
 def test_a_refused_filing_touches_nothing(tmp_path: Path) -> None:
-    sections = _installed(tmp_path)
-    kwargs = {
-        "type": "Feature",
-        "title": "Twice filed",
-        "description": "D",
-        "on": _TODAY,
-        "affects": ("packages/work-tracker-okf",),
-        "section_set": sections,
-        "dry_run": False,
-    }
-    file_and_reconcile(tmp_path, **kwargs)
-    log_before = (tmp_path / "log.md").read_bytes()
-    index_before = (tmp_path / "work" / "index.md").read_bytes()
-    second = file_and_reconcile(tmp_path, **kwargs)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    filing_seed = FilingSeed(type="Feature", title="Twice filed", description="D", on=_TODAY)
+    apply_file_and_reconcile(_plan_at(tmp_path, filing_seed).plan)
+    before = snapshot_bytes(tmp_path)
+    second = _plan_at(tmp_path, filing_seed)
+    assert second.plan.filing.refusal == "page-exists"
     assert second.plan.refusal == "page-exists"
-    assert second.path is None
-    assert second.logged is None
-    assert (tmp_path / "log.md").read_bytes() == log_before
-    assert (tmp_path / "work" / "index.md").read_bytes() == index_before
+    assert apply_file_and_reconcile(second.plan) == FilingApplication()
+    assert snapshot_bytes(tmp_path) == before
 
 
 def test_two_filings_share_one_dated_section(tmp_path: Path) -> None:
-    sections = _installed(tmp_path)
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
     for title in ("First thing", "Second thing"):
-        file_and_reconcile(
-            tmp_path,
-            type="Feature",
-            title=title,
-            description="D",
-            on=_TODAY,
-            affects=("packages/work-tracker-okf",),
-            section_set=sections,
-            dry_run=False,
-        )
+        outcome = _plan_at(tmp_path, FilingSeed(type="Feature", title=title, description="D", on=_TODAY))
+        assert apply_file_and_reconcile(outcome.plan).written
     log_text = (tmp_path / "log.md").read_text(encoding="utf-8")
     assert log_text.count(f"## {_TODAY.isoformat()}") == 1
+
+
+def test_an_io_failure_carries_the_completed_effects_and_original_cause(bundle, section_set, monkeypatch) -> None:
+    outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed(), section_set)
+    log_path = bundle.root / "log.md"
+    original = Path.replace
+
+    def fail_log(path: Path, target: Path) -> Path:
+        if target == log_path:
+            raise OSError("log unavailable")
+        return original(path, target)
+
+    monkeypatch.setattr(Path, "replace", fail_log)
+    with pytest.raises(FilingApplyError) as raised:
+        apply_file_and_reconcile(outcome.plan)
+    assert raised.value.application.page == outcome.plan.filing.target
+    assert raised.value.application.indexes == (outcome.plan.index,)
+    assert raised.value.application.log is None
+    assert raised.value.application.written is False
+    assert isinstance(raised.value.__cause__, OSError)
+    assert str(raised.value.__cause__) == "log unavailable"
+    assert not tuple(bundle.root.glob(".log.md.*.tmp"))
 
 
 def test_append_lane_log_is_silent_without_a_log(tmp_path: Path) -> None:
     (tmp_path / "index.md").parent.mkdir(parents=True, exist_ok=True)
     (tmp_path / "index.md").write_text("# Empty\n", encoding="utf-8")
     assert append_lane_log(tmp_path, "nothing to record", on=_TODAY) is None
+
+
+def test_append_lane_log_forwards_to_the_shared_appender(tmp_path, monkeypatch):
+    """The lane wrapper owns *which* commands log; the append itself is
+    `okf_ext.logs`'. Pinning the delegation here means a future edit to one
+    cannot silently fork the other."""
+    seen = {}
+
+    def fake(root, entry, *, on):
+        seen.update(root=root, entry=entry, on=on)
+        return entry
+
+    monkeypatch.setattr("work_tracker_okf.compose.append_entry", fake)
+
+    assert append_lane_log(tmp_path, "recorded", on=_TODAY) == "recorded"
+    assert seen == {"root": tmp_path, "entry": "recorded", "on": _TODAY}
+
+
+def test_compose_keeps_no_private_copy_of_the_appender():
+    """The move exists to stop a second implementation drifting from the
+    first. A reintroduced private helper is that drift, one commit early."""
+    import work_tracker_okf.compose as compose
+
+    for name in ("_log_lock_path", "_locked_log", "_atomic_replace"):
+        assert not hasattr(compose, name), name

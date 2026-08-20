@@ -5,7 +5,7 @@ sections:
   - heading: Why we depend on this
     required: true
     placeholder: |
-      > TODO: <Why the workspace depends on this and what it's used for.>
+      > TODO: why the workspace depends on this, and what it is used for.
   - heading: Gotchas / workarounds
     placeholder: |
-      > TODO: <Known issues, version pins, or workarounds this dependency needs.>
+      > TODO: known issues, version pins, or workarounds this dependency needs.

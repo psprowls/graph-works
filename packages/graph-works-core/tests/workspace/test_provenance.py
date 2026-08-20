@@ -205,3 +205,93 @@ def test_a_separate_git_dir_checkout_still_matches(tmp_path):
     top, branch = state
     assert Path(top).resolve() == linked.resolve()
     assert branch == "feature/x"
+
+
+# --- reconcile evidence: anchors, reachability, scoped log -------------------
+
+
+def test_spec_anchor_commit_is_the_last_commit_touching_the_file(repo):
+    spec = repo / "spec.md"
+    spec.write_text("one\n", encoding="utf-8")
+    _git(repo, "add", "spec.md")
+    _git(repo, "commit", "-m", "add spec")
+    expected = provenance.head_sha(repo)
+    # A later commit that does NOT touch the spec must not become its anchor.
+    (repo / "other.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "other.txt")
+    _git(repo, "commit", "-m", "unrelated")
+    assert provenance.spec_anchor_commit(repo, spec) == expected
+
+
+def test_an_untracked_spec_has_no_anchor(repo):
+    spec = repo / "untracked.md"
+    spec.write_text("one\n", encoding="utf-8")
+    assert provenance.spec_anchor_commit(repo, spec) is None
+
+
+def test_a_spec_outside_the_repo_has_no_anchor(repo, tmp_path):
+    outside = tmp_path / "elsewhere.md"
+    outside.write_text("one\n", encoding="utf-8")
+    assert provenance.spec_anchor_commit(repo, outside) is None
+
+
+def test_a_non_repo_yields_no_anchor(tmp_path):
+    assert provenance.spec_anchor_commit(tmp_path, tmp_path / "a.md") is None
+
+
+def test_commit_exists_for_a_real_sha(repo):
+    sha = provenance.head_sha(repo)
+    assert sha is not None
+    assert provenance.commit_exists(repo, sha) is True
+
+
+@pytest.mark.parametrize("sha", ["", "0123456789abcdef0123456789abcdef01234567"])
+def test_commit_exists_is_false_for_a_blank_or_fabricated_sha(repo, sha):
+    assert provenance.commit_exists(repo, sha) is False
+
+
+def test_commit_exists_is_false_outside_a_repo(tmp_path):
+    assert provenance.commit_exists(tmp_path, "abc1234") is False
+
+
+def test_commits_touching_is_newest_first_and_path_scoped(repo):
+    base = provenance.head_sha(repo)
+    for name, message in (("in.txt", "touches in"), ("out.txt", "touches out"), ("in.txt", "touches in again")):
+        (repo / name).write_text(f"{message}\n", encoding="utf-8")
+        _git(repo, "add", name)
+        _git(repo, "commit", "-m", message)
+    rows = provenance.commits_touching(repo, f"{base}..HEAD", ["in.txt"])
+    assert [subject for _, subject in rows] == ["touches in again", "touches in"]
+    assert all(len(sha) == 40 for sha, _ in rows)
+
+
+def test_commits_touching_returns_a_tuple_of_pairs(repo):
+    base = provenance.head_sha(repo)
+    (repo / "in.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "in.txt")
+    _git(repo, "commit", "-m", "one")
+    rows = provenance.commits_touching(repo, f"{base}..HEAD", ["in.txt"])
+    assert isinstance(rows, tuple)
+    assert all(isinstance(row, tuple) and len(row) == 2 for row in rows)
+
+
+def test_an_empty_paths_never_widens_to_the_whole_log(repo):
+    base = provenance.head_sha(repo)
+    (repo / "in.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "in.txt")
+    _git(repo, "commit", "-m", "one")
+    assert provenance.commits_touching(repo, f"{base}..HEAD", []) == ()
+
+
+def test_a_bad_range_reads_as_nothing_landed(repo):
+    assert provenance.commits_touching(repo, "nope..HEAD", ["a.txt"]) == ()
+
+
+def test_a_subject_carrying_separators_survives_intact(repo):
+    base = provenance.head_sha(repo)
+    subject = "feat(core): add\tthing -- with: punctuation"
+    (repo / "in.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "in.txt")
+    _git(repo, "commit", "-m", subject)
+    rows = provenance.commits_touching(repo, f"{base}..HEAD", ["in.txt"])
+    assert [s for _, s in rows] == [subject]

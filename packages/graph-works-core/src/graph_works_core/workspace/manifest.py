@@ -353,21 +353,45 @@ def checked(resolved: Resolved, *, source: Path) -> object:
     return value
 
 
-def _checked_value(layout: WorkspaceLayout, key: str) -> object:
-    """One concrete key: refuse an explicit null, then `checked`.
-
-    The null refusal is `dotted.has` plus a `None` value rather than a test on
-    `Resolved.value`: `resolve_key` treats a stored null as unset and hands
-    back the catalog default, so by the time a value exists the null is gone.
-    """
-    store = PlainYamlStore(layout.manifest_path)
-    raw = store.read_explicit()
-    if dotted.has(raw, key) and dotted.get(raw, key) is None:
+def _check_resolved(resolved: Resolved, *, explicit: Mapping[str, object], source: Path) -> Resolved:
+    """Refuse a malformed stored value while preserving its resolution metadata."""
+    # `resolve_key` treats a stored null as unset and returns the catalog
+    # default, so the raw mapping is the only place a deliberate null remains
+    # visible. Optional keys whose default is already None retain their normal
+    # unset meaning; a null that hides a real default is the ambiguous case.
+    if (
+        resolved.entry.default is not None
+        and dotted.has(explicit, resolved.key)
+        and dotted.get(explicit, resolved.key) is None
+    ):
         raise WorkspaceError(
-            f"{layout.manifest_path}: {key}: is explicitly null. This key has a real default, so a "
+            f"{source}: {resolved.key}: is explicitly null. This key has a real default, so a "
             "null here inherits it while reading as a deliberate setting — remove the line, or set a value."
         )
-    return checked(resolve_key(CATALOG, key, store=store, environ={}), source=layout.manifest_path)
+    checked(resolved, source=source)
+    return resolved
+
+
+def resolve_checked_key(layout: WorkspaceLayout, key: str, *, environ: Mapping[str, str]) -> Resolved:
+    """Resolve one manifest key and reject malformed hand-edited values."""
+    store = PlainYamlStore(layout.manifest_path)
+    resolved = resolve_key(CATALOG, key, store=store, environ=environ)
+    return _check_resolved(resolved, explicit=store.read_explicit(), source=layout.manifest_path)
+
+
+def resolve_checked_all(layout: WorkspaceLayout, *, environ: Mapping[str, str]) -> list[Resolved]:
+    """Resolve every manifest key and reject malformed hand-edited values."""
+    store = PlainYamlStore(layout.manifest_path)
+    explicit = store.read_explicit()
+    return [
+        _check_resolved(resolved, explicit=explicit, source=layout.manifest_path)
+        for resolved in resolve_all(CATALOG, store=store, environ=environ)
+    ]
+
+
+def _checked_value(layout: WorkspaceLayout, key: str) -> object:
+    """One concrete key's checked value for typed core consumers."""
+    return resolve_checked_key(layout, key, environ={}).value
 
 
 def checked_int(layout: WorkspaceLayout, key: str) -> int:
@@ -446,5 +470,7 @@ __all__ = [
     "defaults",
     "read",
     "render_initial",
+    "resolve_checked_all",
+    "resolve_checked_key",
     "set_value",
 ]

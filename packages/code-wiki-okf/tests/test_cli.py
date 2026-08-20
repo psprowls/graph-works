@@ -363,7 +363,7 @@ def test_sync_command_creates_file_pages(tmp_path: Path) -> None:
     bundle_root = _scratch_workspace(tmp_path)
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "acme" / "a.py.md").exists()
+    assert (bundle_root / "repositories" / "acme" / "fs" / "a.py.md").exists()
 
 
 def test_sync_command_dry_run_writes_nothing(tmp_path: Path) -> None:
@@ -426,8 +426,8 @@ def test_sync_command_syncs_every_configured_repo(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "acme" / "a.py.md").exists()
-    assert (bundle_root / "repositories" / "beta" / "b.py.md").exists()
+    assert (bundle_root / "repositories" / "acme" / "fs" / "a.py.md").exists()
+    assert (bundle_root / "repositories" / "beta" / "fs" / "b.py.md").exists()
     assert "acme: created 1" in result.output
     assert "beta: created 1" in result.output
 
@@ -444,7 +444,7 @@ def test_sync_command_reports_failure_and_still_processes_other_repos(
     def _boom(*args: object, **kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("code_wiki_okf.cli.apply_mirror", _boom)
+    monkeypatch.setattr("code_wiki_okf.mirror.lanes.apply_mirror", _boom)
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 1
     assert "acme: sync failed: disk full" in result.output
@@ -504,7 +504,7 @@ def test_echo_plan_reports_no_changes_for_an_empty_plan(tmp_path: Path, capsys: 
 def test_echo_plan_reports_every_kind_of_change(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     move_plan = MovePlan(
         root=tmp_path,
-        moves=(Move(source="repositories/acme/old.py.md", dest="repositories/acme/new.py.md", is_asset=False),),
+        moves=(Move(source="repositories/acme/fs/old.py.md", dest="repositories/acme/fs/new.py.md", is_asset=False),),
         edits=(),
         refusals=(),
         unrebased=(),
@@ -514,19 +514,19 @@ def test_echo_plan_reports_every_kind_of_change(tmp_path: Path, capsys: pytest.C
         repo="acme",
         moves=move_plan,
         creates={"a.py": ({}, Render())},
-        updates={"repositories/acme/b.py": Render()},
+        updates={"repositories/acme/fs/b.py": Render()},
         deletions=("c.py",),
         declined_deletions=(
-            DeclinedDeletion(resource="file:acme/d.py", path="repositories/acme/d.py.md", reason="prose-edited"),
+            DeclinedDeletion(resource="file:acme/d.py", path="repositories/acme/fs/d.py.md", reason="prose-edited"),
         ),
     )
     _echo_plan("acme", plan)
     output = capsys.readouterr().out
     assert "acme: would create a.py" in output
-    assert "acme: would update repositories/acme/b.py" in output
-    assert "acme: would move repositories/acme/old.py.md -> repositories/acme/new.py.md" in output
+    assert "acme: would update repositories/acme/fs/b.py" in output
+    assert "acme: would move repositories/acme/fs/old.py.md -> repositories/acme/fs/new.py.md" in output
     assert "acme: would delete c.py" in output
-    assert "acme: would decline deletion of repositories/acme/d.py.md (prose-edited)" in output
+    assert "acme: would decline deletion of repositories/acme/fs/d.py.md (prose-edited)" in output
 
 
 def test_validate_reports_missing_page_and_exits_nonzero(tmp_path: Path) -> None:
@@ -656,8 +656,8 @@ def test_validate_reports_schema_violation(tmp_path: Path) -> None:
     (bundle_root / "packages" / "bad.md").write_text(
         '---\ntype: Package\ntitle: "bad"\nversion: 123\n---\n\n'
         "## Purpose\n\nSome real purpose text goes here, filled in properly for this test.\n\n"
-        "## Public API\n\n> TODO: <Main exports and when to use them. "
-        "Link code with backticked `path:line` references.>\n\n"
+        "## Public API\n\n> TODO: the main exports and when to use them. "
+        "Link code with backticked `path:line` references.\n\n"
         "## Files\n\n_(populated by `code-wiki-okf sync` — not yet generated)_\n",
         encoding="utf-8",
     )
@@ -684,9 +684,9 @@ def test_validate_reports_unfilled_required_section(tmp_path: Path) -> None:
     (bundle_root / "packages").mkdir()
     (bundle_root / "packages" / "stub.md").write_text(
         '---\ntype: Package\ntitle: "stub"\nversion: "0.1.0"\n---\n\n'
-        "## Purpose\n\n> TODO: <One paragraph: what this package does, who uses it, why it exists.>\n\n"
-        "## Public API\n\n> TODO: <Main exports and when to use them. "
-        "Link code with backticked `path:line` references.>\n\n"
+        "## Purpose\n\n> TODO: what this package does, who uses it, and why it exists, in one paragraph.\n\n"
+        "## Public API\n\n> TODO: the main exports and when to use them. "
+        "Link code with backticked `path:line` references.\n\n"
         "## Files\n\n_(populated by `code-wiki-okf sync` — not yet generated)_\n",
         encoding="utf-8",
     )
@@ -770,12 +770,12 @@ def test_validate_still_reports_sync_findings_alongside_new_rules(tmp_path: Path
 def test_echo_result_reports_every_kind_of_change(capsys: pytest.CaptureFixture[str]) -> None:
     result = MirrorResult(
         repo="acme",
-        moved=(("repositories/acme/old.py.md", "repositories/acme/new.py.md"),),
+        moved=(("repositories/acme/fs/old.py.md", "repositories/acme/fs/new.py.md"),),
         created=("a.py",),
-        regenerated=("repositories/acme/b.py",),
+        regenerated=("repositories/acme/fs/b.py",),
         deleted=("c.py",),
         declined_deletions=(
-            DeclinedDeletion(resource="file:acme/d.py", path="repositories/acme/d.py.md", reason="prose-edited"),
+            DeclinedDeletion(resource="file:acme/d.py", path="repositories/acme/fs/d.py.md", reason="prose-edited"),
         ),
         index_updates=(),
     )
@@ -783,7 +783,7 @@ def test_echo_result_reports_every_kind_of_change(capsys: pytest.CaptureFixture[
     output = capsys.readouterr().out
     assert "acme: created 1, updated 1, moved 1, deleted 1" in output
     assert "acme: created a.py" in output
-    assert "acme: updated repositories/acme/b.py" in output
-    assert "acme: moved repositories/acme/old.py.md -> repositories/acme/new.py.md" in output
+    assert "acme: updated repositories/acme/fs/b.py" in output
+    assert "acme: moved repositories/acme/fs/old.py.md -> repositories/acme/fs/new.py.md" in output
     assert "acme: deleted c.py" in output
-    assert "acme: declined deletion of repositories/acme/d.py.md (prose-edited)" in output
+    assert "acme: declined deletion of repositories/acme/fs/d.py.md (prose-edited)" in output

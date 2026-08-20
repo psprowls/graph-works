@@ -2,18 +2,28 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from contextlib import contextmanager
+from datetime import date
 from pathlib import Path
 
 import pytest
+from work_tracker_okf import decisions
 from work_tracker_okf.decisions import (
     UNSET,
     VALID_STATUSES,
     Decision,
     append,
+    apply_plan,
+    compose_prose,
     counts,
+    decided_stamp,
     id_number,
     load,
+    merge_prose,
     parse,
+    plan_append,
+    plan_supersede,
+    plan_update,
     prose_block,
     query,
     render,
@@ -226,6 +236,53 @@ def test_prose_block_collects_the_continuation_lines():
     assert prose_block(entry, "If wrong") == "one\ntwo"
 
 
+def test_compose_and_merge_replace_known_labels_and_keep_unrelated_prose() -> None:
+    existing = "**Answer:** guess\n\nFree-form note\n\n**If wrong:** re-plan"
+    merged = merge_prose(existing, compose_prose(answer="settled", rationale="evidence"))
+    assert merged == ("**Answer:** settled\n\n**Rationale:** evidence\n\nFree-form note\n\n**If wrong:** re-plan")
+
+
+def test_merge_collapses_duplicate_blocks_for_each_supplied_label() -> None:
+    existing = (
+        "**Answer:** first guess\n\nFree-form note\n\n**Answer:** second guess\n\n"
+        "**Rationale:** first reason\n\n**If wrong:** re-plan\n\n**Rationale:** second reason"
+    )
+    replacement = compose_prose(answer="settled", rationale="evidence")
+
+    merged = merge_prose(existing, replacement)
+
+    assert merged == ("**Answer:** settled\n\nFree-form note\n\n**Rationale:** evidence\n\n**If wrong:** re-plan")
+
+
+def test_decided_stamp_uses_only_supplied_values() -> None:
+    assert decided_stamp(date(2026, 8, 18), "pat") == "2026-08-18 by pat"
+
+
+@pytest.mark.parametrize(
+    ("status", "answer", "if_wrong", "refusal"),
+    [
+        ("open", None, None, None),
+        ("assumed", "guess", None, "if-wrong-required"),
+        ("assumed", "guess", "re-plan", None),
+        ("answered", None, None, "answer-required"),
+        ("superseded", "x", None, "status-disallowed"),
+    ],
+)
+def test_append_status_rules(tmp_path: Path, status, answer, if_wrong, refusal) -> None:
+    plan = plan_append(
+        tmp_path / "ledger.md",
+        question="q",
+        status=status,
+        answer=answer,
+        rationale=None,
+        if_wrong=if_wrong,
+        affects=(),
+        on=date(2026, 8, 18),
+        decided_by="pat",
+    )
+    assert plan.refusal == refusal
+
+
 def test_the_status_vocabulary_is_the_closed_four():
     assert frozenset({"answered", "assumed", "open", "superseded"}) == VALID_STATUSES
 
@@ -325,12 +382,165 @@ def test_counts_flags_an_invalid_status():
     }
 
 
+# --- extract_cited_decisions: what a spec cites ------------------------------
+
+
+def test_cited_ids_come_back_in_first_seen_order_deduped():
+    text = "cites D-014 then D-002 then D-014 again"
+    assert decisions.extract_cited_decisions(text) == ("D-014", "D-002")
+
+
+def test_cited_ids_are_verbatim_so_padded_and_unpadded_stay_distinct():
+    # The caller unifies by number via `id_number`, exactly as `query`'s
+    # `cites` filter already does. Unifying here would lose the source spelling.
+    assert decisions.extract_cited_decisions("D-14 and D-014") == ("D-14", "D-014")
+
+
+def test_text_with_no_ids_cites_nothing():
+    assert decisions.extract_cited_decisions("no decisions here, D-x is not one") == ()
+
+
+def test_extract_cited_decisions_is_exported():
+    assert "extract_cited_decisions" in decisions.__all__
+
+
 def _ledger(tmp_path: Path) -> Path:
     from work_tracker_okf.paths import decisions_ledger
 
     path = decisions_ledger("2026-08-11-epic-foo").path(tmp_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
+
+
+DAY = date(2026, 8, 18)
+
+
+def seeded_ledger(tmp_path: Path) -> Path:
+    ledger = tmp_path / "references/00-decisions.md"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_text(
+        "# Decisions\n\n## D-001 — q\nstatus: open\n\n**Rationale:** pending\n",
+        encoding="utf-8",
+    )
+    return ledger
+
+
+def recording_lock(paths: list[Path]):
+    @contextmanager
+    def locked(path: Path):
+        paths.append(path)
+        yield
+
+    return locked
+
+
+def test_planning_is_byte_for_byte_no_write(tmp_path: Path) -> None:
+    ledger = seeded_ledger(tmp_path)
+    before = ledger.read_bytes()
+    plan = plan_update(
+        ledger,
+        "D-001",
+        answer="settled",
+        rationale="evidence",
+        on=date(2026, 8, 18),
+        decided_by="pat",
+    )
+    assert plan.refusal is None
+    assert ledger.read_bytes() == before
+
+
+def test_update_replaces_answer_and_rationale_while_preserving_other_prose(tmp_path: Path) -> None:
+    ledger = seeded_ledger(tmp_path)
+    ledger.write_text(
+        "# Decisions\n\n## D-001 — q\nstatus: assumed\n\n"
+        "**Answer:** guess\n\n**Rationale:** stale\n\nFree-form note\n\n**If wrong:** re-plan\n",
+        encoding="utf-8",
+    )
+    plan = plan_update(
+        ledger,
+        "D-001",
+        answer="settled",
+        rationale=None,
+        on=DAY,
+        decided_by="pat",
+    )
+    assert plan.primary is not None
+    assert plan.primary.prose == "**Answer:** settled\n\nFree-form note\n\n**If wrong:** re-plan"
+
+
+def test_apply_rejects_a_stale_snapshot_without_writing(tmp_path: Path) -> None:
+    ledger = seeded_ledger(tmp_path)
+    plan = plan_update(
+        ledger,
+        "D-001",
+        answer="settled",
+        rationale=None,
+        on=date(2026, 8, 18),
+        decided_by="pat",
+    )
+    ledger.write_text(ledger.read_text(encoding="utf-8") + "\nexternal edit\n", encoding="utf-8")
+    before = ledger.read_bytes()
+    applied = apply_plan(plan)
+    assert applied.stale is True
+    assert applied.written is False
+    assert ledger.read_bytes() == before
+
+
+def test_apply_treats_a_crlf_to_lf_external_edit_as_stale(tmp_path: Path) -> None:
+    ledger = tmp_path / "references/00-decisions.md"
+    ledger.parent.mkdir(parents=True)
+    ledger.write_bytes(b"# Decisions\r\n\r\n## D-001 - q\r\nstatus: open\r\n")
+    plan = plan_update(
+        ledger,
+        "D-001",
+        answer="settled",
+        rationale=None,
+        on=DAY,
+        decided_by="pat",
+    )
+    ledger.write_bytes(ledger.read_bytes().replace(b"\r\n", b"\n"))
+    externally_edited = ledger.read_bytes()
+
+    applied = apply_plan(plan)
+
+    assert applied.stale is True
+    assert applied.written is False
+    assert ledger.read_bytes() == externally_edited
+
+
+def test_supersession_apply_writes_both_entries_under_one_lock(tmp_path: Path, monkeypatch) -> None:
+    ledger = seeded_ledger(tmp_path)
+    locks: list[Path] = []
+    monkeypatch.setattr(decisions, "_locked", recording_lock(locks))
+    applied = apply_plan(
+        plan_supersede(
+            ledger,
+            "D-001",
+            question="q2",
+            answer="a",
+            rationale=None,
+            on=DAY,
+            decided_by="pat",
+        )
+    )
+    assert applied.written is True
+    assert len(locks) == 1
+
+
+@pytest.mark.parametrize("status", ["answered", "superseded"])
+def test_answer_refuses_entries_outside_open_or_assumed(tmp_path: Path, status: str) -> None:
+    ledger = seeded_ledger(tmp_path)
+    text = ledger.read_text(encoding="utf-8").replace("status: open", f"status: {status}")
+    ledger.write_text(text, encoding="utf-8")
+    plan = plan_update(
+        ledger,
+        "D-001",
+        answer="settled",
+        rationale=None,
+        on=DAY,
+        decided_by="pat",
+    )
+    assert plan.refusal == ("superseded-decision" if status == "superseded" else "transition-disallowed")
 
 
 def test_the_caller_composes_the_path_the_module_never_discovers_it(tmp_path: Path):
@@ -482,6 +692,39 @@ def test_prose_merge_sees_the_value_read_under_the_same_lock(tmp_path: Path):
     ledger = _ledger(tmp_path)
     append(ledger, question="q", status="assumed", prose="**Answer:** guess")
     updated = set_fields(ledger, "D-001", status="answered", prose_merge=lambda old: old.replace("guess", "real"))
+    assert updated.prose == "**Answer:** real"
+    assert load(ledger).entries[0].prose == "**Answer:** real"
+
+
+def test_prose_merge_callback_runs_once_under_lock_on_the_latest_value(tmp_path: Path, monkeypatch) -> None:
+    ledger = _ledger(tmp_path)
+    append(ledger, question="q", status="assumed", prose="**Answer:** guess")
+    active = False
+    acquisitions = 0
+
+    @contextmanager
+    def competing_lock(path: Path):
+        nonlocal active, acquisitions
+        acquisitions += 1
+        if acquisitions == 1:
+            path.write_text(path.read_text(encoding="utf-8").replace("guess", "external"), encoding="utf-8")
+        active = True
+        try:
+            yield
+        finally:
+            active = False
+
+    monkeypatch.setattr(decisions, "_locked", competing_lock)
+    calls: list[tuple[bool, str]] = []
+
+    def merge(old: str) -> str:
+        calls.append((active, old))
+        return old.replace("external", "real")
+
+    updated = set_fields(ledger, "D-001", status="answered", prose_merge=merge)
+
+    assert calls == [(True, "**Answer:** external")]
+    assert acquisitions == 1
     assert updated.prose == "**Answer:** real"
     assert load(ledger).entries[0].prose == "**Answer:** real"
 

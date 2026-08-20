@@ -27,7 +27,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from code_wiki_okf.config import CONFIG_FILENAME, ConfigError, load_config
 from config_io import PlainYamlStore, dotted
 from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
@@ -53,6 +52,7 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import checked_int, checked_str
 from graph_works_core.workspace.pipeline import PipelineEntry, pipeline_table
 from graph_works_core.workspace.provenance import run_git
+from graph_works_core.workspace.repos import resolve_repo
 
 _DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
 
@@ -818,52 +818,6 @@ def default_base(repo: Path | None) -> str:
     return out.strip().rsplit("/", 1)[-1]
 
 
-def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tuple[Path | None, str | None]:
-    """The code repo this workspace describes, and why there is none.
-
-    `_repositories.yaml` is authoritative **always**, not only when the
-    workspace and the code repo are separate repositories. The layout's
-    `repo_root` is a `.git` walk-up from the workspace root: in the split
-    topology it resolves to the *vault*, and every git call made against it
-    then degrades to `None` without a word. The declarations file is the
-    surface that actually names the code.
-
-    Six outcomes, closed:
-
-    - Exactly one declared, no *repo_name* -> that repo.
-    - *repo_name* names a declared repo -> that repo.
-    - *repo_name* names nothing declared -> `WorkspaceError`, naming the set.
-    - Several declared, no *repo_name* -> `WorkspaceError`. Ambiguity refuses
-      rather than guessing; a wrong repo is worse than a refusal.
-    - Zero declared, or the file missing -> `(None, note)`. Not an error: a
-      workspace that catalogs no code is a shape.
-    - Malformed -> `WorkspaceError`. Config raises and content never does, the
-      line `code_wiki_okf.config` draws for itself and `_routing_rules` draws
-      for a hand-edited manifest.
-    """
-    path = layout.bundle_dir / CONFIG_FILENAME
-    try:
-        config = load_config(layout.bundle_dir)
-    except OSError:
-        return None, f"{path}: absent, so this workspace declares no code repository"
-    except ConfigError as exc:
-        raise WorkspaceError(str(exc)) from exc
-
-    declared = sorted(entry.name for entry in config.repos)
-    if repo_name is not None:
-        match = next((entry for entry in config.repos if entry.name == repo_name), None)
-        if match is None:
-            raise WorkspaceError(f"{path}: repo_name {repo_name!r} names no declared repository; declared: {declared}")
-        return match.path, None
-    if not config.repos:
-        return None, f"{path}: declares no repositories, so no code repo was resolved"
-    if len(config.repos) > 1:
-        raise WorkspaceError(
-            f"{path}: {len(config.repos)} repositories declared ({declared}); pass repo_name= to choose one"
-        )
-    return config.repos[0].path, None
-
-
 def _routing_rules(layout: WorkspaceLayout) -> Mapping[str, Any]:
     """The raw `workflow.auto_drive` block, membership-checked.
 
@@ -1207,7 +1161,6 @@ __all__ = [
     "branch_name",
     "default_base",
     "plan",
-    "resolve_repo",
     "run_orchestrate",
     "run_stage_advance",
 ]

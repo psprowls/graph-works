@@ -1,10 +1,9 @@
 # work-tracker-okf
 
-Work-item tracking as an OKF v0.2 lane — see
-`wiki/work/2026-08-10-epic-work-tracker-okf-port/01-design-spec.md` in the
-graph-wiki workspace for the full architecture, and
-`wiki/work/2026-08-10-epic-feature-package-scaffold-declarations-items/01-design-spec.md`
-for what this first slice ships.
+Work-item tracking as an OKF v0.2 lane: typed item projection, dependency and
+hierarchy rules, immutable mutation plans, and a standalone CLI. This package
+receives an explicit bundle root. Workspace-aware callers use the qualified
+`graph_works_core.work.commands` surface described by `graph-works-core`.
 
 ## The CLI
 
@@ -34,8 +33,8 @@ relocates `_schema/` and `_sections/` for that invocation. It is **not**
 persisted: this package writes no configuration file, so a later command needs
 the flag again.
 
-See [the corresponding library sections](#the-writers) and [The decision layer](#the-decision-layer)
-for what each command does.
+See [the corresponding library sections](#the-writers) and
+[Routing and advancement](#routing-and-advancement) for what each command does.
 
 ### `--dry-run` means "stop after plan"
 
@@ -64,10 +63,10 @@ an acceptance gate.
 ### advance lints after writing
 
 `advance` re-validates the item it just wrote and prints only that item's
-findings. The stamp is unconditional (C6-G: a pointer at a not-yet-written
-artifact is `targets.artifact-missing`, a warning, surfaced immediately rather
-than waiting for the next `lint` run). This is why `--dry-run` cannot show
-post-write findings honestly and says the check was skipped instead.
+findings. The stamp is unconditional: a pointer at a not-yet-written artifact
+is `targets.artifact-missing`, a warning surfaced immediately rather than
+waiting for the next `lint` run. This is why `--dry-run` cannot show post-write
+findings honestly and says the check was skipped instead.
 
 ## The lane
 
@@ -104,38 +103,80 @@ filename from, so a caller cannot obtain a resource without its matching id.
 Note the flip, which predates the port: the filename is `<phase>-<kind>`
 (`03-execute-results`), the id is `<kind>-<phase>` (`results-execute`).
 
+## Dependency edges
+
+`depends_on` accepts legacy slug strings and structured edges in the same
+ordered list:
+
+```yaml
+depends_on:
+  - 2026-08-18-feature-legacy-terminal-gate
+  - slug: 2026-08-18-feature-design-input
+    blocks: plan
+    needs: design
+```
+
+The first entry is shorthand for `blocks: execute` and `needs: resolved`: it
+does not gate design or plan, and a terminal dependency satisfies it. The
+second gates plan and every later phase until the dependency moves *past*
+design. Entering design is not enough; `needs` names a phase that must be
+complete.
+
+One slug may carry distinct gates for different consumers or phases. An exact
+duplicate `(slug, blocks, needs)` triple is invalid. Unknown dependencies,
+invalid phase names, and dependencies with no usable phase fail closed once
+their edge gates the current phase. Readers retain malformed entries as
+`DependencyIssue` values so lint can report them without crashing; writers
+accept typed `dependencies.DependencyEdge` values and refuse invalid graphs.
+
 ## The writers
 
-| Module | Exports | Shape |
+Mutation names remain qualified by their owning submodule. In particular,
+`filing.apply`, `decisions.apply_plan`, and `adoption.apply_adoption` are not
+flattened onto the `work_tracker_okf` package root.
+
+The table highlights the APIs most useful when composing writers; it is not an
+exhaustive module reference. The owning module remains authoritative; where it
+declares `__all__`, that collection is its complete public surface.
+
+| Module | Selected composition APIs | Shape |
 |---|---|---|
-| `filing` | `slugify`, `compose_slug`, `FilingPlan`, `FilingRefusal`, `file_item`, `apply` | plan + apply; no `dry_run` flag and no `force=` |
-| `sources` | `upsert` | mutates a `Document` in memory, returns whether it changed; the caller saves |
-| `results` | `ResultsFacts`, `render`, `write_results` | the one direct write — a stub derived entirely from its facts |
-| `archive` | `SkipReason`, `Skipped`, `ArchivePlan`, `ArchiveResult`, `plan_archive`, `apply_archive` | plan + apply; no `dry_run` flag — the plan *is* the preview, and a dry run could not honestly report its `IndexUpdate`s |
+| `work_tracker_okf.filing` | `FilingSeed`, `FilingPlan`, `FilingRefusal`, `plan_filing`, `apply` | one page; planning is the default no-write operation |
+| `work_tracker_okf.compose` | `FilingCompositionPlan`, `FilingApplication`, `FilingOutcome`, `plan_file_and_reconcile`, `apply_file_and_reconcile` | preflights the page, lane index, and root log before any write |
+| `work_tracker_okf.decisions` | `DecisionPlan`, `DecisionApplication`, `plan_append`, `plan_update`, `plan_supersede`, `apply_plan` | immutable ledger snapshot; apply rechecks it under the ledger lock |
+| `work_tracker_okf.adoption` | `AdoptionPlan`, `AdoptionApplication`, `plan_adoption`, `apply_adoption` | classifies migrated child specs without workspace discovery or Git |
+| `work_tracker_okf.sources` | `upsert` | mutates a `Document` in memory, returns whether it changed; the caller saves |
+| `work_tracker_okf.results` | `ResultsFacts`, `render`, `write_results` | the one direct write — a stub derived entirely from its facts |
+| `work_tracker_okf.archive` | `SkipReason`, `Skipped`, `ArchivePlan`, `ArchiveResult`, `plan_archive`, `apply_archive` | plan + apply; no `dry_run` flag — the plan *is* the preview, and a dry run could not honestly report its `IndexUpdate`s |
 
 ```python
 from datetime import date
 
 from okf_ext.shape import load_sections
-from work_tracker_okf.filing import apply, file_item
+from work_tracker_okf.filing import FilingSeed, apply, plan_filing
 
-plan = file_item(
+plan = plan_filing(
     root,
-    type="Feature",
-    title="The filing writer",
-    description="Owns where a work item lands.",
-    on=date(2026, 3, 2),
-    affects=("packages/work-tracker-okf",),
-    section_set=load_sections(root / "_sections"),
+    items,
+    FilingSeed(
+        type="Feature",
+        title="The filing writer",
+        description="Owns where a work item lands.",
+        on=date(2026, 3, 2),
+        affects=("packages/work-tracker-okf",),
+    ),
+    load_sections(root / "_sections"),
 )
 if plan.refusal is None:
     apply(plan)  # not calling this is the dry run
 ```
 
 Filing writes **one page**. `work/index.md` reconciliation and the `log.md` line
-stay a composing CLI's, out of okf-io's `update_index` and `append_log_entry`:
-index reconciliation is bundle-wide, and folding it in would make a `FilingPlan`
-span three files in two directories.
+belong to `compose.plan_file_and_reconcile`, whose `FilingCompositionPlan`
+preflights all three resources. `compose.apply_file_and_reconcile` applies that
+same plan and reports completed effects in `FilingApplication`; an unexpected
+I/O failure raises `FilingApplyError` with the partial application attached.
+Neither planner writes, and neither apply operation has a `force` escape hatch.
 
 ## Archiving
 
@@ -200,26 +241,29 @@ composition is how two consumers end up loading the same bundle differently.
 projects, with the uncoercible fields at their empty value — the *rules*
 report malformed content, the *reader* does not refuse it.
 
-`IGNORE` is the right lens for everything above — routing, hierarchy, the
-decision layer, validation — but not for planning a move. Reach for
+`IGNORE` is the right lens for everything above — routing, hierarchy, decision
+ledgers, validation — but not for planning a move. Reach for
 `ARCHIVE_IGNORE` only inside the [Archiving](#archiving) path, where
 `okf_ext.moves` needs `work/<slug>/references/` visible to find what to move.
 **`ARCHIVE_IGNORE` must never reach `validate()` or `update_index`** — both
 would then walk every artifact under every `references/` tree as if it were a
 concept in its own right.
 
-## The decision layer
+## Routing and advancement
 
-Five modules, one public API surface — the one a CLI tier imports. No leading
-underscores on anything they export.
+Six modules form the qualified routing surface used by a CLI tier. The table
+highlights common composition points rather than enumerating every public name;
+the owning module remains authoritative, with `__all__` naming its complete
+declared surface where present.
 
-| Module | Exports |
+| Module | Selected routing APIs |
 |---|---|
-| `hierarchy` | `ChildRollup`, `DescendResult`, `child_rollup`, `unmet_depends_on`, `unknown_depends_on`, `child_gated_node`, `descend` |
-| `workflow` | `RouteState`, `Transition`, `Dispatch`, `RouteResult`, `Stage`, `Variant`, `PLAN_OR_EXECUTE`, `route`, `state_for` |
-| `advance` | `AdvancePlan`, `FieldChange`, `RefusalReason`, `advance`, `apply` |
-| `children` | `ChildrenSync`, `plan_children_sync`, `apply_children_sync` |
-| `projection` | `Rollup`, `ResumeItem`, `ResumeSelection`, `rollup`, `select_resume`, `resolve` |
+| `work_tracker_okf.dependencies` | `DependencyEdge`, `DependencyFact`, `DependencyIssue`, `parse_dependencies`, `serialize_dependencies`, `entry_phase`, `resolve_facts`, `satisfied`, `gates`, `unmet`, `describe`, `validate_dependencies` |
+| `work_tracker_okf.hierarchy` | `ChildRollup`, `DescendResult`, `child_rollup`, `unknown_depends_on`, `child_gated_node`, `descend`, `nearest_epic` |
+| `work_tracker_okf.workflow` | `RouteState`, `Transition`, `Dispatch`, `RouteResult`, `Stage`, `Variant`, `PLAN_OR_EXECUTE`, `route`, `state_for` |
+| `work_tracker_okf.advance` | `AdvancePlan`, `FieldChange`, `RefusalReason`, `advance`, `apply` |
+| `work_tracker_okf.children` | `ChildrenSync`, `plan_children_sync`, `apply_children_sync` |
+| `work_tracker_okf.projection` | `Rollup`, `ResumeItem`, `ResumeSelection`, `rollup`, `select_resume`, `resolve` |
 
 ```python
 from datetime import date
@@ -253,9 +297,76 @@ Two of a transition's fields are handed onward rather than applied:
 `sync_plan_table` (the `## Plan` row to add). Both need path and table
 functions this package does not yet own; a composing CLI resolves them.
 
+## Decision ledgers
+
+Each epic owns one decision ledger. Callers may resolve a child to its epic in
+`hierarchy`, but the ledger operations themselves take an explicit path and do
+no discovery.
+
+```python
+from datetime import date
+
+from work_tracker_okf.decisions import apply_plan, plan_append
+from work_tracker_okf.paths import decisions_ledger
+
+ledger = decisions_ledger(epic_slug).path(root)
+plan = plan_append(
+    ledger,
+    question="Which store?",
+    status="assumed",
+    answer="SQLite",
+    rationale="single writer",
+    if_wrong="re-plan storage",
+    affects=(child_slug,),
+    on=date(2026, 8, 18),
+    decided_by="pat",
+)
+if plan.refusal is None:
+    application = apply_plan(plan)
+    if application.stale:
+        print("ledger changed after planning; nothing landed")
+```
+
+`decisions.plan_append`, `decisions.plan_update`, and
+`decisions.plan_supersede` are the supported planned mutations. Planning
+captures expected refusals and writes nothing. `decisions.apply_plan` rechecks
+the immutable ledger snapshot while holding the existing exclusive lock; a
+stale plan returns `DecisionApplication(stale=True, written=False)` rather than
+claiming its entries landed. `decisions.query` and `decisions.counts` are pure
+read helpers.
+
+Status is part of the contract: `open` is unanswered, `answered` requires an
+answer, `assumed` requires both an answer and an `if_wrong` recovery, and
+`superseded` is produced by `plan_supersede` rather than appended directly.
+
+## Migrated child-spec adoption
+
+Migration donors have exactly one supported root:
+`work/<epic>/references/child-specs/`. A matched direct child's canonical
+destination is `work/<child>/references/01-design-spec.md`, registered as the
+root-absolute resource
+`/work/<child>/references/01-design-spec.md`.
+
+```python
+from work_tracker_okf.adoption import apply_adoption, plan_adoption
+
+plan = plan_adoption(bundle, items, epic_slug)
+if plan.refusal is None:
+    application = apply_adoption(plan)  # omit this call for a byte-identical dry run
+```
+
+`adoption.plan_adoption` only classifies already-loaded domain data. It never
+discovers a workspace, invokes Git, or writes. `adoption.apply_adoption`
+creates a missing canonical destination without overwrite, removes its donor
+only after the destination write succeeds, and registers the canonical source.
+An authored noncanonical `design-spec` source wins, including one introduced
+after planning. Re-running after a successful apply is idempotent. There is no
+`force` option.
+
 ## Linting a lane
 
-The lane's 25 rules ship as one `extra_rules=` bundle:
+The lane's 31 finding codes across 14 rule functions ship as one
+`extra_rules=` bundle:
 
 ```python
 from datetime import date
@@ -288,9 +399,9 @@ report = validate(
 
 Codes are dotted and topic-prefixed (`state.stuck-open`,
 `graph.depends-on-cycle`), so `report.by_code(...)` and a
-`code.startswith("state.")` filter both work with no lookup table. Eleven codes
-are `error`; the other fourteen are `warn`, which means `Report.ok` stays a claim
-about conformance rather than about tidiness.
+`code.startswith("state.")` filter both work with no lookup table. Sixteen
+codes are `error`; the other fifteen are `warn`, which means `Report.ok` stays
+a claim about conformance rather than about tidiness.
 
 Nothing in okf-io or okf-ext validates a `sources[].resource` **target** — the
 link graph reads body prose only, and `provenance.source-resource-missing`
@@ -302,18 +413,18 @@ checks only that `resource` is present, never that it resolves.
 Settled, so nobody has to re-open it:
 
 - **No consumer cutover.** Repointing the graph-wiki plugin at this package is
-  its own work item (E-B), not part of this lane.
+  a separate integration decision, not part of this lane.
 - **No dispatch, no auto-drive, no `orchestrate`.** Mapping a `(stage, variant)`
-  pair to a skill name, and driving a pipeline, are the harness's (E-A).
+  pair to a skill name and driving a pipeline belong to the harness.
   `route()` returns `Literal` types precisely so that mapping stays
   exhaustively checkable at the caller's end.
 - **No `work-index.json` and no `regen-index`.** The sidecar was a cache whose
-  invalidation nobody could see (E-H). `projection.resolve` is two stat calls,
+  invalidation nobody could see. `projection.resolve` is two stat calls,
   which is what the cache existed to serve.
 - **`results` has no CLI command.** `ResultsFacts` needs a `start_sha`, and the
-  file that recorded where a phase began was tier 4's — deleted by E-H. Nothing
-  this package can reach knows where the phase started, so no honest stub can be
-  written from here. It stays a library function, called by whoever dispatched
-  the phase, which is the only layer that knows the range. This is the one
-  stated hole in "every capability is exercisable from the CLI", and naming it
-  is better than a command that guesses a sha.
+  former tier-4 phase marker no longer exists. Nothing this package can reach
+  knows where the phase started, so no honest stub can be written from here. It
+  stays a library function, called by whoever dispatched the phase, which is
+  the only layer that knows the range. This is the one stated hole in "every
+  capability is exercisable from the CLI", and naming it is better than a
+  command that guesses a sha.

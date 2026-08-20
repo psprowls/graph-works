@@ -8,9 +8,9 @@ from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
 
-_PURPOSE_PLACEHOLDER = "> TODO: <One paragraph: what this package does, who uses it, why it exists.>"
+_PURPOSE_PLACEHOLDER = "> TODO: what this package does, who uses it, and why it exists, in one paragraph."
 _PUBLIC_API_PLACEHOLDER = (
-    "> TODO: <Main exports and when to use them. Link code with backticked `path:line` references.>"
+    "> TODO: the main exports and when to use them. Link code with backticked `path:line` references."
 )
 
 
@@ -180,19 +180,19 @@ def _write_repository_page(root: Path, name: str, resource: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f'---\ntype: Repository\ntitle: "{name}"\nresource: "{resource}"\n---\n\n'
-        "## Overview\n\n> TODO: <One paragraph: what this repository is and what it contains.>\n\n"
-        "## Layout\n\n> TODO: <Top-level directory layout and what lives where.>\n",
+        "## Overview\n\n> TODO: what this repository is and what it contains, in one paragraph.\n\n"
+        "## Layout\n\n> TODO: the top-level directory layout, and what lives where.\n",
         encoding="utf-8",
     )
 
 
 def _write_mirror_file_page(root: Path, repo: str, rel_path: str, resource: str) -> None:
-    path = root / "repositories" / repo / f"{rel_path}.md"
+    path = root / "repositories" / repo / "fs" / f"{rel_path}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         f'---\ntype: File\ntitle: "{rel_path}"\nresource: "{resource}"\n---\n\n'
         "## Notes\n\n"
-        "> TODO: <Anything a reader should know about this file that the generated sections below don't capture.>\n"
+        "> TODO: anything a reader should know about this file that the generated sections below don't capture.\n"
         "\n## Symbols\n\n_(populated by `code-wiki-okf sync` — not yet generated)_\n"
         "\n## Imports\n\n_(populated by `code-wiki-okf sync` — not yet generated)_\n"
         "\n## Exports\n\n_(populated by `code-wiki-okf sync` — not yet generated)_\n"
@@ -218,7 +218,7 @@ def test_exact_depth_leaves_mirror_file_pages_alone(tmp_path: Path) -> None:
 
     assert result.deleted == ("repositories/acme",)
     assert result.declined == ()
-    assert (tmp_path / "repositories" / "acme" / "src" / "mod.py.md").exists()
+    assert (tmp_path / "repositories" / "acme" / "fs" / "src" / "mod.py.md").exists()
 
 
 def test_without_exact_depth_the_mirror_subtree_is_incorrectly_swept(tmp_path: Path) -> None:
@@ -234,4 +234,4 @@ def test_without_exact_depth_the_mirror_subtree_is_incorrectly_swept(tmp_path: P
 
     result = prune_lane(bundle, section_set, directory="repositories/", should_exist=set())
 
-    assert set(result.deleted) == {"repositories/acme", "repositories/acme/src/mod.py"}
+    assert set(result.deleted) == {"repositories/acme", "repositories/acme/fs/src/mod.py"}

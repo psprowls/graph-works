@@ -5,16 +5,16 @@ sections:
   - heading: Purpose
     required: true
     placeholder: |
-      > TODO: <One paragraph: what this app does, who uses it, why it exists.>
+      > TODO: what this app does, who uses it, and why it exists, in one paragraph.
   - heading: Platform & runtime
     placeholder: |
-      > TODO: <Target platform(s) and runtime — e.g. web/Node, iOS, Electron.>
+      > TODO: the target platform(s) and runtime — e.g. web/Node, iOS, Electron.
   - heading: Routes / screens
     placeholder: |
-      > TODO: <Table of Route | Purpose | Auth, or the equivalent for this platform.>
+      > TODO: a table of Route | Purpose | Auth, or the equivalent for this platform.
   - heading: Provider chain
     placeholder: |
-      > TODO: <Top-level providers/wrappers this app mounts, in order.>
+      > TODO: the top-level providers/wrappers this app mounts, in order.
   - heading: Files
     ownership: generated
     required: true

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from code_wiki_okf.config import load_config
@@ -34,9 +35,62 @@ async def test_narrate_false_stops_after_phase_one(ready, monkeypatch):
 
     monkeypatch.setattr(scan, "role_binding", _no_model)
     result = await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
-    assert result.sync.written
+    assert result.structural.entities.written
     assert result.worklist.prose_tasks
     assert result.applied == scan.ApplyResult()
+
+
+async def test_narrate_false_reports_structural_catalog_declines(ready, monkeypatch):
+    """An early structural-only return must still be a failed scan result."""
+    layout, config = ready
+    real_build = scan.build_scan_worklist
+
+    async def build_with_decline(*args, **kwargs):
+        worklist, structural = await real_build(*args, **kwargs)
+        entities = replace(structural.entities, catalog_declined=(("packages/broken.md", "parse-error"),))
+        return worklist, replace(structural, entities=entities)
+
+    def _no_model(*args, **kwargs):
+        raise AssertionError("narrate=False must not construct a model")
+
+    monkeypatch.setattr(scan, "build_scan_worklist", build_with_decline)
+    monkeypatch.setattr(scan, "role_binding", _no_model)
+
+    result = await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
+
+    assert result.errors == ("packages/broken.md: parse-error",)
+    assert not result.ok
+
+
+async def test_narrated_scan_keeps_structural_declines_before_provider_and_apply_errors(ready, monkeypatch):
+    """The final narrated return must preserve every phase's error in order."""
+    layout, config = ready
+    real_build = scan.build_scan_worklist
+
+    async def build_with_decline(*args, **kwargs):
+        worklist, structural = await real_build(*args, **kwargs)
+        entities = replace(structural.entities, catalog_declined=(("packages/broken.md", "parse-error"),))
+        return worklist, replace(structural, entities=entities)
+
+    async def fake_fan_out(*args, **kwargs):
+        return ScanResults(provider_errors=("pkg:widgets: provider unavailable",))
+
+    monkeypatch.setattr(scan, "build_scan_worklist", build_with_decline)
+    monkeypatch.setattr(scan, "run_prose_fan_out", fake_fan_out)
+    monkeypatch.setattr(
+        scan,
+        "apply_scan_results",
+        lambda *args, **kwargs: scan.ApplyResult(entity_errors=("packages/widgets.md: write-error",)),
+    )
+
+    result = await scan.run_scan(layout, config, today=TODAY, at=AT, dry_run=False)
+
+    assert result.errors == (
+        "packages/broken.md: parse-error",
+        "pkg:widgets: provider unavailable",
+        "packages/widgets.md: write-error",
+    )
+    assert not result.ok
 
 
 async def test_an_empty_worklist_short_circuits_before_constructing_a_model(ready, monkeypatch):
@@ -151,7 +205,8 @@ async def test_a_dry_run_writes_nothing_and_reports_what_it_would_do(ready, monk
     after = sorted(p.name for p in layout.bundle_dir.rglob("*.md"))
 
     assert after == before  # the structural pass did not create pages
-    assert result.sync == scan.SyncSummary()  # `entities.sync(dry_run=True)` is a no-op
+    assert result.structural.entities == scan.SyncSummary()  # `entities.sync(dry_run=True)` is a no-op
+    assert result.structural.mirror.results == ()  # `sync_mirror(dry_run=True)` writes nothing either
     assert result.applied == scan.ApplyResult()
 
 

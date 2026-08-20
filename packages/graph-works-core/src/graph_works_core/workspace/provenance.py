@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from work_tracker_okf.results import ResultsFacts
@@ -35,6 +36,10 @@ ACTIVE_WORK_FILENAME = "active-work.json"
 #: Every git call is capped. A hung `git` on the advance path is the failure
 #: this exists to make impossible.
 _GIT_TIMEOUT_SECONDS = 5
+
+#: git's own field separator for `--format`. Safe inside a subject line, where
+#: a colon or a tab is not.
+_UNIT_SEP = "\x1f"
 
 
 def run_git(cwd: Path, *args: str) -> str | None:
@@ -119,6 +124,50 @@ def head_sha(repo: Path) -> str | None:
     return sha or None
 
 
+def spec_anchor_commit(repo: Path, spec_path: Path) -> str | None:
+    """The most recent commit in *repo* touching *spec_path*.
+
+    `None` when the file is untracked, new, or outside *repo*. Git's own
+    history of the file IS the anchor when it has one, which is why no
+    frontmatter field stamps it: it stays correct even if reconcile runs twice.
+    """
+    out = run_git(repo, "log", "-1", "--format=%H", "--", str(spec_path))
+    sha = (out or "").strip()
+    return sha or None
+
+
+def commit_exists(repo: Path, sha: str) -> bool:
+    """Whether *sha* names a commit reachable in *repo*. Never raises.
+
+    The guard on a blank *sha* is not defensive noise: `cat-file -e ^{commit}`
+    on an empty string is a git usage error, and this answers a question the
+    caller asks about an unverified fallback.
+    """
+    if not sha:
+        return False
+    return run_git(repo, "cat-file", "-e", f"{sha}^{{commit}}") is not None
+
+
+def commits_touching(repo: Path, commit_range: str, paths: Sequence[Path | str]) -> tuple[tuple[str, str], ...]:
+    """`((sha, subject), ...)` for commits in *commit_range* touching *paths*,
+    newest first.
+
+    An empty *paths* returns `()` rather than the whole log — an unscoped range
+    is never what the caller means, and silently widening it would flood the
+    consumer with unrelated commits.
+    """
+    if not paths:
+        return ()
+    out = run_git(repo, "log", f"--format=%H{_UNIT_SEP}%s", commit_range, "--", *(str(path) for path in paths))
+    rows: list[tuple[str, str]] = []
+    for line in (out or "").splitlines():
+        if _UNIT_SEP not in line:
+            continue
+        sha, subject = line.split(_UNIT_SEP, 1)
+        rows.append((sha, subject))
+    return tuple(rows)
+
+
 def results_facts(repo: Path, *, phase: str, start_sha: str) -> ResultsFacts | None:
     """The facts a results stub renders from, gathered over `start_sha..HEAD`.
 
@@ -183,9 +232,12 @@ def clear_active_work(layout: WorkspaceLayout, slugs: set[str]) -> bool:
 __all__ = [
     "ACTIVE_WORK_FILENAME",
     "clear_active_work",
+    "commit_exists",
+    "commits_touching",
     "head_sha",
     "results_facts",
     "run_git",
+    "spec_anchor_commit",
     "worktree_state",
     "write_active_work",
 ]

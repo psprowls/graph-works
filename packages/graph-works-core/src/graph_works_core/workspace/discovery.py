@@ -38,10 +38,17 @@ def find_repo_root(start: str | Path) -> Path | None:
     return None
 
 
-def _root(workspace: str | Path | None, cwd: str | Path | None, environ: Mapping[str, str]) -> Path:
+def resolve_root(
+    *,
+    workspace: str | Path | None = None,
+    cwd: str | Path | None = None,
+    environ: Mapping[str, str] | None = None,
+) -> Path:
+    """Resolve the prospective workspace root without requiring a manifest."""
+    resolved_environ = os.environ if environ is None else environ
     if workspace is not None:
         return Path(workspace).expanduser().resolve()
-    pinned = environ.get(WORKSPACE_DIR_ENV, "").strip()
+    pinned = resolved_environ.get(WORKSPACE_DIR_ENV, "").strip()
     if pinned:
         return Path(pinned).expanduser().resolve()
     start = Path.cwd() if cwd is None else Path(cwd).expanduser().resolve()
@@ -79,7 +86,7 @@ def resolve(
     instead of losing it to the walk-up again.
     """
     resolved_environ = os.environ if environ is None else environ
-    root = _root(workspace, cwd, resolved_environ)
+    root = resolve_root(workspace=workspace, cwd=cwd, environ=resolved_environ)
     manifest = read(root / MANIFEST_FILENAME, environ=resolved_environ)
     return layout_for(
         root,
@@ -91,4 +98,4 @@ def resolve(
     )
 
 
-__all__ = ["find_repo_root", "resolve"]
+__all__ = ["find_repo_root", "resolve", "resolve_root"]

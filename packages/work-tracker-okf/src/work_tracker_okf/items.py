@@ -20,6 +20,7 @@ from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
 from okf_ext.shape import DEFAULT_IGNORE as _SECTIONS_IGNORE
 from okf_io import Bundle, Document, Source
 
+from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
 from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID
 
 #: The lane's two directories, bundle-relative posix. An item page sits at
@@ -78,11 +79,14 @@ class WorkItem:
     workflow_status: str
     phase: str | None
     effort: str | None
+    blast_radius: str | None
+    target: str | None
     opened: str
     updated: str
     affects: tuple[str, ...]
     parent: str | None
-    depends_on: tuple[str, ...]
+    depends_on: tuple[DependencyEdge, ...]
+    dependency_issues: tuple[DependencyIssue, ...]
     children: tuple[str, ...]
     owner: str | None
     resolved_in: str | None
@@ -166,6 +170,7 @@ def _project(concept_id: str, slug: str, archived: bool, document: Document) -> 
     # `okf_ext.schemas.rule` reads frontmatter that way.
     data = document.fm_data(dates="iso")
     source_ids = {source.id for source in fm.sources if source.id is not None}
+    dependency_parse = parse_dependencies(data.get("depends_on"))
     return WorkItem(
         slug=slug,
         path=f"{concept_id}.md",
@@ -177,11 +182,14 @@ def _project(concept_id: str, slug: str, archived: bool, document: Document) -> 
         workflow_status=_text(data.get("workflow_status")),
         phase=_optional_text(data.get("phase")),
         effort=_optional_text(data.get("effort")),
+        blast_radius=_optional_text(data.get("blast_radius")),
+        target=_optional_text(data.get("target")),
         opened=_text(data.get("opened")),
         updated=_text(data.get("updated")),
         affects=_text_tuple(data.get("affects")),
         parent=_optional_text(data.get("parent")),
-        depends_on=_text_tuple(data.get("depends_on")),
+        depends_on=dependency_parse.edges,
+        dependency_issues=dependency_parse.issues,
         children=(),
         owner=_optional_text(data.get("owner")),
         resolved_in=_optional_text(data.get("resolved_in")),

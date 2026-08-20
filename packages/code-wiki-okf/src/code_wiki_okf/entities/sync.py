@@ -30,7 +30,6 @@ from datetime import date, datetime
 from types import MappingProxyType
 
 from code_graph_io import GraphReader, NodeRecord
-from code_graph_io.tokens import count_tokens
 from okf_ext.generators import Render, plan_regenerate
 from okf_ext.generators import apply as apply_regenerations
 from okf_ext.schemas import SchemaSet, load_schemas
@@ -52,7 +51,7 @@ from code_wiki_okf.entities.render import (
     render_test_suite,
 )
 from code_wiki_okf.git_state import head_commit
-from code_wiki_okf.provenance import generated_value, last_updated_commit_value, tokens_value
+from code_wiki_okf.provenance import generated_value, last_updated_commit_value
 from code_wiki_okf.resources import resource_index
 
 #: Shared empty `by_repository` default -- mirrors `generators/model.py`'s
@@ -95,11 +94,14 @@ class EntitySync:
     by_repository: Mapping[str, tuple[str, ...]] = field(default=_NO_REPOSITORIES)
 
 
-#: `File.yaml`-style provenance keys that must never count as content drift
-#: -- `generated.at` is a fresh wall-clock timestamp every call, so comparing
-#: it would make every existing page look stale on every run. Mirrors
-#: `mirror.plan._render_matches_disk`'s own `_PROVENANCE_KEYS` exclusion, for
-#: the identical reason.
+#: `File.yaml`-style provenance keys that must never count as content drift.
+#: `generated.at` is a fresh wall-clock timestamp every call, so comparing it
+#: would make every existing page look stale on every run. `tokens` is excluded
+#: for a different reason: this lane no longer stamps it at all -- it is owned
+#: by `run_tokens_update` (graph-works-core) alone -- so a *foreign* writer
+#: changes it between runs; comparing it would make every page look stale on
+#: the first `gw util tokens` after a scan. Mirrors
+#: `mirror.plan._render_matches_disk`'s own `_PROVENANCE_KEYS` exclusion.
 _PROVENANCE_KEYS = frozenset({"generated", "last_updated_commit", "tokens"})
 
 #: The repo label `_resolve_placements` gives a dependency. A dependency node
@@ -174,12 +176,15 @@ def _resolve_target(
     return _Target(concept_id=concept_id, render=render, type_name=type_name, title=name, resource=resource)
 
 
-def _stamp_provenance(render: Render, *, sha: str | None, at: datetime, tokens_source: str) -> Render:
+def _stamp_provenance(render: Render, *, sha: str | None, at: datetime) -> Render:
+    """`tokens` is not stamped here: `run_tokens_update`
+    (graph-works-core) is its sole writer, keyed off D-041. Stamping a
+    per-kind proxy here would double-write the key -- see
+    2026-08-19-tech-debt-tokens-metric-proxy-string."""
     frontmatter = dict(render.frontmatter)
     frontmatter["generated"] = generated_value(by=f"code-wiki-okf/{__version__}", at=at)
     if sha:
         frontmatter["last_updated_commit"] = last_updated_commit_value(sha)
-    frontmatter["tokens"] = tokens_value(count_tokens(tokens_source))
     return Render(frontmatter=frontmatter, sections=render.sections)
 
 
@@ -197,9 +202,7 @@ def _package_targets(
         desc = reader.describe_package(name=node.name)
         if desc is None:
             continue
-        render = _stamp_provenance(
-            render_package(desc, repo_name=repo_name), sha=sha, at=at, tokens_source="\n".join(desc.files)
-        )
+        render = _stamp_provenance(render_package(desc, repo_name=repo_name), sha=sha, at=at)
         yield _resolve_target(
             existing=existing,
             schema_set=schema_set,
@@ -224,9 +227,7 @@ def _app_targets(
         desc = reader.describe_app(name=node.name)
         if desc is None:
             continue
-        render = _stamp_provenance(
-            render_app(desc, repo_name=repo_name), sha=sha, at=at, tokens_source="\n".join(desc.files)
-        )
+        render = _stamp_provenance(render_app(desc, repo_name=repo_name), sha=sha, at=at)
         yield _resolve_target(
             existing=existing,
             schema_set=schema_set,
@@ -241,6 +242,7 @@ def _test_suite_targets(
     nodes: Sequence[NodeRecord],
     reader: GraphReader,
     *,
+    repo_name: str,
     existing: dict[str, str],
     schema_set: SchemaSet,
     sha: str | None,
@@ -251,9 +253,7 @@ def _test_suite_targets(
         if desc is None:
             continue
         tested = reader.consumer_packages(kind="test_suite", entity_uri=desc.uri)
-        render = _stamp_provenance(
-            render_test_suite(desc, tested_packages=tested), sha=sha, at=at, tokens_source="\n".join(tested)
-        )
+        render = _stamp_provenance(render_test_suite(desc, tested_packages=tested, repo_name=repo_name), sha=sha, at=at)
         yield _resolve_target(
             existing=existing,
             schema_set=schema_set,
@@ -277,7 +277,7 @@ def _agent_plugin_targets(
         desc = reader.describe_agent_plugin(name=node.name)
         if desc is None:
             continue
-        render = _stamp_provenance(render_agent_plugin(desc), sha=sha, at=at, tokens_source=desc.description)
+        render = _stamp_provenance(render_agent_plugin(desc), sha=sha, at=at)
         yield _resolve_target(
             existing=existing,
             schema_set=schema_set,
@@ -303,7 +303,7 @@ def _dependency_targets(
         desc = reader.describe_dependency(ecosystem=ecosystem, name=node.name)
         if desc is None:
             continue
-        render = _stamp_provenance(render_dependency(desc), sha=None, at=at, tokens_source="\n".join(desc.used_by))
+        render = _stamp_provenance(render_dependency(desc), sha=None, at=at)
         yield _resolve_target(
             existing=existing,
             schema_set=schema_set,
@@ -393,6 +393,7 @@ def _resolve_placements(
         for target in _test_suite_targets(
             _nodes_for_repo(all_suites, repo_uri),
             reader,
+            repo_name=repo_cfg.name,
             existing=existing,
             schema_set=schema_set,
             sha=sha,
@@ -411,9 +412,7 @@ def _resolve_placements(
             place(target, repo_label=repo_cfg.name)
 
         package_count = len(_nodes_for_repo(all_packages, repo_uri))
-        repo_render = _stamp_provenance(
-            render_repository(package_count=package_count), sha=sha, at=at, tokens_source=str(package_count)
-        )
+        repo_render = _stamp_provenance(render_repository(package_count=package_count), sha=sha, at=at)
         place(
             _resolve_target(
                 existing=existing,

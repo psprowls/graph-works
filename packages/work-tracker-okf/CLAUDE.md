@@ -4,53 +4,61 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
 
 ## Layout
 
-- `src/work_tracker_okf/` — library + CLI (`cli.py`, `__main__.py`). The
-  decision layer is `hierarchy.py` → `workflow.py` → `advance.py` /
-  `children.py` / `projection.py`, importing strictly downward and never the
-  reverse.
-- `src/work_tracker_okf/compose.py` — what a composing CLI does that no single
+- `work_tracker_okf` — library plus the `cli`/`__main__` entry point. The
+  dependency and routing layers are `dependencies` → `items` → `hierarchy` →
+  `workflow` → `advance` / `children` / `projection`, importing strictly
+  downward and never the reverse.
+- `work_tracker_okf.compose` — what a composing CLI does that no single
   writer owns: the shared rule set, the `sources[]` stamp, the `## Plan` row,
   the one-save advance, and filing's index/log reconcile. Library rather than
   CLI because tier 4 drives this lane through the Python API, so anything in a
   Typer callback is something tier 4 has to reimplement.
-- `src/work_tracker_okf/_rules/` — the lane rule catalog: five topic modules
-  (`state`, `plan`, `graph`, `targets`, `decisions`) plus `_common.py` and the
-  registry. Exported as one `extra_rules=` bundle through `rules.py`'s
+- `work_tracker_okf._rules` — the lane rule catalog: five topic modules
+  (`state`, `plan`, `graph`, `targets`, `decisions`) plus `_common` and the
+  registry. Exported as one `extra_rules=` bundle through `rules`'s
   `lane_rules()`.
-- `src/work_tracker_okf/decisions.py` — the per-epic decisions ledger, in three
-  layers: pure text (`parse`/`render`/`prose_block`), file (`load`/`append`/
-  `set_fields`/`supersede`, each one read → mutate → render → write cycle under
-  one exclusive `flock`), and pure query (`query`/`counts`). It imports
-  `paths` and nothing else from the package.
-- `src/work_tracker_okf/assets/` — package-data seed files copied byte-for-byte
+- `work_tracker_okf.decisions` — the per-epic decisions ledger: pure text
+  (`parse`/`render`/`prose_block`), immutable snapshot planners
+  (`plan_append`/`plan_update`/`plan_supersede`), stale-safe locked apply
+  (`apply_plan`), and pure query (`query`/`counts`). Legacy direct mutators are
+  compatibility wrappers, not the interface new callers should compose. The
+  module imports `paths` and nothing else from the package.
+- `work_tracker_okf.adoption` — domain-only classification and apply for
+  migrated child specs. It consumes an already-loaded bundle and item
+  projection; it never discovers a workspace or invokes Git.
+- `work_tracker_okf.assets` — package-data seed files copied byte-for-byte
   by `plan_install()`: seven `_schema/` documents and seven `_sections/`
   declarations
-- `tests/` — pytest tests; `tests/fixtures/minimal/` is the fixture vault
+- The pytest suite includes the `minimal` fixture vault.
 
 ## Conventions
 
-- Never reads the clock: `today=` is an argument everywhere except `cli.py`,
+- Never reads the clock: `today=` is an argument everywhere except `cli`,
   the one module allowed to call it.
 - Never discovers paths: the bundle root is always explicit.
 - Nothing on the content path raises. `InitError` is for caller error (a root
   that is not a directory) and nothing else; a malformed work item still
   projects to a `WorkItem` with its uncoercible fields at their empty value.
-- Tier 3 per ADR-0005: depends on `okf-io` and `okf-ext[schemas]`. Nothing
-  depends on this package.
-- The module name is the vocabulary's home: `vocabulary.py` holds every closed
+- Tier 3 per ADR-0005: its domain runtime depends on `okf-io` and
+  `okf-ext[schemas]`. Workspace-aware layers may depend on this package; this
+  package never imports those layers back.
+- The module name is the vocabulary's home: `vocabulary` holds every closed
   set, and the base schema's `enum` arrays are reconciled against it by
-  `tests/test_vocabulary.py` rather than generated from it.
+  the `test_vocabulary` test module rather than generated from it.
 - Writers plan, then apply. `advance()` returns an `AdvancePlan` and mutates
-  nothing; `apply(document, plan)` writes it. `children.py` splits the same
-  way, and `apply_children_sync` defaults to `dry_run=True`.
+  nothing; `apply(document, plan)` writes it. `children` splits the same way,
+  and `apply_children_sync` defaults to `dry_run=True`. Filing uses
+  `filing.plan_filing`/`filing.apply`, ledger mutations use the three
+  `decisions.plan_*` functions/`decisions.apply_plan`, and migrated specs use
+  `adoption.plan_adoption`/`adoption.apply_adoption`.
 - Refusals are data. `AdvancePlan.refusal` is a closed `RefusalReason`
   vocabulary, not an exception — the one raise on this path
   (`Document.set` on a document that failed to parse) is unreachable through
-  the public API, and `test_advance.py` pins that.
+  the public API, and the `test_advance` module pins that.
 - Two `ignore=` recipes, deliberately. `IGNORE` is what every reader and
   validator uses; `ARCHIVE_IGNORE` (it minus `*/references/*`) is what the
   archive path plans moves through, because `okf_ext.moves` never reads
-  `bundle.ignored`. `tests/test_ignore.py` asserts both literally *and*
+  `bundle.ignored`. The `test_ignore` module asserts both literally *and*
   asserts their delta, because two constants drifting apart silently is the
   failure mode. `ARCHIVE_IGNORE` must never reach `validate()` or
   `update_index`.
@@ -64,7 +72,22 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   question: not "is this stamped resource present" but "does an epic that has
   moved past design have a ledger at all."
 
-## Three things about `compose.py`
+## Artifact roots and compatibility boundaries
+
+There are exactly two supported design-spec roots:
+
+- `references/01-design-spec.md` is an item's canonical design artifact.
+- `references/child-specs/` is the migrated donor directory under an epic's
+  references directory; adoption moves matched donors to each child's
+  canonical artifact.
+
+Reject every legacy shortcut rather than carrying it forward: no `spec_doc`
+frontmatter, no direct `child-specs/` directory beside an epic page, no Git
+subprocess or workspace discovery in domain modules, no clock reads below the
+CLI, and no `force` argument on a planner or apply function. Callers resolve
+paths, dates, and repository state before entering this package.
+
+## Three things about `work_tracker_okf.compose`
 
 - **`advance` writes the page once.** `ensure_plan_row` uses
   `okf_ext.tables.splice_text` + `Document.set_body`, never
@@ -74,8 +97,8 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   okf-io's byte-fidelity splice running over a file that already moved
   underneath it.
 - **The plan row's action cell names the root-absolute `resource`.** Its
-  leading slash is load-bearing: `_rules/plan.py`'s `_PATH_RE` fullmatches one
-  whitespace token, and a token starting with `/` cannot match, so
+  leading slash is load-bearing: the plan target rule recognizes a relative
+  whitespace-free token, and a token starting with `/` cannot match, so
   `plan.action-target-missing` correctly skips a bundle path. Writing the
   bundle-relative form would make every advanced item report an error under
   `--repo-root`.
@@ -86,11 +109,11 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
 
 ## The rule catalog
 
-30 codes, 5 topics, 14 rule functions. **The module name is the code prefix**,
-asserted mechanically in `test_lane_catalog.py` — the same move
-`okf_io/tests/test_catalog.py` makes for its own eight. Adding a code means
+31 codes, 5 topics, 14 rule functions. **The module name is the code prefix**,
+asserted mechanically in the `test_lane_catalog` module — the same move
+`okf_io`'s `test_catalog` module makes for its own eight. Adding a code means
 adding it to its topic module's `CODES` *and* to the rule that emits it; a new
-topic means a new module plus an entry in `_rules/__init__.py`'s two mappings.
+topic means a new module plus an entry in `_rules`' two registry mappings.
 
 The five prefixes had to clear eighteen taken names: okf-io's eight (which make
 `validate()` **raise**), okf-ext's six — `health`, `placement`, `render`,
@@ -125,12 +148,11 @@ invariant — an item whose `workflow_status` is `superseded` with no
 for the two `targets` codes about `sources[]`. Inventing a section number for a
 lane invariant would be a false citation that outlives whoever wrote it.
 
-`_PHASE_COMPAT` lives module-private in `_rules/state.py` and is **bonded to
-`workflow.route()` by a test**, not by derivation: `test_phase_compat.py`
-enumerates every `RouteState` over the closed sets and asserts the router never
-turns a coherent `(workflow_status, phase)` pair into one the map condemns. That
-bond is what makes the epic's argument for keeping the routing table at tier 3
-worth anything.
+The internal phase-compatibility map is **bonded to `workflow.route()` by a
+test**, not by derivation: the `test_phase_compat` module enumerates every
+`RouteState` over the closed sets and asserts the router never turns a coherent
+`(workflow_status, phase)` pair into one the map condemns. That bond is what
+makes the argument for keeping the routing table at tier 3 worth anything.
 
 ### One thing okf-io does not do
 
@@ -146,17 +168,16 @@ leaving it to double-report.
 `uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests -v`
 from the repo root.
 
-`tests/fixtures/nonconformant/` is the whole-catalog vault: one walk triggers
-every one of the 30 lane codes, and `nonconformant.golden.txt` is its reviewed
-output. Regenerating the golden alone proves nothing — what holds it honest is
-the hand-written `ERROR_CODES` set in `test_lane_catalog.py` and the conformant
-vault's zero-errors property. `tests/fixtures/nonconformant_repo/` is the
-synthetic repo `repo_root` points at, and it is a **sibling** of the vault: an
-in-vault one would need `IGNORE` to grow a pattern, which is the contract these
-tests exist to exercise.
+The `nonconformant` fixture is the whole-catalog vault: one walk triggers every
+one of the 31 lane codes, and `nonconformant.golden.txt` is its reviewed output.
+Regenerating the golden alone proves nothing — what holds it honest is the
+hand-written `ERROR_CODES` set in the `test_lane_catalog` module and the
+conformant vault's zero-errors property. The sibling `nonconformant_repo`
+fixture is the synthetic repo `repo_root` points at; putting it inside the vault
+would force `IGNORE` to grow a pattern, which is the contract these tests exist
+to exercise.
 
 `uv run --package work-tracker-okf mypy --strict packages/work-tracker-okf/src`
-is this package's type gate. The shared `just types` line may be red for
-reasons that predate this package (a root venv missing third-party stubs like
-`typer`, `tree_sitter` or `tiktoken`) — that is not yours to fix; only a
-failure naming `work_tracker_okf` is.
+is this package's type gate. The repository-level `just check` must also pass;
+do not dismiss a shared Ruff, strict-mypy, import-contract, test, or coverage
+failure as somebody else's gate.

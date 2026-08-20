@@ -22,6 +22,7 @@ from okf_io import Bundle, load_bundle, update_index
 from code_wiki_okf.config import RepoConfig
 from code_wiki_okf.mirror.create import write_new_page
 from code_wiki_okf.mirror.model import MirrorPlan, MirrorResult
+from code_wiki_okf.mirror.paths import mirror_concept_id, mirror_page_path
 
 
 def _mirror_directories(bundle: Bundle, repo_name: str) -> tuple[str, ...]:
@@ -29,6 +30,12 @@ def _mirror_directories(bundle: Bundle, repo_name: str) -> tuple[str, ...]:
     touched -- not the bundle-wide `repositories/` directory itself, which
     is a sibling lane's (entity lane's) territory to reconcile, not this
     one's.
+
+    Deliberately anchored at the repo root, not at the mirror root
+    (`mirror/paths.mirror_prefix`): from here the walk yields
+    `repositories/<repo>`, `repositories/<repo>/fs` and everything below,
+    so both directories get an `index.md`. Anchored one level down it would
+    silently stop creating `repositories/<repo>/index.md`.
     """
     prefix = f"repositories/{repo_name}"
     found: set[str] = set()
@@ -60,7 +67,7 @@ def apply_mirror(bundle: Bundle, plan: MirrorPlan, repo: RepoConfig, *, section_
 
     renders = dict(plan.updates)
     for rel_path, (_frontmatter, render) in plan.creates.items():
-        concept_id = f"repositories/{repo.name}/{rel_path}"
+        concept_id = mirror_concept_id(repo.name, rel_path)
         if render.sections:  # a minimal create has an empty Render -- nothing to regenerate
             renders[concept_id] = render
 
@@ -72,7 +79,7 @@ def apply_mirror(bundle: Bundle, plan: MirrorPlan, repo: RepoConfig, *, section_
 
     deleted: list[str] = []
     for rel_path in plan.deletions:
-        target = reloaded.root / "repositories" / repo.name / f"{rel_path}.md"
+        target = mirror_page_path(reloaded.root, repo.name, rel_path)
         target.unlink(missing_ok=True)
         deleted.append(rel_path)
 

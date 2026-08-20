@@ -79,6 +79,13 @@ is the call and its result shape, not an implementation detail. Unlike every
 other vertical, it has no second file: `commands.py` is the entire module,
 so there is nothing left to keep qualified.
 
+The util vertical hoists `LogAppendResult`, `TokenStamp`, `SkippedPage`,
+`TokensUpdate`, `run_log` and `run_tokens_update` — its whole API — for the
+reason the archive and wiki_stats verticals hoist theirs: they are the call
+and its result shape. `VALID_OPS` and `TOKENS_KEY` stay
+`util.commands.*`; both are too generic for a front door, and the only
+consumer that needs them is the sub-app named for this vertical.
+
 The work vertical is deliberately **not** hoisted here. Its `run_lint` would
 collide with the wiki lint vertical's already-hoisted `run_lint`, and no
 consumer exists yet to force a naming resolution — `graph-works-cli`, the
@@ -109,7 +116,7 @@ and the rest of the shared `prompts`.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from graph_works_core.agent_substrate.agent_loop import ToolLoopResult, coerce_tool_name, run_tool_loop
 from graph_works_core.agent_substrate.agent_tools import (
@@ -168,6 +175,14 @@ from graph_works_core.scan.scan_contract import (
     ProseRefreshTask,
     ScanWorklist,
 )
+from graph_works_core.util.commands import (
+    LogAppendResult,
+    SkippedPage,
+    TokenStamp,
+    TokensUpdate,
+    run_log,
+    run_tokens_update,
+)
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats, compute_stats
 from graph_works_core.workspace.discovery import find_repo_root, resolve
 from graph_works_core.workspace.errors import InitError, QueryError, ScanError, WorkspaceError, WorkspaceNotFound
@@ -214,6 +229,7 @@ __all__ = [
     "LaneReport",
     "LaneSet",
     "LintReport",
+    "LogAppendResult",
     "Manifest",
     "OrchestratePlan",
     "OrchestrateResult",
@@ -229,9 +245,12 @@ __all__ = [
     "ScanResult",
     "ScanWorklist",
     "SemanticFinding",
+    "SkippedPage",
     "SourceChunks",
     "StageAdvance",
     "Target",
+    "TokenStamp",
+    "TokensUpdate",
     "ToolLoopResult",
     "WikiStats",
     "WorkspaceError",
@@ -268,11 +287,13 @@ __all__ = [
     "run_archive",
     "run_ingest_source",
     "run_lint",
+    "run_log",
     "run_mechanical",
     "run_orchestrate",
     "run_propagate_drift",
     "run_scan",
     "run_stage_advance",
+    "run_tokens_update",
     "run_tool_loop",
     "search_catalog",
     "state_gate_adapter",

@@ -7,6 +7,7 @@ import dataclasses
 import pytest
 from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.workspace.pipeline import PACKAGED_PIPELINE
+from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.hierarchy import descend
 from work_tracker_okf.items import WorkItem
 
@@ -25,11 +26,14 @@ def _item(slug: str, **overrides) -> WorkItem:
         workflow_status="open",
         phase="plan",
         effort="medium",
+        blast_radius=None,
+        target=None,
         opened="2026-08-01",
         updated="2026-08-01",
         affects=("packages/a",),
         parent=None,
         depends_on=(),
+        dependency_issues=(),
         children=(),
         owner=None,
         resolved_in=None,
@@ -430,9 +434,17 @@ def test_a_planned_advance_carries_the_epic_worktree():
 
 
 def test_a_dependency_blocker_classifies_as_deps():
-    items = (_item("a", depends_on=("b",)), _item("b", opened="2026-08-02"))
+    items = (_item("a", depends_on=(DependencyEdge("b", blocks="plan"),)), _item("b", opened="2026-08-02"))
     result = _plan(items, "a")
     assert [(b.slug, b.kind) for b in result.blocked] == [("a", "deps")]
+
+
+def test_orchestrate_reads_edge_slugs_from_route_state(tmp_path) -> None:
+    root = _item("root", type="Epic", phase="execute", children=("child",))
+    child = _item("child", parent="root", phase="execute", depends_on=(DependencyEdge("dep"),))
+    dep = _item("dep", phase="execute", workflow_status="in-progress")
+    plan = _plan((root, child, dep), "root")
+    assert any(blocked.kind == "deps" and "dep (needs resolved" in blocked.reason for blocked in plan.blocked)
 
 
 def test_a_mitigated_item_classifies_as_human():

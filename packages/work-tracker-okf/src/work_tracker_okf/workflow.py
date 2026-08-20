@@ -15,7 +15,17 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from work_tracker_okf.hierarchy import ChildRollup, child_rollup, unmet_depends_on
+from work_tracker_okf.dependencies import (
+    DependencyEdge,
+    DependencyFact,
+    DependencyIssue,
+    describe,
+    entry_phase,
+    resolve_facts,
+    unmet,
+    validate_dependencies,
+)
+from work_tracker_okf.hierarchy import ChildRollup, child_rollup
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.vocabulary import (
     BUG_LIKE_TYPES,
@@ -58,8 +68,9 @@ class RouteState:
     has_plan_doc: bool = False
     has_spec_doc: bool = False
     has_open_decision: bool = False
-    depends_on: tuple[str, ...] = ()
-    unmet_deps: tuple[str, ...] = ()
+    dependency_edges: tuple[DependencyEdge, ...] = ()
+    dependency_facts: tuple[DependencyFact, ...] = ()
+    dependency_issues: tuple[DependencyIssue, ...] = ()
     child_rollup: ChildRollup | None = None
 
 
@@ -114,14 +125,6 @@ def route(state: RouteState) -> RouteResult:
                 "set it to 'open' to re-enter the pipeline",
             ),
         )
-    if state.unmet_deps:
-        return RouteResult(
-            dispatch=None,
-            reason="blocked on dependencies",
-            blockers=(
-                "blocked on dependencies (not terminal): " + ", ".join(state.unmet_deps) + "; finish them first",
-            ),
-        )
     if state.phase is None:
         return _entry(state)
     branches: dict[str, Callable[[RouteState], RouteResult]] = {
@@ -143,7 +146,20 @@ def _validate(state: RouteState) -> list[str]:
         blockers.append(f"phase {state.phase!r} not in {sorted(PHASES)}")
     if state.effort is not None and state.effort not in EFFORTS:
         blockers.append(f"effort {state.effort!r} not in {sorted(EFFORTS)}; re-size the item")
+    blockers.extend(f"depends_on[{issue.index}] {issue.code}: {issue.detail}" for issue in state.dependency_issues)
     return blockers
+
+
+def _dependency_blocker(state: RouteState, phase: str) -> RouteResult | None:
+    pairs = unmet(state.dependency_edges, state.dependency_facts, phase)
+    if not pairs:
+        return None
+    fragments = "\n  ".join(describe(edge, fact) for edge, fact in pairs)
+    return RouteResult(
+        dispatch=None,
+        reason=f"blocked on dependencies ({phase})",
+        blockers=(f"blocked on dependencies for {phase}:\n  {fragments}",),
+    )
 
 
 def _entry(state: RouteState) -> RouteResult:
@@ -158,20 +174,25 @@ def _entry(state: RouteState) -> RouteResult:
                 "to adopt an in-flight item mid-pipeline",
             ),
         )
+    # The gap is identified at filing time, so there is no design stage to
+    # advance out of -- which is why the effort fork lands here instead,
+    # and why both rows carry `document_status` (spec 3.3): otherwise the
+    # item that skipped design keeps W-D's draft exemption for life.
+    if state.type == "TestGap" and state.effort is None:
+        return RouteResult(
+            dispatch=None,
+            reason="test-gap entry forks on effort",
+            blockers=(
+                "effort required: TestGap routes to execute (xtra-small/small) or plan "
+                "(medium/large/xtra-large); size the item and advance with the effort",
+            ),
+        )
+    phase = entry_phase(state.type, state.effort)
+    if phase is not None:
+        blocker = _dependency_blocker(state, phase)
+        if blocker is not None:
+            return blocker
     if state.type == "TestGap":
-        # The gap is identified at filing time, so there is no design stage to
-        # advance out of -- which is why the effort fork lands here instead,
-        # and why both rows carry `document_status` (spec 3.3): otherwise the
-        # item that skipped design keeps W-D's draft exemption for life.
-        if state.effort is None:
-            return RouteResult(
-                dispatch=None,
-                reason="test-gap entry forks on effort",
-                blockers=(
-                    "effort required: TestGap routes to execute (xtra-small/small) or plan "
-                    "(medium/large/xtra-large); size the item and advance with the effort",
-                ),
-            )
         if state.effort in SMALL_EFFORTS:
             return RouteResult(
                 dispatch=Dispatch("execute", "unplanned"),
@@ -234,6 +255,9 @@ def _design(state: RouteState) -> RouteResult:
     # a previous reconciling-spec pass) must never fall through to another
     # dispatch -- that is the infinite-redispatch loop this gate exists to
     # stop. Checked before the spec-doc branch, deliberately.
+    blocker = _dependency_blocker(state, "design")
+    if blocker is not None:
+        return blocker
     if state.has_open_decision:
         return RouteResult(
             dispatch=None,
@@ -256,6 +280,9 @@ def _design(state: RouteState) -> RouteResult:
 
 
 def _plan(state: RouteState) -> RouteResult:
+    blocker = _dependency_blocker(state, "plan")
+    if blocker is not None:
+        return blocker
     if state.type == "Epic":
         # An epic decomposes into children and has no implementation row to
         # add, so no plan table to sync.
@@ -304,6 +331,9 @@ def _feature_children_requires(state: RouteState) -> tuple[str, ...]:
 
 
 def _execute(state: RouteState) -> RouteResult:
+    blocker = _dependency_blocker(state, "execute")
+    if blocker is not None:
+        return blocker
     if state.type == "Epic":
         return _epic_execute_gate(state)
     if state.has_plan_doc:
@@ -324,6 +354,9 @@ def _execute(state: RouteState) -> RouteResult:
 
 
 def _finish(state: RouteState) -> RouteResult:
+    blocker = _dependency_blocker(state, "finish")
+    if blocker is not None:
+        return blocker
     if state.type == "Epic":
         # An epic owns no branch -- its children carry `resolved_in`.
         return RouteResult(
@@ -353,9 +386,10 @@ def state_for(
       `PARENT_TYPES` item, and then only for an `Epic` or a non-empty rollup.
       A childless `Feature` carries `None`, so no gate fires; an `Epic` keeps
       its zero-count rollup, because its no-children blocker is phrased from it.
-    - **Archived items participate.** `unmet_deps` and the rollup are computed
-      over the whole projection. One walk retires `work-io`'s second loader and
-      the bug it fixed -- a resolved-and-archived dependency reading as unmet.
+    - **Archived items participate.** Dependency facts and the rollup are
+      computed over the whole projection. One walk retires `work-io`'s second
+      loader and the bug it fixed -- a resolved-and-archived dependency reading
+      as unmet.
 
     `effort=` overrides the item's own value: it is what lets a caller resolve
     the design-complete fork in the same call that supplies the size.
@@ -373,6 +407,11 @@ def state_for(
         rollup = child_rollup(items, slug)
         if item.type != "Epic" and rollup.total == 0:
             rollup = None
+    structural_issues = tuple(
+        issue
+        for issue in validate_dependencies(item.depends_on, parent=item.parent, self_slug=item.slug)
+        if issue.code in {"targets-parent", "targets-self"}
+    )
     return RouteState(
         type=item.type,
         workflow_status=item.workflow_status,
@@ -381,8 +420,9 @@ def state_for(
         has_plan_doc=item.has_plan_doc,
         has_spec_doc=item.has_spec_doc,
         has_open_decision=has_open_decision,
-        depends_on=item.depends_on,
-        unmet_deps=unmet_depends_on(items, item.depends_on),
+        dependency_edges=item.depends_on,
+        dependency_facts=resolve_facts(items, item.depends_on),
+        dependency_issues=(*item.dependency_issues, *structural_issues),
         child_rollup=rollup,
     )
 

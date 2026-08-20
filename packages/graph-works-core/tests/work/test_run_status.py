@@ -7,6 +7,7 @@ from datetime import date
 
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
+from okf_io import load
 
 TODAY = date(2026, 8, 17)
 
@@ -62,3 +63,16 @@ def test_resume_picks_the_most_recently_updated_item(tmp_path):
     report = work.run_status(layout)
     assert report.resume is not None
     assert report.resume.primary.slug == "2026-08-02-feature-b"
+
+
+def test_status_rollup_accepts_structured_dependency_items(tmp_path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout, "2026-08-01-feature-a")
+    _write_item(layout, "2026-08-02-feature-b")
+    document = load(layout.bundle_dir / "work/2026-08-02-feature-b.md")
+    document.set(
+        "depends_on",
+        [{"slug": "2026-08-01-feature-a", "blocks": "plan", "needs": "design"}],
+    )
+    document.save()
+    assert work.run_status(layout).rollup.total == 2

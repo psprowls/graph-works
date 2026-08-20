@@ -71,7 +71,7 @@ from doc_wiki_okf.ingest import plan_document_brief
 from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatcher, StateGate
 from doc_wiki_okf.proposals.lanes import lane_set
-from doc_wiki_okf.sources import copy_target, page_target, plan_ingest, source_kinds
+from doc_wiki_okf.sources import copy_target, page_target, plan_ingest, preflight_ingest, source_kinds
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from okf_ext.proposals import apply as apply_plan
@@ -100,7 +100,7 @@ TOUCHES_HEADING = "## Touches"
 #: `plan_ingest` argument -- `title` decides the page path before `plan_ingest`
 #: is even called. Carrying them here as well would write a second copy that
 #: fights the first.
-CARRIED_KEYS: tuple[str, ...] = ("authors", "source_date", "tags", "tokens")
+CARRIED_KEYS: tuple[str, ...] = ("authors", "source_date", "tags")
 
 
 @dataclass(frozen=True, slots=True)
@@ -386,8 +386,8 @@ async def run_ingest_source(
     *source_kind* is a **hint**: `plan_document_brief` needs a value before the
     model has read anything, the model classifies from content, and
     `validated_source_kind` decides against the vocabulary this bundle's
-    `Source` schema declares. *origin* defaults to the material's own path --
-    an opaque string saying where it came from.
+    `Source` schema declares. *origin* defaults to the brief's resolved source
+    path -- an opaque explicit value is preserved unchanged.
 
     *layout* is the `WorkspaceLayout` -- where the workspace keeps its parts.
     *ingest_layout* is the `IngestLayout` -- the source-page template one
@@ -446,6 +446,26 @@ async def run_ingest_source(
             layout=ingest_layout,
             state_gate=state_gate,
             match_entity=matcher,
+        )
+
+    resolved_origin = origin or str(brief.source_path.resolve())
+    preflight = preflight_ingest(
+        bundle,
+        brief.source_path,
+        title=brief.title,
+        origin=resolved_origin,
+        today=today,
+        layout=ingest_layout,
+    )
+    if not preflight.ok:
+        return IngestResult(
+            ok=False,
+            page=preflight.page,
+            copy=preflight.copy,
+            title=brief.title,
+            source_kind=brief.source_kind,
+            proposal_status={"proposals": 0},
+            refusals=tuple(f"{refusal.path}: {refusal.kind}: {refusal.detail}" for refusal in preflight.refusals),
         )
 
     try:
@@ -507,10 +527,6 @@ async def run_ingest_source(
     entity_uri = match.uri
     entity_page = match.entity_filename
     page = page_target(title, today=today, layout=ingest_layout)
-    # Hoisted out of the `plan_ingest` call below so the line the reasoner
-    # reads and the value the page's frontmatter carries cannot diverge.
-    resolved_origin = origin or str(material)
-
     composed = compose_body(body, entity_page=entity_page)
     planned, status = await plan_suggestions(
         bundle=bundle,
@@ -597,8 +613,10 @@ async def run_ingest_source(
     #: subdirectory. Derived from the page rather than named, so a replaced
     #: `IngestLayout.source_page_template` reconciles the lane it actually
     #: wrote to.
-    directories = [str(PurePosixPath(page).parent), ""]
-    updates = update_index(reconciled, directories=directories, create_missing=True, dry_run=False)
+    directories = {str(PurePosixPath(page).parent), ""}
+    if "proposals" in reconciled.indexes or any(cid.startswith("proposals/") for cid in reconciled.concepts):
+        directories.add("proposals")
+    updates = update_index(reconciled, directories=sorted(directories), create_missing=True, dry_run=False)
     log_document = reconciled.logs.get("")
     if log_document is not None:
         append_log_entry(log_document, _log_line(page, title, status), on=today, dry_run=False)

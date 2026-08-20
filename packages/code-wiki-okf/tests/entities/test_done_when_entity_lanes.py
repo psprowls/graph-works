@@ -39,7 +39,7 @@ from okf_io import load_bundle
 _TODAY = date(2026, 1, 1)
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 
-_PURPOSE_PLACEHOLDER = "> TODO: <One paragraph: what this package does, who uses it, why it exists.>"
+_PURPOSE_PLACEHOLDER = "> TODO: what this package does, who uses it, and why it exists, in one paragraph."
 
 
 def _repo_node(org: str, repo: str) -> GraphNode:

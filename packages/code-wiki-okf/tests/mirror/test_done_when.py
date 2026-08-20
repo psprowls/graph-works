@@ -123,11 +123,11 @@ def _new_bundle(tmp_path: Path) -> Path:
 
 
 def _collect_mirror_paths(bundle_root: Path, repo_name: str) -> set[str]:
-    """Every `.md` path under `repositories/<repo_name>`, mirror-root-relative,
+    """Every `.md` path under `repositories/<repo_name>/fs`, mirror-root-relative,
     excluding `index.md` at any depth -- those are the lane's own reconciled
     directory indexes, not a mirrored tracked file.
     """
-    root = bundle_root / "repositories" / repo_name
+    root = bundle_root / "repositories" / repo_name / "fs"
     if not root.exists():
         return set()
     return {path.relative_to(root).as_posix() for path in root.rglob("*.md") if path.name != "index.md"}
@@ -190,7 +190,7 @@ def test_synced_bundle_validates_clean(tmp_path: Path) -> None:
         ],
     )
     assert report.ok, report.errors
-    # Every mirror page is a `File` at `repositories/<repo>/<rel>`; the
+    # Every mirror page is a `File` at `repositories/<repo>/fs/<rel>`; the
     # depth half of `placement.directory-mismatch` (design spec §3.1) must not
     # false-positive on any of them, and `Repository`/`File` sharing one
     # `x-okf-directory` is exactly the case a plain prefix check would miss.
@@ -205,7 +205,7 @@ def test_rename_preserves_prose_and_repairs_inbound_links(tmp_path: Path) -> Non
 
     _sync(bundle_root, repo_root, graph_dir)
 
-    mirror_root = bundle_root / "repositories" / _REPO_NAME
+    mirror_root = bundle_root / "repositories" / _REPO_NAME / "fs"
     base_target = mirror_root / "src" / "pkg" / "base.py.md"
     user_target = mirror_root / "src" / "pkg" / "user.py.md"
     assert base_target.exists()

@@ -25,6 +25,7 @@ from okf_ext.shape import SectionSet
 from okf_io import parse
 
 from code_wiki_okf.config import RepoConfig
+from code_wiki_okf.mirror.paths import mirror_page_path
 
 #: The order keys are set in. `Document.set` places each one per
 #: `PREFERRED_KEY_ORDER` when the core schema knows it, and appends at the
@@ -42,12 +43,7 @@ _KEY_ORDER: tuple[str, ...] = (
     "role_flags",
     "generated",
     "last_updated_commit",
-    "tokens",
 )
-
-
-def _mirrored_path(bundle_root: Path, repo: RepoConfig, rel_path: str) -> Path:
-    return bundle_root / "repositories" / repo.name / f"{rel_path}.md"
 
 
 def write_new_page(
@@ -65,7 +61,7 @@ def write_new_page(
     `okf_ext.generators` instead. Raises `KeyError` if `section_set` carries
     no `"File"` declaration (a caller/config error, not content).
     """
-    target = _mirrored_path(bundle_root, repo, rel_path)
+    target = mirror_page_path(bundle_root, repo.name, rel_path)
     if target.exists():
         raise FileExistsError(f"{target}: a page already exists here; write_new_page never overwrites")
 

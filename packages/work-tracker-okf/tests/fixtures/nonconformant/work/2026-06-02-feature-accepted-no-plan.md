@@ -12,7 +12,8 @@ affects:
   - packages/example
 parent: 2026-07-03-spike-wrong-parent-type
 depends_on:
-  - 2026-06-05-bug-no-such-item
+  - slug: 2026-06-05-bug-no-such-item
+    blocks: build
   - 2026-07-06-test-gap-wontfix
 ---
 

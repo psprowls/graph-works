@@ -19,6 +19,7 @@ def test_the_schema_enums_and_the_python_frozensets_agree() -> None:
     assert frozenset(properties["workflow_status"]["enum"]) == vocabulary.WORKFLOW_STATUSES
     assert frozenset(properties["phase"]["enum"]) == vocabulary.PHASES
     assert frozenset(properties["effort"]["enum"]) == vocabulary.EFFORTS
+    assert frozenset(properties["blast_radius"]["enum"]) == vocabulary.BLAST_RADII
 
 
 def test_the_schema_pattern_is_this_modules_pattern_character_for_character() -> None:

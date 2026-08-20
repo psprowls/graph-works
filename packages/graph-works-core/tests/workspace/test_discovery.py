@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from graph_works_core.workspace.discovery import find_repo_root, resolve
+from graph_works_core.workspace.discovery import find_repo_root, resolve, resolve_root
 from graph_works_core.workspace.errors import WorkspaceNotFound
 from graph_works_core.workspace.layout import DEFAULT_WORKSPACE_NAME
 
@@ -64,6 +64,22 @@ def test_outside_any_repo_discovery_falls_back_to_cwd(tmp_path):
     layout = resolve(cwd=tmp_path, environ={})
     assert layout.root == root.resolve()
     assert layout.repo_root is None
+
+
+def test_resolve_root_uses_the_same_precedence_before_a_manifest_exists(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
+    explicit = tmp_path / "explicit"
+    pinned = tmp_path / "pinned"
+
+    assert resolve_root(workspace=explicit, cwd=repo, environ={"GRAPH_WORKS_DIR": str(pinned)}) == explicit.resolve()
+    assert resolve_root(cwd=repo, environ={"GRAPH_WORKS_DIR": str(pinned)}) == pinned.resolve()
+    assert resolve_root(cwd=repo, environ={}) == (repo / ".works").resolve()
+
+
+def test_resolve_root_falls_back_to_cwd_outside_git(tmp_path: Path) -> None:
+    assert resolve_root(cwd=tmp_path, environ={}) == (tmp_path / ".works").resolve()
 
 
 # --- branch 4: nothing there ------------------------------------------------

@@ -51,8 +51,8 @@ out from under the layout — and catching that belongs to lint, not to a writer
 
 ## The agent substrate
 
-Everything the verticals share, so C3–C6 compose a substrate instead of each
-re-deriving one.
+Everything the verticals share, so they compose one substrate instead of each
+re-deriving it.
 
 ```python
 from graph_works_core import make_llm, role_binding, run_tool_loop, build_catalog
@@ -66,11 +66,11 @@ system = "\n\n".join([prompts.IRON_RULES, prompts.render_architecture_overview(l
 
 | Piece | What it is |
 |---|---|
-| `roles.py` | packaged `models.toml` → `workspace.yaml` `roles.<name>.<field>` → explicit argument, merged by `subagents_io.resolve_role_spec` |
+| `agent_substrate.roles` | packaged `models.toml` → `workspace.yaml` `roles.<name>.<field>` → explicit argument, merged by `subagents_io.resolve_role_spec` |
 | `role_spec` / `role_binding` / `make_llm` | the three constructors over that merge: a provider-free `RoleSpec`, a `RoleBinding` (spec plus a factory `SubagentPool` calls once per item), or a constructed `BaseChatModel` |
-| `agent_loop.py` | the capped tool-call loop: two distinct cap outcomes, and a tool-name coercion that is written back into the replayed history |
-| `agent_tools.py` | catalog / bounded page read / chunking, all over an `okf_io.Bundle` |
-| `prompts/` | seven shared fragments plus two renderers |
+| `agent_substrate.agent_loop` | the capped tool-call loop: two distinct cap outcomes, and a tool-name coercion that is written back into the replayed history |
+| `agent_substrate.agent_tools` | catalog / bounded page read / chunking, all over an `okf_io.Bundle` |
+| `prompts` | seven shared fragments plus two renderers |
 
 **`layout` is an argument, never a discovery call.** `None` means
 packaged-only; passing a layout is how a caller opts into workspace overrides.
@@ -93,6 +93,218 @@ deliberately not consulted — it names the old layout.
 
 Config raises; content never does. `WorkspaceError` (a `ValueError`) with
 `WorkspaceNotFound` and `InitError` subclasses.
+
+## Work commands (qualified only)
+
+Use `work_tracker_okf` directly when the caller already owns a bundle root,
+loaded `Bundle`, and `WorkItem` projection. Use
+`graph_works_core.work.commands` when the caller owns a `WorkspaceLayout` and
+wants workspace path resolution composed around those domain plans.
+
+```python
+from graph_works_core.work import commands as work
+```
+
+The work vertical remains qualified-only. None of these names is an attribute
+of `graph_works_core` or a member of `graph_works_core.__all__`; generic names
+such as `run_lint` need their module owner to remain legible.
+
+These are the exact workspace-qualified mutation and routing signatures:
+
+```python
+work.run_file(
+    layout: WorkspaceLayout,
+    config: Config,
+    *,
+    type: str,
+    title: str,
+    description: str,
+    on: date,
+    words: str | None = None,
+    effort: str | None = None,
+    blast_radius: str | None = None,
+    target: str | None = None,
+    owner: str | None = None,
+    parent: str | None = None,
+    depends_on: Sequence[DependencyEdge] = (),
+    affects: Sequence[str] = (),
+    tags: Sequence[str] = (),
+    dry_run: bool = True,
+) -> FilingOutcome
+
+work.run_next(
+    layout: WorkspaceLayout,
+    slug: str,
+    *,
+    descend: bool = False,
+    dry_run: bool = True,
+) -> NextResult
+
+work.run_decision_add(
+    layout: WorkspaceLayout,
+    slug: str,
+    *,
+    question: str,
+    status: str = "open",
+    answer: str | None = None,
+    rationale: str | None = None,
+    if_wrong: str | None = None,
+    affects: Sequence[str] = (),
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> DecisionCommandResult
+
+work.run_decision_answer(
+    layout: WorkspaceLayout,
+    slug: str,
+    decision_id: str,
+    *,
+    answer: str,
+    rationale: str | None = None,
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> DecisionCommandResult
+
+work.run_decision_list(
+    layout: WorkspaceLayout,
+    slug: str,
+    *,
+    status: str | None = None,
+    affects: str | None = None,
+    cites: str | None = None,
+) -> DecisionCommandResult
+
+work.run_decision_supersede(
+    layout: WorkspaceLayout,
+    slug: str,
+    decision_id: str,
+    *,
+    question: str,
+    answer: str,
+    rationale: str | None = None,
+    affects: Sequence[str] | None = None,
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> DecisionCommandResult
+
+work.run_adopt_child_specs(
+    layout: WorkspaceLayout,
+    epic_slug: str,
+    *,
+    dry_run: bool = True,
+) -> AdoptChildSpecsResult
+
+work.run_decision_overturn(
+    layout: WorkspaceLayout,
+    config: Config,
+    slug: str,
+    decision_id: str,
+    *,
+    answer: str,
+    rationale: str | None,
+    follow_up_title: str,
+    follow_up_type: str = "TechDebt",
+    follow_up_affects: Sequence[str] = (),
+    on: date,
+    decided_by: str,
+    dry_run: bool = True,
+) -> OverturnResult
+```
+
+All mutating commands default to `dry_run=True`. A dry run returns the complete
+plan and an empty application; pass `dry_run=False` only after inspecting the
+plan and its refusal. `run_decision_list` is read-only and therefore has no
+`dry_run` parameter. Dates and actors are required inputs; this layer does not
+read the clock.
+
+### Filing and dependency edges
+
+`run_file` plans the new page, `work/index.md` reconciliation, and root log
+append before any write. `result.plan.refusal` prevents every effect.
+`result.application.written` is true only after the full apply completes; an
+unexpected I/O failure preserves partial effects in the raised
+`work_tracker_okf.compose.FilingApplyError.application`.
+
+Pass typed edges, including distinct gates for the same slug when needed:
+
+```python
+from datetime import date
+
+from work_tracker_okf.dependencies import DependencyEdge
+
+result = work.run_file(
+    layout,
+    config,
+    type="Feature",
+    title="Consume the design input",
+    description="Starts planning after the input design is complete.",
+    on=date(2026, 8, 18),
+    depends_on=(
+        DependencyEdge(
+            "2026-08-18-feature-design-input",
+            blocks="plan",
+            needs="design",
+        ),
+    ),
+)
+```
+
+`DependencyEdge(slug)` means `blocks="execute", needs="resolved"`. A
+dependency satisfies a phase requirement only after moving past that phase;
+terminal items satisfy every edge. Unknown dependencies and malformed gates
+fail closed. Exact duplicate triples are invalid, while distinct triples for
+one slug are allowed.
+
+### Next and canonical source normalization
+
+`run_next` returns both `requested_slug` and `selected_slug`; `descend=True`
+walks a gated parent to its next actionable leaf. If a canonical
+`references/01-design-spec.md` exists but the item lacks its `design-spec`
+source, the dry run includes a `SourceNormalization` and routes against that
+planned state without writing.
+
+With `dry_run=False`, normalization is best-effort. Each page is reloaded
+before saving, so an authored `design-spec` source introduced after planning
+wins and does not prevent later normalizations from running. The command then
+reloads the bundle and recomputes the selected route from persisted state;
+save failures appear in `NextResult.warnings` rather than producing a route
+that assumes an unpersisted stamp.
+
+### Decisions and overturn
+
+Decision commands accept either an epic or any active or archived descendant
+and report the resolved epic-owned ledger in `DecisionCommandResult.owner`.
+Add, answer, and supersede use immutable `work_tracker_okf.decisions` plans.
+Apply rechecks the ledger snapshot under its exclusive lock; a stale
+application reports `stale=True`, `written=False`, and no landed entries.
+List filters returned entries while its counts cover the whole ledger.
+`open` entries are unanswered; `answered` requires an answer; `assumed`
+requires an answer plus `if_wrong`; and supersession creates a replacement
+entry without deleting history.
+
+`run_decision_overturn` preflights a supersession and its peer follow-up filing
+before applying either. A refusal in either plan writes neither resource.
+Application is ordered: decision first, filing second. If the decision plan is
+stale, no follow-up is filed. If filing fails after partial effects, the raised
+`OverturnApplyError` preserves both the completed decision application and the
+partial filing application, with the original `FilingApplyError` as its
+`__cause__`; this is observable partial-effect reporting, not rollback.
+
+### Migrated child-spec adoption
+
+`run_adopt_child_specs` loads one workspace bundle and delegates to
+`work_tracker_okf.adoption`. Its only donor root is
+`work/<epic>/references/child-specs/`; each matched direct child lands at
+`work/<child>/references/01-design-spec.md` and receives the canonical
+`/work/<child>/references/01-design-spec.md` source resource.
+
+The default dry run is byte-identical. Apply creates destinations without
+overwrite, removes a donor only after its destination is written, preserves
+authored noncanonical sources, and is idempotent. The domain planner never
+discovers a workspace or invokes Git, and neither layer exposes `force`.
 
 ## The graph surface
 
@@ -207,20 +419,20 @@ it.
 ## The dispatch seam
 
 `work-tracker-okf`'s `route()` returns a `Dispatch(stage, variant)` and names no
-skill — its README refuses that mapping by name. `pipeline.py` is where it
+skill — its README refuses that mapping by name. `workspace.pipeline` is where it
 lands: a packaged table total over the closed `Variant` set, overridable per
 field from `workflow.pipeline.<variant>.*` in `workspace.yaml`. Because the
 packaged table is total, an override can replace an entry but never leave a
 hole, and `workflow.pipeline.*.mode` carries `allowed=DISPATCH_MODES`, so a bad
 value is refused at `gw config set` time rather than at dispatch time.
 
-`commands/orchestrate.py` splits the way `route()` does. `plan()` is IO-free —
+`orchestrate.commands` splits the way `route()` does. `plan()` is IO-free —
 plain `WorkItem` data in, an `OrchestratePlan` out — so every rule (affects
 serialization, capacity, the four worktree rules, model resolution) is a table
 test. `run_orchestrate()` and `run_stage_advance()` are the shells that read
 config, stat worktrees and run git.
 
-`provenance.py` is the only module in this package that runs git. Every
+`workspace.provenance` is the only module in this package that runs git. Every
 function degrades to `None` or a silent no-op: capturing provenance must never
 fail an advance.
 
@@ -251,7 +463,7 @@ set. Zero declared is not an error — it degrades, and says so, in
 `StageAdvance.repo_note` and in `run_orchestrate`'s `warnings`. An explicit
 `repo=` still wins and skips the config read entirely; an argument is not a
 default. `layout.repo_root` stays on the layout — gitignore placement and
-`scanner_excludes` are its documented job — but `commands/orchestrate.py` is no
+`scanner_excludes` are its documented job — but `orchestrate.commands` is no
 longer one of its readers.
 
 Three limits worth knowing before you rely on the result:
@@ -264,12 +476,13 @@ Three limits worth knowing before you rely on the result:
 - When the root carries no worktree stamp, "the epic worktree" is the first
   stamped descendant in pick order. Reproducible from vault state, but it means
   the plan's worktree decisions depend on which child happened to run first.
-- `_held_decisions` walks every item in the vault on every plan call,
-  regardless of root, and loads one decisions ledger per distinct epic. A lone
-  item with no epic ancestor pays the walk too. `nearest_epic` rebuilds its
-  index per call, so the pass is quadratic in vault size — negligible at
-  present scale, and not fixed here because both available fixes either
-  duplicate the ancestor walk or change `work-tracker-okf`'s signature.
+- The decision-hold scan in `graph_works_core.orchestrate.commands` walks every
+  item in the vault on every plan call, regardless of root, and loads one
+  decisions ledger per distinct epic. A lone item with no epic ancestor pays
+  the walk too. `work_tracker_okf.hierarchy.nearest_epic` rebuilds its index
+  per call, so the pass is quadratic in vault size — negligible at present
+  scale, and not fixed here because both available fixes either duplicate the
+  ancestor walk or change the domain signature.
 
 ## Custom-type provenance
 
@@ -320,13 +533,14 @@ should not be sold as if it were. The mitigation, if it proves necessary, is
 extraction-side rather than lint-side — have the extractor record every file it
 opened, not every file it cited.
 
-**One surface already writes it.** `commands/propagate_drift.py`'s `_source`
-writes this staleness-checkable shape (`id`, `resource`, `at_commit`, plus
-`title` and `rationale` for its own presentation needs) into every proposal it
-files. It is the only one: `suggest_pages._source_entry` and `ingest.py`'s path
-through `doc_wiki_okf.sources` each build `sources[]` independently, with
-different key sets and no `at_commit`. Whether they should carry one is an open
-question, not a settled shape.
+**One surface already writes it.**
+`graph_works_core.lint_drift.propagate_drift` writes this
+staleness-checkable shape (`id`, `resource`, `at_commit`, plus `title` and
+`rationale` for its own presentation needs) into every proposal it files. It
+is the only one: `graph_works_core.ingest.suggest_pages` and
+`graph_works_core.ingest.commands`, through `doc_wiki_okf.sources`, each build
+`sources[]` independently, with different key sets and no `at_commit`. Whether
+they should carry one is an open question, not a settled shape.
 
 Out of scope here: the extractor, the schema for custom types, the lane the
 extracted pages live in, and any enforcement that a page declares provenance at

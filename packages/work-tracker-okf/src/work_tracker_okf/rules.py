@@ -10,9 +10,9 @@
         extra_rules=lane_rules(repo_root=repo_root),
     )
 
-A **factory per capability** rather than okf-io's module-level `RULES` tuple
-(C5-E): `RuleContext` deliberately carries no filesystem, and two of the 25 codes
-are questions about a repository. okf-ext's `schema_rule` / `section_rule` /
+A **factory per capability** rather than okf-io's module-level `RULES` tuple:
+`RuleContext` deliberately carries no filesystem, and two of the 31 codes are
+questions about a repository. okf-ext's `schema_rule` / `section_rule` /
 `health_rule` are the precedent this follows.
 
 A submodule rather than a name at the package's front door, for the reason
@@ -40,10 +40,10 @@ def lane_rules(*, repo_root: Path | None = None) -> tuple[Rule, ...]:
     one: not knowing where the repo is says nothing about whether the paths are
     good.
 
-    Topic order rather than registration order, matching `okf_io._rules.RULES`.
-    It does not affect output -- `validate()` sorts findings after collection --
-    but a catalog whose iteration order is a dict literal's is a catalog that
-    reorders when someone reformats it.
+    Topic order rather than registration order, matching `okf_io`'s built-in
+    rule ordering. It does not affect output -- `validate()` sorts findings
+    after collection -- but a catalog whose iteration order is a dict literal's
+    is a catalog that reorders when someone reformats it.
     """
     config = LaneConfig(repo_root=repo_root)
     return tuple(rule for topic in sorted(RULES_BY_TOPIC) for rule in RULES_BY_TOPIC[topic](config))

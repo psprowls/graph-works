@@ -1,8 +1,13 @@
 """Pure `describe_* -> okf_ext.generators.Render` translations.
 
-No I/O, no graph reads, no clock — matching `provenance.py`'s style.
-Provenance keys (`generated`, `last_updated_commit`, `tokens`) are added by
-`sync.py`, not here: a renderer knows a `PackageDescription`, not a commit SHA.
+No I/O, no graph reads, no clock — matching `provenance.py`'s style. The one
+intra-package import is `mirror.paths`, a `pathlib`-only leaf module: the
+`## Files` links must agree with the lane's writers about where a File page
+lives, and two hard-coded copies of that path is how they stopped agreeing.
+Provenance keys `generated` and `last_updated_commit` are added by `sync.py`,
+not here: a renderer knows a `PackageDescription`, not a commit SHA. `tokens`
+is also a declared provenance key but neither this module nor `sync.py` adds
+it -- `run_tokens_update` (graph-works-core) is its sole writer.
 
 Frontmatter arrays are plain graph names, verbatim from the describe record —
 not resolved to bundle links. `depends_on` is `internal_dependencies`
@@ -24,20 +29,31 @@ from code_graph_io import (
 )
 from okf_ext.generators import Render
 
+from code_wiki_okf.mirror.paths import mirror_concept_id
+
 _NONE_PLACEHOLDER = "_(none)_"
 
 
 def _files_section(files: Sequence[str], *, repo_name: str) -> str:
     """A `## Files` body: one root-absolute link per file into the mirror
-    lane (child 3), keyed by the same `repositories/<repo>/<path>.md`
-    convention that lane's E-F filename rule (verbatim plus `.md`) fixes.
-    The link is written whether or not the mirror page exists yet — root-
-    absolute links are never existence-checked (epic, "Links are root-
-    absolute markdown links").
+    lane, keyed by `mirror/paths.mirror_concept_id` — the same convention the
+    lane's own writers use, so there is one answer to where a File page lives
+    rather than a renderer's guess and a writer's.
+
+    **These links are existence-checked.** `okf_io._rules.links::broken` calls
+    `ctx.bundle.has_member(...)` for every internal link, absolute form
+    included, and reports `links.broken` at WARN
+    (`adrs/0004-broken-links-are-warn`); there is no absolute-link exemption
+    anywhere in the catalog. An earlier version of this docstring claimed the
+    opposite and used it to justify emitting links into a lane the caller
+    might never fill — which is exactly what `gw scan` did, for 1311
+    warnings. The rule is correct as written and is not to be narrowed: any
+    caller that renders these links must also run the mirror lane
+    (`mirror.lanes.sync_mirror`).
     """
     if not files:
         return _NONE_PLACEHOLDER
-    lines = [f"- [{path}](/repositories/{repo_name}/{path}.md)" for path in sorted(files)]
+    lines = [f"- [{path}](/{mirror_concept_id(repo_name, path)}.md)" for path in sorted(files)]
     return "\n".join(lines) + "\n"
 
 
@@ -67,14 +83,14 @@ def render_app(desc: AppDescription, *, repo_name: str) -> Render:
     )
 
 
-def render_test_suite(desc: SuiteDescription, *, tested_packages: Sequence[str]) -> Render:
+def render_test_suite(desc: SuiteDescription, *, tested_packages: Sequence[str], repo_name: str) -> Render:
     return Render(
         frontmatter={
             "tested_packages": list(tested_packages),
             "suite_kind": desc.kind,
             "file_count": desc.file_count,
         },
-        sections={"Files": _NONE_PLACEHOLDER},
+        sections={"Files": _files_section(desc.files, repo_name=repo_name)},
     )
 
 

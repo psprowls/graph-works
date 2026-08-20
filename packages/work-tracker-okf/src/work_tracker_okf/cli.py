@@ -19,7 +19,16 @@ from okf_io import validate as okf_validate
 
 from work_tracker_okf.archive import apply_archive, plan_archive
 from work_tracker_okf.children import apply_children_sync, plan_children_sync
-from work_tracker_okf.compose import advance_and_stamp, append_lane_log, file_and_reconcile, rule_set
+from work_tracker_okf.compose import (
+    FilingOutcome,
+    advance_and_stamp,
+    append_lane_log,
+    apply_file_and_reconcile,
+    plan_file_and_reconcile,
+    rule_set,
+)
+from work_tracker_okf.dependencies import DependencyEdge
+from work_tracker_okf.filing import FilingSeed
 from work_tracker_okf.hierarchy import ChildRollup
 from work_tracker_okf.init import InitError, install_bundle
 from work_tracker_okf.items import ARCHIVE_IGNORE, IGNORE, load_items
@@ -331,7 +340,6 @@ def file(
     title: str = typer.Option(..., "--title", help="The item's title."),
     description: str = typer.Option(..., "--description", help="One line, for the index entry."),
     words: str | None = typer.Option(None, "--words", help="Slug words. Defaults to the title."),
-    epic_child: bool = typer.Option(False, "--epic-child", help="Mark the slug as an epic's child."),
     parent: str | None = typer.Option(None, "--parent", help="The parent item's slug."),
     depends_on: list[str] = typer.Option([], "--depends-on", help="Repeatable."),  # noqa: B008
     affects: list[str] = typer.Option([], "--affects", help="Repeatable repo path."),  # noqa: B008
@@ -345,41 +353,49 @@ def file(
     """File one work item, then reconcile `work/index.md` and log the arrival.
 
     Filing writes one page; the index reconcile and the `log.md` line are this
-    command's, out of `compose.file_and_reconcile` (C6-I: a command that
+    command's, out of the graph-aware composition plan (C6-I: a command that
     changes what the vault contains logs one line).
 
-    `--dry-run` stops after the plan and prints `FilingPlan.diff()` -- the
-    library's own renderer, so a dry run cannot drift from the real run.
+    `--dry-run` prints all three preflighted effects. The standalone command
+    otherwise remains mutating by default.
     """
-    outcome = file_and_reconcile(
-        root,
-        type=type_,
-        title=title,
-        description=description,
-        on=_today(today),
-        words=words,
-        epic_child=epic_child,
-        parent=parent,
-        depends_on=depends_on,
-        affects=affects,
-        tags=tags,
-        section_set=_sections(root, declarations_dir),
-        dry_run=dry_run,
+    bundle = _bundle(root)
+    outcome = plan_file_and_reconcile(
+        bundle,
+        load_items(bundle),
+        FilingSeed(
+            type=type_,
+            title=title,
+            description=description,
+            on=_today(today),
+            words=words,
+            parent=parent,
+            depends_on=tuple(DependencyEdge(slug) for slug in depends_on),
+            affects=tuple(affects),
+            tags=tuple(tags),
+        ),
+        _sections(root, declarations_dir),
     )
     for warning in outcome.plan.warnings:
         typer.echo(warning, err=True)
     if outcome.plan.refusal is not None:
-        typer.echo(outcome.plan.diff(), err=True)
+        typer.echo(outcome.plan.filing.diff(), err=True)
+        typer.echo(f"{outcome.plan.filing.slug}: refused ({outcome.plan.refusal})", err=True)
         raise typer.Exit(code=1)
     if dry_run:
-        typer.echo(outcome.plan.diff())
+        typer.echo(outcome.plan.filing.diff())
+        if outcome.plan.index.changed:
+            typer.echo(outcome.plan.index.diff())
+        if outcome.plan.log is not None and outcome.plan.log.changed:
+            typer.echo(outcome.plan.log.diff())
         return
-    typer.echo(f"wrote {item_page(outcome.plan.slug).rel}")
-    for update in outcome.indexes:
+    outcome = FilingOutcome(plan=outcome.plan, application=apply_file_and_reconcile(outcome.plan))
+    typer.echo(f"wrote {item_page(outcome.plan.filing.slug).rel}")
+    for update in outcome.application.indexes:
         if update.changed:
             typer.echo(f"reconciled {update.path}")
-    if outcome.logged is not None:
-        typer.echo(f"wrote log.md: {outcome.logged}")
+    if outcome.application.log is not None:
+        typer.echo(f"wrote log.md: {outcome.application.log.entry.removeprefix('- ')}")
 
 
 @app.command()

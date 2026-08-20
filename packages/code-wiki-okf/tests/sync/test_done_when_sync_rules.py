@@ -104,7 +104,7 @@ def test_doctored_last_updated_commit_fires_stale_page(synced_bundle) -> None:
 def test_orphan_after_source_removed_regardless_of_prose_edit(synced_bundle) -> None:
     repo_root, graph_dir, bundle_root, config, _first_sha = synced_bundle
 
-    page_path = bundle_root / "repositories" / "repo-a" / "src" / "mod.py.md"
+    page_path = bundle_root / "repositories" / "repo-a" / "fs" / "src" / "mod.py.md"
     assert page_path.exists()
 
     # A human-authored prose edit -- `apply_mirror`'s deletion guard (see
@@ -112,7 +112,7 @@ def test_orphan_after_source_removed_regardless_of_prose_edit(synced_bundle) -> 
     # page like this once its source disappears. The report must diverge
     # from what a write would do: `.orphaned` still has to flag it.
     placeholder = (
-        "> TODO: <Anything a reader should know about this file that the generated sections below don't capture.>"
+        "> TODO: anything a reader should know about this file that the generated sections below don't capture."
     )
     text = page_path.read_text()
     assert placeholder in text
@@ -131,7 +131,7 @@ def test_orphan_after_source_removed_regardless_of_prose_edit(synced_bundle) -> 
     report = validate(load_bundle(bundle_root), today=_TODAY, extra_rules=[sync_rule(snapshot)])
     findings = report.by_code("sync.orphan-page")
     assert len(findings) == 1
-    assert findings[0].path == "repositories/repo-a/src/mod.py.md"
+    assert findings[0].path == "repositories/repo-a/fs/src/mod.py.md"
 
 
 def test_vendored_bundles_report_zero_sync_findings() -> None:

@@ -1,13 +1,17 @@
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
 import pytest
+import work_tracker_okf.filing as filing
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
 from okf_io import load_bundle, validate
-from work_tracker_okf import IGNORE
-from work_tracker_okf.filing import FilingPlan, apply, compose_slug, file_item, slugify
+from work_helpers import make_item
+from work_tracker_okf import IGNORE, load_items
+from work_tracker_okf.dependencies import DependencyEdge
+from work_tracker_okf.filing import FilingPlan, FilingSeed, apply, compose_slug, plan_filing, slugify
 from work_tracker_okf.init import install_bundle
 
 _ON = date(2026, 3, 2)
@@ -21,18 +25,30 @@ def vault(tmp_path: Path) -> Path:
     return root
 
 
-def _file(vault: Path, section_set, **overrides) -> FilingPlan:
-    kwargs = {
+def seed(**overrides: object) -> FilingSeed:
+    values: dict[str, object] = {
+        "type": "Feature",
+        "title": "Child",
+        "description": "d",
+        "on": date(2026, 8, 18),
+        "affects": ("packages/work-tracker-okf",),
+    }
+    values.update(overrides)
+    return FilingSeed(**values)  # type: ignore[arg-type]
+
+
+def _file(vault: Path, section_set, **overrides: object) -> FilingPlan:
+    values: dict[str, object] = {
         "type": "Feature",
         "title": "The filing writer",
         "description": "Owns where a work item lands.",
         "on": _ON,
         "affects": ("packages/work-tracker-okf",),
         "tags": ("fixture",),
-        "section_set": section_set,
     }
-    kwargs.update(overrides)
-    return file_item(vault, **kwargs)
+    values.update(overrides)
+    bundle = load_bundle(vault, ignore=IGNORE)
+    return plan_filing(vault, load_items(bundle), FilingSeed(**values), section_set)  # type: ignore[arg-type]
 
 
 # --- slug composition -------------------------------------------------------
@@ -108,6 +124,10 @@ def test_compose_slug_raises_on_an_unknown_type() -> None:
         compose_slug("Chore", "one two", on=_ON)
 
 
+def test_graph_aware_planner_does_not_expose_the_old_file_item_api() -> None:
+    assert not hasattr(filing, "file_item")
+
+
 # --- planning ---------------------------------------------------------------
 
 
@@ -131,15 +151,131 @@ def test_words_default_to_the_title(vault: Path, section_set) -> None:
     assert plan.slug == "2026-03-02-feature-one-two-three"
 
 
-def test_the_seeded_frontmatter_is_the_documented_set(vault: Path, section_set) -> None:
-    plan = _file(vault, section_set, parent="2026-03-01-epic-root", depends_on=("2026-03-03-spike-x",))
-    assert plan.frontmatter["type"] == "Feature"
-    assert plan.frontmatter["status"] == "draft"
-    assert plan.frontmatter["workflow_status"] == "open"
-    assert plan.frontmatter["opened"] == _ON
-    assert plan.frontmatter["updated"] == _ON
-    assert plan.frontmatter["parent"] == "2026-03-01-epic-root"
-    assert plan.frontmatter["depends_on"] == ["2026-03-03-spike-x"]
+def test_seed_carries_every_supported_field(vault: Path, section_set) -> None:
+    filing_seed = FilingSeed(
+        type="Feature",
+        title="Child",
+        description="d",
+        on=date(2026, 8, 18),
+        effort="medium",
+        blast_radius="package",
+        target="2026-Q4",
+        owner="pat",
+        parent="epic",
+        depends_on=(DependencyEdge("sibling", blocks="plan", needs="design"),),
+        affects=("packages/a",),
+        tags=("compat",),
+    )
+    plan = plan_filing(vault, (make_item("epic", type="Epic"), make_item("sibling")), filing_seed, section_set)
+    assert plan.frontmatter["effort"] == "medium"
+    assert plan.frontmatter["blast_radius"] == "package"
+    assert plan.frontmatter["target"] == "2026-Q4"
+    assert plan.frontmatter["owner"] == "pat"
+    assert plan.frontmatter["depends_on"] == ({"slug": "sibling", "blocks": "plan", "needs": "design"},)
+
+
+def test_filing_plan_sequence_values_cannot_be_mutated(vault: Path, section_set) -> None:
+    plan = _file(vault, section_set, tags=("compat",), affects=("packages/a",))
+    tags = plan.frontmatter["tags"]
+    affects = plan.frontmatter["affects"]
+
+    with pytest.raises(AttributeError):
+        tags.append("mutated")
+    with pytest.raises(AttributeError):
+        affects.append("packages/b")
+
+    assert tags == ("compat",)
+    assert affects == ("packages/a",)
+
+
+def test_filing_plan_nested_dependency_mappings_cannot_be_mutated(vault: Path, section_set) -> None:
+    plan = plan_filing(
+        vault,
+        (make_item("sibling"),),
+        seed(
+            depends_on=(DependencyEdge("sibling", blocks="plan", needs="design"),),
+        ),
+        section_set,
+    )
+    dependencies = plan.frontmatter["depends_on"]
+
+    with pytest.raises(TypeError):
+        dependencies[0]["needs"] = "resolved"
+
+    assert dependencies[0]["needs"] == "design"
+
+
+def test_direct_epic_child_derives_epic_prefix_but_feature_child_does_not(vault: Path, section_set) -> None:
+    epic_child = plan_filing(vault, (make_item("parent", type="Epic"),), seed(parent="parent"), section_set)
+    feature_child = plan_filing(vault, (make_item("parent", type="Feature"),), seed(parent="parent"), section_set)
+    assert "-epic-feature-" in epic_child.slug
+    assert "-epic-feature-" not in feature_child.slug
+
+
+@pytest.mark.parametrize(
+    ("items", "seed_change", "refusal"),
+    [
+        ((), {"parent": "missing"}, "unknown-parent"),
+        ((make_item("parent", type="Bug"),), {"parent": "parent"}, "invalid-parent-type"),
+        ((make_item("parent", type="Epic", workflow_status="resolved"),), {"parent": "parent"}, "inactive-parent"),
+        ((), {"depends_on": (DependencyEdge("missing"),)}, "unknown-dependency"),
+        (
+            (make_item("parent", type="Epic"),),
+            {"parent": "parent", "depends_on": (DependencyEdge("parent"),)},
+            "invalid-dependency",
+        ),
+    ],
+)
+def test_expected_graph_refusals_are_data(items, seed_change, refusal, vault: Path, section_set) -> None:
+    plan = plan_filing(vault, items, replace(seed(), **seed_change), section_set)
+    assert plan.refusal == refusal
+
+
+@pytest.mark.parametrize(
+    ("seed_change", "refusal"),
+    [
+        ({"blast_radius": "repository"}, "invalid-blast-radius"),
+        ({"target": "2026-Q5"}, "invalid-target"),
+        ({"effort": "tiny"}, "invalid-effort"),
+    ],
+)
+def test_invalid_filing_metadata_is_refused_before_write(seed_change, refusal, vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), replace(seed(), **seed_change), section_set)
+    assert plan.refusal == refusal
+
+
+def test_archived_dependency_is_valid_and_parent_note_distinguishes_parent_type(vault: Path, section_set) -> None:
+    archived = make_item("landed", archived=True, workflow_status="resolved")
+    epic_plan = plan_filing(
+        vault,
+        (make_item("parent", type="Epic"), archived),
+        seed(parent="parent", depends_on=(DependencyEdge("landed"),)),
+        section_set,
+    )
+    feature_plan = plan_filing(
+        vault,
+        (make_item("parent", type="Feature"), archived),
+        seed(parent="parent", depends_on=(DependencyEdge("landed"),)),
+        section_set,
+    )
+    assert epic_plan.refusal is None and "Designed as part of epic" in epic_plan.body
+    assert feature_plan.refusal is None and "Filed as a child" in feature_plan.body
+
+
+def test_active_parent_metadata_wins_over_an_archived_same_slug_twin(vault: Path, section_set) -> None:
+    plan = plan_filing(
+        vault,
+        (
+            make_item("parent", type="Epic"),
+            make_item("parent", type="Feature", archived=True, path="work/_archive/parent.md"),
+        ),
+        seed(parent="parent"),
+        section_set,
+    )
+
+    assert plan.refusal is None
+    assert "-epic-feature-" in plan.slug
+    assert "Designed as part of epic parent" in plan.body
 
 
 def test_no_phase_is_seeded(vault: Path, section_set) -> None:
@@ -199,6 +335,37 @@ def test_applying_a_refused_plan_raises_and_writes_nothing(vault: Path, section_
     assert plan.target.read_bytes() == before
 
 
+def test_apply_rechecks_page_and_directory_before_exclusive_create(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (make_item("parent", type="Epic"),), seed(parent="parent"), section_set)
+    plan.target.parent.mkdir(parents=True)
+    plan.target.write_text("authored", encoding="utf-8")
+    with pytest.raises(FileExistsError):
+        apply(plan)
+    assert plan.target.read_text(encoding="utf-8") == "authored"
+
+
+def test_apply_rechecks_work_directory_before_exclusive_create(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(), section_set)
+    plan.work_directory.mkdir(parents=True)
+    with pytest.raises(FileExistsError):
+        apply(plan)
+    assert not plan.target.exists()
+
+
+def test_apply_uses_exclusive_create(vault: Path, section_set, monkeypatch) -> None:
+    plan = plan_filing(vault, (), seed(), section_set)
+    modes: list[str] = []
+    original = Path.open
+
+    def recording_open(path: Path, mode: str = "r", *args, **kwargs):
+        modes.append(mode)
+        return original(path, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", recording_open)
+    assert apply(plan) == plan.target
+    assert "x" in modes
+
+
 # --- the written page -------------------------------------------------------
 
 
@@ -233,7 +400,7 @@ def test_the_key_order_is_the_one_document_set_produces(vault: Path, section_set
     intention, because the conformant vault has to be authored to match it."""
     from okf_io import parse
 
-    document = parse(apply(_file(vault, section_set, parent="2026-03-01-epic-root")).read_text(encoding="utf-8"))
+    document = parse(apply(_file(vault, section_set)).read_text(encoding="utf-8"))
     assert list(document.fm_data()) == [
         "type",
         "title",
@@ -244,7 +411,6 @@ def test_the_key_order_is_the_one_document_set_produces(vault: Path, section_set
         "opened",
         "updated",
         "affects",
-        "parent",
     ]
 
 

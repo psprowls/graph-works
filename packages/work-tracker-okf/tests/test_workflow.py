@@ -1,5 +1,7 @@
 import itertools
 
+import pytest
+from work_tracker_okf.dependencies import DependencyEdge, DependencyFact, DependencyIssue
 from work_tracker_okf.hierarchy import ChildRollup
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORKFLOW_STATUSES
 from work_tracker_okf.workflow import (
@@ -25,6 +27,34 @@ EIGHT_PAIRS = {
 def _state(**overrides) -> RouteState:
     base = {"type": "Feature", "workflow_status": "open"}
     return RouteState(**{**base, **overrides})
+
+
+def state_with_edge(
+    *,
+    phase: str | None,
+    type: str = "Feature",
+    effort: str | None = "medium",
+    workflow_status: str = "open",
+    blocks: str,
+    needs: str = "resolved",
+    dependency_phase: str | None = "design",
+) -> RouteState:
+    edge = DependencyEdge("dep", blocks=blocks, needs=needs)
+    fact = DependencyFact(
+        "dep",
+        known=True,
+        terminal=False,
+        phase=dependency_phase,
+        status="in-progress",
+    )
+    return RouteState(
+        type=type,
+        workflow_status=workflow_status,
+        phase=phase,
+        effort=effort,
+        dependency_edges=(edge,),
+        dependency_facts=(fact,),
+    )
 
 
 def _sweep():
@@ -72,6 +102,43 @@ def test_the_sentinel_phase_is_not_a_real_phase():
     assert PLAN_OR_EXECUTE not in PHASES
 
 
+@pytest.mark.parametrize("phase", ["design", "plan", "execute", "finish"])
+def test_each_branch_checks_its_own_phase(phase: str) -> None:
+    state = state_with_edge(phase=phase, blocks=phase, needs="resolved", dependency_phase="design")
+    result = route(state)
+    assert result.dispatch is None
+    assert result.reason == f"blocked on dependencies ({phase})"
+    assert f"for {phase}" in result.blockers[0]
+
+
+def test_phase_less_feature_checks_design() -> None:
+    result = route(state_with_edge(phase=None, type="Feature", blocks="design", needs="resolved"))
+    assert result.reason == "blocked on dependencies (design)"
+
+
+def test_sized_test_gap_checks_the_phase_selected_by_effort() -> None:
+    small = route(state_with_edge(phase=None, type="TestGap", effort="small", blocks="execute"))
+    medium = route(state_with_edge(phase=None, type="TestGap", effort="medium", blocks="plan"))
+    assert small.reason == "blocked on dependencies (execute)"
+    assert medium.reason == "blocked on dependencies (plan)"
+
+
+def test_unsized_test_gap_reports_effort_before_a_dependency_gate() -> None:
+    result = route(state_with_edge(phase=None, type="TestGap", effort=None, blocks="design"))
+    assert result.reason == "test-gap entry forks on effort"
+
+
+def test_dependency_issues_block_routing_before_any_phase_dispatch() -> None:
+    result = route(
+        _state(
+            phase="design",
+            dependency_issues=(DependencyIssue(0, "invalid-blocks", "blocks 'build' is invalid", {}),),
+        )
+    )
+    assert result.reason == "invalid item"
+    assert "invalid-blocks" in result.blockers[0]
+
+
 def test_an_invalid_field_blocks_and_names_itself():
     result = route(_state(type="Widget", workflow_status="nope", phase="nowhere", effort="huge"))
     assert result.dispatch is None
@@ -102,14 +169,20 @@ def test_a_terminal_status_never_dispatches():
 def test_the_dependency_gate_runs_after_the_terminal_checks():
     """A resolved item blocked on an unfinished dep reports 'resolved', not
     'blocked on dependencies'."""
-    result = route(_state(workflow_status="resolved", phase="execute", unmet_deps=("dep",)))
+    result = route(state_with_edge(phase="execute", workflow_status="resolved", blocks="execute", needs="resolved"))
     assert "never dispatches" in result.blockers[0]
 
 
 def test_unmet_dependencies_block_and_are_named():
-    result = route(_state(phase="plan", unmet_deps=("dep-a", "dep-b")))
+    edges = (DependencyEdge("dep-a", blocks="plan"), DependencyEdge("dep-b", blocks="plan"))
+    facts = (
+        DependencyFact("dep-a", known=False, terminal=False),
+        DependencyFact("dep-b", known=False, terminal=False),
+    )
+    result = route(_state(phase="plan", dependency_edges=edges, dependency_facts=facts))
     assert result.dispatch is None
-    assert "dep-a, dep-b" in result.blockers[0]
+    assert "dep-a" in result.blockers[0]
+    assert "dep-b" in result.blockers[0]
 
 
 def test_entry_with_a_non_open_status_is_a_human_decision():

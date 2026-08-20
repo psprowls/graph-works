@@ -29,6 +29,19 @@ def _seed(db: Path):
     return store
 
 
+def test_consumer_packages_includes_repository(tmp_path: Path):
+    store = _seed(tmp_path / "code.db")
+    try:
+        c = store._conn
+        c.execute("BEGIN")
+        c.execute("INSERT INTO nodes (id, kind, name, path, uri) VALUES (8,'repository','repo','','repo-uri')")
+        c.execute("INSERT INTO edges (src, dst, kind) VALUES (8,4,'used_by')")  # repo used_by requests
+        c.commit()
+        assert store.consumer_packages(kind="dependency", entity_name="requests") == ("pkg", "repo")
+    finally:
+        store.close()
+
+
 def test_package_for_file(tmp_path: Path):
     store = _seed(tmp_path / "code.db")
     try:

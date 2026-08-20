@@ -261,7 +261,7 @@ wheels = [
 
 [[package]]
 name = "code-graph-io"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/code-graph-io" }
 dependencies = [
     { name = "pyyaml" },
@@ -397,7 +397,7 @@ wheels = [
 
 [[package]]
 name = "doc-wiki-okf"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/doc-wiki-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },
@@ -1071,7 +1071,7 @@ wheels = [
 
 [[package]]
 name = "okf-ext"
-version = "0.4.5"
+version = "0.4.6"
 source = { editable = "packages/okf-ext" }
 dependencies = [
     { name = "markdown-it-py" },
@@ -1720,7 +1720,7 @@ wheels = [
 
 [[package]]
 name = "subagents-io"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/subagents-io" }
 dependencies = [
     { name = "langchain-core" },

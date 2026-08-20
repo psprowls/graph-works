@@ -3,17 +3,60 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import date
 from pathlib import Path
 
 import pytest
 from doc_wiki_okf.cli import IGNORE
-from doc_wiki_okf.sources import plan_ingest
+from doc_wiki_okf.sources import plan_ingest, preflight_ingest
 from okf_ext.proposals import apply
 from okf_io import load_bundle
 from source_helpers import AT, BY, TODAY, build_bundle, material, schema_set, section_set
 
 PAGE = "sources/2026-08-auth-spec.md"
 COPY = "sources/references/2026-08-auth-spec.md"
+
+
+def test_preflight_reports_its_clean_targets_exactly(tmp_path: Path) -> None:
+    material_path, _ = material(tmp_path, name="source.md")
+    bundle = build_bundle(tmp_path / "bundle")
+
+    result = preflight_ingest(
+        bundle,
+        material_path,
+        title="Same title",
+        origin="https://example.invalid/original",
+        today=date(2026, 8, 18),
+    )
+
+    assert result.ok is True
+    assert result.page == "sources/2026-08-same-title.md"
+    assert result.copy == "sources/references/2026-08-same-title.md"
+    assert result.origin == "https://example.invalid/original"
+    assert result.refusals == ()
+
+
+def test_preflight_refuses_predicted_page_and_duplicate_origin(tmp_path: Path) -> None:
+    material_path, _ = material(tmp_path, name="source.md")
+    bundle = build_bundle(
+        tmp_path / "bundle",
+        {
+            "sources/2026-08-same-title.md": "---\ntype: Source\norigin: https://example.invalid/original\n---\n",
+        },
+    )
+
+    result = preflight_ingest(
+        bundle,
+        material_path,
+        title="Same title",
+        origin="https://example.invalid/original",
+        today=date(2026, 8, 18),
+    )
+
+    assert result.ok is False
+    assert result.page == "sources/2026-08-same-title.md"
+    assert {refusal.kind for refusal in result.refusals} == {"target-exists"}
+    assert any("origin=" in refusal.detail for refusal in result.refusals)
 
 
 def _plan(root: Path, path: Path, text: str, *, bundle=None, **overrides):
@@ -118,7 +161,9 @@ def test_a_re_ingest_refuses_target_exists(tmp_path: Path) -> None:
 
     assert not plan.ok
     assert plan.writes == ()
-    assert [(r.kind, r.path) for r in plan.refusals] == [("target-exists", PAGE)]
+    assert [(r.kind, r.path) for r in plan.refusals] == [("target-exists", PAGE), ("target-exists", PAGE)]
+    assert len({(r.path, r.kind, r.detail) for r in plan.refusals}) == len(plan.refusals)
+    assert any(r.detail == "already a member; a source page is written once" for r in plan.refusals)
 
 
 def test_an_occupied_copy_refuses_even_when_the_page_is_free(tmp_path: Path) -> None:

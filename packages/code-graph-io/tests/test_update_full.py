@@ -195,6 +195,42 @@ def test_update_honors_graphignore(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_repository_dep_edges_survive_a_full_build(tmp_path: Path) -> None:
+    """Regression: a virtual root's external dependency edge, re-sourced to
+    the Repository node, must survive `--full`. The Repository node doesn't
+    exist until `structural_nodes.emit` runs, well after `packages.refresh` —
+    and the full-mode cleanup DELETE sits between the two and does not
+    exclude kind='repository', so a naive in-`refresh()` write is dropped."""
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "pyproject.toml": (
+                '[project]\nname = "ws"\nversion = "0.0.0"\n'
+                "[tool.uv]\npackage = false\n"
+                '[dependency-groups]\ndev = ["mypy>=1.0"]\n'
+            ),
+            "packages/alpha/pyproject.toml": '[project]\nname = "alpha"\nversion = "0.1.0"\n',
+        },
+        "init",
+    )
+
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
+
+    conn = _open_ro(tmp_path)
+    try:
+        row = conn.execute(
+            "SELECT e.attrs_json FROM edges e "
+            "JOIN nodes src ON e.src = src.id "
+            "JOIN nodes dst ON e.dst = dst.id "
+            "WHERE e.kind='used_by' AND src.kind='repository' AND dst.kind='dependency' AND dst.name='mypy'"
+        ).fetchone()
+        assert row is not None
+        assert json.loads(row[0]) == {"dev": True}
+    finally:
+        conn.close()
+
+
 def test_token_count_on_function_node(seeded_db) -> None:
     row = seeded_db.execute(
         "SELECT attrs_json FROM nodes WHERE kind='function' AND name='foo' AND path LIKE '%foo.py'"

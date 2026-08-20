@@ -1209,3 +1209,240 @@ def test_refresh_falls_back_to_dominant_language_when_manifest_silent(
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='package' AND name='silentpkg'").fetchone()
     assert row is not None
     assert json.loads(row[0])["language"] == "python"
+
+
+def test_refresh_prunes_package_whose_manifest_vanished(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A package node whose manifest disappears between two --full-style
+    refresh() calls is deleted on the second call, not left stale forever."""
+    pkg_dir = tmp_path / "gone"
+    pkg_dir.mkdir()
+    manifest = pkg_dir / "pyproject.toml"
+    manifest.write_text('[project]\nname = "gone"\nversion = "0.1.0"\n')
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='gone'").fetchone() is not None
+
+    manifest.unlink()
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='gone'").fetchone() is None
+
+
+def test_refresh_prune_leaves_surviving_packages_alone(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """Pruning a vanished manifest must not touch a sibling package that is
+    still discovered."""
+    gone_dir = tmp_path / "gone"
+    gone_dir.mkdir()
+    manifest = gone_dir / "pyproject.toml"
+    manifest.write_text('[project]\nname = "gone"\nversion = "0.1.0"\n')
+    keep_dir = tmp_path / "keep"
+    keep_dir.mkdir()
+    (keep_dir / "pyproject.toml").write_text('[project]\nname = "keep"\nversion = "0.1.0"\n')
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    manifest.unlink()
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='gone'").fetchone() is None
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='keep'").fetchone() is not None
+
+
+def test_refresh_prune_cascades_edges(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A pruned package node's contains/used_by edges are cascade-deleted with
+    it — no orphan edge rows survive."""
+    pkg_dir = tmp_path / "gone"
+    pkg_dir.mkdir()
+    manifest = pkg_dir / "pyproject.toml"
+    manifest.write_text('[project]\nname = "gone"\nversion = "0.1.0"\ndependencies = ["requests"]\n')
+    _seed_file_node(conn, "gone/a.py")
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    node_id = conn.execute("SELECT id FROM nodes WHERE kind='package' AND name='gone'").fetchone()[0]
+    assert conn.execute("SELECT COUNT(*) FROM edges WHERE src=? OR dst=?", (node_id, node_id)).fetchone()[0] > 0
+
+    manifest.unlink()
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    assert conn.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone() is None
+    assert conn.execute("SELECT COUNT(*) FROM edges WHERE src=? OR dst=?", (node_id, node_id)).fetchone()[0] == 0
+
+
+def test_refresh_prune_scoped_to_current_repo(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A member's prune pass must only ever delete package/app nodes stamped
+    with its own `repo` — never a sibling workspace member's (H3: unscoped
+    pruning silently deletes the wrong repo's packages)."""
+    member_a = tmp_path / "member_a"
+    member_a.mkdir()
+    (member_a / "pyproject.toml").write_text('[project]\nname = "a"\nversion = "0.1.0"\n')
+    member_b = tmp_path / "member_b"
+    member_b.mkdir()
+    b_manifest = member_b / "pyproject.toml"
+    b_manifest.write_text('[project]\nname = "b"\nversion = "0.1.0"\n')
+
+    # Mirrors update._update_one_repo: the connection-scoped repo (which
+    # stamps nodes.repo at insert time) is set around each member's refresh,
+    # in step with the `current_repo` argument.
+    upsert.set_current_repo(conn, "repo:a")
+    packages.refresh(conn, repo_root=member_a, ctx=_CTX, current_repo="repo:a")
+    upsert.set_current_repo(conn, "repo:b")
+    packages.refresh(conn, repo_root=member_b, ctx=_CTX, current_repo="repo:b")
+    upsert.set_current_repo(conn, None)
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='a'").fetchone() is not None
+
+    # member_b's manifest vanishes; only member_b's refresh runs again.
+    b_manifest.unlink()
+    upsert.set_current_repo(conn, "repo:b")
+    packages.refresh(conn, repo_root=member_b, ctx=_CTX, current_repo="repo:b")
+    upsert.set_current_repo(conn, None)
+
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='a'").fetchone() is not None
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='b'").fetchone() is None
+
+
+# ============================================================================
+# `[tool.uv] package = false` — a virtual workspace root is not a Package
+# ============================================================================
+
+
+def test_virtual_root_emits_no_package_node(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "ws"\nversion = "0.0.0"\n[tool.uv]\npackage = false\n')
+    alpha = tmp_path / "packages" / "alpha"
+    alpha.mkdir(parents=True)
+    (alpha / "pyproject.toml").write_text('[project]\nname = "alpha"\nversion = "0.1.0"\n')
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
+    assert names == {"alpha"}
+    contains = conn.execute(
+        "SELECT COUNT(*) FROM edges e JOIN nodes n ON e.src = n.id WHERE n.name='ws' AND e.kind='contains'"
+    ).fetchone()[0]
+    assert contains == 0
+
+
+def test_tool_uv_package_true_still_emits_a_package(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """Negative case: `package = true`, and a bare `[tool.uv]` with no `package`
+    key, both still produce a Package node — guards the `is False` check
+    against a truthiness regression."""
+    true_dir = tmp_path / "true_pkg"
+    true_dir.mkdir()
+    (true_dir / "pyproject.toml").write_text(
+        '[project]\nname = "true_pkg"\nversion = "0.1.0"\n[tool.uv]\npackage = true\n'
+    )
+    bare_dir = tmp_path / "bare_pkg"
+    bare_dir.mkdir()
+    (bare_dir / "pyproject.toml").write_text('[project]\nname = "bare_pkg"\nversion = "0.1.0"\n[tool.uv]\n')
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
+    assert names == {"true_pkg", "bare_pkg"}
+
+
+def test_virtual_root_external_deps_defer_to_repository(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "ws"\nversion = "0.0.0"\n'
+        "[tool.uv]\npackage = false\n"
+        '[dependency-groups]\ndev = ["mypy>=1.0"]\n'
+    )
+    deferred: list[packages.RepositoryDepLink] = []
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX, deferred_repo_deps=deferred)
+
+    # no repository-sourced used_by edge lands in the DB from refresh() alone —
+    # the Repository node doesn't exist yet.
+    used_by_from_ws = conn.execute(
+        "SELECT COUNT(*) FROM edges e JOIN nodes n ON e.src = n.id WHERE n.kind='repository' AND e.kind='used_by'"
+    ).fetchone()[0]
+    assert used_by_from_ws == 0
+    # the dependency node itself IS written by refresh().
+    dep_row = conn.execute("SELECT name FROM nodes WHERE kind='dependency' AND name='mypy'").fetchone()
+    assert dep_row is not None
+    # and the deferred edge is queued for the Repository, carrying dev=True.
+    assert deferred == [("pypi", "mypy", True)]
+
+
+def test_virtual_root_internal_deps_are_dropped(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "ws"\nversion = "0.0.0"\n[tool.uv]\npackage = false\n[dependency-groups]\ndev = ["alpha"]\n'
+    )
+    alpha = tmp_path / "packages" / "alpha"
+    alpha.mkdir(parents=True)
+    (alpha / "pyproject.toml").write_text('[project]\nname = "alpha"\nversion = "0.1.0"\n')
+    deferred_cross_repo: list[packages.CrossRepoLink] = []
+    deferred_repo_deps: list[packages.RepositoryDepLink] = []
+
+    packages.refresh(
+        conn,
+        repo_root=tmp_path,
+        ctx=_CTX,
+        deferred_cross_repo=deferred_cross_repo,
+        deferred_repo_deps=deferred_repo_deps,
+    )
+
+    used_by = conn.execute(
+        "SELECT COUNT(*) FROM edges e JOIN nodes d ON e.dst = d.id WHERE d.name='alpha' AND e.kind='used_by'"
+    ).fetchone()[0]
+    assert used_by == 0
+    dop = conn.execute("SELECT COUNT(*) FROM edges WHERE kind='depends_on_package'").fetchone()[0]
+    assert dop == 0
+    assert deferred_cross_repo == []
+    assert deferred_repo_deps == []
+
+
+def test_previously_admitted_root_is_pruned(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A `package` row from before the `virtual` fix existed is pruned on the
+    next refresh — verifiable on an already-populated database."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[GraphNode(kind="package", name="ws", path="", line=None, attrs={"uri": "pkg:test/repo/ws"})],
+            edges=[],
+        ),
+    )
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='ws'").fetchone() is not None
+
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "ws"\nversion = "0.0.0"\n[tool.uv]\npackage = false\n')
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='ws'").fetchone() is None
+
+
+def test_python_dep_group_edges_carry_dev_attr(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text(
+        '[project]\nname = "pkg"\nversion = "0.1.0"\ndependencies = ["requests"]\n[dependency-groups]\ndev = ["mypy"]\n'
+    )
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    def _edge_attrs(dep_name: str) -> dict:
+        row = conn.execute(
+            "SELECT e.attrs_json FROM edges e JOIN nodes d ON e.dst = d.id WHERE d.name=? AND e.kind='used_by'",
+            (dep_name,),
+        ).fetchone()
+        return json.loads(row[0]) if row and row[0] else {}
+
+    assert _edge_attrs("requests") == {}
+    assert _edge_attrs("mypy") == {"dev": True}
+
+
+def test_runtime_dependency_wins_over_dep_group(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A name declared in both [project.dependencies] and a dep-group yields
+    ONE edge with attrs={} — the runtime pass wins the first-write dedupe."""
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    (pkg / "pyproject.toml").write_text(
+        '[project]\nname = "pkg"\nversion = "0.1.0"\ndependencies = ["mypy"]\n[dependency-groups]\ndev = ["mypy"]\n'
+    )
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    rows = conn.execute(
+        "SELECT e.attrs_json FROM edges e JOIN nodes d ON e.dst = d.id WHERE d.name='mypy' AND e.kind='used_by'"
+    ).fetchall()
+    assert len(rows) == 1
+    attrs = json.loads(rows[0][0]) if rows[0][0] else {}
+    assert attrs == {}

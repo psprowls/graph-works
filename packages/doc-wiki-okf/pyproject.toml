@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "doc-wiki-okf"
-version = "0.2.0"
+version = "0.2.1"
 description = "The documentation-wiki lane over OKF v0.2: source reading, ingest briefs, and proposals."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },

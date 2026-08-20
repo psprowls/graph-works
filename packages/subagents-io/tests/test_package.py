@@ -45,7 +45,7 @@ def test_all_is_sorted_and_bound():
 
 
 def test_the_public_surface_is_the_spec_s_module_table():
-    # Exactly these forty-five. The two writers are surface because they have
+    # Exactly these fifty-six. The two writers are surface because they have
     # real consumers with no pool in sight; `PriceLookup` is surface because it
     # is the type of a parameter two of those callables accept. The dispatch
     # seven are surface because they exist for a consumer that has not been
@@ -58,6 +58,14 @@ def test_the_public_surface_is_the_spec_s_module_table():
     # all of them. `WorkerEventBase` is surface because a coordinator writing
     # a generic ack/dedupe helper annotates against it, and `WorkerEvent`
     # because that is the union it matches on.
+    #
+    # The eleven the read half added (D-039/D-042): `read_trace_records` plus
+    # its two result types (`TraceFile`, `TraceWarning`) and the version floor
+    # it warns against (`KNOWN_SCHEMA_VERSION`); the aggregate
+    # (`TraceAggregate`, `RoleTotals`, `RoleModelTotals`) and the function that
+    # builds it (`aggregate_trace`); `is_groupable`, shared by the aggregate
+    # and by `collapse_runs`, the maximal-run partition a default-view renderer
+    # consumes via `render_collapsed_group`.
     assert set(subagents_io.__all__) == {
         "Adapter",
         "BackendError",
@@ -69,6 +77,7 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "Escalation",
         "FanOutResult",
         "Heartbeat",
+        "KNOWN_SCHEMA_VERSION",
         "LoopAdapter",
         "LoopOutcome",
         "ModelResolution",
@@ -78,12 +87,17 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "Prepared",
         "PriceLookup",
         "RoleBinding",
+        "RoleModelTotals",
         "RoleSpec",
+        "RoleTotals",
         "RunContext",
         "RunOutcome",
         "SubagentPool",
         "TRACE_LOGGER_NAME",
         "TaskResult",
+        "TraceAggregate",
+        "TraceFile",
+        "TraceWarning",
         "UnknownWorker",
         "UnsupportedMode",
         "WORKER_STATES",
@@ -95,6 +109,11 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "WorkerRecord",
         "WorktreeAction",
         "WorktreeNotProvisioned",
+        "aggregate_trace",
+        "collapse_runs",
+        "is_groupable",
+        "read_trace_records",
+        "render_collapsed_group",
         "render_trace_record",
         "resolve_model",
         "resolve_role_spec",

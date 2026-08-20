@@ -33,19 +33,19 @@ CAPABILITY_NAMES = (
     "proposals",
     "bundle",
     "placement",
+    "logs",
 )
 
 
 def test_version_is_static_and_pinned():
     """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking and patch
-    is compatible (ADR-0007). Three additive changes land together here: the
-    `placement` capability plus `schemas.declared_directories()`,
-    `plan_propose`'s `render=` seam, and `proposals._placement` becoming the
-    public `placement` with an additive `directory=` keyword defaulting to
-    what it already did. No existing caller's behaviour changes, so this is a
-    patch. `0.5.0` is still not free: the README promises the
-    `okf_ext.sections` re-export shim comes out there."""
-    assert okf_ext.__version__ == "0.4.5"
+    is compatible (ADR-0007). One additive change lands here: the `logs`
+    capability, the locked/atomic `log.md` append lifted out of
+    `work_tracker_okf.compose` so a third consumer does not make a third copy.
+    No existing caller's behaviour changes, so this is a patch. `0.5.0` is
+    still not free: the README promises the `okf_ext.sections` re-export shim
+    comes out there."""
+    assert okf_ext.__version__ == "0.4.6"
 
 
 def test_the_distribution_version_matches_the_python_attribute():
@@ -160,3 +160,9 @@ def test_the_sixth_capability_is_reachable_as_a_submodule():
     from okf_ext import proposals
 
     assert proposals.PROPOSAL_TYPE == "Proposal"
+
+
+def test_the_seventh_capability_is_reachable_as_a_submodule():
+    from okf_ext import logs
+
+    assert callable(logs.append_entry)

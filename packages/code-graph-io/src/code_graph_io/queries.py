@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import sqlite3
 from collections.abc import Iterable, Sequence
@@ -20,9 +21,9 @@ _CLI_KIND = {
     "package": "package",
     "app": "app",
     "dependency": "dependency",
-    "test_suite": "suite",
-    "agent_plugin": "agent-plugin",
-    "entry_point": "entry-point",
+    "test_suite": "test_suite",
+    "agent_plugin": "agent_plugin",
+    "entry_point": "entry_point",
     "function": "function",
     "class": "class",
     "method": "method",
@@ -179,6 +180,7 @@ class SuiteDescription:
     uri: str
     kind: str
     file_count: int
+    files: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -433,7 +435,7 @@ def build_menu(conn: sqlite3.Connection, matches: list[NodeRecord]) -> list[Matc
                             when there is no containing package/app to narrow by;
                             otherwise `... <name> --kind <cli> --in-package <pkg>`
       * file             -> `... <path>` (resolves via the path describer)
-      * dependency       -> `... <name> --kind dependency --ecosystem <eco>`
+      * dependency       -> `... <ecosystem>/<name> --kind dependency`
                             (dependency nodes carry a synthetic path; never
                             address them by `--in-package`)
       * other path-less  -> `... <name> --kind <cli>`
@@ -461,16 +463,20 @@ def build_menu(conn: sqlite3.Connection, matches: list[NodeRecord]) -> list[Matc
                 command = f"gw graph describe {m.path}:{m.line}"
             else:
                 command = f"gw graph describe {m.name} --kind {cli_kind} --in-package {pkg}"
+        elif m.kind == "builtin":
+            # Builtin nodes key on (name=module, path=language); describe takes
+            # the two folded into one `builtin:<language>/<module>` identifier.
+            command = f"gw graph describe builtin:{m.path}/{m.name} --kind builtin"
         elif m.kind == "file":
             # A bare file path resolves via q_describe.run's path-describer fallback.
             command = f"gw graph describe {m.path}"
         elif m.kind == "dependency":
             # Dependency nodes carry a synthetic path; address them by ecosystem,
             # never --in-package.
-            eco = m.attrs.get("ecosystem", "")
-            command = f"gw graph describe {m.name} --kind dependency --ecosystem {eco}"
+            eco = m.attrs.get("ecosystem", "pypi")
+            command = f"gw graph describe {eco}/{m.name} --kind dependency"
         else:
-            # Path-less entities (package, app, suite, agent_plugin,
+            # Path-less entities (package, app, test_suite, agent_plugin,
             # entry_point) resolve by name under their explicit kind.
             command = f"gw graph describe {m.name} --kind {cli_kind}"
         out.append(MatchRecord(kind=m.kind, address=address, command=command))
@@ -1144,16 +1150,26 @@ def describe_test_suite(conn: sqlite3.Connection, *, suite_name: str) -> SuiteDe
         "SELECT COUNT(*) FROM edges WHERE src = ? AND kind='physically_contains'",
         (suite_id,),
     ).fetchone()[0]
-    return _load_suite_description((name, uri, attrs_json, fc))
+    file_rows = conn.execute(
+        "SELECT f.path FROM edges pc JOIN nodes f ON pc.dst = f.id "
+        "WHERE pc.src = ? AND pc.kind='physically_contains' ORDER BY f.path",
+        (suite_id,),
+    ).fetchall()
+    desc = _load_suite_description((name, uri, attrs_json, fc))
+    return dataclasses.replace(desc, files=[r[0] for r in file_rows])
 
 
 def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) -> DependencyDescription | None:
     """Return the description of a dependency node identified by (ecosystem, name).
 
     Reads `versions_in_use` from the node's attrs, and populates `used_by`
-    from inbound `used_by` edges originating from `package` nodes (sorted
-    alphabetically by consumer package name). `conn` must be opened
-    read-only.
+    from inbound `used_by` edges. Consumer-side filters broaden to
+    `p.kind IN ('package', 'app', 'repository')` so App consumers of a
+    dependency remain discoverable — the same convention `describe_app`'s
+    docstring names — and so a virtual workspace root's dev tooling,
+    re-sourced to the Repository node, renders too.
+    Deduplicated and sorted alphabetically by consumer name. `conn` must be
+    opened read-only.
     """
     row = conn.execute(
         "SELECT id, name, attrs_json, uri FROM nodes "
@@ -1166,9 +1182,9 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
     dep_id, dep_name, attrs_json, uri = row
     attrs = json.loads(attrs_json) if attrs_json else {}
     used_by_rows = conn.execute(
-        "SELECT p.name FROM edges e "
+        "SELECT DISTINCT p.name FROM edges e "
         "JOIN nodes p ON e.src = p.id "
-        "WHERE e.kind='used_by' AND e.dst = ? AND p.kind='package' "
+        "WHERE e.kind='used_by' AND e.dst = ? AND p.kind IN ('package', 'app', 'repository') "
         "ORDER BY p.name",
         (dep_id,),
     ).fetchall()
@@ -1188,9 +1204,11 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
 def describe_builtin(conn: sqlite3.Connection, *, language: str, module_name: str) -> BuiltinDescription | None:
     """Return the description of a Builtin node identified by (language, module_name).
 
-    Populates `used_by` from inbound `used_by` edges originating from `package`
-    nodes, sorted alphabetically by consumer package name. `conn` must be opened
-    read-only.
+    Populates `used_by` from inbound `used_by` edges. Consumer-side filters
+    broaden to `p.kind IN ('package', 'app')` so App consumers of a builtin
+    remain discoverable — the same convention `describe_app`'s docstring
+    names. Deduplicated and sorted alphabetically by consumer name. `conn`
+    must be opened read-only.
 
     mirrors `describe_dependency` with `language` /
     `module_name` substituting for `ecosystem` / `name`.
@@ -1204,9 +1222,9 @@ def describe_builtin(conn: sqlite3.Connection, *, language: str, module_name: st
     builtin_id, _name, attrs_json, uri = row
     attrs = json.loads(attrs_json) if attrs_json else {}
     used_by_rows = conn.execute(
-        "SELECT p.name FROM edges e "
+        "SELECT DISTINCT p.name FROM edges e "
         "JOIN nodes p ON e.src = p.id "
-        "WHERE e.kind='used_by' AND e.dst = ? AND p.kind='package' "
+        "WHERE e.kind='used_by' AND e.dst = ? AND p.kind IN ('package', 'app') "
         "ORDER BY p.name",
         (builtin_id,),
     ).fetchall()
@@ -1749,7 +1767,7 @@ def consumer_packages(
     """DOMAIN-AGNOSTIC consumer/tested package (and app) names.
 
     Per-kind logic:
-      - dependency:  `used_by` consumers, `p.kind IN ('package','app')`,
+      - dependency:  `used_by` consumers, `p.kind IN ('package','app','repository')`,
                      by `dep.name` (DISTINCT, ORDER BY p.name).
       - test_suite:  `tests` packages/apps by `ts.uri` (DISTINCT, ORDER BY p.name).
     Any other kind returns `()`.
@@ -1759,7 +1777,7 @@ def consumer_packages(
             "SELECT DISTINCT p.name FROM edges u "
             "JOIN nodes p ON u.src = p.id "
             "JOIN nodes dep ON u.dst = dep.id "
-            "WHERE u.kind='used_by' AND p.kind IN ('package', 'app') "
+            "WHERE u.kind='used_by' AND p.kind IN ('package', 'app', 'repository') "
             "AND dep.kind='dependency' AND dep.name = ? "
             "ORDER BY p.name",
             (entity_name,),

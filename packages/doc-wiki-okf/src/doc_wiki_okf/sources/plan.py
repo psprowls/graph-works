@@ -21,7 +21,7 @@ closed and puts the check where the decoding actually happens.
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 
@@ -90,6 +90,21 @@ REFERENCES_DIRECTORY = "references"
 DEFAULT_SUFFIX = ".txt"
 
 
+@dataclass(frozen=True, slots=True)
+class IngestPreflight:
+    """Collision information for a proposed Source page and its copy."""
+
+    page: str
+    copy: str
+    origin: str
+    refusals: tuple[Refusal, ...] = ()
+
+    @property
+    def ok(self) -> bool:
+        """Whether the predicted source page may be written."""
+        return not self.refusals
+
+
 def page_target(title: str, *, today: date, layout: IngestLayout = GRAPH_WIKI_LAYOUT) -> str:
     """Where the source page for *title* is created.
 
@@ -129,6 +144,47 @@ def _existing_source_with_origin(bundle: Bundle, origin: str) -> str | None:
     return None
 
 
+def preflight_ingest(
+    bundle: Bundle,
+    material: Path,
+    *,
+    title: str,
+    origin: str,
+    today: date,
+    layout: IngestLayout = GRAPH_WIKI_LAYOUT,
+) -> IngestPreflight:
+    """Refuse a predicted Source page, reference copy, or origin collision.
+
+    This is intentionally independent of page rendering so callers can avoid
+    expensive work when the brief's predicted identity is already present.
+    """
+    page = page_target(title, today=today, layout=layout)
+    copy = copy_target(page, material)
+    refusals: list[Refusal] = []
+    if bundle.has_member(page):
+        refusals.append(Refusal(page, "target-exists", "already a member; a source page is written once"))
+    existing = _existing_source_with_origin(bundle, origin)
+    if existing is not None:
+        refusals.append(
+            Refusal(page, "target-exists", f"already ingested (origin={origin!r}); existing source: {existing}")
+        )
+    if bundle.has_member(copy):
+        refusals.append(Refusal(copy, "target-exists", "already a member; a reference copy is written once"))
+    return IngestPreflight(page=page, copy=copy, origin=origin, refusals=tuple(refusals))
+
+
+def _unique_refusals(refusals: tuple[Refusal, ...]) -> tuple[Refusal, ...]:
+    """Keep each planner refusal once, preserving its first-seen order."""
+    unique: list[Refusal] = []
+    identities: set[tuple[str, str, str]] = set()
+    for refusal in refusals:
+        identity = (refusal.path, refusal.kind, refusal.detail)
+        if identity not in identities:
+            identities.add(identity)
+            unique.append(refusal)
+    return tuple(unique)
+
+
 def plan_ingest(
     bundle: Bundle,
     schema_set: SchemaSet,
@@ -165,8 +221,9 @@ def plan_ingest(
         raise KeyError(f"{SOURCE_TYPE}: no schema in `{schema_set.root.name}`")
     declaration = section_set.types[SOURCE_TYPE]
 
-    page = page_target(title, today=today, layout=layout)
-    copy = copy_target(page, material)
+    preflight = preflight_ingest(bundle, material, title=title, origin=origin, today=today, layout=layout)
+    page = preflight.page
+    copy = preflight.copy
 
     frontmatter: dict[str, object] = {
         "title": title.strip(),
@@ -185,26 +242,7 @@ def plan_ingest(
     )
     plan = plan_create(bundle, page, render, by=by, at=at)
 
-    refusals = plan.refusals
-    existing = _existing_source_with_origin(bundle, origin)
-    if existing is not None:
-        refusals = (
-            *refusals,
-            Refusal(
-                path=page,
-                kind="target-exists",
-                detail=f"already ingested (origin={origin!r}); a source with this origin already exists at {existing}",
-            ),
-        )
-    if bundle.has_member(copy):
-        refusals = (
-            *refusals,
-            Refusal(
-                path=copy,
-                kind="target-exists",
-                detail="already a member; a reference copy is written once, never reconciled",
-            ),
-        )
+    refusals = _unique_refusals((*plan.refusals, *preflight.refusals))
     if refusals:
         return replace(plan, writes=(), refusals=refusals)
 
@@ -216,9 +254,11 @@ __all__ = [
     "DEFAULT_SUFFIX",
     "REFERENCES_DIRECTORY",
     "SOURCE_TYPE",
+    "IngestPreflight",
     "copy_target",
     "page_target",
     "plan_ingest",
+    "preflight_ingest",
     "seed_source_kinds",
     "source_kinds",
 ]

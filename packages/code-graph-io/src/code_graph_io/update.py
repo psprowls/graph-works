@@ -233,6 +233,7 @@ def _update_one_repo(
     upsert.set_current_repo(conn, repo_uri_val)
     try:
         _process_files(conn, repo_root, changed, skip_dirs, repo_uri_val)
+        deferred_repo_deps: list[packages.RepositoryDepLink] = []
         packages.refresh(
             conn,
             repo_root=repo_root,
@@ -240,6 +241,7 @@ def _update_one_repo(
             current_repo=repo_uri_val,
             global_workspace=global_workspace,
             deferred_cross_repo=deferred,
+            deferred_repo_deps=deferred_repo_deps,
         )
         builtins.refresh(conn, repo_root=repo_root, graph_dir=graph_dir, ctx=ctx)
         # Resolve file-import edges to real file nodes BEFORE the full-mode cleanup
@@ -248,6 +250,17 @@ def _update_one_repo(
         # Running resolution first repoints edges onto the real (tracked) file nodes
         # that survive the DELETE; the orphaned stubs are then cleaned up safely.
         resolve.resolve_file_imports(conn, repo_root)
+        # The package/app exclusion below is load-bearing, not an oversight:
+        # packages.refresh() (above, line 236) runs BEFORE this cleanup, unlike
+        # every other node emitter (structural_nodes / agent_plugins /
+        # entry_points / test_suites), which all run AFTER it and so get
+        # pruning for free from this DELETE. A package/app node's `path` is its
+        # directory (often "" for a root manifest), never a member of
+        # `tracked_paths`, so removing the exclusion here would delete every
+        # package/app node on every full build, including ones just written by
+        # this same pass. Package/app pruning instead lives in
+        # `packages.refresh()`'s own `_prune_vanished` pass, which runs before
+        # this cleanup and diffs against the freshly discovered manifest set.
         if full:
             tracked_paths = [
                 rel for _, rel in changed if _is_parseable(rel) and not _ignore.should_skip(rel, skip_dirs)
@@ -279,6 +292,10 @@ def _update_one_repo(
         )
 
         structural_nodes.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)
+        # Must run after structural_nodes.emit: a virtual manifest's
+        # dependencies are re-sourced to the Repository node, which
+        # structural_nodes.emit is what creates.
+        packages.link_repository_dependencies(conn, deferred_repo_deps, ctx=ctx)
         agent_plugins.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)
         entry_points.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)
         test_suites.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)

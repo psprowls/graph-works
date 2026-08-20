@@ -452,7 +452,7 @@ def test_dataclass_field_shapes() -> None:
             "implemented_by_path",
             "source",
         },
-        SuiteDescription: {"name", "uri", "kind", "file_count"},
+        SuiteDescription: {"name", "uri", "kind", "file_count", "files"},
     }
     for cls, want in expected.items():
         got = {f.name for f in dataclasses.fields(cls)}
@@ -729,6 +729,14 @@ def test_describe_test_suite(seeded_db: sqlite3.Connection) -> None:
     assert s.name == first.name
 
 
+def test_describe_test_suite_includes_files(seeded_db: sqlite3.Connection) -> None:
+    """`SuiteDescription.files` carries the same paths `file_count` counts."""
+    s = describe_test_suite(seeded_db, suite_name="mypkg-unit-tests")
+    assert s is not None
+    assert s.files == ["packages/mypkg/tests/test_foo.py"]
+    assert s.file_count == len(s.files)
+
+
 def test_describe_test_suite_returns_none_on_missing(
     empty_db: sqlite3.Connection,
 ) -> None:
@@ -980,6 +988,183 @@ def test_describe_dependency_returns_none_when_missing(conn: sqlite3.Connection)
     assert queries.describe_dependency(conn, ecosystem="pypi", name="nonexistent") is None
 
 
+def test_describe_dependency_includes_app_only_consumer(conn: sqlite3.Connection) -> None:
+    """A dependency consumed exclusively by an App still renders a non-empty used_by."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="dependency",
+                    name="typer",
+                    path=None,
+                    line=None,
+                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:pypi/typer"},
+                ),
+                GraphNode(
+                    kind="app",
+                    name="work-tracker-okf",
+                    path="apps/work-tracker-okf",
+                    line=None,
+                    attrs={
+                        "language": "python",
+                        "uri": "app:o/r/work-tracker-okf",
+                        "app_kind": "cli",
+                        "app_signals": [],
+                    },
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("app", "work-tracker-okf", "apps/work-tracker-okf"),
+                    dst=("dependency", "typer", None),
+                    kind="used_by",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+    d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
+    assert d is not None
+    assert d.used_by == ["work-tracker-okf"]
+
+
+def test_describe_dependency_includes_repository_consumer(conn: sqlite3.Connection) -> None:
+    """A dependency re-sourced to the Repository (a virtual workspace root's
+    dev tooling) still renders a non-empty used_by."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="dependency",
+                    name="mypy",
+                    path=None,
+                    line=None,
+                    attrs={"ecosystem": "pypi", "name": "mypy", "uri": "dependency:pypi/mypy"},
+                ),
+                GraphNode(
+                    kind="repository",
+                    name="agent-workspace",
+                    path="",
+                    line=None,
+                    attrs={"owner": "o", "name": "agent-workspace", "uri": "repo:o/agent-workspace"},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("repository", "agent-workspace", ""),
+                    dst=("dependency", "mypy", None),
+                    kind="used_by",
+                    attrs={"dev": True},
+                ),
+            ],
+        ),
+    )
+    d = queries.describe_dependency(conn, ecosystem="pypi", name="mypy")
+    assert d is not None
+    assert d.used_by == ["agent-workspace"]
+
+
+def test_describe_dependency_used_by_matches_consumer_packages(conn: sqlite3.Connection) -> None:
+    """For a mixed package+app consumer set, describe_dependency agrees with consumer_packages."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="dependency",
+                    name="typer",
+                    path=None,
+                    line=None,
+                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:pypi/typer"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="my-pkg",
+                    path="src/my_pkg",
+                    line=None,
+                    attrs={"uri": "pkg:local/repo/my-pkg"},
+                ),
+                GraphNode(
+                    kind="app",
+                    name="my-app",
+                    path="apps/my-app",
+                    line=None,
+                    attrs={"language": "python", "uri": "app:o/r/my-app", "app_kind": "cli", "app_signals": []},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("package", "my-pkg", "src/my_pkg"),
+                    dst=("dependency", "typer", None),
+                    kind="used_by",
+                    attrs={},
+                ),
+                GraphEdge(
+                    src=("app", "my-app", "apps/my-app"),
+                    dst=("dependency", "typer", None),
+                    kind="used_by",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+    d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
+    assert d is not None
+    cp = queries.consumer_packages(conn, kind="dependency", entity_name="typer")
+    assert d.used_by == list(cp)
+
+
+def test_describe_dependency_dedupes_same_named_package_and_app(conn: sqlite3.Connection) -> None:
+    """A package and an app sharing a name collapse to one used_by entry."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="dependency",
+                    name="typer",
+                    path=None,
+                    line=None,
+                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:pypi/typer"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="twin",
+                    path="src/twin",
+                    line=None,
+                    attrs={"uri": "pkg:local/repo/twin"},
+                ),
+                GraphNode(
+                    kind="app",
+                    name="twin",
+                    path="apps/twin",
+                    line=None,
+                    attrs={"language": "python", "uri": "app:o/r/twin", "app_kind": "cli", "app_signals": []},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("package", "twin", "src/twin"),
+                    dst=("dependency", "typer", None),
+                    kind="used_by",
+                    attrs={},
+                ),
+                GraphEdge(
+                    src=("app", "twin", "apps/twin"),
+                    dst=("dependency", "typer", None),
+                    kind="used_by",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+    d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
+    assert d is not None
+    assert d.used_by == ["twin"]
+
+
 def test_describe_agent_plugin_returns_description(conn: sqlite3.Connection) -> None:
     """describe_agent_plugin returns AgentPluginDescription from node attrs."""
     upsert.upsert_records(
@@ -1146,6 +1331,96 @@ def test_describe_builtin_returns_description(conn: sqlite3.Connection) -> None:
 
 def test_describe_builtin_returns_none_when_missing(conn: sqlite3.Connection) -> None:
     assert queries.describe_builtin(conn, language="python", module_name="nonexistent") is None
+
+
+def test_describe_builtin_dedupes_same_named_package_and_app(conn: sqlite3.Connection) -> None:
+    """A package and an app sharing a name collapse to one used_by entry."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="builtin",
+                    name="pathlib",
+                    path="python",
+                    line=None,
+                    attrs={"language": "python", "module_name": "pathlib", "uri": "builtin:python/pathlib"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="twin",
+                    path="src/twin",
+                    line=None,
+                    attrs={"uri": "pkg:local/repo/twin"},
+                ),
+                GraphNode(
+                    kind="app",
+                    name="twin",
+                    path="apps/twin",
+                    line=None,
+                    attrs={"language": "python", "uri": "app:o/r/twin", "app_kind": "cli", "app_signals": []},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("package", "twin", "src/twin"),
+                    dst=("builtin", "pathlib", "python"),
+                    kind="used_by",
+                    attrs={},
+                ),
+                GraphEdge(
+                    src=("app", "twin", "apps/twin"),
+                    dst=("builtin", "pathlib", "python"),
+                    kind="used_by",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+    b = queries.describe_builtin(conn, language="python", module_name="pathlib")
+    assert b is not None
+    assert b.used_by == ["twin"]
+
+
+def test_describe_builtin_includes_app_only_consumer(conn: sqlite3.Connection) -> None:
+    """A builtin consumed exclusively by an App still renders a non-empty used_by."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="builtin",
+                    name="pathlib",
+                    path="python",
+                    line=None,
+                    attrs={"language": "python", "module_name": "pathlib", "uri": "builtin:python/pathlib"},
+                ),
+                GraphNode(
+                    kind="app",
+                    name="work-tracker-okf",
+                    path="apps/work-tracker-okf",
+                    line=None,
+                    attrs={
+                        "language": "python",
+                        "uri": "app:o/r/work-tracker-okf",
+                        "app_kind": "cli",
+                        "app_signals": [],
+                    },
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("app", "work-tracker-okf", "apps/work-tracker-okf"),
+                    dst=("builtin", "pathlib", "python"),
+                    kind="used_by",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+    b = queries.describe_builtin(conn, language="python", module_name="pathlib")
+    assert b is not None
+    assert b.used_by == ["work-tracker-okf"]
 
 
 def test_describe_builtin_filters_by_language(conn: sqlite3.Connection) -> None:
@@ -1525,10 +1800,10 @@ def test_build_menu_dependency_form(conn: sqlite3.Connection) -> None:
     menu = queries.build_menu(conn, queries.resolve_selector(conn, selector="boto3"))
     assert menu[0].kind == "dependency"
     assert menu[0].address == ""
-    assert menu[0].command == "gw graph describe boto3 --kind dependency --ecosystem pypi"
+    assert menu[0].command == "gw graph describe pypi/boto3 --kind dependency"
 
 
-def test_build_menu_test_suite_kind_maps_to_suite(conn: sqlite3.Connection) -> None:
+def test_build_menu_test_suite_kind_uses_the_core_describe_spelling(conn: sqlite3.Connection) -> None:
     upsert.upsert_records(
         conn,
         GraphRecords(
@@ -1537,12 +1812,13 @@ def test_build_menu_test_suite_kind_maps_to_suite(conn: sqlite3.Connection) -> N
         ),
     )
     menu = queries.build_menu(conn, queries.resolve_selector(conn, selector="core_tests"))
-    assert menu[0].command == "gw graph describe core_tests --kind suite"
+    assert menu[0].command == "gw graph describe core_tests --kind test_suite"
 
 
 def test_build_menu_dependency_with_synthetic_path(conn: sqlite3.Connection) -> None:
-    """A dependency node carrying a synthetic path/None line is addressed by
-    ecosystem (not --in-package None) with a blank address (not ":None")."""
+    """A dependency node carrying a synthetic path/None line is addressed by the
+    `<ecosystem>/<name>` identifier (not --in-package None, and not the
+    `--ecosystem` flag that no longer exists) with a blank address (not ":None")."""
     upsert.upsert_records(
         conn,
         GraphRecords(
@@ -1561,8 +1837,32 @@ def test_build_menu_dependency_with_synthetic_path(conn: sqlite3.Connection) -> 
     menu = queries.build_menu(conn, queries.resolve_selector(conn, selector="boto3"))
     assert len(menu) == 1
     assert menu[0].kind == "dependency"
-    assert menu[0].command == "gw graph describe boto3 --kind dependency --ecosystem pypi"
+    assert menu[0].command == "gw graph describe pypi/boto3 --kind dependency"
     assert menu[0].address == ""
+
+
+def test_build_menu_builtin_uses_the_folded_uri_identifier(conn: sqlite3.Connection) -> None:
+    """Builtin nodes key on (name=module, path=language); describe takes the two
+    folded into one `builtin:<language>/<module>` identifier, not a bare name."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="builtin",
+                    name="json",
+                    path="python",
+                    line=None,
+                    attrs={"language": "python", "module_name": "json"},
+                ),
+            ],
+            edges=[],
+        ),
+    )
+    menu = queries.build_menu(conn, queries.resolve_selector(conn, selector="json"))
+    assert menu[0].kind == "builtin"
+    assert menu[0].address == ""
+    assert menu[0].command == "gw graph describe builtin:python/json --kind builtin"
 
 
 def test_build_menu_code_symbol_no_package_uses_path_line(conn: sqlite3.Connection) -> None:

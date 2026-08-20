@@ -28,6 +28,12 @@ _DEPENDS_ON_PACKAGE_KIND = "depends_on_package"
 # (consumer_kind, consumer_name, consumer_rel, target_kind, target_name, target_rel).
 CrossRepoLink = tuple[str, str, str, str, str, str]
 
+# One external dependency of a virtual manifest (`[tool.uv] package = false`),
+# collected during `refresh` and drained by `link_repository_dependencies`
+# once the Repository node exists (after `structural_nodes.emit`):
+# (ecosystem, name, is_dev).
+RepositoryDepLink = tuple[str, str, bool]
+
 
 def _normalize_name(name: str) -> str:
     """Canonicalize a package/dependency name for cross-form comparison.
@@ -39,6 +45,32 @@ def _normalize_name(name: str) -> str:
     ``import_scan._build_importable_maps``.
     """
     return name.lower().replace("-", "_")
+
+
+def _prune_vanished(
+    conn: sqlite3.Connection,
+    *,
+    current_repo: str | None,
+    keep_keys: set[tuple[str, str]],
+) -> None:
+    """Delete package/app nodes whose manifest is no longer discovered.
+
+    Scoped to `current_repo`: a workspace member's build must only ever prune
+    nodes stamped with its own repo. Unscoped, one member's `refresh()` would
+    delete a sibling member's package/app nodes too — they would then be
+    silently re-inserted as corrupt stub nodes (uri/attrs/repo all NULL) by
+    `link_cross_repo_packages`. `ON DELETE CASCADE` on `edges.src`/`edges.dst`
+    (schema.py) removes the node's edges along with it.
+    """
+    rows = conn.execute(
+        "SELECT id, name, path FROM nodes WHERE kind IN ('package', 'app') "
+        "AND ((? IS NULL AND repo IS NULL) OR repo = ?)",
+        (current_repo, current_repo),
+    ).fetchall()
+    stale_ids = [row[0] for row in rows if (row[1], row[2]) not in keep_keys]
+    if stale_ids:
+        placeholders = ",".join("?" for _ in stale_ids)
+        conn.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", stale_ids)
 
 
 def _owning_repo(
@@ -112,6 +144,13 @@ def _read_pyproject(path: Path) -> dict[str, Any] | None:
                 dep_groups[group] = [e for e in entries if isinstance(e, str)]
     # surface [project.scripts] presence as a classify() signal.
     scripts = project.get("scripts") or {}
+    # uv's own term for a `[tool.uv] package = false` manifest is a "virtual
+    # project": not built or installed. Tested with `is False`, not
+    # truthiness, so a string "false" or a missing key never opts a real
+    # package out of the graph.
+    tool = data.get("tool")
+    uv_table = tool.get("uv") if isinstance(tool, dict) else None
+    virtual = isinstance(uv_table, dict) and uv_table.get("package") is False
     return {
         "name": name,
         "version": project.get("version", ""),
@@ -122,6 +161,7 @@ def _read_pyproject(path: Path) -> dict[str, Any] | None:
         "dep_groups": dep_groups,  # PEP 735
         "language": "python",
         "scripts_present": bool(scripts),
+        "virtual": virtual,
     }
 
 
@@ -170,6 +210,9 @@ def _read_package_json(path: Path) -> dict[str, Any] | None:
         "_runtime_dep_names": runtime_names,  # for is_dev computation in refresh()
         "language": "javascript",
         "bin_present": bin_present,
+        # npm's "private": true is NOT the uv `package = false` equivalent —
+        # it governs publishing, not whether the thing is a package.
+        "virtual": False,
     }
 
 
@@ -252,6 +295,8 @@ def build_workspace_index(members: list[Path]) -> dict[str, tuple[str, str, str,
         ruri = repo_uri(ctx)
         skip_dirs = _ignore.load_skip_dirs(member)
         for pkg_dir, info in _discover_manifests(member, skip_dirs):
+            if info.get("virtual"):
+                continue
             rel = pkg_dir.resolve().relative_to(member).as_posix()
             rel = "" if rel == "." else rel
             ws_kind, _app_kind, _sig = classify(info, pkg_dir)
@@ -267,6 +312,7 @@ def refresh(
     current_repo: str | None = None,
     global_workspace: dict[str, tuple[str, str, str, str]] | None = None,
     deferred_cross_repo: list[CrossRepoLink] | None = None,
+    deferred_repo_deps: list[RepositoryDepLink] | None = None,
 ) -> None:
     """Rescan manifests under `repo_root` and upsert kind:package nodes + contains edges.
 
@@ -291,12 +337,24 @@ def refresh(
     # resolve to the real node (mirroring derived_edges.py:148-153).
     workspace_names: set[str] = set()
     workspace_kinds: dict[str, tuple[str, str, str]] = {}
+    # (name, rel_path) of every manifest discovered THIS pass, scoped to
+    # repo_root only (not merged with global_ws below) — the keep-set for
+    # _prune_vanished. A manifest's kind can flip between builds (app<->package,
+    # see the kind-flip UPDATE further down), so identity here is (name, path),
+    # not (kind, name, path).
+    local_keys: set[tuple[str, str]] = set()
     for pkg_dir, info in manifests:
+        if info.get("virtual"):
+            # A `[tool.uv] package = false` root is not a workspace member:
+            # excluding it from workspace_names/local_keys is what lets
+            # _prune_vanished clear an already-admitted root node below.
+            continue
         rel = pkg_dir.resolve().relative_to(repo_root).as_posix()
         rel = "" if rel == "." else rel
         ws_kind, _app_kind, _app_signals = classify(info, pkg_dir)
         norm = _normalize_name(info["name"])
         workspace_names.add(norm)
+        local_keys.add((info["name"], rel))
         # Store the workspace package's ACTUAL node name (info["name"]) — the
         # consumer may declare it under a different separator/case spelling, but
         # the edge dst must match the real node so it resolves instead of
@@ -327,98 +385,111 @@ def refresh(
         rel_prefix = pkg_dir.resolve().relative_to(repo_root).as_posix()
         if rel_prefix == ".":
             rel_prefix = ""
-
-        # derive kind, URI, and attrs in one inline pass.
-        new_kind, app_kind, app_signals = classify(info, pkg_dir)
-        new_uri = app_uri(ctx, info["name"]) if new_kind == "app" else pkg_uri(ctx, info["name"])
-
-        # Hoist contained-file list so it's available for the defensive language
-        # fallback below AND for the contains-edge loop that follows attrs.
-        prefix = f"{rel_prefix}/" if rel_prefix else ""
-        contained = _file_nodes_under(conn, prefix, current_repo)
-
-        attrs: dict[str, Any] = {
-            "version": info["version"],
-            # source — stored in attrs_json so wiki-io can
-            # read node.attrs["description"] uniformly across kinds.
-            # Empty when pyproject has no [project].description; the TODO fallback
-            # is wiki-io's job, not synthesized here.
-            "description": info.get("description", ""),
-            "dependencies": info["dependencies"],
-            # dev-origin marker for JS packages (empty list for Python
-            # manifests which have no devDependencies field).
-            "dev_dependencies": info.get("dev_dependencies", []),
-            "language": info["language"],
-            "uri": new_uri,
-        }
-        # Defensive fallback: if the manifest reader did not declare a language
-        # (future manifest types), infer it from the dominant language of the
-        # contained file nodes. Normal builds never reach this branch.
-        if not attrs.get("language"):
-            dom = _dominant_language(conn, contained, current_repo)
-            if dom:
-                attrs["language"] = dom
-        if new_kind == "app":
-            # invariant: only App nodes carry app_kind / app_signals.
-            attrs["app_kind"] = app_kind
-            attrs["app_signals"] = app_signals
-
-        # probe the opposite-kind row from a prior run and flip
-        # it in place so the row id is preserved (every inbound edge FK stays
-        # valid). The outer store.transaction() boundary set by update.run()
-        # gives this UPDATE read-your-own-writes semantics for the subsequent
-        # upsert_records call.
-        other_kind = "package" if new_kind == "app" else "app"
         package_path = rel_prefix
-        other_id = upsert._node_id(conn, (other_kind, info["name"], package_path))
-        if other_id is not None:
-            # Mirror _upsert_node's convention: the "uri" key lives in the
-            # nodes.uri column, not attrs_json.
-            attrs_for_db = {k: v for k, v in attrs.items() if k != "uri"}
-            conn.execute(
-                "UPDATE nodes SET kind=?, uri=?, attrs_json=? WHERE id=?",
-                (
-                    new_kind,
-                    new_uri,
-                    json.dumps(attrs_for_db, sort_keys=True),
-                    other_id,
-                ),
-            )
+        is_virtual = bool(info.get("virtual"))
 
-        nodes = [
-            GraphNode(
-                kind=new_kind,
-                name=info["name"],
-                path=package_path,
-                line=None,
-                attrs=attrs,
-            )
-        ]
-        edges = []
-        for file_path in contained:
-            edges.append(
-                GraphEdge(
-                    src=(new_kind, info["name"], package_path),
-                    dst=("file", file_path, file_path),
-                    kind="contains",
-                    attrs={},
+        if is_virtual:
+            # A `[tool.uv] package = false` root is not a distributable
+            # package: no Package/App node, no `contains` edges. Its
+            # dependencies are still processed below, but attributed to the
+            # Repository (consumer_kind="repository") instead; its repo-root
+            # files get a `physically_contains` edge from the Repository node
+            # via `structural_nodes.emit` instead of `contains` from here.
+            consumer_name = ctx.repo
+            consumer_rel_path = ""
+            consumer_kind = "repository"
+        else:
+            # derive kind, URI, and attrs in one inline pass.
+            new_kind, app_kind, app_signals = classify(info, pkg_dir)
+            new_uri = app_uri(ctx, info["name"]) if new_kind == "app" else pkg_uri(ctx, info["name"])
+
+            # Hoist contained-file list so it's available for the defensive language
+            # fallback below AND for the contains-edge loop that follows attrs.
+            prefix = f"{rel_prefix}/" if rel_prefix else ""
+            contained = _file_nodes_under(conn, prefix, current_repo)
+
+            attrs: dict[str, Any] = {
+                "version": info["version"],
+                # source — stored in attrs_json so wiki-io can
+                # read node.attrs["description"] uniformly across kinds.
+                # Empty when pyproject has no [project].description; the TODO fallback
+                # is wiki-io's job, not synthesized here.
+                "description": info.get("description", ""),
+                "dependencies": info["dependencies"],
+                # dev-origin marker for JS packages (empty list for Python
+                # manifests which have no devDependencies field).
+                "dev_dependencies": info.get("dev_dependencies", []),
+                "language": info["language"],
+                "uri": new_uri,
+            }
+            # Defensive fallback: if the manifest reader did not declare a language
+            # (future manifest types), infer it from the dominant language of the
+            # contained file nodes. Normal builds never reach this branch.
+            if not attrs.get("language"):
+                dom = _dominant_language(conn, contained, current_repo)
+                if dom:
+                    attrs["language"] = dom
+            if new_kind == "app":
+                # invariant: only App nodes carry app_kind / app_signals.
+                attrs["app_kind"] = app_kind
+                attrs["app_signals"] = app_signals
+
+            # probe the opposite-kind row from a prior run and flip
+            # it in place so the row id is preserved (every inbound edge FK stays
+            # valid). The outer store.transaction() boundary set by update.run()
+            # gives this UPDATE read-your-own-writes semantics for the subsequent
+            # upsert_records call.
+            other_kind = "package" if new_kind == "app" else "app"
+            other_id = upsert._node_id(conn, (other_kind, info["name"], package_path))
+            if other_id is not None:
+                # Mirror _upsert_node's convention: the "uri" key lives in the
+                # nodes.uri column, not attrs_json.
+                attrs_for_db = {k: v for k, v in attrs.items() if k != "uri"}
+                conn.execute(
+                    "UPDATE nodes SET kind=?, uri=?, attrs_json=? WHERE id=?",
+                    (
+                        new_kind,
+                        new_uri,
+                        json.dumps(attrs_for_db, sort_keys=True),
+                        other_id,
+                    ),
                 )
-            )
-        upsert.upsert_records(conn, as_graph_records(nodes=nodes, edges=edges))
+
+            nodes = [
+                GraphNode(
+                    kind=new_kind,
+                    name=info["name"],
+                    path=package_path,
+                    line=None,
+                    attrs=attrs,
+                )
+            ]
+            edges = []
+            for file_path in contained:
+                edges.append(
+                    GraphEdge(
+                        src=(new_kind, info["name"], package_path),
+                        dst=("file", file_path, file_path),
+                        kind="contains",
+                        attrs={},
+                    )
+                )
+            upsert.upsert_records(conn, as_graph_records(nodes=nodes, edges=edges))
+
+            consumer_name = info["name"]
+            consumer_rel_path = package_path
+            consumer_kind = new_kind
 
         # collect deps from manifests and feed the shared
         # dep_acc / used_by_pairs / internal_pkg_edges accumulators.
         # Python: project.dependencies + dependency-groups (PEP 508 specifiers).
         # JavaScript: dep_specs dict from _read_package_json (raw version strings).
-        consumer_name = info["name"]
-        consumer_rel_path = package_path
-        consumer_kind = new_kind
-        consumer_norm = _normalize_name(consumer_name)
+        consumer_norm = _normalize_name(info["name"])
         if info["language"] == "python":
-            all_dep_strs: list[str] = list(info["dependencies"])
+            dep_entries: list[tuple[str, bool]] = [(s, False) for s in info["dependencies"]]
             for group_entries in info.get("dep_groups", {}).values():
-                all_dep_strs.extend(group_entries)
-            for s in all_dep_strs:
+                dep_entries.extend((s, True) for s in group_entries)
+            for s, is_dev in dep_entries:
                 dep_name = _extract_dep_name(s)
                 if dep_name is None:
                     continue
@@ -429,6 +500,11 @@ def refresh(
                 # Record it as an internal package→package relationship instead;
                 # skip self-dependencies.
                 if dep_norm in workspace_names and dep_norm != consumer_norm:
+                    if is_virtual:
+                        # A virtual manifest's internal (workspace-member)
+                        # deps are test-harness plumbing, not real
+                        # dependencies — dropped, not re-sourced.
+                        continue
                     target_repo = _owning_repo(global_ws, dep_norm, current_repo)
                     if target_repo == current_repo or current_repo is None:
                         target_kind, target_name, target_rel_path = workspace_kinds[dep_norm]
@@ -452,8 +528,13 @@ def refresh(
                 bucket = dep_acc.setdefault(key, {"versions_in_use": []})
                 if s not in bucket["versions_in_use"]:
                     bucket["versions_in_use"].append(s)
-                # Python deps are never dev in this model (dep_groups treated as runtime).
-                used_by_pairs.append((consumer_name, consumer_rel_path, consumer_kind, "pypi", dep_name, False))
+                if is_virtual:
+                    # The Repository node doesn't exist yet (structural_nodes.emit
+                    # runs later) — deferred, drained by link_repository_dependencies.
+                    if deferred_repo_deps is not None:
+                        deferred_repo_deps.append(("pypi", dep_name, is_dev))
+                else:
+                    used_by_pairs.append((consumer_name, consumer_rel_path, consumer_kind, "pypi", dep_name, is_dev))
         elif info["language"] == "javascript":
             # iterate dep_specs (name->spec, runtime wins on collision).
             # is_dev = name came ONLY from devDependencies (not in runtime set).
@@ -560,6 +641,8 @@ def refresh(
     if dep_nodes or dep_edges:
         upsert.upsert_records(conn, as_graph_records(nodes=dep_nodes, edges=dep_edges))
 
+    _prune_vanished(conn, current_repo=current_repo, keep_keys=local_keys)
+
 
 def link_cross_repo_packages(conn: sqlite3.Connection, deferred: list[CrossRepoLink]) -> None:
     """Emit cross-repo used_by + depends_on_package edges after all members exist.
@@ -582,4 +665,37 @@ def link_cross_repo_packages(conn: sqlite3.Connection, deferred: list[CrossRepoL
         dst = (target_kind, target_name, target_rel)
         edges.append(GraphEdge(src=src, dst=dst, kind="used_by", attrs={}))
         edges.append(GraphEdge(src=src, dst=dst, kind=_DEPENDS_ON_PACKAGE_KIND, attrs={}))
+    upsert.upsert_records(conn, as_graph_records(nodes=[], edges=edges))
+
+
+def link_repository_dependencies(
+    conn: sqlite3.Connection, deferred: list[RepositoryDepLink], *, ctx: RepoContext
+) -> None:
+    """Emit Repository -> Dependency used_by edges deferred from `refresh`.
+
+    A virtual manifest's (`[tool.uv] package = false`) external dependencies
+    are re-sourced to the Repository node rather than the (unwritten) Package
+    node. The Repository node does not exist until `structural_nodes.emit`
+    runs, so this must be called after it — see `update._update_one_repo`.
+    Sibling of `link_cross_repo_packages`, but scoped to one member's own
+    Repository node rather than deferred across the whole workspace.
+    """
+    if not deferred:
+        return
+    src = ("repository", ctx.repo, "")
+    edges: list[GraphEdge] = []
+    seen: set[tuple[str, str]] = set()
+    for ecosystem, name, is_dev in deferred:
+        if (ecosystem, name) in seen:
+            continue
+        seen.add((ecosystem, name))
+        dep_path = f"dependency:{ecosystem}:{name}"
+        edges.append(
+            GraphEdge(
+                src=src,
+                dst=("dependency", name, dep_path),
+                kind="used_by",
+                attrs={"dev": True} if is_dev else {},
+            )
+        )
     upsert.upsert_records(conn, as_graph_records(nodes=[], edges=edges))

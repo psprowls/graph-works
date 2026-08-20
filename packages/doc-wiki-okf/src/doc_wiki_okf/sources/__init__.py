@@ -17,9 +17,11 @@ from doc_wiki_okf.sources.plan import (
     DEFAULT_SUFFIX,
     REFERENCES_DIRECTORY,
     SOURCE_TYPE,
+    IngestPreflight,
     copy_target,
     page_target,
     plan_ingest,
+    preflight_ingest,
     seed_source_kinds,
     source_kinds,
 )
@@ -29,9 +31,11 @@ __all__ = [
     "DEFAULT_SUFFIX",
     "REFERENCES_DIRECTORY",
     "SOURCE_TYPE",
+    "IngestPreflight",
     "copy_target",
     "page_target",
     "plan_ingest",
+    "preflight_ingest",
     "seed_source_kinds",
     "source_kinds",
 ]

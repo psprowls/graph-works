@@ -147,6 +147,26 @@ def test_emit_creates_repo_to_package_edge(conn: sqlite3.Connection, tmp_path: P
     assert ("repository", "package") in rows
 
 
+def test_unowned_non_test_files_parent_under_repository(conn: sqlite3.Connection, tmp_path: Path, patched_git) -> None:
+    """A tracked, non-test file with no owning package still gets a File
+    node, parented under the Repository — the previous behavior silently
+    skipped it (only orphan *test* files were kept)."""
+    pkg_dir = tmp_path / "packages" / "mypkg"
+    pkg_dir.mkdir(parents=True)
+    _seed_package(conn, name="mypkg", path="packages/mypkg")
+    (tmp_path / "README.md").write_text("# hi\n")
+
+    structural_nodes.emit(conn, repo_root=tmp_path, ctx=_CTX, skip_dirs=frozenset())
+
+    file_row = conn.execute("SELECT id FROM nodes WHERE kind='file' AND path='README.md'").fetchone()
+    assert file_row is not None
+    parents = conn.execute(
+        "SELECT n.kind FROM edges e JOIN nodes n ON e.src=n.id WHERE e.kind='physically_contains' AND e.dst=?",
+        (file_row[0],),
+    ).fetchall()
+    assert parents == [("repository",)]
+
+
 # ============================================================================
 # B. Role-flag heuristics
 # ============================================================================

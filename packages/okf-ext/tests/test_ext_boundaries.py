@@ -306,6 +306,7 @@ BUILT_IN_TOPICS = frozenset(
         "proposals",
         "bundle",
         "placement",
+        "logs",
     ]
 )
 def capability(request):
@@ -329,6 +330,7 @@ def test_every_capability_on_disk_is_covered_by_these_tests(modules: list[Path])
         "proposals",
         "bundle",
         "placement",
+        "logs",
     }
 
 

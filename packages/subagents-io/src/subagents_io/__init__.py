@@ -36,7 +36,7 @@ out.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 
 from subagents_io.adapters import (
     Adapter,
@@ -70,8 +70,19 @@ from subagents_io.roles import RoleBinding, RoleSpec, resolve_role_spec
 from subagents_io.routing import ModelResolution, resolve_model, validate_rules
 from subagents_io.runner import RunOutcome, run_all, run_loop, run_single, stream_and_parse
 from subagents_io.trace import (
+    KNOWN_SCHEMA_VERSION,
     TRACE_LOGGER_NAME,
     PriceLookup,
+    RoleModelTotals,
+    RoleTotals,
+    TraceAggregate,
+    TraceFile,
+    TraceWarning,
+    aggregate_trace,
+    collapse_runs,
+    is_groupable,
+    read_trace_records,
+    render_collapsed_group,
     render_trace_record,
     write_trace_record,
 )
@@ -87,6 +98,7 @@ __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural
     "Escalation",
     "FanOutResult",
     "Heartbeat",
+    "KNOWN_SCHEMA_VERSION",
     "LoopAdapter",
     "LoopOutcome",
     "ModelResolution",
@@ -96,12 +108,17 @@ __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural
     "Prepared",
     "PriceLookup",
     "RoleBinding",
+    "RoleModelTotals",
     "RoleSpec",
+    "RoleTotals",
     "RunContext",
     "RunOutcome",
     "SubagentPool",
     "TRACE_LOGGER_NAME",
     "TaskResult",
+    "TraceAggregate",
+    "TraceFile",
+    "TraceWarning",
     "UnknownWorker",
     "UnsupportedMode",
     "WORKER_STATES",
@@ -113,6 +130,11 @@ __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural
     "WorkerRecord",
     "WorktreeAction",
     "WorktreeNotProvisioned",
+    "aggregate_trace",
+    "collapse_runs",
+    "is_groupable",
+    "read_trace_records",
+    "render_collapsed_group",
     "render_trace_record",
     "resolve_model",
     "resolve_role_spec",

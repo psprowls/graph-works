@@ -596,18 +596,9 @@ def emit(
         if _ignore.should_skip(rel, skip_dirs):
             continue
         owner = _owning_package(rel, pkg_index)
-        # test files outside any Package are still emitted with
-        # Repository as their physically_contains parent — test_suites.emit
-        # re-parents them under their TestSuite. Non-test files outside any
-        # Package remain skipped.
-        is_test_orphan = owner is None and _is_test_path(
-            rel,
-            package_dirs=[(name, prel) for _, name, prel in pkg_index],
-            repo_root=repo_root,
-        )
-        if owner is None and not is_test_orphan:
-            continue
-
+        # A tracked file with no owning package still gets a File node,
+        # parented under the Repository (below) — test or not. test_suites.emit
+        # re-parents test files under their TestSuite afterward.
         fpath = repo_root / rel
         if not fpath.exists():
             continue

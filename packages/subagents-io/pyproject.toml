@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "subagents-io"
-version = "0.2.0"
+version = "0.2.1"
 description = "A bounded async fan-out pool for role-bound model dispatch: per-item failure isolation, a JSONL trace record per invocation, and opt-in USD cost accounting."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },

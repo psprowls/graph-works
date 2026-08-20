@@ -8,7 +8,7 @@ import importlib.metadata
 def test_package_imports() -> None:
     import code_graph_io
 
-    assert code_graph_io.__version__ == "0.1.0"
+    assert code_graph_io.__version__ == "0.1.1"
 
 
 def test_version_matches_package_metadata() -> None:

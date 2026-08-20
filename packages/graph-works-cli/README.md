@@ -13,7 +13,9 @@ then `GRAPH_WORKS_DIR`, then workspace discovery.
 
 Root commands:
 
-- `gw bootstrap --topic TEXT [--workspace PATH] [--json]` initializes a workspace.
+- `gw bootstrap --topic TEXT [--workspace PATH] [--repo-root PATH] [--dry-run] [--json]` initializes a
+  workspace. `--repo-root` pins the repository the workspace catalogs; pass it when the workspace lives
+  outside that repository, where the `.git` walk-up cannot find it.
 - `gw scan [--no-narrate | --emit-worklist | --apply]` runs, emits, or applies a scan handoff.
 - `gw ingest --source PATH [--json]` ingests one source.
 - `gw query --query TEXT [--limit N]` answers a query with citations.
@@ -29,8 +31,8 @@ Wiki commands:
 - `gw wiki proposal approve TARGET`
 - `gw wiki proposal reject TARGET`
 
-Mutating commands apply by default. The sole preview is `--dry-run`: only `gw wiki archive --dry-run`
-prints its plan without applying it.
+Mutating commands apply by default. `--dry-run` is the only preview, and two commands offer it:
+`gw bootstrap --dry-run` and `gw wiki archive --dry-run` print their plan without applying it.
 
 ### Scan worklist handoff
 

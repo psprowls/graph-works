@@ -9,7 +9,7 @@ from graph_works_core.lint_drift.lint import LintReport
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
-from graph_works_core.workspace.init import WorkspaceInit
+from graph_works_core.workspace.init import WorkspaceInit, WorkspacePlan
 from okf_ext.proposals import Proposal
 
 
@@ -25,6 +25,33 @@ def bootstrap_payload(result: WorkspaceInit) -> dict[str, object]:
         "cache_dir": str(result.layout.cache_dir),
         "created": [str(path) for path in result.created],
         "written": written,
+    }
+
+
+def bootstrap_plan_payload(plan: WorkspacePlan) -> dict[str, object]:
+    """Render a previewed workspace initialization, keyed like `bootstrap_payload`.
+
+    A sibling rather than a branch inside that function: it takes a
+    `WorkspaceInit`, and a plan is a different type with a different vocabulary
+    (`is_empty` rather than `changed`). Keeping the key names aligned is what lets
+    one caller read either shape — `created` / `written` become `planned`, because
+    a plan has created and written nothing.
+
+    `planned` is not shaped like `written`. `written` is a deduped list of bare
+    filenames; `planned` is `plan.diff()` split into lines, so it keeps the `+ `,
+    `= ` and `! ` markers, is not deduped, and mixes additions, skips and refusals
+    in one list. That is deliberate: it makes `--dry-run --json`'s `planned` agree
+    line for line with what `--dry-run` prints, and a preview that disagreed with
+    its own text rendering would be worse than one that does not match `written`.
+    """
+    return {
+        "ok": plan.ok,
+        "changed": not plan.is_empty,
+        "workspace": str(plan.layout.root),
+        "bundle_dir": str(plan.layout.bundle_dir),
+        "config_dir": str(plan.layout.config_dir),
+        "cache_dir": str(plan.layout.cache_dir),
+        "planned": plan.diff().splitlines(),
     }
 
 

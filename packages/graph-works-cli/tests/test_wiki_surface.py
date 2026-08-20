@@ -53,7 +53,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
     assert _option_names(root) == {"--verbose", "-v", "--install-completion", "--show-completion"}
 
     expected_options = {
-        ("bootstrap",): {"--topic", "--workspace", "--json"},
+        ("bootstrap",): {"--topic", "--workspace", "--repo-root", "--dry-run", "--json"},
         ("scan",): {
             "--no-narrate",
             "--emit-worklist",
@@ -122,7 +122,8 @@ def test_readme_documents_the_shipped_c4_surface_without_future_commands() -> No
         "gw wiki proposal reject",
         "gw scan --emit-worklist",
         "gw scan --apply",
-        "only `gw wiki archive --dry-run`",
+        "`gw bootstrap --dry-run`",
+        "`gw wiki archive --dry-run`",
         "| 0 |",
         "| 1 |",
         "| 2 |",

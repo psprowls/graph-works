@@ -60,7 +60,7 @@ dev = [
 
 [tool.ruff]
 line-length = 120
-exclude = ["**/fixtures/**", ".claude/skills/**", "scripts"]
+exclude = ["**/fixtures/**", ".claude/skills/**", "scripts", "plugins"]
 target-version = "py312"
 
 [tool.ruff.lint]
@@ -104,7 +104,7 @@ module = ["bm25s.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
-testpaths = ["packages/okf-io/tests", "packages/okf-ext/tests"]
+testpaths = ["packages/okf-io/tests", "packages/okf-ext/tests", "scripts/tests"]
 # Both test directories sit flat on this path with no `__init__.py` in either,
 # so a duplicate `test_*.py` basename fails loudly at collection ("import file
 # mismatch") — but a duplicate *plain* module basename (the `helpers.py` /

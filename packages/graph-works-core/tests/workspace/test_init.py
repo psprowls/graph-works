@@ -254,3 +254,61 @@ def test_the_seeded_tail_carries_the_relay_trigger(tmp_path):
     assert tail is not None
     assert tail.startswith("Auto-drive context:")
     assert "{merge_target}" in tail
+
+
+# --- the plan's own renderer -------------------------------------------------
+
+
+def test_a_fresh_plan_renders_every_act_it_will_perform(tmp_path):
+    root = tmp_path / "works"
+
+    lines = plan_init(root, today=TODAY, topic="Demo").diff().splitlines()
+
+    assert f"+ {root.resolve()}/" in lines
+    assert "+ .gitignore" in lines
+    assert "+ workspace.yaml" in lines
+    assert "+ okf/_repositories.yaml" in lines
+    assert "+ index.md" in lines
+    assert "+ _schema/Package.schema.json" in lines
+
+
+def test_the_first_plan_over_reports_the_installer_seeded_repositories_file(tmp_path):
+    """The asymmetry `WorkspacePlan`'s docstring records, asserted as behavior.
+
+    Installer previews are computed against the filesystem as it stands, so on a
+    fresh root `code_wiki_okf` still previews `_repositories.yaml` — a file act 4
+    will have written by the time its installer actually runs. The renderer must
+    report what the plan says, not what the apply will do.
+    """
+    lines = plan_init(tmp_path / "works", today=TODAY).diff().splitlines()
+
+    assert "+ okf/_repositories.yaml" in lines
+    assert "+ _repositories.yaml" in lines
+
+
+def test_a_second_plan_renders_no_additions(tmp_path):
+    """Idempotence, in the renderer's vocabulary.
+
+    Not "empty": the three scaffold members come back as `already-present` skips,
+    exactly as they do from `WorkspaceInit.diff()` on a second apply. The property
+    that matters is that nothing is *added*.
+    """
+    root = tmp_path / "works"
+    _init(root)
+
+    plan = plan_init(root, today=TODAY)
+
+    assert plan.is_empty
+    assert [line for line in plan.diff().splitlines() if line.startswith("+ ")] == []
+    assert plan.diff() == apply_init(plan_init(root, today=TODAY)).diff()
+
+
+def test_a_refused_plan_renders_the_refusal(tmp_path):
+    root = tmp_path / "works"
+    (root / "okf").mkdir(parents=True)
+    (root / "okf" / "index.md").write_text("# My authored index\n", encoding="utf-8")
+
+    plan = plan_init(root, today=TODAY, topic="Demo")
+
+    assert not plan.ok
+    assert [line for line in plan.diff().splitlines() if line.startswith("! index.md: ")]

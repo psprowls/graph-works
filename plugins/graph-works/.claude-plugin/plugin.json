@@ -1,0 +1,25 @@
+{
+  "name": "graph-works",
+  "description": "Fork of obra/superpowers carrying the graph-works work-item pipeline as a native plugin surface: wiki scan/ingest/query/lint plus the work-item pipeline and auto-drive, all driven through the gw CLI.",
+  "version": "6.3.0",
+  "author": {
+    "name": "Patrick Sprowls"
+  },
+  "homepage": "https://github.com/psprowls/agent-workspace",
+  "repository": "https://github.com/psprowls/agent-workspace",
+  "license": "MIT",
+  "keywords": [
+    "skills",
+    "tdd",
+    "debugging",
+    "collaboration",
+    "best-practices",
+    "workflows",
+    "wiki",
+    "knowledge-management",
+    "work-tracking"
+  ],
+  "env": {
+    "GRAPH_WORKS_ROOT": "${CLAUDE_PLUGIN_ROOT}"
+  }
+}

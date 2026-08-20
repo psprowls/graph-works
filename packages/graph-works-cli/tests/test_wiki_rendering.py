@@ -10,6 +10,7 @@ from code_wiki_okf.mirror.lanes import MirrorSummary
 from code_wiki_okf.mirror.model import MirrorResult
 from graph_works_cli.wiki_cli.rendering import (
     bootstrap_payload,
+    bootstrap_plan_payload,
     ingest_payload,
     lint_payload,
     proposal_payload,
@@ -23,7 +24,7 @@ from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBac
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
-from graph_works_core.workspace.init import WorkspaceInit
+from graph_works_core.workspace.init import WorkspaceInit, plan_init
 from graph_works_core.workspace.layout import layout_for
 from okf_ext.bundle import ApplyResult as BundleApplyResult
 from okf_ext.proposals import Proposal
@@ -44,6 +45,16 @@ def test_bootstrap_payload_has_exact_keys_and_reports_actual_diff_additions(tmp_
 
     assert set(payload) == {"ok", "changed", "workspace", "bundle_dir", "config_dir", "cache_dir", "created", "written"}
     assert payload["written"] == [f"{layout.root}/", "workspace.yaml", "index.md"]
+
+
+def test_bootstrap_plan_payload_has_exact_keys_and_reports_the_planned_lines(tmp_path: Path) -> None:
+    plan = plan_init(tmp_path / "workspace", today=date(2026, 8, 20), topic="Demo")
+
+    payload = bootstrap_plan_payload(plan)
+
+    assert set(payload) == {"ok", "changed", "workspace", "bundle_dir", "config_dir", "cache_dir", "planned"}
+    assert payload["changed"] is True
+    assert "+ workspace.yaml" in payload["planned"]
 
 
 _MIRROR_KEYS = {

@@ -34,8 +34,20 @@ CLI_NAME = "graph-works-cli"
 #: permanent escape hatch.
 DEFERRED: dict[str, str] = {"guidance suggest": "guidance-okf-port"}
 
-#: Flags the page lists that the CLI deliberately does not implement yet, and who owns them.
+#: Flags the page lists that the CLI does not implement *yet*, each mapped to the work item
+#: that owns closing the gap. This is a ledger, not a mute switch: a page flag the CLI does
+#: not declare and that has no entry here **fails**. That is what stops drift growing back
+#: silently — a new gap has no owner, so it goes red the day it appears.
 FLAG_ADVISORIES: dict[tuple[str, str], str] = {("next", "--file"): "guidance-okf-port"}
+
+#: Files whose `gw` mentions are not invocations, and why. Same discipline as the two
+#: ledgers above: named, short, and deleted when the reason stops being true.
+TREE_MENTIONS: dict[str, str] = {
+    "tests/hooks/test-skill-doc-routing.sh": (
+        "asserts the ABSENCE of three candidate verbs from a hook message; the verb strings "
+        "are the assertion, not a call"
+    ),
+}
 
 _BLOCK = re.compile(r"<!--\s*cli-contract\s*\n(.*?)-->", re.DOTALL)
 _HEADING = re.compile(r"^(#{1,6})\s", re.MULTILINE)
@@ -139,12 +151,19 @@ def _surface_index(surface: dict[str, object] | None) -> dict[str, set[str]]:
 
 
 def assert_verbs(verbs: list[ContractVerb], surface: dict[str, object] | None, report: Report) -> None:
-    """A2 — every verb on the page exists in the CLI. Missing verb fails; missing flag advises."""
+    """A2 — every verb and flag on the page exists in the CLI.
+
+    A missing verb fails. A missing flag fails too, *unless* `FLAG_ADVISORIES` names the
+    work item that owns closing it — an owned gap advises and stays green while that item
+    runs. An unowned one is drift nobody has looked at, and drift that only advises is drift
+    that grows.
+    """
     index = _surface_index(surface)
     resolved = 0
     missing: list[str] = []
     deferred_lines: list[str] = []
     advisories: list[str] = []
+    undeclared: list[str] = []
     for entry in verbs:
         if entry.verb in DEFERRED:
             deferred_lines.append(f"  1 deferred ({DEFERRED[entry.verb]}): {entry.verb}")
@@ -156,14 +175,18 @@ def assert_verbs(verbs: list[ContractVerb], surface: dict[str, object] | None, r
         for flag in entry.flags:
             if flag not in index[entry.verb]:
                 owner = FLAG_ADVISORIES.get((entry.verb, flag))
-                suffix = f" (deferred to {owner})" if owner else " (flag not declared by the CLI)"
-                advisories.append(f"  advisory: {entry.verb} {flag}{suffix}")
+                if owner is None:
+                    undeclared.append(f"  undeclared flag: {entry.verb} {flag} (no owning work item)")
+                else:
+                    advisories.append(f"  advisory: {entry.verb} {flag} (deferred to {owner})")
 
     # A label line, matching A1/A3, so a fully-passing run is legible without counting.
-    if missing:
+    if missing or undeclared:
         report.note("A2 every page verb exists in the CLI: FAILED")
         for verb in missing:
             report.fail(f"  missing verb: {verb}")
+        for line in undeclared:
+            report.fail(line)
     else:
         report.note("A2 every page verb exists in the CLI: ok")
     report.note(f"  {resolved}/{len(verbs)} verbs resolve")
@@ -191,27 +214,63 @@ def _read_tree(tree: Path) -> list[TreeFile]:
     return files
 
 
+#: An invocation is *written as code*: a fenced block, or an inline span. Prose that merely
+#: says the word `gw` ("a mutation made outside the gw commands") is not a call, and treating
+#: it as one is what buried the real findings under noise.
+_FENCE = re.compile(r"```.*?```", re.DOTALL)
+_SPAN = re.compile(r"`[^`\n]+`")
+
+#: `[ \t]` rather than `\s`: `\s` crosses newlines, so a paragraph ending in "…resolved via
+#: gw" swallowed the next line's first word and reported it as a verb.
+_INVOCATION = re.compile(r"\bgw[ \t]+([a-z][a-z0-9-]*(?:[ \t]+[a-z][a-z0-9-]*)?)")
+
+
+def _code_spans(file: TreeFile) -> list[tuple[int, int]] | None:
+    """The regions of *file* that are code, or None when the whole file is."""
+    if not file.relative.endswith(".md"):
+        return None
+    assert file.text is not None
+    return [match.span() for match in _FENCE.finditer(file.text)] + [
+        match.span() for match in _SPAN.finditer(file.text)
+    ]
+
+
 def assert_tree_invocations(tree_files: list[TreeFile] | None, verbs: list[ContractVerb], report: Report) -> None:
     """A1 — every `gw` verb invoked in the plugin tree appears on the page.
 
-    Reported honestly, but never fails the exit code: this scan is a regex heuristic over
-    prose and skill files, not a parse of real invocations, so a hit is worth a human's
-    attention rather than a build break. Exit is gated on A2/A3 only.
+    Reported honestly, but never fails the exit code, and the contract page's Enforcement
+    section says so too. This is a regex heuristic over prose and skill files, not a parse of
+    real invocations: it cannot tell a call from a sentence with certainty, so a hit is worth
+    a human's attention rather than a build break. Exit is gated on A2/A3 only.
+
+    An invocation that is a *prefix* of a page verb is not unknown — `gw work` in prose is the
+    group `gw work advance` belongs to, not a missing entry.
     """
     if tree_files is None:
         report.note("A1 every plugin invocation is on the page: skipped (no plugin tree)")
         return
     known = {entry.verb for entry in verbs}
     unknown: set[str] = set()
-    pattern = re.compile(r"\bgw\s+([a-z][a-z0-9-]*(?:\s+[a-z][a-z0-9-]*)?)")
     for file in tree_files:
-        if file.text is None:
+        if file.text is None or file.relative in TREE_MENTIONS:
             continue
-        for match in pattern.finditer(file.text):
+        spans = _code_spans(file)
+        for match in _INVOCATION.finditer(file.text):
+            if spans is not None and not any(start <= match.start() and match.end() <= end for start, end in spans):
+                continue
             invocation = match.group(1)
-            if not any(invocation == verb or invocation.startswith(f"{verb} ") for verb in known):
-                unknown.add(invocation.split()[0])
+            if any(
+                invocation == verb or invocation.startswith(f"{verb} ") or verb.startswith(f"{invocation} ")
+                for verb in known
+            ):
+                continue
+            unknown.add(invocation.split()[0])
+
+    # A label line in both branches — `assert_verbs`'s own comment states the intent, and A1
+    # broke it: a run *with* findings printed no heading, so its advisories appeared orphaned
+    # under A2's block.
     if unknown:
+        report.note("A1 every plugin invocation is on the page: advisory")
         for invocation in sorted(unknown):
             report.note(f"  advisory: invocation not on the page: gw {invocation}")
     else:

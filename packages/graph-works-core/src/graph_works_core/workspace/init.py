@@ -161,6 +161,37 @@ class WorkspacePlan:
             self.directories or self.writes or self.scaffold.writes or any(install.changed for install in self.installs)
         )
 
+    def diff(self) -> str:
+        """The plan's acts, in `WorkspaceInit.diff()`'s line vocabulary.
+
+        On the plan rather than in the CLI: ADR-0022 requires a plan to be a
+        complete artifact the caller can inspect before any write, and a renderer
+        living in one caller is not that.
+
+        Refusals come from `scaffold.refusals` — `failed` is the *applied*
+        result's field, and a plan has not applied anything yet.
+
+        The class docstring's over-report is deliberately not papered over here:
+        on a first init this lists `_repositories.yaml` twice, once as act 4's own
+        write and once from `code_wiki_okf`'s preview of a file act 4 will already
+        have satisfied. A renderer that hid it would disagree with the plan it
+        renders.
+
+        That over-report is not confined to `_repositories.yaml`. Every installer
+        previews the bundle scaffold against the filesystem as it stands, so a
+        first init also lists `index.md`, `log.md` and `_tags.yaml` once per
+        installer — four times each, as of the three shipped installers plus act
+        4. This is the same staleness, counted honestly: each of those previews is
+        an act the plan really does hold.
+        """
+        lines = [f"+ {path}/" for path in self.directories]
+        lines += [f"+ {write.label}" for write in self.writes]
+        lines += [f"+ {planned.member}" for planned in self.scaffold.writes]
+        lines += [f"= {item.path}" for item in self.scaffold.skipped]
+        lines += [f"! {refusal.path}: {refusal.error}" for refusal in self.scaffold.refusals]
+        lines += [install.diff() for install in self.installs if install.changed]
+        return "\n".join(line for line in lines if line)
+
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceInit:

@@ -72,6 +72,28 @@
           "is_flag": false
         },
         {
+          "name": "repo_root",
+          "opts": [
+            "--repo-root"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
           "name": "json_output",
           "opts": [
             "--json"

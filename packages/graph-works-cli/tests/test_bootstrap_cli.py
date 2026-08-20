@@ -157,3 +157,56 @@ def test_bootstrap_fails_when_initialization_is_incomplete(monkeypatch: pytest.M
     assert result.exit_code == 1
     assert result.stdout == "partial workspace\n"
     assert "workspace initialization was incomplete" in result.stderr
+
+
+def test_repo_root_pins_a_repository_the_walk_up_cannot_find(tmp_path: Path) -> None:
+    """The §1.2 regression: an out-of-repo workspace must still catalog its repo.
+
+    `plan_init` accepts `repo_root=` precisely because a workspace outside the
+    repo it catalogs is a walk-up `find_repo_root` cannot find. Dropping the
+    parameter writes `repositories: {}`, and everything downstream scans nothing.
+    """
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    root = tmp_path / "outside" / "works"
+
+    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root), "--repo-root", str(repo)])
+
+    assert result.exit_code == 0
+    declared = (root / "okf" / "_repositories.yaml").read_text(encoding="utf-8")
+    assert "repositories: {}" not in declared
+    assert "  repo:" in declared
+
+
+def test_omitting_repo_root_keeps_the_walk_up(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    root = repo / ".works"
+
+    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
+
+    assert result.exit_code == 0
+    assert "  repo:" in (root / "okf" / "_repositories.yaml").read_text(encoding="utf-8")
+
+
+def test_dry_run_renders_the_plan_and_writes_nothing(tmp_path: Path) -> None:
+    root = tmp_path / "works"
+
+    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root), "--dry-run"])
+
+    assert result.exit_code == 0
+    assert "+ workspace.yaml" in result.stdout
+    assert not root.exists()
+
+
+def test_dry_run_json_keys_mirror_the_applied_payload(tmp_path: Path) -> None:
+    root = tmp_path / "works"
+
+    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root), "--dry-run", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"ok", "changed", "workspace", "bundle_dir", "config_dir", "cache_dir", "planned"}
+    assert payload["changed"] is True
+    assert "+ workspace.yaml" in payload["planned"]
+    assert not root.exists()

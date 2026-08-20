@@ -9,13 +9,29 @@
 
 default: check
 
+# Provision the workspace environment. Idempotent; a no-op once in sync.
+#
+# A bare `uv run` installs the ROOT's dependencies only — not those declared by
+# workspace *members*. `typer` belongs to `code-wiki-okf` and `work-tracker-okf`,
+# so without this `mypy --strict` cannot resolve their `@app.command()`
+# decorators and reports all 13 commands as untyped. The code is fine; the
+# checker is half-blind.
+#
+# The `--package` recipes below self-provision, so `test` and `cov` install
+# `typer` as a side effect — which is why an established `.venv` hides this and a
+# clean checkout does not. It stayed invisible until a merge drill ran the gate
+# in a fresh worktree. CI is always a fresh worktree.
+sync:
+    uv sync --all-packages
+
 # Lint and format check — repo-wide, so every package is covered by both.
 lint:
     uv run ruff check .
     uv run ruff format --check .
 
-# Static types, strict — every package.
-types:
+# Static types, strict — every package. Depends on `sync`: this is the recipe
+# that fails without it.
+types: sync
     uv run mypy --strict packages/okf-io/src packages/okf-ext/src
     uv run --package code-graph-io mypy --strict packages/code-graph-io/src
     uv run --package code-wiki-okf mypy --strict packages/code-wiki-okf/src
@@ -74,11 +90,126 @@ cov:
 # The plugin CLI contract — three assertions against
 # `wiki/concepts/graph-works-plugin-cli-contract.md`. Deliberately OUTSIDE
 # `just check`: a gate that cannot pass yet must not block every unrelated
-# change. Pass --plugin-tree to un-skip A1 and A3; the tree lives in a
-# different repository, so without it they report honestly rather than
-# passing vacuously.
+# change.
+#
+# `--plugin-tree` is passed here where the upstream recipe leaves it off. That
+# recipe was written in a repository where the plugin tree lives elsewhere, so
+# A1 and A3 report `skipped (no plugin tree)` rather than passing vacuously.
+# In this fork the tree is `plugins/graph-works`, so naming it is what makes
+# all three assertions real.
 plugin-contract *ARGS:
-    uv run python scripts/plugin_contract.py --contract-page "${GRAPH_WIKI_WORKSPACE}/wiki/concepts/graph-works-plugin-cli-contract.md" {{ARGS}}
+    uv run python scripts/plugin_contract.py --contract-page "${GRAPH_WIKI_WORKSPACE}/wiki/concepts/graph-works-plugin-cli-contract.md" --plugin-tree plugins/graph-works {{ARGS}}
 
 # Everything CI will run. `cov` runs every suite, so `test` is not repeated.
-check: lint types contracts cov
+#
+# `sync` is named here as well as on `types`, deliberately. `just` runs a
+# dependency at most once per invocation, so it costs nothing — and it means the
+# gate is provisioned by its own contract rather than by whichever member recipe
+# happens to pull `sync` in today. Without it the gate's result depends on the
+# order of this list: `types` before `cov` fails from a clean checkout, `cov`
+# before `types` passes, on identical code.
+check: sync subtree-base lint types contracts cov test-plugin
+
+# Subtree merge-base guard -- the `git-subtree-split` note behind
+# `plugins/graph-works`.
+#
+# ENFORCING, and part of `check`. This is the one fork check that belongs in the
+# gate: `audit-delta` and `plugin-contract` go legitimately red during
+# in-progress work, so gating on them blocks unrelated changes. This cannot. The
+# base changes only during an upstream re-base, and `plugins/SYNC.md`'s ritual
+# appends the ledger row as step 1 -- there is no window where correct work
+# leaves it red.
+#
+# It is the machine half of SYNC.md hard rule 2. The rule states a property --
+# the squash commit stays reachable, recorded and prefix-rooted -- and this
+# asserts it, which is what lets the rule name the property rather than banning
+# every operation that might break it.
+#
+# It runs where `just check` runs. That converts a failure discovered one
+# upstream release later into a red gate on the next run; it is not a merge gate.
+subtree-base:
+    python3 scripts/check_subtree_base.py
+
+# Fork ledger drift check -- `plugins/PATCHES.md` against the tree.
+#
+# ADVISORY, and deliberately not in `check`. An enforcing gate fails on
+# legitimate in-progress work: the child that applies the audit's dispositions
+# would run its whole execution against a red gate until its last ledger entry
+# landed, and every future patch would be blocked until documented. The two
+# moments that matter -- the post-merge checklist in `plugins/SYNC.md`, and the
+# merge drill -- invoke it explicitly.
+audit-delta:
+    python3 scripts/audit_delta.py
+
+# Vendored upstream plugin suites -- the offline subset that executes code.
+#
+# ENFORCING, and part of `check`. This departs from how `audit-delta` and
+# `plugin-contract` are wired, deliberately: both of those go red during
+# legitimate in-progress work, so gating on them would block unrelated changes.
+# These do not. Once repaired they are green, and they go red only when a patch
+# actually breaks a hook -- which is the exposure the gate exists to close.
+#
+# What is NOT here, and why, is written down in `plugins/SYNC.md`. The two
+# documentation-grep suites stay unrun (they assert our own skill prose
+# verbatim); the live-model suites stay unrun (non-deterministic, 10-30 minutes,
+# billed per run); `windows-lifecycle` moves to `test-plugin-slow`.
+#
+# It invokes the files directly rather than delegating to upstream's own
+# `tests/claude-code/run-skill-tests.sh`, which names only three files, two of
+# which need a live model. That runner was never a route to the offline set.
+#
+# `tests/pi` is here because our one added test in it -- coverage for the
+# extension injecting nothing when the bundled skill is unreadable -- was
+# unreachable by any runner: upstream's `package.json` declares no scripts, and
+# nothing else named the directory. A divergence nothing executes is not
+# coverage. It needs Node's built-in TypeScript stripping to import
+# `.pi/extensions/superpowers.ts` (Node 22+; developed against v24).
+#
+# node and npm are hard requirements. A gate that silently skips 133 assertions
+# when a toolchain is missing reports green while covering nothing.
+#
+# Eight pcvelz-only `tests/claude-code/test-*.sh` suites were drop-list rows
+# (spike D2) and were removed with the dormant hook surface they covered.
+# Their names were pruned from the list below by C2, 2026-08-17 — the gate
+# still runs every suite that survives, and nothing is skipped silently.
+#
+# `hooks/test-skill-doc-routing` and `skills/shared/resolve-workspace.test.sh`
+# joined on 2026-08-20 for `tests/pi`'s reason, restated: the resolver suite was
+# reachable only by running the file by hand, so a divergence nothing executes
+# was not coverage. `uv` is a hard requirement of the resolver suite's parity
+# matrix, for the same reason node and npm are hard requirements below.
+test-plugin:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd plugins/graph-works
+    for t in test-sdd-workspace; do
+        echo "--- claude-code/$t"
+        bash "tests/claude-code/$t.sh"
+    done
+    echo "--- hooks/test-session-start"
+    bash tests/hooks/test-session-start.sh
+    echo "--- hooks/test-skill-doc-routing"
+    bash tests/hooks/test-skill-doc-routing.sh
+    echo "--- skills/shared/resolve-workspace"
+    bash skills/shared/resolve-workspace.test.sh
+    echo "--- shell-lint/test-lint-shell"
+    bash tests/shell-lint/test-lint-shell.sh
+    echo "--- systematic-debugging/test-find-polluter"
+    bash tests/systematic-debugging/test-find-polluter.sh
+    echo "--- pi/test-pi-extension (7 node)"
+    node --test tests/pi/test-pi-extension.mjs
+    echo "--- brainstorm-server (7 node + 2 bash)"
+    cd tests/brainstorm-server
+    [ -d node_modules ] || npm ci
+    npm test
+
+# The vendored suite deliberately kept out of `check`.
+#
+# `windows-lifecycle.test.sh` costs ~150s in hard `sleep 75` calls and skips 3
+# of its 12 checks off Windows. Shortening those sleeps behind an env-overridable
+# window was considered and rejected: patching upstream test *timing logic* is a
+# behavioral divergence, not an identity rename, and a larger maintenance
+# liability than the 150 seconds it saves. It runs intact, on demand -- from
+# `plugins/SYNC.md`'s post-merge checklist and the merge drill.
+test-plugin-slow:
+    cd plugins/graph-works/tests/brainstorm-server && bash windows-lifecycle.test.sh

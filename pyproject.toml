@@ -27,6 +27,7 @@ doc-wiki-okf = { workspace = true }
 graph-works-core = { workspace = true }
 workflow-local = { workspace = true }
 workflow-orca = { workspace = true }
+graph-works-cli = { workspace = true }
 
 [dependency-groups]
 dev = [
@@ -78,6 +79,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/graph-works-core/tests/**" = ["ANN"]
 "packages/workflow-local/tests/**" = ["ANN"]
 "packages/workflow-orca/tests/**" = ["ANN"]
+"packages/graph-works-cli/tests/**" = ["ANN"]
 "packages/graph-works-core/src/graph_works_core/prompts/_fragments/*.py" = ["E501"]
 "packages/graph-works-core/src/graph_works_core/query/prompts/code_reader.py" = ["E501"]
 "packages/graph-works-core/src/graph_works_core/query/prompts/synthesizer.py" = ["E501"]

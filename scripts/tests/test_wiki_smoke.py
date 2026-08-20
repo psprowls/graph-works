@@ -19,7 +19,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-import wiki_smoke  # noqa: E402
+import wiki_smoke
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _REAL_CHECKOUT = _REPO_ROOT / "packages" / "config-io"

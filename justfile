@@ -27,6 +27,7 @@ types:
     uv run --package graph-works-core mypy --strict packages/graph-works-core/src
     uv run --package workflow-local mypy --strict packages/workflow-local/src
     uv run --package workflow-orca mypy --strict packages/workflow-orca/src
+    uv run --package graph-works-cli mypy --strict packages/graph-works-cli/src
 
 # Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
 # exists: nothing enforces this but the person who runs it.
@@ -46,6 +47,7 @@ test:
     uv run --package graph-works-core pytest packages/graph-works-core/tests
     uv run --package workflow-local pytest packages/workflow-local/tests
     uv run --package workflow-orca pytest packages/workflow-orca/tests
+    uv run --package graph-works-cli pytest packages/graph-works-cli/tests
 
 # Branch coverage — GATED, per package.
 #
@@ -67,6 +69,16 @@ cov:
     uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package workflow-local pytest packages/workflow-local/tests --cov=workflow_local --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package graph-works-cli pytest packages/graph-works-cli/tests --cov=graph_works_cli --cov-branch --cov-report=term-missing --cov-fail-under=95
+
+# The plugin CLI contract — three assertions against
+# `wiki/concepts/graph-works-plugin-cli-contract.md`. Deliberately OUTSIDE
+# `just check`: a gate that cannot pass yet must not block every unrelated
+# change. Pass --plugin-tree to un-skip A1 and A3; the tree lives in a
+# different repository, so without it they report honestly rather than
+# passing vacuously.
+plugin-contract *ARGS:
+    uv run python scripts/plugin_contract.py --contract-page "${GRAPH_WIKI_WORKSPACE}/wiki/concepts/graph-works-plugin-cli-contract.md" {{ARGS}}
 
 # Everything CI will run. `cov` runs every suite, so `test` is not repeated.
 check: lint types contracts cov

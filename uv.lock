@@ -13,6 +13,7 @@ members = [
     "code-wiki-okf",
     "config-io",
     "doc-wiki-okf",
+    "graph-works-cli",
     "graph-works-core",
     "models-io",
     "okf-ext",
@@ -409,6 +410,39 @@ dependencies = [
 requires-dist = [
     { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
     { name = "okf-io", editable = "packages/okf-io" },
+    { name = "typer", specifier = ">=0.12" },
+]
+
+[[package]]
+name = "graph-works-cli"
+version = "0.1.0"
+source = { editable = "packages/graph-works-cli" }
+dependencies = [
+    { name = "click" },
+    { name = "code-graph-io" },
+    { name = "code-wiki-okf" },
+    { name = "config-io" },
+    { name = "doc-wiki-okf" },
+    { name = "graph-works-core" },
+    { name = "models-io" },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "subagents-io" },
+    { name = "typer" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "click", specifier = ">=8.0" },
+    { name = "code-graph-io", editable = "packages/code-graph-io" },
+    { name = "code-wiki-okf", editable = "packages/code-wiki-okf" },
+    { name = "config-io", editable = "packages/config-io" },
+    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
+    { name = "graph-works-core", editable = "packages/graph-works-core" },
+    { name = "models-io", editable = "packages/models-io" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "subagents-io", editable = "packages/subagents-io" },
     { name = "typer", specifier = ">=0.12" },
 ]
 

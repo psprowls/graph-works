@@ -52,8 +52,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from okf_io import Document, load_bundle
-from okf_io import _md
+from okf_io import Document, _md, load_bundle
 from okf_io.bundle import Bundle
 
 INDEX_NAME = "index.md"

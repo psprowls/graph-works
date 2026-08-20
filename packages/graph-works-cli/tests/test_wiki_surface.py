@@ -1,0 +1,134 @@
+"""Frozen C4 wiki command names, option names, and shipped documentation."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from graph_works_cli.cli import app
+from typer.testing import CliRunner
+
+runner = CliRunner()
+
+
+def _help(*command_path: str) -> dict[str, object]:
+    """Load an authoritative help payload through the public JSON helper."""
+    result = runner.invoke(app, ["help", "--json", *command_path])
+    assert result.exit_code == 0, result.stderr
+    return json.loads(result.stdout)
+
+
+def _command_names(payload: dict[str, object]) -> list[str]:
+    """Extract the public command ordering from one help payload."""
+    return [str(entry["name"]) for entry in payload["commands"]]  # type: ignore[index]
+
+
+def _option_names(payload: dict[str, object]) -> set[str]:
+    """Extract every public long/short option spelling from one help payload."""
+    return {
+        option
+        for entry in payload["options"]  # type: ignore[index]
+        for option in [*entry["opts"], *entry["secondary_opts"]]  # type: ignore[index]
+    }
+
+
+def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> None:
+    """A command or flag drift would break callers that rely on the C4 contract."""
+    root = _help()
+    assert _command_names(root) == [
+        "help",
+        "version",
+        "bootstrap",
+        "scan",
+        "ingest",
+        "query",
+        "archive",
+        "next",
+        "config",
+        "graph",
+        "wiki",
+        "work",
+        "util",
+    ]
+    assert _option_names(root) == {"--verbose", "-v", "--install-completion", "--show-completion"}
+
+    expected_options = {
+        ("bootstrap",): {"--topic", "--workspace", "--json"},
+        ("scan",): {
+            "--no-narrate",
+            "--emit-worklist",
+            "--apply",
+            "--results-dir",
+            "--short-head",
+            "--json",
+            "--workspace",
+        },
+        ("ingest",): {"--source", "--json", "--workspace"},
+        ("query",): {"--query", "--limit", "--workspace"},
+        ("archive",): {"--dry-run", "--workspace"},
+        ("wiki", "lint"): {"--json", "--workspace"},
+        ("wiki", "stats"): {"--top", "--json", "--workspace"},
+        ("wiki", "index"): {"--workspace"},
+        ("wiki", "archive"): {"--dry-run", "--workspace"},
+        ("wiki", "proposals"): {"--json", "--workspace"},
+        ("wiki", "proposal", "file"): {
+            "--lane",
+            "--title",
+            "--description",
+            "--id",
+            "--resource",
+            "--rationale",
+            "--evidence",
+            "--workspace",
+        },
+        ("wiki", "proposal", "approve"): {"--workspace"},
+        ("wiki", "proposal", "reject"): {"--workspace"},
+    }
+    for command_path, expected in expected_options.items():
+        assert _option_names(_help(*command_path)) == expected
+
+    wiki = _help("wiki")
+    proposal = _help("wiki", "proposal")
+    assert _command_names(wiki) == ["lint", "stats", "index", "archive", "proposals", "proposal"]
+    assert _command_names(proposal) == ["file", "approve", "reject"]
+    assert _option_names(wiki) == set()
+    assert _option_names(proposal) == set()
+
+    assert not {"--tool", "--force"} & _option_names(_help("bootstrap"))
+    assert not {"--limit", "--all"} & _option_names(_help("ingest"))
+    assert not {"--stale-days", "--log-gap-days", "--check"} & _option_names(_help("wiki", "lint"))
+    assert not {"--json", "--model"} & _option_names(_help("query"))
+    for command_path in (("wiki", "proposal", "file"), ("wiki", "proposal", "approve"), ("wiki", "proposal", "reject")):
+        assert not {"--dry-run", "--json"} & _option_names(_help(*command_path))
+    assert not {"show", "promote"} & set(_command_names(proposal))
+
+
+def test_readme_documents_the_shipped_c4_surface_without_future_commands() -> None:
+    """The package README is the supported human entry point for C4 users."""
+    readme = (Path(__file__).parents[1] / "README.md").read_text(encoding="utf-8")
+    for text in (
+        "## Wiki command surface",
+        "gw bootstrap",
+        "gw scan",
+        "gw ingest",
+        "gw query",
+        "gw wiki lint",
+        "gw wiki stats",
+        "gw wiki index",
+        "gw wiki archive",
+        "gw wiki proposals",
+        "gw wiki proposal file",
+        "gw wiki proposal approve",
+        "gw wiki proposal reject",
+        "gw scan --emit-worklist",
+        "gw scan --apply",
+        "only `gw wiki archive --dry-run`",
+        "| 0 |",
+        "| 1 |",
+        "| 2 |",
+        "| 3 |",
+        "| 4 |",
+        "| 5 |",
+    ):
+        assert text in readme
+    assert "gw util describe-surface" not in readme

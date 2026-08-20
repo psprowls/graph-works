@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from convert_wikilinks import mask_inline_code, run, strip_entity_prefix  # noqa: E402
+from convert_wikilinks import mask_inline_code, run, strip_entity_prefix
 
 
 def page(vault: Path, path: str, body: str, *, frontmatter: str = "") -> Path:

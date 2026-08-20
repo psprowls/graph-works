@@ -1,0 +1,2938 @@
+{
+  "schema_version": 1,
+  "cli": "graph-works-cli",
+  "version": "0.1.0",
+  "commands": [
+    {
+      "name": "gw archive",
+      "help": "Archive every eligible work item and every eligible wiki proposal in one sweep.",
+      "short_help": "Archive every eligible work item and every eligible wiki proposal in one sweep.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Render both plans and write nothing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root; defaults to discovery.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "archive"
+      ]
+    },
+    {
+      "name": "gw bootstrap",
+      "help": "Create a graph-works workspace if it has not been initialized yet.",
+      "short_help": "Create a graph-works workspace if it has not been initialized yet.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "topic",
+          "opts": [
+            "--topic"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "bootstrap"
+      ]
+    },
+    {
+      "name": "gw config",
+      "help": "Read and write graph-works workspace configuration.",
+      "short_help": "Read and write graph-works workspace configuration.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "get",
+        "hooks",
+        "list",
+        "set",
+        "sync",
+        "unset"
+      ],
+      "path": [
+        "config"
+      ]
+    },
+    {
+      "name": "gw config get",
+      "help": "Show a key's effective value and origin (env / manifest / default).",
+      "short_help": "Show a key's effective value and origin (env / manifest / default).",
+      "usage": [
+        "[OPTIONS]",
+        "{key}"
+      ],
+      "arguments": [
+        {
+          "name": "key",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path (default: GRAPH_WORKS_DIR, then cwd discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "config",
+        "get"
+      ]
+    },
+    {
+      "name": "gw config hooks",
+      "help": "Register or unregister opt-in hooks in .claude/settings.local.json.",
+      "short_help": "Register or unregister opt-in hooks in .claude/settings.local.json.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "disable",
+        "enable"
+      ],
+      "path": [
+        "config",
+        "hooks"
+      ]
+    },
+    {
+      "name": "gw config hooks disable",
+      "help": "Remove a feature's hook registrations from .claude/settings.local.json.",
+      "short_help": "Remove a feature's hook registrations from .claude/settings.local.json.",
+      "usage": [
+        "[OPTIONS]",
+        "{feature}:<transcript>"
+      ],
+      "arguments": [
+        {
+          "name": "feature",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Repository whose .claude/settings.local.json is written (default: cwd Git discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "config",
+        "hooks",
+        "disable"
+      ]
+    },
+    {
+      "name": "gw config hooks enable",
+      "help": "Merge a feature's hook registrations into .claude/settings.local.json.",
+      "short_help": "Merge a feature's hook registrations into .claude/settings.local.json.",
+      "usage": [
+        "[OPTIONS]",
+        "{feature}:<transcript>"
+      ],
+      "arguments": [
+        {
+          "name": "feature",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Repository whose .claude/settings.local.json is written (default: cwd Git discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "config",
+        "hooks",
+        "enable"
+      ]
+    },
+    {
+      "name": "gw config list",
+      "help": "List every resolved catalog key, including concrete wildcard keys.",
+      "short_help": "List every resolved catalog key, including concrete wildcard keys.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path (default: GRAPH_WORKS_DIR, then cwd discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "config",
+        "list"
+      ]
+    },
+    {
+      "name": "gw config set",
+      "help": "Set a catalog key and refresh `_config/config.json`.",
+      "short_help": "Set a catalog key and refresh `_config/config.json`.",
+      "usage": [
+        "[OPTIONS]",
+        "{key}",
+        "{value}"
+      ],
+      "arguments": [
+        {
+          "name": "key",
+          "required": true,
+          "nargs": 1
+        },
+        {
+          "name": "value",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path (default: GRAPH_WORKS_DIR, then cwd discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "config",
+        "set"
+      ]
+    },
+    {
+      "name": "gw config sync",
+      "help": "Regenerate `_config/config.json` after an out-of-band manifest edit.",
+      "short_help": "Regenerate `_config/config.json` after an out-of-band manifest edit.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path (default: GRAPH_WORKS_DIR, then cwd discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "config",
+        "sync"
+      ]
+    },
+    {
+      "name": "gw config unset",
+      "help": "Remove an explicit key, refresh the projection, and show its fallback.",
+      "short_help": "Remove an explicit key, refresh the projection, and show its fallback.",
+      "usage": [
+        "[OPTIONS]",
+        "{key}"
+      ],
+      "arguments": [
+        {
+          "name": "key",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path (default: GRAPH_WORKS_DIR, then cwd discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "config",
+        "unset"
+      ]
+    },
+    {
+      "name": "gw graph",
+      "help": "Code-graph queries.",
+      "short_help": "Code-graph queries.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "build",
+        "describe",
+        "export",
+        "find"
+      ],
+      "path": [
+        "graph"
+      ]
+    },
+    {
+      "name": "gw graph build",
+      "help": "Build or refresh the code graph from the workspace's declared repositories.",
+      "short_help": "Build or refresh the code graph from the workspace's declared repositories.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "full",
+          "opts": [
+            "--full"
+          ],
+          "secondary_opts": [],
+          "help": "Rebuild from scratch instead of refreshing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "only",
+          "opts": [
+            "--only"
+          ],
+          "secondary_opts": [],
+          "help": "Build one member by its `_repositories.yaml` key.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "graph",
+        "build"
+      ]
+    },
+    {
+      "name": "gw graph describe",
+      "help": "Describe one graph entity, inferring its kind from SELECTOR when --kind is omitted.",
+      "short_help": "Describe one graph entity, inferring its kind from SELECTOR when --kind is omitted.",
+      "usage": [
+        "[OPTIONS]",
+        "[selector]"
+      ],
+      "arguments": [
+        {
+          "name": "selector",
+          "required": false,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "kind",
+          "opts": [
+            "--kind"
+          ],
+          "secondary_opts": [],
+          "help": "Entity kind. Omit to infer it from SELECTOR.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "in_package",
+          "opts": [
+            "--in-package"
+          ],
+          "secondary_opts": [],
+          "help": "Narrow inference to one package or app.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "depth",
+          "opts": [
+            "--depth"
+          ],
+          "secondary_opts": [],
+          "help": "Containment-tree depth.",
+          "required": false,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit JSON instead of human text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "graph",
+        "describe"
+      ]
+    },
+    {
+      "name": "gw graph export",
+      "help": "Export the whole graph as GraphML.",
+      "short_help": "Export the whole graph as GraphML.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "out",
+          "opts": [
+            "--out"
+          ],
+          "secondary_opts": [],
+          "help": "Write GraphML here; omit or `-` to write to stdout.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "graph",
+        "export"
+      ]
+    },
+    {
+      "name": "gw graph find",
+      "help": "Find graph nodes by name, kind and/or containing package.",
+      "short_help": "Find graph nodes by name, kind and/or containing package.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "name",
+          "opts": [
+            "--name"
+          ],
+          "secondary_opts": [],
+          "help": "Match nodes by name.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "kind",
+          "opts": [
+            "--kind"
+          ],
+          "secondary_opts": [],
+          "help": "Match nodes by kind.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "in_package",
+          "opts": [
+            "--in-package"
+          ],
+          "secondary_opts": [],
+          "help": "Match nodes inside one package or app.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit JSON instead of human text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "graph",
+        "find"
+      ]
+    },
+    {
+      "name": "gw help",
+      "help": "Show gw help, optionally as machine-readable JSON.",
+      "short_help": "Show gw help, optionally as machine-readable JSON.",
+      "usage": [
+        "[OPTIONS]",
+        "[command]..."
+      ],
+      "arguments": [
+        {
+          "name": "command",
+          "required": false,
+          "nargs": -1
+        }
+      ],
+      "options": [
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable help as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "help"
+      ]
+    },
+    {
+      "name": "gw ingest",
+      "help": "Ingest one source into the initialized workspace.",
+      "short_help": "Ingest one source into the initialized workspace.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "source",
+          "opts": [
+            "--source"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "ingest"
+      ]
+    },
+    {
+      "name": "gw next",
+      "help": "Compute what to dispatch for SLUG, and what advancing would change.\n\nIts one permitted write is the design-spec pointer repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
+      "short_help": "Compute what to dispatch for SLUG, and what advancing would change.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "descend",
+          "opts": [
+            "--descend"
+          ],
+          "secondary_opts": [],
+          "help": "When the item waits on children, switch to the next actionable child.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the routing decision as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "next"
+      ]
+    },
+    {
+      "name": "gw query",
+      "help": "Answer one text query against the initialized workspace.",
+      "short_help": "Answer one text query against the initialized workspace.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "query_text",
+          "opts": [
+            "--query"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "limit",
+          "opts": [
+            "--limit"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": 5,
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "query"
+      ]
+    },
+    {
+      "name": "gw scan",
+      "help": "Run scan locally, emit its worklist, or apply an external result directory.",
+      "short_help": "Run scan locally, emit its worklist, or apply an external result directory.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "no_narrate",
+          "opts": [
+            "--no-narrate"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "emit_worklist",
+          "opts": [
+            "--emit-worklist"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "apply",
+          "opts": [
+            "--apply"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "results_dir",
+          "opts": [
+            "--results-dir"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "short_head",
+          "opts": [
+            "--short-head"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "scan"
+      ]
+    },
+    {
+      "name": "gw util",
+      "help": "Diagnostics: log/tokens/trace and the surface freeze.",
+      "short_help": "Diagnostics: log/tokens/trace and the surface freeze.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "describe-surface",
+        "log",
+        "tokens",
+        "trace"
+      ],
+      "path": [
+        "util"
+      ]
+    },
+    {
+      "name": "gw util describe-surface",
+      "help": "Describe every command in the gw tree \u2014 the machine-readable surface freeze.",
+      "short_help": "Describe every command in the gw tree \u2014 the machine-readable surface freeze.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the whole surface as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "util",
+        "describe-surface"
+      ]
+    },
+    {
+      "name": "gw util log",
+      "help": "Append one timestamped entry to the wiki log.",
+      "short_help": "Append one timestamped entry to the wiki log.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "op",
+          "opts": [
+            "--op"
+          ],
+          "secondary_opts": [],
+          "help": "One of scan/ingest/query/lint/create/update/delete/note.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "title",
+          "opts": [
+            "--title"
+          ],
+          "secondary_opts": [],
+          "help": "The entry's headline.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "detail",
+          "opts": [
+            "--detail"
+          ],
+          "secondary_opts": [],
+          "help": "Optional trailing detail.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root; defaults to discovery.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the result as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "util",
+        "log"
+      ]
+    },
+    {
+      "name": "gw util tokens",
+      "help": "Stamp each page's token count into its frontmatter.",
+      "short_help": "Stamp each page's token count into its frontmatter.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Count and report, but stamp nothing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root; defaults to discovery.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit every bucket in full as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "util",
+        "tokens"
+      ]
+    },
+    {
+      "name": "gw util trace",
+      "help": "Render a subagent trace file with a summary and a per-role cost rollup.",
+      "short_help": "Render a subagent trace file with a summary and a per-role cost rollup.",
+      "usage": [
+        "[OPTIONS]",
+        "{file}"
+      ],
+      "arguments": [
+        {
+          "name": "file",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "expand",
+          "opts": [
+            "--expand"
+          ],
+          "secondary_opts": [],
+          "help": "Render every record instead of collapsing runs.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "util",
+        "trace"
+      ]
+    },
+    {
+      "name": "gw version",
+      "help": "Print version and exit.",
+      "short_help": "Print version and exit.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [],
+      "path": [
+        "version"
+      ]
+    },
+    {
+      "name": "gw wiki",
+      "help": "Wiki scan/ingest/query/lint.",
+      "short_help": "Wiki scan/ingest/query/lint.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "archive",
+        "index",
+        "lint",
+        "proposal",
+        "proposals",
+        "stats"
+      ],
+      "path": [
+        "wiki"
+      ]
+    },
+    {
+      "name": "gw wiki archive",
+      "help": "Archive one curated page or sweep eligible proposal pages.",
+      "short_help": "Archive one curated page or sweep eligible proposal pages.",
+      "usage": [
+        "[OPTIONS]",
+        "[target]"
+      ],
+      "arguments": [
+        {
+          "name": "target",
+          "required": false,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "archive"
+      ]
+    },
+    {
+      "name": "gw wiki index",
+      "help": "Reconcile every represented index and create missing index files.",
+      "short_help": "Reconcile every represented index and create missing index files.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "index"
+      ]
+    },
+    {
+      "name": "gw wiki lint",
+      "help": "Run the workspace's mechanical and semantic lint pipeline.",
+      "short_help": "Run the workspace's mechanical and semantic lint pipeline.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "lint"
+      ]
+    },
+    {
+      "name": "gw wiki proposal",
+      "help": "File or decide one proposal.",
+      "short_help": "File or decide one proposal.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "approve",
+        "file",
+        "reject"
+      ],
+      "path": [
+        "wiki",
+        "proposal"
+      ]
+    },
+    {
+      "name": "gw wiki proposal approve",
+      "help": "Approve the proposal identified by TARGET.",
+      "short_help": "Approve the proposal identified by TARGET.",
+      "usage": [
+        "[OPTIONS]",
+        "{target}"
+      ],
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "proposal",
+        "approve"
+      ]
+    },
+    {
+      "name": "gw wiki proposal file",
+      "help": "File or merge one source's proposal for a lane target.",
+      "short_help": "File or merge one source's proposal for a lane target.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "lane",
+          "opts": [
+            "--lane"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "title",
+          "opts": [
+            "--title"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "description",
+          "opts": [
+            "--description"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "identifier",
+          "opts": [
+            "--id"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "resource",
+          "opts": [
+            "--resource"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "rationale",
+          "opts": [
+            "--rationale"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "evidence",
+          "opts": [
+            "--evidence"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "proposal",
+        "file"
+      ]
+    },
+    {
+      "name": "gw wiki proposal reject",
+      "help": "Reject the proposal identified by TARGET.",
+      "short_help": "Reject the proposal identified by TARGET.",
+      "usage": [
+        "[OPTIONS]",
+        "{target}"
+      ],
+      "arguments": [
+        {
+          "name": "target",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "proposal",
+        "reject"
+      ]
+    },
+    {
+      "name": "gw wiki proposals",
+      "help": "List open proposals.",
+      "short_help": "List open proposals.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "proposals"
+      ]
+    },
+    {
+      "name": "gw wiki stats",
+      "help": "Compute deterministic wiki link-graph statistics.",
+      "short_help": "Compute deterministic wiki link-graph statistics.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "top",
+          "opts": [
+            "--top"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": 10,
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "stats"
+      ]
+    },
+    {
+      "name": "gw work",
+      "help": "Work-item pipeline verbs.",
+      "short_help": "Work-item pipeline verbs.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "adopt-child-specs",
+        "advance",
+        "archive",
+        "decision",
+        "file",
+        "lint",
+        "next",
+        "orchestrate",
+        "reconcile-context",
+        "regen-index",
+        "status"
+      ],
+      "path": [
+        "work"
+      ]
+    },
+    {
+      "name": "gw work adopt-child-specs",
+      "help": "Adopt pre-written child-spec drafts into EPIC_SLUG's filed children.\n\nMechanical: a draft whose suffix identifies more than one direct child is\nreported as ambiguous and skipped, never guessed at.",
+      "short_help": "Adopt pre-written child-spec drafts into EPIC_SLUG's filed children.",
+      "usage": [
+        "[OPTIONS]",
+        "{epic_slug}"
+      ],
+      "arguments": [
+        {
+          "name": "epic_slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of moving.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the adoption as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "adopt-child-specs"
+      ]
+    },
+    {
+      "name": "gw work advance",
+      "help": "Apply the routing table's next transition for SLUG.\n\nThe pipeline's single mutation point. An explicit `--worktree`/`--branch`\npair is applied unconditionally -- it is the caller's own resolved\ndecision, which is what lets an item be evicted out of a shared main\ncheckout; without the pair, provenance falls back to cwd inference.",
+      "short_help": "Apply the routing table's next transition for SLUG.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "effort",
+          "opts": [
+            "--effort"
+          ],
+          "secondary_opts": [],
+          "help": "xtra-small|small|medium|large|xtra-large.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "owner",
+          "opts": [
+            "--owner"
+          ],
+          "secondary_opts": [],
+          "help": "Handle to record when execution starts.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "resolved_in",
+          "opts": [
+            "--resolved-in"
+          ],
+          "secondary_opts": [],
+          "help": "PR or commit ref.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "worktree",
+          "opts": [
+            "--worktree"
+          ],
+          "secondary_opts": [],
+          "help": "The item's worktree path, when the caller knows it.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "branch",
+          "opts": [
+            "--branch"
+          ],
+          "secondary_opts": [],
+          "help": "The item's branch, paired with --worktree.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the advance as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "advance"
+      ]
+    },
+    {
+      "name": "gw work archive",
+      "help": "Relocate terminal work items to `work/_archive/`, repairing referrers.\n\nSweep mode reports no skips -- a sweep's non-candidates were never\ncandidates. Targeted mode reports one per named slug that did not move,\nand exits non-zero, because there the caller named the slug and is owed\nan answer. The wiki lane is never involved.",
+      "short_help": "Relocate terminal work items to `work/_archive/`, repairing referrers.",
+      "usage": [
+        "[OPTIONS]",
+        "[slugs]..."
+      ],
+      "arguments": [
+        {
+          "name": "slugs",
+          "required": false,
+          "nargs": -1
+        }
+      ],
+      "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of moving.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the archive run as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "archive"
+      ]
+    },
+    {
+      "name": "gw work decision",
+      "help": "Epic decisions ledger.",
+      "short_help": "Epic decisions ledger.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "add",
+        "answer",
+        "list",
+        "overturn",
+        "supersede"
+      ],
+      "path": [
+        "work",
+        "decision"
+      ]
+    },
+    {
+      "name": "gw work decision add",
+      "help": "Append a decision to the owning epic's ledger.",
+      "short_help": "Append a decision to the owning epic's ledger.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "question",
+          "opts": [
+            "--question"
+          ],
+          "secondary_opts": [],
+          "help": "The question this decision settles.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "status",
+          "opts": [
+            "--status"
+          ],
+          "secondary_opts": [],
+          "help": "answered|assumed|open|superseded.",
+          "required": false,
+          "default": "open",
+          "is_flag": false
+        },
+        {
+          "name": "answer",
+          "opts": [
+            "--answer"
+          ],
+          "secondary_opts": [],
+          "help": "Renders as an **Answer:** block.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "rationale",
+          "opts": [
+            "--rationale"
+          ],
+          "secondary_opts": [],
+          "help": "Renders as a **Rationale:** block.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "if_wrong",
+          "opts": [
+            "--if-wrong"
+          ],
+          "secondary_opts": [],
+          "help": "Blast radius; renders as an **If wrong:** block.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "affects",
+          "opts": [
+            "--affects"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated child slugs this decision affects.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "decided_by",
+          "opts": [
+            "--decided-by"
+          ],
+          "secondary_opts": [],
+          "help": "Actor recorded in `decided`.",
+          "required": false,
+          "default": "user",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan the append without writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "decision",
+        "add"
+      ]
+    },
+    {
+      "name": "gw work decision answer",
+      "help": "Flip an open or assumed decision to answered.",
+      "short_help": "Flip an open or assumed decision to answered.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}",
+        "{DECISION_ID}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        },
+        {
+          "name": "decision_id",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "answer_text",
+          "opts": [
+            "--answer"
+          ],
+          "secondary_opts": [],
+          "help": "Renders as an **Answer:** block.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "rationale",
+          "opts": [
+            "--rationale"
+          ],
+          "secondary_opts": [],
+          "help": "Renders as a **Rationale:** block.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "decided_by",
+          "opts": [
+            "--decided-by"
+          ],
+          "secondary_opts": [],
+          "help": "Actor recorded in `decided`.",
+          "required": false,
+          "default": "user",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan the answer without writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "decision",
+        "answer"
+      ]
+    },
+    {
+      "name": "gw work decision list",
+      "help": "List the owning epic's decisions. A missing ledger reads as empty.\n\n`counts` rolls up the **whole** ledger, not the filtered slice -- the\nrollup is what makes a filtered view legible.",
+      "short_help": "List the owning epic's decisions.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "status",
+          "opts": [
+            "--status"
+          ],
+          "secondary_opts": [],
+          "help": "Filter: answered|assumed|open|superseded.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "affects",
+          "opts": [
+            "--affects"
+          ],
+          "secondary_opts": [],
+          "help": "Filter: entries whose affects contain this slug.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "cites",
+          "opts": [
+            "--cites"
+          ],
+          "secondary_opts": [],
+          "help": "Filter: entries referencing this id, e.g. D-014.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "decision",
+        "list"
+      ]
+    },
+    {
+      "name": "gw work decision overturn",
+      "help": "Supersede a decision and file a follow-up against what already landed.\n\nOne logical operation. Both halves are preflighted before either writes,\nso an expected refusal on the follow-up leaves the ledger untouched too.",
+      "short_help": "Supersede a decision and file a follow-up against what already landed.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}",
+        "{DECISION_ID}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        },
+        {
+          "name": "decision_id",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "answer_text",
+          "opts": [
+            "--answer"
+          ],
+          "secondary_opts": [],
+          "help": "The new decision; renders as an **Answer:** block.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "follow_up_title",
+          "opts": [
+            "--follow-up-title"
+          ],
+          "secondary_opts": [],
+          "help": "Title of the follow-up work item.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "follow_up_affects",
+          "opts": [
+            "--follow-up-affects"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated paths or packages.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "follow_up_kind",
+          "opts": [
+            "--follow-up-kind"
+          ],
+          "secondary_opts": [],
+          "help": "Kind for the follow-up item.",
+          "required": false,
+          "default": "TechDebt",
+          "is_flag": false
+        },
+        {
+          "name": "rationale",
+          "opts": [
+            "--rationale"
+          ],
+          "secondary_opts": [],
+          "help": "Renders as a **Rationale:** block.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "decided_by",
+          "opts": [
+            "--decided-by"
+          ],
+          "secondary_opts": [],
+          "help": "Actor recorded in `decided`.",
+          "required": false,
+          "default": "user",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Preflight both halves without writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "decision",
+        "overturn"
+      ]
+    },
+    {
+      "name": "gw work decision supersede",
+      "help": "Retire one decision and append its canonical replacement, under one lock.",
+      "short_help": "Retire one decision and append its canonical replacement, under one lock.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}",
+        "{DECISION_ID}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        },
+        {
+          "name": "decision_id",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "question",
+          "opts": [
+            "--question"
+          ],
+          "secondary_opts": [],
+          "help": "The replacement entry's question.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "answer_text",
+          "opts": [
+            "--answer"
+          ],
+          "secondary_opts": [],
+          "help": "Renders as an **Answer:** block.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "rationale",
+          "opts": [
+            "--rationale"
+          ],
+          "secondary_opts": [],
+          "help": "Renders as a **Rationale:** block.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "affects",
+          "opts": [
+            "--affects"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated child slugs; omit to inherit.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "decided_by",
+          "opts": [
+            "--decided-by"
+          ],
+          "secondary_opts": [],
+          "help": "Actor recorded in `decided`.",
+          "required": false,
+          "default": "user",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan the supersession without writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "decision",
+        "supersede"
+      ]
+    },
+    {
+      "name": "gw work file",
+      "help": "File one work item, reconcile `work/index.md`, and log its arrival.\n\n`--parent` and `--depends-on`/`--dep` are mutually exclusive on one call:\na child's dependency edges are expressed relative to its siblings, not to\nits epic. Core enforces that; this command only reports the refusal.",
+      "short_help": "File one work item, reconcile `work/index.md`, and log its arrival.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "title",
+          "opts": [
+            "--title"
+          ],
+          "secondary_opts": [],
+          "help": "Work item title.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "kind",
+          "opts": [
+            "--kind"
+          ],
+          "secondary_opts": [],
+          "help": "Epic | Feature | Bug | TechDebt | TestGap | Spike.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "summary",
+          "opts": [
+            "--summary"
+          ],
+          "secondary_opts": [],
+          "help": "One-line summary for the index entry.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "affects",
+          "opts": [
+            "--affects"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated repo paths or package names.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "effort",
+          "opts": [
+            "--effort"
+          ],
+          "secondary_opts": [],
+          "help": "xtra-small|small|medium|large|xtra-large.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "slug_words",
+          "opts": [
+            "--slug-words"
+          ],
+          "secondary_opts": [],
+          "help": "1-4 words for the slug. Defaults to the title.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "parent",
+          "opts": [
+            "--parent"
+          ],
+          "secondary_opts": [],
+          "help": "Parent slug; this item becomes its child.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "depends_on",
+          "opts": [
+            "--depends-on"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated sibling slugs that must finish first.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dep",
+          "opts": [
+            "--dep"
+          ],
+          "secondary_opts": [],
+          "help": "Repeatable phase-granular edge: slug=<slug>[,blocks=design|plan|execute|finish][,needs=design|plan|execute|resolved].",
+          "required": false,
+          "default": [],
+          "is_flag": false
+        },
+        {
+          "name": "blast_radius",
+          "opts": [
+            "--blast-radius"
+          ],
+          "secondary_opts": [],
+          "help": "file|package|domain|system.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "target",
+          "opts": [
+            "--target"
+          ],
+          "secondary_opts": [],
+          "help": "YYYY-QN or YYYY-MM.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "owner",
+          "opts": [
+            "--owner"
+          ],
+          "secondary_opts": [],
+          "help": "Owner handle.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "tags",
+          "opts": [
+            "--tags"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated tags.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the filing as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "file"
+      ]
+    },
+    {
+      "name": "gw work lint",
+      "help": "Report work-lane conformance. Never writes.\n\nThe fast, synchronous, LLM-free work-lane check -- a sibling of\n`gw wiki lint`, not a subset of it.",
+      "short_help": "Report work-lane conformance.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "strict",
+          "opts": [
+            "--strict"
+          ],
+          "secondary_opts": [],
+          "help": "Promote every warning to an error.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the report as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "lint"
+      ]
+    },
+    {
+      "name": "gw work next",
+      "help": "Compute what to dispatch for SLUG, and what advancing would change.\n\nIts one permitted write is the design-spec pointer repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
+      "short_help": "Compute what to dispatch for SLUG, and what advancing would change.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "descend",
+          "opts": [
+            "--descend"
+          ],
+          "secondary_opts": [],
+          "help": "When the item waits on children, switch to the next actionable child.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the routing decision as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "next"
+      ]
+    },
+    {
+      "name": "gw work orchestrate",
+      "help": "Compute the auto-drive dispatch plan for SLUG's subtree. Read-only.\n\nA planner, not an executor: it never launches a dispatch, mutates an item,\nprovisions a worktree, or edits the manifest.",
+      "short_help": "Compute the auto-drive dispatch plan for SLUG's subtree.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "live",
+          "opts": [
+            "--live"
+          ],
+          "secondary_opts": [],
+          "help": "Comma-separated running dispatch keys (<slug>#<phase>).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the dispatch plan as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "orchestrate"
+      ]
+    },
+    {
+      "name": "gw work reconcile-context",
+      "help": "Assemble everything `reconciling-spec` needs for one work item. Read-only.",
+      "short_help": "Assemble everything `reconciling-spec` needs for one work item.",
+      "usage": [
+        "[OPTIONS]",
+        "{slug}"
+      ],
+      "arguments": [
+        {
+          "name": "slug",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Code repository path; overrides the declared resolution.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "repo_name",
+          "opts": [
+            "--repo-name"
+          ],
+          "secondary_opts": [],
+          "help": "Select among several declared repositories.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the context as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "reconcile-context"
+      ]
+    },
+    {
+      "name": "gw work regen-index",
+      "help": "Reconcile `work/index.md` against what is on disk.\n\nReconciles the Markdown index; it does not rebuild a JSON sidecar. That\nmigration is deliberate (spec 1) and `work-index.json` is not coming back.",
+      "short_help": "Reconcile `work/index.md` against what is on disk.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the reconciliation as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "regen-index"
+      ]
+    },
+    {
+      "name": "gw work status",
+      "help": "Count the active work items and name the one worth resuming.",
+      "short_help": "Count the active work items and name the one worth resuming.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the rollup as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "status"
+      ]
+    }
+  ]
+}

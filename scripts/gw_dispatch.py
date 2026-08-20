@@ -47,7 +47,7 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -73,7 +73,7 @@ ISO = "%Y-%m-%dT%H:%M:%SZ"
 
 
 def now_iso() -> str:
-    return datetime.now(timezone.utc).strftime(ISO)
+    return datetime.now(UTC).strftime(ISO)
 
 
 # --------------------------------------------------------------------------
@@ -158,7 +158,7 @@ class EventLog:
         self.path = path
         self.notify = notify
 
-    def emit(self, kind: str, slug: str, **fields: Any) -> None:
+    def emit(self, kind: str, slug: str, **fields: Any) -> None:  # noqa: ANN401
         rec = {"at": now_iso(), "event": kind, "slug": slug, **fields}
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -421,7 +421,7 @@ class Dispatcher:
 
         if self.args.dry_run:
             print(f"DRY-RUN would dispatch {slug} (phase={phase} skill={skill})")
-            print("        " + " ".join(argv[:1] + ["..."] + argv[-1:]))
+            print("        " + " ".join([*argv[:1], "...", *argv[-1:]]))
             return False
 
         rc, out, err = run(argv, cwd=self.repo, timeout=180)
@@ -515,7 +515,7 @@ def main() -> None:
     )
     ap.add_argument("--workspace", default=default_ws, help="graph-wiki workspace (default: $GRAPH_WIKI_WORKSPACE)")
     ap.add_argument(
-        "--repo", default=os.getcwd(), help="repo checkout used as cwd for dispatched sessions (default: cwd)"
+        "--repo", default=str(Path.cwd()), help="repo checkout used as cwd for dispatched sessions (default: cwd)"
     )
     ap.add_argument(
         "--phases",

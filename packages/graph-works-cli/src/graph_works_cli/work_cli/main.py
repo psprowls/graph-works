@@ -22,6 +22,7 @@ from graph_works_core.work import commands as work
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.pipeline import entry_for
+from okf_ext.moves import stranded_warning
 
 from graph_works_cli import exit_codes
 from graph_works_cli.provenance import warn_if_stale_routing
@@ -386,7 +387,11 @@ def archive(
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = typer.Option(False, "--json", help="Emit the archive run as JSON."),
 ) -> None:
-    """Relocate terminal work items to `work/_archive/`, repairing referrers.
+    """Relocate terminal work items to `work/_archive/`, repairing the OKF
+    markdown references that pointed at them.
+
+    `[[wikilink]]` forms are not an OKF link form, are never rewritten, and
+    are reported to stderr as stranded instead -- per lane, never merged.
 
     Sweep mode reports no skips -- a sweep's non-candidates were never
     candidates. Targeted mode reports one per named slug that did not move,
@@ -401,6 +406,13 @@ def archive(
         rendering.fail(str(exc), cause=exc)
 
     payload = rendering.archive_payload(run, dry_run=dry_run)
+    # Two counts, never a merged total: `run_archive` keeps `plan` and
+    # `wiki_plan` separate for the same reason -- a caller acting on the
+    # number needs to know which lane stranded what.
+    for label, entries in (("work items", run.plan.moves.stranded), ("wiki pages", run.wiki_plan.moves.stranded)):
+        warning = stranded_warning(entries)
+        if warning is not None:
+            rendering.warn(f"{label}: {warning}")
     if json_output:
         rendering.emit(payload)
     else:

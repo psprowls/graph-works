@@ -206,6 +206,53 @@ def test_rename_is_found_when_another_deletion_candidates_stamp_is_more_recent(t
     reader.close()
 
 
+def test_a_wikilink_into_a_renamed_page_is_stranded(tmp_path: Path) -> None:
+    """The item's done-when for the mirror lane: a wikilink-only bundle and a
+    quiet one produce different plans."""
+    repo_root = _scratch_repo(tmp_path)
+    sha_before = _head(repo_root)
+    bundle_root = tmp_path / "bundle"
+    _write_page(bundle_root, "acme", "a.py", notes=_PLACEHOLDER, last_commit=sha_before)
+    _write_page(bundle_root, "acme", "b.py", notes=_PLACEHOLDER, last_commit=sha_before)
+    # Outside the mirror lane, so it is never a deletion candidate and never
+    # trips the prose-edited guard on a mirrored page.
+    citing = bundle_root / "concepts" / "citing.md"
+    citing.parent.mkdir(parents=True, exist_ok=True)
+    citing.write_text(
+        "---\ntype: Explanation\ntitle: Citing\ndescription: d\n---\n\n"
+        "## Summary\n\nSee [[repositories/acme/fs/a.py]] for the rest.\n",
+        encoding="utf-8",
+    )
+
+    _git(repo_root, "mv", "a.py", "renamed.py")
+    _git(repo_root, "commit", "-q", "-m", "rename a.py")
+    sha_after = _head(repo_root)
+
+    reader = _reader_for(repo_root, tmp_path / "graph")
+    repo = RepoConfig(name="acme", path=repo_root, ignore=())
+    plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("renamed.py", "b.py"), sha=sha_after, at=_AT)
+
+    assert [entry.member for entry in plan.moves.stranded] == ["concepts/citing.md"]
+    assert plan.moves.stranded[0].target == "repositories/acme/fs/a.py.md"
+    reader.close()
+
+
+def test_a_quiet_bundle_strands_nothing_on_the_same_rename(tmp_path: Path) -> None:
+    repo_root = _scratch_repo(tmp_path)
+    sha_before = _head(repo_root)
+    bundle_root = tmp_path / "bundle"
+    _write_page(bundle_root, "acme", "a.py", notes=_PLACEHOLDER, last_commit=sha_before)
+    _git(repo_root, "mv", "a.py", "renamed.py")
+    _git(repo_root, "commit", "-q", "-m", "rename a.py")
+    sha_after = _head(repo_root)
+
+    reader = _reader_for(repo_root, tmp_path / "graph")
+    repo = RepoConfig(name="acme", path=repo_root, ignore=())
+    plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("renamed.py",), sha=sha_after, at=_AT)
+
+    assert plan.moves.stranded == ()
+
+
 def test_a_dot_nested_page_already_on_disk_is_not_re_created(tmp_path: Path) -> None:
     """The second-sync abort, pinned. `plan_mirror` builds `previous` from
     `resource_index`, which reads `bundle.concepts`, which comes from okf-io's

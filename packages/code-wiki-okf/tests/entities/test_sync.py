@@ -291,7 +291,7 @@ def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> Non
 
     app_doc = bundle_after.concept("repositories/repo-a/apps/cli-app")
     assert app_doc is not None
-    assert app_doc.fm_raw.get("package") == "[cli-app](/packages/cli-app.md)"
+    assert app_doc.fm_raw.get("package") == "[cli-app](/repositories/repo-a/packages/cli-app.md)"
 
     suite_doc = bundle_after.concept("repositories/repo-a/test-suites/tests")
     assert suite_doc is not None

@@ -13,6 +13,8 @@ _FACTS = ResultsFacts(
     end_sha="1234567890abc",
     files=("src/paths.py", "tests/test_paths.py"),
     commits=("abcdef1 feat: add the layout contract",),
+    scope=("src/", "tests/"),
+    start_predates_item=False,
 )
 
 
@@ -28,6 +30,31 @@ def test_render_carries_the_short_shas_the_counts_and_the_heading() -> None:
     assert "**Files changed:** 2" in text
     assert "- src/paths.py" in text
     assert "- abcdef1 feat: add the layout contract" in text
+
+
+def test_render_names_its_own_scope() -> None:
+    text = render(_FACTS)
+    assert "src/" in text
+    assert "tests/" in text
+
+
+def test_an_empty_range_warns_instead_of_printing_a_bare_zero() -> None:
+    facts = replace(_FACTS, start_sha="1234567890abc", commits=(), files=())
+    text = render(facts)
+    assert "Range is empty" in text
+
+
+def test_a_normal_range_carries_no_empty_range_warning() -> None:
+    assert "Range is empty" not in render(_FACTS)
+
+
+def test_a_start_predating_the_item_warns() -> None:
+    text = render(replace(_FACTS, start_predates_item=True))
+    assert "before the item was opened" in text
+
+
+def test_a_start_not_predating_the_item_carries_no_warning() -> None:
+    assert "before the item was opened" not in render(_FACTS)
 
 
 def test_the_footer_names_no_cli() -> None:

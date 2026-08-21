@@ -301,3 +301,40 @@ def test_wiki_lanes_matches_the_schema_and_module_source_of_truth() -> None:
     # "proposals" is the one genuinely fixed convention with no other module
     # constant to check against, matching the module's own docstring rationale.
     assert "proposals" in WIKI_LANES
+
+
+# --- the stranded-wikilink count (2026-08-21 spec §4.4) ---------------------
+
+_CITING = """---
+title: Citing
+description: d
+---
+
+## Summary
+See [[tutorials/foo]] for the rest.
+"""
+
+_QUIET = """---
+title: Citing
+description: d
+---
+
+## Summary
+Nothing points anywhere.
+"""
+
+
+def test_a_wikilink_only_vault_and_a_quiet_vault_produce_different_plans(tmp_path):
+    """The item's done-when, as a test: the count is what tells the two apart."""
+    loud = _build(tmp_path / "loud", {"tutorials/foo": _PAGE.format(title="Foo"), "reference/citing": _CITING})
+    quiet = _build(tmp_path / "quiet", {"tutorials/foo": _PAGE.format(title="Foo"), "reference/citing": _QUIET})
+
+    loud_plan = plan_archive(loud, ["tutorials/foo"])
+    quiet_plan = plan_archive(quiet, ["tutorials/foo"])
+
+    assert loud_plan.ok and quiet_plan.ok  # never a reason a plan is not ok
+    assert [entry.target for entry in loud_plan.moves.stranded] == ["tutorials/foo.md"]
+    assert quiet_plan.moves.stranded == ()
+    assert loud_plan.diff() != quiet_plan.diff()
+    assert "1 inbound [[wikilink]]" in loud_plan.diff()
+    assert "inbound [[wikilink]]" not in quiet_plan.diff()

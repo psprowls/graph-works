@@ -168,23 +168,62 @@ def commits_touching(repo: Path, commit_range: str, paths: Sequence[Path | str])
     return tuple(rows)
 
 
-def results_facts(repo: Path, *, phase: str, start_sha: str) -> ResultsFacts | None:
-    """The facts a results stub renders from, gathered over `start_sha..HEAD`.
+def results_facts(
+    repo: Path,
+    *,
+    phase: str,
+    start_sha: str,
+    paths: Sequence[Path | str],
+    opened: str,
+) -> ResultsFacts | None:
+    """The facts a results stub renders from, gathered over `start_sha..HEAD`,
+    scoped to *paths*.
+
+    An empty *paths* returns `None` -- no stub -- matching `commits_touching`'s
+    own contract just above: we cannot attribute an item with no declared
+    surface, and an unscoped page is worse than an absent one.
 
     Rendering and writing stay in `work_tracker_okf.results` -- that module
     declines git by name (`ResultsFacts` takes its facts, it never gathers
     them), and this is the gatherer it declined.
     """
+    if not paths:
+        return None
     end_sha = head_sha(repo)
     if end_sha is None:
         return None
-    diff = run_git(repo, "diff", "--name-status", f"{start_sha}..{end_sha}")
-    log = run_git(repo, "log", "--oneline", f"{start_sha}..{end_sha}")
+    scope = tuple(str(path) for path in paths)
+    diff = run_git(repo, "diff", "--name-status", f"{start_sha}..{end_sha}", "--", *scope)
+    log = run_git(repo, "log", "--oneline", f"{start_sha}..{end_sha}", "--", *scope)
     if diff is None or log is None:
         return None
     files = tuple(line.split("\t")[-1] for line in diff.splitlines() if line.strip())
     commits = tuple(line for line in log.splitlines() if line.strip())
-    return ResultsFacts(phase=phase, start_sha=start_sha, end_sha=end_sha, files=files, commits=commits)
+    return ResultsFacts(
+        phase=phase,
+        start_sha=start_sha,
+        end_sha=end_sha,
+        files=files,
+        commits=commits,
+        scope=scope,
+        start_predates_item=_start_predates_opened(repo, start_sha, opened),
+    )
+
+
+def _start_predates_opened(repo: Path, start_sha: str, opened: str) -> bool:
+    """Whether *start_sha*'s committer date is earlier than *opened*.
+
+    Best-effort like every other call in this module: a failed `git show`
+    degrades to `False` rather than making the range look wrong when we
+    simply couldn't check. String comparison, not a datetime parse: both
+    sides are ISO 8601 date-prefixed, which sorts correctly as text, and it
+    keeps this a value comparison rather than a clock read.
+    """
+    out = run_git(repo, "show", "-s", "--format=%cI", start_sha)
+    committer_date = (out or "").strip()
+    if not committer_date:
+        return False
+    return committer_date[:10] < opened
 
 
 def write_active_work(layout: WorkspaceLayout, slug: str, phase: str, *, updated: str) -> Path | None:

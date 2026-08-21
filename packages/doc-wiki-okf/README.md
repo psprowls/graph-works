@@ -228,7 +228,9 @@ is skipped, so a re-run is an empty plan rather than an error.
 The sequence is **rewrite, reload, move**: each old-dialect document is
 rewritten in place first (frontmatter only, body carried verbatim), the
 bundle is reloaded, and only then is each rewritten document relocated by
-`okf_ext.moves`, which repairs every inbound reference on the way. Refusals
+`okf_ext.moves`, which repairs every inbound **OKF markdown** reference on the
+way -- `[[wikilink]]` forms are not an OKF link form and are never rewritten;
+`render.wikilink-target` reports them at lint time instead. Refusals
 are all-or-nothing per document -- one unusable `kind`, `status` or
 `target_slug` declines that proposal and its neighbours still migrate.
 

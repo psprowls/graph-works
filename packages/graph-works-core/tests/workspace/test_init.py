@@ -8,6 +8,7 @@ import code_wiki_okf.init
 import doc_wiki_okf.init
 import pytest
 import work_tracker_okf.init
+from graph_works_core.workspace.discovery import resolve
 from graph_works_core.workspace.errors import InitError
 from graph_works_core.workspace.init import INSTALLERS, apply_init, plan_init
 
@@ -297,6 +298,27 @@ def test_a_plan_over_a_customized_workspace_previews_that_workspace(tmp_path):
     apply_init(plan_init(root, today=TODAY))
     assert (root / "wiki" / "index.md").is_file()
     assert not (root / "okf").exists()
+
+
+def test_a_repositories_path_override_is_seeded_where_discovery_reads_it(tmp_path):
+    """Init must honor the fifth layout override, not just the other four.
+
+    `discovery.resolve` passes `repositories_path` through to `layout_for`;
+    an init that defaulted it would seed `_gw/_repositories.yaml` while every
+    reader looked at the override, and `repos.resolve_repo` would then report
+    a workspace that declares no code repository.
+    """
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(
+        "version: 1\nlayout:\n  repositories_path: elsewhere/_repositories.yaml\n", encoding="utf-8"
+    )
+    result = apply_init(plan_init(root, today=TODAY))
+
+    assert result.layout.repositories_path == root.resolve() / "elsewhere" / "_repositories.yaml"
+    assert (root / "elsewhere" / "_repositories.yaml").is_file()
+    assert not (root / "_gw" / "_repositories.yaml").exists()
+    assert resolve(workspace=root).repositories_path == result.layout.repositories_path
 
 
 # --- the seeded relay tail --------------------------------------------------

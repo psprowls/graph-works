@@ -33,7 +33,7 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from okf_ext import moves
-from okf_ext.moves import MovePlan, MoveResult, Refusal
+from okf_ext.moves import MovePlan, MoveResult, Refusal, stranded_summary
 from okf_ext.proposals import list_proposals
 from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
 from okf_ext.shape import DEFAULT_IGNORE as _SECTIONS_IGNORE
@@ -127,6 +127,8 @@ class ArchivePlan:
             lines.append(f"  {move.source} -> {move.dest}")
         for edit in self.moves.edits:
             lines.append(f"  ~ {edit.member}: {edit.old} -> {edit.new}")
+        if self.moves.stranded:
+            lines.append(stranded_summary(self.moves.stranded))
         return "\n".join(lines)
 
 

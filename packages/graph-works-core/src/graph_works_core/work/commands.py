@@ -260,6 +260,9 @@ def run_next(
 
     Dry-run is the default. An `effort=` override is not exposed here or by the
     standalone CLI.
+
+    The single write is the design-spec pointer repair and nothing else;
+    `test_run_next.py`'s confinement tests pin that.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)

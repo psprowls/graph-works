@@ -9,7 +9,7 @@ from graph_works_core.workspace.errors import InitError, WorkspaceError, Workspa
 
 
 def test_version_is_static_and_matches_the_distribution():
-    assert graph_works_core.__version__ == "0.2.2"
+    assert graph_works_core.__version__ == "0.3.1"
 
 
 def test_all_is_sorted_and_every_name_is_bound():

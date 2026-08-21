@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-works-core"
-version = "0.2.2"
+version = "0.3.1"
 description = "What a workspace is: discovery, the layout object, the manifest, and init."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -30,11 +30,11 @@ requires-python = ">=3.12"
 # catalog names.
 dependencies = [
   "okf-io>=0.2,<0.3",
-  "okf-ext[schemas]>=0.4.8,<0.5",
-  "code-wiki-okf>=0.3,<0.4",
-  "doc-wiki-okf>=0.3,<0.4",
-  "code-graph-io>=0.1.1,<0.2",
-  "work-tracker-okf>=0.2,<0.3",
+  "okf-ext[schemas]>=0.4.10,<0.5",
+  "code-wiki-okf>=0.4,<0.5",
+  "doc-wiki-okf>=0.3.2,<0.4",
+  "code-graph-io>=0.2,<0.3",
+  "work-tracker-okf>=0.3.1,<0.4",
   "config-io>=0.1,<0.2",
   "langchain-core>=1.4",
   "subagents-io>=0.2,<0.3",

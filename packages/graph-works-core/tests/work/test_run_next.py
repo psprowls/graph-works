@@ -337,3 +337,41 @@ def test_dependency_vocabulary_is_reachable_through_the_command_module(tmp_path)
     parsed = work.parse_dependencies([{"slug": "s", "blocks": "nope"}])
     assert [issue.code for issue in parsed.issues] == ["invalid-blocks"]
     assert parsed.edges == (work.DependencyEdge("s", "nope", "resolved"),)
+
+
+def test_apply_touches_only_the_sources_key_of_the_item_it_names(tmp_path) -> None:
+    layout = gated_epic_with_leaf_specs(tmp_path)
+    epic_before = item_bytes(layout, EPIC)
+    child_page = layout.bundle_dir / "work" / f"{CHILD}.md"
+    before = load(child_page).fm_data()
+
+    result = work.run_next(layout, CHILD, dry_run=False)
+    assert result.application.normalized == (CHILD,)
+
+    after = load(child_page).fm_data()
+    assert set(after) - set(before) == {"sources"}
+    assert {k: v for k, v in after.items() if k != "sources"} == before
+    assert item_bytes(layout, EPIC) == epic_before
+
+
+def test_apply_never_stamps_a_plan_pointer(tmp_path) -> None:
+    layout = workspace_with_unstamped_canonical_spec(tmp_path, CHILD)
+    _write_item(layout, CHILD, phase="plan")
+    plan = layout.bundle_dir / "work" / CHILD / "references/02-plan-plan.md"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    plan.write_text("# Plan\n", encoding="utf-8")
+
+    work.run_next(layout, CHILD, dry_run=False)
+
+    sources = load(layout.bundle_dir / "work" / f"{CHILD}.md").fm_data()["sources"]
+    assert [entry["id"] for entry in sources] == ["design-spec"]
+
+
+def test_dry_run_writes_nothing_anywhere_in_the_bundle(tmp_path) -> None:
+    layout = gated_epic_with_leaf_specs(tmp_path)
+    snapshot = {p: p.read_bytes() for p in sorted(layout.bundle_dir.rglob("*")) if p.is_file()}
+
+    result = work.run_next(layout, EPIC, descend=True)
+    assert [change.slug for change in result.normalizations] == [EPIC, CHILD]
+
+    assert {p: p.read_bytes() for p in sorted(layout.bundle_dir.rglob("*")) if p.is_file()} == snapshot

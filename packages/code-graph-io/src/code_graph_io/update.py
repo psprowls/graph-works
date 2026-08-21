@@ -244,6 +244,7 @@ def _update_one_repo(
             global_workspace=global_workspace,
             deferred_cross_repo=deferred,
             deferred_repo_deps=deferred_repo_deps,
+            ignore=ignore,
         )
         builtins.refresh(conn, repo_root=repo_root, graph_dir=graph_dir, ctx=ctx)
         # Resolve file-import edges to real file nodes BEFORE the full-mode cleanup
@@ -388,10 +389,15 @@ def run_workspace(
                     file=sys.stderr,
                 )
                 full = True
-            global_workspace = packages.build_workspace_index(members)
+            # Compiled once and shared: `build_workspace_index` must apply the
+            # same per-member scope the member's own build does, or the
+            # cross-repo index would resolve dependencies against manifests
+            # that member's graph never admits.
+            specs = [_ignore.compile_ignore(patterns) for patterns in member_ignore]
+            global_workspace = packages.build_workspace_index(members, specs)
             deferred: list[packages.CrossRepoLink] = []
             with store.transaction(conn):
-                for repo_root, patterns in zip(members, member_ignore, strict=True):
+                for repo_root, spec in zip(members, specs, strict=True):
                     _update_one_repo(
                         conn,
                         repo_root,
@@ -399,7 +405,7 @@ def run_workspace(
                         full=full,
                         global_workspace=global_workspace,
                         deferred=deferred,
-                        ignore=_ignore.compile_ignore(patterns),
+                        ignore=spec,
                     )
                 packages.link_cross_repo_packages(conn, deferred)
                 resolve.sweep(conn)

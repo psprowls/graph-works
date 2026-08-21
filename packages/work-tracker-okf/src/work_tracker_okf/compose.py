@@ -27,6 +27,8 @@ from types import MappingProxyType
 from typing import Literal
 
 from okf_ext.logs import append_entry, atomic_replace, locked_log
+from okf_ext.placement import placement_rule
+from okf_ext.render import render_rule
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionSet, load_sections
@@ -48,7 +50,7 @@ from work_tracker_okf.advance import AdvancePlan, advance
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, _materialize_frontmatter, plan_filing
 from work_tracker_okf.filing import apply as apply_filing
-from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items
+from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items, placement_directories
 from work_tracker_okf.paths import ArtifactRef, artifact_path
 from work_tracker_okf.rules import PLAN_TABLE_SPEC, lane_rules
 from work_tracker_okf.sources import upsert
@@ -95,6 +97,25 @@ def rule_set(
     defaults to `warn`, and the fixture test records why it is overridden: a
     gate a malformed section can pass is not a gate.
 
+    **`render_rule()` stays at its `warn` default.** Before this, no rule in
+    this set ever walked a work item for `[[wikilink]]` syntax at all --
+    `render_rule` was wired into the wiki lane only. `render.wikilink-target`
+    is a WARN by design (broken links are warn, never error; see
+    ADR-0004) and must not be raised to error here: this vault currently
+    trips it hundreds of times over, and `gw work advance`'s exit code must
+    stay unaffected.
+
+    **`placement_rule` is raised to `error` too, and takes no `depth` map.**
+    All six types declare `work/`, so a plain prefix comparison passes both
+    `work/<slug>.md` and `work/_archive/<slug>.md`; `depth="exact"` would flag
+    every archived item, whose remainder still carries a `/`. The severity is
+    the same argument the two house rules already make, in this lane's terms: a
+    work page outside `work/` is invisible to `load_items`, so it gets no
+    routing, no rollup, no archive eligibility, and every lane rule silently
+    skips it. It is not merely unexpected, it is unreachable. The map is
+    `items.placement_directories`, narrowed to this lane's own types -- see
+    there for why an allow-list.
+
     **`repo_root` stays optional and skips rather than reports.** Omitting it
     drops `targets.affects-missing` and `plan.action-target-missing`, because
     not knowing where the repo is says nothing about whether the paths are
@@ -107,9 +128,12 @@ def rule_set(
     exit 1 with the message.
     """
     declarations = root if declarations_dir is None else declarations_dir
+    schema_set = load_schemas(declarations / "_schema")
     return (
-        schema_rule(load_schemas(declarations / "_schema"), severity="error"),
+        schema_rule(schema_set, severity="error"),
         section_rule(load_sections(declarations / "_sections"), severity="error"),
+        render_rule(),
+        placement_rule(placement_directories(schema_set), severity="error"),
         *lane_rules(repo_root=repo_root),
     )
 
@@ -378,11 +402,11 @@ def _planned_document(filing: FilingPlan) -> Document:
     return document
 
 
-def _unchanged_work_index(bundle: Bundle) -> IndexUpdate:
-    document = bundle.indexes.get(WORK_DIR)
+def _unchanged_work_index(bundle: Bundle, lane: str = WORK_DIR) -> IndexUpdate:
+    document = bundle.indexes.get(lane)
     before = "" if document is None else document.raw_text
     return IndexUpdate(
-        path=f"{WORK_DIR}/index.md",
+        path=f"{lane}/index.md",
         before=before,
         after=before,
         changes=(),
@@ -396,14 +420,24 @@ def plan_file_and_reconcile(
     items: Sequence[WorkItem],
     seed: FilingSeed,
     section_set: SectionSet,
+    *,
+    lane_dir: str | None = None,
 ) -> FilingOutcome:
-    """Plan the page, lane index, and root log without writing any of them."""
-    filing = plan_filing(bundle.root, items, seed, section_set)
+    """Plan the page, lane index, and root log without writing any of them.
+
+    *lane_dir* is `plan_filing`'s, passed through, and it also names the index
+    reconciled here: the lane index belongs beside the pages it lists, so a
+    page filed somewhere else would otherwise be added to an index it does not
+    live under. `None` keeps `WORK_DIR` on both, which is every caller holding
+    no `SchemaSet`.
+    """
+    lane = WORK_DIR if lane_dir is None else lane_dir
+    filing = plan_filing(bundle.root, items, seed, section_set, lane_dir=lane_dir)
     if filing.refusal is not None:
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                index=_unchanged_work_index(bundle),
+                index=_unchanged_work_index(bundle, lane),
                 log=None,
                 refusal=filing.refusal,
                 warnings=filing.warnings,
@@ -419,7 +453,7 @@ def plan_file_and_reconcile(
     try:
         (index,) = update_index(
             synthetic,
-            directories=[WORK_DIR],
+            directories=[lane],
             create_missing=True,
             dry_run=True,
         )
@@ -427,7 +461,7 @@ def plan_file_and_reconcile(
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                index=_unchanged_work_index(bundle),
+                index=_unchanged_work_index(bundle, lane),
                 log=None,
                 refusal="index-refused",
                 warnings=(*filing.warnings, str(exc)),
@@ -474,12 +508,19 @@ def plan_file_and_reconcile(
 
 
 def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
-    """Apply a fully preflighted filing composition."""
+    """Apply a fully preflighted filing composition.
+
+    The lane comes off `plan.filing.target` rather than from a second argument
+    -- `<root>/<lane>/<slug>.md`, the same two segments `root` has always been
+    derived from, so the index written here is the one `plan_file_and_reconcile`
+    planned even when the declaration moved the page.
+    """
     if plan.refusal is not None:
         return FilingApplication()
 
     application = FilingApplication()
     root = plan.filing.target.parent.parent
+    lane = plan.filing.target.parent.name
     try:
         if plan.filing.target.exists():
             raise FileExistsError(f"{plan.filing.target}: a page already exists here")
@@ -491,7 +532,7 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
 
         indexes = update_index(
             load_bundle(root, ignore=IGNORE),
-            directories=[WORK_DIR],
+            directories=[lane],
             create_missing=True,
             dry_run=False,
         )

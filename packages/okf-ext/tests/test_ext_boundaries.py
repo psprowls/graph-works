@@ -400,7 +400,7 @@ def test_the_documented_schemas_surface_is_present() -> None:
 
 
 def test_the_documented_render_surface_is_present() -> None:
-    """Spec §3 and §6.3 of the render work item: one factory, one helper, four codes."""
+    """Spec §3 and §6.3 of the render work item: one factory, one helper, five codes."""
     from okf_ext import render
 
     assert callable(render.render_rule)
@@ -410,6 +410,7 @@ def test_the_documented_render_surface_is_present() -> None:
         "render.angle-bracket",
         "render.callout",
         "render.wikilink",
+        "render.wikilink-target",
         "render.table-pipe",
     )
 

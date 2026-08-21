@@ -7,7 +7,7 @@ def test_version() -> None:
     two defaulted fields and a property, so no existing caller's construction
     or reads changed. `0.2.2` adds `*/.DS_Store` to `IGNORE` -- and pointedly
     not to `ARCHIVE_IGNORE`. Both additive, so both patches (ADR-0007)."""
-    assert work_tracker_okf.__version__ == "0.2.2"
+    assert work_tracker_okf.__version__ == "0.3.1"
 
 
 def test_dependencies_are_exactly_the_three_the_spec_allows() -> None:

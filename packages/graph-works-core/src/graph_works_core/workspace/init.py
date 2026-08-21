@@ -352,6 +352,7 @@ def plan_init(
         config_dir=manifest.config_dir,
         cache_dir=manifest.cache_dir,
         worktrees_dir=manifest.worktrees_dir,
+        repositories_path=manifest.repositories_path,
         repo_root=repo_root if repo_root is not None else find_repo_root(root),
     )
 

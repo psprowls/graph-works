@@ -403,3 +403,26 @@ def test_the_round_trip_reports_a_refused_move_plan_without_raising(tmp_path) ->
     assert outcome.move.moved == ()
     assert (root / "proposals" / "one.md").is_file()
     assert (root / "proposals" / "two.md").is_file()
+
+
+# --- the stranded count in preview (2026-08-21 spec D-4, §4.4) --------------
+
+
+def test_plan_migrate_populates_stranded_without_building_a_move_plan(tmp_path) -> None:
+    """`migrate` previews by default and only builds a `MovePlan` under
+    `--apply`. Under a plan-only fix the default invocation would stay silent,
+    which is the silence this item exists to remove."""
+    citing = (
+        "---\ntype: Reference\ntitle: Citing\ndescription: d\n---\n\n"
+        "## Summary\n\nSee [[proposals/adr-bulk]] for the rest.\n"
+    )
+    plan = _plan(tmp_path, {"proposals/adr-bulk": OLD, "reference/citing": citing})
+
+    assert plan.writes  # there is something to migrate
+    assert [entry.member for entry in plan.stranded] == ["reference/citing.md"]
+    assert plan.ok  # never a reason a plan is not ok
+
+
+def test_a_quiet_vault_strands_nothing(tmp_path) -> None:
+    plan = _plan(tmp_path, {"proposals/adr-bulk": OLD})
+    assert plan.stranded == ()

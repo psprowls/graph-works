@@ -17,7 +17,7 @@ from pathlib import PurePosixPath
 from types import MappingProxyType
 from typing import Literal
 
-from okf_ext.moves import MovePlan, MoveResult, WriteFailure, plan_move
+from okf_ext.moves import MovePlan, MoveResult, WriteFailure, plan_move, stranded_summary
 from okf_ext.moves import apply as apply_move
 from okf_ext.schemas import SchemaSet
 from okf_io import Bundle
@@ -64,11 +64,17 @@ class RetypePlan:
         if not self.move.ok:
             first_move = self.move.refusals[0]
             return f"{self.concept_id}: move refused ({first_move.kind}) -- {first_move.detail}"
-        return (
-            f"{self.concept_id}.md -> {self.dest}\n"
-            f"  type: {self.from_type} -> {self.to_type}\n"
-            f"  references repaired: {len(self.move.edits)}"
-        )
+        lines = [
+            f"{self.concept_id}.md -> {self.dest}",
+            f"  type: {self.from_type} -> {self.to_type}",
+            # Qualified: this counts OKF markdown edits. `[[wikilink]]` forms
+            # are not an OKF link form and are never rewritten -- the line
+            # below is where they are accounted for instead.
+            f"  OKF markdown references repaired: {len(self.move.edits)}",
+        ]
+        if self.move.stranded:
+            lines.append(stranded_summary(self.move.stranded))
+        return "\n".join(lines)
 
 
 @dataclass(frozen=True, slots=True)

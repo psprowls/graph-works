@@ -359,3 +359,133 @@ def test_a_wikilink_is_left_exactly_as_written(conformant_root: Path) -> None:
     assert _archive(conformant_root, [_SPIKE]).ok
     moved = (conformant_root / "work" / "_archive" / f"{_SPIKE}.md").read_text(encoding="utf-8")
     assert f"[[work/{_FEATURE}]]" in moved
+
+
+# --- Stranded wikilinks (design spec §6.4) -----------------------------------
+
+
+def test_a_wikilink_into_the_moved_set_is_reported_as_stranded(conformant_root: Path) -> None:
+    """The archive-time count: a wikilink pointing at a moving member is not
+    repaired (D-1), and is not silent about it either -- unlike the markdown
+    link one directory over, which `moves` does repair."""
+    make_terminal(conformant_root, _FEATURE)
+    page = conformant_root / "work" / f"{_SPIKE}.md"
+    original = page.read_text(encoding="utf-8")
+    page.write_text(original + f"\nSee [[work/{_FEATURE}]] for the writer.\n", encoding="utf-8")
+    added_line = original.count("\n") + 2  # frontmatter/body line the new sentence lands on
+
+    plan = archive.plan_archive(_archive_bundle(conformant_root), slugs=[_FEATURE])
+    assert plan.ok  # stranded references never make a plan not-`ok` (D-3)
+    assert [(s.member, s.target) for s in plan.stranded] == [
+        (f"work/{_SPIKE}.md", f"work/{_FEATURE}.md"),
+    ]
+    assert plan.stranded[0].line == added_line
+    rendered = plan.diff()
+    assert "1 inbound [[wikilink]]" in rendered
+
+    result = archive.apply_archive(_archive_bundle(conformant_root), plan)
+    assert result.ok
+    assert result.stranded == plan.stranded
+
+
+def test_a_markdown_reference_into_the_moved_set_is_not_stranded(conformant_root: Path) -> None:
+    """A markdown link is exactly what `moves` repairs -- `plan.stranded` names
+    only the link form nothing here can rewrite."""
+    make_terminal(conformant_root, _FEATURE)
+    plan = archive.plan_archive(_archive_bundle(conformant_root), slugs=[_FEATURE])
+    assert plan.stranded == ()
+
+
+def test_a_malformed_wikilink_among_referrers_is_not_stranded(conformant_root: Path) -> None:
+    """`target is None` (unbalanced/empty) has nothing to resolve -- that is
+    `render.wikilink`'s concern, not the archive-time count's."""
+    make_terminal(conformant_root, _FEATURE)
+    page = conformant_root / "work" / f"{_SPIKE}.md"
+    page.write_text(page.read_text(encoding="utf-8") + "\nSee [[dangling for more.\n", encoding="utf-8")
+    plan = archive.plan_archive(_archive_bundle(conformant_root), slugs=[_FEATURE])
+    assert plan.stranded == ()
+
+
+def test_a_parse_error_document_among_referrers_is_skipped_not_scanned(conformant_root: Path) -> None:
+    """A document that failed to parse has no usable `body` to scan -- the same
+    posture `render`'s own rule takes for a parse-error member."""
+    make_terminal(conformant_root, _FEATURE)
+    (conformant_root / "sources").mkdir(exist_ok=True)
+    (conformant_root / "sources" / "broken.md").write_text("---\nunterminated: [", encoding="utf-8")
+    plan = archive.plan_archive(_archive_bundle(conformant_root), slugs=[_FEATURE])
+    assert plan.stranded == ()
+
+
+def test_all_four_wikilink_forms_are_stranded_and_the_markdown_link_is_repaired(
+    conformant_root: Path,
+) -> None:
+    """Design spec §2/§6.6's own done-when, as a test: a referrer citing the
+    moving item as a markdown link plus all four wikilink forms -- plain,
+    anchored, aliased, embed. The markdown link repairs; all four wikilinks
+    are `stranded`, none rewritten."""
+    make_terminal(conformant_root, _FEATURE)
+    page = conformant_root / "work" / f"{_SPIKE}.md"
+    original = page.read_text(encoding="utf-8")
+    page.write_text(
+        original
+        + f"\n[Gamma]({_FEATURE}.md)\n"
+        + f"[[work/{_FEATURE}]]\n"
+        + f"[[work/{_FEATURE}#section]]\n"
+        + f"[[work/{_FEATURE}|Gamma]]\n"
+        + f"![[work/{_FEATURE}]]\n",
+        encoding="utf-8",
+    )
+
+    plan = archive.plan_archive(_archive_bundle(conformant_root), slugs=[_FEATURE])
+    assert plan.ok
+    assert len(plan.stranded) == 4
+    assert {s.member for s in plan.stranded} == {f"work/{_SPIKE}.md"}
+    assert {s.target for s in plan.stranded} == {f"work/{_FEATURE}.md"}
+    assert sorted(s.line for s in plan.stranded) == list(range(original.count("\n") + 3, original.count("\n") + 7))
+
+    result = archive.apply_archive(_archive_bundle(conformant_root), plan)
+    assert result.ok
+    # `_SPIKE` itself never moved (only `_FEATURE` did); its page still sits at
+    # `work/`, and this is exactly where the four stranded wikilinks live on.
+    referrer = (conformant_root / "work" / f"{_SPIKE}.md").read_text(encoding="utf-8")
+    # The four wikilinks: left exactly as written, none rewritten (D-1).
+    assert f"[[work/{_FEATURE}]]" in referrer
+    assert f"[[work/{_FEATURE}#section]]" in referrer
+    assert f"[[work/{_FEATURE}|Gamma]]" in referrer
+    assert f"![[work/{_FEATURE}]]" in referrer
+    # The markdown link: repointed at the moved member's new home.
+    assert f"[Gamma](_archive/{_FEATURE}.md)" in referrer
+    graph = build_link_graph(load_bundle(conformant_root, ignore=IGNORE))
+    assert [link.raw for link in graph.broken if link.source == f"work/{_SPIKE}"] == []
+
+
+def test_a_no_op_plan_reports_no_stranded_references(conformant_root: Path) -> None:
+    plan = archive.plan_archive(_archive_bundle(conformant_root), slugs=[_OPEN_BUG])
+    assert plan.stranded == ()
+
+
+def test_a_wikilink_only_vault_and_a_no_reference_vault_produce_different_plans(tmp_path: Path) -> None:
+    """§2's discrimination test, at the `ArchivePlan` level: before this fix a
+    wikilink-only referrer and no referrer at all produced byte-identical
+    plans. This is the item's done-when, expressed as a test."""
+    from work_helpers import CONFORMANT_ROOT
+
+    wikilinked = tmp_path / "wikilinked"
+    shutil.copytree(CONFORMANT_ROOT, wikilinked)
+    make_terminal(wikilinked, _FEATURE)
+    page = wikilinked / "work" / f"{_SPIKE}.md"
+    page.write_text(
+        page.read_text(encoding="utf-8") + f"\nSee [[work/{_FEATURE}]] for the writer.\n",
+        encoding="utf-8",
+    )
+
+    unreferenced = tmp_path / "unreferenced"
+    shutil.copytree(CONFORMANT_ROOT, unreferenced)
+    make_terminal(unreferenced, _FEATURE)
+
+    with_wikilink = archive.plan_archive(_archive_bundle(wikilinked), slugs=[_FEATURE])
+    with_nothing = archive.plan_archive(_archive_bundle(unreferenced), slugs=[_FEATURE])
+
+    assert with_wikilink.stranded != with_nothing.stranded
+    assert with_wikilink.stranded != ()
+    assert with_nothing.stranded == ()

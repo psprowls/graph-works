@@ -13,9 +13,13 @@ caller cannot obtain a resource without the matching id** (C2-C). That is the se
 child 3 left open when it deleted `artifact_slot` on the promise that the
 destination is derivable from `on_complete.stamp_source` plus the in-flight phase.
 
-`WORK_DIR` and `ARCHIVE_DIR` are hardcoded from `items.py` rather than read out of
-the base schema's `x-okf-directory`: reading the schema at path-composition time
-would make a pure string function do file I/O.
+`WORK_DIR` and `ARCHIVE_DIR` from `items.py` are still what every composer resolves
+to by default, because reading the schema at path-composition time would make a
+pure string function do file I/O. A caller that already holds a `SchemaSet` --
+`cli.file`, and `compose.plan_file_and_reconcile` through it -- passes the
+directory its type declares as `lane_dir=`, so the bundle's own
+`x-okf-directory` is honoured wherever there is one to honour and this module
+still reads no files.
 """
 
 from __future__ import annotations
@@ -79,21 +83,34 @@ class ArtifactRef:
         return root / self.rel
 
 
-def _lane_dir(archived: bool) -> str:
-    return ARCHIVE_DIR if archived else WORK_DIR
+def _lane_dir(archived: bool, lane_dir: str | None = None) -> str:
+    """The directory an item's artifacts hang off, active or archived.
+
+    *lane_dir* is the bundle's own declaration for the item's type, already
+    read out of `x-okf-directory` and stripped of its trailing slash by the
+    caller that holds the `SchemaSet`. `None` -- every call site that holds no
+    schema -- resolves to the hardcoded pair, which is what keeps this module a
+    pure-string one and leaves the reader's constants in force.
+
+    `_archive` stays a literal in both branches: nothing declares
+    `work/_archive/`, so there is no annotation to read for the other half.
+    """
+    if lane_dir is None:
+        return ARCHIVE_DIR if archived else WORK_DIR
+    return f"{lane_dir}/_archive" if archived else lane_dir
 
 
-def item_page(slug: str, *, archived: bool = False) -> ArtifactRef:
+def item_page(slug: str, *, archived: bool = False, lane_dir: str | None = None) -> ArtifactRef:
     """`work/<slug>.md`, or its archived twin."""
-    return ArtifactRef(rel=f"{_lane_dir(archived)}/{slug}.md")
+    return ArtifactRef(rel=f"{_lane_dir(archived, lane_dir)}/{slug}.md")
 
 
-def references_dir(slug: str, *, archived: bool = False) -> ArtifactRef:
+def references_dir(slug: str, *, archived: bool = False, lane_dir: str | None = None) -> ArtifactRef:
     """`work/<slug>/references`, or its archived twin. No trailing slash."""
-    return ArtifactRef(rel=f"{_lane_dir(archived)}/{slug}/{REFERENCES_DIRNAME}")
+    return ArtifactRef(rel=f"{_lane_dir(archived, lane_dir)}/{slug}/{REFERENCES_DIRNAME}")
 
 
-def decisions_ledger(slug: str, *, archived: bool = False) -> ArtifactRef:
+def decisions_ledger(slug: str, *, archived: bool = False, lane_dir: str | None = None) -> ArtifactRef:
     """`work/<slug>/references/00-decisions.md`, or its archived twin.
 
     `source_id` stays `None`: the epic page does not stamp its ledger into
@@ -106,7 +123,7 @@ def decisions_ledger(slug: str, *, archived: bool = False) -> ArtifactRef:
     only purpose is to reach `00` is exactly the mistake `work-io`'s deleted
     `open: "00"` entry was.
     """
-    return ArtifactRef(rel=f"{references_dir(slug, archived=archived).rel}/{LEDGER_FILENAME}")
+    return ArtifactRef(rel=f"{references_dir(slug, archived=archived, lane_dir=lane_dir).rel}/{LEDGER_FILENAME}")
 
 
 def source_id_for(phase: str, kind: str, suffix: str | None = None) -> str:
@@ -152,6 +169,7 @@ def artifact_path(
     suffix: str | None = None,
     ext: str = "md",
     archived: bool = False,
+    lane_dir: str | None = None,
 ) -> ArtifactRef:
     """`work/<slug>/references/<NN>-<phase>-<kind>[-<suffix>].<ext>`, with its id.
 
@@ -168,7 +186,10 @@ def artifact_path(
     if suffix:
         segments.append(suffix)
     filename = f"{'-'.join(segments)}.{ext}"
-    return ArtifactRef(rel=f"{references_dir(slug, archived=archived).rel}/{filename}", source_id=source_id)
+    return ArtifactRef(
+        rel=f"{references_dir(slug, archived=archived, lane_dir=lane_dir).rel}/{filename}",
+        source_id=source_id,
+    )
 
 
 __all__ = [

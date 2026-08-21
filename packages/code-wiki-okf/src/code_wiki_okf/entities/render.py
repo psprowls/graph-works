@@ -71,20 +71,28 @@ def render_package(desc: PackageDescription, *, repo_name: str) -> Render:
     )
 
 
-def _package_reference(name: str) -> str:
+def _package_reference(name: str, *, repo_name: str) -> str:
     """Plain markdown link to a sibling Package page, given ITS OWN name —
     this vault's cross-reference convention (markdown links, not
     wikilinks). An App is always faceted off a Package of the same `name`,
     so `render_app` passes `desc.name` straight through. An agent_plugin's
     own `name` comes from `plugin.json`, independent of any co-located
     manifest's name, so `render_agent_plugin` must pass the sibling
-    Package's OWN name (`desc.package_name`), not `desc.name`."""
-    return f"[{name}](/packages/{slug(name)}.md)"
+    Package's OWN name (`desc.package_name`), not `desc.name`.
+
+    *repo_name* is required because Package is a repo-scoped lane: the page
+    lives at `repositories/<repo>/packages/<slug>.md`, matching
+    `entities.pages.default_concept_id`. A facet always sits in the same
+    repository as the Package it is faceted off, so the caller's own
+    `repo_name` is the right one. Hardcoding the bundle-root `packages/`
+    here would dangle on every App and dual-facet AgentPlugin page.
+    """
+    return f"[{name}](/repositories/{repo_name}/packages/{slug(name)}.md)"
 
 
 def render_app(desc: AppDescription, *, repo_name: str) -> Render:
     return Render(
-        frontmatter={"package": _package_reference(desc.name)},
+        frontmatter={"package": _package_reference(desc.name, repo_name=repo_name)},
         sections={"Files": _files_section(desc.files, repo_name=repo_name)},
     )
 
@@ -140,10 +148,10 @@ def _mcp_server_line(c: dict[str, Any]) -> str:
     return f"- **{name}**: `{command}`" if command else f"- **{name}**"
 
 
-def render_agent_plugin(desc: AgentPluginDescription) -> Render:
+def render_agent_plugin(desc: AgentPluginDescription, *, repo_name: str) -> Render:
     frontmatter: dict[str, Any] = {"ecosystem": desc.ecosystem, "version": desc.version}
     if desc.package_name is not None:
-        frontmatter["package"] = _package_reference(desc.package_name)
+        frontmatter["package"] = _package_reference(desc.package_name, repo_name=repo_name)
     return Render(
         frontmatter=frontmatter,
         sections={

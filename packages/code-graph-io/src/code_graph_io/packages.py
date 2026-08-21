@@ -7,6 +7,7 @@ import re
 import sqlite3
 import sys
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
@@ -121,8 +122,20 @@ def _dependency_registry_url(ecosystem: str, name: str) -> str:
     raise ValueError(f"unsupported dependency ecosystem: {ecosystem!r}")
 
 
-def _should_skip(manifest_path: Path, repo_root: Path, skip_dirs: frozenset[str]) -> bool:
-    return bool(_ignore.should_skip(str(manifest_path), skip_dirs))
+def _should_skip(
+    manifest_path: Path, repo_root: Path, skip_dirs: frozenset[str], ignore: _ignore.IgnoreSpec | None = None
+) -> bool:
+    """Whether the manifest at *manifest_path* is out of scope for this repo.
+
+    Matched against the **repo-relative** path, not the absolute one: every
+    other caller of `should_skip` in this package passes a repo-relative
+    path, `IgnoreSpec` patterns are anchored at the repo root, and an
+    absolute path would also let a `DEFAULT_SKIP_DIRS` name anywhere in the
+    checkout's *parent* directories (`/Users/x/build/repo/...`) skip the
+    whole tree.
+    """
+    rel = manifest_path.relative_to(repo_root).as_posix()
+    return bool(_ignore.should_skip(rel, skip_dirs, ignore))
 
 
 def _read_pyproject(path: Path) -> dict[str, Any] | None:
@@ -216,16 +229,18 @@ def _read_package_json(path: Path) -> dict[str, Any] | None:
     }
 
 
-def _discover_manifests(repo_root: Path, skip_dirs: frozenset[str]) -> list[tuple[Path, dict[str, Any]]]:
+def _discover_manifests(
+    repo_root: Path, skip_dirs: frozenset[str], ignore: _ignore.IgnoreSpec | None = None
+) -> list[tuple[Path, dict[str, Any]]]:
     found: list[tuple[Path, dict[str, Any]]] = []
     for manifest_path in repo_root.rglob("pyproject.toml"):
-        if _should_skip(manifest_path, repo_root, skip_dirs):
+        if _should_skip(manifest_path, repo_root, skip_dirs, ignore):
             continue
         info = _read_pyproject(manifest_path)
         if info:
             found.append((manifest_path.parent, info))
     for manifest_path in repo_root.rglob("package.json"):
-        if _should_skip(manifest_path, repo_root, skip_dirs):
+        if _should_skip(manifest_path, repo_root, skip_dirs, ignore):
             continue
         info = _read_package_json(manifest_path)
         if info:
@@ -276,21 +291,31 @@ def _dominant_language(conn: sqlite3.Connection, paths: list[str], current_repo:
     return ranked[0][0]
 
 
-def build_workspace_index(members: list[Path]) -> dict[str, tuple[str, str, str, str]]:
+def build_workspace_index(
+    members: list[Path], member_ignore: Sequence[_ignore.IgnoreSpec | None] | None = None
+) -> dict[str, tuple[str, str, str, str]]:
     """Union package index across member repos for cross-repo dep resolution.
 
     Maps normalized package name -> (stored_kind, real_name, rel_path, repo_uri),
     rel_path relative to the package's OWN member repo root.
+
+    `member_ignore` is index-aligned with *members* and applies each member's
+    own `ignore:` patterns to its manifest walk, so an ignored manifest is
+    absent from the cross-repo index for the same reason it is absent from
+    that member's own graph. Omitted or `None` keeps the
+    `DEFAULT_SKIP_DIRS`-only behavior for every member.
     """
     from code_graph_io.repo_context import repo_context
 
     index: dict[str, tuple[str, str, str, str]] = {}
-    for member in members:
+    specs: list[_ignore.IgnoreSpec | None] = list(member_ignore or ())
+    specs += [None] * (len(members) - len(specs))
+    for member, spec in zip(members, specs, strict=True):
         member = Path(member).resolve()
         ctx = repo_context(member)
         ruri = repo_uri(ctx)
         skip_dirs = _ignore.DEFAULT_SKIP_DIRS
-        for pkg_dir, info in _discover_manifests(member, skip_dirs):
+        for pkg_dir, info in _discover_manifests(member, skip_dirs, spec):
             if info.get("virtual"):
                 continue
             rel = pkg_dir.resolve().relative_to(member).as_posix()
@@ -309,6 +334,7 @@ def refresh(
     global_workspace: dict[str, tuple[str, str, str, str]] | None = None,
     deferred_cross_repo: list[CrossRepoLink] | None = None,
     deferred_repo_deps: list[RepositoryDepLink] | None = None,
+    ignore: _ignore.IgnoreSpec | None = None,
 ) -> None:
     """Rescan manifests under `repo_root` and upsert kind:package nodes + contains edges.
 
@@ -321,10 +347,16 @@ def refresh(
     create additional `contains` edges, so a file inside a sub-package will
     have edges from BOTH the sub-package and the root package. Query callers
     that want a single owner should pick longest-prefix-wins.
+
+    `ignore` is this member's compiled `ignore:` patterns. A manifest under
+    an ignored path yields no Package node at all — without this the file
+    walk would drop a vendored/fixture tree's files while its
+    `pyproject.toml` still produced a Package node, and one entity page per
+    fixture package with it.
     """
     repo_root = Path(repo_root).resolve()
     skip_dirs = _ignore.DEFAULT_SKIP_DIRS
-    manifests = _discover_manifests(repo_root, skip_dirs)
+    manifests = _discover_manifests(repo_root, skip_dirs, ignore)
 
     # build the workspace-package-name set + a normalized-name ->
     # (stored_kind, rel_path) map ONCE, before any dep accumulation, from the

@@ -161,3 +161,20 @@ def test_the_refusal_corpus_carries_one_parse_error():
 def test_the_documented_surface_is_importable():
     for name in moves.__all__:
         assert hasattr(moves, name)
+
+
+def test_stranded_references_do_not_change_ok_or_is_empty():
+    """A stranded reference is a fact about what the planner could not see, and
+    never gates anything (2026-08-21 spec D-3, ADR-0004)."""
+    from okf_ext.moves.model import Stranded
+
+    entry = Stranded(member="notes/gamma.md", target="concepts/beta.md", line=9)
+    plan = _plan(stranded=(entry,))
+    assert plan.ok
+    assert plan.is_empty
+    assert plan.stranded == (entry,)
+
+
+def test_a_plan_built_without_a_stranded_argument_still_works():
+    """`migrate.py`'s empty-plan short circuit constructs a `MovePlan` directly."""
+    assert _plan().stranded == ()

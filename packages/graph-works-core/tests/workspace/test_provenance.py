@@ -81,20 +81,72 @@ def test_results_facts_gathers_the_range(repo):
     (repo / "b.txt").write_text("two\n", encoding="utf-8")
     _git(repo, "add", "b.txt")
     _git(repo, "commit", "-m", "second")
-    facts = provenance.results_facts(repo, phase="execute", start_sha=start)
+    facts = provenance.results_facts(repo, phase="execute", start_sha=start, paths=["b.txt"], opened="2026-01-01")
     assert facts is not None
     assert facts.phase == "execute"
     assert facts.start_sha == start
     assert facts.files == ("b.txt",)
     assert len(facts.commits) == 1
+    assert facts.scope == ("b.txt",)
 
 
 def test_results_facts_degrades_outside_a_repo(tmp_path):
-    assert provenance.results_facts(tmp_path, phase="execute", start_sha="deadbee") is None
+    assert (
+        provenance.results_facts(tmp_path, phase="execute", start_sha="deadbee", paths=["a.txt"], opened="2026-01-01")
+        is None
+    )
 
 
 def test_results_facts_degrades_on_an_unknown_start_sha(repo):
-    assert provenance.results_facts(repo, phase="execute", start_sha="0" * 40) is None
+    assert (
+        provenance.results_facts(repo, phase="execute", start_sha="0" * 40, paths=["a.txt"], opened="2026-01-01")
+        is None
+    )
+
+
+def test_results_facts_declines_an_unscoped_range(repo):
+    # Empty `affects:` means we cannot attribute the item to anything -- an
+    # unscoped page is worse than an absent one. Matches `commits_touching`'s
+    # own contract in this module.
+    facts = provenance.results_facts(repo, phase="execute", start_sha="HEAD", paths=[], opened="2026-01-01")
+    assert facts is None
+
+
+def test_results_facts_scopes_out_commits_outside_affects(repo):
+    base = provenance.head_sha(repo)
+    (repo / "in.txt").write_text("x\n", encoding="utf-8")
+    _git(repo, "add", "in.txt")
+    _git(repo, "commit", "-m", "touches in")
+    (repo / "out.txt").write_text("y\n", encoding="utf-8")
+    _git(repo, "add", "out.txt")
+    _git(repo, "commit", "-m", "touches out")
+    facts = provenance.results_facts(repo, phase="execute", start_sha=base, paths=["in.txt"], opened="2026-01-01")
+    assert facts is not None
+    assert facts.files == ("in.txt",)
+    assert len(facts.commits) == 1
+    assert "touches out" not in facts.commits[0]
+
+
+def test_results_facts_flags_a_start_that_predates_the_item(repo):
+    start = provenance.head_sha(repo)
+    (repo / "b.txt").write_text("two\n", encoding="utf-8")
+    _git(repo, "add", "b.txt")
+    _git(repo, "commit", "-m", "second")
+    # The fixture's one commit is made "now" by the test's own git config; an
+    # `opened` far in the future reads as "the start predates the item."
+    facts = provenance.results_facts(repo, phase="execute", start_sha=start, paths=["b.txt"], opened="2099-01-01")
+    assert facts is not None
+    assert facts.start_predates_item is True
+
+
+def test_results_facts_does_not_flag_a_start_at_or_after_the_item(repo):
+    start = provenance.head_sha(repo)
+    (repo / "b.txt").write_text("two\n", encoding="utf-8")
+    _git(repo, "add", "b.txt")
+    _git(repo, "commit", "-m", "second")
+    facts = provenance.results_facts(repo, phase="execute", start_sha=start, paths=["b.txt"], opened="2000-01-01")
+    assert facts is not None
+    assert facts.start_predates_item is False
 
 
 def test_the_active_work_pointer_lands_in_the_cache_dir(tmp_path):

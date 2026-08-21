@@ -182,9 +182,10 @@ Neither planner writes, and neither apply operation has a `force` escape hatch.
 
 Archiving a terminal item is a **symmetric prefix move**: `work/<slug>.md` and
 everything under `work/<slug>/` relocate to their `work/_archive/` twins in one
-`okf_ext.moves` batch, every inbound reference is repaired, the emptied working
-directory is pruned, and both lane indexes are reconciled. **No frontmatter is
-written** — an item reaching this path is already terminal.
+`okf_ext.moves` batch, every inbound **OKF markdown** reference is repaired,
+the emptied working directory is pruned, and both lane indexes are reconciled.
+**No frontmatter is written** — an item reaching this path is already
+terminal.
 
 ```python
 from okf_io import load_bundle
@@ -218,9 +219,13 @@ candidates. Targeted mode reports one `Skipped` per named slug that does not
 move — `unknown-slug`, `not-terminal` or `already-archived` — because there the
 caller named the slug and is owed an answer.
 
-**`[[wikilinks]]` are not repaired.** A wikilink is not a link form OKF v0.2
-defines, so nothing in `moves` can see one. A vault authored in wikilink form
-needs converting before its first archive.
+**`[[wikilinks]]` are not repaired, and the archive command says so.** A
+wikilink is not a link form OKF v0.2 defines, so nothing in `moves` can see
+one. A vault authored in wikilink form needs converting before its first
+archive; until then, `ArchivePlan.stranded` counts the inbound wikilinks the
+move could not reach and `archive` prints the count to stderr without
+touching the exit code — `render.wikilink-target` covers the same gap
+vault-wide, at lint time.
 
 ## Reading a vault
 

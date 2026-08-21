@@ -332,7 +332,14 @@ reports no edge for it — measured directly in one vault: 7 and 5 edges where 2
 and 113 wikilinks exist. A wikilink-aware locator inside a bundle-agnostic
 capability would embed one vault's dialect in tier 2. Convert wikilinks to
 markdown links first; then this capability sees them like any other
-destination.
+destination. **The blindness is reported, not silent**: `okf_ext.render`'s
+`render.wikilink-target` flags a dangling wikilink at lint time, vault-wide,
+and every plan carries `MovePlan.stranded` — the inbound wikilinks into its
+own moved set that nothing here can reach. The count lives on the plan rather
+than in each caller, so all five relocating lanes inherit it; `stranded()` is
+public for a caller holding a mapping rather than a plan, which is what
+`doc-wiki-okf migrate`'s preview needs. Both surfaces are built over the
+shared `okf_ext.body.wikilinks` locator, and neither rewrites anything.
 
 **A reference-style link refuses the whole plan rather than being repaired.**
 `[text][ref]`'s destination lives in a `[ref]: dest` definition markdown-it's

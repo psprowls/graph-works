@@ -17,7 +17,7 @@ def manifest() -> dict[str, Any]:
 def test_version() -> None:
     import doc_wiki_okf
 
-    assert doc_wiki_okf.__version__ == "0.3.1"
+    assert doc_wiki_okf.__version__ == "0.3.2"
 
 
 def test_dependencies_are_exactly_the_three_the_spec_declares() -> None:

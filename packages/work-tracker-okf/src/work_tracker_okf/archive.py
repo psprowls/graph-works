@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Literal
 
 from okf_ext import moves
-from okf_ext.moves import MovePlan, MoveResult, Refusal
+from okf_ext.moves import MovePlan, MoveResult, Refusal, Stranded, stranded_summary, stranded_warning
 from okf_io import Bundle, Describe, EntryTarget, IndexUpdate, load_bundle, update_index
 
 from work_tracker_okf.items import ARCHIVE_DIR, IGNORE, WORK_DIR, WorkItem, load_items
@@ -73,12 +73,20 @@ class ArchivePlan:
     @property
     def ok(self) -> bool:
         """False when the move plan carries any refusal. All-or-nothing by
-        construction, which is what makes a sweep fail closed."""
+        construction, which is what makes a sweep fail closed. Stranded
+        wikilink references never make a plan not-`ok` (D-3, ADR-0004):
+        broken links are warn, never error."""
         return self.moves.ok
 
     @property
     def changed(self) -> bool:
         return self.ok and bool(self.slugs)
+
+    @property
+    def stranded(self) -> tuple[Stranded, ...]:
+        """The move plan's own count. Every relocating lane inherits it from
+        `MovePlan`, so this lane holds no copy of the computation."""
+        return self.moves.stranded
 
     def diff(self) -> str:
         """Render the plan. Writes nothing."""
@@ -91,6 +99,8 @@ class ArchivePlan:
             lines.append(f"  {move.source} -> {move.dest}")
         for edit in self.moves.edits:
             lines.append(f"  ~ {edit.member}: {edit.old} -> {edit.new}")
+        if self.stranded:
+            lines.append(stranded_summary(self.stranded))
         return "\n".join(lines)
 
 
@@ -105,6 +115,7 @@ class ArchiveResult:
     move: MoveResult
     indexes: tuple[IndexUpdate, ...]
     pruned: tuple[str, ...]
+    stranded: tuple[Stranded, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -192,6 +203,8 @@ def plan_archive(bundle: Bundle, slugs: Sequence[str] | None = None) -> ArchiveP
     # consistent with no further surgery. The cost is a transient dangling
     # reference in `work/index.md` between `apply` and the reconcile, never
     # observable to a reader who loads the bundle before or after.
+    # `replace` carries `stranded` through with every other field, so the
+    # filtered plan still reports the count `plan_move_many` computed.
     filtered = replace(plan, edits=tuple(edit for edit in plan.edits if edit.member not in _LANE_INDEXES))
     return ArchivePlan(root=bundle.root, slugs=chosen, skipped=skipped, moves=filtered)
 
@@ -306,6 +319,7 @@ def apply_archive(bundle: Bundle, plan: ArchivePlan) -> ArchiveResult:
         move=result,
         indexes=indexes,
         pruned=pruned,
+        stranded=plan.stranded,
     )
 
 
@@ -332,4 +346,13 @@ def _prune_working_directories(root: Path, slugs: Sequence[str]) -> tuple[str, .
     return tuple(pruned)
 
 
-__all__ = ["ArchivePlan", "ArchiveResult", "SkipReason", "Skipped", "apply_archive", "plan_archive"]
+__all__ = [
+    "ArchivePlan",
+    "ArchiveResult",
+    "SkipReason",
+    "Skipped",
+    "Stranded",
+    "apply_archive",
+    "plan_archive",
+    "stranded_warning",
+]

@@ -10,15 +10,22 @@ from typing import Any
 import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.util_cli import archive as archive_module
+from okf_ext.moves import Stranded
 from typer.testing import CliRunner
 
 runner = CliRunner()
 
 
+class _Moves:
+    def __init__(self, *, stranded: tuple[Stranded, ...] = ()) -> None:
+        self.stranded = stranded
+
+
 class _Plan:
-    def __init__(self, *, ok: bool = True, diff: str = "") -> None:
+    def __init__(self, *, ok: bool = True, diff: str = "", stranded: tuple[Stranded, ...] = ()) -> None:
         self.ok = ok
         self._diff = diff
+        self.moves = _Moves(stranded=stranded)
 
     def diff(self) -> str:
         return self._diff
@@ -136,6 +143,48 @@ def test_nothing_to_do_is_a_success(calls: _CallsBox, initialized_workspace: Pat
 
     assert result.exit_code == 0
     assert result.stdout.strip() == "nothing to do"
+
+
+def test_reports_both_lanes_stranded_counts_separately_and_labelled(
+    calls: _CallsBox, initialized_workspace: Path
+) -> None:
+    """A caller acting on the number needs to know which lane stranded what
+    (2026-08-21 spec §4.5) -- the two counts are never merged into one."""
+    calls.box["run"] = _Run(
+        plan=_Plan(stranded=(Stranded(member="work/citing.md", target="work/a.md", line=3),)),
+        wiki_plan=_Plan(stranded=(Stranded(member="tutorials/citing.md", target="tutorials/b.md", line=5),)),
+        archived=("2026-01-01-a",),
+        wiki_archived=("concepts/b",),
+        applied=True,
+    )
+
+    result = runner.invoke(app, ["archive", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == 0
+    assert "work items: ! 1 inbound [[wikilink]]" in result.stderr
+    assert "wiki pages: ! 1 inbound [[wikilink]]" in result.stderr
+
+
+def test_no_stranded_note_when_neither_lane_stranded_anything(calls: _CallsBox, initialized_workspace: Path) -> None:
+    result = runner.invoke(app, ["archive", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == 0
+    assert "inbound [[wikilink]]" not in result.stderr
+
+
+def test_stranded_note_still_prints_on_a_conflict(calls: _CallsBox, initialized_workspace: Path) -> None:
+    """Step 4: the note is emitted before the conflict/refusal echo block, so a
+    conflict or refusal still reports what was stranded."""
+    calls.box["run"] = _Run(
+        plan=_Plan(stranded=(Stranded(member="work/citing.md", target="work/a.md", line=3),)),
+        wiki_plan=_Plan(),
+        conflict=("work/a.md",),
+    )
+
+    result = runner.invoke(app, ["archive", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code != 0
+    assert "work items: ! 1 inbound [[wikilink]]" in result.stderr
 
 
 def test_the_verb_is_registered_at_the_root() -> None:

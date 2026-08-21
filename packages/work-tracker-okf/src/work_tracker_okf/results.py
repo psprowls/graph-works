@@ -36,17 +36,27 @@ class ResultsFacts:
     end_sha: str
     files: tuple[str, ...]
     commits: tuple[str, ...]
+    scope: tuple[str, ...]
+    start_predates_item: bool
 
 
 def render(facts: ResultsFacts) -> str:
     """The stub body. Pure: no clock, no filesystem, no git."""
     commit_word = "commit" if len(facts.commits) == 1 else "commits"
+    warnings: list[str] = []
+    if facts.start_sha == facts.end_sha:
+        warnings.append("_Range is empty: the stage recorded no commits in this scope. The start commit may be wrong._")
+    if facts.start_predates_item:
+        warnings.append("_Range starts before the item was opened; attribution may be too wide._")
     lines = [
         f"## {facts.phase.capitalize()} — results",
         "",
         f"**Commits:** `{facts.start_sha[:7]}`..`{facts.end_sha[:7]}` ({len(facts.commits)} {commit_word})",
         f"**Files changed:** {len(facts.files)}",
+        f"**Scope:** {', '.join(facts.scope)}",
         "",
+        *warnings,
+        *([""] if warnings else []),
         *(f"- {name}" for name in facts.files),
         "",
         *(f"- {commit}" for commit in facts.commits),

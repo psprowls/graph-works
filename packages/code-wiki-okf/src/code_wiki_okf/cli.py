@@ -13,6 +13,7 @@ from pathlib import Path
 import typer
 from code_graph_io import open_reader
 from okf_ext.bundle import WriteFailure
+from okf_ext.moves import Stranded, stranded_summary
 from okf_ext.placement import placement_rule
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
@@ -137,11 +138,20 @@ def _echo_plan(repo_name: str, plan: MirrorPlan) -> None:
         typer.echo(f"{repo_name}: would delete {rel_path}")
     for declined in plan.declined_deletions:
         typer.echo(f"{repo_name}: would decline deletion of {declined.path} ({declined.reason})")
+    if plan.moves.stranded:
+        # stderr, and never an exit code (2026-08-21 spec §4.5): `moves`
+        # repairs OKF markdown links only, and this is how the lane says so.
+        typer.echo(f"{repo_name}: {stranded_summary(plan.moves.stranded)}", err=True)
 
 
-def _echo_result(repo_name: str, result: MirrorResult) -> None:
+def _echo_result(repo_name: str, result: MirrorResult, stranded: tuple[Stranded, ...] = ()) -> None:
     """Summary line first (its exact wording is a stable contract other tests
     match on), then one line per file actually touched -- see `_echo_plan`.
+
+    *stranded* is the matching plan's count, passed in rather than carried on
+    `MirrorResult`: the count is a plan-time fact, and `MirrorSummary.plans`
+    is populated in both modes. Defaulted, so a caller with nothing to report
+    calls this exactly as before.
     """
     typer.echo(
         f"{repo_name}: created {len(result.created)}, updated {len(result.regenerated)}, "
@@ -157,6 +167,8 @@ def _echo_result(repo_name: str, result: MirrorResult) -> None:
         typer.echo(f"{repo_name}: deleted {rel_path}")
     for declined in result.declined_deletions:
         typer.echo(f"{repo_name}: declined deletion of {declined.path} ({declined.reason})")
+    if stranded:
+        typer.echo(f"{repo_name}: {stranded_summary(stranded)}", err=True)
 
 
 @app.command()
@@ -238,8 +250,9 @@ def sync(
         for plan in mirror.plans:
             _echo_plan(plan.repo, plan)
     else:
+        stranded_by_repo = {plan.repo: plan.moves.stranded for plan in mirror.plans}
         for result in mirror.results:
-            _echo_result(result.repo, result)
+            _echo_result(result.repo, result, stranded_by_repo.get(result.repo, ()))
     for repo_name, error in mirror.failed_repos:
         typer.echo(f"{repo_name}: sync failed: {error}", err=True)
 

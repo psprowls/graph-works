@@ -191,3 +191,40 @@ def test_diff_renders_and_writes_nothing(bundle_root: Path) -> None:
 
     refused = plan_retype(bundle, schema_set(), "explanations/why-it-works", "Explanation")
     assert "same-type" in refused.diff()
+
+
+def test_a_wikilink_only_vault_and_a_quiet_vault_produce_different_retype_plans(tmp_path):
+    """`retype` has no CLI caller, so the `diff()` line is its whole surface --
+    already there the day a command appears (2026-08-21 spec §4.4)."""
+    citing = (
+        "---\ntype: Reference\ntitle: Flags\ndescription: Flags.\n---\n\n"
+        "## Summary\n\nSee [[explanations/why-it-works]] for the reason.\n"
+    )
+    quiet = "---\ntype: Reference\ntitle: Flags\ndescription: Flags.\n---\n\n## Summary\n\nNothing points anywhere.\n"
+
+    plans = []
+    for name, citing_text in (("loud", citing), ("quiet", quiet)):
+        root = tmp_path / name
+        build_bundle(
+            root,
+            {
+                "explanations/why-it-works": _page("Explanation", "Why it works", "explanations/why-it-works"),
+                "reference/flags": citing_text,
+            },
+        )
+        plans.append(plan_retype(load_bundle(root), schema_set(), "explanations/why-it-works", "Tutorial"))
+
+    loud, quiet_plan = plans
+    assert loud.ok and quiet_plan.ok
+    assert [entry.target for entry in loud.move.stranded] == ["explanations/why-it-works.md"]
+    assert quiet_plan.move.stranded == ()
+    assert loud.diff() != quiet_plan.diff()
+    assert "1 inbound [[wikilink]]" in loud.diff()
+    assert "OKF markdown references repaired:" in quiet_plan.diff()
+
+
+def test_retype_registers_no_cli_command():
+    """Spec §6: `retype` gains the render line and nothing else."""
+    from doc_wiki_okf import cli
+
+    assert "retype" not in {command.name for command in cli.app.registered_commands}

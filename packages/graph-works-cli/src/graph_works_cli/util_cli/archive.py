@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 
 import typer
 from graph_works_core.archive.commands import run_archive
+from okf_ext.moves import stranded_warning
 
 from graph_works_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
@@ -26,6 +27,11 @@ def archive(
         run = run_archive(layout, None, None, today=datetime.now(UTC).date(), dry_run=dry_run)
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
+
+    for label, entries in (("work items", run.plan.moves.stranded), ("wiki pages", run.wiki_plan.moves.stranded)):
+        warning = stranded_warning(entries)
+        if warning is not None:
+            typer.echo(f"{label}: {warning}", err=True)
 
     if run.conflict or not run.ok or dry_run:
         typer.echo(run.plan.diff())

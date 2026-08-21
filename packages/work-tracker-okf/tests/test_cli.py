@@ -485,6 +485,19 @@ def test_archive_reports_a_named_skip_and_exits_one(conformant_root) -> None:
     assert "not-terminal" in result.stderr
 
 
+def test_archive_warns_about_stranded_wikilinks_on_stderr_and_still_exits_zero(conformant_root) -> None:
+    make_terminal(conformant_root, _FEATURE, status="resolved")
+    page = conformant_root / "work" / f"{_SPIKE}.md"
+    page.write_text(
+        page.read_text(encoding="utf-8") + f"\nSee [[work/{_FEATURE}]] for the writer.\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(app, ["archive", str(conformant_root), _FEATURE, "--today", _TODAY])
+    assert result.exit_code == 0
+    assert "1 inbound [[wikilink]] reference(s)" in result.stderr
+    assert "okf_ext.moves" in result.stderr
+
+
 def test_an_empty_sweep_logs_nothing_and_exits_zero(tmp_path) -> None:
     _init(tmp_path)
     (tmp_path / "work").mkdir(exist_ok=True)

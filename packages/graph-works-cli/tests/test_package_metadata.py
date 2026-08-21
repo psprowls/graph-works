@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import tomllib
 import zipfile
 from email.parser import BytesParser
 from email.policy import default
@@ -12,19 +13,25 @@ from pathlib import Path
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
+#: The fake index this test resolves against. Each workspace entry must carry
+#: that package's **currently declared** version, or the resolution below is
+#: answered by a version that no longer exists and a pin excluding today's
+#: real release passes unnoticed -- which is exactly how a stale
+#: `code-wiki-okf>=0.3,<0.4` survived that package's bump to 0.4.0.
+#: `test_every_stubbed_workspace_version_is_the_declared_one` pins that.
 _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "click": ("8.0.0",),
-    "code-graph-io": ("0.1.0", "0.1.1"),
-    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0"),
+    "code-graph-io": ("0.1.0", "0.1.1", "0.2.0"),
+    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0"),
     "config-io": ("0.1.0",),
-    "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.3.0", "0.3.1"),
+    "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2"),
     "langchain-core": ("1.4.0",),
     "models-io": ("0.2.0",),
-    "okf-ext": ("0.1.0", "0.4.5", "0.4.6", "0.4.7", "0.4.8", "0.4.9"),
+    "okf-ext": ("0.1.0", "0.4.5", "0.4.6", "0.4.7", "0.4.8", "0.4.9", "0.4.10"),
     "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3"),
     "subagents-io": ("0.2.0", "0.2.1"),
     "typer": ("0.12.0",),
-    "work-tracker-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2"),
+    "work-tracker-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1"),
 }
 
 
@@ -112,3 +119,27 @@ def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path
     )
 
     assert completed.returncode == 0, completed.stderr
+
+
+def test_every_stubbed_workspace_version_is_the_declared_one() -> None:
+    """The stub index must publish each workspace package's real version.
+
+    `_STUB_VERSIONS` is hand-maintained, and the resolution test above can
+    only prove a pin is satisfiable by *something the stub publishes*. When a
+    package is bumped and its stub entry is not, the stub keeps offering the
+    superseded version, every dependent pin still resolves against it, and a
+    pin that excludes the actual release passes -- a false green precisely
+    when the bound has gone wrong. Asserting containment (not equality) keeps
+    the older entries, which are what make an over-tight lower bound fail.
+    """
+    workspace_root = Path(__file__).resolve().parents[3]
+    for manifest in sorted(workspace_root.glob("packages/*/pyproject.toml")):
+        with manifest.open("rb") as handle:
+            project = tomllib.load(handle)["project"]
+        stubbed = _STUB_VERSIONS.get(canonicalize_name(project["name"]))
+        if stubbed is None:
+            continue  # built as a real wheel above, or simply not a dependency
+        assert project["version"] in stubbed, (
+            f"{project['name']} is {project['version']} but the stub index only publishes "
+            f"{stubbed} -- add it, or the resolution test cannot see today's version"
+        )

@@ -143,8 +143,12 @@ def test_a_zero_length_wikilink_reads_as_unbalanced(tmp_path):
         "An aliased [[target|alias]] link.\n",
     ],
 )
-def test_valid_and_code_wrapped_wikilinks_never_fire(tmp_path, body):
-    assert one(tmp_path, "d", f"---\ntype: Note\ntitle: T\n---\n\n{body}") == []
+def test_valid_and_code_wrapped_wikilinks_never_fire_the_syntax_code(tmp_path, body):
+    """Syntax validity is `render.wikilink`'s concern. None of these names a
+    bundle member in this one-file bundle, so `render.wikilink-target` may
+    still fire for the two live (non-code) targets -- covered separately."""
+    found = one(tmp_path, "d", f"---\ntype: Note\ntitle: T\n---\n\n{body}")
+    assert [f.code for f in found if f.code == "render.wikilink"] == []
 
 
 def test_a_wikilink_broken_across_a_line_break_is_still_unbalanced(tmp_path):
@@ -165,6 +169,29 @@ def test_an_unbalanced_wikilink_excerpt_stops_at_the_line_end(tmp_path):
     found = one(tmp_path, "d", "---\ntype: Note\ntitle: T\n---\n\nSee [[dangling for more.\nThird line.\n")
     assert len(found) == 1
     assert "Third line" not in found[0].message
+
+
+# --- Wikilink targets --------------------------------------------------------
+
+
+def test_a_dangling_wikilink_target_is_flagged(tmp_path):
+    found = one(tmp_path, "d", "---\ntype: Note\ntitle: T\n---\n\nSee [[nowhere]] here.\n")
+    assert len(found) == 1
+    assert found[0].code == "render.wikilink-target"
+    assert found[0].spec == "okf_ext.render"
+
+
+def test_a_wikilink_target_that_resolves_never_fires(tmp_path):
+    (tmp_path / "other.md").write_text("---\ntype: Note\ntitle: Other\n---\n", encoding="utf-8")
+    found = one(tmp_path, "d", "---\ntype: Note\ntitle: T\n---\n\nSee [[other]] here.\n")
+    assert found == []
+
+
+def test_a_malformed_wikilink_does_not_also_fire_the_target_code(tmp_path):
+    """`render.wikilink` already covers a malformed occurrence; there is no
+    target to resolve, so `render.wikilink-target` never doubles up on it."""
+    found = one(tmp_path, "d", "---\ntype: Note\ntitle: T\n---\n\nSee [[dangling for more.\n")
+    assert [f.code for f in found] == ["render.wikilink"]
 
 
 # --- Table pipes ------------------------------------------------------------

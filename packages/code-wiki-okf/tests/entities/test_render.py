@@ -72,7 +72,7 @@ def test_render_app_frontmatter_drops_packaging_facts_for_a_package_reference() 
         test_suites=[],
     )
     render = render_app(desc, repo_name="agent-workspace")
-    assert render.frontmatter == {"package": "[cli-app](/packages/cli-app.md)"}
+    assert render.frontmatter == {"package": "[cli-app](/repositories/agent-workspace/packages/cli-app.md)"}
     assert "/repositories/agent-workspace/fs/apps/cli/src/index.ts.md" in render.sections["Files"]
 
 
@@ -136,7 +136,7 @@ def test_render_agent_plugin_formats_all_six_component_lists() -> None:
         hooks=[{"id": "hook:1", "event": "PreToolUse", "matchers": ["Skill"]}],
         mcp_servers=[{"id": "mcp:1", "name": "context7", "command": "npx"}],
     )
-    render = render_agent_plugin(desc)
+    render = render_agent_plugin(desc, repo_name="agent-workspace")
     assert render.frontmatter == {"ecosystem": "claude-code", "version": "1.0.0"}
     assert render.sections.keys() == {"Commands", "Agents", "Skills", "Scripts", "Hooks", "MCP servers"}
     assert "next" in render.sections["Commands"]
@@ -157,7 +157,7 @@ def test_render_agent_plugin_empty_component_lists_render_none() -> None:
         version="1.0.0",
         description="",
     )
-    render = render_agent_plugin(desc)
+    render = render_agent_plugin(desc, repo_name="agent-workspace")
     for heading in ("Commands", "Agents", "Skills", "Scripts", "Hooks", "MCP servers"):
         assert render.sections[heading].strip() == "_(none)_"
 
@@ -173,7 +173,7 @@ def test_render_agent_plugin_without_sibling_package_omits_package_key() -> None
         version="1.0.0",
         description="",
     )
-    render = render_agent_plugin(desc)
+    render = render_agent_plugin(desc, repo_name="agent-workspace")
     assert render.frontmatter == {"ecosystem": "claude-code", "version": "1.0.0"}
     assert "package" not in render.frontmatter
 
@@ -190,11 +190,11 @@ def test_render_agent_plugin_with_sibling_package_adds_package_reference() -> No
         description="",
         package_name="graph-works",
     )
-    render = render_agent_plugin(desc)
+    render = render_agent_plugin(desc, repo_name="agent-workspace")
     assert render.frontmatter == {
         "ecosystem": "claude-code",
         "version": "1.0.0",
-        "package": "[graph-works](/packages/graph-works.md)",
+        "package": "[graph-works](/repositories/agent-workspace/packages/graph-works.md)",
     }
 
 
@@ -219,7 +219,7 @@ def test_render_agent_plugin_component_optional_fields_fallback() -> None:
         hooks=[{"id": "hook:1", "event": "PostExecute"}],  # no matchers
         mcp_servers=[{"id": "mcp:1", "name": "local"}],  # no command
     )
-    render = render_agent_plugin(desc)
+    render = render_agent_plugin(desc, repo_name="agent-workspace")
 
     # Test _named_line fallback: command with no description
     assert "- **run**\n" in render.sections["Commands"]

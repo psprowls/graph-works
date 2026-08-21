@@ -13,11 +13,12 @@ from typing import Any
 
 import typer
 from okf_ext.bundle import WriteFailure
+from okf_ext.schemas import declared_directories, load_schemas
 from okf_ext.shape import SectionSet, load_sections
 from okf_io import Bundle, Finding, Rule, load_bundle
 from okf_io import validate as okf_validate
 
-from work_tracker_okf.archive import apply_archive, plan_archive
+from work_tracker_okf.archive import apply_archive, plan_archive, stranded_warning
 from work_tracker_okf.children import apply_children_sync, plan_children_sync
 from work_tracker_okf.compose import (
     FilingOutcome,
@@ -158,6 +159,28 @@ def _sections(root: Path, declarations_dir: Path | None) -> SectionSet:
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
+
+
+def _lane_dir(root: Path, declarations_dir: Path | None, type_: str) -> str | None:
+    """Where the bundle says a *type_* page goes, or `None` for no declaration.
+
+    The writer half of ADR-0012's reader/writer asymmetry: the annotation tells
+    a writer where to create, and nothing tells a reader where to expect. The
+    trailing slash the annotation carries is stripped here and nowhere else --
+    `placement_rule` wants it (it does `concept_id.removeprefix(directory)`),
+    and a path composer would emit a doubled separator with it.
+
+    `None` on an undeclared type rather than `WORK_DIR`, so the fallback stays
+    in one place: `paths._lane_dir`.
+    """
+    declarations = root if declarations_dir is None else declarations_dir
+    try:
+        schema_set = load_schemas(declarations / "_schema")
+    except (OSError, ValueError) as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+    declared = declared_directories(schema_set).get(type_)
+    return None if declared is None else declared.rstrip("/")
 
 
 @app.command()
@@ -352,7 +375,7 @@ def file(
     affects: list[str] = typer.Option([], "--affects", help="Repeatable repo path."),  # noqa: B008
     tags: list[str] = typer.Option([], "--tags", help="Repeatable."),  # noqa: B008
     declarations_dir: Path | None = typer.Option(  # noqa: B008
-        None, "--declarations-dir", help="Where `_sections/` lives. Defaults to ROOT. Not persisted."
+        None, "--declarations-dir", help="Where `_schema/` and `_sections/` live. Defaults to ROOT. Not persisted."
     ),
     today: str | None = typer.Option(None, "--today", help="File as of YYYY-MM-DD instead of now."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
@@ -382,6 +405,7 @@ def file(
             tags=tuple(tags),
         ),
         _sections(root, declarations_dir),
+        lane_dir=_lane_dir(root, declarations_dir, type_),
     )
     for warning in outcome.plan.warnings:
         typer.echo(warning, err=True)
@@ -397,7 +421,10 @@ def file(
             typer.echo(outcome.plan.log.diff())
         return
     outcome = FilingOutcome(plan=outcome.plan, application=apply_file_and_reconcile(outcome.plan))
-    typer.echo(f"wrote {item_page(outcome.plan.filing.slug).rel}")
+    # Reported off the plan's own target, not recomposed: `_lane_dir` already
+    # answered where this page goes, and asking twice is how the message and
+    # the file diverge.
+    typer.echo(f"wrote {outcome.plan.filing.target.relative_to(root).as_posix()}")
     for update in outcome.application.indexes:
         if update.changed:
             typer.echo(f"reconciled {update.path}")
@@ -477,11 +504,14 @@ def archive(
     today: str | None = typer.Option(None, "--today", help="Stamp the `log.md` entry with YYYY-MM-DD."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of moving."),
 ) -> None:
-    """Relocate terminal items to `work/_archive/`, repairing what pointed at them.
+    """Relocate terminal items to `work/_archive/`, repairing the OKF markdown
+    references that pointed at them.
 
     A symmetric prefix move: the item page and everything under its working
-    directory relocate in one batch, every inbound reference is repaired, the
-    emptied directory is pruned, and both lane indexes are reconciled. **No
+    directory relocate in one batch, every inbound **OKF markdown** reference
+    is repaired, the emptied directory is pruned, and both lane indexes are
+    reconciled. `[[wikilink]]` forms are not an OKF link form, are never
+    rewritten, and are reported to stderr as stranded instead. **No
     frontmatter is written** -- an item reaching this path is already terminal.
 
     Planned through `ARCHIVE_IGNORE`, never `IGNORE`: `okf_ext.moves` never
@@ -495,6 +525,9 @@ def archive(
     bundle = _bundle(root, ignore=ARCHIVE_IGNORE)
     plan = plan_archive(bundle, slugs or None)
     typer.echo(plan.diff() or "nothing to archive")
+    warning = stranded_warning(plan.stranded)
+    if warning is not None:
+        typer.echo(warning, err=True)
     if not plan.ok:
         raise typer.Exit(code=1)
     if dry_run:

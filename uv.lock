@@ -262,7 +262,7 @@ wheels = [
 
 [[package]]
 name = "code-graph-io"
-version = "0.1.1"
+version = "0.2.0"
 source = { editable = "packages/code-graph-io" }
 dependencies = [
     { name = "pyyaml" },
@@ -398,7 +398,7 @@ wheels = [
 
 [[package]]
 name = "doc-wiki-okf"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "packages/doc-wiki-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },
@@ -448,7 +448,7 @@ requires-dist = [
 
 [[package]]
 name = "graph-works-core"
-version = "0.2.2"
+version = "0.3.1"
 source = { editable = "packages/graph-works-core" }
 dependencies = [
     { name = "code-graph-io" },
@@ -1105,7 +1105,7 @@ wheels = [
 
 [[package]]
 name = "okf-ext"
-version = "0.4.9"
+version = "0.4.10"
 source = { editable = "packages/okf-ext" }
 dependencies = [
     { name = "markdown-it-py" },
@@ -2109,7 +2109,7 @@ wheels = [
 
 [[package]]
 name = "work-tracker-okf"
-version = "0.2.2"
+version = "0.3.1"
 source = { editable = "packages/work-tracker-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },

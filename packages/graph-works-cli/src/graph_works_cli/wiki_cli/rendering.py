@@ -69,6 +69,7 @@ def _mirror_keys(structural: StructuralSummary) -> dict[str, object]:
         "mirror_moved": mirror.moved,
         "mirror_deleted": mirror.deleted,
         "mirror_declined": mirror.declined,
+        "mirror_stranded": mirror.stranded,
         "mirror_skipped_repos": list(mirror.skipped_repos),
         "mirror_errors": [f"{repo}: {error}" for repo, error in mirror.failed_repos],
     }

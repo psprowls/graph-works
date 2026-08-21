@@ -97,6 +97,20 @@ class Refusal:
 
 
 @dataclass(frozen=True, slots=True)
+class Stranded:
+    """One inbound `[[wikilink]]` into the moved set that no repair can reach.
+
+    Not a `Refusal`: a refusal is a judgment about markdown the planner *can*
+    see, and any refusal makes the whole plan not-`ok`. A stranded wikilink is
+    a fact about what the planner could not see, and never gates anything.
+    """
+
+    member: str  # the referrer, bundle-relative posix
+    target: str  # the bundle-relative path it names, before the move
+    line: int  # 1-based, document-relative
+
+
+@dataclass(frozen=True, slots=True)
 class Unrebased:
     """A moved member's own relative reference that was left exactly as written.
 
@@ -126,6 +140,10 @@ class MovePlan:
 
     `relocate` is `False` for a `plan_repair` plan: the references are
     repaired, no file is relocated, and no source is required to still exist.
+
+    `stranded` counts the inbound `[[wikilink]]` references into the moved set
+    that `moves` is deliberately blind to (it repairs OKF markdown links only).
+    Reported, never rewritten, and never a reason a plan is not `ok`.
     """
 
     root: Path  # the bundle this was planned against
@@ -135,6 +153,7 @@ class MovePlan:
     unrebased: tuple[Unrebased, ...]
     digests: Mapping[str, str]
     relocate: bool = True
+    stranded: tuple[Stranded, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -209,5 +228,6 @@ __all__ = [
     "RefWhere",
     "Refusal",
     "RefusalKind",
+    "Stranded",
     "Unrebased",
 ]

@@ -86,6 +86,7 @@ RENDER_EXPECTED = {
     ("render.wikilink", "log.md"),
     ("render.wikilink", "wikilink_empty.md"),
     ("render.wikilink", "wikilink_unbalanced.md"),
+    ("render.wikilink-target", "wikilink_in_code.md"),
 }
 
 

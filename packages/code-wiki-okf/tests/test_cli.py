@@ -12,7 +12,7 @@ from code_wiki_okf.cli import _echo_plan, _echo_result, app
 from code_wiki_okf.init import SEED_ONLY, SEED_RELATIVE_PATHS, install_bundle
 from code_wiki_okf.mirror.model import DeclinedDeletion, MirrorPlan, MirrorResult
 from okf_ext.generators import Render
-from okf_ext.moves.model import Move, MovePlan
+from okf_ext.moves.model import Move, MovePlan, Stranded
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -437,6 +437,46 @@ def test_sync_command_syncs_every_configured_repo(tmp_path: Path) -> None:
     assert "beta: created 1" in result.output
 
 
+def test_sync_command_exit_code_is_unchanged_by_stranded_wikilinks(tmp_path: Path) -> None:
+    """`2026-08-21` spec: a stranded inbound `[[wikilink]]` is reported, never
+    fatal -- the `sync` CLI counterpart to
+    `mirror/test_plan.py::test_a_wikilink_into_a_renamed_page_is_stranded`."""
+    repo_root = tmp_path / "repo"
+    _init_git_repo(repo_root, "a.py", "VALUE = 1\n")
+
+    from code_graph_io.update import run_workspace
+
+    graph_dir = tmp_path / "graph"
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+
+    bundle_root = tmp_path / "bundle"
+    assert runner.invoke(app, ["init", str(bundle_root)]).exit_code == 0
+    (bundle_root / "_repositories.yaml").write_text(
+        f"graph_dir: {graph_dir}\nrepositories:\n  acme:\n    path: {repo_root}\n", encoding="utf-8"
+    )
+
+    quiet = runner.invoke(app, ["sync", str(bundle_root)])
+    assert quiet.exit_code == 0, quiet.output
+    assert "inbound [[wikilink]]" not in quiet.output
+
+    # A concept page outside the mirror lane links into the freshly mirrored
+    # file, then the source file is renamed -- stranding that wikilink.
+    citing = bundle_root / "concepts" / "citing.md"
+    citing.parent.mkdir(parents=True, exist_ok=True)
+    citing.write_text(
+        "---\ntype: Explanation\ntitle: Citing\ndescription: d\n---\n\n"
+        "## Summary\n\nSee [[repositories/acme/fs/a.py]] for the rest.\n",
+        encoding="utf-8",
+    )
+    _git(repo_root, "mv", "a.py", "renamed.py")
+    _git(repo_root, "commit", "-q", "-m", "rename a.py")
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+
+    loud = runner.invoke(app, ["sync", str(bundle_root)])
+    assert loud.exit_code == quiet.exit_code == 0, loud.output
+    assert "acme: ! 1 inbound [[wikilink]]" in loud.output
+
+
 def test_sync_command_reports_failure_and_still_processes_other_repos(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -798,3 +838,40 @@ def test_echo_result_reports_every_kind_of_change(capsys: pytest.CaptureFixture[
     assert "acme: moved repositories/acme/fs/old.py.md -> repositories/acme/fs/new.py.md" in output
     assert "acme: deleted c.py" in output
     assert "acme: declined deletion of repositories/acme/fs/d.py.md (prose-edited)" in output
+
+
+def test_echo_plan_reports_stranded_wikilinks_on_stderr(tmp_path, capsys):
+    """One repo-prefixed line, on stderr -- `2026-08-21` spec §4.5: every one
+    of these is stderr, and not one changes an exit code."""
+    move_plan = MovePlan(
+        root=tmp_path,
+        moves=(Move(source="repositories/acme/fs/old.py.md", dest="repositories/acme/fs/new.py.md", is_asset=False),),
+        edits=(),
+        refusals=(),
+        unrebased=(),
+        digests={},
+        stranded=(Stranded(member="concepts/citing.md", target="repositories/acme/fs/old.py.md", line=9),),
+    )
+    plan = MirrorPlan(repo="acme", moves=move_plan, creates={}, updates={}, deletions=(), declined_deletions=())
+    _echo_plan("acme", plan)
+    captured = capsys.readouterr()
+    assert "acme: ! 1 inbound [[wikilink]]" in captured.err
+    assert "inbound [[wikilink]]" not in captured.out
+
+
+def test_echo_result_summary_line_is_byte_identical_with_stranded_present(tmp_path, capsys):
+    """`_echo_result`'s summary line is a stable contract other tests match on
+    -- append, never alter."""
+    result = MirrorResult(
+        repo="acme",
+        moved=(("repositories/acme/fs/old.py.md", "repositories/acme/fs/new.py.md"),),
+        created=(),
+        regenerated=(),
+        deleted=(),
+        declined_deletions=(),
+        index_updates=(),
+    )
+    _echo_result("acme", result, (Stranded(member="concepts/citing.md", target="x.md", line=9),))
+    captured = capsys.readouterr()
+    assert captured.out.splitlines()[0] == "acme: created 0, updated 0, moved 1, deleted 0"
+    assert "acme: ! 1 inbound [[wikilink]]" in captured.err

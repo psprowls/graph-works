@@ -128,6 +128,7 @@ def test_scan_emit_and_apply_round_trip_across_processes_and_refuse_unsafe_hando
         "mirror_moved",
         "mirror_deleted",
         "mirror_declined",
+        "mirror_stranded",
         "mirror_skipped_repos",
         "mirror_errors",
     }

@@ -113,7 +113,7 @@ def test_archive_uses_the_wide_bundle_lens_and_targeted_or_sweep_plan(
 
     def fake_plan_archive(actual_bundle: object, tokens: object = None) -> SimpleNamespace:
         planned.append((actual_bundle, tokens))
-        return SimpleNamespace(ok=True, diff=lambda: "archive plan")
+        return SimpleNamespace(ok=True, diff=lambda: "archive plan", moves=SimpleNamespace(stranded=()))
 
     monkeypatch.setattr(maintenance, "load_bundle", fake_load_bundle)
     monkeypatch.setattr(maintenance, "plan_archive", fake_plan_archive)
@@ -135,7 +135,9 @@ def test_archive_dry_run_never_applies(monkeypatch: pytest.MonkeyPatch, initiali
     applied: list[object] = []
     monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
-        maintenance, "plan_archive", lambda *_args, **_kwargs: SimpleNamespace(ok=True, diff=lambda: "preview")
+        maintenance,
+        "plan_archive",
+        lambda *_args, **_kwargs: SimpleNamespace(ok=True, diff=lambda: "preview", moves=SimpleNamespace(stranded=())),
     )
     monkeypatch.setattr(maintenance, "apply_archive", applied.append)
 
@@ -155,7 +157,11 @@ def test_archive_dry_run_prints_a_refused_plan_without_applying(
     applied: list[object] = []
     monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
-        maintenance, "plan_archive", lambda *_args, **_kwargs: SimpleNamespace(ok=False, diff=lambda: "refused preview")
+        maintenance,
+        "plan_archive",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            ok=False, diff=lambda: "refused preview", moves=SimpleNamespace(stranded=())
+        ),
     )
     monkeypatch.setattr(maintenance, "apply_archive", applied.append)
 
@@ -175,7 +181,7 @@ def test_archive_refusals_and_incomplete_moves_fail(
 ) -> None:
     """Refused plans and partial moves must never report a successful archive."""
     applied: list[object] = []
-    plan = SimpleNamespace(ok=plan_ok, diff=lambda: "refused")
+    plan = SimpleNamespace(ok=plan_ok, diff=lambda: "refused", moves=SimpleNamespace(stranded=()))
     monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(maintenance, "plan_archive", lambda *_args, **_kwargs: plan)
 
@@ -293,7 +299,11 @@ def test_archive_reports_a_failed_move_instead_of_a_traceback(
         raise OSError("destination is not writable")
 
     monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(maintenance, "plan_archive", lambda *_args, **_kwargs: SimpleNamespace(ok=True))
+    monkeypatch.setattr(
+        maintenance,
+        "plan_archive",
+        lambda *_args, **_kwargs: SimpleNamespace(ok=True, moves=SimpleNamespace(stranded=())),
+    )
     monkeypatch.setattr(maintenance, "apply_archive", fail)
 
     result = runner.invoke(app, ["wiki", "archive", "sources/one", "--workspace", str(initialized_workspace)])
@@ -306,7 +316,11 @@ def test_archive_reports_a_failed_move_instead_of_a_traceback(
 def test_archive_echoes_every_archived_token(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
     """A silent archive gives no record of what moved."""
     monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(maintenance, "plan_archive", lambda *_args, **_kwargs: SimpleNamespace(ok=True))
+    monkeypatch.setattr(
+        maintenance,
+        "plan_archive",
+        lambda *_args, **_kwargs: SimpleNamespace(ok=True, moves=SimpleNamespace(stranded=())),
+    )
     monkeypatch.setattr(
         maintenance,
         "apply_archive",
@@ -317,3 +331,39 @@ def test_archive_echoes_every_archived_token(monkeypatch: pytest.MonkeyPatch, in
 
     assert result.exit_code == 0
     assert result.stdout == "sources/one\nsources/two\n"
+
+
+def _workspace_with_wikilink_into(tmp_path: Path, token: str) -> Path:
+    """A real, bootstrapped workspace with *token*'s page and a curated page
+    under `references/` whose body cites `token` as a `[[wikilink]]`."""
+    root = tmp_path / "works"
+    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
+    assert result.exit_code == 0
+
+    layout = maintenance.resolve_workspace(str(root))
+    lane, slug = token.split("/", 1)
+    target_dir = layout.bundle_dir / lane
+    target_dir.mkdir(parents=True, exist_ok=True)
+    (target_dir / f"{slug}.md").write_text("---\ntitle: Foo\ndescription: d\n---\n\n## Summary\nd\n", encoding="utf-8")
+
+    references_dir = layout.bundle_dir / "references"
+    references_dir.mkdir(parents=True, exist_ok=True)
+    (references_dir / "citing.md").write_text(
+        f"---\ntitle: Citing\ndescription: d\n---\n\n## Summary\nSee [[{token}]] for the rest.\n",
+        encoding="utf-8",
+    )
+    return root
+
+
+def test_wiki_archive_reports_stranded_wikilinks_in_both_modes(tmp_path: Path) -> None:
+    """The lane the spec singles out: without `--dry-run` this command never
+    prints the plan, so a plan-render-only fix would leave it silent."""
+    workspace = _workspace_with_wikilink_into(tmp_path, "tutorials/foo")
+
+    preview = runner.invoke(app, ["wiki", "archive", "tutorials/foo", "--dry-run", "--workspace", str(workspace)])
+    assert preview.exit_code == 0
+    assert "inbound [[wikilink]]" in preview.stderr
+
+    applied = runner.invoke(app, ["wiki", "archive", "tutorials/foo", "--workspace", str(workspace)])
+    assert applied.exit_code == 0  # ADR-0004: broken links are warn, never error
+    assert "inbound [[wikilink]]" in applied.stderr

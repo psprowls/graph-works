@@ -29,6 +29,9 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from okf_io import Bundle, Document, Finding, Rule, RuleContext, Severity
 
+from okf_ext.body import resolve_wikilink
+from okf_ext.body import wikilinks as body_wikilinks
+
 #: The topic prefix this rule set claims. `validate()` raises the moment an
 #: external rule emits a built-in prefix, and `render` collides with none of the
 #: eight (computation, frontmatter, legacy, lifecycle, links, provenance,
@@ -39,12 +42,13 @@ CODES = (
     "render.angle-bracket",  # a bare `<placeholder>` parsed as raw HTML and swallowed
     "render.callout",  # a callout header that is malformed, or names an unknown type
     "render.wikilink",  # an unbalanced `[[...` or an empty `[[ ]]` target
+    "render.wikilink-target",  # a well-formed wikilink naming no bundle member
     "render.table-pipe",  # an unescaped `|` splitting a body row past the header width
 )
 
 #: Unpacked from `CODES` rather than re-typed, so a code-string edit to one
 #: cannot silently drift from the other -- the habit `tags/vocabulary.py` set.
-_CODE_ANGLE_BRACKET, _CODE_CALLOUT, _CODE_WIKILINK, _CODE_TABLE_PIPE = CODES
+_CODE_ANGLE_BRACKET, _CODE_CALLOUT, _CODE_WIKILINK, _CODE_WIKILINK_TARGET, _CODE_TABLE_PIPE = CODES
 
 #: `Finding.spec` is "the thing that says so". These codes cite no OKF section --
 #: a bundle with a typo'd callout is a conformant bundle -- so they cite the
@@ -157,19 +161,6 @@ _CALLOUT_OK_RE = re.compile(r"^\[!([a-zA-Z][a-zA-Z0-9-]*)\][+-]?(?:\s.*)?$")
 #: The "attempted callout" trigger -- the first line opens with `[!` or `[![`.
 #: An ordinary blockquote never matches, and is therefore never flagged.
 _CALLOUT_ATTEMPT_RE = re.compile(r"^\[!?\[?!")
-
-#: An opening `[[` or `![[`, used to find candidate spans to validate.
-_WIKILINK_OPEN_RE = re.compile(r"!?\[\[")
-#: `[[target]]`, `[[target#anchor]]`, `[[target|alias]]`. Inside a table cell the
-#: alias separator is escaped as `\|`, so the lookahead stops the target there
-#: and lets the alias group consume `\|alias`. Note the target group requires at
-#: least one character, so `[[]]` does not match and reads as unbalanced.
-#:
-#: **No group crosses a newline.** A wikilink is a single-line construct -- an
-#: unclosed `[[` at the end of one line and a stray `]]` on the next render as
-#: neither -- so every character class excludes `\n`. Without that exclusion the
-#: two halves join into one apparently-valid link and the finding is lost.
-_WIKILINK_RE = re.compile(r"\[\[((?:(?!\\\|)[^\]|#\n])+)(?:#[^\]|\n]*)?(?:\\?\|[^\]\n]*)?\]\]")
 
 #: Inline children that end a source line. markdown-it emits these between the
 #: `text` children they separate, and they carry no content of their own.
@@ -346,53 +337,38 @@ def _callouts(
             )
 
 
-def _wikilinks(path: str, tokens: Sequence[Token], offset: int, severity: Severity) -> Iterator[Finding]:
-    for token in tokens:
-        if not token.map or token.type != "inline":
-            continue
-        start = _line(token.map, offset)
-        # Only `text` children contribute scannable text -- `code_inline` and
-        # `autolink` children do not, so `[[foo` inside backticks never reaches
-        # the scan. Every other child still contributes **its newlines**: they
-        # keep `text` line-aligned with the source, which is what both places
-        # below depend on.
-        #
-        # Line breaks are preserved rather than dropped. Joining across them
-        # glues an unclosed `[[` at the end of one line to a stray `]]` on the
-        # next into one apparently-valid link -- a silent miss, and a garbled
-        # excerpt in every message that spans the seam.
-        text = "".join(
-            child.content if child.type == "text" else "\n" * _advance(child) for child in (token.children or [])
-        )
-        for opener in _WIKILINK_OPEN_RE.finditer(text):
-            # Anchor the candidate span at the `[[` (the match's last two
-            # characters), so an `![[...]]` embed is validated from its brackets
-            # rather than from the leading `!` -- otherwise a valid embed would
-            # be false-flagged.
-            rest = text[opener.end() - 2 :]
-            line = start + text.count("\n", 0, opener.start())
-            valid = _WIKILINK_RE.match(rest)
-            if valid is None:
-                # The excerpt stops at the line end for the same reason the scan
-                # does: what follows is a different line and did not break this.
-                fragment = rest.split("\n", 1)[0]
-                yield Finding(
-                    code=_CODE_WIKILINK,
-                    severity=severity,
-                    message=f"Unbalanced wikilink `{fragment[:30]}`; missing closing `]]`.",
-                    spec=_SPEC,
-                    path=path,
-                    line=line,
-                )
-            elif not valid.group(1).strip():
-                yield Finding(
-                    code=_CODE_WIKILINK,
-                    severity=severity,
-                    message=f"Empty wikilink target `{valid.group(0)}`.",
-                    spec=_SPEC,
-                    path=path,
-                    line=line,
-                )
+def _wikilinks(path: str, body: str, offset: int, severity: Severity, bundle: Bundle) -> Iterator[Finding]:
+    """The two wikilink codes, both built from `okf_ext.body.wikilinks`'s single scan.
+
+    A malformed occurrence (`target is None`) yields `render.wikilink`; a
+    well-formed one whose target names no bundle member yields
+    `render.wikilink-target` instead. They never double up on the same
+    occurrence -- a malformed link has no target to resolve.
+
+    **Distinguishing "unbalanced" from "empty target" without a dedicated
+    field.** `Wikilink.raw` ends with `]]` for a well-formed-but-empty match
+    (`[[ ]]`) and, for a genuinely unbalanced one, only coincidentally could --
+    a pathological line crafted to end in a literal `]]` it never closes with.
+    No test exercises that case and this mirrors wiki-io's own ported
+    behaviour for every case that matters.
+    """
+    for occurrence in body_wikilinks(body):
+        line = occurrence.line + offset
+        if occurrence.target is None:
+            if occurrence.raw.endswith("]]"):
+                message = f"Empty wikilink target `{occurrence.raw}`."
+            else:
+                message = f"Unbalanced wikilink `{occurrence.raw[:30]}`; missing closing `]]`."
+            yield Finding(code=_CODE_WIKILINK, severity=severity, message=message, spec=_SPEC, path=path, line=line)
+        elif resolve_wikilink(occurrence.target, bundle=bundle) is None:
+            yield Finding(
+                code=_CODE_WIKILINK_TARGET,
+                severity=severity,
+                message=f"Wikilink target `{occurrence.target}` names no bundle member.",
+                spec=_SPEC,
+                path=path,
+                line=line,
+            )
 
 
 def _table_pipes(
@@ -440,13 +416,14 @@ def render_rule(*, severity: Severity = "warn") -> Rule:
     Concepts, indexes and logs are walked; assets are not, and documents okf-io
     could not parse are skipped rather than re-reported.
 
-    **`Finding.line` is the offending source line for all four codes.**
-    `callout` and `table-pipe` read raw source lines and are exact. The two
-    inline codes -- `angle-bracket` and `wikilink` -- are placed by walking a
-    block's inline children and counting line breaks, because markdown-it gives
-    an inline token the whole block's map. That is exact except after a
-    multi-line code span, whose line ending CommonMark collapses to a space:
-    findings past one are reported a line early. See `_advance`.
+    **`Finding.line` is the offending source line for all five codes.**
+    `callout` and `table-pipe` read raw source lines and are exact, and so do
+    the two wikilink codes -- `okf_ext.body.wikilinks` scans physical lines
+    directly. `angle-bracket` is the one placed by walking a block's inline
+    children and counting line breaks, because markdown-it gives an inline
+    token the whole block's map; that is exact except after a multi-line code
+    span, whose line ending CommonMark collapses to a space: findings past one
+    are reported a line early. See `_advance`.
     """
     # `commonmark` plus the core `table` block rule. NOT `"gfm-like"`, which
     # enables `linkify` and raises `ModuleNotFoundError`, and no
@@ -465,7 +442,7 @@ def render_rule(*, severity: Severity = "warn") -> Rule:
             tokens = parser.parse(body)
             yield from _angle_brackets(path, tokens, offset, severity)
             yield from _callouts(path, tokens, lines, offset, severity)
-            yield from _wikilinks(path, tokens, offset, severity)
+            yield from _wikilinks(path, body, offset, severity, context.bundle)
             yield from _table_pipes(path, tokens, lines, offset, severity)
 
     return rule

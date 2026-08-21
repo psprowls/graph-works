@@ -21,6 +21,7 @@ from typing import Any, cast
 import typer
 from okf_ext.bundle import apply as apply_bundle
 from okf_ext.bundle import plan_install, plan_scaffold
+from okf_ext.moves import stranded_warning
 from okf_ext.proposals import (
     PAGE_STATUSES,
     ApplyResult,
@@ -529,6 +530,7 @@ def _migration_payload(plan: MigrationPlan) -> dict[str, Any]:
         "refusals": [
             {"member": refusal.member, "kind": refusal.kind, "detail": refusal.detail} for refusal in plan.refusals
         ],
+        "stranded": [{"member": entry.member, "target": entry.target, "line": entry.line} for entry in plan.stranded],
         "applied": False,
     }
 
@@ -545,8 +547,10 @@ def migrate(
 
     Old dialect means frontmatter carrying `target_slug` and no `type`. Each
     such document is rewritten **in place** -- frontmatter only, body carried
-    verbatim -- and then relocated by `okf_ext.moves`, which repairs every
-    inbound reference on the way. A document already carrying `type: Proposal`
+    verbatim -- and then relocated by `okf_ext.moves`, which repairs the **OKF
+    markdown references** that pointed at it. `[[wikilink]]` forms are not an
+    OKF link form, are never rewritten, and are reported as `stranded`
+    instead. A document already carrying `type: Proposal`
     is skipped, so a re-run is an empty plan rather than an error.
 
     Refusals are all-or-nothing **per document**: one unusable `kind`,
@@ -577,6 +581,9 @@ def migrate(
                 typer.echo("nothing to do")
             for refusal in plan.refusals:
                 typer.echo(f"refused {refusal.member} ({refusal.kind}): {refusal.detail}", err=True)
+            warning = stranded_warning(plan.stranded)
+            if warning is not None:
+                typer.echo(warning, err=True)
         if not plan.ok:
             raise typer.Exit(code=1)
         return
@@ -605,6 +612,9 @@ def migrate(
             typer.echo(f"refused move {move_refusal.path} ({move_refusal.kind}): {move_refusal.detail}", err=True)
         for failure in (*outcome.rewrite.failed, *outcome.move.failed):
             _echo_failure(failure)
+        warning = stranded_warning(outcome.plan.stranded)
+        if warning is not None:
+            typer.echo(warning, err=True)
     if not outcome.ok:
         raise typer.Exit(code=1)
 

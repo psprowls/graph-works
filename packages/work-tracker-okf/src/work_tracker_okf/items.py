@@ -17,16 +17,40 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
+from okf_ext.schemas import SchemaSet, declared_directories
 from okf_ext.shape import DEFAULT_IGNORE as _SECTIONS_IGNORE
 from okf_io import Bundle, Document, Source
 
 from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
-from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID
+from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID, TYPES
 
 #: The lane's two directories, bundle-relative posix. An item page sits at
 #: exactly one segment under either.
 WORK_DIR = "work"
 ARCHIVE_DIR = "work/_archive"
+
+
+def placement_directories(schema_set: SchemaSet) -> dict[str, str]:
+    """`declared_directories(schema_set)`, narrowed to this lane's own `TYPES`.
+
+    The map `compose.rule_set` hands `okf_ext.placement.placement_rule`, and
+    the one place the narrowing lives -- beside the `WORK_DIR` it must stay
+    consistent with, which is what the drift test in
+    `tests/test_placement_adoption.py` anchors on.
+
+    An **allow**-list, where `code_wiki_okf.entities.lanes.placement_directories`
+    excludes four type names outright. A deny-list is correct only while the
+    schema set holds nothing but its own lane's types, and a composed workspace
+    points every lane installer at one shared `_schema/` -- so it already holds
+    thirteen. Four of those nest under `repositories/<repo>/` (ADR-0026) and
+    have no single static prefix this rule's `Mapping[str, str]` can express;
+    passing them through at `severity="error"` would report every correctly
+    placed entity page as misplaced.
+    """
+    return {
+        type_name: directory for type_name, directory in declared_directories(schema_set).items() if type_name in TYPES
+    }
+
 
 #: The `ignore=` recipe for loading a vault carrying this lane.
 #:
@@ -237,4 +261,12 @@ def load_items(bundle: Bundle) -> tuple[WorkItem, ...]:
     return tuple(sorted(resolved, key=lambda item: (item.slug, item.archived)))
 
 
-__all__ = ["ARCHIVE_DIR", "ARCHIVE_IGNORE", "IGNORE", "WORK_DIR", "WorkItem", "load_items"]
+__all__ = [
+    "ARCHIVE_DIR",
+    "ARCHIVE_IGNORE",
+    "IGNORE",
+    "WORK_DIR",
+    "WorkItem",
+    "load_items",
+    "placement_directories",
+]

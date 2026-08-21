@@ -1817,8 +1817,8 @@
     },
     {
       "name": "gw work archive",
-      "help": "Relocate terminal work items to `work/_archive/`, repairing referrers.\n\nSweep mode reports no skips -- a sweep's non-candidates were never\ncandidates. Targeted mode reports one per named slug that did not move,\nand exits non-zero, because there the caller named the slug and is owed\nan answer. The wiki lane is never involved.",
-      "short_help": "Relocate terminal work items to `work/_archive/`, repairing referrers.",
+      "help": "Relocate terminal work items to `work/_archive/`, repairing the OKF\nmarkdown references that pointed at them.\n\n`[[wikilink]]` forms are not an OKF link form, are never rewritten, and\nare reported to stderr as stranded instead -- per lane, never merged.\n\nSweep mode reports no skips -- a sweep's non-candidates were never\ncandidates. Targeted mode reports one per named slug that did not move,\nand exits non-zero, because there the caller named the slug and is owed\nan answer. The wiki lane is never involved.",
+      "short_help": "Relocate terminal work items to `work/_archive/`, repairing the OKF markdown references that pointed at them.",
       "usage": [
         "[OPTIONS]",
         "[slugs]..."

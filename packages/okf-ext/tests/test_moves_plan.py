@@ -855,3 +855,129 @@ def test_an_unmoved_member_is_never_rebased(linked):
     plan = plan_move(linked, "concepts/beta.md", "pages/beta.md")
     alpha = [e for e in plan.edits if e.member == "concepts/alpha.md"]
     assert {e.target for e in alpha} == {"concepts/beta.md"}
+
+
+# --- the stranded-wikilink count (2026-08-21 spec §4.2, §5) ------------------
+
+
+def _with_wikilink(tmp_path, member, sentence):
+    """A writable copy of the clean corpus with *sentence* appended to *member*."""
+    root = ext_helpers.linked_copy(tmp_path)
+    target = root / member
+    target.write_text(target.read_text(encoding="utf-8") + sentence, encoding="utf-8")
+    return load_bundle(root)
+
+
+def test_a_wikilink_into_the_moved_set_is_stranded(tmp_path):
+    """The count `moves` could not repair, reported rather than silent."""
+    bundle = _with_wikilink(tmp_path, "notes/gamma.md", "\nSee [[concepts/beta]] for the rest.\n")
+    plan = plan_move_many(bundle, {"concepts/beta.md": "pages/beta.md"})
+    assert plan.ok  # a stranded reference never makes a plan not-ok
+    assert [(entry.member, entry.target) for entry in plan.stranded] == [
+        ("notes/gamma.md", "concepts/beta.md"),
+    ]
+
+
+def test_a_wikilink_into_an_unmoved_member_is_not_stranded(tmp_path):
+    bundle = _with_wikilink(tmp_path, "notes/gamma.md", "\nSee [[concepts/alpha]] for the rest.\n")
+    plan = plan_move_many(bundle, {"concepts/beta.md": "pages/beta.md"})
+    assert plan.stranded == ()
+
+
+def test_a_wikilink_naming_nothing_is_not_stranded(tmp_path):
+    bundle = _with_wikilink(tmp_path, "notes/gamma.md", "\nSee [[concepts/nowhere]] for the rest.\n")
+    plan = plan_move_many(bundle, {"concepts/beta.md": "pages/beta.md"})
+    assert plan.stranded == ()
+
+
+def test_a_malformed_wikilink_is_not_stranded(tmp_path):
+    """`target is None` has nothing to match -- that is `render.wikilink`'s concern."""
+    bundle = _with_wikilink(tmp_path, "notes/gamma.md", "\nSee [[concepts/beta for the rest.\n")
+    plan = plan_move_many(bundle, {"concepts/beta.md": "pages/beta.md"})
+    assert plan.stranded == ()
+
+
+def test_the_bare_candidate_form_matches_a_mapping_key(tmp_path):
+    """`<target>.md` first, then `<target>` -- the same two candidates
+    `resolve_wikilink` tries, matched against the mapping instead."""
+    bundle = _with_wikilink(tmp_path, "notes/gamma.md", "\nSee [[concepts/beta.md]] for the rest.\n")
+    plan = plan_move_many(bundle, {"concepts/beta.md": "pages/beta.md"})
+    assert [entry.target for entry in plan.stranded] == ["concepts/beta.md"]
+
+
+def test_an_empty_mapping_strands_nothing_without_scanning(tmp_path, monkeypatch):
+    """The short circuit `snapshot_bundle` pays for once per repo with no renames."""
+    bundle = _with_wikilink(tmp_path, "notes/gamma.md", "\nSee [[concepts/beta]] for the rest.\n")
+
+    def explode(_body):  # pragma: no cover - must never be reached
+        raise AssertionError("wikilinks() was called for an empty mapping")
+
+    monkeypatch.setattr(plan_module, "body_wikilinks", explode)
+    assert plan_module.stranded(bundle, {}) == ()
+
+
+def test_a_repair_plan_reports_stranded_for_sources_that_are_no_longer_members(tmp_path):
+    """The §4.2 regression: `plan_repair`'s sources have already moved, so a
+    membership-based resolve would return `None` for every one of them and the
+    repair path would report zero -- the same silence this item removes."""
+    bundle = _with_wikilink(tmp_path, "notes/gamma.md", "\nSee [[concepts/beta]] for the rest.\n")
+    plan = plan_repair(bundle, {"concepts/beta.md": "pages/beta.md"})
+    assert [entry.member for entry in plan.stranded] == ["notes/gamma.md"]
+
+
+def test_the_stranded_line_number_is_document_relative(tmp_path):
+    """`Wikilink.line` is body-relative; `Stranded.line` adds the frontmatter offset."""
+    root = ext_helpers.linked_copy(tmp_path)
+    target = root / "notes" / "gamma.md"
+    original = target.read_text(encoding="utf-8")
+    target.write_text(original + "\nSee [[concepts/beta]] for the rest.\n", encoding="utf-8")
+    expected = original.count("\n") + 2
+    plan = plan_move_many(load_bundle(root), {"concepts/beta.md": "pages/beta.md"})
+    assert plan.stranded[0].line == expected
+
+
+def test_the_two_message_builders_share_one_wording(tmp_path):
+    from okf_ext.moves import Stranded, stranded_summary, stranded_warning
+
+    entries = (
+        Stranded(member="notes/gamma.md", target="concepts/beta.md", line=9),
+        Stranded(member="notes/gamma.md", target="concepts/beta.md", line=11),
+    )
+    summary = stranded_summary(entries)
+    assert summary == "! 2 inbound [[wikilink]] reference(s) into the moved set were not repaired, across 1 file(s)."
+    warning = stranded_warning(entries)
+    assert warning is not None
+    assert warning.startswith(summary)
+    assert "see `gw lint` for the full inventory" in warning
+    assert stranded_warning(()) is None
+
+
+def test_a_wikilink_in_a_different_normalization_form_is_still_stranded(tmp_path):
+    """`stranded()` matches by canonical id, like every other lookup here.
+
+    The mapping key is the **raw disk id** (NFD here) because the callers
+    that strand things -- `plan_move_dir`, `work_tracker_okf.archive` --
+    build their mapping by enumerating bundle members, and a member id is
+    byte-identical to what `readdir` returned. The wikilink naming that same
+    member is content-derived and may be written NFC (§ADR-0027). Raw key
+    matching missed that pair and reported zero rather than failing, so
+    nothing downstream could notice.
+    """
+    nfd = unicodedata.normalize("NFD", "café")
+    nfc = unicodedata.normalize("NFC", "café")
+    assert nfd != nfc  # guard: the whole test is vacuous if these coincide
+    bundle = ext_helpers.write_bundle(
+        tmp_path,
+        {
+            f"concepts/{nfd}.md": "---\ntype: Concept\ntitle: Café\n---\n\n# Café\n",
+            "concepts/citing.md": (f"---\ntype: Concept\ntitle: Citing\n---\n\nSee [[concepts/{nfc}]] for the rest.\n"),
+        },
+    )
+    # keyed by the raw disk id, as a member enumeration produces it
+    plan = plan_move_many(bundle, {f"concepts/{nfd}.md": f"pages/{nfd}.md"})
+
+    assert plan.ok
+    assert [entry.member for entry in plan.stranded] == ["concepts/citing.md"]
+    # the RAW mapping key comes back -- what a caller must use to key the
+    # mapping again, per `Bundle.member_id`'s own contract
+    assert plan.stranded[0].target == f"concepts/{nfd}.md"

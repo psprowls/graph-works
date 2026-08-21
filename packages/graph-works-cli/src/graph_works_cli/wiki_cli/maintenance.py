@@ -7,6 +7,7 @@ import json
 import typer
 from doc_wiki_okf.archive import ARCHIVE_IGNORE, apply_archive, plan_archive
 from graph_works_core.wiki_stats.commands import compute_stats
+from okf_ext.moves import stranded_warning
 from okf_io import load_bundle, update_index
 
 from graph_works_cli import exit_codes
@@ -81,6 +82,10 @@ def archive(
         plan = plan_archive(bundle, [target] if target is not None else None)
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
+
+    warning = stranded_warning(plan.moves.stranded)
+    if warning is not None:
+        typer.echo(warning, err=True)
 
     if dry_run:
         typer.echo(plan.diff())

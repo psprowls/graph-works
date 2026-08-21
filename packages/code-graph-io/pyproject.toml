@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "code-graph-io"
-version = "0.1.1"
+version = "0.2.0"
 description = "Code-graph core for the agent-workspace ecosystem — SQLite store, manifest scanning, and read-only queries."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },

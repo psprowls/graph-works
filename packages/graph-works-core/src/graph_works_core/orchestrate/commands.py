@@ -1122,8 +1122,16 @@ def run_stage_advance(
 
     results_path: Path | None = None
     facts_root = _facts_root(item, stamped_worktree, resolved_repo)
-    if facts_root is not None and start_sha and old_phase in RESULTS_PHASES and new_phase != old_phase:
-        facts = provenance.results_facts(facts_root, phase=old_phase, start_sha=start_sha)
+    if (
+        facts_root is not None
+        and start_sha
+        and item is not None
+        and old_phase in RESULTS_PHASES
+        and new_phase != old_phase
+    ):
+        facts = provenance.results_facts(
+            facts_root, phase=old_phase, start_sha=start_sha, paths=item.affects, opened=item.opened
+        )
         if facts is not None:
             results_path = write_results(bundle.root, slug, facts, archived=item.archived if item else False)
 

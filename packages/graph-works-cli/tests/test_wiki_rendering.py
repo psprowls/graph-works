@@ -63,6 +63,7 @@ _MIRROR_KEYS = {
     "mirror_moved",
     "mirror_deleted",
     "mirror_declined",
+    "mirror_stranded",
     "mirror_skipped_repos",
     "mirror_errors",
 }

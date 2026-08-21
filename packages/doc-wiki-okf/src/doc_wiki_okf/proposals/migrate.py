@@ -26,8 +26,10 @@ and any BOM survive without a single assertion needed to defend them, and
 contract does the work rather than being re-implemented.
 
 **Re-placement is computed here and performed by `okf_ext.moves`**, which buys
-inbound reference repair for free and keeps this module inside its own
-competence. The order is rewrite, reload, move -- the plan's writes address the
+OKF markdown reference repair for free and keeps this module inside its own
+competence. `[[wikilink]]` forms are not an OKF link form and are never
+rewritten; `MigrationPlan.stranded` counts the ones this run could not reach.
+The order is rewrite, reload, move -- the plan's writes address the
 paths the documents are at when the plan is computed.
 
 Rejected: re-rendering each body through `ReviewRenderer`. It would repair two
@@ -48,7 +50,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
 from okf_ext import moves
-from okf_ext.moves import MovePlan, MoveResult
+from okf_ext.moves import MovePlan, MoveResult, Stranded
 from okf_ext.proposals import PAGE_STATUSES, PROPOSAL_TYPE, proposal_path
 from okf_ext.writing import ApplyResult, PendingWrite, WriteFailure, body_digest, write_all
 from okf_io import Bundle, Document, load_bundle
@@ -129,11 +131,18 @@ class MigrationPlan:
     mapping that is no longer the one being applied. Nothing here is computed
     across documents, so a refused document simply contributes no write and the
     others still land. Refusals are always reported, never silent.
+
+    **`stranded` is computed here, not read off a `MovePlan`.** This command
+    previews by default and only builds a `MovePlan` under `--apply`, so a
+    plan that read the count off `MovePlan.stranded` would report nothing on
+    the invocation people actually run. `moves.stranded()` is public for
+    exactly this: a caller holding a mapping rather than a plan.
     """
 
     root: Path
     writes: tuple[MigrationWrite, ...]
     refusals: tuple[Refusal, ...]
+    stranded: tuple[Stranded, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -335,7 +344,13 @@ def plan_migrate(bundle: Bundle, *, by: str, at: datetime) -> MigrationPlan:
         elif isinstance(outcome, Refusal):
             refusals.append(outcome)
 
-    return MigrationPlan(root=bundle.root, writes=tuple(writes), refusals=tuple(refusals))
+    placements = {write.member: write.placement for write in writes}
+    return MigrationPlan(
+        root=bundle.root,
+        writes=tuple(writes),
+        refusals=tuple(refusals),
+        stranded=moves.stranded(bundle, placements),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -441,8 +456,10 @@ def migrate_and_move(root: Path, *, by: str, at: datetime, ignore: Sequence[str]
     and neither does `moves.apply` -- both document that the caller reloads.
 
     Performing the move is `okf_ext.moves`' job rather than this module's,
-    which buys inbound reference repair for free and keeps the migrator inside
-    its own competence. A move step is skipped entirely when the rewrite
+    which buys OKF markdown reference repair for free and keeps the migrator
+    inside its own competence -- `[[wikilink]]` forms are never rewritten and
+    are reported on `MigrationPlan.stranded` instead. A move step is skipped
+    entirely when the rewrite
     landed nothing (an all-ready-migrated bundle, most plausibly), so a re-run
     reports four empty results rather than paying for a no-op move plan.
 

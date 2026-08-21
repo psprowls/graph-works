@@ -31,8 +31,9 @@ from okf_io import Bundle, Document, build_link_graph
 from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 from okf_io.links import is_external, parse_destination, resolve_path, resolve_reference
 
+from okf_ext.body import wikilinks as body_wikilinks
 from okf_ext.moves import locate
-from okf_ext.moves.model import Move, MovePlan, RefEdit, Refusal, Unrebased
+from okf_ext.moves.model import Move, MovePlan, RefEdit, Refusal, Stranded, Unrebased
 from okf_ext.writing import body_digest
 
 #: The §6.2 path-valued frontmatter keys, as dotted paths. A fixed, documented
@@ -482,6 +483,89 @@ def _frontmatter_edits(
     return edits, unrebased
 
 
+def _stranded_candidate(target: str, keys: Mapping[str, str]) -> str | None:
+    """The mapping key *target* names, or `None`. `<target>.md`, then `<target>`.
+
+    The same two candidates `okf_ext.body.resolve_wikilink` tries, matched
+    against the mapping's key set rather than against bundle membership --
+    deliberately. `plan_repair`'s sources have **already moved**, so they are
+    no longer bundle members and a membership-based resolve would answer
+    `None` for every one of them, silently reporting zero stranded references
+    on exactly the path that needs the count most.
+
+    *keys* is `{canonical_id(key): key}`, not the raw key set (§ADR-0027).
+    *target* is content-derived -- it comes off a `[[wikilink]]` in a body --
+    so it can name the same file in a different Unicode normalization form
+    than the caller's mapping key, exactly as `_body_edits` documents for its
+    own `destination_of` lookup just below. Raw membership would answer
+    `None` there and under-report the count on precisely the non-ASCII
+    members most likely to be stranded. The **raw** key is what comes back,
+    because that is what a caller must use to key the mapping again.
+    """
+    for candidate in (f"{target}.md", target):
+        raw = keys.get(canonical_id(candidate))
+        if raw is not None:
+            return raw
+    return None
+
+
+def stranded(bundle: Bundle, mapping: Mapping[str, str]) -> tuple[Stranded, ...]:
+    """Inbound `[[wikilink]]` references into *mapping*'s source set.
+
+    Reports; never rewrites. `okf_ext.moves` repairs OKF markdown links only,
+    and this is how it says what it could not see.
+
+    Scope is every markdown member the bundle holds -- the loaded bundle's
+    ignore lens is the caller's choice and this does not second-guess it. Code
+    exclusion (fenced blocks, indented blocks, raw HTML, inline-code spans) is
+    inherited from `okf_ext.body.wikilinks`; nothing is re-implemented here.
+
+    An empty *mapping* returns immediately without scanning: `plan_mirror` is
+    called once per configured repo and most repos have no renames in a given
+    run, so the common path pays nothing.
+    """
+    if not mapping:
+        return ()
+    keys = {canonical_id(key): key for key in mapping}
+    found: list[Stranded] = []
+    for member, document in sorted(_members(bundle).items()):
+        if document.parse_error is not None or not document.body:
+            continue
+        offset = document.body_line_offset
+        for occurrence in body_wikilinks(document.body):
+            if occurrence.target is None:
+                continue  # malformed: `render.wikilink`'s concern, not this one's
+            candidate = _stranded_candidate(occurrence.target, keys)
+            if candidate is not None:
+                found.append(Stranded(member=member, target=candidate, line=occurrence.line + offset))
+    return tuple(found)
+
+
+def stranded_summary(stranded_entries: Sequence[Stranded]) -> str:
+    """The one `!` line every relocating lane's plan render carries.
+
+    One string across five lanes rather than five near-identical ones: a
+    caller reading two lanes' output in one run should see one message.
+    """
+    files = len({entry.member for entry in stranded_entries})
+    return (
+        f"! {len(stranded_entries)} inbound [[wikilink]] reference(s) into the moved set were not repaired, "
+        f"across {files} file(s)."
+    )
+
+
+def stranded_warning(stranded_entries: Sequence[Stranded]) -> str | None:
+    """The two-line stderr note a CLI prints, or `None` when there is nothing
+    to warn about. Never touches an exit code -- broken links are warn, never
+    error (ADR-0004)."""
+    if not stranded_entries:
+        return None
+    return (
+        f"{stranded_summary(stranded_entries)}\n"
+        "  `okf_ext.moves` repairs OKF markdown links only; see `gw lint` for the full inventory."
+    )
+
+
 def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -> MovePlan:
     """The one engine behind all four planners.
 
@@ -610,11 +694,12 @@ def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -
         unrebased=tuple(unrebased),
         digests=digests,
         relocate=relocate,
+        stranded=stranded(bundle, mapping),
     )
 
 
 def plan_move(bundle: Bundle, source: str, dest: str) -> MovePlan:
-    """Move one member, repairing every inbound reference to it.
+    """Move one member, repairing every inbound OKF reference to it.
 
     Sugar over `plan_move_many({source: dest})`: a single-member call and the
     equivalent one-entry mapping produce the same plan, because they are the
@@ -667,7 +752,12 @@ def plan_move_many(bundle: Bundle, mapping: Mapping[str, str]) -> MovePlan:
 
 
 def plan_repair(bundle: Bundle, mapping: Mapping[str, str]) -> MovePlan:
-    """Repair inbound references for moves that already happened.
+    """Repair inbound OKF markdown references for moves that already happened.
+
+    `[[wikilink]]` forms are never rewritten. They are counted on
+    `MovePlan.stranded`, which `stranded()` computes against the **mapping's
+    key set** precisely so this mode -- whose sources are no longer bundle
+    members -- reports them correctly rather than silently returning zero.
 
     The same engine with the relocation step omitted: no requirement that the
     source still exist, and no `dest-exists` refusal for a destination that
@@ -705,4 +795,7 @@ __all__ = [
     "plan_move_dir",
     "plan_move_many",
     "plan_repair",
+    "stranded",
+    "stranded_summary",
+    "stranded_warning",
 ]

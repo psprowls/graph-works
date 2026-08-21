@@ -303,7 +303,7 @@ def _agent_plugin_targets(
         desc = reader.describe_agent_plugin(name=node.name)
         if desc is None:
             continue
-        render = _stamp_provenance(render_agent_plugin(desc), sha=sha, at=at)
+        render = _stamp_provenance(render_agent_plugin(desc, repo_name=repo_name), sha=sha, at=at)
         yield _resolve_target(
             existing=existing,
             schema_set=schema_set,

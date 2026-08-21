@@ -314,6 +314,8 @@ def plan_filing(
     items: Sequence[WorkItem],
     seed: FilingSeed,
     section_set: SectionSet,
+    *,
+    lane_dir: str | None = None,
 ) -> FilingPlan:
     """Plan a new item page under *root*. Writes nothing; reads two paths.
 
@@ -321,11 +323,21 @@ def plan_filing(
     dependency graph before collision checks, so an invalid plan never proceeds
     to an effectful apply.
 
+    *lane_dir* is the directory the bundle's own `x-okf-directory` declares for
+    `seed.type`, trailing slash already stripped -- the annotation this lane
+    puts on all six of its schemas and, before this, never read. `None` keeps
+    `WORK_DIR`, which is what leaves every caller that holds no `SchemaSet`
+    compiling untouched. Resolving it here rather than loading a schema set is
+    deliberate: filing already takes its declarations from the caller, and one
+    more is cheaper than a module that reads the bundle behind its caller's
+    back.
+
     Raises `KeyError` when *section_set* carries no declaration for a type
     `SLUG_PREFIXES` knows. That is a configuration error, not content, and it is
     the same failure `code_wiki_okf.mirror.create.write_new_page` documents.
     """
-    work_root = root / WORK_DIR
+    lane = WORK_DIR if lane_dir is None else lane_dir
+    work_root = root / lane
     if seed.type not in SLUG_PREFIXES:
         return _refused(
             seed,
@@ -371,8 +383,8 @@ def plan_filing(
         on=seed.on,
         epic_child=parent_item is not None and parent_item.type == "Epic",
     )
-    target = item_page(slug).path(root)
-    work_directory = root / WORK_DIR / slug
+    target = item_page(slug, lane_dir=lane_dir).path(root)
+    work_directory = root / lane / slug
 
     dependency_issues = validate_dependencies(seed.depends_on, parent=seed.parent, self_slug=slug)
     if dependency_issues:

@@ -313,3 +313,34 @@ def test_no_token_count_on_synthetic_package_node(seeded_db) -> None:
     assert row is not None, "expected at least one package node"
     attrs = json.loads(row[0]) if row[0] else {}
     assert "token_count" not in attrs
+
+
+def test_member_ignore_excludes_a_manifest_not_just_its_files(tmp_path: Path) -> None:
+    """An ignored subtree must yield no Package node, not just no File nodes.
+
+    Filtering the file walk alone left a fixture/vendored tree's
+    `pyproject.toml` producing a Package node — and one entity page per
+    fixture package downstream — which is the drift `ignore:` exists to stop.
+    """
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "realpkg"\nversion = "0.1.0"\n',
+            "src/a.py": "def keep_me():\n    return 1\n",
+            "pkg/tests/fixtures/sample/pyproject.toml": '[project]\nname = "fixturepkg"\nversion = "0.1.0"\n',
+            "pkg/tests/fixtures/sample/b.py": "def skip_me():\n    return 2\n",
+        },
+        "init",
+    )
+
+    update.run_workspace([tmp_path], graph_dir=graph_dir(tmp_path), full=True, member_ignore=[("**/fixtures/**",)])
+
+    conn = _open_ro(tmp_path)
+    try:
+        packages = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
+        assert packages == {"realpkg"}
+        paths = {row[0] for row in conn.execute("SELECT path FROM nodes WHERE kind='file'").fetchall()}
+        assert not any(path.startswith("pkg/tests/fixtures/") for path in paths)
+    finally:
+        conn.close()

@@ -572,6 +572,57 @@ def test_archive_passes_sweep_mode_as_none(workspace: Path, monkeypatch) -> None
     assert captured["dry_run"] is False
 
 
+def test_archive_reports_stranded_wikilinks_labelled_by_lane(workspace: Path) -> None:
+    """A caller acting on the number needs to know which lane stranded what
+    (2026-08-21 spec §4.5). `work archive` never touches the wiki lane (its
+    own docstring: "The wiki lane is never involved"), so only the
+    "work items" note can ever fire here -- the "wiki pages" note is the
+    combined `gw archive` sweep's to print, covered in test_archive_cli.py."""
+    write_item(workspace, "2026-08-01-feature-a", phase="finish", template=RESOLVED_ITEM)
+    layout = resolve_workspace(str(workspace))
+    (layout.bundle_dir / "work" / "2026-08-01-feature-a").mkdir(parents=True, exist_ok=True)
+    citing = write_item(workspace, "2026-08-01-feature-b", phase="plan")
+    citing.write_text(
+        citing.read_text(encoding="utf-8") + "\nSee [[work/2026-08-01-feature-a]] for detail.\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["work", "archive", "--dry-run", "--workspace", str(workspace)])
+
+    assert result.exit_code == exit_codes.SUCCESS, result.output
+    assert "work items: ! 1 inbound [[wikilink]]" in result.stderr
+    assert "wiki pages:" not in result.stderr
+
+
+def test_archive_json_mode_still_reports_the_note_on_stderr(workspace: Path) -> None:
+    """The note is stderr and the payload is stdout -- they do not collide."""
+    write_item(workspace, "2026-08-01-feature-a", phase="finish", template=RESOLVED_ITEM)
+    layout = resolve_workspace(str(workspace))
+    (layout.bundle_dir / "work" / "2026-08-01-feature-a").mkdir(parents=True, exist_ok=True)
+    citing = write_item(workspace, "2026-08-01-feature-b", phase="plan")
+    citing.write_text(
+        citing.read_text(encoding="utf-8") + "\nSee [[work/2026-08-01-feature-a]] for detail.\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["work", "archive", "--workspace", str(workspace), "--json"])
+
+    assert result.exit_code == exit_codes.SUCCESS, result.output
+    json.loads(result.stdout)  # stdout is still valid JSON
+    assert "work items: ! 1 inbound [[wikilink]]" in result.stderr
+
+
+def test_archive_no_stranded_note_when_nothing_is_stranded(workspace: Path) -> None:
+    write_item(workspace, "2026-08-01-feature-a", phase="finish", template=RESOLVED_ITEM)
+    layout = resolve_workspace(str(workspace))
+    (layout.bundle_dir / "work" / "2026-08-01-feature-a").mkdir(parents=True, exist_ok=True)
+
+    result = runner.invoke(app, ["work", "archive", "--dry-run", "--workspace", str(workspace)])
+
+    assert result.exit_code == exit_codes.SUCCESS, result.output
+    assert "inbound [[wikilink]]" not in result.stderr
+
+
 def test_archive_dry_run_flag_plumbing(workspace: Path, monkeypatch) -> None:
     captured: dict[str, object] = {}
 

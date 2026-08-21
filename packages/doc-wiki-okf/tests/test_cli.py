@@ -451,6 +451,43 @@ def test_migrate_apply_on_a_missing_root_refuses(tmp_path) -> None:
     assert "not a directory" in result.stderr
 
 
+def _bundle_with_old_dialect_proposal_and_wikilink(root) -> None:
+    """The one migratable proposal from `_seed_old`, plus a `reference/citing.md`
+    page carrying an inbound `[[wikilink]]` into it -- a reference `moves` is
+    deliberately blind to."""
+    _seed_old(root)
+    citing = root / "reference" / "citing.md"
+    citing.parent.mkdir(parents=True, exist_ok=True)
+    citing.write_text(
+        "---\ntype: Reference\ntitle: Citing\ndescription: d\n---\n\n"
+        "## Summary\n\nSee [[proposals/adr-bulk]] for the rest.\n",
+        encoding="utf-8",
+    )
+
+
+def test_migrate_preview_reports_stranded_wikilinks_and_still_exits_zero(tmp_path) -> None:
+    root = tmp_path / "b"
+    _bundle_with_old_dialect_proposal_and_wikilink(root)
+
+    result = runner.invoke(app, ["migrate", str(root), "--today", DAY])
+    assert result.exit_code == 0  # ADR-0004: broken links are warn, never error
+    assert "inbound [[wikilink]]" in result.stderr
+
+    as_json = runner.invoke(app, ["migrate", str(root), "--json", "--today", DAY])
+    payload = json.loads(as_json.stdout)
+    assert [entry["member"] for entry in payload["stranded"]] == ["reference/citing.md"]
+
+
+def test_migrate_apply_carries_stranded_in_the_same_payload(tmp_path) -> None:
+    root = tmp_path / "b"
+    _bundle_with_old_dialect_proposal_and_wikilink(root)
+
+    result = runner.invoke(app, ["migrate", str(root), "--apply", "--json", "--today", DAY])
+    payload = json.loads(result.stdout)
+    assert payload["applied"] is True
+    assert [entry["member"] for entry in payload["stranded"]] == ["reference/citing.md"]
+
+
 def _ingest_workspace(tmp_path):
     """A workspace with a `wiki/`, and material that need not live inside it."""
     (tmp_path / "wiki").mkdir()

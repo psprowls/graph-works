@@ -88,6 +88,13 @@ class MirrorSummary:
     def declined(self) -> int:
         return sum(len(result.declined_deletions) for result in self.results)
 
+    @property
+    def stranded(self) -> int:
+        """Inbound `[[wikilink]]` references into every repo's moved set that
+        `moves` could not repair. Read off `plans`, not `results`: it is a
+        plan-time fact and `plans` is populated in both modes."""
+        return sum(len(plan.moves.stranded) for plan in self.plans)
+
 
 def _summary_text(summary: MirrorSummary) -> str:
     """One `log.md` bullet naming this run's counts.

@@ -1,4 +1,4 @@
-"""Member moves: plan a rename, repair every inbound reference, apply.
+"""Member moves: plan a rename, repair every inbound OKF reference, apply.
 
     from okf_ext import moves
 
@@ -21,7 +21,10 @@ express.
 **Not `[[wikilink]]` forms.** A wikilink is not a link form OKF v0.2 defines
 and `okf_io` does not see one, so nothing here can repair one. Converting
 wikilinks to markdown links is a separate, upstream decision; once converted,
-this capability sees them like any other destination.
+this capability sees them like any other destination. **The blindness is
+reported, not silent**: every plan carries `MovePlan.stranded`, the inbound
+wikilinks into its moved set that nothing here can reach, and `stranded()` is
+public for a caller holding a mapping rather than a plan.
 
 **This module imports the shared `okf_ext.context`, `okf_ext.body` and
 `okf_ext.writing` layers and nothing else from its own package.** It never
@@ -40,6 +43,7 @@ from okf_ext.moves.model import (
     Refusal,
     RefusalKind,
     RefWhere,
+    Stranded,
     Unrebased,
 )
 from okf_ext.moves.plan import (
@@ -49,6 +53,9 @@ from okf_ext.moves.plan import (
     plan_move_dir,
     plan_move_many,
     plan_repair,
+    stranded,
+    stranded_summary,
+    stranded_warning,
 )
 from okf_ext.writing import FailureKind, WriteFailure
 
@@ -88,6 +95,7 @@ __all__ = [
     "RefWhere",
     "Refusal",
     "RefusalKind",
+    "Stranded",
     "Unrebased",
     "WriteFailure",
     "apply",
@@ -95,4 +103,7 @@ __all__ = [
     "plan_move_dir",
     "plan_move_many",
     "plan_repair",
+    "stranded",
+    "stranded_summary",
+    "stranded_warning",
 ]

@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from markdown_it import MarkdownIt
+from okf_io import Bundle
 
 #: One shared parser. `commonmark` deliberately, matching `okf_io._md`: no
 #: linkify, no GFM tables, so nothing here depends on a plugin set.
@@ -215,12 +216,146 @@ def prose_lines(body: str) -> frozenset[int]:
     return frozenset(number for number in range(1, skeleton.total + 1) if number not in skeleton.code)
 
 
+#: An opening `[[` or `![[`, used to find candidate spans to validate. Moved
+#: here from `okf_ext.render.rule` (not copied) -- `render`'s lint rule and
+#: `work_tracker_okf.archive`'s stranded-reference count both need the same
+#: wikilink scan, and the independence contract forbids one capability
+#: importing another, so the scan has to live in this shared layer.
+_WIKILINK_OPEN_RE = re.compile(r"!?\[\[")
+#: `[[target]]`, `[[target#anchor]]`, `[[target|alias]]`. Inside a table cell the
+#: alias separator is escaped as `\|`, so the lookahead stops the target there
+#: and lets the alias group consume `\|alias`. Note the target group requires at
+#: least one character, so `[[]]` does not match and reads as unbalanced.
+#:
+#: **No group crosses a newline.** A wikilink is a single-line construct -- an
+#: unclosed `[[` at the end of one line and a stray `]]` on the next render as
+#: neither -- so every character class excludes `\n`. Without that exclusion the
+#: two halves join into one apparently-valid link and the finding is lost.
+_WIKILINK_RE = re.compile(r"\[\[((?:(?!\\\|)[^\]|#\n])+)(?:#[^\]|\n]*)?(?:\\?\|[^\]\n]*)?\]\]")
+
+#: A run of one or more backticks -- CommonMark closes a code span with the
+#: next run of *exactly* the same width.
+_BACKTICK_RUN_RE = re.compile(r"`+")
+#: Filler for a masked-out inline-code span. Same length as what it replaces,
+#: so every match offset still points at the same place in the unmasked line.
+_CODE_MASK = "\x00"
+
+
+@dataclass(frozen=True, slots=True)
+class Wikilink:
+    """One `[[...]]` occurrence in a body, well-formed or not."""
+
+    raw: str  # the occurrence exactly as written, e.g. "[[work/x|Alias]]"
+    target: str | None  # the target with alias and anchor stripped; None when malformed
+    line: int  # 1-based, body-relative
+    column: int  # 0-based index into that line
+    embed: bool  # True for the `![[...]]` form
+
+
+def _mask_inline_code(line: str) -> str:
+    """Blank out inline-code spans in *line*, preserving every other offset.
+
+    CommonMark's rule: a run of N backticks is closed by the next run of
+    *exactly* N -- a naive `` `[^`]*` `` mis-pairs a double-backtick span, and
+    these are exactly the spans a wikilink hides inside (`` `[[foo` ``).
+    """
+    runs = [(match.start(), match.end()) for match in _BACKTICK_RUN_RE.finditer(line)]
+    if not runs:
+        return line
+    out = list(line)
+    index = 0
+    while index < len(runs):
+        start, end = runs[index]
+        width = end - start
+        for later in range(index + 1, len(runs)):
+            if runs[later][1] - runs[later][0] == width:
+                for position in range(start, runs[later][1]):
+                    out[position] = _CODE_MASK
+                index = later + 1
+                break
+        else:
+            index += 1
+    return "".join(out)
+
+
+def _line_text(raw_line: str) -> str:
+    """*raw_line* with its own terminator (if any) removed."""
+    if raw_line.endswith("\r\n"):
+        return raw_line[:-2]
+    if raw_line.endswith(("\n", "\r")):
+        return raw_line[:-1]
+    return raw_line
+
+
+def wikilinks(body: str) -> tuple[Wikilink, ...]:
+    """Every `[[...]]` occurrence in *body*'s prose, well-formed or not.
+
+    **Two classes of code are excluded**, because a wikilink can hide inside
+    either: fenced blocks, indented blocks and raw HTML blocks (`prose_lines`'s
+    mask), and inline-code spans within an otherwise-prose line (backtick
+    masking, in place, the same hazard `scripts/convert_wikilinks.py` names and
+    solves the same way).
+
+    The only scanner for this syntax in the package: `okf_ext.render`'s lint
+    rule and `work_tracker_okf.archive`'s stranded-reference count both consume
+    this rather than each parsing wikilinks for themselves.
+    """
+    prose = prose_lines(body)
+    found: list[Wikilink] = []
+    for number, raw_line in enumerate(split_lines(body), start=1):
+        if number not in prose:
+            continue
+        text = _line_text(raw_line)
+        masked = _mask_inline_code(text)
+        for opener in _WIKILINK_OPEN_RE.finditer(masked):
+            start = opener.start()
+            embed = masked[start] == "!"
+            bracket_start = opener.end() - 2  # the "[[" itself, past any leading "!"
+            rest = masked[bracket_start:]
+            valid = _WIKILINK_RE.match(rest)
+            if valid is None:
+                found.append(Wikilink(raw=text[start:], target=None, line=number, column=start, embed=embed))
+                continue
+            target_start, target_end = valid.span(1)
+            target = text[bracket_start + target_start : bracket_start + target_end].strip() or None
+            found.append(
+                Wikilink(
+                    raw=text[start : bracket_start + valid.end()],
+                    target=target,
+                    line=number,
+                    column=start,
+                    embed=embed,
+                )
+            )
+    return tuple(found)
+
+
+def resolve_wikilink(target: str, *, bundle: Bundle) -> str | None:
+    """The bundle member `target` names, or None. Tries `<target>.md`, then `<target>`.
+
+    **Obsidian's shortest-path (bare-name) resolution is deliberately not
+    implemented.** Measured against a live vault, it rescues none of its
+    dangling wikilinks -- the ones that are genuinely broken name no file
+    anywhere under any basename, so bare-name matching would buy nothing and
+    introduce an ambiguity rule with no test to anchor it.
+    """
+    candidate = f"{target}.md"
+    if bundle.has_member(candidate):
+        return candidate
+    if bundle.has_member(target):
+        return target
+    return None
+
+
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords, then lowercase
 #: functions, each group alphabetical -- `RUF022` enforces exactly this.
 __all__ = [
     "Section",
+    "Wikilink",
     "find_section",
     "prose_lines",
+    "resolve_wikilink",
     "sections",
     "split_lines",
+    "wikilinks",
 ]

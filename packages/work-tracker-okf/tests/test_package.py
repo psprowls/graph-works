@@ -2,7 +2,12 @@ import work_tracker_okf
 
 
 def test_version() -> None:
-    assert work_tracker_okf.__version__ == "0.2.0"
+    """`0.2.1` gave `install_bundle` a fourth act, merging this package's
+    `CONTRIBUTED_TAGS` into the bundle's `_tags.yaml`; `BundleInstall` grew
+    two defaulted fields and a property, so no existing caller's construction
+    or reads changed. `0.2.2` adds `*/.DS_Store` to `IGNORE` -- and pointedly
+    not to `ARCHIVE_IGNORE`. Both additive, so both patches (ADR-0007)."""
+    assert work_tracker_okf.__version__ == "0.2.2"
 
 
 def test_dependencies_are_exactly_the_three_the_spec_allows() -> None:

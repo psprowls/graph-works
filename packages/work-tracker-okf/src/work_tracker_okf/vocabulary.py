@@ -19,6 +19,8 @@ import re
 from collections.abc import Mapping
 from types import MappingProxyType
 
+from okf_ext.tags import TagDefinition
+
 #: The six concept types this lane declares. They differ in how child 3 routes
 #: them, not in frontmatter shape -- which is why the six schema wrappers carry
 #: nothing but a `const`.
@@ -60,6 +62,22 @@ SMALL_EFFORTS: frozenset[str] = frozenset({"xtra-small", "small"})
 #: which survey §4.3 showed becomes indistinguishable from this once rule 16
 #: and `target` are deleted.
 PARENT_TYPES: frozenset[str] = frozenset({"Epic", "Feature"})
+
+#: The tags this package contributes to a shared vault's `_tags.yaml`.
+#:
+#: W-K's two. `security` and `perf` stopped being *kinds* and became `Bug`
+#: *tags*, and until now nothing in the shipped code declared either string
+#: anywhere -- so a human editing a Bug had no way to discover them. Merged in
+#: at install time by `init.install_bundle`, which is what puts them in front
+#: of `vocabulary_rule`'s "Did you mean `security`?" suggestion.
+#:
+#: A package contributes *entries*; it never ships `_tags.yaml` itself. The
+#: file is the vault's, and `okf_ext.bundle.plan_install` refuses it as a
+#: whole-file member for exactly that reason.
+CONTRIBUTED_TAGS: tuple[TagDefinition, ...] = (
+    TagDefinition(name="perf", description="A defect whose impact is performance."),
+    TagDefinition(name="security", description="A defect with a security impact."),
+)
 
 #: The phases that produce an artifact, in pipeline order. A tuple, not a
 #: frozenset -- order is the point. `done` is absent because a terminal phase
@@ -129,6 +147,7 @@ __all__ = [
     "ARTIFACT_PHASES",
     "BLAST_RADII",
     "BUG_LIKE_TYPES",
+    "CONTRIBUTED_TAGS",
     "DIAGNOSIS_TYPES",
     "DOCUMENT_STATUSES",
     "EFFORTS",

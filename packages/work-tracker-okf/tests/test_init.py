@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 from okf_ext.bundle import SCAFFOLD_MEMBERS
+from okf_ext.tags import load_vocabulary, vocabulary_rule
+from okf_io import load_bundle, validate
+from work_tracker_okf.compose import rule_set
 from work_tracker_okf.init import BundleInstall, InitError, install_bundle, plan_install
+from work_tracker_okf.items import IGNORE
 from work_tracker_okf.resources import SEED_RELATIVE_PATHS, seed_files
 
 _TODAY = date(2026, 1, 1)
@@ -248,3 +252,153 @@ def test_seed_files_reads_every_owned_path(tmp_path: Path) -> None:
 
 def test_bundle_install_is_frozen() -> None:
     assert BundleInstall.__dataclass_params__.frozen is True
+
+
+def test_a_fresh_install_merges_both_tags_into_the_scaffolds_tags_yaml(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    result = install_bundle(root, today=_TODAY, dry_run=False)
+
+    assert result.ok
+    assert result.vocabulary is not None
+    assert result.vocabulary.added == ("perf", "security")
+    assert result.vocabulary_write is not None
+    assert result.vocabulary_write.written == ("_tags.yaml",)
+
+    vocab = load_vocabulary(root / "_tags.yaml")
+    assert {"perf", "security"} <= vocab.allowed
+    assert "+ _tags.yaml: security" in result.diff()
+
+
+def test_a_second_install_merges_nothing_and_reports_unchanged(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    install_bundle(root, today=_TODAY, dry_run=False)
+    before = (root / "_tags.yaml").read_bytes()
+
+    again = install_bundle(root, today=_TODAY, dry_run=False)
+    assert again.ok
+    assert not again.changed
+    assert again.vocabulary is not None
+    assert again.vocabulary.added == ()
+    assert again.vocabulary.unchanged == ("perf", "security")
+    assert (root / "_tags.yaml").read_bytes() == before
+
+
+def test_a_hand_deprecated_tag_refuses_that_tag_alone_and_the_file_is_untouched(tmp_path: Path) -> None:
+    """The conflict path, with no synthetic second contributor: a human flips
+    `security` to deprecated in their own vault, and the next install declines
+    to argue with them."""
+    root = tmp_path / "bundle"
+    install_bundle(root, today=_TODAY, dry_run=False)
+    target = root / "_tags.yaml"
+    target.write_text(
+        target.read_text(encoding="utf-8").replace(
+            "  - name: security\n    description: A defect with a security impact.\n",
+            "  - name: security\n    description: A defect with a security impact.\n    deprecated: true\n",
+        ),
+        encoding="utf-8",
+        newline="",
+    )
+    edited = target.read_bytes()
+
+    result = install_bundle(root, today=_TODAY, dry_run=False)
+    assert not result.ok
+    assert [f.path for f in result.vocabulary_problems] == ["security"]
+    assert result.vocabulary_problems[0].kind == "foreign-content"
+    assert target.read_bytes() == edited  # the human's edit survives untouched
+
+
+def test_a_reworded_description_is_reported_as_drift_and_the_install_still_succeeds(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    install_bundle(root, today=_TODAY, dry_run=False)
+    target = root / "_tags.yaml"
+    target.write_text(
+        target.read_text(encoding="utf-8").replace(
+            "A defect with a security impact.", "Anything a security reviewer would care about."
+        ),
+        encoding="utf-8",
+        newline="",
+    )
+    edited = target.read_bytes()
+
+    result = install_bundle(root, today=_TODAY, dry_run=False)
+    assert result.ok  # prose the human owns is never a refusal
+    assert result.vocabulary is not None
+    assert [d.name for d in result.vocabulary.drift] == ["security"]
+    assert target.read_bytes() == edited
+    assert "~ _tags.yaml: security" in result.diff()
+
+
+def test_a_dry_run_into_a_bundle_that_does_not_exist_yet_reports_no_vocabulary_act(tmp_path: Path) -> None:
+    """P-2: the merge splices into the file's own bytes, and on a fresh root
+    the scaffold has not written it yet. The scaffold act in the same result
+    already says it would create it."""
+    result = install_bundle(tmp_path / "bundle", today=_TODAY, dry_run=True)
+    assert result.vocabulary is None
+    assert result.vocabulary_write is None
+    assert result.vocabulary_problems == ()
+    assert "_tags.yaml" in result.scaffold.written  # the preview still names it
+
+
+def test_a_dry_run_over_an_installed_bundle_previews_the_merge_without_writing(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    install_bundle(root, today=_TODAY, dry_run=False)
+    target = root / "_tags.yaml"
+    target.write_text(
+        target.read_text(encoding="utf-8").replace(
+            "  - name: perf\n    description: A defect whose impact is performance.\n", ""
+        ),
+        encoding="utf-8",
+        newline="",
+    )
+    before = target.read_bytes()
+
+    result = install_bundle(root, today=_TODAY, dry_run=True)
+    assert result.vocabulary is not None
+    assert result.vocabulary.added == ("perf",)
+    assert result.vocabulary_write is None
+    assert target.read_bytes() == before  # a dry run writes nothing
+
+
+def test_the_merge_follows_declarations_dir(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    declarations = tmp_path / "config"
+    declarations.mkdir()
+
+    result = install_bundle(root, today=_TODAY, declarations_dir=declarations, dry_run=False)
+    assert result.ok
+    assert (declarations / "_tags.yaml").is_file()
+    assert not (root / "_tags.yaml").exists()
+    assert "security" in load_vocabulary(declarations / "_tags.yaml").allowed
+
+
+def test_two_lanes_share_one_bundle_and_the_merged_vocabulary_validates_clean(tmp_path: Path) -> None:
+    """The archived co-existence spec's done-when, restated with the
+    vocabulary in it: two tier-3 packages install into one bundle, one of them
+    contributes tags, and the shared bundle is clean under both lanes' rules.
+
+    Skipped under `--package work-tracker-okf`, where the sibling is not in
+    the dependency closure -- deliberately, since depending on it would break
+    the three-dependency boundary this package is held to."""
+    pytest.importorskip("code_wiki_okf", reason="sibling tier-3 package, not a dependency of this one")
+    from code_wiki_okf.init import install_bundle as install_code_wiki
+
+    root = tmp_path / "bundle"
+    install_code_wiki(root, today=_TODAY, dry_run=False)
+    sibling = (root / "_schema/Package.schema.json").read_bytes()
+
+    result = install_bundle(root, today=_TODAY, dry_run=False)
+    assert result.ok
+    assert result.vocabulary is not None
+    assert result.vocabulary.added == ("perf", "security")
+    assert (root / "_schema/Package.schema.json").read_bytes() == sibling
+
+    vocab = load_vocabulary(root / "_tags.yaml")
+    assert {"perf", "security"} <= vocab.allowed
+
+    bundle = load_bundle(root, ignore=IGNORE)
+    report = validate(
+        bundle,
+        today=_TODAY,
+        extra_rules=[*rule_set(root), vocabulary_rule(vocab)],
+    )
+    assert [f"{f.code} {f.path}: {f.message}" for f in report.errors] == []

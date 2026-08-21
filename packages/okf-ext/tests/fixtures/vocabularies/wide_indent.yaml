@@ -1,0 +1,7 @@
+version: 1
+tags:
+    - name: metric
+      description: A measurable quantity.
+    - name: kpi
+      deprecated: true
+      replaced_by: metric

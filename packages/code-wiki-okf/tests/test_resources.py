@@ -50,3 +50,23 @@ def test_resource_index_triple_collision_still_one_duplicate_entry(tmp_path: Pat
     winner = index.get("package:triple")
     assert winner is not None
     assert index.duplicates == ("package:triple",)
+
+
+def test_a_dot_nested_mirror_page_is_indexed(tmp_path: Path) -> None:
+    """Regression for the okf-io walk that dropped dot-nested members.
+    `resource_index` is a pure function of `bundle.concepts`, so a page the
+    walk never yielded is invisible here through no fault of its own -- which
+    is what made 23 correctly-written mirror pages unfindable in the live
+    bundle.
+    """
+    _write_concept(
+        tmp_path,
+        "repositories/demo/.agents/skills/x/SKILL.md.md",
+        "file:demo/.agents/skills/x/SKILL.md",
+        type_="File",
+    )
+    index = resource_index(load_bundle(tmp_path))
+    assert "file:demo/.agents/skills/x/SKILL.md" in index.by_resource
+    assert index.by_resource["file:demo/.agents/skills/x/SKILL.md"].concept_id == (
+        "repositories/demo/.agents/skills/x/SKILL.md"
+    )

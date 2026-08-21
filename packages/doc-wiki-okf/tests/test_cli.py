@@ -910,18 +910,36 @@ def test_source_add_refuses_a_source_schema_with_no_source_kind_enum(tmp_path) -
     assert "no `source_kind` enum" in result.stderr
 
 
-def test_source_add_rejects_binary_material(tmp_path) -> None:
-    """S-D: the first cut is UTF-8 text only. A PDF is refused by name, not
-    laundered into the bundle."""
+def test_source_add_writes_a_binary_copy_byte_for_byte(tmp_path) -> None:
+    """B-F: the material is recorded, findable and byte-perfect. It is just not
+    summarized -- real PDF text extraction is B-I's, not this item's."""
+    import hashlib
+
     root = tmp_path / "b"
     _init(root)
-    material = _material(tmp_path, name="scan.pdf", data=b"%PDF-1.4\n\xff\xfe\x00binary")
+    data = b"%PDF-1.4\n\xff\xfe\x00binary\n"
+    material = _material(tmp_path, name="scan.pdf", data=data)
+
     result = _add_source(root, material)
 
-    assert result.exit_code == 1
-    assert "scan.pdf" in result.stderr
-    assert "UTF-8" in result.stderr
+    assert result.exit_code == 0, result.output
+    copy = root / "sources" / "references" / "2026-08-auth-spec.pdf"
+    assert (root / "sources" / "2026-08-auth-spec.md").is_file()
+    assert copy.read_bytes() == data
+    assert hashlib.sha256(copy.read_bytes()).hexdigest() == hashlib.sha256(material.read_bytes()).hexdigest()
+    assert "wrote sources/references/2026-08-auth-spec.pdf" in result.stdout
+
+
+def test_source_add_dry_run_writes_no_binary_copy(tmp_path) -> None:
+    root = tmp_path / "b"
+    _init(root)
+    material = _material(tmp_path, name="scan.pdf", data=b"%PDF-1.4\n\xff\xfe\x00binary\n")
+
+    result = _add_source(root, material, "--dry-run")
+
+    assert result.exit_code == 0
     assert not (root / "sources").exists()
+    assert "would create sources/references/2026-08-auth-spec.pdf" in result.stdout
 
 
 def test_source_add_rejects_a_missing_material(tmp_path) -> None:
@@ -982,4 +1000,5 @@ def test_the_ignore_list_covers_reference_copies() -> None:
         "*/_sections/*",
         "sources/references/*",
         "*/sources/references/*",
+        "*/.DS_Store",
     )

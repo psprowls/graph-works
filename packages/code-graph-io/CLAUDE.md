@@ -4,9 +4,9 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
 
 ## Layout
 
-- `src/code_graph_io/` — library + CLI
+- `src/code_graph_io/` — library only
 - `src/code_graph_io/parser/` — tree-sitter-backed source parsing (formerly the standalone `code-parser` package)
-- `tests/` — pytest tests (unit + integration + CLI subprocess)
+- `tests/` — pytest tests (unit + integration)
 - `tests/parser/` — parser tests, with `tests/parser/fixtures/{python,javascript,typescript}/`
 - `conftest.py` — pytest configuration
 
@@ -45,9 +45,6 @@ SQL against the code graph. Every other package reaches the graph through a
 `resolve`, `store`, `schema`) are code-graph-io-internal —
 callers import the handle API, record dataclasses, and error classes from the
 `code_graph_io` top level instead. Enforced by `tests/test_db_boundary.py`.
-
-Note: `commands/query.py` keeps `import sqlite3` for its `search.db` embeddings
-cache — that is NOT graph data and NOT `code.db`, so it is outside this boundary.
 
 ## Testing
 

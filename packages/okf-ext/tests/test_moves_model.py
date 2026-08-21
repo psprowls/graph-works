@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import subprocess
+import unicodedata
 from pathlib import Path
 
 import ext_helpers
@@ -9,6 +11,7 @@ import pytest
 from okf_ext import moves
 from okf_ext.moves.model import Move, MovePlan, MoveResult, RefEdit, Refusal, Unrebased
 from okf_io import build_link_graph
+from okf_io.bundle import canonical_id
 
 
 def _plan(**overrides) -> MovePlan:
@@ -98,10 +101,16 @@ def test_the_clean_corpus_loads_with_no_broken_links():
 
 
 def test_the_clean_corpus_is_exactly_what_the_helper_claims():
-    """A fixture change cannot leave a test quietly asserting the old corpus."""
+    """A fixture change cannot leave a test quietly asserting the old corpus.
+
+    Compared canonically, not by raw string: `readdir` may hand back
+    `concepts/café.md` as NFC or NFD depending on how the working tree was
+    materialized (spec §ADR-0027), and `LINKED_MEMBERS` is a hand-authored
+    NFC literal set either way.
+    """
     root = ext_helpers.LINKED
     found = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
-    assert found == set(ext_helpers.LINKED_MEMBERS)
+    assert {canonical_id(m) for m in found} == {canonical_id(m) for m in ext_helpers.LINKED_MEMBERS}
 
 
 def test_the_crlf_fixture_is_uniformly_crlf():
@@ -110,6 +119,30 @@ def test_the_crlf_fixture_is_uniformly_crlf():
     raw = (ext_helpers.LINKED / "concepts" / "crlf.md").read_bytes()
     assert b"\r\n" in raw
     assert raw.replace(b"\r\n", b"").count(b"\n") == 0
+
+
+def test_the_café_fixture_name_is_committed_as_nfc():
+    """Guards §ADR-0027's D2 choice itself, not the working tree's current
+    materialization -- a checkout is free to decompose an NFC name to NFD
+    (that tolerance is the whole point of the fix, and is what
+    `test_the_clean_corpus_is_exactly_what_the_helper_claims` accepts).
+    `git ls-files` reports the tracked bytes, not `readdir`'s, so this is
+    the one check immune to that and able to catch the fixture regressing
+    to a committed NFD name -- which the repo-wide drift gate
+    (`scripts/check_filename_normalization.py`) cannot: a name committed
+    and checked out in the same (wrong) form carries no tracked/disk drift
+    for it to see.
+    """
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", "fixtures/linked/concepts/"],
+        cwd=Path(__file__).resolve().parent,
+        check=True,
+        capture_output=True,
+    )
+    tracked = [name for name in result.stdout.decode("utf-8").split("\0") if name]
+    (café,) = [name for name in tracked if "caf" in name.lower()]
+    leaf = café.rsplit("/", 1)[-1]
+    assert leaf == unicodedata.normalize("NFC", leaf)
 
 
 def test_the_asset_is_a_real_member():

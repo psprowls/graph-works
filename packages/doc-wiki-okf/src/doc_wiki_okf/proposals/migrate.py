@@ -49,7 +49,7 @@ from typing import Any, Literal
 
 from okf_ext import moves
 from okf_ext.moves import MovePlan, MoveResult
-from okf_ext.proposals import PAGE_STATUSES, PROPOSAL_TYPE, placement
+from okf_ext.proposals import PAGE_STATUSES, PROPOSAL_TYPE, proposal_path
 from okf_ext.writing import ApplyResult, PendingWrite, WriteFailure, body_digest, write_all
 from okf_io import Bundle, Document, load_bundle
 
@@ -314,7 +314,7 @@ def _plan_one(
         member=member,
         text=_rewrite(document, target=target, page_status=page_status, sources=sources, by=by, stamp=stamp),
         digest=body_digest(document.body),
-        placement=placement(bundle, target, directory=_parent(member)),
+        placement=proposal_path(bundle, target, directory=_parent(member)),
     )
 
 
@@ -448,7 +448,7 @@ def migrate_and_move(root: Path, *, by: str, at: datetime, ignore: Sequence[str]
 
     When the move step *is* attempted but `move_plan` comes back refused --
     two migrated proposals resolving to the same destination is the one way
-    this can happen, since `placement()` is computed per document against the
+    this can happen, since `proposal_path()` is computed per document against the
     bundle as it stood before any of this batch's writes landed -- `moves.apply`
     is never called: it raises on a non-ok plan, and this function reports the
     refusal through `move_plan.refusals` instead of letting that exception

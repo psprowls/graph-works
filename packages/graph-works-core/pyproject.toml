@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-works-core"
-version = "0.2.0"
+version = "0.2.2"
 description = "What a workspace is: discovery, the layout object, the manifest, and init."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -29,10 +29,10 @@ requires-python = ">=3.12"
 # `models-io[bedrock]` because Bedrock is the only backend the packaged
 # catalog names.
 dependencies = [
-  "okf-io>=0.1,<0.2",
-  "okf-ext[schemas]>=0.4.6,<0.5",
+  "okf-io>=0.2,<0.3",
+  "okf-ext[schemas]>=0.4.8,<0.5",
   "code-wiki-okf>=0.3,<0.4",
-  "doc-wiki-okf>=0.2.1,<0.3",
+  "doc-wiki-okf>=0.3,<0.4",
   "code-graph-io>=0.1.1,<0.2",
   "work-tracker-okf>=0.2,<0.3",
   "config-io>=0.1,<0.2",

@@ -280,3 +280,46 @@ def test_re_applying_an_applied_plan_is_a_no_op_or_a_clean_refusal(tmp_path):
     again = apply(load_bundle(bundle.root), plan)
     assert not again.ok
     assert [f.kind for f in again.failed] == ["stale"]
+
+
+PDF = b"%PDF-1.4\n\xff\xfe\x00binary\n"
+
+
+def test_a_create_write_carrying_bytes_lands_byte_identical(tmp_path):
+    """B-B: `apply` hands a create write to `write_all` without parsing it, so
+    a binary payload is the same path with a different payload type."""
+    bundle = _live(tmp_path)
+    plan = ProposalPlan(
+        root=bundle.root,
+        target="pages/live.md",
+        proposal="proposals/live.md",
+        writes=(Write(member="sources/references/scan.pdf", mode="create", text=PDF),),
+        refusals=(),
+    )
+
+    result = apply(bundle, plan)
+
+    assert result.ok, result.failed
+    assert result.written == ("sources/references/scan.pdf",)
+    assert (bundle.root / "sources/references/scan.pdf").read_bytes() == PDF
+
+
+def test_an_update_write_ignores_its_text_payload_whether_str_or_bytes(tmp_path):
+    """The update path renders from `frontmatter` and `body` and never reads
+    `text`, so widening the field changes nothing there."""
+    bundle = _live(tmp_path)
+    plan = ProposalPlan(
+        root=bundle.root,
+        target="pages/live.md",
+        proposal="proposals/live.md",
+        writes=(Write(member="proposals/live.md", mode="update", text=PDF, frontmatter={"title": "Retitled"}),),
+        refusals=(),
+    )
+
+    result = apply(bundle, plan)
+
+    assert result.ok, result.failed
+    landed = Document.load(bundle.root / "proposals/live.md")
+    assert landed.parse_error is None
+    assert landed.fm.title == "Retitled"
+    assert PDF not in (bundle.root / "proposals/live.md").read_bytes()

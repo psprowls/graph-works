@@ -1,0 +1,4 @@
+# A vocabulary that declares its version and nothing else. It loads -- the
+# loader treats a missing `tags` key as an empty sequence -- but there is no
+# `tags:` at column 0 to anchor a splice to, so a merge refuses it whole.
+version: 1

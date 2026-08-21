@@ -12,7 +12,7 @@ authors = [
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "okf-io>=0.1,<0.2",
+  "okf-io>=0.2,<0.3",
   "okf-ext[schemas]>=0.4.2,<0.5",
   "code-graph-io>=0.1.1,<0.2",
   "typer>=0.12",

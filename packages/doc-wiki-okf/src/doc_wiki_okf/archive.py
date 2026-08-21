@@ -68,7 +68,18 @@ WIKI_LANES: tuple[str, ...] = (
 #: crosses `/` (okf-io's `*` does), so this hides `sources/references/`
 #: (and, harmlessly, a `references/` anywhere else) the same way
 #: `work_tracker_okf.items.IGNORE` hides `*/references/*` bundle-wide.
-IGNORE: tuple[str, ...] = ("sources/references/*", "*/sources/references/*", *_SCHEMA_IGNORE, *_SECTIONS_IGNORE)
+#:
+#: `*/.DS_Store` is here and deliberately **not** in `ARCHIVE_IGNORE`: the two
+#: lenses want opposite answers. Reading, it is not content; moving, it has to
+#: stay visible or `okf_ext.moves` leaves it behind and the source directory
+#: never empties for `apply` to prune.
+IGNORE: tuple[str, ...] = (
+    "sources/references/*",
+    "*/sources/references/*",
+    "*/.DS_Store",
+    *_SCHEMA_IGNORE,
+    *_SECTIONS_IGNORE,
+)
 
 #: `IGNORE` minus the `references/` patterns. The recipe a caller must load
 #: *through* for `plan_archive`/`apply_archive`'s own bundle argument:

@@ -6,7 +6,9 @@ the same staleness check and the same scratch-document dance, and four places
 for one of them to drift.
 
 A **create** write is handed straight to `okf_ext.writing.write_all` with
-`create=True`: parent made, occupied target refused, staged and committed
+`create=True`, and its `text` may be `str` or `bytes` -- nothing on this path
+parses it, which is what lets binary material land through the same engine:
+parent made, occupied target refused, staged and committed
 exactly as an update is. An **update** write follows `generators.apply` --
 `copy.deepcopy` of `fm_raw` onto a `dataclasses.replace` scratch document,
 private until that document's own write commits -- rather than

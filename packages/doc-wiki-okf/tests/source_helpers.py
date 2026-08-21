@@ -57,3 +57,16 @@ def material(tmp_path: Path, name: str = "notes.md", text: str = "# Notes\n\nBod
     path = outside / name
     path.write_text(text, encoding="utf-8")
     return path, text
+
+
+PDF_BYTES = b"%PDF-1.4\n\xff\xfe\x00binary\n"
+
+
+def binary_material(tmp_path: Path, name: str = "scan.pdf", data: bytes = PDF_BYTES) -> tuple[Path, bytes]:
+    """A binary file outside any bundle, plus its bytes -- what the CLI hands
+    the writer once the decode has failed."""
+    outside = tmp_path / "outside"
+    outside.mkdir(parents=True, exist_ok=True)
+    path = outside / name
+    path.write_bytes(data)
+    return path, data

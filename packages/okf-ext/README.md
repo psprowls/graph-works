@@ -131,6 +131,13 @@ re-exports every moved name — but the canonical home is `okf_ext.shape` now,
 and the shim comes out one minor version after the move, at `0.5.0`. Import
 from `okf_ext.shape` directly in new code.
 
+The recipe applies just as well to a rename inside one module, not only to a
+move between modules. **Current instance:** `okf_ext.proposals.placement`
+renamed to `proposal_path` in `0.4.6` (ADR-0030 — a colliding name moves on
+the side without an invariant). `placement` stays as an additive alias —
+`placement is proposal_path` — and comes out at `0.5.0` alongside the
+`okf_ext.sections` shim above. Import `proposal_path` directly in new code.
+
 ## Where a rule belongs
 
 `okf-ext` ships six rule-emitting capabilities (`tags`, `schemas`, `render`,
@@ -460,6 +467,21 @@ ones worth retrying as-is; the rest name the remaining content failures
 `apply()` documents. This was cheap to add pre-1.0 (v0.1.0, no consumers yet)
 and is exactly the kind of API gap that gets expensive once someone is
 matching on `error`'s prose in production.
+
+**`PendingWrite` carries `str | bytes`, and there is still one write engine.**
+The staging loop already wrote *bytes* to the temp file — it manufactured them
+from a `str` at the last moment — so admitting a binary payload is a one-line
+change to what a `PendingWrite` may hold, not a second I/O regime. The field
+keeps the name `rendered`: it names the value's role ("the whole file, as it
+will be written"), and a byte string is a rendering of a file as much as a
+character string is. A separate `PendingBinaryWrite` with its own staging loop
+was rejected for a reason not visible from the type signature — `write_all`
+commits in the order given, and `okf_ext.moves` bases its "no partial outcome
+leaves a dangling reference" invariant on that order. Two sequences means two
+orders, with no way to interleave them. `okf_ext.proposals.Write.text` mirrors
+the widening, create-only; `okf_ext.bundle.plan_install` deliberately does not
+(its inputs are a package's own text declarations, and its byte-compare has
+nothing to compare a binary value against). See ADR-0031. — okf-ext 0.4.7
 
 **`tables` ships a primitive, not a rule.** It exports no `TOPIC` and no
 `CODES`, and emits no `Finding`. `diataxis.no-entries` and "Reference entries

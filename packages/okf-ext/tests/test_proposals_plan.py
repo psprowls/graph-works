@@ -289,46 +289,54 @@ def test_an_injected_render_sees_the_merged_sources_on_a_merge(tmp_path):
     assert "body 2" in second.writes[0].body
 
 
-def test_placement_defaults_to_the_proposals_directory(tmp_path):
+def test_proposal_path_defaults_to_the_proposals_directory(tmp_path):
     """The pre-existing rule, now reachable by name. `plan_propose` passes the
     default and its behaviour is unchanged."""
-    from okf_ext.proposals import placement
+    from okf_ext.proposals import proposal_path
 
     root = tmp_path / "b"
     root.mkdir()
     bundle = ext_helpers.write_bundle(root, {})
-    assert placement(bundle, "adrs/x.md") == "proposals/adrs-x.md"
+    assert proposal_path(bundle, "adrs/x.md") == "proposals/adrs-x.md"
 
 
-def test_placement_honours_a_caller_supplied_directory(tmp_path):
+def test_proposal_path_honours_a_caller_supplied_directory(tmp_path):
     """The migrator re-places a proposal inside its **own** parent, which is
     what keeps an archived proposal archived rather than resurrecting it."""
-    from okf_ext.proposals import placement
+    from okf_ext.proposals import proposal_path
 
     root = tmp_path / "b"
     root.mkdir()
     bundle = ext_helpers.write_bundle(root, {})
-    assert placement(bundle, "adrs/x.md", directory="proposals/_archive") == "proposals/_archive/adrs-x.md"
-    assert placement(bundle, "adrs/x.md", directory="/proposals/_archive/") == "proposals/_archive/adrs-x.md"
+    assert proposal_path(bundle, "adrs/x.md", directory="proposals/_archive") == "proposals/_archive/adrs-x.md"
+    assert proposal_path(bundle, "adrs/x.md", directory="/proposals/_archive/") == "proposals/_archive/adrs-x.md"
 
 
-def test_placement_at_the_bundle_root_carries_no_prefix(tmp_path):
-    from okf_ext.proposals import placement
+def test_proposal_path_at_the_bundle_root_carries_no_prefix(tmp_path):
+    from okf_ext.proposals import proposal_path
 
     root = tmp_path / "b"
     root.mkdir()
     bundle = ext_helpers.write_bundle(root, {})
-    assert placement(bundle, "adrs/x.md", directory="") == "adrs-x.md"
+    assert proposal_path(bundle, "adrs/x.md", directory="") == "adrs-x.md"
 
 
-def test_placement_disambiguates_inside_a_non_default_directory(tmp_path):
+def test_proposal_path_disambiguates_inside_a_non_default_directory(tmp_path):
     """A collision is worked around rather than refused, in every directory --
     identity is the target and placement is cosmetic."""
-    from okf_ext.proposals import placement
+    from okf_ext.proposals import proposal_path
 
     root = tmp_path / "b"
     occupied = root / "proposals" / "_archive" / "adrs-x.md"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     occupied.write_text("---\ntype: Proposal\ntitle: Occupies it\n---\nbody\n", encoding="utf-8")
     bundle = ext_helpers.write_bundle(root, {})
-    assert placement(bundle, "adrs/x.md", directory="proposals/_archive") == "proposals/_archive/adrs-x-2.md"
+    assert proposal_path(bundle, "adrs/x.md", directory="proposals/_archive") == "proposals/_archive/adrs-x-2.md"
+
+
+def test_placement_is_a_deprecated_alias_of_proposal_path():
+    """okf-ext 0.4.6 renames the function; `placement` stays as an additive
+    alias, removed at 0.5.0 (ADR-0030)."""
+    from okf_ext.proposals import placement, proposal_path
+
+    assert placement is proposal_path

@@ -28,7 +28,7 @@ from pathlib import PurePosixPath
 from urllib.parse import quote
 
 from okf_io import Bundle, Document, build_link_graph
-from okf_io.bundle import INDEX_NAME, LOG_NAME
+from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 from okf_io.links import is_external, parse_destination, resolve_path, resolve_reference
 
 from okf_ext.moves import locate
@@ -182,9 +182,17 @@ def _validate(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -> 
                 )
             )
             continue
-        if relocate and not bundle.has_member(clean_source):
-            refusals.append(Refusal(clean_source, "not-a-member", "not a member of this bundle"))
-            continue
+        raw_source = clean_source
+        if relocate:
+            if not bundle.has_member(clean_source):
+                refusals.append(Refusal(clean_source, "not-a-member", "not a member of this bundle"))
+                continue
+            # `bundle.member_id` is what keeps the rest of the engine on raw
+            # disk ids: every downstream comparison against `bundle.concepts`
+            # / `_members(bundle)` is keyed by what the walk found, and a
+            # `clean_source` typed in a different Unicode normalization form
+            # than the disk id would otherwise never match it again.
+            raw_source = bundle.member_id(clean_source) or clean_source
         # `bundle.has_member(clean_dest)` is gated on `relocate`, symmetrically
         # with the `not-a-member` check on the source above -- and for the
         # same reason. `plan_repair` exists for exactly the situations where
@@ -212,7 +220,7 @@ def _validate(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -> 
             )
             continue
         claimed[clean_dest] = clean_source
-        moves.append(Move(source=clean_source, dest=clean_dest, is_asset=not clean_source.endswith(".md")))
+        moves.append(Move(source=raw_source, dest=clean_dest, is_asset=not raw_source.endswith(".md")))
 
     return moves, refusals
 
@@ -280,18 +288,28 @@ def _body_edits(
                     Unrebased(member=member, raw=candidate.text, detail="resolves outside the bundle root")
                 )
             continue
-        moved_to = destination_of.get(target)
+        # `target` is content-derived -- it may name a non-ASCII member in a
+        # different Unicode normalization form than the raw disk id
+        # `destination_of` is keyed by *in relocate mode*. In repair mode
+        # `destination_of` is keyed by the caller's own (unresolved) mapping,
+        # because the source it names has already left the bundle -- so the
+        # plain `target` is tried too, falling back to it whenever the raw
+        # id either doesn't resolve or isn't the key that was used.
+        raw_target = bundle.member_id(target)
+        moved_to = destination_of.get(raw_target) if raw_target is not None else None
+        if moved_to is None:
+            moved_to = destination_of.get(target)
         if moved_to is not None:
             located_into_moved += 1
             new_text = _rewrite_path(candidate.text, moved_to, new_base, encode=not candidate.bracketed)
         elif rebase:
-            if not bundle.has_member(target):
+            if raw_target is None:
                 if not path_part.startswith("/"):
                     unrebased.append(
                         Unrebased(member=member, raw=candidate.text, detail="target is not a bundle member")
                     )
                 continue
-            new_text = _rewrite_path(candidate.text, target, new_base, encode=not candidate.bracketed)
+            new_text = _rewrite_path(candidate.text, raw_target, new_base, encode=not candidate.bracketed)
         else:
             continue
         if new_text == candidate.text:
@@ -300,7 +318,7 @@ def _body_edits(
             RefEdit(
                 member=member,
                 where="body",
-                target=target,
+                target=raw_target if raw_target is not None else target,
                 old=candidate.text,
                 new=new_text,
                 line=candidate.line,
@@ -310,7 +328,7 @@ def _body_edits(
     return edits, unrebased, located_into_moved
 
 
-def _mentions_moved_set(document: Document, member: str, moved_set: set[str]) -> bool:
+def _mentions_moved_set(document: Document, member: str, moved_set: set[str], *, bundle: Bundle) -> bool:
     """Whether *document*'s raw text mentions a path resolving into *moved_set*.
 
     Used only to decide whether a document that failed to parse must still
@@ -323,13 +341,22 @@ def _mentions_moved_set(document: Document, member: str, moved_set: set[str]) ->
     nothing here can safely rewrite a document that does not parse, so the
     only thing this scan is allowed to do is turn a hidden citation into a
     `parse-error` refusal instead of a silent miss.
+
+    *moved_set* holds raw disk ids in relocate mode, and the caller's own
+    (unresolved) source strings in repair mode -- because a repaired source
+    has already left the bundle, `bundle.member_id` cannot resolve it, so a
+    content-derived *target* is checked both through it and directly, for
+    the same reason `_body_edits` does.
     """
     for candidate in locate.destinations(document.raw_text):
         path_part, _fragment, external = parse_destination(candidate.text)
         if external or not path_part:
             continue
         target = resolve_path(path_part, source_id=member)
-        if target is not None and target in moved_set:
+        if target is None:
+            continue
+        raw_target = bundle.member_id(target)
+        if (raw_target is not None and raw_target in moved_set) or target in moved_set:
             return True
     return False
 
@@ -426,15 +453,18 @@ def _frontmatter_edits(
             if rebase and not destination.startswith("/"):
                 unrebased.append(Unrebased(member=member, raw=value, detail="resolves outside the bundle root"))
             continue
-        moved_to = destination_of.get(target)
+        raw_target = bundle.member_id(target)
+        moved_to = destination_of.get(raw_target) if raw_target is not None else None
+        if moved_to is None:
+            moved_to = destination_of.get(target)
         if moved_to is not None:
             new_value = _rewrite_path(stripped, moved_to, new_base, encode=False)
         elif rebase:
-            if not bundle.has_member(target):
+            if raw_target is None:
                 if not destination.startswith("/"):
                     unrebased.append(Unrebased(member=member, raw=value, detail="target is not a bundle member"))
                 continue
-            new_value = _rewrite_path(stripped, target, new_base, encode=False)
+            new_value = _rewrite_path(stripped, raw_target, new_base, encode=False)
         else:
             continue
         if new_value == stripped:
@@ -443,7 +473,7 @@ def _frontmatter_edits(
             RefEdit(
                 member=member,
                 where="frontmatter",
-                target=target,
+                target=raw_target if raw_target is not None else target,
                 old=value,
                 new=new_value,
                 key=key,
@@ -503,7 +533,9 @@ def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -
             expected = sum(
                 1
                 for link in graph.out.get(concept_id, ())
-                if not link.external and link.target is not None and link.target in moved_set
+                if not link.external
+                and link.target is not None
+                and (bundle.member_id(link.target) or link.target) in moved_set
             )
 
         touched = bool(member_edits) or rebase or expected > 0
@@ -512,7 +544,7 @@ def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -
             # frontmatter swallows everything), which also empties `graph.out`
             # for it -- so `expected` cannot see a hidden citation either.
             # This is the one case that needs its own, separate check.
-            touched = _mentions_moved_set(document, member, moved_set)
+            touched = _mentions_moved_set(document, member, moved_set, bundle=bundle)
         if not touched:
             continue
 
@@ -532,7 +564,8 @@ def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -
                 continue
             href_path = parse_destination(definition.href)[0]
             resolved = resolve_path(href_path, source_id=member) if href_path else None
-            if resolved is not None and resolved in moved_set:
+            resolved_id = (bundle.member_id(resolved) if resolved is not None else None) or resolved
+            if resolved_id is not None and resolved_id in moved_set:
                 refusals.append(
                     Refusal(
                         member,
@@ -600,13 +633,31 @@ def plan_move_dir(bundle: Bundle, source: str, dest: str) -> MovePlan:
     its new form depends on both the new base and the new target.
     """
     prefix = source.rstrip("/")
-    head = f"{prefix}/" if prefix else ""
+    # A caller's `source` is written text, like any other reference, and a
+    # raw disk id may name the same directory in a different Unicode
+    # normalization form (§ADR-0027). Comparing canonically, segment by
+    # segment, is what keeps a directory rename from silently matching
+    # nothing when the two disagree -- and computing the remainder in
+    # *segments* rather than by string length is what keeps the destination
+    # correct when a matched segment's raw byte length differs from the
+    # caller's.
+    head_segments = [segment for segment in prefix.split("/") if segment]
+    canonical_head = [canonical_id(segment) for segment in head_segments]
     target = dest.rstrip("/")
-    mapping = {
-        member: f"{target}/{member[len(head) :]}" if head else f"{target}/{member}"
-        for member in _all_member_paths(bundle)
-        if member.startswith(head)
-    }
+
+    def _under_prefix(member: str) -> str | None:
+        parts = member.split("/")
+        if len(parts) <= len(canonical_head):
+            return None
+        if [canonical_id(part) for part in parts[: len(canonical_head)]] != canonical_head:
+            return None
+        return "/".join(parts[len(canonical_head) :])
+
+    mapping: dict[str, str] = {}
+    for member in _all_member_paths(bundle):
+        rest = _under_prefix(member)
+        if rest is not None:
+            mapping[member] = f"{target}/{rest}"
     return plan_move_many(bundle, mapping)
 
 

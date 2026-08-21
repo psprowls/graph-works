@@ -357,3 +357,37 @@ def proposed_copy(tmp_path: Path) -> Path:
     target = tmp_path / "proposed"
     shutil.copytree(PROPOSED, target, copy_function=shutil.copy2)
     return target
+
+
+VOCABULARIES = FIXTURES / "vocabularies"
+
+#: What each vocabulary fixture is there to prove. Hand-written and asserted
+#: against rather than derived, so a fixture added or removed without intent
+#: fails loudly -- the habit `SCHEMA_EXPECTED` and `GENERATED_EXPECTED` set.
+#: Each of these is a named regression: change the assertion *with* the file,
+#: never the file alone.
+VOCABULARY_FIXTURES = {
+    "empty.yaml": "the scaffold's `tags: []` verbatim -- the flow-to-block rewrite, and the common first merge",
+    "commented.yaml": "grouped entries under hand-written comments, with a column-0 comment block below them",
+    "wide_indent.yaml": "a four-space sequence indent the merge matches rather than imposing two",
+    "crlf.yaml": "uniformly CRLF -- the added lines must carry CRLF too",
+    "bom.yaml": "a UTF-8 BOM and no trailing newline, both of which must survive the splice",
+    "no_tags_key.yaml": "loads cleanly, but has no `tags:` key at column 0 -- the unanchorable refusal",
+    "flow_entries.yaml": "a non-empty flow sequence -- a shape the locator deliberately does not recognize",
+}
+
+#: The five fixtures a merge can actually splice into. The other two are the
+#: unanchorable pair, and every property that asserts something changed has
+#: to exclude them.
+ANCHORABLE_VOCABULARIES = ("empty.yaml", "commented.yaml", "wide_indent.yaml", "crlf.yaml", "bom.yaml")
+
+
+def vocabulary_copy(tmp_path: Path, name: str) -> Path:
+    """A writable byte-identical copy of one vocabulary fixture.
+
+    Every mutating test goes through this. `copy2` preserves bytes, which the
+    byte-fidelity properties depend on.
+    """
+    target = tmp_path / name
+    shutil.copy2(VOCABULARIES / name, target)
+    return target

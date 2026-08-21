@@ -205,6 +205,13 @@ def init(
         _echo_failure(failure)
     if result.log_failure is not None:
         _echo_failure(result.log_failure)
+    if result.vocabulary is not None:
+        for name in result.vocabulary.added:
+            typer.echo(f"{verb} _tags.yaml: {name}")
+        for drifted in result.vocabulary.drift:
+            typer.echo(f"kept your description of `{drifted.name}` in _tags.yaml; ours differs", err=True)
+    for failure in result.vocabulary_problems:
+        _echo_failure(failure)
     if result.logged is not None:
         typer.echo(f"{verb} log.md: {result.logged}")
     if not result.ok:

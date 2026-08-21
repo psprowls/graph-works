@@ -56,9 +56,12 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   (`Document.set` on a document that failed to parse) is unreachable through
   the public API, and the `test_advance` module pins that.
 - Two `ignore=` recipes, deliberately. `IGNORE` is what every reader and
-  validator uses; `ARCHIVE_IGNORE` (it minus `*/references/*`) is what the
-  archive path plans moves through, because `okf_ext.moves` never reads
-  `bundle.ignored`. The `test_ignore` module asserts both literally *and*
+  validator uses; `ARCHIVE_IGNORE` (it minus `*/references/*` and
+  `*/.DS_Store`) is what the archive path plans moves through, because
+  `okf_ext.moves` never reads `bundle.ignored` — anything hidden from that
+  lens is left behind by the move, half-archiving an item in the first case
+  and stranding a file that blocks the emptied directory's prune in the
+  second. The `test_ignore` module asserts both literally *and*
   asserts their delta, because two constants drifting apart silently is the
   failure mode. `ARCHIVE_IGNORE` must never reach `validate()` or
   `update_index`.

@@ -15,7 +15,7 @@ from okf_ext.moves.apply import apply
 from okf_ext.moves.model import MovePlan, RefEdit
 from okf_ext.moves.plan import plan_move, plan_move_dir
 from okf_io import Bundle, build_link_graph, load_bundle
-from okf_io.bundle import INDEX_NAME, LOG_NAME
+from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 
 #: Every move the properties run over. Each is a different shape: a leaf
 #: rename, a climb into a deeper directory, an asset, a whole directory, and
@@ -214,9 +214,14 @@ def test_a_directory_move_preserves_every_members_meaning(tmp_path: Path) -> Non
     assert apply(bundle, plan).ok
 
     moved = {move.source: move.dest for move in plan.moves}
+    # `targets` is content-derived (a link destination) and `moved` is keyed
+    # by raw disk ids (§ADR-0027) -- the two may disagree about Unicode
+    # normalization form for `café.md` alone, so the lookup below goes
+    # through `canonical_id` rather than by raw string.
+    canonical_moved = {canonical_id(k): v for k, v in moved.items()}
     after_graph = build_link_graph(load_bundle(root))
     for cid, targets in before.items():
         new_cid = moved.get(f"{cid}.md", f"{cid}.md")[: -len(".md")]
-        expected = {moved.get(target, target) for target in targets}
+        expected = {canonical_moved.get(canonical_id(target), target) for target in targets}
         actual = {link.target for link in after_graph.out.get(new_cid, ()) if not link.external}
         assert actual == expected, f"{cid} changed meaning"

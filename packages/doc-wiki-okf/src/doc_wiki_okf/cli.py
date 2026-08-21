@@ -61,6 +61,14 @@ from doc_wiki_okf.sources import SOURCE_TYPE, plan_ingest, seed_source_kinds, so
 #:
 #: Ignored still means present: `has_member` counts these, which is what the
 #: writer's occupancy check depends on.
+#:
+#: `*/.DS_Store` is the nested half of what okf-io already drops at the bundle
+#: root. ADR-0028 scoped the walk's dot exclusion to the root on the argument
+#: that a nested dot-entry "only exists because something deliberately created
+#: a path there" -- true of `.agents/`, false of `.DS_Store`, which Finder
+#: writes into every directory it is asked to display. The root pattern is
+#: absent because the walk still excludes that one; only the nested case
+#: reaches here.
 IGNORE = (
     "_schema/*",
     "*/_schema/*",
@@ -68,6 +76,7 @@ IGNORE = (
     "*/_sections/*",
     "sources/references/*",
     "*/sources/references/*",
+    "*/.DS_Store",
 )
 
 app = typer.Typer(add_completion=False, no_args_is_help=True)
@@ -232,19 +241,23 @@ def _source_kind(value: str, kinds: tuple[str, ...]) -> str:
     return value
 
 
-def _material_text(material: Path) -> str:
-    """Decode MATERIAL as UTF-8. Exits 1 naming the file on failure."""
+def _material_payload(material: Path) -> str | bytes:
+    """Read MATERIAL, as UTF-8 text where it decodes and as raw bytes where it does not.
+
+    One read on both paths: decoding an already-read `bytes` rather than calling
+    `read_text` and then `read_bytes` on the fallback, which would read a large
+    PDF twice. Exits 1 naming the file on an `OSError`, unchanged -- a file that
+    is not there or cannot be opened is still a command-level error.
+    """
     try:
-        return material.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        typer.echo(
-            f"{material}: not UTF-8 text. Binary reference material (PDFs, images) is not supported yet.",
-            err=True,
-        )
-        raise typer.Exit(code=1) from exc
+        data = material.read_bytes()
     except OSError as exc:
         typer.echo(f"{material}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data
 
 
 def _report(plan: Plan, *, dry_run: bool, bundle: Bundle, json_output: bool) -> None:
@@ -742,6 +755,10 @@ def source_add(
     guaranteed to have. Re-recording material whose page already exists is
     refused rather than merged: delete the page and re-run to redo one.
 
+    Binary material -- a PDF, an image -- is recorded byte-for-byte. Its page
+    body is the section skeleton plus the `--title` and `--description` given
+    here; nothing extracts text from it.
+
     `--source-kind` has no default. Guessing it from a folder name is what this
     command's arrival retires, and a human running this by hand knows what the
     material is -- the schema field is optional (K-C) for the agent path, not
@@ -749,7 +766,7 @@ def source_add(
     """
     today = _today(today_option)
     checked = _source_kind(source_kind, _bundle_source_kinds(root, declarations_dir))
-    text = _material_text(material)
+    payload = _material_payload(material)
     bundle = _bundle(root)
     try:
         plan = plan_ingest(
@@ -757,7 +774,7 @@ def source_add(
             _schema_set(root, declarations_dir),
             _sections(root, declarations_dir),
             material,
-            text=text,
+            content=payload,
             title=title,
             description=description,
             source_kind=checked,

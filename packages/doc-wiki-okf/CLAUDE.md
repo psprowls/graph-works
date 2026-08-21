@@ -100,8 +100,12 @@ arguments, and the copy in `sources/references/` is the material's durable
 location. The three live vaults' own 610 `raw/` files are untouched — moving
 them is a data migration and belongs to the live-vault migration item.
 
-Binary reference material. `source add` refuses a PDF or image by name --
-see README.md's "Source pages and reference copies" section for why.
+Text extraction from binary reference material. `source add` records a PDF or
+image byte-for-byte (ADR-0031) but does not read it: the page body is the
+section skeleton plus the caller's own `--title`/`--description`, and the
+agent door's ingest brief goes content-blind rather than summarizing content
+nobody read. Real extraction needs a new runtime dependency and its own work
+item.
 
 Re-pointing `gw wiki proposals` and editing `/graph-wiki:proposals` are the cutover epic's — `gw`
 lives in `agent-research` and nothing in this workspace can keep those command names working. See

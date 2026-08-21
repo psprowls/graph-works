@@ -116,7 +116,7 @@ and the rest of the shared `prompts`.
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 from graph_works_core.agent_substrate.agent_loop import ToolLoopResult, coerce_tool_name, run_tool_loop
 from graph_works_core.agent_substrate.agent_tools import (

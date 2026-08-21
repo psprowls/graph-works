@@ -206,6 +206,37 @@ def test_rename_is_found_when_another_deletion_candidates_stamp_is_more_recent(t
     reader.close()
 
 
+def test_a_dot_nested_page_already_on_disk_is_not_re_created(tmp_path: Path) -> None:
+    """The second-sync abort, pinned. `plan_mirror` builds `previous` from
+    `resource_index`, which reads `bundle.concepts`, which comes from okf-io's
+    one walk. While that walk dropped dot-nested members the page fell into
+    `candidate_creates = tracked - previous` on every run, and
+    `write_new_page` refused to overwrite the file already sitting there --
+    FileExistsError, per-repo abort, exit 1.
+    """
+    repo_root = _scratch_repo(tmp_path)
+    (repo_root / ".agents").mkdir()
+    (repo_root / ".agents" / "SKILL.md").write_text("# Skill\n")
+    _git(repo_root, "add", "-A")
+    _git(repo_root, "commit", "-q", "-m", "skill")
+    sha = _head(repo_root)
+
+    bundle_root = tmp_path / "bundle"
+    _write_page(bundle_root, "acme", "a.py", notes=_PLACEHOLDER, last_commit=sha)
+    _write_page(bundle_root, "acme", "b.py", notes=_PLACEHOLDER, last_commit=sha)
+    _write_page(bundle_root, "acme", ".agents/SKILL.md", notes=_PLACEHOLDER, last_commit=sha)
+
+    reader = _reader_for(repo_root, tmp_path / "graph")
+    bundle = load_bundle(bundle_root)
+    repo = RepoConfig(name="acme", path=repo_root, ignore=())
+
+    plan = plan_mirror(bundle, reader, repo, tracked=("a.py", "b.py", ".agents/SKILL.md"), sha=sha, at=_AT)
+
+    assert plan.creates == {}
+    assert plan.deletions == ()
+    reader.close()
+
+
 def test_the_notes_placeholder_constant_matches_the_declared_file_notes_section() -> None:
     """`plan.py` hardcodes `_NOTES_PLACEHOLDER` rather than depending on a
     loaded `SectionSet` (see its own docstring), which means nothing ties it

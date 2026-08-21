@@ -267,3 +267,74 @@ def test_creates_and_updates_commit_together_in_the_order_given(tmp_path):
     assert result.written == ("pages/fresh.md", "ledger.md")
     assert fresh.read_text(encoding="utf-8") == "page\n"
     assert existing.read_text(encoding="utf-8") == "after\n"
+
+
+PDF = b"%PDF-1.4\n\xff\xfe\x00binary\n"
+
+
+def test_a_bytes_payload_lands_byte_identical(tmp_path):
+    """B-A: `write_all` already wrote bytes; it just manufactured them from a
+    `str` at the last moment."""
+    target = tmp_path / "scan.pdf"
+    target.write_bytes(b"old")
+    item = PendingWrite(member="scan.pdf", path=target, rendered=PDF, on_written=lambda: None)
+
+    result = write_all([item])
+
+    assert result.written == ("scan.pdf",)
+    assert target.read_bytes() == PDF
+
+
+def test_a_bytes_create_lands_in_a_directory_that_did_not_exist(tmp_path):
+    target = tmp_path / "sources" / "references" / "scan.pdf"
+    item = PendingWrite(
+        member="sources/references/scan.pdf", path=target, rendered=PDF, on_written=lambda: None, create=True
+    )
+
+    result = write_all([item])
+
+    assert result.written == ("sources/references/scan.pdf",)
+    assert target.read_bytes() == PDF
+
+
+def test_a_batch_mixing_str_and_bytes_commits_in_the_order_given(tmp_path):
+    """The commit order is a contract (`moves` bases an invariant on it), and
+    the payload type does not get a say in it."""
+    commits: list[str] = []
+    text_item = pending(tmp_path, "a.md", "A\n", commits)
+    binary_target = tmp_path / "b.pdf"
+    binary_target.write_bytes(b"old")
+    binary_item = PendingWrite(
+        member="b.pdf", path=binary_target, rendered=PDF, on_written=lambda: commits.append("b.pdf")
+    )
+
+    result = write_all([text_item, binary_item])
+
+    assert result.written == ("a.md", "b.pdf")
+    assert commits == ["a.md", "b.pdf"]
+    assert (tmp_path / "a.md").read_text() == "A\n"
+    assert binary_target.read_bytes() == PDF
+
+
+def test_a_staging_failure_on_a_bytes_item_aborts_the_batch(tmp_path, monkeypatch):
+    """All-or-nothing does not weaken for a bytes payload: no live file is
+    touched and no temp file survives."""
+    text_item = pending(tmp_path, "a.md", "A\n")
+    binary_target = tmp_path / "b.pdf"
+    binary_target.write_bytes(b"old")
+    binary_item = PendingWrite(member="b.pdf", path=binary_target, rendered=PDF, on_written=lambda: None)
+    real = type(text_item.path).write_bytes
+
+    def flaky(self, data):
+        if self.name.startswith(".b.pdf"):
+            raise OSError("no space left on device")
+        return real(self, data)
+
+    monkeypatch.setattr(type(text_item.path), "write_bytes", flaky)
+    result = write_all([text_item, binary_item])
+
+    assert result.written == ()
+    assert [(f.path, f.kind) for f in result.failed] == [("b.pdf", "stage-error")]
+    assert (tmp_path / "a.md").read_text() == "old\n"
+    assert binary_target.read_bytes() == b"old"
+    assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []

@@ -660,6 +660,45 @@ async def test_a_clean_run_records_no_write_failures(tmp_path, monkeypatch):
     assert status["failed"] == []
 
 
+async def test_a_blank_source_text_skips_both_model_calls(tmp_path, monkeypatch):
+    """P-2: binary material extracts to nothing. Reasoning over nothing files
+    proposals the material does not support."""
+    root = make_bundle(tmp_path)
+    schema_set, _section_set = declarations(root)
+
+    def exploding_make_llm(role, **kwargs):
+        raise AssertionError(f"{role} was called for a blank source")
+
+    for path in (
+        "graph_works_core.ingest.suggest_pages",
+        "graph_works_core.ingest.proposal_reasoner",
+    ):
+        monkeypatch.setattr(f"{path}.make_llm", exploding_make_llm, raising=False)
+
+    planned, status = await plan_suggestions(
+        bundle=load_bundle(root),
+        schema_set=schema_set,
+        lane_set=lane_set(schema_set),
+        material=Path("/tmp/scan.pdf"),
+        source_text="   \n\t  ",
+        source_page="sources/2026-08-scan.md",
+        source_title="Scan",
+        source_kind="note",
+        origin="/tmp/scan.pdf",
+        page_text="body",
+        entity_uri=None,
+        entity_page=None,
+        by="agent:test",
+        at=AT,
+    )
+
+    assert planned == []
+    assert status["reasoner"] == "skipped"
+    assert status["extractor"] == "skipped"
+    assert status["proposals"] == 0
+    assert status["error"] is None
+
+
 async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypatch):
     """The three drops are three shapes, so they are three keys.
 

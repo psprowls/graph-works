@@ -239,6 +239,16 @@ def plan_install(
     the target is absent or present, rather than raising -- content is never an
     exception here.
 
+    `files` stays `Mapping[str, str]` and does not follow `PendingWrite.rendered`'s
+    widening to `str | bytes` (ADR-0031). What this plans is a package's *own
+    declaration assets* -- seed schemas, section declarations, scaffold templates
+    -- which are text by construction, authored in the package's own `resources/`.
+    The compare path encodes each value to UTF-8 precisely so it can byte-compare
+    against what is on disk and refuse `foreign-content` on a human's edits; a
+    bytes value would need a second branch there and would make the
+    `serialize-error` refusal above unreachable. There is no caller asking for it.
+    Widen it the day one appears, not before.
+
     Files are planned in the order *files* iterates, and `write_all` commits
     in the order it is given, so a caller who cares about write order controls
     it by the mapping it passes.

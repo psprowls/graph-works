@@ -2,12 +2,16 @@
 
 from __future__ import annotations
 
+import unicodedata
+from urllib.parse import unquote
+
 import ext_helpers
 import pytest
 from okf_ext.moves import plan as plan_module
 from okf_ext.moves.model import Move
 from okf_ext.moves.plan import plan_move, plan_move_dir, plan_move_many, plan_repair
 from okf_io import load_bundle
+from okf_io.bundle import canonical_id
 
 
 @pytest.fixture
@@ -36,7 +40,8 @@ def test_plan_move_is_the_one_entry_mapping(linked):
 def test_plan_move_dir_enumerates_the_directory(linked):
     plan = plan_move_dir(linked, "concepts", "pages")
     sources = {move.source for move in plan.moves}
-    assert sources == {m for m in ext_helpers.LINKED_MEMBERS if m.startswith("concepts/")}
+    expected = {m for m in ext_helpers.LINKED_MEMBERS if m.startswith("concepts/")}
+    assert {canonical_id(s) for s in sources} == {canonical_id(m) for m in expected}
     assert all(move.dest.startswith("pages/") for move in plan.moves)
 
 
@@ -221,11 +226,38 @@ def test_a_root_absolute_reference_stays_root_absolute(linked):
 
 def test_a_percent_encoded_destination_repairs(linked):
     """`Link.raw` is markdown-it's normalized destination, so string matching
-    could never find this one -- resolution is what makes it ordinary."""
+    could never find this one -- resolution is what makes it ordinary.
+
+    Asserted canonically: `edit.target` and `edit.new` carry whatever
+    Unicode normalization form `café.md` actually has on disk (NFC or NFD,
+    spec §ADR-0027), not necessarily the NFC this literal is written in.
+    """
     plan = plan_move(linked, "concepts/café.md", "pages/café.md")
     assert plan.ok
     edit = edit_for(plan, "concepts/encoded.md", "./caf%C3%A9.md")
-    assert edit.target == "concepts/café.md"
+    assert unicodedata.normalize("NFC", edit.target) == "concepts/café.md"
+    assert unicodedata.normalize("NFC", unquote(edit.new)) == "../pages/café.md"
+
+
+def test_plan_move_accepts_an_nfc_source_against_an_nfd_named_member(tmp_path):
+    """The same scenario as `test_a_percent_encoded_destination_repairs`, but
+    materialized so the member's *disk* name is NFD while every reference to
+    it -- the caller's `source` argument and the link content -- is NFC, the
+    form a byte-exact filesystem would hand back from a git checkout that
+    normalized on write. `plan_move` must accept the NFC source and repair
+    the NFC-encoded inbound reference either way."""
+    nfd = unicodedata.normalize("NFD", "café")
+    bundle = ext_helpers.write_bundle(
+        tmp_path,
+        {
+            f"concepts/{nfd}.md": "---\ntype: Concept\ntitle: Café\n---\n\n# Café\n",
+            "concepts/encoded.md": ("---\ntype: Concept\ntitle: Encoded\n---\n\nA link: [café](./caf%C3%A9.md).\n"),
+        },
+    )
+    plan = plan_move(bundle, "concepts/café.md", "pages/café.md")
+    assert plan.ok
+    assert plan.moves == (Move(source=f"concepts/{nfd}.md", dest="pages/café.md", is_asset=False),)
+    edit = edit_for(plan, "concepts/encoded.md", "./caf%C3%A9.md")
     assert "%C3%A9" in edit.new
 
 

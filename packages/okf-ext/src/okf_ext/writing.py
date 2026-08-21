@@ -11,6 +11,10 @@ Imports stdlib only. A `PendingWrite` names its target by `Path` and carries a
 zero-argument `on_written` callback rather than a `Document`, so nothing here
 has to know what a bundle is.
 
+A `PendingWrite` carries `str | bytes`. The `str` case is encoded UTF-8 at
+staging time and is what every rendering capability produces; the `bytes` case
+is staged verbatim and is how binary material reaches a bundle. See ADR-0031.
+
 `SkipReason` and `FailureKind` are unions across every capability,
 deliberately. `tags-not-a-sequence` and `duplicate-edit` stay in `FailureKind`
 even though `tables` never emits them, and `section-missing` sits in
@@ -169,7 +173,15 @@ class PendingWrite:
 
     member: str  # bundle-relative posix, for reporting
     path: Path  # the live target
-    rendered: str  # the whole file, as it will be written
+    rendered: str | bytes
+    """The whole file, as it will be written.
+
+    A `str` is encoded UTF-8 at staging time; a `bytes` is staged verbatim,
+    which is how a binary member -- a PDF, an image -- lands in a bundle. Both
+    payload kinds go through the same probe, the same `.tmp` sibling, the same
+    `Path.replace`, and land in `ApplyResult.written` in the same position:
+    nothing about either I/O regime is about the payload's type.
+    """
     on_written: Callable[[], None]
     create: bool = False
     """Whether this write brings a **new** member into being.
@@ -324,8 +336,9 @@ def write_all(
     stage_failed = False
     for item in pending:
         tmp_target = item.path.with_name(f".{item.path.name}.{uuid.uuid4().hex}.tmp")
+        payload = item.rendered
         try:
-            tmp_target.write_bytes(item.rendered.encode("utf-8"))
+            tmp_target.write_bytes(payload if isinstance(payload, bytes) else payload.encode("utf-8"))
         except OSError as exc:
             # `write_bytes` opens for truncating write before it can fail -- a
             # disk-full error, say, can still land after some bytes are

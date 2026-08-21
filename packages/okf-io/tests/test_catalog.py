@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import dataclasses
 import random
+import re
 from datetime import date
+from pathlib import Path
 
 import pytest
 from helpers import BUNDLES, GOLDEN, NONCONFORMANT, render_finding
 from okf_io import _md, _rules, bundle
 from okf_io.validate import Report, RuleContext, validate
+
+_PACKAGE_ROOT = Path(__file__).resolve().parent.parent
+_REPO_ROOT = _PACKAGE_ROOT.parent.parent
 
 #: Fixed, so `lifecycle.stale` fires as a function of the argument and nothing else.
 GOLDEN_TODAY = date(2026, 8, 3)
@@ -67,7 +72,7 @@ def _fresh_golden_report() -> Report:
 
 
 def test_the_corpus_triggers_every_catalog_code(golden_report: Report) -> None:
-    """One walk, all 29. This is what catches a rule that stops firing."""
+    """One walk, all 30. This is what catches a rule that stops firing."""
     assert {f.code for f in golden_report.findings} == _rules.CATALOG
 
 
@@ -78,7 +83,7 @@ def test_the_error_codes_are_exactly_the_fourteen(golden_report: Report) -> None
 
 def test_the_severity_split_matches_the_catalog(golden_report: Report) -> None:
     assert len(ERROR_CODES) == 14
-    assert len(_rules.CATALOG - ERROR_CODES) == 15
+    assert len(_rules.CATALOG - ERROR_CODES) == 16
     assert {f.code for f in golden_report.warnings} == _rules.CATALOG - ERROR_CODES
 
 
@@ -116,10 +121,33 @@ def test_every_declared_code_carries_its_module_prefix():
             assert code.startswith(f"{topic}."), (topic, code)
 
 
-def test_the_catalog_is_twenty_nine_codes_across_eight_topics():
-    assert len(_rules.CATALOG) == 29
+def test_the_catalog_is_thirty_codes_across_eight_topics():
+    assert len(_rules.CATALOG) == 30
     assert len(_rules.TOPICS) == 8
-    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 29
+    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 30
+
+
+@pytest.mark.parametrize("claude_md", [_REPO_ROOT / "CLAUDE.md", _PACKAGE_ROOT / "CLAUDE.md"], ids=["root", "okf-io"])
+def test_the_catalog_counts_the_agent_docs_quote_are_the_catalogs_own(claude_md) -> None:
+    """Both `CLAUDE.md` files state the catalog's size in prose, and both said
+    `19 rule functions, 29 codes` for the whole life of the rule that made it
+    twenty and thirty. Nothing read them, so nothing noticed.
+
+    Counted, not spelled: the assertion reads whatever number sits in front of
+    each noun, so rewording the sentence keeps working and only the numbers are
+    pinned. `test_the_catalog_is_thirty_codes_across_eight_topics` pins the
+    catalog itself; this pins what the files an agent reads first say about it.
+    """
+    text = claude_md.read_text(encoding="utf-8")
+    expected = {
+        "rule functions": len(_rules.RULES),
+        "codes": len(_rules.CATALOG),
+        "topics": len(_rules.TOPICS),
+    }
+    for noun, count in expected.items():
+        quoted = {int(found) for found in re.findall(rf"(\d+) {re.escape(noun)}", text)}
+        assert quoted, f"{claude_md.name} states no '<n> {noun}'"
+        assert quoted == {count}, f"{claude_md.name} says {sorted(quoted)} {noun}; the catalog has {count}"
 
 
 def test_no_rule_emits_an_undeclared_code(golden_report: Report) -> None:

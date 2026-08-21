@@ -28,17 +28,22 @@ components are preserved; plain `.ts` files continue to use `typescript`.
 
 ## Exit codes
 
-Stable from v1 forward — script consumers can rely on these:
+Stable from v1 forward — script consumers can rely on these. code-graph-io only
+declares the constants below (`exit_codes.py`); the command layer that returns
+them lives in the sibling `graph-works-core` package
+(`graph_works_core/graph/commands.py`, `graph_tools.py`) — the live user-facing
+entry point is `gw graph build`.
 
 | Code | Name | Meaning |
 |---|---|---|
 | 0 | `SUCCESS` | command succeeded |
 | 1 | `GENERIC` | unhandled error or "not found" for `describe-*` |
-| 2 | `STALE` | `gw graph status` only — `last_indexed_commit != HEAD` |
-| 3 | `NOT_INITIALIZED` | no `code.db` yet — run `gw graph update --full` |
-| 4 | `SCHEMA_MISMATCH` | **reserved** — declared in `exit_codes.py`, not yet enforced. Wires up when v2 schema lands. |
-| 5 | `NOT_IN_GIT_REPO` | `gw graph update`/`status` outside a git repo |
-| 6 | `UPDATE_IN_PROGRESS` | **reserved** — declared in `exit_codes.py`, not yet enforced. Concurrent `gw graph update` invocations currently surface as `GENERIC` (1) due to SQLite write-lock contention. |
+| 2 | `STALE` | **reserved** — declared in `exit_codes.py`, zero producers today |
+| 3 | `NOT_INITIALIZED` | no `code.db` yet — run a full build |
+| 4 | `SCHEMA_MISMATCH` | the graph's on-disk schema doesn't match this build's expectations |
+| 5 | `NOT_IN_GIT_REPO` | a build/status command ran outside a git repo |
+| 6 | `UPDATE_IN_PROGRESS` | a concurrent update is already writing the graph |
+| 7 | `AMBIGUOUS` | an entry-point identifier resolved to more than one match |
 
 ## Ignoring directories
 

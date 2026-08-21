@@ -52,6 +52,7 @@ class DocumentBrief:
     source_kind: str
     slug: str
     text: str
+    binary: bool
     preview: str
     word_count: int
     suggested_summary_path: str
@@ -60,8 +61,8 @@ class DocumentBrief:
     state_gate: Mapping[str, Any] | None
 
     def as_data(self) -> dict[str, Any]:
-        """The legacy dict, minus `in_repo_doc` and with the key renamed. Every
-        value survives `json.dumps`."""
+        """The legacy dict, minus `in_repo_doc`, with the key renamed, and plus
+        `binary`. Every value survives `json.dumps`."""
         return {
             "source_path": str(self.source_path),
             "title": self.title,
@@ -69,6 +70,7 @@ class DocumentBrief:
             "slug": self.slug,
             "preview": self.preview,
             "word_count": self.word_count,
+            "binary": self.binary,
             "suggested_summary_path": self.suggested_summary_path,
             "merge_mode": self.merge_mode,
             "entity_match": self.entity_match.as_data(),
@@ -101,7 +103,7 @@ def plan_document_brief(
     classifies anything.
     """
     resolved = resolve_source_path(source_path, repo)
-    text, title = extract(resolved)
+    text, title, binary = extract(resolved)
     title_guess = title or resolved.stem.replace("-", " ").title()
     slug = slugify(title_guess)
 
@@ -116,6 +118,7 @@ def plan_document_brief(
         source_kind=source_kind,
         slug=slug,
         text=text,
+        binary=binary,
         preview=preview,
         word_count=len(WORD_RE.findall(text)),
         suggested_summary_path=suggested,

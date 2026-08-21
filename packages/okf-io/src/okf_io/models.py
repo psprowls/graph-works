@@ -191,6 +191,39 @@ def parse_actor(
     return Actor(raw=raw, kind="unknown", id=raw)
 
 
+def value_shape(value: Any) -> str:  # noqa: ANN401 -- raw YAML value of unknown shape
+    """What a raw frontmatter *value* is, in words a reader would use.
+
+    The companion to :attr:`Frontmatter.coercion_failures`: that set names
+    the paths whose value was the wrong shape, and this names the shape it
+    was. Public because the answer must not be re-derived. ``fm_raw`` is a
+    **round-trip** tree, so ``type(value).__name__`` there reports
+    ``CommentedMap`` and ``CommentedSeq`` -- ruamel's implementation, which
+    ``_yaml.py`` already treats as an unstable contract and which has no
+    business appearing in a message a human reads. A consumer naming the
+    class itself would leak it just as surely, so the naming lives here,
+    beside the seam that produced the failure.
+
+    Scalars answer to their builtin (ruamel's ``ScalarInt`` is an ``int``);
+    the two containers answer to what YAML calls them. ``bool`` is tested
+    before ``int`` because it is a subclass of one, and ``str``/``bytes``
+    before ``Sequence`` for the same reason.
+    """
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, int):
+        return "int"
+    if isinstance(value, float):
+        return "float"
+    if isinstance(value, str | bytes):
+        return "str"
+    if isinstance(value, Mapping):
+        return "mapping"
+    if isinstance(value, Sequence):
+        return "sequence"
+    return type(value).__name__
+
+
 def _as_str(value: Any, path: str, failures: set[str]) -> str | None:  # noqa: ANN401 -- raw YAML value of unknown shape
     if value is None:
         return None

@@ -25,6 +25,7 @@ shared layer past both `test_the_shared_layer_imports_no_capability`
 from __future__ import annotations
 
 import ast
+import dataclasses
 import importlib
 import tomllib
 from pathlib import Path
@@ -358,18 +359,29 @@ def test_the_documented_tags_surface_is_present() -> None:
     from okf_ext import tags
 
     for name in (
+        "apply",
+        "apply_vocabulary",
         "canonical",
-        "inventory",
         "clusters",
+        "inventory",
         "load_vocabulary",
-        "vocabulary_rule",
-        "plan_rename",
+        "plan_from_vocabulary",
         "plan_merge",
         "plan_normalize",
-        "plan_from_vocabulary",
-        "apply",
+        "plan_rename",
+        "plan_vocabulary_merge",
+        "vocabulary_rule",
     ):
         assert callable(getattr(tags, name))
+
+
+def test_the_documented_vocabulary_merge_types_are_present() -> None:
+    """Spec §"Architecture" of the vocabulary-merge work item: three frozen
+    types, re-exported from the capability root like every other model."""
+    from okf_ext import tags
+
+    for name in ("TagDefinition", "TagDrift", "VocabularyPlan"):
+        assert dataclasses.is_dataclass(getattr(tags, name))
 
 
 def test_the_documented_schemas_surface_is_present() -> None:
@@ -624,6 +636,7 @@ def test_the_documented_proposals_surface_is_present() -> None:
         "list_proposals",
         "mode",
         "placement",
+        "proposal_path",
         "apply",
         "render_body",
     ):

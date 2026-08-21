@@ -6,7 +6,10 @@ still pass, they just stop testing two dialects.
 
 from __future__ import annotations
 
+import ext_helpers
+import pytest
 from ext_helpers import TAGGED, UNUSABLE, bundle_copy, read, snapshot, tagged_bundle
+from okf_ext.tags import load_vocabulary
 
 
 def test_the_bundle_loads_eight_concepts():
@@ -64,3 +67,26 @@ def test_the_vocabulary_lives_inside_the_bundle():
 
 def test_a_copy_is_byte_identical(tmp_path):
     assert snapshot(bundle_copy(tmp_path)) == snapshot(TAGGED)
+
+
+def test_the_vocabulary_corpus_on_disk_is_exactly_what_ext_helpers_names():
+    """A fixture added without a reason, or a reason left behind after its
+    file was deleted, is a corpus nobody can review."""
+    on_disk = {path.name for path in ext_helpers.VOCABULARIES.glob("*.yaml")}
+    assert on_disk == set(ext_helpers.VOCABULARY_FIXTURES)
+
+
+def test_the_empty_fixture_is_the_scaffolds_own_template_byte_for_byte():
+    """`empty.yaml` is the first merge every real bundle takes. If it drifts
+    from what `plan_scaffold` actually writes, the common case is untested."""
+    from okf_ext.bundle import EMPTY_TAGS_YAML
+
+    assert (ext_helpers.VOCABULARIES / "empty.yaml").read_bytes() == EMPTY_TAGS_YAML.encode("utf-8")
+
+
+@pytest.mark.parametrize("name", sorted(ext_helpers.VOCABULARY_FIXTURES))
+def test_every_vocabulary_fixture_loads(name):
+    """Including the two unanchorable ones: they are shapes the *locator*
+    does not recognize, not files the *loader* rejects. A fixture that failed
+    to load would be testing the wrong refusal."""
+    load_vocabulary(ext_helpers.VOCABULARIES / name)

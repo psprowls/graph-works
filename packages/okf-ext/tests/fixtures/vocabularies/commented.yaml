@@ -1,0 +1,15 @@
+version: 1
+
+tags:
+  # --- domain ---
+  - name: metric
+    description: A measurable quantity.
+  - name: finance
+    description: Finance-owned concepts.
+
+  # --- quality ---
+  - name: data-quality
+    description: Concerns about the fidelity of a number.
+
+# Everything below this line is a note to whoever edits next.
+# Keep the groups above; the merge appends under the last entry, not here.

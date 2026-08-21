@@ -12,10 +12,9 @@ already carries `root`, `target`, `mode`, `writes`, `refusals`, `ok` and
 `None`, which is that field's documented meaning for the direct-request door.
 
 **It writes nothing, and it reads nothing.** The caller supplies the material's
-decoded text; the CLI owns the read and the `UnicodeDecodeError`, because the
-first cut is UTF-8 text only and a decode failure is a command-level error
-rather than a plan refusal. That keeps this capability's refusal vocabulary
-closed and puts the check where the decoding actually happens.
+payload -- text where it decoded, bytes where it did not -- and owns the read.
+Nothing here inspects it, so this capability's refusal vocabulary stays closed
+and binary material is not a special case in it.
 """
 
 from __future__ import annotations
@@ -191,7 +190,7 @@ def plan_ingest(
     section_set: SectionSet,
     material: Path,
     *,
-    text: str,
+    content: str | bytes,
     title: str,
     description: str,
     source_kind: str,
@@ -205,8 +204,13 @@ def plan_ingest(
 ) -> PagePlan:
     """Plan recording *material* as a Source page plus a reference copy.
 
-    *text* is the material already decoded as UTF-8; *material* is its path,
-    consulted for its suffix and named by a refusal.
+    *content* is the material's payload -- `str` where the caller could decode
+    it as UTF-8, `bytes` where it could not -- and is passed through to the copy
+    write without ever being inspected. `text` would contradict its own type the
+    moment bytes are legal, which is why the keyword is `content`. *material* is
+    its path, consulted for its suffix and named by a refusal; `copy_target`
+    takes the suffix from it, so a `.pdf` lands at
+    `sources/references/<stem>.pdf` with no change.
 
     *extra* carries the optional frontmatter the schema declares and this
     function does not name -- `source_date`, `authors`, `entity_uri`, `tokens`,
@@ -246,7 +250,7 @@ def plan_ingest(
     if refusals:
         return replace(plan, writes=(), refusals=refusals)
 
-    return replace(plan, writes=(*plan.writes, Write(member=copy, mode="create", text=text)))
+    return replace(plan, writes=(*plan.writes, Write(member=copy, mode="create", text=content)))
 
 
 __all__ = [

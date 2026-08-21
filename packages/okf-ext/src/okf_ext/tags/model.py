@@ -40,6 +40,70 @@ class Vocabulary:
 
 
 @dataclass(frozen=True, slots=True)
+class TagDefinition:
+    """One tag a package contributes.
+
+    Distinct from `Vocabulary`, which is the whole file. A package declares
+    these; it never ships `_tags.yaml` content -- the vocabulary is the
+    vault's, and `plan_install` refuses the file as a whole-file member for
+    exactly that reason.
+
+    `description` is required rather than optional even though the file
+    format allows an entry without one: a contributed tag with no description
+    is a tag a human meets in a finding with nothing to explain it.
+    """
+
+    name: str
+    description: str
+    deprecated: bool = False
+    replaced_by: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TagDrift:
+    """A contributed tag whose description the human has since changed.
+
+    Reported, never overwritten. `description` is prose the human owns, the
+    same claim ADR-0009 makes about an index entry's text; only `deprecated`
+    and `replaced_by` are machine instructions, and only those refuse.
+    """
+
+    name: str
+    ours: str  # the package's description
+    theirs: str  # what the file says now -- `""` when the entry carries none
+
+
+@dataclass(frozen=True, slots=True)
+class VocabularyPlan:
+    """A preview of merging one package's definitions into a vault's file.
+
+    A value rather than a `dry_run=True` flag, following every other planner
+    in this package (ADR-0022). `before` and `after` are the whole file, so a
+    caller can diff them without re-reading anything.
+
+    On a whole-merge refusal -- a malformed file, or one whose `tags:` block
+    the locator cannot anchor -- `after == before`, `added` is empty and the
+    reason is the single entry in `refusals`.
+    """
+
+    path: Path
+    before: str
+    after: str
+    added: tuple[str, ...]  # names this merge would introduce, in definition order
+    unchanged: tuple[str, ...]  # names already present and identical
+    drift: tuple[TagDrift, ...]
+    refusals: tuple[WriteFailure, ...]
+
+    @property
+    def ok(self) -> bool:
+        return not self.refusals
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.added
+
+
+@dataclass(frozen=True, slots=True)
 class TagInventory:
     """What the bundle actually carries. Reports the mess; never fixes it."""
 
@@ -145,8 +209,11 @@ __all__ = [
     "SkipReason",
     "Skipped",
     "TagCluster",
+    "TagDefinition",
+    "TagDrift",
     "TagEdit",
     "TagInventory",
     "Vocabulary",
+    "VocabularyPlan",
     "WriteFailure",
 ]

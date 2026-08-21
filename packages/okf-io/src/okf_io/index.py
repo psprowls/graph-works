@@ -212,10 +212,39 @@ def _concepts_in(bundle: Bundle, directory: str) -> tuple[str, ...]:
 
 
 def _subdirectories_of(directories: frozenset[str], directory: str) -> tuple[str, ...]:
+    """Direct child directories of *directory* eligible to be proposed as new index entries.
+
+    A dot-directory is excluded here even though root-scoped exclusion (§ADR-0028) makes it
+    a real bundle member: it is machine-managed content nested in the tree, not something a
+    human curates a subdirectory entry for. An existing hand-written entry that names a page
+    inside one is still honored -- this only stops the directory itself from being
+    auto-proposed as a *new* entry.
+    """
     prefix = f"{directory}/" if directory else ""
     return tuple(
-        sorted(found for found in directories if found and found.startswith(prefix) and "/" not in found[len(prefix) :])
+        sorted(
+            found
+            for found in directories
+            if found
+            and found.startswith(prefix)
+            and "/" not in found[len(prefix) :]
+            and not PurePosixPath(found).name.startswith(".")
+        )
     )
+
+
+def _in_dot_subtree(directory: str) -> bool:
+    """Whether *directory* is, or sits under, a dot-directory.
+
+    The **any-segment** test, where :func:`_subdirectories_of` uses a
+    leaf-only one. The two are not inconsistent: that function is already
+    scoped to one parent, so a caller who named ``.agents`` outright is
+    entitled to see its children proposed. This one runs over the whole
+    bundle at once, where ``.agents/skills`` is reachable only through the
+    ``.agents`` that was already declined -- so admitting it would create an
+    index nothing can ever link to.
+    """
+    return any(segment.startswith(".") for segment in directory.split("/") if segment)
 
 
 def _has_content(bundle: Bundle, subdirectory: str) -> bool:
@@ -255,20 +284,32 @@ def _members_of(bundle: Bundle, directories: frozenset[str], directory: str) -> 
     return tuple(out)
 
 
-def _alive(bundle: Bundle, directories: frozenset[str], target: str) -> bool:
-    """Whether *target* still names something in the bundle.
+def _raw_target(bundle: Bundle, directories: frozenset[str], target: str) -> str | None:
+    """The canonical, disk-raw form of *target*, or ``None`` when it names
+    nothing in the bundle.
 
     A directory counts, whether or not it carries an ``index.md``. An entry
     reading ``[concepts](concepts/index.md)`` for a directory with no index is
     a broken *link*, which ``links.broken`` already reports -- but it is not a
     dead *entry*: pruning it would only make the next reconcile add the same
     directory straight back under a different destination.
+
+    *target* arrives from an entry's written destination (§8), which -- like
+    any other reference -- may name a non-ASCII member in a different
+    Unicode normalization form than the id the walk derived from disk.
+    Routing through ``bundle.member_id`` is what keeps a canonically-matching
+    entry from reading as "missing" and getting duplicated.
     """
     if target in directories:
-        return True
+        return target
     if target.endswith(f"/{INDEX_NAME}") and _parent_of(target) in directories:
-        return True
-    return bundle.has_member(target)
+        return target
+    return bundle.member_id(target)
+
+
+def _alive(bundle: Bundle, directories: frozenset[str], target: str) -> bool:
+    """Whether *target* still names something in the bundle."""
+    return _raw_target(bundle, directories, target) is not None
 
 
 def _covers(covered: frozenset[str], target: EntryTarget) -> bool:
@@ -335,8 +376,9 @@ def _plan(bundle: Bundle, directory: str, directories: frozenset[str]) -> _Plan:
             continue
         entry = _read_entry(item, target)
         entries.append(entry)
-        if _alive(bundle, directories, target):
-            covered.add(target)
+        raw = _raw_target(bundle, directories, target)
+        if raw is not None:
+            covered.add(raw)
         else:
             dead.append(entry)
 
@@ -399,7 +441,10 @@ def _type_of(bundle: Bundle, target: str) -> str | None:
     """The ``type`` of the concept an entry points at, if it is one."""
     if not target.endswith(".md"):
         return None
-    document = bundle.concepts.get(target[: -len(".md")])
+    raw = bundle.member_id(target)
+    if raw is None:
+        return None
+    document = bundle.concepts.get(raw[: -len(".md")])
     if document is None:
         return None
     return (document.fm.type or "").strip() or None
@@ -697,8 +742,18 @@ def update(
     for directory in wanted:
         if directory not in known:
             raise ValueError(f"{directory!r} is not a directory of this bundle")
-        if directory not in bundle.indexes and not create_missing:
-            continue
+        if directory not in bundle.indexes:
+            if not create_missing:
+                continue
+            # An index that already exists inside a dot-subtree is reconciled
+            # like any other, above -- what is declined here is *conjuring* one
+            # into a directory nobody asked for by name. `_subdirectories_of`
+            # will not propose the dot-directory as an entry in its parent, so
+            # an index created here could never be linked from anywhere: an
+            # orphan by construction. Naming the directory explicitly is still
+            # honored, symmetrically with `create_missing` itself.
+            if directories is None and _in_dot_subtree(directory):
+                continue
         results.append(
             _update_one(
                 bundle,
@@ -721,17 +776,28 @@ def update(
 
 
 def _entry_target(bundle: Bundle, directories: frozenset[str], target: str) -> EntryTarget | None:
-    """The :class:`EntryTarget` an existing entry points at, if it is a member."""
+    """The :class:`EntryTarget` an existing entry points at, if it is a member.
+
+    *target* is the entry's written destination, decoded but not otherwise
+    normalized; every lookup below routes through ``bundle.member_id`` so a
+    non-ASCII member matches regardless of which Unicode form the entry text
+    happens to use, and the ``EntryTarget`` it returns always carries the
+    *raw* disk id -- the id a caller can actually open or re-key a mapping
+    with.
+    """
     if _is_subdirectory_entry(directories, target):
         path = _parent_of(target) if target.endswith(f"/{INDEX_NAME}") else target
         return EntryTarget(path, "subdirectory", bundle.indexes.get(path))
     if target.endswith(".md"):
-        document = bundle.concepts.get(target[: -len(".md")])
-        if document is not None:
-            return EntryTarget(target, "concept", document)
+        raw = bundle.member_id(target)
+        if raw is not None:
+            document = bundle.concepts.get(raw[: -len(".md")])
+            if document is not None:
+                return EntryTarget(raw, "concept", document)
         return None
-    if target in bundle.assets:
-        return EntryTarget(target, "asset", None)
+    raw_asset = bundle.member_id(target)
+    if raw_asset is not None and raw_asset in bundle.assets:
+        return EntryTarget(raw_asset, "asset", None)
     return None
 
 

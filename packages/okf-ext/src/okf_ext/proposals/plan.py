@@ -161,7 +161,7 @@ def _slug(target: str) -> str:
     """A filename stem for *target*. Placement only -- never identity.
 
     Deterministic and lossy on purpose: two targets can slug the same, and the
-    caller of `placement` disambiguates rather than refusing, because where a
+    caller of `proposal_path` disambiguates rather than refusing, because where a
     proposal file sits is cosmetic and nothing reads it.
     """
     stem = target[:-3] if target.endswith(".md") else target
@@ -170,7 +170,7 @@ def _slug(target: str) -> str:
     return collapsed or "proposal"
 
 
-def placement(bundle: Bundle, target: str, *, directory: str = "proposals") -> str:
+def proposal_path(bundle: Bundle, target: str, *, directory: str = "proposals") -> str:
     """Where a new proposal for *target* goes, avoiding an occupied path.
 
     `<directory>/<slug>.md`, then `-2`, `-3`, ... until free. A collision is
@@ -195,6 +195,11 @@ def placement(bundle: Bundle, target: str, *, directory: str = "proposals") -> s
         candidate = f"{base}-{counter}.md"
         counter += 1
     return candidate
+
+
+#: Deprecated alias, kept for one minor version (ADR-0030). Removed at 0.5.0
+#: alongside the `okf_ext.sections` shim. No runtime warning -- see README.
+placement = proposal_path
 
 
 def _render_document(*, body: str, frontmatter: Mapping[str, Any]) -> str:
@@ -340,7 +345,7 @@ def plan_propose(
         )
 
     if live is None:
-        member = placement(bundle, normalized)
+        member = proposal_path(bundle, normalized)
         deduped, _changed = _merge_sources((), sources)
         body = render(description=description, sources=deduped)
         text = _render_document(
@@ -664,4 +669,13 @@ def plan_promote(
     )
 
 
-__all__ = ["list_proposals", "mode", "placement", "plan_create", "plan_decide", "plan_promote", "plan_propose"]
+__all__ = [
+    "list_proposals",
+    "mode",
+    "placement",
+    "plan_create",
+    "plan_decide",
+    "plan_promote",
+    "plan_propose",
+    "proposal_path",
+]

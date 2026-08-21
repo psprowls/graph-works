@@ -84,10 +84,11 @@ from okf_io.models import (
     UsageWindow,
     Verified,
     build_frontmatter,
+    value_shape,
 )
 from okf_io.validate import Finding, Report, Rule, RuleContext, Severity, validate
 
-__version__ = "0.1.1"
+__version__ = "0.2.3"
 
 __all__ = [
     "Actor",
@@ -143,4 +144,5 @@ __all__ = [
     "trust_tier",
     "update_index",
     "validate",
+    "value_shape",
 ]

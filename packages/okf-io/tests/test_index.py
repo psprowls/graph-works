@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import unicodedata
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -115,6 +116,28 @@ def test_a_live_asset_entry_survives_and_is_never_re_added(tmp_path):
         },
     )
     result = plan(loaded, "attesters")
+    assert result.dead == ()
+    assert result.missing == ()
+
+
+def test_an_entry_naming_a_nested_dot_directory_page_is_not_pruned(tmp_path):
+    """Regression: `_alive` falls through to `bundle.has_member`, which answers
+    from the walk. While the walk dropped dot-nested members, this entry was
+    classified dead and `update_index()` removed it -- deleting the human's
+    description text about a page that is really on disk, against ADR-0009
+    ("reconcile, don't regenerate") and ADR-0016. `descriptions="preserve"`
+    does not protect against this: preserve governs drift, not pruning.
+    """
+    loaded = make(
+        tmp_path,
+        {
+            "repositories/demo/index.md": (
+                "# Demo\n\n* [skill](.agents/skills/x/SKILL.md.md) - hand-written description.\n"
+            ),
+            "repositories/demo/.agents/skills/x/SKILL.md.md": CONCEPT,
+        },
+    )
+    result = plan(loaded, "repositories/demo")
     assert result.dead == ()
     assert result.missing == ()
 
@@ -406,6 +429,25 @@ def test_a_typeless_concept_lands_under_concepts(tmp_path):
     assert "# Concepts\n\n* [X](x.md)\n" in result.after
 
 
+def test_a_reconciled_index_pointing_at_an_nfd_named_member_via_an_nfc_link_stays_reconciled(tmp_path):
+    """An index bullet's destination is written text (NFC, like every other
+    reference); the member it names may sit on disk as NFD. Reconciling must
+    not read that as "entry missing, member undocumented" -- a false drift
+    that would duplicate the bullet on every regeneration."""
+    nfd = unicodedata.normalize("NFD", "café")
+    loaded = make(
+        tmp_path,
+        {
+            "d/index.md": "# Metric\n\n* [Café](caf%C3%A9.md) - The concept.\n",
+            f"d/{nfd}.md": '---\ntype: Metric\ntitle: Café\ndescription: "The concept."\n---\n\n# Café\n',
+        },
+    )
+    (result,) = index.update(loaded, directories=["d"])
+    assert result.changes == ()
+    assert result.drift == ()
+    assert not result.changed
+
+
 def test_an_entry_joins_an_existing_but_empty_section(tmp_path):
     """Rule 3 looks for the heading before creating a second copy of it."""
     loaded = make(
@@ -511,6 +553,47 @@ def test_directories_none_covers_every_directory(tmp_path):
         },
     )
     assert [r.path for r in index.update(loaded)] == ["d/index.md", "index.md"]
+
+
+def _dot_subtree(tmp_path: Path) -> bundle.Bundle:
+    return make(
+        tmp_path,
+        {
+            "concepts/m.md": CONCEPT,
+            "repositories/demo/.agents/skills/SKILL.md.md": CONCEPT,
+        },
+    )
+
+
+def test_auto_selection_never_conjures_an_index_inside_a_dot_subtree(tmp_path):
+    """The orphan `create_missing` path. `_subdirectories_of` will not propose
+    a dot-directory as an entry in its parent, so an index auto-created inside
+    one could never be linked from anywhere -- ADR-0028 made the directory a
+    real member, not a curated one. `.agents/skills` has to go too: it is
+    reachable only through the `.agents` already declined.
+    """
+    paths = [r.path for r in index.update(_dot_subtree(tmp_path), create_missing=True)]
+    assert paths == ["concepts/index.md", "index.md", "repositories/demo/index.md", "repositories/index.md"]
+
+
+def test_naming_a_dot_directory_outright_still_creates_its_index(tmp_path):
+    """Declining is about auto-selection, not about the directory. A caller
+    who names one is as entitled to an index as `create_missing` itself is."""
+    (result,) = index.update(_dot_subtree(tmp_path), directories=["repositories/demo/.agents"], create_missing=True)
+    assert (result.path, result.created) == ("repositories/demo/.agents/index.md", True)
+
+
+def test_an_index_already_inside_a_dot_subtree_is_still_reconciled(tmp_path):
+    """Reconciling what exists is untouched: only creation is declined."""
+    loaded = make(
+        tmp_path,
+        {
+            "repositories/demo/.agents/index.md": "# Metric\n",
+            "repositories/demo/.agents/note.md": CONCEPT,
+        },
+    )
+    paths = [r.path for r in index.update(loaded)]
+    assert "repositories/demo/.agents/index.md" in paths
 
 
 def test_an_unknown_directory_raises(tmp_path):

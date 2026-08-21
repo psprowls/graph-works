@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from okf_ext.context import DEFAULT_NORMALIZATION, ExtContext, NormalizationPolicy
 from okf_ext.tags.inventory import DEFAULT_CUTOFF, clusters, inventory, scan
+from okf_ext.tags.merge import apply_vocabulary, plan_vocabulary_merge
 from okf_ext.tags.model import (
     ApplyResult,
     FailureKind,
@@ -31,9 +32,12 @@ from okf_ext.tags.model import (
     Skipped,
     SkipReason,
     TagCluster,
+    TagDefinition,
+    TagDrift,
     TagEdit,
     TagInventory,
     Vocabulary,
+    VocabularyPlan,
     WriteFailure,
 )
 from okf_ext.tags.normalize import canonical
@@ -82,12 +86,16 @@ __all__ = [
     "SkipReason",
     "Skipped",
     "TagCluster",
+    "TagDefinition",
+    "TagDrift",
     "TagEdit",
     "TagInventory",
     "Vocabulary",
     "VocabularyError",
+    "VocabularyPlan",
     "WriteFailure",
     "apply",
+    "apply_vocabulary",
     "canonical",
     "clusters",
     "inventory",
@@ -96,6 +104,7 @@ __all__ = [
     "plan_merge",
     "plan_normalize",
     "plan_rename",
+    "plan_vocabulary_merge",
     "scan",
     "vocabulary_rule",
 ]

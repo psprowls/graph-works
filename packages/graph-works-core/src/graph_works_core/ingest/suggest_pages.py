@@ -291,6 +291,11 @@ async def plan_suggestions(
     Never raises. Every failure path returns `([], status)` with the reason
     recorded in `status`, same contract `run_suggest_phase` used to carry alone.
 
+    A blank *source_text* returns `([], status)` before either model call, with
+    `reasoner` and `extractor` left at `"skipped"`. Binary material extracts to
+    `""` and an empty text file is the same case; `error` stays unset, because a
+    deliberate skip is not a degradation and `log.md` should not say it was.
+
     `status` carries the plan-time-only keys: `reasoner`, `extractor`,
     `unclassified`, `refused`, `duplicates`, `errored` -- a suggestion's
     classify/`plan_file` pipeline raising is still caught per suggestion, same
@@ -310,6 +315,13 @@ async def plan_suggestions(
         "errored": [],
         "error": None,
     }
+
+    if not source_text.strip():
+        # Nothing to reason over. Binary material extracts to `""` (B-G), and
+        # two model calls against an empty source produce suggestions the
+        # material does not support. `reasoner` and `extractor` stay
+        # `"skipped"`, which is the record: every other path overwrites them.
+        return [], status
 
     try:
         reasoned = await run_proposal_reasoner(

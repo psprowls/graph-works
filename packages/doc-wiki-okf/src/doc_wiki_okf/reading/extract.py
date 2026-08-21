@@ -1,7 +1,9 @@
-"""One file in, text plus a title guess out.
+"""One file in, text plus a title guess plus a binary flag out.
 
 Supported formats: `.md` `.txt` `.html` `.htm` `.json` `.csv`. Anything else
-is decoded as UTF-8 with replacement and returned with no title.
+that decodes as UTF-8 is returned verbatim with no title. Anything that does
+not decode is reported as binary with no text at all -- never as replacement
+characters.
 """
 
 from __future__ import annotations
@@ -52,29 +54,40 @@ class _HTMLTextExtractor(html.parser.HTMLParser):
         return "\n".join(self.parts)
 
 
-def extract(path: Path) -> tuple[str, str | None]:
+def extract(path: Path) -> tuple[str, str | None, bool]:
+    """One file in, `(text, title, binary)` out.
+
+    *binary* is `True` for material that does not decode strictly as UTF-8. Its
+    text is `""` in that case, never a string of replacement characters:
+    manufacturing text that was never there is how a page gets composed from
+    noise, and an empty extract is the truthful answer a caller can branch on.
+    The strict decode runs before the format dispatch, so a PDF named `.md` is
+    reported as binary rather than mojibake.
+    """
     ext = path.suffix.lower()
     data = path.read_bytes()
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return "", None, True
     if ext in {".md", ".txt"}:
-        text = data.decode("utf-8", errors="replace")
         title = None
         for line in text.splitlines()[:TITLE_SCAN_LINES]:
             if line.startswith("# "):
                 title = line[2:].strip()
                 break
-        return text, title
+        return text, title, False
     if ext in {".html", ".htm"}:
         parser = _HTMLTextExtractor()
         with contextlib.suppress(Exception):
-            parser.feed(data.decode("utf-8", errors="replace"))
-        return parser.text(), parser.title
+            parser.feed(text)
+        return parser.text(), parser.title, False
     if ext == ".json":
         try:
-            obj = json.loads(data.decode("utf-8", errors="replace"))
-            return json.dumps(obj, indent=2)[:JSON_CHARS], None
+            obj = json.loads(text)
+            return json.dumps(obj, indent=2)[:JSON_CHARS], None, False
         except Exception:
-            return data.decode("utf-8", errors="replace"), None
+            return text, None, False
     if ext == ".csv":
-        text = data.decode("utf-8", errors="replace")
-        return "\n".join(text.splitlines()[:CSV_LINES]), None
-    return data.decode("utf-8", errors="replace"), None
+        return "\n".join(text.splitlines()[:CSV_LINES]), None, False
+    return text, None, False

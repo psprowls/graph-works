@@ -252,6 +252,7 @@ def test_as_data_is_the_legacy_dict(tmp_path):
         "slug": "auth-spec",
         "preview": "# Auth Spec\n\nBody text.",
         "word_count": 4,
+        "binary": False,
         "suggested_summary_path": "sources/2026-08-auth-spec.md",
         "merge_mode": False,
         "entity_match": {"uri": "pkg:o/r/graph-io", "entity_filename": "pkg_graph-io"},
@@ -263,3 +264,23 @@ def test_as_data_is_the_legacy_dict(tmp_path):
 def test_the_brief_is_frozen_and_carries_no_discriminator():
     fields = {f.name for f in DocumentBrief.__dataclass_fields__.values()}
     assert not fields & {"is_folder", "is_batch", "is_skill"}
+
+
+def test_binary_material_briefs_as_binary_with_nothing_extracted(tmp_path):
+    """B-G: the brief tells the truth about what could not be read. The title
+    guess survives, because it never came from the content."""
+    workspace, wiki = _workspace(tmp_path)
+    source = workspace / "material" / "scanned-report.pdf"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_bytes(b"%PDF-1.4\n\xff\xfe\x00binary\n")
+
+    brief = plan_document_brief(
+        source, wiki=wiki, repo=workspace, workspace_root=workspace, today=DAY, source_kind="spec"
+    )
+
+    assert brief.binary is True
+    assert brief.text == ""
+    assert brief.preview == ""
+    assert brief.word_count == 0
+    assert brief.title == "Scanned Report"
+    assert brief.as_data()["binary"] is True

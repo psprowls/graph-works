@@ -39,13 +39,27 @@ CAPABILITY_NAMES = (
 
 def test_version_is_static_and_pinned():
     """Static `version`, never hatch-vcs. Pre-1.0, minor is breaking and patch
-    is compatible (ADR-0007). One additive change lands here: the `logs`
-    capability, the locked/atomic `log.md` append lifted out of
-    `work_tracker_okf.compose` so a third consumer does not make a third copy.
-    No existing caller's behaviour changes, so this is a patch. `0.5.0` is
-    still not free: the README promises the `okf_ext.sections` re-export shim
-    comes out there."""
-    assert okf_ext.__version__ == "0.4.6"
+    is compatible (ADR-0007). Three additive changes land across this range:
+    the `logs` capability (the locked/atomic `log.md` append lifted out of
+    `work_tracker_okf.compose` so a third consumer does not make a third
+    copy), the `tags.merge` vocabulary splice, and `PendingWrite.rendered`
+    widening to `str | bytes` (ADR-0031). `proposals.placement` is renamed to
+    `proposal_path` (ADR-0030); `placement` stays as an additive deprecated
+    alias with no behaviour change for any existing caller. All of it is
+    compatible, so this is a patch.
+
+    **`0.4.8`, not `0.4.7`.** `0.4.6` was cut independently on two branches
+    -- `logs` on one, `proposal_path` on the other -- so both that number and
+    the `0.4.7` that followed one of them name two different trees. The merge
+    steps past the ambiguity rather than reusing a taken number.
+
+    `0.4.9` routes `tags.inventory`'s `tags-not-a-sequence` detail through
+    okf-io's new `value_shape` instead of `type(...).__name__`, which is why
+    the okf-io floor moves to `0.2.3`.
+
+    `0.5.0` is still not free: the README promises the `okf_ext.sections`
+    re-export shim, and now the `placement` alias too, come out there."""
+    assert okf_ext.__version__ == "0.4.9"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

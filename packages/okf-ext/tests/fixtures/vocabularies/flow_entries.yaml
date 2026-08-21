@@ -1,0 +1,5 @@
+# A non-empty flow sequence. It loads cleanly, and the locator deliberately
+# does not recognize it: rewriting a flow sequence a human chose into block
+# style is a reformat nobody asked for.
+version: 1
+tags: [{name: metric, description: A measurable quantity.}]

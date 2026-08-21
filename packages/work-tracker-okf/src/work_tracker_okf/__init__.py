@@ -56,7 +56,7 @@ module name says which vocabulary is meant, and hoisting them would make
 
 from __future__ import annotations
 
-__version__ = "0.2.0"
+__version__ = "0.2.2"
 
 from work_tracker_okf.init import BundleInstall, InitError, install_bundle, plan_install
 from work_tracker_okf.items import ARCHIVE_DIR, ARCHIVE_IGNORE, IGNORE, WORK_DIR, WorkItem, load_items

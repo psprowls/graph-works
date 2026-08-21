@@ -787,36 +787,58 @@ async def test_graph_tools_are_filtered_before_reaching_the_reasoner(workspace, 
     assert seen and "cg_find" in seen[0] and "cg_delete" not in seen[0]
 
 
-async def test_material_that_is_not_utf8_is_refused_before_any_model_call(workspace, monkeypatch):
-    """`extract` decodes with `errors="replace"`, so the brief always succeeds.
+async def test_binary_material_lands_with_a_content_blind_brief(workspace, monkeypatch):
+    """B-G: the copy is byte-perfect and the page does not describe contents no
+    one read. Deleting the refusal without this would land a correct copy beside
+    a page composed from replacement characters."""
+    layout, repo, _material = workspace
+    data = b"%PDF-1.4\n\xff\xfe\x00binary\n"
+    pdf = repo / "docs" / "scan.pdf"
+    pdf.write_bytes(data)
 
-    The second read of the same file did not, and a bare `UnicodeDecodeError`
-    escaped a library whose whole posture is that content failures are data.
-    Refusing is `doc_wiki_okf`'s own posture for material it cannot record.
-    """
+    llms = _script_llms(monkeypatch)
+    result = await run_ingest_source(pdf, layout=layout, repo=repo, today=TODAY, at=AT)
+
+    assert result.ok, result.refusals
+    assert result.refusals == ()
+    assert (layout.bundle_dir / result.copy).read_bytes() == data
+    assert result.copy.endswith(".pdf")
+
+    prompt = llms["ingestor"].calls[0][1].content
+    assert "--- Source content ---" not in prompt
+    assert "binary" in prompt.lower()
+    assert "scan.pdf" in prompt
+    assert ".pdf" in prompt
+    assert str(len(data)) in prompt
+    assert "�" not in prompt
+
+
+async def test_binary_material_skips_the_suggest_phase(workspace, monkeypatch):
+    """P-2, end to end: no reasoner call, so no proposal cites a source nobody
+    could read."""
+    layout, repo, _material = workspace
+    pdf = repo / "docs" / "scan.pdf"
+    pdf.write_bytes(b"%PDF-1.4\n\xff\xfe\x00binary\n")
+
+    _models(monkeypatch)
+    result = await run_ingest_source(pdf, layout=layout, repo=repo, today=TODAY, at=AT)
+
+    assert result.ok
+    assert result.proposal_status["reasoner"] == "skipped"
+    assert result.proposal_status["proposals"] == 0
+    assert result.proposals == ()
+
+
+async def test_text_material_still_gets_the_source_content_block(workspace, monkeypatch):
+    """The binary branch is a branch, not a replacement."""
     layout, repo, material = workspace
-    material.write_bytes(b"# A Thing\n\n\xff\xfe not utf-8\n")
-    roles: list[str] = []
-
-    def fake_make_llm(role, **kwargs):
-        roles.append(role)
-        return FakeLLM(FakeResponse(""))
-
-    module_paths = {
-        "ingest": "graph_works_core.ingest.commands",
-        "suggest_pages": "graph_works_core.ingest.suggest_pages",
-        "proposal_reasoner": "graph_works_core.ingest.proposal_reasoner",
-    }
-    for path in module_paths.values():
-        monkeypatch.setattr(f"{path}.make_llm", fake_make_llm, raising=False)
-
+    llms = _script_llms(monkeypatch)
     result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
-    assert not result.ok
-    assert roles == []
-    assert result.written == ()
-    assert len(result.refusals) == 1
-    assert "not-utf-8" in result.refusals[0]
-    assert not (layout.bundle_dir / "sources" / "2026-08-a-thing.md").exists()
+
+    assert result.ok
+    prompt = llms["ingestor"].calls[0][1].content
+    assert "--- Source content ---" in prompt
+    assert "Some prose about a thing." in prompt
 
 
 async def test_a_write_failure_in_the_suggest_phase_reaches_the_log(workspace, monkeypatch):

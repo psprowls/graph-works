@@ -195,12 +195,13 @@ def build(bundle: Bundle) -> LinkGraph:
         out[link.source].append(link)
         if link.external:
             continue
-        if link.target is None or not bundle.has_member(link.target):
+        raw_target = bundle.member_id(link.target) if link.target is not None else None
+        if raw_target is None:
             broken.append(link)
             continue
         # An embedded asset does not cite anything, so images are excluded.
-        if not link.image and link.target.endswith(".md"):
-            target_id = link.target[: -len(".md")]
+        if not link.image and raw_target.endswith(".md"):
+            target_id = raw_target[: -len(".md")]
             if target_id in bundle.concepts:
                 back[target_id].add(link.source)
 

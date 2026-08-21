@@ -197,10 +197,14 @@ A second `source add` for material whose page exists is **refused**
 (`target-exists`), not merged and not forked. A human who genuinely wants to
 re-record one deletes the page and re-runs.
 
-The first cut is **UTF-8 text only**. `PendingWrite.rendered` is `str` and
-`write_all` encodes UTF-8, so PDFs and images are refused by name rather than
-laundered in; a bytes-carrying write in `okf-ext` is a tier-2 change and wants
-its own work item.
+A PDF or an image lands too, byte-for-byte. `plan_ingest` takes `content: str
+| bytes` and never inspects it; `okf_ext.writing.PendingWrite.rendered` widened
+the same way, so a binary copy stages and commits through the same engine a
+text copy does (ADR-0031). What is not there yet is text extraction: a binary
+source's page body is the section skeleton plus the caller's `--title` and
+`--description`, and its ingest brief goes content-blind rather than being fed
+replacement-character mojibake — real PDF/image text extraction is a separate,
+future work item.
 
 `sources/references/*` is in the CLI's `IGNORE` list, so a copied markdown
 original is a member but not a concept — `ignore=` declares "this is not a

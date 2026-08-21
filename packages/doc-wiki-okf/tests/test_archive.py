@@ -237,6 +237,7 @@ def test_the_authors_words_survive_the_lane_crossing(tmp_path):
 _EXPECTED_IGNORE = (
     "sources/references/*",
     "*/sources/references/*",
+    "*/.DS_Store",
     "_schema/*",
     "*/_schema/*",
     "_sections/*",
@@ -262,10 +263,16 @@ def test_archive_ignore_is_the_composed_recipe_written_out() -> None:
     assert ARCHIVE_IGNORE == _EXPECTED_ARCHIVE_IGNORE
 
 
-def test_the_two_recipes_differ_by_exactly_the_lane_pattern() -> None:
+def test_the_two_recipes_differ_by_exactly_the_move_blind_patterns() -> None:
+    """Every entry in the delta is there for one reason: `okf_ext.moves` never
+    reads `bundle.ignored`, so anything hidden from the archive's own lens is
+    left behind by the move -- a `sources/` page's `references/` companions in
+    the first two cases, and in the third a file that keeps `apply` from
+    pruning the directory it emptied."""
     assert tuple(pattern for pattern in IGNORE if pattern not in ARCHIVE_IGNORE) == (
         "sources/references/*",
         "*/sources/references/*",
+        "*/.DS_Store",
     )
     assert tuple(pattern for pattern in ARCHIVE_IGNORE if pattern not in IGNORE) == ()
 

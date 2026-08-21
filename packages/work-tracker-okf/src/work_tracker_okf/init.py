@@ -1,9 +1,12 @@
 """Install `work-tracker-okf`'s own files into an OKF v0.2 bundle, additively.
 
-Three acts, all idempotent: `plan_scaffold` -> `plan_install` -> one `log.md`
-line when the install actually wrote something. In a bundle three tier-3
-packages share, `log.md` then reads as a record of each arrival, which is what
-a human opening a shared bundle wants it to say.
+Four acts, all idempotent: `plan_scaffold` -> `plan_install` -> this package's
+tags merged into `_tags.yaml` -> one `log.md` line when the install actually
+wrote something. The vocabulary merge runs *after* the scaffold specifically
+because it needs the `_tags.yaml` the scaffold creates -- there is nothing to
+merge into before that file exists. In a bundle three tier-3 packages share,
+`log.md` then reads as a record of each arrival, which is what a human opening
+a shared bundle wants it to say.
 
 **There is no `SEED_ONLY` here.** `code-wiki-okf` exempts `_repositories.yaml`
 from byte comparison because that file is the human's from birth; this package
@@ -30,9 +33,11 @@ from okf_ext.bundle import (
     plan_scaffold,
 )
 from okf_ext.bundle import plan_install as plan_bundle_install
+from okf_ext.tags import VOCABULARY_FILENAME, VocabularyPlan, apply_vocabulary, plan_vocabulary_merge
 from okf_io import append_log_entry, load_bundle
 
 from work_tracker_okf.resources import SEED_RELATIVE_PATHS, seed_files
+from work_tracker_okf.vocabulary import CONTRIBUTED_TAGS
 
 
 class InitError(ValueError):
@@ -46,7 +51,7 @@ class InitError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class BundleInstall:
-    """What `install_bundle()` did, in its three acts.
+    """What `install_bundle()` did, in its four acts.
 
     Shares the `changed` / `diff()` vocabulary `IndexUpdate`, `LogAppend` and
     `Migration` already use: `diff()` renders on demand and writes nothing.
@@ -57,16 +62,36 @@ class BundleInstall:
     install: ApplyResult
     logged: str | None
     log_failure: WriteFailure | None
+    vocabulary: VocabularyPlan | None = None
+    """This package's tags merged into the bundle's `_tags.yaml`, or `None`
+    when there was no file to merge into -- a dry run against a bundle the
+    scaffold has not created yet, and nothing else."""
+
+    vocabulary_write: ApplyResult | None = None
+    """What the merge actually wrote. `None` on a dry run, exactly as
+    `logged` is."""
+
+    @property
+    def vocabulary_problems(self) -> tuple[WriteFailure, ...]:
+        """The vocabulary act's failures, from whichever half of it ran.
+
+        `apply_vocabulary` merges the plan's own refusals into its result, so
+        a caller reading both lists would report every refusal twice.
+        """
+        if self.vocabulary_write is not None:
+            return self.vocabulary_write.failed
+        return self.vocabulary.refusals if self.vocabulary is not None else ()
 
     @property
     def ok(self) -> bool:
-        return self.scaffold.ok and self.install.ok and self.log_failure is None
+        return self.scaffold.ok and self.install.ok and self.log_failure is None and not self.vocabulary_problems
 
     @property
     def changed(self) -> bool:
         """False on a re-run, which is the point: an idempotent installer that
         reports "changed" every time tells a human nothing."""
-        return bool(self.scaffold.written or self.install.written or self.logged)
+        vocabulary_changed = self.vocabulary is not None and bool(self.vocabulary.added)
+        return bool(self.scaffold.written or self.install.written or self.logged or vocabulary_changed)
 
     def diff(self) -> str:
         lines = [f"+ {member}" for member in (*self.scaffold.written, *self.install.written)]
@@ -74,6 +99,13 @@ class BundleInstall:
         lines += [f"! {failure.path}: {failure.error}" for failure in (*self.scaffold.failed, *self.install.failed)]
         if self.log_failure is not None:
             lines.append(f"! {self.log_failure.path}: {self.log_failure.error}")
+        if self.vocabulary is not None:
+            lines += [f"+ {VOCABULARY_FILENAME}: {name}" for name in self.vocabulary.added]
+            lines += [
+                f"~ {VOCABULARY_FILENAME}: {item.name} -- your description kept, ours differs"
+                for item in self.vocabulary.drift
+            ]
+        lines += [f"! {failure.path}: {failure.error}" for failure in self.vocabulary_problems]
         if self.logged is not None:
             lines.append(f"+ log.md: {self.logged}")
         return "\n".join(lines)
@@ -88,6 +120,20 @@ def plan_install(root: str | Path, *, declarations_dir: str | Path | None = None
     ships.
     """
     return plan_bundle_install(root, seed_files(), declarations_dir=declarations_dir)
+
+
+def _plan_vocabulary(path: Path) -> VocabularyPlan | None:
+    """This package's tags merged into *path*, or `None` when there is no
+    `_tags.yaml` to merge into.
+
+    Absent only on a dry run against a bundle the scaffold has not created
+    yet: the wet path plans this *after* `apply(scaffold)`, which creates the
+    file. Reported as nothing rather than guessed at -- the merge splices into
+    the file's own bytes, and on a fresh root there are none to splice into.
+    """
+    if not path.is_file():
+        return None
+    return plan_vocabulary_merge(path, CONTRIBUTED_TAGS)
 
 
 def _preview(plan: Plan) -> ApplyResult:
@@ -107,9 +153,10 @@ def install_bundle(
     declarations_dir: str | Path | None = None,
     dry_run: bool = True,
 ) -> BundleInstall:
-    """Scaffold *root*, install this package's files into it, log the arrival.
+    """Scaffold *root*, install this package's files into it, merge this
+    package's tags into its `_tags.yaml`, log the arrival.
 
-    All three acts are idempotent, so installing into a bundle another package
+    All four acts are idempotent, so installing into a bundle another package
     created simply works, and a second run writes nothing and refuses nothing.
 
     `today` is injected -- nothing below `cli.py` reads the clock. `dry_run`
@@ -123,14 +170,24 @@ def install_bundle(
 
     scaffold: ScaffoldPlan = plan_scaffold(root, today=today, declarations_dir=declarations_dir)
     install = plan_install(root, declarations_dir=declarations_dir)
+    vocabulary_path = scaffold.declarations_dir / VOCABULARY_FILENAME
 
     if dry_run:
         return BundleInstall(
-            root=root, scaffold=_preview(scaffold), install=_preview(install), logged=None, log_failure=None
+            root=root,
+            scaffold=_preview(scaffold),
+            install=_preview(install),
+            logged=None,
+            log_failure=None,
+            vocabulary=_plan_vocabulary(vocabulary_path),
+            vocabulary_write=None,
         )
 
     scaffold_result = apply(scaffold)
     install_result = apply(install)
+
+    vocabulary = _plan_vocabulary(vocabulary_path)
+    vocabulary_write = apply_vocabulary(vocabulary) if vocabulary is not None else None
 
     logged: str | None = None
     log_failure: WriteFailure | None = None
@@ -154,7 +211,13 @@ def install_bundle(
                 logged = entry
 
     return BundleInstall(
-        root=root, scaffold=scaffold_result, install=install_result, logged=logged, log_failure=log_failure
+        root=root,
+        scaffold=scaffold_result,
+        install=install_result,
+        logged=logged,
+        log_failure=log_failure,
+        vocabulary=vocabulary,
+        vocabulary_write=vocabulary_write,
     )
 
 

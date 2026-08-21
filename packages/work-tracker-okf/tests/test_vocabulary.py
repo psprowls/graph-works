@@ -156,3 +156,29 @@ def test_the_two_provenance_keys_are_declared() -> None:
     for key in ("worktree", "branch"):
         assert properties[key] == {"type": "string", "minLength": 1}, key
         assert key not in required
+
+
+def test_contributed_tags_are_exactly_w_ks_two() -> None:
+    """W-K retired `security` and `perf` as *kinds* and made them `Bug` tags.
+    This constant is the only place either string is declared, so a human
+    editing a Bug meets them through `vocabulary_rule`'s suggestion rather
+    than through folklore -- which only works if it stays exactly these two.
+
+    Pinned in the manner the frozensets are pinned against
+    `_base.schema.json`: restated here rather than derived, so a set edited
+    without intent fails loudly."""
+    from work_tracker_okf.vocabulary import CONTRIBUTED_TAGS
+
+    assert [tag.name for tag in CONTRIBUTED_TAGS] == ["perf", "security"]
+    assert all(tag.description and not tag.deprecated for tag in CONTRIBUTED_TAGS)
+    assert all(tag.replaced_by is None for tag in CONTRIBUTED_TAGS)
+
+
+def test_contributed_tags_is_non_empty() -> None:
+    """`init.py` merges unconditionally rather than guarding on this tuple:
+    with a non-empty constant the guard's false branch is unreachable, and an
+    unreachable branch is a `--cov-branch` partial miss against a 95% floor.
+    This assertion is what makes that safe."""
+    from work_tracker_okf.vocabulary import CONTRIBUTED_TAGS
+
+    assert CONTRIBUTED_TAGS

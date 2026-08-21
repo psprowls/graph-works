@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import importlib
+import re
+import unicodedata
+from urllib.parse import unquote
 
 import ext_helpers
 import pytest
@@ -10,6 +13,7 @@ from okf_ext.moves.apply import _apply_body_edits, _set_key, apply
 from okf_ext.moves.model import RefEdit
 from okf_ext.moves.plan import plan_move, plan_move_dir, plan_move_many, plan_repair
 from okf_io import Document, build_link_graph, load_bundle
+from okf_io.bundle import canonical_id
 
 # `importlib.import_module`, not `from okf_ext.moves import apply as
 # apply_module` or `import okf_ext.moves.apply as apply_module`: the module
@@ -160,14 +164,16 @@ def test_a_moved_member_with_no_references_is_byte_identical(live):
 
 def test_untouched_members_are_byte_identical(live):
     root, bundle = live
-    before = ext_helpers.snapshot(root)
+    before = {canonical_id(k): v for k, v in ext_helpers.snapshot(root).items()}
     plan = plan_move(bundle, "concepts/beta.md", "pages/beta.md")
     assert apply(bundle, plan).ok
-    after = ext_helpers.snapshot(root)
+    after = {canonical_id(k): v for k, v in ext_helpers.snapshot(root).items()}
     # `spaced name.md` and `café.md` link nowhere; `notes/gamma.md` links only
-    # at alpha. None of the three may have been rewritten.
+    # at alpha. None of the three may have been rewritten. Compared by
+    # canonical key: `café.md` may be NFC or NFD on disk (spec §ADR-0027).
     for name in ("concepts/café.md", "concepts/spaced name.md", "notes/gamma.md", "log.md"):
-        assert after[name] == before[name], f"{name} was rewritten and should not have been"
+        key = canonical_id(name)
+        assert after[key] == before[key], f"{name} was rewritten and should not have been"
 
 
 def test_several_edits_on_one_line_all_land(live):
@@ -182,11 +188,16 @@ def test_several_edits_on_one_line_all_land(live):
 
 
 def test_an_encoded_and_a_bracketed_destination_survive_a_directory_move(live):
+    """The rewritten destination is percent-encoded *raw disk bytes*
+    (§ADR-0027: ids stay raw), so it is compared decoded and NFC-normalized
+    rather than as a literal -- `café.md`'s disk name may be NFC or NFD."""
     root, bundle = live
     plan = plan_move_dir(bundle, "concepts", "pages")
     assert apply(bundle, plan).ok
     encoded = (root / "pages" / "encoded.md").read_text(encoding="utf-8")
-    assert "[café](./caf%C3%A9.md)" in encoded
+    match = re.search(r"\[café\]\(([^)]*)\)", encoded)
+    assert match is not None
+    assert unicodedata.normalize("NFC", unquote(match.group(1))) == "./café.md"
     assert "[spaced](<./spaced name.md>)" in encoded
 
 

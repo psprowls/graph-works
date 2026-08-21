@@ -9,6 +9,7 @@ from work_tracker_okf.items import ARCHIVE_IGNORE, IGNORE, load_items
 #: whatever okf-ext happens to say today.
 _EXPECTED = (
     "*/references/*",
+    "*/.DS_Store",
     "_schema/*",
     "*/_schema/*",
     "_sections/*",
@@ -46,6 +47,31 @@ def test_every_artifact_is_still_a_member(minimal_root: Path) -> None:
     bundle = load_bundle(minimal_root, ignore=IGNORE)
     for artifact in _ARTIFACTS:
         assert bundle.has_member(artifact), artifact
+
+
+def test_a_nested_ds_store_is_ignored_by_the_read_lens_but_still_a_member(tmp_path: Path) -> None:
+    """The nested half of ADR-0028's root-scoped dot exclusion.
+
+    Built here rather than dropped into the fixture vault: that vault is a
+    byte-exact contract, and a file macOS writes on its own is exactly what a
+    committed fixture must not carry. The root `.DS_Store` is deliberately
+    present too -- okf-io's walk drops that one, so the assertion below is
+    about the nested pattern rather than about both.
+    """
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "item.md").write_text("---\ntype: Bug\ntitle: T\n---\n\n# T\n", encoding="utf-8")
+    (tmp_path / ".DS_Store").write_bytes(b"\x00root")
+    (tmp_path / "work" / ".DS_Store").write_bytes(b"\x00nested")
+
+    bundle = load_bundle(tmp_path, ignore=IGNORE)
+    assert "work/.DS_Store" not in bundle.assets
+    assert "work/.DS_Store" in bundle.ignored
+    # Ignored still means present, which is the whole distinction `ignore=` draws.
+    assert bundle.has_member("work/.DS_Store")
+
+    # The move lens must still see it, or the emptied directory never prunes.
+    moving = load_bundle(tmp_path, ignore=ARCHIVE_IGNORE)
+    assert "work/.DS_Store" in moving.assets
 
 
 def test_the_recipe_leaves_the_item_pages_alone(minimal_root: Path) -> None:
@@ -92,10 +118,20 @@ def test_archive_ignore_is_the_composed_recipe_written_out() -> None:
     assert ARCHIVE_IGNORE == _EXPECTED_ARCHIVE
 
 
-def test_the_two_recipes_differ_by_exactly_the_lane_pattern() -> None:
+def test_the_two_recipes_differ_by_exactly_the_move_blind_patterns() -> None:
     """C4-A. Two constants that drift apart silently is the failure mode, and
-    a literal assertion on the delta is what prevents it."""
-    assert tuple(pattern for pattern in IGNORE if pattern not in ARCHIVE_IGNORE) == ("*/references/*",)
+    a literal assertion on the delta is what prevents it.
+
+    Both entries in the delta are there for one reason: `okf_ext.moves` never
+    reads `bundle.ignored`, so anything hidden from the archive's own lens is
+    left behind by the move. `*/references/*` would half-archive an item;
+    `*/.DS_Store` would strand a file that keeps `apply` from pruning the
+    emptied directory.
+    """
+    assert tuple(pattern for pattern in IGNORE if pattern not in ARCHIVE_IGNORE) == (
+        "*/references/*",
+        "*/.DS_Store",
+    )
     assert tuple(pattern for pattern in ARCHIVE_IGNORE if pattern not in IGNORE) == ()
 
 

@@ -1,3 +1,4 @@
+warn	frontmatter.value-malformed	concepts/coercion.md	§11	`sources` is not readable as its declared type (int); the value was dropped
 error	computation.missing	concepts/computation-a.md	§10.3	An Attested Computation has neither an inline `# Computation` block nor a `computation:` path
 error	computation.runtime-missing	concepts/computation-a.md	§10.2	An Attested Computation has no `runtime`
 error	computation.duplicate	concepts/computation-b.md	§10.3	Both an inline `# Computation` block and a `computation:` path are present
@@ -6,6 +7,7 @@ warn	computation.parameter-incomplete	concepts/computation-c.md	§10.2	`paramete
 warn	computation.path-unresolved	concepts/computation-c.md	§6.2	`executor.resource` `sub/index.md` is not a bundle member (did you mean `/sub/index.md`?)
 warn	legacy.body-citations	concepts/legacy.md	§13.1	v0.1 body `# Citations` list; migrate to frontmatter `sources`
 warn	legacy.timestamp	concepts/legacy.md	§13.1	v0.1 top-level `timestamp`; migrate to `generated: { by, at }`
+warn	frontmatter.value-malformed	concepts/lifecycle.md	§11	`stale_after` is not readable as its declared type (str); the value was dropped
 error	lifecycle.stale-after-malformed	concepts/lifecycle.md	§5.5	`stale_after` 'soonish' is not `YYYY-MM-DD`
 error	lifecycle.status-unknown	concepts/lifecycle.md	§5.4	`status` 'archived' is outside draft / stable / deprecated
 warn	links.broken	concepts/links.md:11	§6.1	Link target `./nowhere.md` is not a bundle member
@@ -24,6 +26,7 @@ warn	provenance.source-uncited	concepts/provenance.md	§5.1	`sources[].id` `no-r
 warn	provenance.usage-count-unframed	concepts/provenance.md	§5.1	`sources[1].usage_count` has no `usage_window` to frame it
 warn	lifecycle.stale	concepts/stale.md	§5.5	`stale_after` 2020-01-01 is on or before 2026-08-03
 error	trust.generated-by-missing	concepts/trust-a.md	§5.2	`generated` is present without `by`
+warn	frontmatter.value-malformed	concepts/trust-b.md	§11	`generated.at` is not readable as its declared type (str); the value was dropped
 warn	trust.actor-convention	concepts/trust-b.md	§7	`generated.by` `team:data-platform` matches none of `human:`, `process:`, or `<producer>/<version>`
 warn	trust.timestamp-not-iso	concepts/trust-b.md	§5.2	`generated.at` is not ISO 8601: 'yesterday'
 warn	trust.verified-entry-incomplete	concepts/trust-b.md	§5.2	`verified[0]` is missing `at`

@@ -26,6 +26,11 @@ is nothing to edit.
 (`ab906786`). Material is copied into `sources/references/` by `plan_ingest`,
 never moved.
 
+**No text extraction from binary material.** A PDF or an image is copied into
+`sources/references/` byte-for-byte and its page is composed content-blind. Real
+extraction means a new runtime dependency and its own ADR, and is a named
+hand-off, not an omission.
+
 **No `_resolve_wikilinks`.** Deleting unresolvable `[[wikilinks]]` -- which
 `okf_io.LinkGraph` cannot see anyway -- would silence a broken link instead of
 surfacing it. With root-absolute markdown links, `okf_io.validate()` reports one
@@ -299,6 +304,7 @@ BUNDLE_IGNORE: tuple[str, ...] = (
     "*/_sections/*",
     "sources/references/*",
     "*/sources/references/*",
+    "*/.DS_Store",
 )
 
 
@@ -404,6 +410,14 @@ async def run_ingest_source(
     agrees with the heading -- which is the common case, and is why the entity
     match re-runs only when it does not.
 
+    **Binary material is recorded, not summarized.** A file that does not decode
+    as UTF-8 is copied byte-for-byte and its brief goes content-blind: the
+    ingestor is told the material is binary, with filename, type and size, and
+    is told not to summarize what it cannot see. The suggest phase is skipped
+    for the same reason -- there is no source text to reason over. Real PDF and
+    image text extraction is a separate item; until it lands, the page body is
+    the section skeleton plus the model's classification.
+
     The three seams are all defaulted:
 
     | Seam | Default |
@@ -448,6 +462,10 @@ async def run_ingest_source(
             match_entity=matcher,
         )
 
+    # Sits above the prompt as well as above `plan_ingest` and the preflight:
+    # the binary brief names it, and the line the ingestor reads, the line the
+    # reasoner reads, and the value the page's frontmatter carries must all be
+    # the one value.
     resolved_origin = origin or str(brief.source_path.resolve())
     preflight = preflight_ingest(
         bundle,
@@ -468,38 +486,40 @@ async def run_ingest_source(
             refusals=tuple(f"{refusal.path}: {refusal.kind}: {refusal.detail}" for refusal in preflight.refusals),
         )
 
-    try:
-        text = brief.source_path.read_text(encoding="utf-8")
-    except UnicodeDecodeError as exc:
-        # `plan_document_brief` reads the same file through `reading.extract`,
-        # which decodes with `errors="replace"` and therefore always succeeds.
-        # This read cannot: the text becomes the reference copy, and a copy
-        # with replacement characters in it is not the material. Refusing is
-        # `doc_wiki_okf`'s own posture for material it cannot record, and it
-        # costs nothing here -- no model has been called yet. Which is also why
-        # this path keeps `brief.title`: there is no model title to prefer.
-        refused = page_target(brief.title, today=today)
-        logger.warning("cannot ingest %s: not UTF-8 text (%s)", brief.source_path, exc)
-        return IngestResult(
-            ok=False,
-            page=refused,
-            copy=copy_target(refused, brief.source_path),
-            title=brief.title,
-            source_kind=brief.source_kind,
-            refusals=(f"{brief.source_path}: not-utf-8: {exc.reason} at byte {exc.start}",),
-        )
+    # Read after the preflight, so a refusal costs no read of a large PDF.
+    # `brief.binary` is `False` only when `reading.extract` already decoded this
+    # file strictly as UTF-8, so this decode cannot fail for content reasons.
+    data = brief.source_path.read_bytes()
+    payload: str | bytes = data if brief.binary else data.decode("utf-8")
 
     system = build_ingestor_system(
         layout=layout, kinds=kinds, schema_set=schema_set, project_context=render_project_context(layout)
     )
-    human = (
+    header = (
         f"Source material: {brief.source_path}\n"
         f"Source kind (caller's hint): {brief.source_kind}\n"
-        f"Word count: {brief.word_count}\n"
+        f"Origin: {resolved_origin}\n"
         f"Provisional page path (your own `title` decides the final one): "
         f"{brief.suggested_summary_path}\n\n"
-        f"--- Source content ---\n{brief.preview}\n--- End source ---\n"
     )
+    if brief.binary:
+        human = (
+            f"{header}"
+            f"--- Binary material ---\n"
+            f"This material is binary. It has not been text-extracted, and no part of its "
+            f"content is available to you.\n"
+            f"Filename: {brief.source_path.name}\n"
+            f"File type: {brief.source_path.suffix.lower() or '(none)'}\n"
+            f"Size: {len(data)} bytes\n"
+            f"Classify it from the filename, the file type, the caller's hint and the origin. "
+            f"Do not summarize contents you cannot see: say plainly in the TL;DR that the "
+            f"material is binary and has not been text-extracted.\n"
+            f"--- End source ---\n"
+        )
+    else:
+        human = (
+            f"{header}Word count: {brief.word_count}\n\n--- Source content ---\n{brief.preview}\n--- End source ---\n"
+        )
     response = await make_llm("ingestor", layout=layout, model_override=model_override).ainvoke(
         [SystemMessage(system), HumanMessage(human)]
     )
@@ -558,7 +578,7 @@ async def run_ingest_source(
         schema_set,
         section_set,
         brief.source_path,
-        text=text,
+        content=payload,
         title=title,
         description=str(frontmatter.get("description") or "").strip() or title,
         source_kind=validated,

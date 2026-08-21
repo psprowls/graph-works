@@ -9,12 +9,34 @@ from pathlib import Path
 import pytest
 from doc_wiki_okf.cli import IGNORE
 from doc_wiki_okf.sources import plan_ingest, preflight_ingest
-from okf_ext.proposals import apply
-from okf_io import load_bundle
-from source_helpers import AT, BY, TODAY, build_bundle, material, schema_set, section_set
+from okf_ext.proposals import PagePlan, apply
+from okf_io import Bundle, load_bundle
+from source_helpers import AT, BY, TODAY, binary_material, build_bundle, material, schema_set, section_set
 
 PAGE = "sources/2026-08-auth-spec.md"
 COPY = "sources/references/2026-08-auth-spec.md"
+
+
+def _plan(
+    root: Path,
+    path: Path,
+    content: str | bytes,
+    *,
+    bundle: Bundle | None = None,
+    **overrides: object,
+) -> tuple[PagePlan, Bundle]:
+    kwargs: dict[str, object] = {
+        "title": "Auth Spec",
+        "description": "The authentication specification.",
+        "source_kind": "spec",
+        "origin": "https://example.invalid/auth-spec",
+        "by": BY,
+        "at": AT,
+        "today": TODAY,
+    }
+    kwargs.update(overrides)
+    resolved_bundle = build_bundle(root) if bundle is None else bundle
+    return plan_ingest(resolved_bundle, schema_set(), section_set(), path, content=content, **kwargs), resolved_bundle  # type: ignore[arg-type]
 
 
 def test_preflight_reports_its_clean_targets_exactly(tmp_path: Path) -> None:
@@ -57,21 +79,6 @@ def test_preflight_refuses_predicted_page_and_duplicate_origin(tmp_path: Path) -
     assert result.page == "sources/2026-08-same-title.md"
     assert {refusal.kind for refusal in result.refusals} == {"target-exists"}
     assert any("origin=" in refusal.detail for refusal in result.refusals)
-
-
-def _plan(root: Path, path: Path, text: str, *, bundle=None, **overrides):
-    kwargs = {
-        "title": "Auth Spec",
-        "description": "The authentication specification.",
-        "source_kind": "spec",
-        "origin": "https://example.invalid/auth-spec",
-        "by": BY,
-        "at": AT,
-        "today": TODAY,
-    }
-    kwargs.update(overrides)
-    bundle = build_bundle(root) if bundle is None else bundle
-    return plan_ingest(bundle, schema_set(), section_set(), path, text=text, **kwargs), bundle
 
 
 def test_a_plan_carries_exactly_two_creates_page_first(tmp_path: Path) -> None:
@@ -246,7 +253,7 @@ def test_an_undeclared_source_schema_raises(tmp_path: Path) -> None:
             stripped,
             section_set(),
             path,
-            text=text,
+            content=text,
             title="Auth Spec",
             description="d",
             source_kind="spec",
@@ -331,6 +338,37 @@ def test_the_two_step_flow_yields_a_backlink(tmp_path: Path) -> None:
     # so that is the id that appears -- `filing.proposal` is exactly it.
     assert filing.proposal == "proposals/explanations-why-auth-works-this-way.md"
     assert "proposals/explanations-why-auth-works-this-way" in graph.backlinks["sources/2026-08-auth-spec"]
+
+
+def test_a_binary_payload_reaches_the_copy_write_verbatim(tmp_path: Path) -> None:
+    """B-E: `plan_ingest` never inspects the payload, which is why widening it
+    costs nothing else in this function."""
+    path, data = binary_material(tmp_path)
+    plan, _ = _plan(tmp_path / "bundle", path, data)
+
+    assert plan.ok
+    assert [(write.member, write.mode) for write in plan.writes] == [
+        (PAGE, "create"),
+        ("sources/references/2026-08-auth-spec.pdf", "create"),
+    ]
+    assert plan.writes[1].text == data
+
+
+def test_a_binary_copy_lands_byte_identical_and_is_not_a_concept(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    path, data = binary_material(tmp_path)
+    plan, bundle = _plan(root, path, data)
+
+    result = apply(bundle, plan)
+
+    assert result.ok, result.failed
+    copy = "sources/references/2026-08-auth-spec.pdf"
+    assert list(result.written) == [PAGE, copy]
+    assert (root / copy).read_bytes() == data
+
+    reloaded = load_bundle(root, ignore=IGNORE)
+    assert reloaded.has_member(copy)
+    assert "sources/references/2026-08-auth-spec" not in reloaded.concepts
 
 
 def test_source_kinds_reads_the_bundles_own_enum(tmp_path: Path) -> None:

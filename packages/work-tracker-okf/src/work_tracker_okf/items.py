@@ -43,7 +43,13 @@ ARCHIVE_DIR = "work/_archive"
 #: `references/` directory **anywhere** in the bundle, not only under `work/`.
 #: Harmless today -- the entity lane has none -- but it is a claim on a
 #: directory name outside this lane, in a bundle three packages share.
-IGNORE: tuple[str, ...] = ("*/references/*", *_SCHEMA_IGNORE, *_SECTIONS_IGNORE)
+#:
+#: `*/.DS_Store` joins it for the nested half of ADR-0028's root-scoped dot
+#: exclusion, and stays out of `ARCHIVE_IGNORE` below for that constant's own
+#: stated reason: `okf_ext.moves` never reads `bundle.ignored`, so an ignored
+#: `.DS_Store` under `work/<slug>/` would be left behind and the directory
+#: would never empty for `apply` to prune.
+IGNORE: tuple[str, ...] = ("*/references/*", "*/.DS_Store", *_SCHEMA_IGNORE, *_SECTIONS_IGNORE)
 
 #: `IGNORE` minus the lane pattern. The recipe the **archive path** plans
 #: through, and nothing else (C4-A).

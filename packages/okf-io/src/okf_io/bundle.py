@@ -7,6 +7,7 @@ takes a ``Bundle`` rather than a path.
 
 from __future__ import annotations
 
+import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
@@ -19,6 +20,22 @@ from okf_io.document import Document
 #: §3.1. Recognised at any depth and never concepts.
 INDEX_NAME = "index.md"
 LOG_NAME = "log.md"
+
+#: Never a member, at any depth.
+GIT_DIR_NAME = ".git"
+
+
+def canonical_id(value: str) -> str:
+    """The form two bundle-relative paths are compared in.
+
+    NFC, not NFKC: NFKC changes which characters are present (it would fold
+    ``ﬁle.md`` onto ``file.md``, conflating two names a filesystem holds
+    apart), where NFC only picks a canonical composition of the same
+    characters. ``isascii()`` is the fast path and the whole risk story: an
+    ASCII string is invariant under every normalization form, so a bundle
+    with no non-ASCII member never pays for this at all.
+    """
+    return value if value.isascii() else unicodedata.normalize("NFC", value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,6 +52,13 @@ class Bundle:
 
     ``ignored`` is kept apart from ``assets`` rather than folded into it so a
     caller can tell "excluded by ``ignore=``" from "not markdown".
+
+    ``_canonical`` maps :func:`canonical_id` of a member's path to that
+    member's *raw* disk id -- one entry per member whose raw id is non-ASCII,
+    none otherwise. Ids themselves stay raw disk bytes (§ADR-0027): a writer
+    that reconstructs a path from an id must open the file that id names, on
+    a filesystem that may not be normalization-insensitive the way APFS is.
+    Matching is NFC-insensitive; identity is not.
     """
 
     root: Path
@@ -44,6 +68,7 @@ class Bundle:
     assets: frozenset[str]
     ignored: frozenset[str]
     unreadable: Mapping[str, str]
+    _canonical: Mapping[str, str]
 
     def concept(self, concept_id: str) -> Document | None:
         return self.concepts.get(concept_id)
@@ -64,17 +89,8 @@ class Bundle:
         """
         return tuple(sorted(cid for cid, doc in self.concepts.items() if effective_status(doc.fm) == status))
 
-    def has_member(self, path: str) -> bool:
-        """Whether *path* (bundle-relative posix) names any member.
-
-        Concepts, reserved files, assets **and** ignored members all count:
-        ``ignore=`` declares "this is not a concept", not "this is not there",
-        so a bundle that ignores ``_schema/`` and links into it has a working
-        link, not a broken one.
-        """
-        member = path.strip()
-        if not member:
-            return False
+    def _raw_member(self, member: str) -> bool:
+        """Whether *member* (already stripped) names something, by exact match."""
         if member in self.assets or member in self.ignored:
             return True
         if not member.endswith(".md"):
@@ -90,16 +106,73 @@ class Bundle:
             return directory in self.logs
         return False
 
+    def has_member(self, path: str) -> bool:
+        """Whether *path* (bundle-relative posix) names any member.
+
+        Concepts, reserved files, assets **and** ignored members all count:
+        ``ignore=`` declares "this is not a concept", not "this is not there",
+        so a bundle that ignores ``_schema/`` and links into it has a working
+        link, not a broken one.
+
+        Matching is NFC-insensitive (§ADR-0027): the exact-match body above is
+        the fast path, unchanged for every ASCII bundle-relative path that
+        exists today; a non-ASCII query that misses it falls back to
+        :attr:`_canonical`, which is empty unless the bundle carries a
+        non-ASCII member.
+        """
+        return self.member_id(path) is not None
+
+    def member_id(self, path: str) -> str | None:
+        """The *raw* disk id *path* names, or ``None`` when it names nothing.
+
+        The funnel every cross-origin lookup routes through: *path* may
+        arrive from file content (a link destination, a §6.2 frontmatter
+        value) rather than from the walk that built this ``Bundle``, and the
+        two can disagree about Unicode normalization form while naming the
+        same file. The raw id -- byte-identical to what ``readdir`` returned
+        -- is what a caller must use to reopen the file or key a mapping
+        built from :attr:`concepts` / :attr:`assets` / :attr:`indexes` /
+        :attr:`logs`.
+        """
+        member = path.strip()
+        if not member:
+            return None
+        if self._raw_member(member):
+            return member
+        if member.isascii():
+            return None
+        return self._canonical.get(canonical_id(member))
+
 
 def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
     """Yield every file under *root*, depth-first, in sorted order.
 
-    Two walk defaults, documented because they are choices rather than
-    deductions. An entry whose name begins with ``.`` is not a member at any
-    depth -- a bundle distributed as a git repository would otherwise carry
-    ``.git`` into the model. Directory symlinks are not followed, for loop
-    safety. A link into either therefore reports broken, which is the honest
-    answer given they are not in the model.
+    Three walk defaults, documented because they are choices rather than
+    deductions.
+
+    A directory or file named ``.git`` is never a member, **at any depth**.
+    This is the one name where over-inclusion is catastrophic rather than
+    untidy: a bundle carrying a vendored or submodule checkout would otherwise
+    walk that checkout's entire object store into ``assets``, and a real
+    ``.git`` holds 10**4 to 10**5 files. It is the only name on the list --
+    a deny-list of tool directories is incomplete by construction, and
+    ``ignore=`` is the surface for every other exclusion a caller wants.
+
+    Every *other* entry whose name begins with ``.`` is excluded **only at the
+    bundle root**. The depth distinction is not a heuristic: the bundle root is
+    where tooling parks its own dot-entries -- ``.obsidian/``, ``.templates/``,
+    ``.DS_Store``, ``.gitignore`` -- because bundle-scoped tool config belongs
+    beside the bundle. A dot-directory nested *inside* the tree only exists
+    because something deliberately created a path there, which is exactly what
+    a repository-mirror lane does when it writes
+    ``repositories/<repo>/.agents/...``. The cut tracks the real difference
+    between the bundle's housekeeping and the content the bundle carries, so
+    it needs no list of names and cannot go stale. The OKF v0.2 spec says
+    nothing about hidden entries; this is policy, not a spec requirement.
+
+    Directory symlinks are not followed, for loop safety. A link into an
+    excluded entry or an unfollowed symlink therefore reports broken, which is
+    the honest answer given they are not in the model.
 
     *root* itself is read unguarded (``guarded=False``): a *root* that does
     not exist, or is not a directory, is a caller error, not bundle content,
@@ -111,7 +184,7 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
     continues past it, exactly as an unreadable file does a few lines below.
     """
 
-    def walk(directory: Path, *, guarded: bool) -> Iterator[Path]:
+    def walk(directory: Path, *, guarded: bool, depth: int) -> Iterator[Path]:
         if guarded:
             try:
                 entries = sorted(directory.iterdir())
@@ -122,16 +195,18 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
         else:
             entries = sorted(directory.iterdir())
         for entry in entries:
-            if entry.name.startswith("."):
+            if entry.name == GIT_DIR_NAME:
+                continue
+            if depth == 0 and entry.name.startswith("."):
                 continue
             if entry.is_symlink() and entry.is_dir():
                 continue
             if entry.is_dir():
-                yield from walk(entry, guarded=True)
+                yield from walk(entry, guarded=True, depth=depth + 1)
             else:
                 yield entry
 
-    yield from walk(root, guarded=False)
+    yield from walk(root, guarded=False, depth=0)
 
 
 def _directory_id(relative: str) -> str:
@@ -163,14 +238,19 @@ def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
     assets: set[str] = set()
     ignored: set[str] = set()
     unreadable: dict[str, str] = {}
+    canonical: dict[str, str] = {}
 
     for path in _files(root, unreadable=unreadable):
         relative = path.relative_to(root).as_posix()
         if any(fnmatchcase(relative, pattern) for pattern in ignore):
             ignored.add(relative)
+            if not relative.isascii():
+                canonical[canonical_id(relative)] = relative
             continue
         if path.suffix != ".md":
             assets.add(relative)
+            if not relative.isascii():
+                canonical[canonical_id(relative)] = relative
             continue
         try:
             document = Document.load(path)
@@ -186,6 +266,8 @@ def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
             logs[_directory_id(relative)] = document
         else:
             concepts[relative[: -len(".md")]] = document
+        if not relative.isascii():
+            canonical[canonical_id(relative)] = relative
 
     return Bundle(
         root=root,
@@ -195,4 +277,5 @@ def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
         assets=frozenset(assets),
         ignored=frozenset(ignored),
         unreadable=MappingProxyType(dict(sorted(unreadable.items()))),
+        _canonical=MappingProxyType(dict(sorted(canonical.items()))),
     )

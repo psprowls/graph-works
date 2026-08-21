@@ -11,7 +11,7 @@ from difflib import SequenceMatcher, get_close_matches
 from itertools import combinations
 from types import MappingProxyType
 
-from okf_io import Bundle
+from okf_io import Bundle, value_shape
 
 from okf_ext.context import ExtContext
 from okf_ext.tags.model import Skipped, TagCluster, TagInventory
@@ -36,7 +36,12 @@ def scan(bundle: Bundle) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
 
     The `tags-not-a-sequence` test reads `fm.coercion_failures` rather than
     re-deriving the shape: the view already recorded it, and a second opinion
-    is a second thing to keep in sync.
+    is a second thing to keep in sync. okf-io's `frontmatter.value-malformed`
+    rule reads the same seam on the validation side, for every reserved key
+    rather than just `tags`; the two are intentional peers, not a duplication
+    to reconcile -- `scan()` answers a per-document "can I read this?"
+    question `inventory`/`rename` need directly, without running the whole
+    rule catalog to get one key's answer.
     """
     skipped: list[Skipped] = []
 
@@ -58,13 +63,19 @@ def scan(bundle: Bundle) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
             )
             continue
         if "tags" in document.fm.coercion_failures:
-            actual = type(document.fm_raw.get("tags")).__name__
+            # `value_shape`, not `type(...).__name__`: `fm_raw` is a round-trip
+            # tree, so the class here is `CommentedMap` / `CommentedSeq`, and
+            # this detail is read by a human. okf-io owns the naming for the
+            # same reason it owns `coercion_failures` -- a second opinion is a
+            # second thing to keep in sync.
+            actual = value_shape(document.fm_raw.get("tags"))
+            article = "an" if actual[:1] in "aeiou" else "a"
             skipped.append(
                 Skipped(
                     concept_id=concept_id,
                     path=path,
                     reason="tags-not-a-sequence",
-                    detail=f"`tags` is a {actual}, not a sequence",
+                    detail=f"`tags` is {article} {actual}, not a sequence",
                 )
             )
             continue

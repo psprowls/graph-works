@@ -169,7 +169,7 @@ def test_re_running_is_an_empty_plan(tmp_path) -> None:
 
 
 def test_filing_and_migrating_agree_on_the_path(tmp_path) -> None:
-    """Spec section 6.6: `placement()`'s two callers resolve the same target to
+    """Spec section 6.6: `proposal_path()`'s two callers resolve the same target to
     the same file, which is the whole reason it became public."""
     filed = plan_file(
         build_bundle(tmp_path / "filed"),

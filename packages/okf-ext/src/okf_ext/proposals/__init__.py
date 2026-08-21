@@ -47,6 +47,9 @@ and `generators`.
 
 **This module imports no sibling capability**, and never the top-level
 `okf_ext` package.
+
+**`placement` is a deprecated alias of `proposal_path`**, kept for one minor
+version (ADR-0030) and removed at `0.5.0`. Use `proposal_path` in new code.
 """
 
 from __future__ import annotations
@@ -77,6 +80,7 @@ from okf_ext.proposals.plan import (
     plan_decide,
     plan_promote,
     plan_propose,
+    proposal_path,
 )
 from okf_ext.proposals.render import HEADER, BodyRenderer, render_body
 from okf_ext.writing import ApplyResult, FailureKind, Skipped, SkipReason, WriteFailure
@@ -115,5 +119,6 @@ __all__ = [
     "plan_decide",
     "plan_promote",
     "plan_propose",
+    "proposal_path",
     "render_body",
 ]

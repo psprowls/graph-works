@@ -142,6 +142,13 @@ class Write:
     """One member this plan writes, in one of the two modes.
 
     `mode="create"` carries `text`: the whole file, exactly as it will land.
+    It is `str | bytes` -- bytes is how binary material (a PDF, an image)
+    reaches a bundle, and `apply` hands a create write to `write_all` without
+    parsing it either way. **The payload is create-only.** `mode="update"`
+    renders through `frontmatter` and `body` and never reads `text`; a payload
+    on an update is ignored rather than refused, which is what a `str` payload
+    on an update already was.
+
     `mode="update"` carries `frontmatter` (keys set wholesale -- there is no
     delete, because nothing this capability does removes a key), an optional
     `body` replacing the whole body, and `digest`, the plan-time fingerprint
@@ -154,7 +161,7 @@ class Write:
 
     member: str  # bundle-relative posix
     mode: Mode
-    text: str = field(default="", repr=False)
+    text: str | bytes = field(default="", repr=False)
     frontmatter: Mapping[str, Any] = _EMPTY_FM
     body: str | None = field(default=None, repr=False)
     digest: str | None = None

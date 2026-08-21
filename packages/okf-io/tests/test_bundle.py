@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import unicodedata
 from pathlib import Path
 
 import pytest
@@ -142,13 +143,57 @@ def test_a_file_symlink_is_followed_and_loaded(tmp_path):
     assert set(loaded.concepts) == {"real", "link"}
 
 
-def test_dot_entries_are_not_members_at_any_depth(tmp_path):
+def test_root_dot_entries_are_not_members(tmp_path):
+    """D1's first half. The bundle root is where tooling parks its own
+    dot-entries -- `.obsidian/`, `.DS_Store`, `.gitignore` -- so root-level
+    hidden entries stay out of the model."""
     write(tmp_path, "a.md", CONCEPT)
-    write(tmp_path, ".git/HEAD", "ref: refs/heads/main\n")
-    write(tmp_path, "sub/.hidden/b.md", CONCEPT)
     write(tmp_path, ".dotfile.md", CONCEPT)
+    write(tmp_path, ".hidden/b.md", CONCEPT)
+    write(tmp_path, ".DS_Store", "junk")
     loaded = bundle.load(tmp_path)
     assert set(loaded.concepts) == {"a"}
+    assert loaded.assets == frozenset()
+
+
+def test_a_nested_dot_directorys_markdown_is_a_concept(tmp_path):
+    """D1's second half, and the filed bug. A dot-directory nested inside the
+    tree exists only because something deliberately created a path there --
+    `code-wiki-okf`'s mirror lane writing `repositories/<repo>/.agents/...`."""
+    write(tmp_path, "a.md", CONCEPT)
+    write(tmp_path, "repositories/demo/.agents/skills/x/SKILL.md.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    assert set(loaded.concepts) == {"a", "repositories/demo/.agents/skills/x/SKILL.md"}
+    assert loaded.has_member("repositories/demo/.agents/skills/x/SKILL.md.md")
+
+
+def test_a_nested_dot_directorys_non_markdown_is_an_asset(tmp_path):
+    write(tmp_path, "a.md", CONCEPT)
+    write(tmp_path, "work/item/.00-decisions.lock", "")
+    loaded = bundle.load(tmp_path)
+    assert set(loaded.concepts) == {"a"}
+    assert loaded.assets == frozenset({"work/item/.00-decisions.lock"})
+
+
+def test_git_is_excluded_at_the_bundle_root(tmp_path):
+    write(tmp_path, "a.md", CONCEPT)
+    write(tmp_path, ".git/HEAD", "ref: refs/heads/main\n")
+    write(tmp_path, ".git/objects/ab/cdef.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    assert set(loaded.concepts) == {"a"}
+    assert loaded.assets == frozenset()
+
+
+def test_git_is_excluded_when_nested(tmp_path):
+    """D2, and the one branch no other test reaches. A bundle carrying a
+    vendored checkout would otherwise walk that checkout's whole object store
+    into `assets` -- 10^4-10^5 files, a performance cliff rather than noise."""
+    write(tmp_path, "a.md", CONCEPT)
+    write(tmp_path, "vendor/dep/.git/HEAD", "ref: refs/heads/main\n")
+    write(tmp_path, "vendor/dep/.git/objects/ab/cdef.md", CONCEPT)
+    write(tmp_path, "vendor/dep/readme.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    assert set(loaded.concepts) == {"a", "vendor/dep/readme"}
     assert loaded.assets == frozenset()
 
 
@@ -174,3 +219,51 @@ def test_ignore_excludes_concepts_but_leaves_them_resolvable(tmp_path):
 def test_mappings_are_read_only(acme):
     with pytest.raises(TypeError):
         acme.concepts["injected"] = None  # type: ignore[index]
+
+
+#: `café` in each normalization form -- NFC is the single precomposed
+#: `U+00E9`, NFD is `e` followed by the combining acute accent `U+0301`.
+_NFC = unicodedata.normalize("NFC", "café")
+_NFD = unicodedata.normalize("NFD", "café")
+
+
+def test_canonical_id_normalizes_non_ascii_to_nfc():
+    assert bundle.canonical_id(f"concepts/{_NFD}.md") == f"concepts/{_NFC}.md"
+    assert bundle.canonical_id(f"concepts/{_NFC}.md") == f"concepts/{_NFC}.md"
+
+
+def test_canonical_id_is_the_identity_for_ascii():
+    assert bundle.canonical_id("concepts/plain.md") == "concepts/plain.md"
+
+
+def test_has_member_matches_an_nfc_query_against_an_nfd_disk_id(tmp_path):
+    write(tmp_path, f"concepts/{_NFD}.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    assert f"concepts/{_NFD}" in loaded.concepts
+    assert loaded.has_member(f"concepts/{_NFC}.md")
+
+
+def test_has_member_matches_an_nfd_query_against_an_nfc_disk_id(tmp_path):
+    write(tmp_path, f"concepts/{_NFC}.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    assert loaded.has_member(f"concepts/{_NFD}.md")
+
+
+def test_member_id_returns_the_raw_disk_id_for_a_differently_normalized_query(tmp_path):
+    write(tmp_path, f"concepts/{_NFD}.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    assert loaded.member_id(f"concepts/{_NFC}.md") == f"concepts/{_NFD}.md"
+    assert loaded.member_id(f"concepts/{_NFD}.md") == f"concepts/{_NFD}.md"
+
+
+def test_member_id_returns_none_for_a_non_member(tmp_path):
+    write(tmp_path, f"concepts/{_NFD}.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    assert loaded.member_id(f"concepts/{_NFC}-nope.md") is None
+
+
+def test_an_all_ascii_bundle_never_consults_the_canonical_map(acme):
+    """`isascii()` is the whole fast-path story: an ASCII bundle carries no
+    non-ASCII members, so `_canonical` is empty and behaviour is unchanged."""
+    assert acme.has_member("metrics/revenue.md")
+    assert not acme.has_member("metrics/does-not-exist.md")

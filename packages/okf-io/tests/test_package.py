@@ -7,7 +7,15 @@ import okf_io
 
 
 def test_version_is_static():
-    assert okf_io.__version__ == "0.1.1"
+    """`0.2.1` made `frontmatter.value-malformed` name a container value
+    `mapping`/`sequence` where it used to print ruamel's `CommentedMap` /
+    `CommentedSeq` -- message text only, and the reviewed golden did not move.
+    `0.2.2` stopped `update()` conjuring an index inside a dot-subtree when
+    it selected the directory itself; the files it no longer writes were
+    orphans `_subdirectories_of` would never link. `0.2.3` adds `value_shape`
+    to the surface, so a consumer naming a raw value's shape does not have to
+    reach for `type(...).__name__` and leak ruamel. All patches (ADR-0007)."""
+    assert okf_io.__version__ == "0.2.3"
 
 
 def test_version_matches_package_metadata():
@@ -70,6 +78,7 @@ def test_public_surface():
         "trust_tier",
         "update_index",
         "validate",
+        "value_shape",
     }
     assert set(okf_io.__all__) == expected
 

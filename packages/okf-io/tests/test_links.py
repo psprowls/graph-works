@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import unicodedata
 from pathlib import Path
 
 from helpers import BUNDLES
@@ -164,6 +165,23 @@ def test_a_self_link_does_produce_a_backlink(tmp_path):
     """
     graph = links.build(make(tmp_path, {"a.md": CONCEPT + "[self](/a.md)\n"}))
     assert graph.backlinks == {"a": ("a",)}
+
+
+def test_an_nfd_named_member_resolves_a_percent_encoded_nfc_destination(tmp_path):
+    """markdown-it normalizes destinations to NFC on the way out; a filesystem
+    is free to store the same name as NFD. `has_member` and backlinks must
+    agree either way."""
+    nfd = unicodedata.normalize("NFD", "café")
+    loaded = make(
+        tmp_path,
+        {
+            f"{nfd}.md": CONCEPT + "# Café\n",
+            "a.md": CONCEPT + "[c](./caf%C3%A9.md)\n",
+        },
+    )
+    graph = links.build(loaded)
+    assert graph.broken == ()
+    assert graph.backlinks[nfd] == ("a",)
 
 
 def test_lines_are_file_accurate(tmp_path):

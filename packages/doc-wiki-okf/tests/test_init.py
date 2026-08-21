@@ -49,6 +49,16 @@ def test_install_bundle_writes_every_file(tmp_path: Path) -> None:
     assert "+ _schema/Tutorial.schema.json" in result.diff()
 
 
+def test_install_bundle_ignores_seed_repositories(tmp_path: Path) -> None:
+    """`seed_repositories` exists for `graph_works_core`'s uniform `INSTALLERS`
+    call; this package owns none of `_repositories.yaml`, so it is accepted
+    and has no effect on what gets written."""
+    root = tmp_path / "bundle"
+    result = install_bundle(root, today=_TODAY, seed_repositories=False, dry_run=False)
+    assert result.ok
+    assert set(result.scaffold.written) | set(result.install.written) == _ALL_FILES
+
+
 def test_a_second_install_writes_nothing_and_refuses_nothing(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)

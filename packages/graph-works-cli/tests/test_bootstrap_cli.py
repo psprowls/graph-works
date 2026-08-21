@@ -173,7 +173,7 @@ def test_repo_root_pins_a_repository_the_walk_up_cannot_find(tmp_path: Path) -> 
     result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root), "--repo-root", str(repo)])
 
     assert result.exit_code == 0
-    declared = (root / "okf" / "_repositories.yaml").read_text(encoding="utf-8")
+    declared = (root / "_gw" / "_repositories.yaml").read_text(encoding="utf-8")
     assert "repositories: {}" not in declared
     assert "  repo:" in declared
 
@@ -186,7 +186,7 @@ def test_omitting_repo_root_keeps_the_walk_up(tmp_path: Path) -> None:
     result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
 
     assert result.exit_code == 0
-    assert "  repo:" in (root / "okf" / "_repositories.yaml").read_text(encoding="utf-8")
+    assert "  repo:" in (root / "_gw" / "_repositories.yaml").read_text(encoding="utf-8")
 
 
 def test_dry_run_renders_the_plan_and_writes_nothing(tmp_path: Path) -> None:

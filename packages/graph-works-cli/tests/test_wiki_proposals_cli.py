@@ -162,7 +162,7 @@ def test_proposal_file_builds_the_ordered_source_mapping_and_timestamps_it(
     filed: list[dict[str, object]] = []
 
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: bundle)
-    monkeypatch.setattr(proposals_module, "load_config", lambda _root: config, raising=False)
+    monkeypatch.setattr(proposals_module, "load_config", lambda _root, **_kwargs: config, raising=False)
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: schemas, raising=False)
     monkeypatch.setattr(proposals_module, "lane_set", lambda actual_schemas: lanes, raising=False)
 
@@ -297,7 +297,9 @@ def test_proposal_file_omits_unprovided_optional_source_fields(
     captured: list[dict[str, object]] = []
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: bundle)
     monkeypatch.setattr(
-        proposals_module, "load_config", lambda _root: SimpleNamespace(declarations_dir=Path("/declarations"))
+        proposals_module,
+        "load_config",
+        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/declarations")),
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object())
     monkeypatch.setattr(proposals_module, "lane_set", lambda _schemas: object())
@@ -339,7 +341,9 @@ def test_proposal_file_refusal_or_incomplete_apply_exits_one(
     applied: list[object] = []
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
     monkeypatch.setattr(
-        proposals_module, "load_config", lambda _root: SimpleNamespace(declarations_dir=Path("/declarations"))
+        proposals_module,
+        "load_config",
+        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/declarations")),
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object())
     monkeypatch.setattr(proposals_module, "lane_set", lambda _schemas: object())
@@ -637,7 +641,10 @@ def test_proposal_file_reports_an_unknown_lane(monkeypatch: pytest.MonkeyPatch, 
 
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
     monkeypatch.setattr(
-        proposals_module, "load_config", lambda _root: SimpleNamespace(declarations_dir=Path("/d")), raising=False
+        proposals_module,
+        "load_config",
+        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/d")),
+        raising=False,
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object(), raising=False)
     monkeypatch.setattr(proposals_module, "lane_set", lambda _schemas: object(), raising=False)
@@ -655,7 +662,10 @@ def test_proposal_file_reports_a_failed_write_and_echoes_written_members(
     """Filing must report a failed write and, on success, name every page it touched."""
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
     monkeypatch.setattr(
-        proposals_module, "load_config", lambda _root: SimpleNamespace(declarations_dir=Path("/d")), raising=False
+        proposals_module,
+        "load_config",
+        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/d")),
+        raising=False,
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object(), raising=False)
     monkeypatch.setattr(proposals_module, "lane_set", lambda _schemas: object(), raising=False)

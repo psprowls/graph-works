@@ -62,7 +62,7 @@ def test_lint_passes_one_captured_utc_date_to_the_typed_core_call(
     assert calls == [
         {
             "layout": layout,
-            "config": lint_module.load_config(layout.bundle_dir),
+            "config": lint_module.load_config(layout.bundle_dir, config_path=layout.repositories_path),
             "today": date(2026, 8, 18),
             "repo_root": layout.repo_root,
         }
@@ -181,7 +181,7 @@ def test_lint_reports_unreadable_configuration_before_running(
 ) -> None:
     """Lint reads configuration first; a config fault must not be reported as a lint finding."""
 
-    def fail(_bundle_root: object) -> object:
+    def fail(_bundle_root: object, *, config_path: object = None) -> object:
         raise ConfigError("config.yaml is malformed")
 
     monkeypatch.setattr(lint_module, "load_config", fail)

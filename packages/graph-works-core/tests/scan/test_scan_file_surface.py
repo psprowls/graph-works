@@ -30,7 +30,7 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 @pytest.fixture
 async def emitted(tmp_path):
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir)
+    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     seed_graph(config.graph_dir, repo)
     worklist, _ = await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
     out_dir = scan_cache_dir(layout)
@@ -221,7 +221,9 @@ async def test_apply_scan_worklist_lands_the_same_page_the_in_process_path_does(
     )
     assert applied.narrated == 1
     assert applied.stamped == 1
-    assert FILLED in (layout.bundle_dir / "packages" / "widgets.md").read_text(encoding="utf-8")
+    assert FILLED in (layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md").read_text(
+        encoding="utf-8"
+    )
 
 
 async def test_apply_scan_worklist_uses_a_supplied_worklist_after_the_artifact_changes(emitted, monkeypatch):

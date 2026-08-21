@@ -129,6 +129,7 @@ def _discover_test_roots(
     repo_root: Path,
     skip_dirs: frozenset[str],
     pkg_rows: list[tuple[str, str | None, str | None]],
+    ignore: _ignore.IgnoreSpec | None = None,
 ) -> list[_TestRoot]:
     """Discover conventional + config-declared test root directories.
 
@@ -155,7 +156,7 @@ def _discover_test_roots(
     ) -> None:
         if rel in seen:
             return
-        if _ignore.should_skip(rel, skip_dirs):
+        if _ignore.should_skip(rel, skip_dirs, ignore):
             return
         seen.add(rel)
         roots.append(
@@ -171,7 +172,11 @@ def _discover_test_roots(
     # Repo-root tests
     repo_tests = repo_root / "tests"
     if repo_tests.is_dir():
-        subdirs = [d for d in repo_tests.iterdir() if d.is_dir() and not _ignore.should_skip(d.name, skip_dirs)]
+        subdirs = [
+            d
+            for d in repo_tests.iterdir()
+            if d.is_dir() and not _ignore.should_skip(d.relative_to(repo_root).as_posix(), skip_dirs, ignore)
+        ]
         if subdirs:
             for sub in sorted(subdirs):
                 rel = sub.relative_to(repo_root).as_posix()
@@ -243,25 +248,27 @@ def emit(
     repo_root: Path,
     ctx: RepoContext,
     skip_dirs: frozenset[str],
+    ignore: _ignore.IgnoreSpec | None = None,
 ) -> None:
     """Emit TestSuite nodes + physically_contains re-parenting + tests edges."""
     repo_root = Path(repo_root).resolve()
 
-    # include both package and app nodes — apps are tested
-    # the same way packages are.
+    # Package-only: under the facet model, `tests` edges always target the
+    # Package node. Scanning App rows too would make pkg_kind_map's
+    # per-name dict nondeterministic between "package" and "app" for a
+    # dual-facet member, depending on SQLite row order.
     # Multi-repo: scope to this member (see structural_nodes.emit).
     member_repo = repo_uri(ctx)
     pkg_rows_raw = conn.execute(
-        "SELECT name, path, attrs_json, kind FROM nodes WHERE kind IN ('package', 'app') "
-        "AND (repo = ? OR repo IS NULL)",
+        "SELECT name, path, attrs_json, kind FROM nodes WHERE kind = 'package' AND (repo = ? OR repo IS NULL)",
         (member_repo,),
     ).fetchall()
     pkg_rows: list[tuple[str, str | None, str | None]] = [(r[0], r[1], r[2]) for r in pkg_rows_raw]
     # Side-table mapping pkg name -> kind so the tests-edge dst tuple uses
-    # the right kind.
+    # the right kind. Now always "package" per the scoped query above.
     pkg_kind_map: dict[str, str] = {r[0]: r[3] for r in pkg_rows_raw}
 
-    roots = _discover_test_roots(repo_root, skip_dirs, pkg_rows)
+    roots = _discover_test_roots(repo_root, skip_dirs, pkg_rows, ignore)
 
     # Map each TestRoot's rel_path -> list of test File rel-paths it owns.
     root_files: dict[str, list[str]] = {r.rel_path: [] for r in roots}
@@ -359,8 +366,10 @@ def emit(
         if r.owner_kind == "repository":
             parent_src = repo_key
         else:
-            # owner may be a Package OR App; resolve kind from
-            # the side-table built earlier.
+            # Package-only under the facet model: pkg_kind_map is built
+            # exclusively from kind='package' rows, so this always resolves
+            # to "package" — the .get default is a defensive fallback, not
+            # a live App-node case.
             if owner_name is None:
                 continue
             owner_kind_str = pkg_kind_map.get(owner_name, "package")
@@ -461,8 +470,9 @@ def _emit_tests_edges(
         matched_pkgs = scan_files_imports(repo_root, file_rel_paths, pkg_rows)
 
         for pkg_name, pkg_rel in matched_pkgs:
-            # use the actual kind so tests-edges from a suite
-            # to an App node resolve correctly.
+            # Package-only under the facet model: pkg_kind_map is built
+            # exclusively from kind='package' rows, so tests edges always
+            # target the Package node, never an App facet.
             pkg_kind_value = pkg_kind_map.get(pkg_name, "package") if pkg_kind_map else "package"
             edges_out.append(
                 GraphEdge(

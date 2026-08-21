@@ -164,24 +164,6 @@ def test_refresh_skips_venv_manifests(tmp_path: Path, conn: sqlite3.Connection) 
     assert "foo" not in names
 
 
-def test_refresh_skips_graphignore_manifests(tmp_path: Path, conn: sqlite3.Connection) -> None:
-    (tmp_path / ".graphignore").write_text("generated\n")
-
-    generated_pkg = tmp_path / "packages" / "generated" / "fake"
-    generated_pkg.mkdir(parents=True)
-    (generated_pkg / "pyproject.toml").write_text('[project]\nname = "fake"\nversion = "0.0.0"\n')
-
-    real_pkg = tmp_path / "packages" / "real"
-    real_pkg.mkdir(parents=True)
-    (real_pkg / "pyproject.toml").write_text('[project]\nname = "real"\nversion = "0.1.1"\n')
-
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
-
-    names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
-    assert names == {"real"}
-    assert "fake" not in names
-
-
 def test_refresh_skips_broken_pyproject(tmp_path: Path, conn: sqlite3.Connection, capsys) -> None:
     pkg_dir = tmp_path / "alpha"
     pkg_dir.mkdir(parents=True)
@@ -404,9 +386,12 @@ def test_internal_dep_edges_dedupe_per_consumer(tmp_path: Path, conn: sqlite3.Co
     assert dop_count == 1
 
 
-def test_internal_dep_on_app_target_resolves_app_kind(tmp_path: Path, conn: sqlite3.Connection) -> None:
-    """stored-kind resolution: when the internal target is classified as an
-    `app` (has [project.scripts]), both edges' dst resolve to kind='app'.
+def test_internal_dep_on_app_target_resolves_package_kind(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """stored-kind resolution: even when the internal target ALSO carries an
+    App facet (has [project.scripts]), both edges' dst resolve to kind='package'
+    — internal dependency edges always target the Package node, never its
+    App sibling (facet model: contains/used_by/depends_on_package are
+    Package-sourced and Package-targeted).
     """
     app_target = tmp_path / "mytool"
     app_target.mkdir()
@@ -430,7 +415,7 @@ def test_internal_dep_on_app_target_resolves_app_kind(tmp_path: Path, conn: sqli
             (kind,),
         ).fetchall()
         assert len(dst_kind) == 1, f"expected one {kind} edge to mytool"
-        assert dst_kind[0][0] == "app", f"{kind} dst should resolve to app"
+        assert dst_kind[0][0] == "package", f"{kind} dst should resolve to package"
 
 
 # ============================================================================
@@ -518,81 +503,82 @@ def test_read_package_json_bin_present_false_when_missing(tmp_path: Path) -> Non
 
 
 # ============================================================================
-# in-place UPDATE for cross-run kind flips.
+# facet coexistence: Package is unconditional, App is an additive facet.
 # ============================================================================
 
 
-def test_kind_flip_pkg_to_app(tmp_path: Path, conn: sqlite3.Connection) -> None:
-    """package gaining [project.scripts] on re-run flips to app with id preserved."""
+def test_app_signals_add_a_facet_not_a_flip(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A package gaining [project.scripts] gets a SECOND node (App), linked
+    to the first (Package) by a facet_of edge — the Package row is untouched."""
     pkg_dir = tmp_path / "myapp"
     pkg_dir.mkdir(parents=True)
     manifest = pkg_dir / "pyproject.toml"
-    # First refresh: no scripts → kind="package".
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
     packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
-    row = conn.execute("SELECT id, kind, uri FROM nodes WHERE name='myapp'").fetchone()
-    assert row is not None, "first refresh did not create the row"
-    pkg_id, pkg_kind, pkg_uri_val = row
+    pkg_row = conn.execute("SELECT id, kind, uri FROM nodes WHERE name='myapp'").fetchone()
+    assert pkg_row is not None
+    pkg_id, pkg_kind, pkg_uri_val = pkg_row
     assert pkg_kind == "package"
     assert pkg_uri_val.startswith("pkg:")
 
-    # Second refresh after adding [project.scripts] → expect kind flip to "app".
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n[project.scripts]\nmyapp = "myapp.cli:main"\n')
     packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
 
-    rows = conn.execute("SELECT id, kind, uri, attrs_json FROM nodes WHERE name='myapp'").fetchall()
-    assert len(rows) == 1, f"expected exactly one row after flip; got {rows!r}"
-    app_id, app_kind_db, app_uri_val, attrs_json = rows[0]
-    assert app_id == pkg_id, "row id must be preserved across kind flip"
-    assert app_kind_db == "app"
-    assert app_uri_val.startswith("app:")
-    attrs = json.loads(attrs_json)
-    assert attrs["app_kind"] == "cli"
-    assert attrs["app_signals"] == ["cli"]
+    rows = conn.execute("SELECT id, kind, uri, attrs_json FROM nodes WHERE name='myapp' ORDER BY kind").fetchall()
+    assert [r[1] for r in rows] == ["app", "package"], f"expected one app row and one package row; got {rows!r}"
+    app_row, pkg_row_after = rows
+    assert pkg_row_after[0] == pkg_id, "Package row id must be untouched by the facet gaining an App sibling"
+    assert pkg_row_after[1] == "package"
+    assert pkg_row_after[2].startswith("pkg:")
+    app_attrs = json.loads(app_row[3])
+    assert app_attrs["app_kind"] == "cli"
+    assert app_attrs["app_signals"] == ["cli"]
+    pkg_attrs = json.loads(pkg_row_after[3])
+    assert "app_kind" not in pkg_attrs
+    assert "app_signals" not in pkg_attrs
+
+    facet_edge = conn.execute(
+        "SELECT src, dst FROM edges e "
+        "JOIN nodes s ON e.src = s.id JOIN nodes d ON e.dst = d.id "
+        "WHERE e.kind='facet_of' AND s.name='myapp' AND d.name='myapp'"
+    ).fetchone()
+    assert facet_edge is not None
+    src_kind = conn.execute("SELECT kind FROM nodes WHERE id=?", (facet_edge[0],)).fetchone()[0]
+    dst_kind = conn.execute("SELECT kind FROM nodes WHERE id=?", (facet_edge[1],)).fetchone()[0]
+    assert (src_kind, dst_kind) == ("package", "app")
 
 
-def test_kind_flip_app_to_pkg_reverts(tmp_path: Path, conn: sqlite3.Connection) -> None:
-    """app losing [project.scripts] on re-run reverts to package with id preserved."""
+def test_app_facet_pruned_when_signals_disappear_package_survives(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """Losing [project.scripts] prunes the App node; the Package node (and
+    its id) survive untouched — no more in-place flip-to-package."""
     pkg_dir = tmp_path / "myapp"
     pkg_dir.mkdir(parents=True)
     manifest = pkg_dir / "pyproject.toml"
-    # First refresh with scripts → kind="app".
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n[project.scripts]\nmyapp = "myapp.cli:main"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
-    row = conn.execute("SELECT id, kind FROM nodes WHERE name='myapp'").fetchone()
-    assert row is not None
-    app_id, app_kind_db = row
-    assert app_kind_db == "app"
-
-    # Remove [project.scripts] → expect revert to kind="package".
-    manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
-
-    rows = conn.execute("SELECT id, kind, uri, attrs_json FROM nodes WHERE name='myapp'").fetchall()
-    assert len(rows) == 1, f"expected exactly one row after revert; got {rows!r}"
-    pkg_id, pkg_kind_db, pkg_uri_val, attrs_json = rows[0]
-    assert pkg_id == app_id, "row id must be preserved across kind revert"
-    assert pkg_kind_db == "package"
-    assert pkg_uri_val.startswith("pkg:")
-    attrs = json.loads(attrs_json) if attrs_json else {}
-    # Package rows MUST NOT carry app_kind / app_signals.
-    assert "app_kind" not in attrs
-    assert "app_signals" not in attrs
-
-
-def test_kind_flip_preserves_inbound_edge_fk(tmp_path: Path, conn: sqlite3.Connection) -> None:
-    """inbound edges against the flipped row survive because dst id is preserved."""
-    pkg_dir = tmp_path / "myapp"
-    pkg_dir.mkdir(parents=True)
-    manifest = pkg_dir / "pyproject.toml"
-    manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
     packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
     pkg_row = conn.execute("SELECT id FROM nodes WHERE name='myapp' AND kind='package'").fetchone()
     assert pkg_row is not None
     pkg_id = pkg_row[0]
+    assert conn.execute("SELECT COUNT(*) FROM nodes WHERE name='myapp' AND kind='app'").fetchone()[0] == 1
 
-    # Manually insert an inbound edge against the pkg row from a synthetic
-    # test_suite node (use _upsert_edge to also create the src test_suite node).
+    manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
+    rows = conn.execute("SELECT id, kind FROM nodes WHERE name='myapp'").fetchall()
+    assert [r[1] for r in rows] == ["package"], f"App facet should be pruned; got {rows!r}"
+    assert rows[0][0] == pkg_id, "surviving Package row id must be unchanged"
+    assert conn.execute("SELECT COUNT(*) FROM edges WHERE kind='facet_of'").fetchone()[0] == 0
+
+
+def test_app_facet_edges_do_not_survive_kind_flip_fk(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """An inbound edge against the Package row survives its App sibling
+    being pruned (cascade only removes edges touching the deleted App row)."""
+    pkg_dir = tmp_path / "myapp"
+    pkg_dir.mkdir(parents=True)
+    manifest = pkg_dir / "pyproject.toml"
+    manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n[project.scripts]\nmyapp = "myapp.cli:main"\n')
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+
     upsert._upsert_edge(
         conn,
         GraphEdge(
@@ -602,18 +588,16 @@ def test_kind_flip_preserves_inbound_edge_fk(tmp_path: Path, conn: sqlite3.Conne
             attrs={},
         ),
     )
+    pkg_id = conn.execute("SELECT id FROM nodes WHERE name='myapp' AND kind='package'").fetchone()[0]
     inbound_before = conn.execute("SELECT COUNT(*) FROM edges WHERE dst=?", (pkg_id,)).fetchone()[0]
-    assert inbound_before >= 1
+    assert inbound_before == 1
 
-    # Flip pkg → app.
-    manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n[project.scripts]\nmyapp = "myapp.cli:main"\n')
+    manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
     packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
 
-    app_row = conn.execute("SELECT id FROM nodes WHERE name='myapp' AND kind='app'").fetchone()
-    assert app_row is not None
-    assert app_row[0] == pkg_id, "row id must survive the flip"
+    assert conn.execute("SELECT id FROM nodes WHERE name='myapp' AND kind='package'").fetchone()[0] == pkg_id
     inbound_after = conn.execute("SELECT COUNT(*) FROM edges WHERE dst=?", (pkg_id,)).fetchone()[0]
-    assert inbound_after == inbound_before, "inbound edges must survive the kind flip because dst FK is preserved"
+    assert inbound_after == 1, "the unrelated inbound edge on the surviving Package row must be untouched"
 
 
 def test_no_kind_flip_for_zero_signal_manifest(tmp_path: Path, conn: sqlite3.Connection) -> None:
@@ -639,11 +623,16 @@ def test_no_kind_flip_for_zero_signal_manifest(tmp_path: Path, conn: sqlite3.Con
 # ============================================================================
 
 
-def _refresh_and_fetch(tmp_path: Path, conn: sqlite3.Connection, name: str) -> tuple[str, str, dict]:
-    """Run packages.refresh and return (kind, uri, attrs) for the named row."""
+def _refresh_and_fetch(
+    tmp_path: Path, conn: sqlite3.Connection, name: str, *, kind: str = "package"
+) -> tuple[str, str, dict]:
+    """Run packages.refresh and return (kind, uri, attrs) for the named row of
+    the given `kind`. Under the facet model a manifest with app signals gets
+    BOTH a package row and an app row sharing `name`, so callers that mean to
+    inspect the App facet must pass kind="app" explicitly."""
     packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
-    row = conn.execute("SELECT kind, uri, attrs_json FROM nodes WHERE name=?", (name,)).fetchone()
-    assert row is not None, f"no row named {name!r} after refresh"
+    row = conn.execute("SELECT kind, uri, attrs_json FROM nodes WHERE name=? AND kind=?", (name, kind)).fetchone()
+    assert row is not None, f"no {kind!r} row named {name!r} after refresh"
     return row[0], row[1], json.loads(row[2]) if row[2] else {}
 
 
@@ -652,7 +641,7 @@ def test_refresh_js_bin_string_classifies_app_cli(tmp_path: Path, conn: sqlite3.
     pkg_dir = tmp_path / "tool"
     pkg_dir.mkdir()
     (pkg_dir / "package.json").write_text(json.dumps({"name": "tool", "version": "1.0.0", "bin": "cli.js"}))
-    kind, uri, attrs = _refresh_and_fetch(tmp_path, conn, "tool")
+    kind, uri, attrs = _refresh_and_fetch(tmp_path, conn, "tool", kind="app")
     assert kind == "app"
     assert uri.startswith("app:")
     assert attrs["app_kind"] == "cli"
@@ -672,7 +661,7 @@ def test_refresh_js_bin_dict_classifies_app_cli(tmp_path: Path, conn: sqlite3.Co
             }
         )
     )
-    kind, uri, attrs = _refresh_and_fetch(tmp_path, conn, "tool")
+    kind, uri, attrs = _refresh_and_fetch(tmp_path, conn, "tool", kind="app")
     assert kind == "app"
     assert uri.startswith("app:")
     assert attrs["app_kind"] == "cli"
@@ -692,7 +681,7 @@ def test_refresh_js_next_classifies_app_nextjs(tmp_path: Path, conn: sqlite3.Con
             }
         )
     )
-    kind, uri, attrs = _refresh_and_fetch(tmp_path, conn, "site")
+    kind, uri, attrs = _refresh_and_fetch(tmp_path, conn, "site", kind="app")
     assert kind == "app"
     assert uri.startswith("app:")
     assert attrs["app_kind"] == "nextjs"
@@ -712,7 +701,7 @@ def test_refresh_js_expo_classifies_app_expo(tmp_path: Path, conn: sqlite3.Conne
             }
         )
     )
-    kind, _uri, attrs = _refresh_and_fetch(tmp_path, conn, "mobile")
+    kind, _uri, attrs = _refresh_and_fetch(tmp_path, conn, "mobile", kind="app")
     assert kind == "app"
     assert attrs["app_kind"] == "expo"
     assert "expo" in attrs["app_signals"]
@@ -732,7 +721,7 @@ def test_refresh_js_vite_with_index_html_classifies_app_spa(tmp_path: Path, conn
         )
     )
     (pkg_dir / "index.html").write_text("<!doctype html><html></html>")
-    kind, _uri, attrs = _refresh_and_fetch(tmp_path, conn, "spa-app")
+    kind, _uri, attrs = _refresh_and_fetch(tmp_path, conn, "spa-app", kind="app")
     assert kind == "app"
     assert attrs["app_kind"] == "spa"
     assert "spa" in attrs["app_signals"]
@@ -772,7 +761,7 @@ def test_refresh_js_multi_signal_nextjs_wins(tmp_path: Path, conn: sqlite3.Conne
             }
         )
     )
-    kind, _uri, attrs = _refresh_and_fetch(tmp_path, conn, "site")
+    kind, _uri, attrs = _refresh_and_fetch(tmp_path, conn, "site", kind="app")
     assert kind == "app"
     assert attrs["app_kind"] == "nextjs"
     assert attrs["app_signals"] == sorted(["cli", "nextjs"])
@@ -808,10 +797,20 @@ def test_refresh_app_node_attrs_json_contains_app_kind_and_signals(tmp_path: Pat
     app_row = conn.execute(
         "SELECT json_extract(attrs_json, '$.app_kind'), "
         "       json_extract(attrs_json, '$.app_signals') "
-        "FROM nodes WHERE name='myapp'"
+        "FROM nodes WHERE name='myapp' AND kind='app'"
     ).fetchone()
     assert app_row[0] == "cli"
     assert app_row[1] is not None
+
+    # myapp's Package facet (the sibling row created alongside the App facet)
+    # must NOT carry app_kind / app_signals either.
+    myapp_pkg_row = conn.execute(
+        "SELECT json_extract(attrs_json, '$.app_kind'), "
+        "       json_extract(attrs_json, '$.app_signals') "
+        "FROM nodes WHERE name='myapp' AND kind='package'"
+    ).fetchone()
+    assert myapp_pkg_row[0] is None
+    assert myapp_pkg_row[1] is None
 
     pkg_row = conn.execute(
         "SELECT json_extract(attrs_json, '$.app_kind'), "
@@ -845,7 +844,7 @@ def test_refresh_electron_app_from_dev_deps(tmp_path: Path, conn: sqlite3.Connec
 
     packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
 
-    row = conn.execute("SELECT kind, attrs_json FROM nodes WHERE name='app-electron-ts'").fetchone()
+    row = conn.execute("SELECT kind, attrs_json FROM nodes WHERE name='app-electron-ts' AND kind='app'").fetchone()
     assert row is not None
     kind, attrs_json = row
     assert kind == "app"
@@ -1099,26 +1098,24 @@ def test_read_package_json_dep_specs_coerces_non_string_spec(tmp_path: Path) -> 
 
 
 # ============================================================================
-# Plugin-root manifests excluded from package emitter (spec decision 4)
+# Plugin-root manifests now ALSO get a Package node (spec decision reversed)
 # ============================================================================
 
 
-def test_plugin_root_manifest_excluded_from_packages(tmp_path: Path, conn: sqlite3.Connection) -> None:
-    """A pyproject.toml AT a .claude-plugin/ dir is NOT emitted as a package;
-    a nested real package under the plugin IS."""
+def test_plugin_root_manifest_also_gets_a_package_node(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A pyproject.toml AT a .claude-plugin/ dir now IS emitted as a package
+    (facet model: every manifest gets a Package node, unconditionally)."""
     pdir = tmp_path / "plugins" / "demo"
     (pdir / ".claude-plugin").mkdir(parents=True)
     (pdir / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "demo"}))
-    # A manifest at the plugin ROOT — must be skipped.
     (pdir / "pyproject.toml").write_text('[project]\nname = "demo-plugin-pkg"\nversion = "0"\n')
-    # A nested real workspace package — must still be detected.
     nested = pdir / "scripts" / "helper"
     nested.mkdir(parents=True)
     (nested / "pyproject.toml").write_text('[project]\nname = "demo-helper"\nversion = "0"\n')
 
     packages.refresh(conn, repo_root=tmp_path, ctx=RepoContext(org="t", repo="r"))
     names = {r[0] for r in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
-    assert "demo-plugin-pkg" not in names
+    assert "demo-plugin-pkg" in names
     assert "demo-helper" in names
 
 
@@ -1169,8 +1166,8 @@ def test_refresh_app_node_carries_language(tmp_path: Path, conn: sqlite3.Connect
     )
     _seed_file_node(conn, "packages/appy/src/appy/__init__.py")
     packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
-    # appy has [project.scripts] → classified as 'app'
-    row = conn.execute("SELECT kind, attrs_json FROM nodes WHERE name='appy'").fetchone()
+    # appy has [project.scripts] → also gets an App facet alongside its Package node.
+    row = conn.execute("SELECT kind, attrs_json FROM nodes WHERE name='appy' AND kind='app'").fetchone()
     assert row is not None
     kind, attrs_json = row
     assert kind == "app"

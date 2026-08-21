@@ -17,7 +17,7 @@ from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Concatenate, cast
 
-from code_graph_io import graphml, queries, resolve, store, upsert
+from code_graph_io import _ignore, graphml, queries, resolve, store, upsert
 from code_graph_io.queries import (
     AgentPluginDescription,
     AppDescription,
@@ -354,8 +354,8 @@ class GraphStore(GraphReader):
     def sweep(self) -> None:
         resolve.sweep(self._conn)
 
-    def sweep_skip_dir_files(self, skip_dirs: frozenset[str]) -> None:
-        resolve.sweep_skip_dir_files(self._conn, skip_dirs)
+    def sweep_skip_dir_files(self, skip_dirs: frozenset[str], ignore: _ignore.IgnoreSpec | None = None) -> None:
+        resolve.sweep_skip_dir_files(self._conn, skip_dirs, ignore)
 
     @contextmanager
     def transaction(self) -> Iterator[GraphStore]:

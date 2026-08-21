@@ -19,7 +19,7 @@ import tomllib
 from pathlib import Path
 from typing import Protocol
 
-from code_graph_io import upsert
+from code_graph_io import _ignore, upsert
 from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
 from code_graph_io.structural_nodes import _resolve_import_root
 from code_graph_io.uri import RepoContext, entry_point_uri, repo_uri
@@ -86,11 +86,12 @@ def _emit_pyproject_entries(
     importable = pkg_name.replace("-", "_")
     import_root = _resolve_import_root(pkg_dir, importable)
 
-    # pkg_key uses the caller-supplied kind so apps emit
-    # src=("app", ...) for their declares_entry_point edges.
+    # pkg_kind is always "package" (emit() now scopes its owner-row scan to
+    # Package rows only — see emit() below); the parameter is kept so a
+    # caller-supplied kind still plumbs through rather than hardcoding it here.
     # Root packages carry rel-path '' (packages.refresh canonical form, never
     # None); pass it through verbatim so the edge resolves to the EXISTING
-    # package/app node instead of stubbing an empty-uri duplicate.
+    # package node instead of stubbing an empty-uri duplicate.
     pkg_key = (pkg_kind, pkg_name, pkg_rel)
 
     def _resolve_callable(value: str) -> tuple[str | None, str | None]:
@@ -295,11 +296,12 @@ def _emit_packagejson_entries(
         )
         return [], []
 
-    # pkg_key uses the caller-supplied kind so apps emit
-    # src=("app", ...) for their declares_entry_point edges.
+    # pkg_kind is always "package" (emit() now scopes its owner-row scan to
+    # Package rows only — see emit() below); the parameter is kept so a
+    # caller-supplied kind still plumbs through rather than hardcoding it here.
     # Root packages carry rel-path '' (packages.refresh canonical form, never
     # None); pass it through verbatim so the edge resolves to the EXISTING
-    # package/app node instead of stubbing an empty-uri duplicate.
+    # package node instead of stubbing an empty-uri duplicate.
     pkg_key = (pkg_kind, pkg_name, pkg_rel)
     pkgjson_name = data.get("name", pkg_name) if isinstance(data, dict) else pkg_name
 
@@ -436,6 +438,7 @@ def emit(
     repo_root: Path,
     ctx: RepoContext,
     skip_dirs: frozenset[str],
+    ignore: _ignore.IgnoreSpec | None = None,
 ) -> None:
     """Emit EntryPoint nodes, declares_entry_point edges, implemented_by edges
     for every declared entry across every Package's manifest."""
@@ -444,13 +447,14 @@ def emit(
     nodes: list[GraphNode] = []
     edges: list[GraphEdge] = []
 
-    # include both Package and App nodes; apps still declare
-    # entry points via the same pyproject.toml / package.json manifest fields.
+    # Package-only: under the facet model (ADR: see packages.py), a manifest's
+    # declares_entry_point edges always source from its Package node. Scanning
+    # App rows too would re-parse the same manifest a second time for a
+    # dual-facet member and double-emit the edge (one from each row).
     # Multi-repo: scope to this member (see structural_nodes.emit).
     member_repo = repo_uri(ctx)
     pkg_rows = conn.execute(
-        "SELECT name, path, attrs_json, kind FROM nodes WHERE kind IN ('package', 'app') "
-        "AND (repo = ? OR repo IS NULL)",
+        "SELECT name, path, attrs_json, kind FROM nodes WHERE kind = 'package' AND (repo = ? OR repo IS NULL)",
         (member_repo,),
     ).fetchall()
 

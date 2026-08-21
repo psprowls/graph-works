@@ -58,7 +58,7 @@ def test_step_3b_a_written_override_reaches_the_next_resolve(workspace):
 def test_step_4_the_two_config_surfaces_agree(workspace):
     """Asserted rather than assumed: `_repositories.yaml` is written from the
     layout, and this is the property that says so."""
-    config = load_config(workspace.layout.bundle_dir)
+    config = load_config(workspace.layout.bundle_dir, config_path=workspace.layout.repositories_path)
     assert config.graph_dir == workspace.layout.cache_dir
     assert config.declarations_dir == workspace.layout.config_dir
 
@@ -70,7 +70,7 @@ def test_step_5_a_second_plan_over_the_same_root_is_empty(workspace):
 def test_the_declarations_land_where_the_config_says_they_do(workspace):
     """The `declarations_dir` seam's first production consumer. Every shipped
     test of it exercises the bundle-root default; this one does not."""
-    config = load_config(workspace.layout.bundle_dir)
+    config = load_config(workspace.layout.bundle_dir, config_path=workspace.layout.repositories_path)
     assert (config.declarations_dir / "_schema" / "Package.schema.json").is_file()
     assert (config.declarations_dir / "_sections" / "Feature.yaml").is_file()
     assert (config.declarations_dir / "_tags.yaml").is_file()

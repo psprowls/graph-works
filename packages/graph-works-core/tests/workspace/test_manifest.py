@@ -42,6 +42,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "layout.config_dir",
         "layout.cache_dir",
         "layout.worktrees_dir",
+        "layout.repositories_path",
         "roles.*.model_id",
         "roles.*.backend",
         "roles.*.region",
@@ -84,7 +85,12 @@ def test_a_minimal_manifest_resolves_every_layout_key_to_its_default(tmp_path):
 def test_an_override_is_read_back(tmp_path):
     manifest = read(_write(tmp_path, "version: 1\nlayout:\n  bundle_dir: wiki\n"))
     assert manifest.bundle_dir == "wiki"
-    assert manifest.config_dir == "_config"
+    assert manifest.config_dir == "_gw/_config"
+
+
+def test_a_repositories_path_override_is_read_back(tmp_path):
+    manifest = read(_write(tmp_path, "version: 1\nlayout:\n  repositories_path: elsewhere/_repositories.yaml\n"))
+    assert manifest.repositories_path == "elsewhere/_repositories.yaml"
 
 
 def test_a_topic_and_a_stamp_are_read_back(tmp_path):

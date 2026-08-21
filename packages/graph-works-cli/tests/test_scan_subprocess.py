@@ -10,6 +10,7 @@ from pathlib import Path
 
 from code_graph_io.testing import raw_conn
 from code_wiki_okf.config import load_config
+from graph_works_core.workspace.layout import DEFAULT_REPOSITORIES_PATH
 
 PACKAGE_URI = "pkg:acme/demo/widgets"
 FILLED_PURPOSE = "Widgets exposes the demo package's public behavior."
@@ -49,8 +50,9 @@ def _seed_scan_workspace(tmp_path: Path) -> tuple[Path, Path]:
     assert bootstrap.returncode == 0, bootstrap.stderr
 
     bundle_dir = workspace / "okf"
-    pristine = load_config(bundle_dir)
-    (bundle_dir / "_repositories.yaml").write_text(
+    repositories_path = workspace / DEFAULT_REPOSITORIES_PATH
+    pristine = load_config(bundle_dir, config_path=repositories_path)
+    repositories_path.write_text(
         "\n".join(
             (
                 f"graph_dir: {json.dumps(str(pristine.graph_dir))}",
@@ -129,7 +131,7 @@ def test_scan_emit_and_apply_round_trip_across_processes_and_refuse_unsafe_hando
         "mirror_skipped_repos",
         "mirror_errors",
     }
-    scan_cache = (workspace / "_cache" / "scan").resolve()
+    scan_cache = (workspace / "_gw" / "_cache" / "scan").resolve()
     worklist_path = Path(emitted["worklist_path"]).resolve()
     briefs_dir = Path(emitted["briefs_dir"]).resolve()
     results_dir = Path(emitted["results_dir"]).resolve()
@@ -139,7 +141,7 @@ def test_scan_emit_and_apply_round_trip_across_processes_and_refuse_unsafe_hando
 
     worklist = json.loads(worklist_path.read_text(encoding="utf-8"))
     package_task = next(task for task in worklist["prose_tasks"] if task["uri"] == PACKAGE_URI)
-    page_path = bundle_dir / "packages" / "widgets.md"
+    page_path = bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
     pristine_bundle = _bundle_files(bundle_dir)
     # Emit writes this structural page. Only apply may land the task's prose.
     assert FILLED_PURPOSE not in page_path.read_text(encoding="utf-8")

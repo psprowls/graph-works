@@ -106,7 +106,13 @@ def test_the_manifest_overrides_reach_the_layout(tmp_path):
     layout = resolve(workspace=root, environ={})
     assert layout.bundle_dir == root.resolve() / "wiki"
     assert layout.cache_dir == root.resolve() / "var" / "cache"
-    assert layout.config_dir == root.resolve() / "_config"
+    assert layout.config_dir == root.resolve() / "_gw" / "_config"
+
+
+def test_a_repositories_path_override_reaches_the_layout(tmp_path):
+    root = _workspace(tmp_path / "ws", "version: 1\nlayout:\n  repositories_path: elsewhere/_repositories.yaml\n")
+    layout = resolve(workspace=root, environ={})
+    assert layout.repositories_path == root.resolve() / "elsewhere" / "_repositories.yaml"
 
 
 def test_the_repo_the_workspace_lives_in_is_reported(tmp_path):

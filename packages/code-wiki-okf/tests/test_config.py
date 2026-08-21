@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 import pytest
@@ -173,3 +174,38 @@ def test_a_blank_declarations_dir_is_a_config_error(tmp_path: Path) -> None:
     )
     with pytest.raises(ConfigError, match="declarations_dir"):
         load_config(tmp_path)
+
+
+def test_load_config_config_path_reads_from_the_given_file(tmp_path: Path) -> None:
+    """`config_path=` overrides where the document is read from; `bundle_root`
+    still resolves every path inside it."""
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    config_path = other_dir / "_repositories.yaml"
+    config_path.write_text("graph_dir: ../graphs/code\n", encoding="utf-8")
+
+    config = load_config(tmp_path, config_path=config_path)
+
+    assert config.graph_dir == (tmp_path / "../graphs/code").resolve()
+
+
+def test_load_config_config_path_none_preserves_the_bundle_root_default(tmp_path: Path) -> None:
+    _write(tmp_path, "graph_dir: ../graphs/code\n")
+    assert load_config(tmp_path, config_path=None) == load_config(tmp_path)
+
+
+def test_load_config_config_path_propagates_oserror_for_a_missing_file(tmp_path: Path) -> None:
+    with pytest.raises(OSError):
+        load_config(tmp_path, config_path=tmp_path / "nowhere" / "_repositories.yaml")
+
+
+def test_load_config_config_path_error_messages_name_the_actual_file(tmp_path: Path) -> None:
+    """`name` must track the file actually read, not the hardcoded default --
+    a ConfigError from a custom-named config_path should name that file."""
+    other_dir = tmp_path / "elsewhere"
+    other_dir.mkdir()
+    config_path = other_dir / "custom-name.yaml"
+    config_path.write_text("bogus: 1\n", encoding="utf-8")  # missing required graph_dir
+
+    with pytest.raises(ConfigError, match=re.escape("custom-name.yaml")):
+        load_config(tmp_path, config_path=config_path)

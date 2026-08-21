@@ -19,8 +19,8 @@ from typing import Any
 import yaml
 
 from code_graph_io import _ignore, upsert
-from code_graph_io.records import GraphNode, as_graph_records
-from code_graph_io.uri import RepoContext, agent_plugin_uri
+from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
+from code_graph_io.uri import RepoContext, agent_plugin_uri, repo_uri
 
 # A component inventory entry. Heterogeneous by design — every parser below
 # emits an "id" plus its own keys, and the whole thing lands in attrs_json.
@@ -199,24 +199,26 @@ def emit(
     repo_root: Path,
     ctx: RepoContext,
     skip_dirs: frozenset[str] | None = None,
+    ignore: _ignore.IgnoreSpec | None = None,
 ) -> None:
     """Walk `repo_root` for `.claude-plugin/plugin.json`, emit one
     `kind:agent_plugin` node per plugin with its component inventory in attrs.
 
-    Honors the same vendored/fixture skip-dir filtering as the package walker
-    (`code_graph_io._ignore`). Silently tolerates plugins with no components and
-    manifests missing a `name`. Each node's `path` is the plugin directory
-    relative to `repo_root` (e.g. `plugins/demo`); whole-plugin removal is
-    covered by delete-and-rebuild per the project backward-compatibility rule.
+    Honors the same vendored/fixture skip-dir + ignore-glob filtering as the
+    package walker (`code_graph_io._ignore`). Silently tolerates plugins with
+    no components and manifests missing a `name`. Each node's `path` is the
+    plugin directory relative to `repo_root` (e.g. `plugins/demo`);
+    whole-plugin removal is covered by delete-and-rebuild per the project
+    backward-compatibility rule.
     """
     repo_root = Path(repo_root).resolve()
     if skip_dirs is None:
-        skip_dirs = _ignore.load_skip_dirs(repo_root)
+        skip_dirs = _ignore.DEFAULT_SKIP_DIRS
 
     nodes: list[GraphNode] = []
     for manifest_path in sorted(repo_root.rglob(".claude-plugin/plugin.json")):
         rel = manifest_path.relative_to(repo_root).as_posix()
-        if _ignore.should_skip(rel, skip_dirs):
+        if _ignore.should_skip(rel, skip_dirs, ignore):
             continue
         manifest = _read_json(manifest_path)
         name = manifest.get("name")
@@ -249,3 +251,41 @@ def emit(
 
     if nodes:
         upsert.upsert_records(conn, as_graph_records(nodes=nodes))
+
+
+def link_agent_plugin_facets(conn: sqlite3.Connection, *, repo_root: Path, ctx: RepoContext) -> None:
+    """Emit `Package --facet_of--> agent_plugin` edges for plugin roots that
+    also carry a package manifest.
+
+    Runs after both `packages.refresh()` and `emit()` have completed for
+    this member — `agent_plugins.py` has no visibility into `packages.py`'s
+    nodes, so the two node sets are matched here by (repo, rel path): the
+    plugin directory and the manifest directory are the same directory when
+    a plugin root also carries a manifest, Python or otherwise (any
+    `kind='package'` row, from `pyproject.toml` or `package.json`). The
+    match is purely SQL-side (repo + path columns already stamped on the
+    rows); `repo_root` is accepted only for signature parity with the
+    sibling `emit()`/`refresh()` calls in `_update_one_repo`, not used here.
+    Idempotent: an already-linked pair upserts the same edge again.
+    """
+    repo_uri_val = repo_uri(ctx)
+    rows = conn.execute(
+        "SELECT p.name, p.path, a.name, a.path FROM nodes p "
+        "JOIN nodes a ON a.kind = 'agent_plugin' AND a.path = p.path "
+        "AND (a.repo = ? OR a.repo IS NULL) "
+        "WHERE p.kind = 'package' AND (p.repo = ? OR p.repo IS NULL)",
+        (repo_uri_val, repo_uri_val),
+    ).fetchall()
+    if not rows:
+        return
+    edges: list[GraphEdge] = []
+    for pkg_name, pkg_path, plugin_name, plugin_path in rows:
+        edges.append(
+            GraphEdge(
+                src=("package", pkg_name, pkg_path),
+                dst=("agent_plugin", plugin_name, plugin_path),
+                kind="facet_of",
+                attrs={},
+            )
+        )
+    upsert.upsert_records(conn, as_graph_records(edges=edges))

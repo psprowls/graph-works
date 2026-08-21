@@ -7,7 +7,7 @@ bundle's own `packages/` entity lane, and what makes `repositories/<repo>/`
 unambiguously "this repo's mirror" rather than a prefix two lanes share --
 the distinction `entities/delete.py`'s `exact_depth=`, `ENTITY_DEPTH`'s
 `{"Repository": "exact", "File": "nested"}` and
-`sync/snapshot.py::_is_entity_repository_page` each re-derive independently.
+`entities/lanes.py::is_entity_lane_page` each re-derive independently.
 
 `File.schema.json`'s `x-okf-directory` stays `repositories/` and
 `ENTITY_DEPTH`'s `"nested"` still holds: `placement/rule.py` reads `nested`

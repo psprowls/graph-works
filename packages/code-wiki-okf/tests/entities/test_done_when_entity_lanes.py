@@ -110,30 +110,36 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
         result1 = sync(bundle, config1, reader, today=_TODAY, at=_AT, dry_run=False)
 
     expected_written = {
-        "packages/widgets",
-        "packages/sprockets",
-        "packages/gadgets",
+        "repositories/repo-a/packages/widgets",
+        "repositories/repo-a/packages/sprockets",
+        "repositories/repo-b/packages/gadgets",
         "repositories/repo-a",
         "repositories/repo-b",
     }
     assert expected_written <= set(result1.written)
     assert result1.deleted == ()
     assert result1.declined == ()
-    widgets_page = bundle_root / "packages" / "widgets.md"
-    sprockets_page = bundle_root / "packages" / "sprockets.md"
-    gadgets_page = bundle_root / "packages" / "gadgets.md"
+    widgets_page = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
+    sprockets_page = bundle_root / "repositories" / "repo-a" / "packages" / "sprockets.md"
+    gadgets_page = bundle_root / "repositories" / "repo-b" / "packages" / "gadgets.md"
     assert widgets_page.exists()
     assert sprockets_page.exists()
     assert gadgets_page.exists()
-    packages_index = (bundle_root / "packages" / "index.md").read_text(encoding="utf-8")
-    assert "widgets.md" in packages_index
-    assert "sprockets.md" in packages_index
-    assert "gadgets.md" in packages_index
+    repo_a_packages_index = (bundle_root / "repositories" / "repo-a" / "packages" / "index.md").read_text(
+        encoding="utf-8"
+    )
+    repo_b_packages_index = (bundle_root / "repositories" / "repo-b" / "packages" / "index.md").read_text(
+        encoding="utf-8"
+    )
+    assert "widgets.md" in repo_a_packages_index
+    assert "sprockets.md" in repo_a_packages_index
+    assert "gadgets.md" not in repo_a_packages_index
+    assert "gadgets.md" in repo_b_packages_index
 
     # --- Criterion 1: two consecutive sync() calls -- the second creates
     # and deletes nothing. -------------------------------------------------
     before_members = sorted(p.relative_to(bundle_root).as_posix() for p in bundle_root.rglob("*.md"))
-    before_index = packages_index
+    before_index = repo_a_packages_index
 
     with open_reader(graph_dir=graph_dir1) as reader:
         bundle2 = load_bundle(bundle_root)
@@ -144,7 +150,9 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
     assert result2.declined == ()
     after_members = sorted(p.relative_to(bundle_root).as_posix() for p in bundle_root.rglob("*.md"))
     assert after_members == before_members
-    assert (bundle_root / "packages" / "index.md").read_text(encoding="utf-8") == before_index
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "index.md").read_text(
+        encoding="utf-8"
+    ) == before_index
 
     # --- Criterion 2: a hand-edited prose section on a Package page
     # survives a third sync() call verbatim. --------------------------------
@@ -160,14 +168,14 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
 
     final_widgets_text = widgets_page.read_text(encoding="utf-8")
     assert hand_edit in final_widgets_text
-    assert "packages/widgets" not in result3.written
+    assert "repositories/repo-a/packages/widgets" not in result3.written
     assert result3.deleted == ()
     assert result3.declined == ()
 
     # --- Criterion 3: a page moved to a different path within its lane
     # (same resource:) is found and updated in place by the next sync(),
     # not duplicated. --------------------------------------------------------
-    moved_page = bundle_root / "packages" / "moved-sprockets.md"
+    moved_page = bundle_root / "repositories" / "repo-a" / "packages" / "moved-sprockets.md"
     moved_page.write_text(sprockets_page.read_text(encoding="utf-8"), encoding="utf-8")
     sprockets_page.unlink()
 
@@ -183,13 +191,13 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
 
     assert not sprockets_page.exists()
     assert moved_page.exists()
-    assert "packages/moved-sprockets" in result4.written
+    assert "repositories/repo-a/packages/moved-sprockets" in result4.written
     assert result4.deleted == ()
     assert result4.declined == ()
 
     bundle_after_move = load_bundle(bundle_root)
-    assert "packages/sprockets" not in bundle_after_move.concepts
-    moved_doc = bundle_after_move.concept("packages/moved-sprockets")
+    assert "repositories/repo-a/packages/sprockets" not in bundle_after_move.concepts
+    moved_doc = bundle_after_move.concept("repositories/repo-a/packages/moved-sprockets")
     assert moved_doc is not None
     assert moved_doc.fm_raw.get("version") == "0.2.0"
     assert moved_doc.fm.resource == "pkg:acme/repo-a/sprockets"
@@ -215,14 +223,15 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
         result5 = sync(bundle5, config2, reader, today=_TODAY, at=_AT, dry_run=False)
 
     assert not gadgets_page.exists()
-    assert "packages/gadgets" in result5.deleted
+    assert "repositories/repo-b/packages/gadgets" in result5.deleted
     assert result5.declined == ()
     assert widgets_page.exists()
     assert moved_page.exists()
-    packages_index_after_delete = (bundle_root / "packages" / "index.md").read_text(encoding="utf-8")
-    assert "gadgets.md" not in packages_index_after_delete
-    assert "widgets.md" in packages_index_after_delete
-    assert "moved-sprockets.md" in packages_index_after_delete
+    repo_a_index_after_delete = (bundle_root / "repositories" / "repo-a" / "packages" / "index.md").read_text(
+        encoding="utf-8"
+    )
+    assert "widgets.md" in repo_a_index_after_delete
+    assert "moved-sprockets.md" in repo_a_index_after_delete
 
     # --- Criterion 4b: the same scenario, but with hand-edited prose,
     # declines the deletion. -------------------------------------------------
@@ -241,8 +250,8 @@ def test_entity_lanes_done_when(tmp_path: Path) -> None:
 
     assert widgets_page.exists()
     assert hand_edit in widgets_page.read_text(encoding="utf-8")
-    assert "packages/widgets" not in result6.deleted
-    assert ("packages/widgets", "prose-edited") in result6.declined
+    assert "repositories/repo-a/packages/widgets" not in result6.deleted
+    assert ("repositories/repo-a/packages/widgets", "prose-edited") in result6.declined
 
     log_text = (bundle_root / "log.md").read_text(encoding="utf-8")
     # Two bullets from `install_bundle` (the scaffold's, then the install's)

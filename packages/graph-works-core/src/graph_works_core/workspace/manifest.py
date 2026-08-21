@@ -1,6 +1,6 @@
 """`<root>/workspace.yaml` — a thin manifest, stored through `config-io`.
 
-Four layout overrides, five role-override wildcards, a version, a provenance
+Five layout overrides, five role-override wildcards, a version, a provenance
 stamp, a topic, and one `env-only` entry documenting the discovery override.
 Keys a workspace manifest might be expected to carry are owned elsewhere:
 `repositories`, `graph_dir`, `declarations_dir`, `ignore` and `state_gate` are
@@ -53,6 +53,7 @@ from graph_works_core.workspace.layout import (
     DEFAULT_BUNDLE_DIR,
     DEFAULT_CACHE_DIR,
     DEFAULT_CONFIG_DIR,
+    DEFAULT_REPOSITORIES_PATH,
     DEFAULT_WORKTREES_DIR,
     MANIFEST_FILENAME,
     WorkspaceLayout,
@@ -116,6 +117,12 @@ CATALOG: tuple[ConfigEntry, ...] = (
         type="str",
         default=DEFAULT_WORKTREES_DIR,
         description="Gitignored feature worktrees, relative to the root.",
+    ),
+    ConfigEntry(
+        key="layout.repositories_path",
+        type="str",
+        default=DEFAULT_REPOSITORIES_PATH,
+        description="Where `_repositories.yaml` lives, relative to the workspace root.",
     ),
     # The workspace role override. Five wildcard entries rather than one per
     # role per field: `config_io.expand_wildcards` handles the
@@ -222,7 +229,7 @@ CATALOG: tuple[ConfigEntry, ...] = (
 @dataclass(frozen=True, slots=True)
 class Manifest:
     """One `workspace.yaml`, resolved. Every field is a value, never a path:
-    turning the four overrides into directories is `layout_for`'s job."""
+    turning the five overrides into resolved paths is `layout_for`'s job."""
 
     version: int
     initialized_at: str
@@ -231,6 +238,7 @@ class Manifest:
     config_dir: str
     cache_dir: str
     worktrees_dir: str
+    repositories_path: str
 
 
 def defaults() -> Manifest:
@@ -243,6 +251,7 @@ def defaults() -> Manifest:
         config_dir=DEFAULT_CONFIG_DIR,
         cache_dir=DEFAULT_CACHE_DIR,
         worktrees_dir=DEFAULT_WORKTREES_DIR,
+        repositories_path=DEFAULT_REPOSITORIES_PATH,
     )
 
 
@@ -310,6 +319,7 @@ def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manif
         config_dir=_text(values, "layout.config_dir", DEFAULT_CONFIG_DIR),
         cache_dir=_text(values, "layout.cache_dir", DEFAULT_CACHE_DIR),
         worktrees_dir=_text(values, "layout.worktrees_dir", DEFAULT_WORKTREES_DIR),
+        repositories_path=_text(values, "layout.repositories_path", DEFAULT_REPOSITORIES_PATH),
     )
 
 
@@ -430,7 +440,7 @@ def render_initial(*, today: date, topic: str | None = None, relay_tail: str | N
     `json.dumps` is the minimal correct YAML double-quoted scalar — the same
     call `code_wiki_okf.seed_files` makes, for the same reason.
 
-    The four layout keys are deliberately absent: an unset override *is* the
+    The five layout keys are deliberately absent: an unset override *is* the
     default, and writing them out would freeze today's defaults into every new
     workspace.
 

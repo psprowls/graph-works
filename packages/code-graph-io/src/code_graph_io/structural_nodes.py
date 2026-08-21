@@ -359,20 +359,26 @@ def _owning_package(
     return None
 
 
-def _walk_subpackages(import_root: Path, skip_dirs: frozenset[str], repo_root: Path) -> Iterator[Path]:
+def _walk_subpackages(
+    import_root: Path, skip_dirs: frozenset[str], repo_root: Path, ignore: _ignore.IgnoreSpec | None = None
+) -> Iterator[Path]:
     """Yield each __init__.py-containing subdirectory STRICTLY UNDER `import_root`.
 
     Excludes `import_root` itself (the import root is
     already a `package` node — yielding it again here was producing a
-    spurious self-referential `subpackage` node). Honors skip_dirs via
-    _ignore.should_skip. Does not follow symlinks (os.walk default).
+    spurious self-referential `subpackage` node). Honors skip_dirs and
+    ignore via _ignore.should_skip. Does not follow symlinks (os.walk
+    default).
     """
     if not (import_root / "__init__.py").exists():
         return
     import_root_resolved = import_root.resolve()
     for dirpath, dirnames, filenames in os.walk(import_root, followlinks=False):
         d = Path(dirpath)
-        # Skip filtered dirs in-place so os.walk doesn't descend into them
+        # Skip filtered dirs in-place so os.walk doesn't descend into them.
+        # Bare dirname only — no path context for glob matching here, so
+        # this stays a skip_dirs-only prune; the full-path ignore check a
+        # few lines below is what actually excludes an ignored subpackage.
         dirnames[:] = [name for name in dirnames if not _ignore.should_skip(name, skip_dirs)]
         # Skip the import root itself, but still descend into its children.
         if d.resolve() == import_root_resolved:
@@ -382,7 +388,7 @@ def _walk_subpackages(import_root: Path, skip_dirs: frozenset[str], repo_root: P
                 rel = d.relative_to(repo_root).as_posix()
             except ValueError:
                 continue
-            if _ignore.should_skip(rel, skip_dirs):
+            if _ignore.should_skip(rel, skip_dirs, ignore):
                 continue
             yield d
 
@@ -403,6 +409,7 @@ def emit(
     repo_root: Path,
     ctx: RepoContext,
     skip_dirs: frozenset[str],
+    ignore: _ignore.IgnoreSpec | None = None,
 ) -> None:
     """Emit Repository + SubPackage + File nodes and physically_contains edges.
 
@@ -473,6 +480,18 @@ def emit(
 
     # --- Per-package emission ---
 
+    # Package-only: file/subpackage containment always sources from the
+    # Package node under the facet model — the App facet (if any) carries no
+    # containment of its own, mirroring the rule packages.py already applies
+    # to contains/used_by/depends_on_package edges. Deliberately a SEPARATE
+    # row set from pkg_rows above: the Repository -> Package/App edges loop
+    # legitimately targets both a dual-facet member's Package row AND its
+    # App row (each is a distinct node, so no invariant conflict there), but
+    # walking pkg_rows here would run the subpackage/file walk twice for a
+    # dual-facet member — once per row — giving each subpackage/file TWO
+    # physically_contains parents and tripping StrictTreeInvariantError.
+    package_only_rows = [r for r in pkg_rows if r[3] == "package"]
+
     # Tracked-file enumeration (git ls-files). Fallback to FS walk when
     # the repo has no git history (used in tests with bare tmp_path trees).
     tracked = _tracked_files(repo_root)
@@ -485,7 +504,7 @@ def emit(
                 d_rel = d.relative_to(repo_root).as_posix()
             except ValueError:
                 continue
-            if d_rel and _ignore.should_skip(d_rel, skip_dirs):
+            if d_rel and _ignore.should_skip(d_rel, skip_dirs, ignore):
                 continue
             for filename in filenames:
                 fpath = d / filename
@@ -493,7 +512,7 @@ def emit(
                     rel = fpath.relative_to(repo_root).as_posix()
                 except ValueError:
                     continue
-                if _ignore.should_skip(rel, skip_dirs):
+                if _ignore.should_skip(rel, skip_dirs, ignore):
                     continue
                 tracked.append(rel)
 
@@ -503,14 +522,16 @@ def emit(
     # Build a fast lookup: pkg sorted by path-depth desc so we can find the
     # most-specific (deepest) package containing each file.
     pkg_index = sorted(
-        ((pkg_rel or "", pkg_name, pkg_rel) for pkg_name, pkg_rel, _, _ in pkg_rows),
+        ((pkg_rel or "", pkg_name, pkg_rel) for pkg_name, pkg_rel, _, _ in package_only_rows),
         key=lambda t: len(t[0]),
         reverse=True,
     )
     # side-table mapping pkg name -> actual stored kind so
     # downstream src tuples (physically_contains, contains) resolve to the
-    # existing row instead of inserting a stub of the wrong kind.
-    pkg_name_to_kind: dict[str, str] = {r[0]: r[3] for r in pkg_rows}
+    # existing row instead of inserting a stub of the wrong kind. Sourced
+    # from package_only_rows so a dual-facet member always resolves to
+    # "package" here, never "app".
+    pkg_name_to_kind: dict[str, str] = {r[0]: r[3] for r in package_only_rows}
 
     # Track which files we've already covered so we don't double-emit when
     # files sit under multiple packages (e.g. root manifest + nested manifest).
@@ -520,11 +541,12 @@ def emit(
     # used by File-parent resolution to pick the deepest enclosing SubPackage.
     pkg_to_subpkg_map: dict[str, dict[Path, tuple[str, str]]] = {}
 
-    for pkg_name, pkg_rel_path, pkg_attrs_json, pkg_kind in pkg_rows:
+    for pkg_name, pkg_rel_path, pkg_attrs_json, pkg_kind in package_only_rows:
         pkg_attrs = json.loads(pkg_attrs_json) if pkg_attrs_json else {}
         language = pkg_attrs.get("language")
-        # pkg_key uses the actual stored kind so contains edges
-        # from app nodes resolve to the existing row.
+        # pkg_kind is always "package" here (package_only_rows), so pkg_key
+        # always resolves to the Package row — the App facet, if any, is not
+        # walked a second time.
         pkg_key = (pkg_kind, pkg_name, pkg_rel_path)
 
         pkg_dir = (repo_root / pkg_rel_path if pkg_rel_path else repo_root).resolve()
@@ -537,7 +559,7 @@ def emit(
             import_root = _resolve_import_root(pkg_dir, importable)
             if import_root is not None:
                 subpkg_dirs = sorted(
-                    _walk_subpackages(import_root, skip_dirs, repo_root),
+                    _walk_subpackages(import_root, skip_dirs, repo_root, ignore),
                     key=lambda p: p.as_posix(),
                 )
 
@@ -593,7 +615,7 @@ def emit(
     for rel in tracked:
         if rel in emitted_file_paths:
             continue
-        if _ignore.should_skip(rel, skip_dirs):
+        if _ignore.should_skip(rel, skip_dirs, ignore):
             continue
         owner = _owning_package(rel, pkg_index)
         # A tracked file with no owning package still gets a File node,

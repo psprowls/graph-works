@@ -21,14 +21,21 @@ from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.catalog import render_repositories, repository_entries
-from code_wiki_okf.entities.lanes import SyncSummary, sync
+from code_wiki_okf.entities.lanes import SyncSummary, placement_directories, sync
 from code_wiki_okf.init import install_bundle
 from okf_ext.generators import Render, plan_regenerate
+from okf_ext.schemas import declared_directories, load_schemas
 from okf_ext.shape import load_sections
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
+
+#: Same convention as `tests/entities/test_pages.py`: the package's own
+#: seeded schema declarations, read directly rather than through
+#: `install_bundle`, since `placement_directories` needs nothing but a
+#: `SchemaSet`.
+_ASSETS = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets"
 
 
 def _repo_node(org: str, repo: str) -> GraphNode:
@@ -77,6 +84,36 @@ def _config(tmp_path: Path, graph_dir: Path, repo_name: str, *, bundle_root: Pat
         repos=(RepoConfig(name=repo_name, path=tmp_path / repo_name, ignore=()),),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
+
+
+# --- placement_directories: the repo-scoped types are excluded ---------------
+
+
+def test_placement_directories_excludes_the_four_repo_scoped_types() -> None:
+    """`placement_directories` narrows `declared_directories` to the types a
+    plain directory-prefix check can still express -- Repository, File and
+    Dependency -- dropping Package, App, TestSuite and AgentPlugin, which now
+    nest under `repositories/<repo>/`."""
+    schema_set = load_schemas(_ASSETS / "_schema")
+    declared = declared_directories(schema_set)
+    assert declared == {
+        "AgentPlugin": "agent-plugins/",
+        "App": "apps/",
+        "Dependency": "dependencies/",
+        "File": "repositories/",
+        "Package": "packages/",
+        "Repository": "repositories/",
+        "TestSuite": "test-suites/",
+    }
+
+    narrowed = placement_directories(schema_set)
+
+    assert narrowed == {
+        "Dependency": "dependencies/",
+        "File": "repositories/",
+        "Repository": "repositories/",
+    }
+    assert not set(narrowed) & {"Package", "App", "TestSuite", "AgentPlugin"}
 
 
 # --- dry_run=True (the default): nothing touches disk ------------------------
@@ -134,10 +171,10 @@ def test_sync_writes_pages_reconciles_index_and_appends_one_log_entry(tmp_path: 
         bundle = load_bundle(bundle_root)
         result = sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
 
-    assert "packages/widgets" in result.written
-    assert (bundle_root / "packages" / "widgets.md").exists()
-    assert (bundle_root / "packages" / "index.md").exists()
-    index_text = (bundle_root / "packages" / "index.md").read_text(encoding="utf-8")
+    assert "repositories/repo-a/packages/widgets" in result.written
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md").exists()
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "index.md").exists()
+    index_text = (bundle_root / "repositories" / "repo-a" / "packages" / "index.md").read_text(encoding="utf-8")
     assert "widgets.md" in index_text
 
     log_text = (bundle_root / "log.md").read_text(encoding="utf-8")
@@ -194,8 +231,8 @@ def test_page_whose_entity_disappeared_from_the_graph_is_deleted(tmp_path: Path)
         bundle = load_bundle(bundle_root)
         sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
 
-    assert (bundle_root / "packages" / "widgets.md").exists()
-    assert (bundle_root / "packages" / "gadgets.md").exists()
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md").exists()
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "gadgets.md").exists()
 
     # "widgets" disappears from the graph -- e.g. the package was removed
     # from the repo. `upsert_records` is additive-only (see `_seed`'s own
@@ -211,14 +248,14 @@ def test_page_whose_entity_disappeared_from_the_graph_is_deleted(tmp_path: Path)
         bundle2 = load_bundle(bundle_root)
         result2 = sync(bundle2, config2, reader, today=_TODAY, at=_AT, dry_run=False)
 
-    assert not (bundle_root / "packages" / "widgets.md").exists()
-    assert (bundle_root / "packages" / "gadgets.md").exists()
-    assert "packages/widgets" in result2.deleted
+    assert not (bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md").exists()
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "gadgets.md").exists()
+    assert "repositories/repo-a/packages/widgets" in result2.deleted
     assert result2.declined == ()
 
     # The index must be reconciled too: the dead entry pruned, the survivor
     # still listed.
-    index_text = (bundle_root / "packages" / "index.md").read_text(encoding="utf-8")
+    index_text = (bundle_root / "repositories" / "repo-a" / "packages" / "index.md").read_text(encoding="utf-8")
     assert "widgets.md" not in index_text
     assert "gadgets.md" in index_text
 
@@ -237,7 +274,7 @@ def test_hand_edited_page_declines_deletion_and_is_reported(tmp_path: Path) -> N
         bundle = load_bundle(bundle_root)
         sync(bundle, config, reader, today=_TODAY, at=_AT, dry_run=False)
 
-    page = bundle_root / "packages" / "widgets.md"
+    page = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
     placeholder = "> TODO: what this package does, who uses it, and why it exists, in one paragraph."
     original = page.read_text(encoding="utf-8")
     assert placeholder in original
@@ -254,7 +291,94 @@ def test_hand_edited_page_declines_deletion_and_is_reported(tmp_path: Path) -> N
     assert page.exists()
     assert "Hand-written, do not delete me." in page.read_text(encoding="utf-8")
     assert result2.deleted == ()
-    assert ("packages/widgets", "prose-edited") in result2.declined
+    assert ("repositories/repo-a/packages/widgets", "prose-edited") in result2.declined
+
+
+def test_a_package_disappearing_from_either_repo_only_prunes_that_repos_same_named_page(
+    tmp_path: Path,
+) -> None:
+    graph_dir = tmp_path / "graph"
+    store = open_store(graph_dir / "code.db", create=True)
+    try:
+        for org, repo in (("acme", "repo-a"), ("acme", "repo-b")):
+            store.set_current_repo(f"repo:{org}/{repo}")
+            nodes = [_repo_node(org, repo), _package_node(org, repo, "shared-name")]
+            with store.transaction() as tx:
+                tx.upsert_records(GraphRecords(nodes=tuple(nodes), edges=()))
+        store.set_current_repo(None)
+    finally:
+        store.close()
+
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = Config(
+        graph_dir=graph_dir,
+        declarations_dir=bundle_root,
+        repos=(
+            RepoConfig(name="repo-a", path=tmp_path / "repo-a", ignore=()),
+            RepoConfig(name="repo-b", path=tmp_path / "repo-b", ignore=()),
+        ),
+        state_gate=StateGateConfig(enabled=False, branches=()),
+    )
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    repo_a_page = bundle_root / "repositories" / "repo-a" / "packages" / "shared-name.md"
+    repo_b_page = bundle_root / "repositories" / "repo-b" / "packages" / "shared-name.md"
+    assert repo_a_page.exists()
+    assert repo_b_page.exists()
+
+    # "shared-name" disappears from repo-a's graph only -- a fresh graph_dir
+    # for repo-a, repo-b re-seeded unchanged (upsert_records is additive-only).
+    graph_dir2 = tmp_path / "graph2"
+    store2 = open_store(graph_dir2 / "code.db", create=True)
+    try:
+        store2.set_current_repo("repo:acme/repo-a")
+        with store2.transaction() as tx:
+            tx.upsert_records(GraphRecords(nodes=(_repo_node("acme", "repo-a"),), edges=()))
+        store2.set_current_repo("repo:acme/repo-b")
+        with store2.transaction() as tx:
+            nodes_b = (_repo_node("acme", "repo-b"), _package_node("acme", "repo-b", "shared-name"))
+            tx.upsert_records(GraphRecords(nodes=nodes_b, edges=()))
+        store2.set_current_repo(None)
+    finally:
+        store2.close()
+
+    config2 = replace(config, graph_dir=graph_dir2)
+    with open_reader(graph_dir=graph_dir2) as reader:
+        result2 = sync(load_bundle(bundle_root), config2, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    assert not repo_a_page.exists()
+    assert repo_b_page.exists()
+    assert "repositories/repo-a/packages/shared-name" in result2.deleted
+    assert "repositories/repo-b/packages/shared-name" not in result2.deleted
+
+    # Now "shared-name" disappears from repo-b's graph too -- a fresh
+    # graph_dir again, repo-a re-seeded unchanged (still gone). This proves
+    # the per-repo pruning loop maps *each* repo's own prefix on its own
+    # iteration, not just repo-a's (which happens to be `config.repos[0]`):
+    # without this second step a bug that hardcoded or mixed up which repo's
+    # prefix the loop uses could pass the assertions above undetected.
+    graph_dir3 = tmp_path / "graph3"
+    store3 = open_store(graph_dir3 / "code.db", create=True)
+    try:
+        for org, repo in (("acme", "repo-a"), ("acme", "repo-b")):
+            store3.set_current_repo(f"repo:{org}/{repo}")
+            with store3.transaction() as tx:
+                tx.upsert_records(GraphRecords(nodes=(_repo_node(org, repo),), edges=()))
+        store3.set_current_repo(None)
+    finally:
+        store3.close()
+
+    config3 = replace(config, graph_dir=graph_dir3)
+    with open_reader(graph_dir=graph_dir3) as reader:
+        result3 = sync(load_bundle(bundle_root), config3, reader, today=_TODAY, at=_AT, dry_run=False)
+
+    assert not repo_a_page.exists()
+    assert not repo_b_page.exists()
+    assert "repositories/repo-b/packages/shared-name" in result3.deleted
+    assert "repositories/repo-a/packages/shared-name" not in result3.deleted
 
 
 # --- the root Repositories catalog ---------------------------------------

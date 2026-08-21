@@ -16,7 +16,10 @@ SCHEMA_VERSION = 3
 # v6: synthetic non-null graph node paths for repository/domain/dependency/manifest nodes.
 # v7: token_count attr on span-bearing nodes (file/class/function/method/type).
 # v9: domain + resource nodes and their derived edges removed.
-DERIVER_VERSION = 9
+# v10: app/agent_plugin become linked facets of an unconditional Package
+# node (facet_of edge) instead of alternatives; plugin-root manifests are
+# now admitted as Package nodes too.
+DERIVER_VERSION = 10
 
 _DDL_STATEMENTS = (
     """

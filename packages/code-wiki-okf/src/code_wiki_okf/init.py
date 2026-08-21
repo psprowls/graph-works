@@ -116,7 +116,7 @@ def _assets_root() -> Traversable:
     return importlib.resources.files("code_wiki_okf") / "assets"
 
 
-def seed_files(*, declarations_dir: str | Path | None = None) -> dict[str, str]:
+def seed_files(*, declarations_dir: str | Path | None = None, seed_repositories: bool = True) -> dict[str, str]:
     """Every file this package installs, read from its own package data.
 
     When *declarations_dir* is given, the `_repositories.yaml` template is
@@ -127,6 +127,10 @@ def seed_files(*, declarations_dir: str | Path | None = None) -> dict[str, str]:
     commented-out line: a sentinel replace needs a "sentinel missing" branch
     that can only fire on a packaging defect, and unreachable code costs
     coverage against a 95% floor.
+
+    *seed_repositories* set to `False` drops `_repositories.yaml` from the
+    returned dict entirely -- the caller (`graph_works_core`) owns that
+    file's seeding itself, at a different address.
     """
     assets = _assets_root()
     files = {relative: (assets / relative).read_text(encoding="utf-8") for relative in SEED_RELATIVE_PATHS}
@@ -139,10 +143,14 @@ def seed_files(*, declarations_dir: str | Path | None = None) -> dict[str, str]:
         files["_repositories.yaml"] += (
             f"\n# Written by `code-wiki-okf init --config-dir`.\ndeclarations_dir: {json.dumps(resolved)}\n"
         )
+    if not seed_repositories:
+        del files["_repositories.yaml"]
     return files
 
 
-def plan_install(root: str | Path, *, declarations_dir: str | Path | None = None) -> InstallPlan:
+def plan_install(
+    root: str | Path, *, declarations_dir: str | Path | None = None, seed_repositories: bool = True
+) -> InstallPlan:
     """Plan this package's own files into *root*.
 
     A thin wrapper over `okf_ext.bundle.plan_install`: the skip/refuse
@@ -151,8 +159,8 @@ def plan_install(root: str | Path, *, declarations_dir: str | Path | None = None
     """
     return plan_bundle_install(
         root,
-        seed_files(declarations_dir=declarations_dir),
-        seed_only=SEED_ONLY,
+        seed_files(declarations_dir=declarations_dir, seed_repositories=seed_repositories),
+        seed_only=SEED_ONLY if seed_repositories else (),
         declarations_dir=declarations_dir,
     )
 
@@ -177,6 +185,7 @@ def install_bundle(
     *,
     today: date,
     declarations_dir: str | Path | None = None,
+    seed_repositories: bool = True,
     dry_run: bool = True,
 ) -> BundleInstall:
     """Scaffold *root*, install this package's files into it, log the arrival.
@@ -207,7 +216,7 @@ def install_bundle(
         raise InitError(f"{root}: exists and is not a directory")
 
     scaffold: ScaffoldPlan = plan_scaffold(root, today=today, declarations_dir=declarations_dir)
-    install = plan_install(root, declarations_dir=declarations_dir)
+    install = plan_install(root, declarations_dir=declarations_dir, seed_repositories=seed_repositories)
 
     if dry_run:
         return BundleInstall(

@@ -44,7 +44,7 @@ from code_wiki_okf.sync.snapshot import snapshot_bundle
 from okf_ext.health import health_rule
 from okf_ext.placement import placement_rule
 from okf_ext.render import render_rule
-from okf_ext.schemas import SchemaError, declared_directories, load_schemas, schema_rule
+from okf_ext.schemas import SchemaError, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionError, load_sections
 from okf_ext.tags import VocabularyError, load_vocabulary, vocabulary_rule
@@ -115,7 +115,9 @@ def _wiki_rules(config: Config, reader: GraphReader | None, *, at: datetime) -> 
         schema_set = load_schemas(schema_dir)
         rules.append(schema_rule(schema_set))
         rules.append(
-            placement_rule(declared_directories(schema_set), depth=entity_lanes.ENTITY_DEPTH, severity="error")
+            placement_rule(
+                entity_lanes.placement_directories(schema_set), depth=entity_lanes.ENTITY_DEPTH, severity="error"
+            )
         )
 
     sections_dir = config.declarations_dir / "_sections"

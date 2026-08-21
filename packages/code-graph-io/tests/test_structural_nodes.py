@@ -7,8 +7,8 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from code_graph_io import store, structural_nodes, upsert
-from code_graph_io.records import GraphNode, GraphRecords
+from code_graph_io import _ignore, store, structural_nodes, upsert
+from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 from code_graph_io.structural_nodes import _is_test_path
 from code_graph_io.uri import RepoContext
 
@@ -38,6 +38,51 @@ def patched_git(monkeypatch):
         return ""
 
     monkeypatch.setattr(structural_nodes, "_git", fake_git)
+
+
+def _seed_faceted_package(
+    conn: sqlite3.Connection,
+    name: str = "mypkg",
+    path: str = "packages/mypkg",
+    language: str = "python",
+) -> None:
+    """Seed a dual-facet member — a Package row AND an App row, same
+    name/path, mirroring what packages.refresh writes for a manifest with
+    app signals (e.g. [project.scripts]) under Task 1's facet model."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="package",
+                    name=name,
+                    path=path,
+                    line=None,
+                    attrs={"uri": f"pkg:test/repo/{name}", "language": language},
+                ),
+                GraphNode(
+                    kind="app",
+                    name=name,
+                    path=path,
+                    line=None,
+                    attrs={
+                        "uri": f"app:test/repo/{name}",
+                        "language": language,
+                        "app_kind": "cli",
+                        "app_signals": ["cli"],
+                    },
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("package", name, path),
+                    dst=("app", name, path),
+                    kind="facet_of",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
 
 
 def _seed_package(
@@ -485,6 +530,35 @@ def test_subpackage_parent_is_enclosing_subpackage_for_nested(
     assert rows == [("subpackage", "mypkg.sub")]
 
 
+def test_faceted_package_subpackage_gets_single_parent_from_package(
+    conn: sqlite3.Connection, tmp_path: Path, patched_git
+) -> None:
+    """A dual-facet member (Package + App, e.g. app signals from
+    [project.scripts]) must not give its subpackage two parent edges (one
+    from the Package row, one from the App row) — that trips
+    StrictTreeInvariantError. Only the Package row owns file/subpackage
+    containment; the App row is a pure facet."""
+    pkg_dir = tmp_path / "packages" / "mypkg"
+    src_root = pkg_dir / "src" / "mypkg"
+    src_root.mkdir(parents=True)
+    (src_root / "__init__.py").write_text("")
+    (src_root / "sub").mkdir()
+    (src_root / "sub" / "__init__.py").write_text("")
+
+    _seed_faceted_package(conn, name="mypkg", path="packages/mypkg", language="python")
+
+    structural_nodes.emit(conn, repo_root=tmp_path, ctx=_CTX, skip_dirs=frozenset())
+
+    rows = conn.execute(
+        "SELECT n_src.kind FROM edges e "
+        "JOIN nodes n_src ON e.src = n_src.id "
+        "JOIN nodes n_dst ON e.dst = n_dst.id "
+        "WHERE e.kind='physically_contains' "
+        "AND n_dst.kind='subpackage' AND n_dst.name='mypkg.sub'"
+    ).fetchall()
+    assert rows == [("package",)], f"expected exactly one parent edge, from Package; got {rows!r}"
+
+
 # ============================================================================
 # D. File emission with parser-derived attrs
 # ============================================================================
@@ -772,3 +846,52 @@ def test_no_subpackages_when_only_import_root(conn: sqlite3.Connection, tmp_path
 
     n = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='subpackage'").fetchone()[0]
     assert n == 0
+
+
+# ============================================================================
+# ignore: config-driven ignore-glob matching
+# ============================================================================
+
+
+def test_emit_excludes_files_matching_ignore(tmp_path: Path, conn: sqlite3.Connection, patched_git) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "keep.py").write_text("x = 1\n")
+    (tmp_path / "generated").mkdir()
+    (tmp_path / "generated" / "auto.py").write_text("x = 2\n")
+
+    structural_nodes.emit(
+        conn,
+        repo_root=tmp_path,
+        ctx=_CTX,
+        skip_dirs=frozenset(),
+        ignore=_ignore.compile_ignore(("generated/**",)),
+    )
+
+    paths = {row[0] for row in conn.execute("SELECT path FROM nodes WHERE kind='file'").fetchall()}
+    assert "src/keep.py" in paths
+    assert "generated/auto.py" not in paths
+
+
+def test_emit_excludes_subpackages_matching_ignore(tmp_path: Path, conn: sqlite3.Connection, patched_git) -> None:
+    _seed_package(conn, path="")
+    pkg_root = tmp_path / "src" / "mypkg"
+    (pkg_root).mkdir(parents=True)
+    (pkg_root / "__init__.py").write_text("")
+    kept_sub = pkg_root / "kept_sub"
+    kept_sub.mkdir()
+    (kept_sub / "__init__.py").write_text("")
+    fixtures_sub = pkg_root / "fixtures"
+    fixtures_sub.mkdir()
+    (fixtures_sub / "__init__.py").write_text("")
+
+    structural_nodes.emit(
+        conn,
+        repo_root=tmp_path,
+        ctx=_CTX,
+        skip_dirs=frozenset(),
+        ignore=_ignore.compile_ignore(("**/fixtures/**",)),
+    )
+
+    dotted = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='subpackage'").fetchall()}
+    assert "mypkg.kept_sub" in dotted
+    assert "mypkg.fixtures" not in dotted

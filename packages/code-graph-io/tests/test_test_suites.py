@@ -9,7 +9,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from code_graph_io import packages, store, structural_nodes, test_suites
+from code_graph_io import _ignore, packages, store, structural_nodes, test_suites
 from code_graph_io.paths import graph_dir
 from code_graph_io.uri import RepoContext
 
@@ -143,6 +143,59 @@ def test_jsts_underscores_tests_dir_same_as_c(tmp_path: Path) -> None:
     assert ("__tests__", "packages/jspkg/__tests__") not in rows
 
 
+def test_emit_excludes_test_roots_matching_ignore(tmp_path: Path) -> None:
+    conn = _setup(tmp_path)
+    _write_pyproject(tmp_path, name="demo")
+    kept_tests = tmp_path / "tests" / "kept"
+    kept_tests.mkdir(parents=True)
+    (kept_tests / "test_a.py").write_text("def test_a(): pass\n")
+    fixture_tests = tmp_path / "tests" / "fixtures"
+    fixture_tests.mkdir(parents=True)
+    (fixture_tests / "test_b.py").write_text("def test_b(): pass\n")
+
+    with store.transaction(conn):
+        packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+        structural_nodes.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
+        test_suites.emit(
+            conn,
+            repo_root=tmp_path,
+            ctx=CTX,
+            skip_dirs=frozenset(),
+            ignore=_ignore.compile_ignore(("**/fixtures/**",)),
+        )
+
+    paths = {row[0] for row in conn.execute("SELECT path FROM nodes WHERE kind='test_suite'").fetchall()}
+    assert "tests/kept" in paths
+    assert "tests/fixtures" not in paths
+
+
+def test_direct_test_file_not_orphaned_by_sibling_ignored_subdir(tmp_path: Path) -> None:
+    """Regression: an ignore-matched subdir under tests/ must not push tests/
+    into per-subdir mode and orphan co-located direct test files."""
+    conn = _setup(tmp_path)
+    _write_pyproject(tmp_path, name="demo")
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_direct.py").write_text("def test_direct(): pass\n")
+    ignored_sub = tmp_path / "tests" / "fixtures"
+    ignored_sub.mkdir()
+    (ignored_sub / "test_b.py").write_text("def test_b(): pass\n")
+
+    with store.transaction(conn):
+        packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+        structural_nodes.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
+        test_suites.emit(
+            conn,
+            repo_root=tmp_path,
+            ctx=CTX,
+            skip_dirs=frozenset(),
+            ignore=_ignore.compile_ignore(("**/fixtures/**",)),
+        )
+
+    paths = {row[0] for row in conn.execute("SELECT path FROM nodes WHERE kind='test_suite'").fetchall()}
+    assert "tests" in paths
+    assert "tests/fixtures" not in paths
+
+
 # ---------- tests edges ----------
 
 
@@ -177,6 +230,29 @@ def test_tests_edge_python_imports(tmp_path: Path) -> None:
     targets = _tests_edge_targets(conn, "tests/integration")
     assert ("package", "foo") in targets
     assert ("package", "bar") in targets
+
+
+def test_tests_edge_faceted_member_targets_package_only(tmp_path: Path) -> None:
+    """A member with both a Package and an App node (facet model): the
+    `tests` edge must target the Package node deterministically, never the
+    App node and never nondeterministic between runs."""
+    foo_dir = tmp_path / "packages" / "foo"
+    _write_pyproject(foo_dir, name="foo", body='[project.scripts]\nfoo = "foo:main"\n')
+    _write_python_pkg(foo_dir, "foo")
+
+    (tmp_path / "tests" / "integration").mkdir(parents=True)
+    (tmp_path / "tests" / "integration" / "test_x.py").write_text("import foo\n")
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    # Sanity: this member is actually faceted under Task 1's facet model.
+    kinds = {r[0] for r in conn.execute("SELECT kind FROM nodes WHERE kind IN ('package', 'app') AND name='foo'")}
+    assert kinds == {"package", "app"}, f"expected faceted member, got kinds={kinds!r}"
+
+    targets = _tests_edge_targets(conn, "tests/integration")
+    assert ("package", "foo") in targets
+    assert ("app", "foo") not in targets
 
 
 def test_tests_edge_js_bare_imports(tmp_path: Path) -> None:
@@ -584,9 +660,12 @@ def test_strict_tree_invariant_raises_on_duplicate_parent(fixture_repo: Path) ->
 def test_anti_regression_describe_package_smoke(fixture_repo: Path) -> None:
     """Anti-regression — after the full pipeline, mypkg is still findable.
 
-    The fixture's mypkg/pyproject.toml carries [project.scripts]
-    which now classifies it as kind="app" — so the smoke assertion accepts
-    either kind (the row exists exactly once under one or the other).
+    The fixture's mypkg/pyproject.toml carries [project.scripts], an app
+    signal. Under the facet model (see packages.py), Package is
+    unconditional and App is an ADDITIVE facet — a manifest with app
+    signals gets BOTH a Package row and an App row (linked by a
+    facet_of edge), never one instead of the other. So the smoke
+    assertion expects exactly one row of each kind, two rows total.
     """
     from code_graph_io import update
 
@@ -594,8 +673,10 @@ def test_anti_regression_describe_package_smoke(fixture_repo: Path) -> None:
     db_path = _db_path(fixture_repo)
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        n = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind IN ('package', 'app') AND name='mypkg'").fetchone()[0]
-        assert n == 1
+        kinds = sorted(
+            r[0] for r in conn.execute("SELECT kind FROM nodes WHERE kind IN ('package', 'app') AND name='mypkg'")
+        )
+        assert kinds == ["app", "package"]
     finally:
         conn.close()
 

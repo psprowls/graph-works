@@ -99,16 +99,21 @@ def _require_nonempty_string(value: Any, *, name: str, where: str) -> str:  # no
     return value
 
 
-def load_config(bundle_root: str | Path) -> Config:
-    """Load and validate `<bundle_root>/_repositories.yaml`.
+def load_config(bundle_root: str | Path, *, config_path: str | Path | None = None) -> Config:
+    """Load and validate `_repositories.yaml`, from *config_path* when given,
+    else `<bundle_root>/_repositories.yaml`.
+
+    *bundle_root* still resolves every relative path the document declares
+    (`graph_dir`, `declarations_dir`, each repo's `path`) -- only the
+    document's own address is independent of it.
 
     Raises `ConfigError` naming the file and key for any malformed shape.
     Propagates `OSError` unchanged when the file is missing.
     """
     bundle_root = Path(bundle_root)
-    path = bundle_root / CONFIG_FILENAME
+    path = Path(config_path) if config_path is not None else bundle_root / CONFIG_FILENAME
     raw = _read_yaml(path)
-    name = CONFIG_FILENAME
+    name = path.name
 
     doc = _require_mapping(raw, name=name, where="the document") if raw is not None else {}
     allowed_top = {"graph_dir", "declarations_dir", "repositories", "ignore", "state_gate"}

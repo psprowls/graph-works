@@ -300,8 +300,9 @@ def test_a_results_stub_lands_when_the_stage_actually_completed(tmp_path):
 
 
 def _repositories(layout, body: str) -> None:
-    """Write `_repositories.yaml` under the bundle. `graph_dir` is required."""
-    (layout.bundle_dir / "_repositories.yaml").write_text(f'graph_dir: "{layout.cache_dir}"\n{body}', encoding="utf-8")
+    """Write `_repositories.yaml` at its layout address. `graph_dir` is required."""
+    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.repositories_path.write_text(f'graph_dir: "{layout.cache_dir}"\n{body}', encoding="utf-8")
 
 
 def test_orchestrate_keeps_no_compatibility_re_export_for_resolve_repo():
@@ -320,7 +321,8 @@ def test_an_explicit_repo_beats_a_declared_one_and_skips_the_read(tmp_path):
     # malformed file proves the read is skipped, not merely overridden.
     layout = _workspace(tmp_path)
     _write_item(layout, "a")
-    (layout.bundle_dir / "_repositories.yaml").write_text("graph_dir: [bad]\n", encoding="utf-8")
+    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.repositories_path.write_text("graph_dir: [bad]\n", encoding="utf-8")
     result = orchestrate.run_orchestrate(layout, "a", repo=tmp_path)
     assert [d.slug for d in result.dispatches] == ["a"]
 

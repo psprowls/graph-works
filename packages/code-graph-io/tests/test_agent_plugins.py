@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from code_graph_io import agent_plugins, store
+from code_graph_io import _ignore, agent_plugins, store
 from code_graph_io.uri import RepoContext
 
 _CTX = RepoContext(org="test", repo="repo")
@@ -136,3 +136,80 @@ def test_emit_skips_entries_without_name(tmp_path: Path, conn: sqlite3.Connectio
     agent_plugins.emit(conn, repo_root=tmp_path, ctx=_CTX)
     n = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='agent_plugin'").fetchone()[0]
     assert n == 0
+
+
+def test_plugin_root_with_manifest_links_facet_of_to_package(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A plugin root that ALSO carries a manifest gets a facet_of edge from
+    its (now-admitted, per Task 1) Package node to its agent_plugin node."""
+    from code_graph_io import packages
+
+    pdir = tmp_path / "plugins" / "demo"
+    (pdir / ".claude-plugin").mkdir(parents=True)
+    (pdir / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "demo"}))
+    (pdir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.1.0"\n')
+
+    ctx = RepoContext(org="t", repo="r")
+    packages.refresh(conn, repo_root=tmp_path, ctx=ctx)
+    agent_plugins.emit(conn, repo_root=tmp_path, ctx=ctx)
+    agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=ctx)
+
+    pkg_row = conn.execute("SELECT id FROM nodes WHERE kind='package' AND name='demo'").fetchone()
+    plugin_row = conn.execute("SELECT id FROM nodes WHERE kind='agent_plugin' AND name='demo'").fetchone()
+    assert pkg_row is not None
+    assert plugin_row is not None
+    edge = conn.execute(
+        "SELECT src, dst FROM edges WHERE kind='facet_of' AND src=? AND dst=?",
+        (pkg_row[0], plugin_row[0]),
+    ).fetchone()
+    assert edge is not None
+
+    # Idempotent: re-running must upsert the same edge, not duplicate it.
+    agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=ctx)
+    count = conn.execute("SELECT COUNT(*) FROM edges WHERE kind='facet_of'").fetchone()[0]
+    assert count == 1
+
+
+def test_plugin_root_without_manifest_gets_no_facet_of(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    (tmp_path / ".claude-plugin").mkdir(parents=True)
+    (tmp_path / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "solo"}))
+
+    ctx = RepoContext(org="t", repo="r")
+    agent_plugins.emit(conn, repo_root=tmp_path, ctx=ctx)
+    agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=ctx)
+
+    assert conn.execute("SELECT COUNT(*) FROM edges WHERE kind='facet_of'").fetchone()[0] == 0
+
+
+def test_plain_package_without_plugin_gets_no_facet_of(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    """A Package node with no co-located `.claude-plugin/` gets no facet_of
+    edge to any agent_plugin node (there are none to match)."""
+    from code_graph_io import packages
+
+    pdir = tmp_path / "packages" / "plain"
+    pdir.mkdir(parents=True)
+    (pdir / "pyproject.toml").write_text('[project]\nname = "plain"\nversion = "0.1.0"\n')
+
+    ctx = RepoContext(org="t", repo="r")
+    packages.refresh(conn, repo_root=tmp_path, ctx=ctx)
+    agent_plugins.emit(conn, repo_root=tmp_path, ctx=ctx)
+    agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=ctx)
+
+    pkg_row = conn.execute("SELECT id FROM nodes WHERE kind='package' AND name='plain'").fetchone()
+    assert pkg_row is not None
+    assert conn.execute("SELECT COUNT(*) FROM edges WHERE kind='facet_of'").fetchone()[0] == 0
+
+
+def test_emit_excludes_plugins_matching_ignore(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    _make_plugin(tmp_path)
+    fixture_root = tmp_path / "tests" / "fixtures" / "demo"
+    fixture_root.mkdir(parents=True)
+    (fixture_root / ".claude-plugin").mkdir()
+    (fixture_root / ".claude-plugin" / "plugin.json").write_text(
+        json.dumps({"name": "fixture-demo", "version": "0.0.0"})
+    )
+
+    agent_plugins.emit(conn, repo_root=tmp_path, ctx=_CTX, ignore=_ignore.compile_ignore(("**/fixtures/**",)))
+
+    names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='agent_plugin'").fetchall()}
+    assert "demo" in names
+    assert "fixture-demo" not in names

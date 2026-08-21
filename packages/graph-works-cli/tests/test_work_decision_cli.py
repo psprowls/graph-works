@@ -252,7 +252,7 @@ def _write_orphan(workspace: Path) -> str:
 
 
 def test_config_error_on_overturn_maps_to_schema_mismatch(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(_root: Path) -> object:
+    def boom(_root: Path, **_kwargs: object) -> object:
         raise decision_module.ConfigError("bad declarations")
 
     monkeypatch.setattr(decision_module, "load_config", boom)
@@ -277,7 +277,7 @@ def test_config_error_on_overturn_maps_to_schema_mismatch(workspace: Path, monke
 
 
 def test_config_os_error_on_overturn_is_reported(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(_root: Path) -> object:
+    def boom(_root: Path, **_kwargs: object) -> object:
         raise OSError("disk gone")
 
     monkeypatch.setattr(decision_module, "load_config", boom)

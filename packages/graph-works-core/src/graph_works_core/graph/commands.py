@@ -34,7 +34,7 @@ from code_graph_io import (
     render,
     update,
 )
-from code_wiki_okf.config import CONFIG_FILENAME, load_config
+from code_wiki_okf.config import load_config
 
 from graph_works_core.graph.graph_tools import ROW_CAP, _describe
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -45,14 +45,18 @@ class GraphTarget:
     """Where the graph lives and which repos feed it, fully resolved.
 
     `member_names` is index-aligned with `members` — the `_repositories.yaml`
-    key for each path, which is what `build(only=…)` scopes by. Both are
-    empty when there is nothing to build, and a caller that only reads (a
-    test, C5's tool factory) can supply neither.
+    key for each path, which is what `build(only=…)` scopes by.
+    `member_ignore` is index-aligned with `members` too — each member's
+    `ignore:` glob patterns (global + per-repo, already merged by
+    `code_wiki_okf.config.load_config`). All three are empty when there is
+    nothing to build, and a caller that only reads (a test, C5's tool
+    factory) can supply none of them.
     """
 
     graph_dir: Path
     members: tuple[Path, ...] = ()
     member_names: tuple[str, ...] = ()
+    member_ignore: tuple[tuple[str, ...], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,7 +81,7 @@ class GraphResult:
 def graph_target(layout: WorkspaceLayout) -> GraphTarget:
     """Resolve *layout* into the one target every command takes.
 
-    Reads `<bundle>/_repositories.yaml` when it is there. When it is not,
+    Reads `<root>/_gw/_repositories.yaml` when it is there. When it is not,
     falls back to `code_graph_io.paths.graph_dir(layout.root)` with
     `layout.repo_root` as the single member — the bootstrap path
     `code_graph_io.update.run` documents in its own docstring, where the graph
@@ -91,19 +95,21 @@ def graph_target(layout: WorkspaceLayout) -> GraphTarget:
 
     Raises `code_wiki_okf.ConfigError` for a malformed `_repositories.yaml`.
     """
-    if not (layout.bundle_dir / CONFIG_FILENAME).exists():
+    if not layout.repositories_path.exists():
         if layout.repo_root is None:
             return GraphTarget(graph_dir=paths.graph_dir(layout.root))
         return GraphTarget(
             graph_dir=paths.graph_dir(layout.root),
             members=(layout.repo_root,),
             member_names=(layout.repo_root.name,),
+            member_ignore=((),),
         )
-    config = load_config(layout.bundle_dir)
+    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     return GraphTarget(
         graph_dir=config.graph_dir,
         members=tuple(repo.path for repo in config.repos),
         member_names=tuple(repo.name for repo in config.repos),
+        member_ignore=tuple(repo.ignore for repo in config.repos),
     )
 
 
@@ -137,12 +143,18 @@ def build(target: GraphTarget, *, full: bool = False, only: str | None = None) -
     captured has to redirect the stream.
     """
     members = list(target.members)
+    # Pad, don't zip-truncate: a hand-constructed GraphTarget (a test, C5's
+    # read-only tool factory) may supply fewer member_ignore entries than
+    # members, or none — those members simply get no ignore patterns.
+    member_ignore = list(target.member_ignore) + [()] * (len(members) - len(target.member_ignore))
     if only is not None:
         declared = dict(zip(target.member_names, target.members, strict=False))
         if only not in declared:
             names = ", ".join(target.member_names) or "(none declared)"
             return GraphResult(exit_codes.GENERIC, "", f"error: unknown member: {only} (declared: {names})")
+        idx = target.member_names.index(only)
         members = [declared[only]]
+        member_ignore = [member_ignore[idx]]
     if not members:
         return GraphResult(
             exit_codes.NOT_IN_GIT_REPO,
@@ -150,7 +162,7 @@ def build(target: GraphTarget, *, full: bool = False, only: str | None = None) -
             "error: no repositories to build; declare one under `repositories` in _repositories.yaml",
         )
     try:
-        update.run_workspace(members, graph_dir=target.graph_dir, full=full)
+        update.run_workspace(members, graph_dir=target.graph_dir, full=full, member_ignore=member_ignore)
     except update.NotInGitRepoError as exc:
         return GraphResult(exit_codes.NOT_IN_GIT_REPO, "", f"error: {exc}")
     except update.UpdateInProgressError as exc:

@@ -293,7 +293,7 @@ def test_sync_command_default_applies_entity_changes(tmp_path: Path) -> None:
     result = runner.invoke(app, ["sync", str(bundle_root)])
 
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "packages" / "widgets.md").exists()
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md").exists()
     assert "entities: written" in result.output
 
 
@@ -311,8 +311,12 @@ def test_sync_command_config_error_exits_1(tmp_path: Path) -> None:
     assert "_repositories.yaml" in result.output or "not a" in result.output.lower()
 
 
-def test_sync_command_collision_error_exits_1(tmp_path: Path) -> None:
-    """A shared package name across repos should raise ValueError and exit 1."""
+def test_sync_command_two_repos_same_package_name_no_longer_collides(tmp_path: Path) -> None:
+    """Entity pages nest under `repositories/<repo>/<lane>/`, so two repos'
+    same-named packages resolve to two distinct paths and no longer raise --
+    the CLI-level counterpart to
+    `entities/test_sync.py::test_sync_two_repos_same_package_name_no_longer_collides`.
+    """
     graph_dir = tmp_path / "graph"
     graph_dir.mkdir()
     _seed_graph_multi(graph_dir, [("acme", "repo-a", ["shared"]), ("acme", "repo-b", ["shared"])])
@@ -323,8 +327,9 @@ def test_sync_command_collision_error_exits_1(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["sync", str(bundle_root)])
 
-    assert result.exit_code == 1
-    assert "shared" in result.output.lower()
+    assert result.exit_code == 0, result.output
+    assert (bundle_root / "repositories" / "repo-a" / "packages" / "shared.md").exists()
+    assert (bundle_root / "repositories" / "repo-b" / "packages" / "shared.md").exists()
 
 
 # --- sync command: mirror-lane coverage ------------------------------------
@@ -737,17 +742,23 @@ def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
     design spec §5.2.) So a plain `validate` run already exits 1, and `cli.py`
     needs no `has_placement_finding` counterpart to its `has_sync_finding`
     special case.
+
+    The misplaced page is a `Dependency`, not a `Package`: narrowing (§5)
+    drops the four repo-scoped types (Package/App/TestSuite/AgentPlugin) --
+    now nested under `repositories/<repo>/<lane>/` -- from
+    `placement.directory-mismatch`'s prefix check, but `Dependency` stays
+    global and fully prefix-checkable, matching
+    `test_placement_adoption.py::test_both_codes_fire_over_one_built_bundle`.
     """
     init_result = runner.invoke(app, ["init", str(tmp_path / "bundle")])
     assert init_result.exit_code == 0
     bundle_root = tmp_path / "bundle"
     _init_empty_graph(bundle_root)
-    (bundle_root / "dependencies").mkdir()
-    (bundle_root / "dependencies" / "widgets.md").write_text(
-        '---\ntype: Package\ntitle: "widgets"\n---\n\n'
-        "## Purpose\n\nSome real purpose text goes here, filled in properly for this test.\n\n"
-        "## Public API\n\nSome real API docs go here too.\n\n"
-        "## Files\n\n_(none)_\n",
+    (bundle_root / "packages").mkdir()
+    (bundle_root / "packages" / "httpx.md").write_text(
+        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\necosystem: "pypi"\n---\n\n'
+        "## Why we depend on this\n\nSome real text goes here, filled in properly for this test.\n\n"
+        "## Gotchas / workarounds\n\nSome real text goes here too.\n",
         encoding="utf-8",
     )
 

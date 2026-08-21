@@ -27,7 +27,7 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 async def synced(tmp_path):
     """A workspace whose structural pass has run, with a worklist in hand."""
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir)
+    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     seed_graph(config.graph_dir, repo)
     worklist, _ = await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
     return layout, config, repo, worklist
@@ -38,7 +38,7 @@ def _task(worklist: ScanWorklist) -> ProseRefreshTask:
 
 
 def _page(layout) -> str:
-    return (layout.bundle_dir / "packages" / "widgets.md").read_text(encoding="utf-8")
+    return (layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md").read_text(encoding="utf-8")
 
 
 def _results(*results: ProseRefreshResult) -> ScanResults:
@@ -67,7 +67,7 @@ async def test_a_splice_touches_only_its_own_section(synced):
 
 async def test_a_crlf_page_keeps_its_terminators(synced):
     layout, config, _repo, worklist = synced
-    path = layout.bundle_dir / "packages" / "widgets.md"
+    path = layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
     path.write_bytes(path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
     apply_scan_results(
         worklist,
@@ -153,14 +153,14 @@ async def test_a_complete_fill_stamps_the_owning_repo_sha(synced):
         dry_run=False,
     )
     assert applied.stamped == 1
-    document = load_bundle(layout.bundle_dir).concepts["packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
     assert document.fm_raw[PROSE_ANCHOR_KEY] == git(repo, "rev-parse", "HEAD")
     assert document.fm_raw[PROSE_ANCHOR_KEY] == document.fm_raw["last_updated_commit"]
 
 
 async def test_a_page_with_no_last_updated_commit_is_narrated_but_not_stamped(synced):
     layout, config, _repo, worklist = synced
-    write_page(layout, "packages/widgets.md", package_page())
+    write_page(layout, "repositories/demo/packages/widgets.md", package_page())
     task = _task(worklist)
     applied = apply_scan_results(
         worklist,
@@ -282,7 +282,7 @@ async def test_a_partial_first_fill_increments_the_attempt_counter(synced):
         dry_run=False,
     )
     assert applied.stamped == 0
-    document = load_bundle(layout.bundle_dir).concepts["packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
     assert document.fm_raw[PROSE_ATTEMPTS_KEY] == 1
 
 
@@ -297,7 +297,7 @@ async def test_a_second_partial_first_fill_increments_again(synced):
             today=TODAY,
             dry_run=False,
         )
-    document = load_bundle(layout.bundle_dir).concepts["packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
     assert document.fm_raw[PROSE_ATTEMPTS_KEY] == 2
 
 
@@ -321,7 +321,7 @@ async def test_a_complete_fill_clears_the_attempt_counter(synced):
         dry_run=False,
     )
     assert applied.stamped == 1
-    document = load_bundle(layout.bundle_dir).concepts["packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
     assert PROSE_ATTEMPTS_KEY not in document.fm_raw
 
 
@@ -343,5 +343,5 @@ async def test_a_partial_diff_refresh_does_not_increment(synced):
         today=TODAY,
         dry_run=False,
     )
-    document = load_bundle(layout.bundle_dir).concepts["packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
     assert PROSE_ATTEMPTS_KEY not in document.fm_raw

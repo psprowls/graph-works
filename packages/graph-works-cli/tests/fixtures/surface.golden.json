@@ -328,8 +328,8 @@
     },
     {
       "name": "gw config set",
-      "help": "Set a catalog key and refresh `_config/config.json`.",
-      "short_help": "Set a catalog key and refresh `_config/config.json`.",
+      "help": "Set a catalog key and refresh `_gw/_config/config.json`.",
+      "short_help": "Set a catalog key and refresh `_gw/_config/config.json`.",
       "usage": [
         "[OPTIONS]",
         "{key}",
@@ -379,8 +379,8 @@
     },
     {
       "name": "gw config sync",
-      "help": "Regenerate `_config/config.json` after an out-of-band manifest edit.",
-      "short_help": "Regenerate `_config/config.json` after an out-of-band manifest edit.",
+      "help": "Regenerate `_gw/_config/config.json` after an out-of-band manifest edit.",
+      "short_help": "Regenerate `_gw/_config/config.json` after an out-of-band manifest edit.",
       "usage": [
         "[OPTIONS]"
       ],

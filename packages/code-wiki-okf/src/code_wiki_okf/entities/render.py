@@ -29,6 +29,7 @@ from code_graph_io import (
 )
 from okf_ext.generators import Render
 
+from code_wiki_okf.entities.pages import slug
 from code_wiki_okf.mirror.paths import mirror_concept_id
 
 _NONE_PLACEHOLDER = "_(none)_"
@@ -70,15 +71,20 @@ def render_package(desc: PackageDescription, *, repo_name: str) -> Render:
     )
 
 
+def _package_reference(name: str) -> str:
+    """Plain markdown link to a sibling Package page, given ITS OWN name —
+    this vault's cross-reference convention (markdown links, not
+    wikilinks). An App is always faceted off a Package of the same `name`,
+    so `render_app` passes `desc.name` straight through. An agent_plugin's
+    own `name` comes from `plugin.json`, independent of any co-located
+    manifest's name, so `render_agent_plugin` must pass the sibling
+    Package's OWN name (`desc.package_name`), not `desc.name`."""
+    return f"[{name}](/packages/{slug(name)}.md)"
+
+
 def render_app(desc: AppDescription, *, repo_name: str) -> Render:
     return Render(
-        frontmatter={
-            "language": desc.language,
-            "version": desc.version,
-            "depends_on": [],  # AppDescription carries no internal_dependencies field
-            "test_suites": [suite.name for suite in desc.test_suites],
-            "entry_points": [ep.name for ep in desc.entry_points],
-        },
+        frontmatter={"package": _package_reference(desc.name)},
         sections={"Files": _files_section(desc.files, repo_name=repo_name)},
     )
 
@@ -135,8 +141,11 @@ def _mcp_server_line(c: dict[str, Any]) -> str:
 
 
 def render_agent_plugin(desc: AgentPluginDescription) -> Render:
+    frontmatter: dict[str, Any] = {"ecosystem": desc.ecosystem, "version": desc.version}
+    if desc.package_name is not None:
+        frontmatter["package"] = _package_reference(desc.package_name)
     return Render(
-        frontmatter={"ecosystem": desc.ecosystem, "version": desc.version},
+        frontmatter=frontmatter,
         sections={
             "Commands": _component_lines(desc.commands, _named_line),
             "Agents": _component_lines(desc.agents, _named_line),

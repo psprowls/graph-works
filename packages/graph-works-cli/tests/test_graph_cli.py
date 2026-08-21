@@ -282,17 +282,17 @@ def test_export_carries_a_core_failure_to_stderr(spy) -> None:
 
 @pytest.fixture
 def seeded_workspace(tmp_path: Path) -> Path:
-    """A bootstrapped workspace whose `_cache/code.db` holds a tiny real graph.
+    """A bootstrapped workspace whose `_gw/_cache/code.db` holds a tiny real graph.
 
     `graph_target()` reads `okf/_repositories.yaml`, which bootstrap writes with
-    `graph_dir: "../_cache"` — so the graph the CLI will open is `<root>/_cache`,
-    not `paths.graph_dir(root)`.
+    `graph_dir: "../_gw/_cache"` — so the graph the CLI will open is
+    `<root>/_gw/_cache`, not `paths.graph_dir(root)`.
     """
     root = tmp_path / "works"
     result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
     assert result.exit_code == exit_codes.SUCCESS
 
-    graph_dir = root / "_cache"
+    graph_dir = root / "_gw" / "_cache"
     graph_dir.mkdir(parents=True, exist_ok=True)
     conn = raw_conn(graph_dir / "code.db", create=True)
     try:
@@ -404,7 +404,7 @@ def path_less_workspace(tmp_path: Path) -> Path:
     root = tmp_path / "works"
     assert runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)]).exit_code == 0
 
-    graph_dir = root / "_cache"
+    graph_dir = root / "_gw" / "_cache"
     graph_dir.mkdir(parents=True, exist_ok=True)
     conn = raw_conn(graph_dir / "code.db", create=True)
     try:

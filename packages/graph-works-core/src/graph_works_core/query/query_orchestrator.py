@@ -910,7 +910,7 @@ async def run_worker_batch(
                     _worker_error_row(task, "layout is required for librarian workers") for task in role_tasks
                 )
                 continue
-            config = load_config(layout.bundle_dir)
+            config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
             schema_set = load_schemas(config.declarations_dir / "_schema")
             task_runner = _build_librarian_task_runner(
                 binding.make_llm(), query=query, bundle=bundle, schema_set=schema_set

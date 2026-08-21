@@ -34,18 +34,30 @@ Writes by default; pass `--dry-run` to print each lane's plan instead. This
 matches `init`'s convention — the flag opts out of writing, and there is no
 `--no-dry-run`.
 
+Package, App, TestSuite and AgentPlugin pages nest under their owning
+repository — `repositories/<repo>/packages/<slug>.md`, and so on — so two
+repositories declaring a same-named entity never collide on one flat,
+ecosystem-wide path. Repository (`repositories/<repo>.md`) and Dependency
+(`dependencies/<slug>.md`, ecosystem-wide by design) keep their own
+bundle-root placement. There is no migration for a bundle synced by an
+older `code-wiki-okf`: delete the bundle and re-`sync` from empty rather
+than move pages by hand.
+
     code-wiki-okf validate <bundle-root> [--config-dir <path>] [--strict]
 
 Reports drift and conformance findings; never writes. Runs okf-io's own
 catalog plus five house rules: `sync.*` (commit-derived staleness),
 `schemas.*`, `sections.*`, `tags.*`, and `placement.*`.
 
-The `placement.*` codes are `okf_ext.placement`'s, composed here from what the
-bundle's own schemas declare — `placement_rule(declared_directories(schema_set),
-depth=ENTITY_DEPTH, severity="error")`. They cover the page-to-lane
-correspondence `sync` assumes and never checks. The capability defaults them to
-`warn`; this package raises both to **error**, because neither is drift a later
-run reconciles away:
+The `placement.*` codes are `okf_ext.placement`'s, composed here from the
+bundle's schemas narrowed to types a flat directory-prefix check can still
+express — `placement_rule(placement_directories(schema_set), depth=ENTITY_DEPTH,
+severity="error")`. Repository, File and Dependency are checked; Package, App,
+TestSuite and AgentPlugin are excluded because they nest under their owning
+`repositories/<repo>/` directory. They cover the page-to-lane correspondence
+`sync` assumes and never checks. The capability defaults them to `warn`; this
+package raises both to **error**, because neither is drift a later run
+reconciles away:
 
 | code | what it catches |
 |---|---|

@@ -68,7 +68,7 @@ def resolve(
     Precedence: *workspace* -> `GRAPH_WORKS_DIR` -> a `.git` walk-up from
     *cwd*, defaulting to `<repo>/.works`. The marker is
     `<root>/workspace.yaml`; when it is absent, `WorkspaceNotFound` names the
-    bootstrap call. The four layout members come from the manifest's
+    bootstrap call. The five layout members come from the manifest's
     overrides, defaulted.
 
     *environ* defaults to the process environment and is a parameter for the
@@ -94,6 +94,7 @@ def resolve(
         config_dir=manifest.config_dir,
         cache_dir=manifest.cache_dir,
         worktrees_dir=manifest.worktrees_dir,
+        repositories_path=manifest.repositories_path,
         repo_root=Path(repo_root).expanduser().resolve() if repo_root is not None else find_repo_root(root),
     )
 

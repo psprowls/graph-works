@@ -52,7 +52,7 @@ from code_wiki_okf.entities.render import (
 )
 from code_wiki_okf.git_state import head_commit
 from code_wiki_okf.provenance import generated_value, last_updated_commit_value
-from code_wiki_okf.resources import resource_index
+from code_wiki_okf.resources import ResourceEntry, resource_index
 
 #: Shared empty `by_repository` default -- mirrors `generators/model.py`'s
 #: `_EMPTY_FM` and `shape/model.py`'s `_NO_INDEXES`: one frozen instance
@@ -162,17 +162,39 @@ def _resource_text(node: NodeRecord) -> str:
 
 def _resolve_target(
     *,
-    existing: dict[str, str],
+    existing: Mapping[str, ResourceEntry],
     schema_set: SchemaSet,
     type_name: str,
     name: str,
     resource: str,
     render: Render,
+    repo_name: str | None = None,
 ) -> _Target:
     """An existing page (found by `resource`) wins over a fresh path -- this
     is what lets a page moved within its lane be found and updated in place
-    instead of duplicated."""
-    concept_id = existing.get(resource) or default_concept_id(schema_set, type_name=type_name, name=name)
+    instead of duplicated. `repo_name` nests a repo-scoped type's *fresh*
+    path under `repositories/<repo_name>/` -- see
+    `entities.pages.default_concept_id`.
+
+    But only if that page's own on-disk `type:` agrees with `type_name` --
+    the type this call site's node-kind loop (`_package_targets`,
+    `_app_targets`, ...) is asserting. `existing` is keyed by `resource`, not
+    by type, so a page whose declared type disagrees with the resource it
+    claims (or a `resource_index` collision where a same-resource page of a
+    *different* type shadowed the one this node actually matches, per
+    `ResourceIndex.duplicates`) must not receive a render shaped for the
+    wrong type -- `plan_regenerate` would then either refuse it outright (an
+    ungranted-key `ValueError`) or, worse, silently overwrite a page with
+    content foreign to its declared type. Treating the mismatch as "no
+    existing page claims this resource" and falling through to
+    `default_concept_id` defers the call entirely to graph-works-core's
+    `_classify_pages`, which already reports the untouched page as
+    `type-mismatch` once this lane leaves it alone."""
+    entry = existing.get(resource)
+    if entry is not None and str(entry.document.fm.type or "") == type_name:
+        concept_id = entry.concept_id
+    else:
+        concept_id = default_concept_id(schema_set, type_name=type_name, name=name, repo_name=repo_name)
     return _Target(concept_id=concept_id, render=render, type_name=type_name, title=name, resource=resource)
 
 
@@ -193,7 +215,7 @@ def _package_targets(
     reader: GraphReader,
     *,
     repo_name: str,
-    existing: dict[str, str],
+    existing: Mapping[str, ResourceEntry],
     schema_set: SchemaSet,
     sha: str | None,
     at: datetime,
@@ -210,6 +232,7 @@ def _package_targets(
             name=node.name,
             resource=_resource_text(node),
             render=render,
+            repo_name=repo_name,
         )
 
 
@@ -218,7 +241,7 @@ def _app_targets(
     reader: GraphReader,
     *,
     repo_name: str,
-    existing: dict[str, str],
+    existing: Mapping[str, ResourceEntry],
     schema_set: SchemaSet,
     sha: str | None,
     at: datetime,
@@ -235,6 +258,7 @@ def _app_targets(
             name=node.name,
             resource=_resource_text(node),
             render=render,
+            repo_name=repo_name,
         )
 
 
@@ -243,7 +267,7 @@ def _test_suite_targets(
     reader: GraphReader,
     *,
     repo_name: str,
-    existing: dict[str, str],
+    existing: Mapping[str, ResourceEntry],
     schema_set: SchemaSet,
     sha: str | None,
     at: datetime,
@@ -261,6 +285,7 @@ def _test_suite_targets(
             name=node.name,
             resource=_resource_text(node),
             render=render,
+            repo_name=repo_name,
         )
 
 
@@ -268,7 +293,8 @@ def _agent_plugin_targets(
     nodes: Sequence[NodeRecord],
     reader: GraphReader,
     *,
-    existing: dict[str, str],
+    repo_name: str,
+    existing: Mapping[str, ResourceEntry],
     schema_set: SchemaSet,
     sha: str | None,
     at: datetime,
@@ -285,6 +311,7 @@ def _agent_plugin_targets(
             name=node.name,
             resource=_resource_text(node),
             render=render,
+            repo_name=repo_name,
         )
 
 
@@ -292,7 +319,7 @@ def _dependency_targets(
     nodes: Sequence[NodeRecord],
     reader: GraphReader,
     *,
-    existing: dict[str, str],
+    existing: Mapping[str, ResourceEntry],
     schema_set: SchemaSet,
     at: datetime,
 ) -> Iterator[_Target]:
@@ -320,9 +347,10 @@ def _collision_message(collisions: dict[str, list[tuple[str, str]]]) -> str:
         named = ", ".join(f"{repo_label!r} ({resource})" for repo_label, resource in entries)
         parts.append(f"{concept_id}: {named}")
     return (
-        "entity name collision -- these repos each declare an entity that would resolve to the same new page, "
-        "and code-wiki-okf gives every repo one flat, ecosystem-wide namespace per lane (no per-repo "
-        f"subdirectory): {'; '.join(parts)}. Rename one of the entities, or give it a distinct `resource:`."
+        "entity name collision -- these entries would resolve to the same page with different resources: "
+        f"{'; '.join(parts)}. This can occur for Repository and Dependency (ecosystem-wide) or within a repo "
+        "for Package, App, TestSuite or AgentPlugin if the same entity is declared twice with different "
+        "`resource:` values. Rename one of the entities, or give it a distinct `resource:`."
     )
 
 
@@ -332,7 +360,7 @@ def _resolve_placements(
     reader: GraphReader,
     *,
     schema_set: SchemaSet,
-    existing: dict[str, str],
+    existing: Mapping[str, ResourceEntry],
     at: datetime,
 ) -> dict[str, tuple[_Target, str]]:
     """Resolve every entity this run's graph walk names to a page target,
@@ -404,6 +432,7 @@ def _resolve_placements(
         for target in _agent_plugin_targets(
             _nodes_for_repo(all_plugins, repo_uri),
             reader,
+            repo_name=repo_cfg.name,
             existing=existing,
             schema_set=schema_set,
             sha=sha,
@@ -462,7 +491,7 @@ def _with_contents(
     placed: dict[str, tuple[_Target, str]],
     bundle: Bundle,
     by_repository: Mapping[str, tuple[str, ...]],
-    existing: Mapping[str, str],
+    existing: Mapping[str, ResourceEntry],
 ) -> dict[str, tuple[_Target, str]]:
     """Give every Repository target its `## Contents` render.
 
@@ -477,8 +506,8 @@ def _with_contents(
     frontmatter key it does not supply (`okf_ext.generators.Render`'s own
     docstring), so a separate pass would silently drop `package_count`.
 
-    `existing` is the pre-placement `{resource: concept_id}` map both callers
-    already computed. A placed target whose resource is not in it is one
+    `existing` is the pre-placement `{resource: ResourceEntry}` map both
+    callers already computed. A placed target whose resource is not in it is one
     phase 1 would create -- or, for `sync_entities`'s post-reload call,
     already did. Either way `bundle` might not have that page yet (it never
     does for `plan_entities`'s preview, which never runs phase 1 at all), so
@@ -532,9 +561,7 @@ def sync_entities(
     """
     schema_set = load_schemas(config.declarations_dir / "_schema")
     section_set = load_sections(config.declarations_dir / "_sections")
-    existing: dict[str, str] = {
-        resource: entry.concept_id for resource, entry in resource_index(bundle).by_resource.items()
-    }
+    existing = resource_index(bundle).by_resource
 
     placed = _resolve_placements(bundle, config, reader, schema_set=schema_set, existing=existing, at=at)
 
@@ -640,9 +667,7 @@ def plan_entities(bundle: Bundle, config: Config, reader: GraphReader, *, at: da
     """
     schema_set = load_schemas(config.declarations_dir / "_schema")
     section_set = load_sections(config.declarations_dir / "_sections")
-    existing: dict[str, str] = {
-        resource: entry.concept_id for resource, entry in resource_index(bundle).by_resource.items()
-    }
+    existing = resource_index(bundle).by_resource
     placed = _resolve_placements(bundle, config, reader, schema_set=schema_set, existing=existing, at=at)
 
     # The preview must render what `sync_entities` writes, or its staleness

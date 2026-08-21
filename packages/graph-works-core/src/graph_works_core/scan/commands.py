@@ -44,7 +44,7 @@ from code_graph_io import (
     open_reader,
 )
 from code_wiki_okf.config import Config, RepoConfig
-from code_wiki_okf.entities.lanes import ENTITY_LANES, SyncSummary, sync
+from code_wiki_okf.entities.lanes import SyncSummary, is_entity_lane_page, sync
 from code_wiki_okf.git_state import changed_files_since, head_commit
 from code_wiki_okf.mirror.lanes import MirrorSummary, sync_mirror
 from langchain_core.tools import BaseTool
@@ -394,19 +394,6 @@ def _build_task(
     )
 
 
-def _is_lane_page(concept_id: str) -> bool:
-    """Whether *concept_id* is a page this vertical is responsible for.
-
-    Scopes the skip channel. `load_bundle` walks the whole workspace, so
-    reporting every page whose `type` is not a lane type would put every
-    concept, ADR, source and work item into `ScanWorklist.skipped` on every
-    scan -- the same noise the "declares no prose sections" rule is silent to
-    avoid. A page outside `ENTITY_LANES` is not skipped; it was never a
-    candidate.
-    """
-    return any(concept_id.startswith(lane) for lane in ENTITY_LANES)
-
-
 def _attempts(document: Document) -> int:
     """`prose_refresh_attempts` as an int, or 0 for anything unreadable.
 
@@ -477,14 +464,14 @@ def _classify_pages(
     1. **Skip and report.** A parse error, a foreign `type`, a `resource:` that
        resolves to nothing, or a type mismatch appends a `SkippedPage`. Only for
        pages inside an entity lane, and never for the mirror `File` type -- see
-       `_is_lane_page`. Every one of the four reasons is gated on `_is_lane_page`
-       uniformly, not just the first two: a page outside `ENTITY_LANES` was
-       never a candidate for this vertical, so it is never "skipped" no matter
-       which of the four checks it would otherwise fail, and reporting it
-       regardless would put every concept, ADR and source page in the vault
-       into `skipped` on every scan. A page whose type declares no prose
-       sections is skipped silently: reporting it would fire on every page of
-       that type on every scan.
+       `is_entity_lane_page`. Every one of the four reasons is gated on
+       `is_entity_lane_page` uniformly, not just the first two: a page outside
+       an entity lane was never a candidate for this vertical, so it is never
+       "skipped" no matter which of the four checks it would otherwise fail,
+       and reporting it regardless would put every concept, ADR and source
+       page in the vault into `skipped` on every scan. A page whose type
+       declares no prose sections is skipped silently: reporting it would fire
+       on every page of that type on every scan.
     2. **Adopt.** No anchor, a `last_updated_commit`, and nothing unfilled means
        a person wrote this prose. Stamp the anchor at that commit and yield no
        task -- §5.2's intent (every page is anchor-tracked) met with no model
@@ -508,7 +495,7 @@ def _classify_pages(
     for concept_id in sorted(bundle.concepts):
         document = bundle.concepts[concept_id]
         member = f"{concept_id}.md"
-        in_lane = _is_lane_page(concept_id)
+        in_lane = is_entity_lane_page(concept_id)
         if document.parse_error is not None:
             if in_lane:
                 skipped.append(SkippedPage(page=member, reason="parse-error"))

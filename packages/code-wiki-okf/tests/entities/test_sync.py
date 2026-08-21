@@ -257,10 +257,10 @@ def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> Non
         result = sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
 
         expected = {
-            "packages/widgets",
-            "apps/cli-app",
-            "test-suites/tests",
-            "agent-plugins/demo-plugin",
+            "repositories/repo-a/packages/widgets",
+            "repositories/repo-a/apps/cli-app",
+            "repositories/repo-a/test-suites/tests",
+            "repositories/repo-a/agent-plugins/demo-plugin",
             "dependencies/requests",
             "repositories/repo-a",
         }
@@ -278,7 +278,7 @@ def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> Non
 
     bundle_after = load_bundle(bundle_root)
 
-    pkg_doc = bundle_after.concept("packages/widgets")
+    pkg_doc = bundle_after.concept("repositories/repo-a/packages/widgets")
     assert pkg_doc is not None
     assert pkg_doc.fm_raw.get("language") == "python"
     assert pkg_doc.fm_raw.get("version") == "0.1.0"
@@ -289,18 +289,17 @@ def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> Non
     assert generated is not None and generated.get("by") == f"code-wiki-okf/{code_wiki_okf.__version__}"
     assert "tokens" not in pkg_doc.fm_raw
 
-    app_doc = bundle_after.concept("apps/cli-app")
+    app_doc = bundle_after.concept("repositories/repo-a/apps/cli-app")
     assert app_doc is not None
-    assert app_doc.fm_raw.get("language") == "typescript"
-    assert app_doc.fm_raw.get("version") == "1.0.0"
+    assert app_doc.fm_raw.get("package") == "[cli-app](/packages/cli-app.md)"
 
-    suite_doc = bundle_after.concept("test-suites/tests")
+    suite_doc = bundle_after.concept("repositories/repo-a/test-suites/tests")
     assert suite_doc is not None
     assert suite_doc.fm_raw.get("suite_kind") == "unit"
     assert suite_doc.fm_raw.get("file_count") == 0
     assert suite_doc.fm_raw.get("tested_packages") == []
 
-    plugin_doc = bundle_after.concept("agent-plugins/demo-plugin")
+    plugin_doc = bundle_after.concept("repositories/repo-a/agent-plugins/demo-plugin")
     assert plugin_doc is not None
     assert plugin_doc.fm_raw.get("ecosystem") == "claude-code"
     assert plugin_doc.fm_raw.get("version") == "1.0.0"
@@ -326,7 +325,7 @@ def test_sync_preserves_hand_edited_prose_section(tmp_path: Path) -> None:
         bundle = load_bundle(bundle_root)
         sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
 
-    page = bundle_root / "packages" / "widgets.md"
+    page = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
     original = page.read_text(encoding="utf-8")
     placeholder = "> TODO: what this package does, who uses it, and why it exists, in one paragraph."
     assert placeholder in original
@@ -339,7 +338,7 @@ def test_sync_preserves_hand_edited_prose_section(tmp_path: Path) -> None:
 
     final_text = page.read_text(encoding="utf-8")
     assert "Widgets, hand-built for the acme storefront." in final_text
-    assert "packages/widgets" not in result.written
+    assert "repositories/repo-a/packages/widgets" not in result.written
 
 
 def test_sync_page_moved_within_lane_is_updated_in_place_not_duplicated(tmp_path: Path) -> None:
@@ -353,9 +352,9 @@ def test_sync_page_moved_within_lane_is_updated_in_place_not_duplicated(tmp_path
         bundle = load_bundle(bundle_root)
         sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
 
-    original = bundle_root / "packages" / "widgets.md"
+    original = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
     assert original.exists()
-    moved = bundle_root / "packages" / "moved-widgets.md"
+    moved = bundle_root / "repositories" / "repo-a" / "packages" / "moved-widgets.md"
     moved.write_text(original.read_text(encoding="utf-8"), encoding="utf-8")
     original.unlink()
 
@@ -369,17 +368,73 @@ def test_sync_page_moved_within_lane_is_updated_in_place_not_duplicated(tmp_path
 
     assert not original.exists()
     assert moved.exists()
-    assert "packages/moved-widgets" in result.written
+    assert "repositories/repo-a/packages/moved-widgets" in result.written
 
     bundle_after = load_bundle(bundle_root)
-    assert "packages/widgets" not in bundle_after.concepts
-    moved_doc = bundle_after.concept("packages/moved-widgets")
+    assert "repositories/repo-a/packages/widgets" not in bundle_after.concepts
+    moved_doc = bundle_after.concept("repositories/repo-a/packages/moved-widgets")
     assert moved_doc is not None
     assert moved_doc.fm_raw.get("version") == "0.2.0"
     assert moved_doc.fm.resource == "pkg:acme/repo-a/widgets"
 
 
-def test_sync_two_repos_same_package_name_raises(tmp_path: Path) -> None:
+def test_sync_leaves_a_wrong_typed_resource_claim_untouched(tmp_path: Path) -> None:
+    """A page whose own on-disk `type:` disagrees with the graph node its
+    `resource:` names must never receive that node's render -- regression
+    for the bug traced through `_resolve_target`: `existing` is keyed by
+    `resource` alone, so a same-resource page of the *wrong* type used to win
+    the lookup just as readily as the right one, handing `plan_regenerate` a
+    Package-shaped render for a page declared `type: App`. That always raised
+    (an ungranted-keys `ValueError`) once a type's granted-key set stopped
+    numerically overlapping another type's -- see
+    `packages/graph-works-core/tests/scan/test_scan_worklist.py::
+    test_a_page_whose_type_does_not_match_its_resource_is_reported`, the
+    integration-level twin of this test.
+
+    `apps/mismatch` sorts before `repositories/repo-a/packages/widgets` in
+    `Bundle.concepts` (`okf_io.bundle` builds it `sorted()`), so it is the
+    one `resource_index` keeps for `pkg:acme/repo-a/widgets` -- reproducing
+    the exact shadowing that exposed the bug, not a friendlier ordering that
+    would hide it.
+    """
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle = load_bundle(bundle_root)
+        sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
+
+    # A page of a different declared type now claims the SAME resource the
+    # real `repositories/repo-a/packages/widgets.md` page above already claims.
+    mismatch = bundle_root / "apps" / "mismatch.md"
+    mismatch.parent.mkdir(parents=True, exist_ok=True)
+    mismatch_text = (
+        '---\ntype: App\ntitle: "mismatch"\nresource: "pkg:acme/repo-a/widgets"\ndescription: ""\n---\n\n'
+        "## Purpose\n\nWrongly typed, deliberately -- claims the Package's own resource.\n"
+    )
+    mismatch.write_text(mismatch_text, encoding="utf-8")
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        bundle2 = load_bundle(bundle_root)
+        result = sync_entities(bundle2, config, reader, today=_TODAY, at=_AT)  # must not raise
+
+    # The mismatched page is left exactly as authored -- not written to, not
+    # deleted, not reshaped.
+    assert mismatch.read_text(encoding="utf-8") == mismatch_text
+    assert "apps/mismatch" not in result.written
+
+    # The real page still gets (and keeps) the Package-shaped render.
+    bundle_after = load_bundle(bundle_root)
+    pkg_doc = bundle_after.concept("repositories/repo-a/packages/widgets")
+    assert pkg_doc is not None
+    assert pkg_doc.fm.type == "Package"
+    assert pkg_doc.fm_raw.get("language") == "python"
+
+
+def test_sync_two_repos_same_package_name_no_longer_collides(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
     _seed(
         graph_dir,
@@ -394,17 +449,16 @@ def test_sync_two_repos_same_package_name_raises(tmp_path: Path) -> None:
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
-        with pytest.raises(ValueError, match="shared-name") as exc_info:
-            sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
+        result = sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
 
-    message = str(exc_info.value)
-    assert "repo-a" in message
-    assert "repo-b" in message
+    assert "repositories/repo-a/packages/shared-name" in result.written
+    assert "repositories/repo-b/packages/shared-name" in result.written
 
-    # The collision check runs strictly before any disk write -- lock that
-    # down with an assertion instead of relying on code-reading.
-    written_md_files = list(bundle_root.rglob("*.md"))
-    assert {p.relative_to(bundle_root).as_posix() for p in written_md_files} == {"index.md", "log.md"}
+    bundle_after = load_bundle(bundle_root)
+    repo_a_doc = bundle_after.concept("repositories/repo-a/packages/shared-name")
+    repo_b_doc = bundle_after.concept("repositories/repo-b/packages/shared-name")
+    assert repo_a_doc is not None and repo_a_doc.fm.resource == "pkg:acme/repo-a/shared-name"
+    assert repo_b_doc is not None and repo_b_doc.fm.resource == "pkg:acme/repo-b/shared-name"
 
 
 def test_sync_refuses_to_overwrite_unregistered_page_at_default_path(tmp_path: Path) -> None:
@@ -420,9 +474,9 @@ def test_sync_refuses_to_overwrite_unregistered_page_at_default_path(tmp_path: P
     config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
 
     # Pre-place a page at the exact default path `sync_entities` would
-    # compute for Package "widgets" (`packages/widgets.md`), authored before
-    # anyone filled in `resource:`.
-    unregistered = bundle_root / "packages" / "widgets.md"
+    # compute for Package "widgets" (`repositories/repo-a/packages/widgets.md`),
+    # authored before anyone filled in `resource:`.
+    unregistered = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
     unregistered.parent.mkdir(parents=True, exist_ok=True)
     original_text = (
         '---\ntype: Package\ntitle: "hand-authored, not yet linked to the graph"\ndescription: ""\n---\n\n'
@@ -432,11 +486,11 @@ def test_sync_refuses_to_overwrite_unregistered_page_at_default_path(tmp_path: P
 
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
-        preexisting = bundle.concept("packages/widgets")
+        preexisting = bundle.concept("repositories/repo-a/packages/widgets")
         assert preexisting is not None
         assert preexisting.fm.resource is None  # confirms it's invisible to resource_index()
 
-        with pytest.raises(ValueError, match="packages/widgets") as exc_info:
+        with pytest.raises(ValueError, match="repositories/repo-a/packages/widgets") as exc_info:
             sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
 
     assert "resource" in str(exc_info.value)
@@ -562,9 +616,9 @@ def test_by_repository_groups_every_placed_page_under_its_repo(tmp_path: Path) -
 
     assert set(result.by_repository) == {"repo-a"}
     assert result.by_repository["repo-a"] == (
-        "packages/gadgets",
-        "packages/widgets",
         "repositories/repo-a",
+        "repositories/repo-a/packages/gadgets",
+        "repositories/repo-a/packages/widgets",
     )
     # Dependencies are ecosystem-wide and belong to no repository -- confirm
     # the seeded one is absent from every `by_repository` value, not merely
@@ -583,7 +637,7 @@ def test_the_repository_page_gains_a_contents_section(tmp_path: Path) -> None:
         sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
 
     page = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
-    assert "## Contents\n\n### Packages\n\n- [widgets](/packages/widgets.md)\n" in page
+    assert "## Contents\n\n### Packages\n\n- [widgets](/repositories/repo-a/packages/widgets.md)\n" in page
     # Empty groups are omitted, and the repo does not list itself.
     assert "### Apps" not in page
     assert "/repositories/repo-a.md" not in page
@@ -613,7 +667,7 @@ def test_a_repository_page_missing_contents_is_scaffolded_then_regenerated(tmp_p
 
     after = page.read_text(encoding="utf-8")
     assert "Hand-written prose." in after
-    assert "- [widgets](/packages/widgets.md)" in after
+    assert "- [widgets](/repositories/repo-a/packages/widgets.md)" in after
     assert not [item for item in result.skipped if "section-missing" in item]
 
 
@@ -680,7 +734,7 @@ def test_plan_entities_flags_repo_as_stale_when_a_new_sibling_would_be_added(tmp
 
     assert "repositories/repo-a" in result.written
     page_after = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
-    assert "### Apps\n\n- [cli-app](/apps/cli-app.md)" in page_after
+    assert "### Apps\n\n- [cli-app](/repositories/repo-a/apps/cli-app.md)" in page_after
 
 
 def test_a_second_sync_with_no_graph_change_writes_nothing(tmp_path: Path) -> None:

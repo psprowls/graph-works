@@ -17,6 +17,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from code_wiki_okf.entities.lanes import is_entity_lane_page
+
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import wiki_smoke
@@ -39,14 +41,28 @@ def test_smoke_run_creates_one_mirror_page_per_tracked_file(tmp_path: Path) -> N
     the count checked is exactly the one-page-per-tracked-file contract the
     coverage gap names, not an incidental directory-index count that would
     change if the fixture's directory depth changed.
+
+    Entity pages (Package, App, TestSuite, AgentPlugin, and the Repository
+    page itself) are also excluded since they're metadata pages, not file
+    mirrors -- checked structurally via `is_entity_lane_page` (the same
+    predicate `sync/snapshot.py` and `graph_works_core.scan.commands` key
+    off) rather than a parent-directory-name heuristic, so a mirrored
+    source file that happens to live under a directory literally named
+    `packages/` etc. is never mistaken for an entity page.
     """
-    result = wiki_smoke.run(_REAL_CHECKOUT, tmp_path / "bundle", graph_dir=tmp_path / "graph")
+    bundle_dir = tmp_path / "bundle"
+    result = wiki_smoke.run(_REAL_CHECKOUT, bundle_dir, graph_dir=tmp_path / "graph")
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
 
-    mirror_dir = tmp_path / "bundle" / "repositories" / result.repo_name
-    mirror_pages = [p for p in mirror_dir.rglob("*.md") if p.name != "index.md"]
+    mirror_dir = bundle_dir / "repositories" / result.repo_name
+    # Exclude index.md files (directory listings) and entity lane pages.
+    mirror_pages = [
+        p
+        for p in mirror_dir.rglob("*.md")
+        if p.name != "index.md" and not is_entity_lane_page(p.relative_to(bundle_dir).with_suffix("").as_posix())
+    ]
     assert len(mirror_pages) == _tracked_file_count(_REAL_CHECKOUT)
 
 

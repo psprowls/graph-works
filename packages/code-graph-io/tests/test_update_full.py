@@ -171,12 +171,11 @@ def test_unchanged_deriver_version_still_short_circuits(tmp_path: Path) -> None:
         conn.close()
 
 
-def test_update_honors_graphignore(tmp_path: Path) -> None:
+def test_run_workspace_honors_member_ignore(tmp_path: Path) -> None:
     init_repo(tmp_path)
     write_and_commit(
         tmp_path,
         {
-            ".graphignore": "generated\n",
             "pyproject.toml": '[project]\nname = "demo"\nversion = "0.1.1"\n',
             "src/a.py": "def keep_me():\n    return 1\n",
             "generated/auto.py": "def skip_me():\n    return 2\n",
@@ -184,13 +183,73 @@ def test_update_honors_graphignore(tmp_path: Path) -> None:
         "init",
     )
 
-    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
+    update.run_workspace([tmp_path], graph_dir=graph_dir(tmp_path), full=True, member_ignore=[("generated/**",)])
 
     conn = _open_ro(tmp_path)
     try:
         names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='function'").fetchall()}
         assert "keep_me" in names
         assert "skip_me" not in names
+        paths = {row[0] for row in conn.execute("SELECT path FROM nodes WHERE kind='file'").fetchall()}
+        assert not any(p is not None and p.startswith("generated/") for p in paths)
+    finally:
+        conn.close()
+
+
+def test_run_workspace_full_recompute_prunes_newly_ignored_nodes(tmp_path: Path) -> None:
+    """Regression: the full-mode tracked-paths recompute must honor `ignore`
+    too, not just _process_files — a file present in a prior full build must
+    be pruned once a later full build ignores it."""
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "demo"\nversion = "0.1.1"\n',
+            "src/a.py": "def keep_me():\n    return 1\n",
+            "generated/auto.py": "def skip_me():\n    return 2\n",
+        },
+        "init",
+    )
+
+    # First full build: nothing ignored yet — skip_me should exist.
+    update.run_workspace([tmp_path], graph_dir=graph_dir(tmp_path), full=True)
+    conn = _open_ro(tmp_path)
+    try:
+        names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='function'").fetchall()}
+        assert "skip_me" in names
+    finally:
+        conn.close()
+
+    # Second full build: generated/** is now ignored — skip_me must be pruned.
+    update.run_workspace([tmp_path], graph_dir=graph_dir(tmp_path), full=True, member_ignore=[("generated/**",)])
+    conn = _open_ro(tmp_path)
+    try:
+        names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='function'").fetchall()}
+        assert "keep_me" in names
+        assert "skip_me" not in names
+    finally:
+        conn.close()
+
+
+def test_run_workspace_member_ignore_defaults_to_none_per_member(tmp_path: Path) -> None:
+    """Omitting member_ignore must behave identically to today: no member
+    gets an IgnoreSpec, only DEFAULT_SKIP_DIRS applies."""
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "demo"\nversion = "0.1.1"\n',
+            "generated/auto.py": "def keep_me():\n    return 1\n",
+        },
+        "init",
+    )
+
+    update.run_workspace([tmp_path], graph_dir=graph_dir(tmp_path), full=True)
+
+    conn = _open_ro(tmp_path)
+    try:
+        names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='function'").fetchall()}
+        assert "keep_me" in names
     finally:
         conn.close()
 

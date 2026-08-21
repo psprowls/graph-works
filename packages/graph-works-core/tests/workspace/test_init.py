@@ -69,12 +69,12 @@ def test_apply_creates_every_layout_directory(tmp_path):
         assert directory.is_dir(), directory
 
 
-# --- act 2: the workspace's own gitignore -----------------------------------
+# --- act 2: the workspace's own gitignore, nested under _gw/ ----------------
 
 
 def test_the_gitignore_holds_the_two_gitignored_members(tmp_path):
     result = _init(tmp_path / "works")
-    text = (result.layout.root / ".gitignore").read_text(encoding="utf-8")
+    text = (result.layout.root / "_gw" / ".gitignore").read_text(encoding="utf-8")
     assert "/_cache/" in text
     assert "/worktrees/" in text
 
@@ -91,9 +91,11 @@ def test_the_repo_gitignore_is_never_edited(tmp_path):
 def test_a_hand_written_gitignore_gains_only_the_missing_entry(tmp_path):
     root = tmp_path / "works"
     root.mkdir()
-    (root / ".gitignore").write_text("/_cache/\n*.tmp", encoding="utf-8")
+    gw = root / "_gw"
+    gw.mkdir()
+    (gw / ".gitignore").write_text("/_cache/\n*.tmp", encoding="utf-8")
     _init(root)
-    text = (root / ".gitignore").read_text(encoding="utf-8")
+    text = (gw / ".gitignore").read_text(encoding="utf-8")
     assert text.count("/_cache/") == 1
     assert "*.tmp" in text
     assert "/worktrees/" in text
@@ -107,7 +109,30 @@ def test_a_workspace_with_no_gitignorable_members_writes_no_gitignore(tmp_path):
         encoding="utf-8",
     )
     apply_init(plan_init(root, today=TODAY))
-    assert not (root / ".gitignore").exists()
+    assert not (root / "_gw" / ".gitignore").exists()
+
+
+# --- the ticket's own acceptance: everything collapses into _gw/ ------------
+
+
+def test_a_fresh_bootstrap_produces_exactly_the_gw_tree(tmp_path):
+    """`<root>/{workspace.yaml, _gw/, okf/}`, with `_gw/` holding exactly the
+    five relocated members -- the ticket's own "bootstrap layout test" line,
+    made concrete. `_repositories.yaml` now lives inside `_gw/`, not `okf/`
+    (D2, landed by this item)."""
+    result = _init(tmp_path / "works")
+    root = result.layout.root
+
+    assert {path.name for path in root.iterdir()} == {"workspace.yaml", "_gw", "okf", "CLAUDE.md", "AGENTS.md"}
+    assert {path.name for path in (root / "_gw").iterdir()} == {
+        "_config",
+        "_cache",
+        "worktrees",
+        ".gitignore",
+        "_repositories.yaml",
+    }
+    assert (root / "_gw" / "_repositories.yaml").is_file()
+    assert not (root / "okf" / "_repositories.yaml").exists()
 
 
 # --- act 3: the manifest ----------------------------------------------------
@@ -163,7 +188,7 @@ def test_repositories_yaml_is_written_from_the_layout(tmp_path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
     result = _init(repo / ".works")
-    config = load_config(result.layout.bundle_dir)
+    config = load_config(result.layout.bundle_dir, config_path=result.layout.repositories_path)
     assert config.graph_dir == result.layout.cache_dir
     assert config.declarations_dir == result.layout.config_dir
     assert [entry.name for entry in config.repos] == [repo.name]
@@ -175,7 +200,7 @@ def test_repositories_yaml_outside_a_repo_declares_no_repository(tmp_path):
     from code_wiki_okf.config import load_config
 
     result = _init(tmp_path / "works")
-    config = load_config(result.layout.bundle_dir)
+    config = load_config(result.layout.bundle_dir, config_path=result.layout.repositories_path)
     assert config.repos == ()
     assert config.graph_dir == result.layout.cache_dir
 
@@ -187,17 +212,59 @@ def test_an_explicit_repo_root_overrides_detection(tmp_path):
     elsewhere.mkdir()
     result = _init(tmp_path / "works", repo_root=elsewhere)
     assert result.layout.repo_root == elsewhere.resolve()
-    assert [entry.name for entry in load_config(result.layout.bundle_dir).repos] == ["elsewhere"]
+    config = load_config(result.layout.bundle_dir, config_path=result.layout.repositories_path)
+    assert [entry.name for entry in config.repos] == ["elsewhere"]
 
 
 def test_a_hand_edited_repositories_yaml_is_left_alone(tmp_path):
     root = tmp_path / "works"
     _init(root)
-    path = root / "okf" / "_repositories.yaml"
+    path = root / "_gw" / "_repositories.yaml"
     edited = path.read_text(encoding="utf-8") + "\nstate_gate:\n  enabled: false\n"
     path.write_text(edited, encoding="utf-8")
     _init(root)
     assert path.read_text(encoding="utf-8") == edited
+
+
+# --- act 7: CLAUDE.md / AGENTS.md, seeding the prompt layer's project context ---
+
+
+def test_a_fresh_init_writes_both_context_files_with_identical_bodies(tmp_path):
+    result = _init(tmp_path / "works")
+    claude = (result.layout.root / "CLAUDE.md").read_text(encoding="utf-8")
+    agents = (result.layout.root / "AGENTS.md").read_text(encoding="utf-8")
+    assert claude == agents
+    assert "## Style" in claude
+    assert "## Log format" in claude
+
+
+def test_context_files_land_in_the_repo_the_workspace_lives_in(tmp_path):
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    result = _init(repo / ".works")
+    assert (repo / "CLAUDE.md").is_file()
+    assert (repo / "AGENTS.md").is_file()
+    assert not (result.layout.root / "CLAUDE.md").exists()
+
+
+def test_a_hand_edited_context_file_keeps_its_prose_on_reinit(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    path = root / "CLAUDE.md"
+    edited = path.read_text(encoding="utf-8") + "\n## Extra\n\nTeam-specific note.\n"
+    path.write_text(edited, encoding="utf-8")
+    _init(root)
+    assert "Team-specific note." in path.read_text(encoding="utf-8")
+
+
+def test_render_project_context_reads_back_a_freshly_bootstrapped_workspace(tmp_path):
+    from graph_works_core.prompts.project_context import render_project_context
+
+    result = _init(tmp_path / "works")
+    rendered = render_project_context(result.layout)
+    assert rendered != ""
+    assert "§Style" in rendered
+    assert "§Log format" in rendered
 
 
 # --- idempotence ------------------------------------------------------------
@@ -265,25 +332,22 @@ def test_a_fresh_plan_renders_every_act_it_will_perform(tmp_path):
     lines = plan_init(root, today=TODAY, topic="Demo").diff().splitlines()
 
     assert f"+ {root.resolve()}/" in lines
-    assert "+ .gitignore" in lines
+    assert "+ _gw/.gitignore" in lines
     assert "+ workspace.yaml" in lines
-    assert "+ okf/_repositories.yaml" in lines
+    assert "+ _gw/_repositories.yaml" in lines
     assert "+ index.md" in lines
     assert "+ _schema/Package.schema.json" in lines
 
 
-def test_the_first_plan_over_reports_the_installer_seeded_repositories_file(tmp_path):
-    """The asymmetry `WorkspacePlan`'s docstring records, asserted as behavior.
-
-    Installer previews are computed against the filesystem as it stands, so on a
-    fresh root `code_wiki_okf` still previews `_repositories.yaml` — a file act 4
-    will have written by the time its installer actually runs. The renderer must
-    report what the plan says, not what the apply will do.
-    """
+def test_a_fresh_plan_lists_repositories_yaml_exactly_once(tmp_path):
+    """`seed_repositories=False` on every installer removes the asymmetry
+    `WorkspacePlan`'s docstring used to document: `code_wiki_okf`'s own
+    preview no longer mentions `_repositories.yaml` at all, so act 4's write
+    is the only line that does."""
     lines = plan_init(tmp_path / "works", today=TODAY).diff().splitlines()
 
-    assert "+ okf/_repositories.yaml" in lines
-    assert "+ _repositories.yaml" in lines
+    assert lines.count("+ _gw/_repositories.yaml") == 1
+    assert "+ _repositories.yaml" not in lines
 
 
 def test_a_second_plan_renders_no_additions(tmp_path):

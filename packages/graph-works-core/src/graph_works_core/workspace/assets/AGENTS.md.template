@@ -1,0 +1,54 @@
+# Graph-Works Workspace
+
+> **Workspace path:** `{{WORKSPACE_PATH}}`
+> **Initialized:** `{{INITIALIZED_AT}}`
+
+This is a graph-works workspace: a per-repo container for the knowledge graph, its
+config, and its work tracker. `okf/` is the OKF bundle (the content itself); `_gw/`
+holds everything graph-works owns about it.
+
+## Layout
+
+- `workspace.yaml` — the workspace manifest. Layout overrides, roles, and the seeded
+  relay tail live here.
+- `okf/` — the OKF bundle: `index.md`, `log.md`, and the concept/entity/work pages the
+  installed verticals write.
+- `_gw/_config/` — declarations the installed verticals own (schemas, sections, tags).
+- `_gw/_cache/` — the derived code graph and traces. Gitignored.
+- `_gw/worktrees/` — feature-work worktrees created under this workspace. Gitignored.
+- `_gw/_repositories.yaml` — the scanned repositories, seeded from the layout at init.
+
+## Plugins installed
+
+<!-- graph-works:auto:installers:start -->
+{{INSTALLER_LIST}}
+<!-- graph-works:auto:installers:end -->
+
+The block above is auto-rendered from the installer roster every time
+`graph_works_core.workspace.init` runs. Hand-edit anything outside the markers; it
+will be preserved.
+
+## Conventions for LLM agents
+
+- Cite with markdown links and `` `code-path:line` `` — this vault uses OKF markdown
+  links, not `[[wikilinks]]`.
+- Treat each installed vertical's own schema doc as authoritative for its directory.
+
+## Log format
+
+```
+## [YYYY-MM-DD] <op> | <title>
+<optional detail — which pages touched, what changed>
+```
+
+Valid ops: `scan`, `ingest`, `query`, `lint`, `create`, `update`, `delete`, `note`.
+
+Grep the log: `grep "^## \[" okf/log.md | tail -10`
+
+## Style
+
+- Be concise. Wiki pages are read, not generated.
+- Prefer short paragraphs. Bulleted lists where appropriate.
+- Cite aggressively with markdown links and `` `code-path:line` ``.
+- When you're not sure, say so in the page. Don't invent content.
+- Update `updated:` frontmatter whenever you touch a page.

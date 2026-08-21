@@ -32,7 +32,7 @@ def _configure_repositories(workspace: Path, *repos: Path) -> None:
     repository_rows = "\n".join(
         f"  repo-{index}:\n    path: {json.dumps(str(repo))}" for index, repo in enumerate(repos, start=1)
     )
-    (workspace / "okf" / "_repositories.yaml").write_text(
+    (workspace / "_gw" / "_repositories.yaml").write_text(
         f'graph_dir: "../_cache"\ndeclarations_dir: "."\nrepositories:\n{repository_rows or " {}"}\nignore: []\n',
         encoding="utf-8",
     )
@@ -290,7 +290,7 @@ def test_ingest_reports_unreadable_configuration_before_any_model_call(
     source = tmp_path / "source.md"
     source.write_text("# Source\n", encoding="utf-8")
 
-    def fail(_bundle_root: object) -> object:
+    def fail(_bundle_root: object, *, config_path: object = None) -> object:
         raise ConfigError("config.yaml is malformed")
 
     monkeypatch.setattr(ingest_module, "load_config", fail)

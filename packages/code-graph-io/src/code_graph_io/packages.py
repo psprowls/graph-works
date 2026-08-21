@@ -51,9 +51,16 @@ def _prune_vanished(
     conn: sqlite3.Connection,
     *,
     current_repo: str | None,
-    keep_keys: set[tuple[str, str]],
+    keep_keys: set[tuple[str, str, str]],
 ) -> None:
-    """Delete package/app nodes whose manifest is no longer discovered.
+    """Delete package/app nodes whose manifest facet is no longer discovered.
+
+    `keep_keys` is (kind, name, path) — kind-aware. A member's Package facet
+    is kept whenever its manifest is discovered at all; its App facet is
+    kept only while classify() still returns app signals THIS pass, so a
+    lost App facet is pruned even though the sibling Package's (name, path)
+    is still current. See the facet_of design: there is no more in-place
+    kind-flip, so a lost facet must be prunable independently of its sibling.
 
     Scoped to `current_repo`: a workspace member's build must only ever prune
     nodes stamped with its own repo. Unscoped, one member's `refresh()` would
@@ -63,11 +70,11 @@ def _prune_vanished(
     (schema.py) removes the node's edges along with it.
     """
     rows = conn.execute(
-        "SELECT id, name, path FROM nodes WHERE kind IN ('package', 'app') "
+        "SELECT id, kind, name, path FROM nodes WHERE kind IN ('package', 'app') "
         "AND ((? IS NULL AND repo IS NULL) OR repo = ?)",
         (current_repo, current_repo),
     ).fetchall()
-    stale_ids = [row[0] for row in rows if (row[1], row[2]) not in keep_keys]
+    stale_ids = [row[0] for row in rows if (row[1], row[2], row[3]) not in keep_keys]
     if stale_ids:
         placeholders = ",".join("?" for _ in stale_ids)
         conn.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", stale_ids)
@@ -116,13 +123,6 @@ def _dependency_registry_url(ecosystem: str, name: str) -> str:
 
 def _should_skip(manifest_path: Path, repo_root: Path, skip_dirs: frozenset[str]) -> bool:
     return bool(_ignore.should_skip(str(manifest_path), skip_dirs))
-
-
-def _is_plugin_root(manifest_dir: Path) -> bool:
-    """True when `manifest_dir` is a claude-code plugin root (has
-    `.claude-plugin/plugin.json`). Such a manifest is owned by the
-    agent_plugin detector, not the package emitter."""
-    return (manifest_dir / ".claude-plugin" / "plugin.json").exists()
 
 
 def _read_pyproject(path: Path) -> dict[str, Any] | None:
@@ -221,15 +221,11 @@ def _discover_manifests(repo_root: Path, skip_dirs: frozenset[str]) -> list[tupl
     for manifest_path in repo_root.rglob("pyproject.toml"):
         if _should_skip(manifest_path, repo_root, skip_dirs):
             continue
-        if _is_plugin_root(manifest_path.parent):
-            continue
         info = _read_pyproject(manifest_path)
         if info:
             found.append((manifest_path.parent, info))
     for manifest_path in repo_root.rglob("package.json"):
         if _should_skip(manifest_path, repo_root, skip_dirs):
-            continue
-        if _is_plugin_root(manifest_path.parent):
             continue
         info = _read_package_json(manifest_path)
         if info:
@@ -293,7 +289,7 @@ def build_workspace_index(members: list[Path]) -> dict[str, tuple[str, str, str,
         member = Path(member).resolve()
         ctx = repo_context(member)
         ruri = repo_uri(ctx)
-        skip_dirs = _ignore.load_skip_dirs(member)
+        skip_dirs = _ignore.DEFAULT_SKIP_DIRS
         for pkg_dir, info in _discover_manifests(member, skip_dirs):
             if info.get("virtual"):
                 continue
@@ -327,7 +323,7 @@ def refresh(
     that want a single owner should pick longest-prefix-wins.
     """
     repo_root = Path(repo_root).resolve()
-    skip_dirs = _ignore.load_skip_dirs(repo_root)
+    skip_dirs = _ignore.DEFAULT_SKIP_DIRS
     manifests = _discover_manifests(repo_root, skip_dirs)
 
     # build the workspace-package-name set + a normalized-name ->
@@ -337,12 +333,12 @@ def refresh(
     # resolve to the real node (mirroring derived_edges.py:148-153).
     workspace_names: set[str] = set()
     workspace_kinds: dict[str, tuple[str, str, str]] = {}
-    # (name, rel_path) of every manifest discovered THIS pass, scoped to
-    # repo_root only (not merged with global_ws below) — the keep-set for
-    # _prune_vanished. A manifest's kind can flip between builds (app<->package,
-    # see the kind-flip UPDATE further down), so identity here is (name, path),
-    # not (kind, name, path).
-    local_keys: set[tuple[str, str]] = set()
+    # (kind, name, path) triples, one per node this pass will keep — the
+    # keep-set for _prune_vanished. Kind-aware (not just (name, path)): a
+    # member's Package facet is always kept, but its App facet is kept only
+    # while classify() still returns app signals, so a facet that disappears
+    # this pass is pruned independently of its still-current Package sibling.
+    local_keys: set[tuple[str, str, str]] = set()
     for pkg_dir, info in manifests:
         if info.get("virtual"):
             # A `[tool.uv] package = false` root is not a workspace member:
@@ -354,12 +350,16 @@ def refresh(
         ws_kind, _app_kind, _app_signals = classify(info, pkg_dir)
         norm = _normalize_name(info["name"])
         workspace_names.add(norm)
-        local_keys.add((info["name"], rel))
+        local_keys.add(("package", info["name"], rel))
+        if ws_kind == "app":
+            local_keys.add(("app", info["name"], rel))
         # Store the workspace package's ACTUAL node name (info["name"]) — the
         # consumer may declare it under a different separator/case spelling, but
         # the edge dst must match the real node so it resolves instead of
-        # inserting a stub.
-        workspace_kinds[norm] = (ws_kind, info["name"], rel)
+        # inserting a stub. Internal-dependency edges always target the
+        # Package node under the facet model — "package" here, not ws_kind,
+        # regardless of whether this member is also faceted as an app.
+        workspace_kinds[norm] = ("package", info["name"], rel)
 
     # Multi-repo: merge the cross-member package index so a dependency
     # naming a sibling-repo package is recognized as internal (not emitted as an
@@ -399,16 +399,19 @@ def refresh(
             consumer_rel_path = ""
             consumer_kind = "repository"
         else:
-            # derive kind, URI, and attrs in one inline pass.
-            new_kind, app_kind, app_signals = classify(info, pkg_dir)
-            new_uri = app_uri(ctx, info["name"]) if new_kind == "app" else pkg_uri(ctx, info["name"])
+            # Package is unconditional; App is an ADDITIVE facet — not an
+            # alternative kind. classify() still decides whether the app
+            # facet exists, but no longer decides which single node this
+            # manifest becomes.
+            ws_kind, app_kind, app_signals = classify(info, pkg_dir)
+            pkg_uri_val = pkg_uri(ctx, info["name"])
 
             # Hoist contained-file list so it's available for the defensive language
             # fallback below AND for the contains-edge loop that follows attrs.
             prefix = f"{rel_prefix}/" if rel_prefix else ""
             contained = _file_nodes_under(conn, prefix, current_repo)
 
-            attrs: dict[str, Any] = {
+            base_attrs: dict[str, Any] = {
                 "version": info["version"],
                 # source — stored in attrs_json so wiki-io can
                 # read node.attrs["description"] uniformly across kinds.
@@ -420,65 +423,50 @@ def refresh(
                 # manifests which have no devDependencies field).
                 "dev_dependencies": info.get("dev_dependencies", []),
                 "language": info["language"],
-                "uri": new_uri,
             }
             # Defensive fallback: if the manifest reader did not declare a language
             # (future manifest types), infer it from the dominant language of the
             # contained file nodes. Normal builds never reach this branch.
-            if not attrs.get("language"):
+            if not base_attrs.get("language"):
                 dom = _dominant_language(conn, contained, current_repo)
                 if dom:
-                    attrs["language"] = dom
-            if new_kind == "app":
-                # invariant: only App nodes carry app_kind / app_signals.
-                attrs["app_kind"] = app_kind
-                attrs["app_signals"] = app_signals
+                    base_attrs["language"] = dom
 
-            # probe the opposite-kind row from a prior run and flip
-            # it in place so the row id is preserved (every inbound edge FK stays
-            # valid). The outer store.transaction() boundary set by update.run()
-            # gives this UPDATE read-your-own-writes semantics for the subsequent
-            # upsert_records call.
-            other_kind = "package" if new_kind == "app" else "app"
-            other_id = upsert._node_id(conn, (other_kind, info["name"], package_path))
-            if other_id is not None:
-                # Mirror _upsert_node's convention: the "uri" key lives in the
-                # nodes.uri column, not attrs_json.
-                attrs_for_db = {k: v for k, v in attrs.items() if k != "uri"}
-                conn.execute(
-                    "UPDATE nodes SET kind=?, uri=?, attrs_json=? WHERE id=?",
-                    (
-                        new_kind,
-                        new_uri,
-                        json.dumps(attrs_for_db, sort_keys=True),
-                        other_id,
-                    ),
-                )
-
-            nodes = [
-                GraphNode(
-                    kind=new_kind,
-                    name=info["name"],
-                    path=package_path,
-                    line=None,
-                    attrs=attrs,
-                )
-            ]
+            pkg_attrs = {**base_attrs, "uri": pkg_uri_val}
+            nodes = [GraphNode(kind="package", name=info["name"], path=package_path, line=None, attrs=pkg_attrs)]
             edges = []
+            # contains/used_by/depends_on_package always source from the
+            # Package node — the App facet (if any) carries no
+            # file-containment or dependency edges of its own.
             for file_path in contained:
                 edges.append(
                     GraphEdge(
-                        src=(new_kind, info["name"], package_path),
+                        src=("package", info["name"], package_path),
                         dst=("file", file_path, file_path),
                         kind="contains",
                         attrs={},
                     )
                 )
+
+            if ws_kind == "app":
+                # invariant: only App nodes carry app_kind / app_signals.
+                app_uri_val = app_uri(ctx, info["name"])
+                app_attrs = {**base_attrs, "uri": app_uri_val, "app_kind": app_kind, "app_signals": app_signals}
+                nodes.append(GraphNode(kind="app", name=info["name"], path=package_path, line=None, attrs=app_attrs))
+                edges.append(
+                    GraphEdge(
+                        src=("package", info["name"], package_path),
+                        dst=("app", info["name"], package_path),
+                        kind="facet_of",
+                        attrs={},
+                    )
+                )
+
             upsert.upsert_records(conn, as_graph_records(nodes=nodes, edges=edges))
 
             consumer_name = info["name"]
             consumer_rel_path = package_path
-            consumer_kind = new_kind
+            consumer_kind = "package"
 
         # collect deps from manifests and feed the shared
         # dep_acc / used_by_pairs / internal_pkg_edges accumulators.

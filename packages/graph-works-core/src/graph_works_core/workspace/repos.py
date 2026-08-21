@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from code_wiki_okf.config import CONFIG_FILENAME, ConfigError, load_config
+from code_wiki_okf.config import ConfigError, load_config
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -44,9 +44,9 @@ def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tu
       line `code_wiki_okf.config` draws for itself and `_routing_rules` draws
       for a hand-edited manifest.
     """
-    path = layout.bundle_dir / CONFIG_FILENAME
+    path = layout.repositories_path
     try:
-        config = load_config(layout.bundle_dir)
+        config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     except OSError:
         return None, f"{path}: absent, so this workspace declares no code repository"
     except ConfigError as exc:

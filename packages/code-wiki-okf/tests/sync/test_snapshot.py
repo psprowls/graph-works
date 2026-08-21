@@ -120,7 +120,7 @@ def test_package_lane_orphan_is_detected_after_removal_from_graph(tmp_path: Path
     with open_reader(graph_dir=graph_dir) as reader:
         sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
 
-    package_doc = load_bundle(bundle_root).concept("packages/widgets")
+    package_doc = load_bundle(bundle_root).concept("repositories/repo-a/packages/widgets")
     assert package_doc is not None
     package_resource = package_doc.fm.resource
     assert package_resource is not None
@@ -273,7 +273,7 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
     same `repositories/` prefix. Removing the mirrored file's *source* must
     orphan only the mirror page, never the Repository entity page whose own
     resource (`repo:...`) is unrelated and still current. This is the
-    guarantee `_is_entity_repository_page`'s depth check exists for.
+    guarantee `is_entity_lane_page`'s depth check exists for.
     """
     from code_wiki_okf.git_state import head_commit
     from code_wiki_okf.mirror.apply import apply_mirror

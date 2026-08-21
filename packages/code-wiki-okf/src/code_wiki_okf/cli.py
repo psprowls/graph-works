@@ -14,7 +14,7 @@ import typer
 from code_graph_io import open_reader
 from okf_ext.bundle import WriteFailure
 from okf_ext.placement import placement_rule
-from okf_ext.schemas import declared_directories, load_schemas, schema_rule
+from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
 from okf_ext.tags import load_vocabulary, vocabulary_rule
@@ -297,7 +297,7 @@ def validate(
             schema_rule(schema_set),
             section_rule(section_set),
             vocabulary_rule(vocabulary),
-            placement_rule(declared_directories(schema_set), depth=lanes.ENTITY_DEPTH, severity="error"),
+            placement_rule(lanes.placement_directories(schema_set), depth=lanes.ENTITY_DEPTH, severity="error"),
         ],
         strict=strict,
     )

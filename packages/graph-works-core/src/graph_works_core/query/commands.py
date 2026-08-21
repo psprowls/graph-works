@@ -994,7 +994,7 @@ async def _run_fixed_query(
     """
     bundle = prepared.bundle
     layout = prepared.layout
-    config = load_config(layout.bundle_dir)
+    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     schema_set = load_schemas(config.declarations_dir / "_schema")
     librarian_system = build_librarian_system(schema_set=schema_set)
 

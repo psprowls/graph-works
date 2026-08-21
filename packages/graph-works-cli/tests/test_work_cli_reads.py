@@ -117,7 +117,7 @@ def test_lint_exits_success_when_ok(workspace: Path) -> None:
 
 
 def test_lint_maps_a_config_error_to_schema_mismatch(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(_root: Path) -> object:
+    def boom(_root: Path, **_kwargs: object) -> object:
         raise work_main.ConfigError("bad declarations")
 
     monkeypatch.setattr(work_main, "load_config", boom)
@@ -127,7 +127,7 @@ def test_lint_maps_a_config_error_to_schema_mismatch(workspace: Path, monkeypatc
 
 
 def test_lint_config_os_error_is_reported(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(_root: Path) -> object:
+    def boom(_root: Path, **_kwargs: object) -> object:
         raise OSError("disk gone")
 
     monkeypatch.setattr(work_main, "load_config", boom)

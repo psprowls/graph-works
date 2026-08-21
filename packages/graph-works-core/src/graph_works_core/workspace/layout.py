@@ -26,10 +26,18 @@ MANIFEST_FILENAME = "workspace.yaml"
 #: What a `.git` walk-up defaults to: `<repo>/.works`.
 DEFAULT_WORKSPACE_NAME = ".works"
 
+#: The one directory every graph-works-owned member nests under, except
+#: `workspace.yaml` itself (the discovery anchor, D1) and `bundle_dir` (the
+#: human's content, D5). Not an override key -- there is no `WorkspaceLayout`
+#: field for it, only this shared literal prefix and the fixed location
+#: `.gitignore` nests under.
+GW_DIRNAME = "_gw"
+
 DEFAULT_BUNDLE_DIR = "okf"
-DEFAULT_CACHE_DIR = "_cache"
-DEFAULT_CONFIG_DIR = "_config"
-DEFAULT_WORKTREES_DIR = "worktrees"
+DEFAULT_CACHE_DIR = f"{GW_DIRNAME}/_cache"
+DEFAULT_CONFIG_DIR = f"{GW_DIRNAME}/_config"
+DEFAULT_WORKTREES_DIR = f"{GW_DIRNAME}/worktrees"
+DEFAULT_REPOSITORIES_PATH = f"{GW_DIRNAME}/_repositories.yaml"
 
 
 def _member(root: Path, raw: str) -> Path:
@@ -56,6 +64,7 @@ class WorkspaceLayout:
     cache_dir: Path
     bundle_dir: Path
     worktrees_dir: Path
+    repositories_path: Path
     repo_root: Path | None = None
 
     @property
@@ -69,14 +78,18 @@ class WorkspaceLayout:
 
     @property
     def gitignore_entries(self) -> tuple[str, ...]:
-        """Lines for `<root>/.gitignore` — the gitignored members, root-relative.
+        """Lines for `<root>/_gw/.gitignore` — the gitignored members, relative
+        to `_gw/` rather than the workspace root.
 
         Derived from the resolved members rather than hard-coded, so an
         override moves the entry with the directory. A member relocated
-        outside the workspace contributes nothing: `<root>/.gitignore` cannot
-        ignore what is not under it.
+        outside `_gw/` contributes nothing: `<root>/_gw/.gitignore` cannot
+        ignore what is not under it -- the same "outside the anchor, not our
+        problem" behavior this had relative to `root` before, now scoped one
+        level deeper.
         """
-        relatives = (_relative(self.cache_dir, self.root), _relative(self.worktrees_dir, self.root))
+        gw_root = self.root / GW_DIRNAME
+        relatives = (_relative(self.cache_dir, gw_root), _relative(self.worktrees_dir, gw_root))
         return tuple(f"/{relative}/" for relative in relatives if relative is not None)
 
     @property
@@ -100,9 +113,10 @@ def layout_for(
     config_dir: str = DEFAULT_CONFIG_DIR,
     cache_dir: str = DEFAULT_CACHE_DIR,
     worktrees_dir: str = DEFAULT_WORKTREES_DIR,
+    repositories_path: str = DEFAULT_REPOSITORIES_PATH,
     repo_root: str | Path | None = None,
 ) -> WorkspaceLayout:
-    """Build the layout for *root*, applying the manifest's four overrides.
+    """Build the layout for *root*, applying the manifest's five overrides.
 
     The single constructor, called by `discovery.resolve` and `init.plan_init`.
     It is not a path lookup: it takes every override at once and returns the
@@ -116,6 +130,7 @@ def layout_for(
         cache_dir=_member(resolved, cache_dir),
         bundle_dir=_member(resolved, bundle_dir),
         worktrees_dir=_member(resolved, worktrees_dir),
+        repositories_path=_member(resolved, repositories_path),
         repo_root=None if repo_root is None else Path(repo_root).expanduser().resolve(),
     )
 
@@ -124,8 +139,10 @@ __all__ = [
     "DEFAULT_BUNDLE_DIR",
     "DEFAULT_CACHE_DIR",
     "DEFAULT_CONFIG_DIR",
+    "DEFAULT_REPOSITORIES_PATH",
     "DEFAULT_WORKSPACE_NAME",
     "DEFAULT_WORKTREES_DIR",
+    "GW_DIRNAME",
     "MANIFEST_FILENAME",
     "WorkspaceLayout",
     "layout_for",

@@ -41,7 +41,7 @@ def _full_schema_set(tmp_path) -> SchemaSet:
     `code_wiki_okf`'s and `work_tracker_okf`'s schemas.
     """
     init = apply_init(plan_init(tmp_path, today=_TODAY, topic="Prompt tests", repo_root=tmp_path))
-    config = load_config(init.layout.bundle_dir)
+    config = load_config(init.layout.bundle_dir, config_path=init.layout.repositories_path)
     return load_schemas(config.declarations_dir / "_schema")
 
 

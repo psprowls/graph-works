@@ -47,11 +47,13 @@ def workspace(tmp_path):
     """A `.works/` layout whose bundle carries the declarations, plus material."""
     root = tmp_path / ".works"
     root.mkdir()
-    bundle_root = make_bundle(root)  # -> <root>/okf
+    make_bundle(root)  # -> <root>/okf
+    layout = layout_for(root)
     # `repositories` is a MAPPING keyed by repo name, not a list -- see
     # `code_wiki_okf.config.load_config`. `declarations_dir` is absent, which
     # means "at the bundle root", where `make_bundle` installed the seeds.
-    (bundle_root / "_repositories.yaml").write_text(
+    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.repositories_path.write_text(
         f"graph_dir: {tmp_path / 'graph'}\nrepositories:\n  repo:\n    path: {tmp_path / 'repo'}\n",
         encoding="utf-8",
     )
@@ -59,7 +61,7 @@ def workspace(tmp_path):
     (repo / "docs").mkdir(parents=True)
     material = repo / "docs" / "thing.md"
     material.write_text("# A Thing\n\nSome prose about a thing.\n", encoding="utf-8")
-    return layout_for(root), repo, material
+    return layout, repo, material
 
 
 def _models(monkeypatch, *, ingestor=_RESPONSE, extractor=_SUGGESTIONS, reasoner="analysis"):

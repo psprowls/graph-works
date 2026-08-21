@@ -117,9 +117,10 @@ def _process_files(
     changed: Iterable[tuple[str, str]],
     skip_dirs: frozenset[str],
     repo_uri_val: str,
+    ignore: _ignore.IgnoreSpec,
 ) -> None:
     for status, rel in changed:
-        if _ignore.should_skip(rel, skip_dirs):
+        if _ignore.should_skip(rel, skip_dirs, ignore):
             continue
         if not _is_parseable(rel):
             continue
@@ -201,6 +202,7 @@ def _update_one_repo(
     full: bool,
     global_workspace: dict[str, tuple[str, str, str, str]],
     deferred: list[packages.CrossRepoLink],
+    ignore: _ignore.IgnoreSpec,
 ) -> None:
     """Run the single-repo pipeline for one member, then stamp its nodes.
 
@@ -219,7 +221,7 @@ def _update_one_repo(
 
     ctx = repo_context(repo_root)
     repo_uri_val = repo_uri(ctx)
-    skip_dirs = _ignore.load_skip_dirs(repo_root)
+    skip_dirs = _ignore.DEFAULT_SKIP_DIRS
     commit_key = f"last_indexed_commit:{repo_uri_val}"
     prev = _get_metadata(conn, commit_key)
     changed = _changed_files(repo_root, full=full, prev=prev)
@@ -232,7 +234,7 @@ def _update_one_repo(
     # unscoped.
     upsert.set_current_repo(conn, repo_uri_val)
     try:
-        _process_files(conn, repo_root, changed, skip_dirs, repo_uri_val)
+        _process_files(conn, repo_root, changed, skip_dirs, repo_uri_val, ignore)
         deferred_repo_deps: list[packages.RepositoryDepLink] = []
         packages.refresh(
             conn,
@@ -263,7 +265,7 @@ def _update_one_repo(
         # this cleanup and diffs against the freshly discovered manifest set.
         if full:
             tracked_paths = [
-                rel for _, rel in changed if _is_parseable(rel) and not _ignore.should_skip(rel, skip_dirs)
+                rel for _, rel in changed if _is_parseable(rel) and not _ignore.should_skip(rel, skip_dirs, ignore)
             ]
             if tracked_paths:
                 placeholders = ",".join("?" for _ in tracked_paths)
@@ -291,15 +293,19 @@ def _update_one_repo(
             test_suites,
         )
 
-        structural_nodes.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)
+        structural_nodes.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
         # Must run after structural_nodes.emit: a virtual manifest's
         # dependencies are re-sourced to the Repository node, which
         # structural_nodes.emit is what creates.
         packages.link_repository_dependencies(conn, deferred_repo_deps, ctx=ctx)
-        agent_plugins.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)
-        entry_points.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)
-        test_suites.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs)
-        resolve.sweep_skip_dir_files(conn, skip_dirs)
+        agent_plugins.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
+        # Packages emitted above (packages.refresh) and plugins emitted just
+        # now may share a directory; link the Package facet to its
+        # agent_plugin node now that both node sets exist.
+        agent_plugins.link_agent_plugin_facets(conn, repo_root=repo_root, ctx=ctx)
+        entry_points.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
+        test_suites.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
+        resolve.sweep_skip_dir_files(conn, skip_dirs, ignore)
         # Repo stamp: claim every node this member produced that isn't already
         # owned. builtin / dependency nodes stay global (repo NULL).
         conn.execute(
@@ -325,7 +331,12 @@ def run(repo_root: Path, *, graph_dir: Path, full: bool = False, lock_timeout_ms
 
 
 def run_workspace(
-    members: list[Path], *, graph_dir: Path, full: bool = False, lock_timeout_ms: int | None = None
+    members: list[Path],
+    *,
+    graph_dir: Path,
+    full: bool = False,
+    lock_timeout_ms: int | None = None,
+    member_ignore: list[tuple[str, ...]] | None = None,
 ) -> None:
     """Update the code graph for one or more member repos into one DB.
 
@@ -337,8 +348,18 @@ def run_workspace(
 
     `members` and `graph_dir` are independent: the graph directory need not sit
     inside — or above — any member repo.
+
+    `member_ignore` is index-aligned with `members` — the `ignore:` glob
+    patterns (global + per-repo, already merged by
+    `code_wiki_okf.config.load_config`) that feed that member's `IgnoreSpec`.
+    Omitted or `None` compiles to an empty `IgnoreSpec` per member, so
+    `update.run`'s single-repo convenience wrapper (which has no config to
+    read `ignore:` from) and any existing direct caller keep today's
+    `DEFAULT_SKIP_DIRS`-only behavior unchanged.
     """
     members = [Path(m).resolve() for m in members]
+    if member_ignore is None:
+        member_ignore = [()] * len(members)
     graph_dir = Path(graph_dir).resolve()
     db_path = graph_dir / "code.db"
     if db_path.exists():
@@ -370,7 +391,7 @@ def run_workspace(
             global_workspace = packages.build_workspace_index(members)
             deferred: list[packages.CrossRepoLink] = []
             with store.transaction(conn):
-                for repo_root in members:
+                for repo_root, patterns in zip(members, member_ignore, strict=True):
                     _update_one_repo(
                         conn,
                         repo_root,
@@ -378,6 +399,7 @@ def run_workspace(
                         full=full,
                         global_workspace=global_workspace,
                         deferred=deferred,
+                        ignore=_ignore.compile_ignore(patterns),
                     )
                 packages.link_cross_repo_packages(conn, deferred)
                 resolve.sweep(conn)

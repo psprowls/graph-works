@@ -134,6 +134,40 @@ def test_python_stdlib_top_level_only(tmp_path: Path) -> None:
         conn.close()
 
 
+def test_faceted_member_used_by_edge_sourced_from_package(tmp_path: Path) -> None:
+    """A member with both a Package and an App node (facet model, e.g. app
+    signals from [project.scripts]) must get its used_by edge sourced from
+    the Package node, deterministically — never the App node."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_repo(repo)
+    write_and_commit(
+        repo,
+        {
+            "pyproject.toml": ('[project]\nname = "demo"\nversion = "0.1.1"\n[project.scripts]\ndemo = "demo:main"\n'),
+            "src/demo/__init__.py": "import os\n",
+        },
+        "init",
+    )
+    update.run(repo, graph_dir=graph_dir(repo), full=True)
+
+    conn = _open_ro(repo)
+    try:
+        # Sanity: this member is actually faceted under Task 1's facet model.
+        kinds = {r[0] for r in conn.execute("SELECT kind FROM nodes WHERE kind IN ('package', 'app') AND name='demo'")}
+        assert kinds == {"package", "app"}, f"expected faceted member, got kinds={kinds!r}"
+
+        rows = conn.execute(
+            "SELECT p.kind FROM edges e "
+            "JOIN nodes p ON e.src = p.id "
+            "JOIN nodes b ON e.dst = b.id "
+            "WHERE e.kind='used_by' AND p.name='demo' AND b.kind='builtin' AND b.name='os'"
+        ).fetchall()
+        assert [r[0] for r in rows] == ["package"], f"expected exactly one edge, from Package; got {rows!r}"
+    finally:
+        conn.close()
+
+
 # ---------------------------------------------------------------------------
 # Silent skip when node missing
 # ---------------------------------------------------------------------------

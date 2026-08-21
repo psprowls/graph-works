@@ -442,7 +442,7 @@ async def run_ingest_source(
     the same `origin`, so a re-ingest whose model picks a different title is
     still refused rather than landing a second page.
     """
-    config = load_config(layout.bundle_dir)
+    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     schema_set = load_schemas(config.declarations_dir / "_schema")
     kinds = source_kinds(schema_set)
     section_set = load_sections(config.declarations_dir / "_sections")

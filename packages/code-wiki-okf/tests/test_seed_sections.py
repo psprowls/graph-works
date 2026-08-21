@@ -13,11 +13,11 @@ _TODAY = date(2026, 1, 1)
 
 _EXPECTED_OWNED = {
     "Package": ("language", "version", "depends_on", "test_suites", "entry_points"),
-    "App": ("language", "version", "depends_on", "test_suites", "entry_points"),
+    "App": ("package",),
     "Dependency": ("ecosystem", "used_by", "versions_in_use"),
     "TestSuite": ("tested_packages", "suite_kind", "file_count"),
     "Repository": ("package_count",),
-    "AgentPlugin": ("ecosystem", "version"),
+    "AgentPlugin": ("ecosystem", "version", "package"),
     "File": ("language", "package", "role_flags"),
 }
 

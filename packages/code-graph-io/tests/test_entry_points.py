@@ -339,6 +339,35 @@ def test_shebang_script_does_not_emit_entry_point(tmp_path: Path) -> None:
     assert cnt == 0
 
 
+def test_faceted_member_gets_exactly_one_declares_entry_point_edge(tmp_path: Path) -> None:
+    """A member with both a Package and an App node (facet model) must not
+    double-emit declares_entry_point — exactly one edge, from the Package."""
+    pkg_dir = tmp_path / "myapp"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "myapp"\nversion = "0.1.0"\n[project.scripts]\nmyapp = "myapp.cli:main"\n'
+    )
+    _write_python_src(pkg_dir, "myapp.cli")
+    conn = _setup_db(tmp_path)
+    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+
+    # Sanity: this member is actually faceted (has both Package and App rows)
+    # under Task 1's facet model — otherwise this test would not exercise the
+    # bug at all.
+    kinds = {r[0] for r in conn.execute("SELECT kind FROM nodes WHERE kind IN ('package', 'app') AND name='myapp'")}
+    assert kinds == {"package", "app"}, f"expected faceted member, got kinds={kinds!r}"
+
+    entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
+
+    ep_row = conn.execute("SELECT id FROM nodes WHERE kind='entry_point' AND name='myapp'").fetchone()
+    assert ep_row is not None
+    inbound = conn.execute(
+        "SELECT s.kind FROM edges e JOIN nodes s ON e.src = s.id WHERE e.kind='declares_entry_point' AND e.dst=?",
+        (ep_row[0],),
+    ).fetchall()
+    assert [r[0] for r in inbound] == ["package"], f"expected exactly one edge, from Package; got {inbound!r}"
+
+
 def test_malformed_pyproject_does_not_crash(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """Defensive: malformed pyproject.toml inside a Package directory is skipped."""
     pkg_dir = tmp_path / "packages" / "okpkg"

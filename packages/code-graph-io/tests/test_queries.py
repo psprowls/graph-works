@@ -18,6 +18,19 @@ def conn(tmp_path: Path) -> sqlite3.Connection:
     c.close()
 
 
+def _seed_file_node(conn: sqlite3.Connection, path: str) -> None:
+    """Seed a bare File node so `packages.refresh`'s contains-edge loop
+    (which reads existing File rows via `_file_nodes_under`) has something
+    to link. Mirrors `test_packages.py`'s helper of the same name."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[GraphNode(kind="file", name=path, path=path, line=None, attrs={"language": "python"})],
+            edges=[],
+        ),
+    )
+
+
 def _seed_call_chain(conn: sqlite3.Connection) -> None:
     nodes = [
         GraphNode(kind="file", name="a.py", path="a.py", line=None, attrs={}),
@@ -1212,10 +1225,55 @@ def test_describe_agent_plugin_returns_description(conn: sqlite3.Connection) -> 
         {"id": "command:test/repo/agent-workspace/scan", "name": "scan", "description": "Walk the monorepo."}
     ]
     assert p.agents == [] and p.mcp_servers == []
+    assert p.package_name is None
 
 
 def test_describe_agent_plugin_returns_none_when_missing(conn: sqlite3.Connection) -> None:
     assert queries.describe_agent_plugin(conn, name="nonexistent") is None
+
+
+def test_describe_agent_plugin_reports_sibling_package_name_via_facet_of(conn: sqlite3.Connection) -> None:
+    """A plugin root that also carries a package manifest is linked
+    `Package --facet_of--> agent_plugin` (facet model) — `describe_agent_plugin`
+    must surface the sibling Package's name as `package_name`."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="package",
+                    name="graph-works",
+                    path="plugins/graph-works",
+                    line=None,
+                    attrs={"uri": "pkg:local/repo/graph-works", "language": "python", "version": "0.1.0"},
+                ),
+                GraphNode(
+                    kind="agent_plugin",
+                    name="graph-works",
+                    path="plugins/graph-works",
+                    line=None,
+                    attrs={
+                        "uri": "agent_plugin:test/repo/graph-works",
+                        "ecosystem": "claude-code",
+                        "version": "0.1.0",
+                        "description": "An epic plugin.",
+                        "components": {},
+                    },
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("package", "graph-works", "plugins/graph-works"),
+                    dst=("agent_plugin", "graph-works", "plugins/graph-works"),
+                    kind="facet_of",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+    p = queries.describe_agent_plugin(conn, name="graph-works")
+    assert p is not None
+    assert p.package_name == "graph-works"
 
 
 def test_list_dependencies_alphabetical(conn: sqlite3.Connection) -> None:
@@ -1565,6 +1623,39 @@ def test_describe_app_does_not_match_package_kind(conn: sqlite3.Connection) -> N
     # No kind='app' row with this name → describe_app returns None even though
     # a kind='package' row exists.
     assert queries.describe_app(conn, name="shared-name") is None
+
+
+def test_describe_app_sources_files_and_entry_points_from_sibling_package(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    """Facet model: files/entry_points/test_suites all source from the App's
+    sibling Package node of the same name — describe_app must resolve to the
+    same content describe_package would, since contains/declares_entry_point
+    edges only ever originate from the Package node. app_kind/app_signals
+    still come from the App node's own attrs."""
+    from code_graph_io import entry_points, packages
+    from code_graph_io.uri import RepoContext
+
+    pkg_dir = tmp_path / "myapp"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "pyproject.toml").write_text(
+        '[project]\nname = "myapp"\nversion = "0.1.0"\n[project.scripts]\nmyapp = "myapp.cli:main"\n'
+    )
+    _seed_file_node(conn, "myapp/src/myapp/__init__.py")
+    ctx = RepoContext(org="t", repo="r")
+    packages.refresh(conn, repo_root=tmp_path, ctx=ctx)
+    entry_points.emit(conn, repo_root=tmp_path, ctx=ctx, skip_dirs=frozenset())
+
+    app_desc = queries.describe_app(conn, name="myapp")
+    pkg_desc = queries.describe_package(conn, name="myapp")
+    assert app_desc is not None
+    assert pkg_desc is not None
+    assert app_desc.files == pkg_desc.files
+    assert app_desc.files != []
+    assert [ep.name for ep in app_desc.entry_points] == [ep.name for ep in pkg_desc.entry_points]
+    assert app_desc.entry_points != []
+    assert app_desc.app_kind == "cli"
+    assert app_desc.app_signals == ["cli"]
 
 
 def test_list_agent_plugins_alphabetical(conn: sqlite3.Connection) -> None:

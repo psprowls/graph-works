@@ -398,7 +398,7 @@ def test_scan_reports_unreadable_configuration_before_running(
 ) -> None:
     """Normal mode reads configuration first; its failure must not look like a scan failure."""
 
-    def fail(_bundle_root: object) -> object:
+    def fail(_bundle_root: object, **_kwargs: object) -> object:
         raise ConfigError("config.yaml is malformed")
 
     monkeypatch.setattr(scan_module, "load_config", fail)

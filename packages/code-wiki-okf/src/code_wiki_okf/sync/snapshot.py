@@ -14,53 +14,27 @@ from code_graph_io.handle import GraphReader
 from okf_io import Bundle
 
 from code_wiki_okf.config import Config
-from code_wiki_okf.entities.lanes import ENTITY_LANES
+from code_wiki_okf.entities.lanes import is_entity_lane_page
 from code_wiki_okf.entities.sync import plan_entities
 from code_wiki_okf.git_state import head_commit
 from code_wiki_okf.mirror.plan import plan_mirror
 from code_wiki_okf.mirror.walk import tracked_files
 from code_wiki_okf.resources import resource_index
 
-#: The entity lanes with no nested-subtree ambiguity -- a plain prefix match
-#: is safe for these. Derived from `entities.lanes.ENTITY_LANES` rather than
-#: hand-duplicated, so a lane added there can never silently fall out of sync
-#: with what this module treats as "an existing entity page" -- the failure
-#: mode of a hand-copied tuple would be `.orphaned` quietly miscounting that
-#: new lane's pages forever, not an error. `repositories/` is excluded here:
-#: it prefixes both the Repository entity page (`repositories/<name>`) and
-#: every mirror File page under it (`repositories/<name>/<rel_path>`), so it
-#: needs the depth-aware check in `_is_entity_repository_page` instead.
-_ENTITY_LANE_PREFIXES: tuple[str, ...] = tuple(lane for lane in ENTITY_LANES if lane != "repositories/")
-
-
-def _is_entity_repository_page(concept_id: str) -> bool:
-    """`repositories/<name>` (the Repository entity page) -- never
-    `repositories/<name>/fs/<rel_path...>` (a mirror File page). A plain
-    `startswith("repositories/")` cannot tell the two apart; `entities/delete.py`'s
-    own docstring warns callers to keep the distinction, which this makes by
-    checking depth instead of prefix alone. The depth check is root-agnostic:
-    it asks "is there anything below `<name>`", so `mirror/paths.MIRROR_SUBDIR`
-    moving the mirror down a level did not change it.
-    """
-    rest = concept_id.removeprefix("repositories/")
-    return rest != concept_id and "/" not in rest
-
 
 def _existing_entity_resources(bundle: Bundle) -> frozenset[str]:
     """Every resource already backing a page in one of the entity lanes.
 
     Generalizes `prune_lane`'s per-lane, per-`exact_depth` filtering
-    (`entities/delete.py`) into one combined check across all lanes at once:
-    `prune_lane` runs once per lane and only ever needs that lane's own
-    resources, but this needs "is this resource *any* entity lane's page" in
-    a single pass, so a naive `resource_index(bundle)` filter (which carries
-    every resource in the bundle, mirror File pages included) would wrongly
-    fold mirror pages in without the same prefix/depth discipline.
+    (`entities/delete.py`) into one combined check across all lanes at once,
+    delegating "is this concept_id an entity lane's own page" to
+    `entities.lanes.is_entity_lane_page` -- the single structural answer
+    both this module and `graph_works_core.scan.commands` share, so a lane
+    change can never silently drift between them.
     """
     resources: set[str] = set()
     for resource, entry in resource_index(bundle).by_resource.items():
-        concept_id = entry.concept_id
-        if concept_id.startswith(_ENTITY_LANE_PREFIXES) or _is_entity_repository_page(concept_id):
+        if is_entity_lane_page(entry.concept_id):
             resources.add(resource)
     return frozenset(resources)
 

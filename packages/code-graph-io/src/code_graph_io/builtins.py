@@ -322,15 +322,18 @@ def refresh(
     """
     repo_root = Path(repo_root).resolve()
     graph_dir = Path(graph_dir).resolve()
-    skip_dirs = _ignore.load_skip_dirs(repo_root)
+    skip_dirs = _ignore.DEFAULT_SKIP_DIRS
 
-    # Load all Package/App rows from the graph (written by packages.refresh before us).
-    # * apps also import builtins; include them.
+    # Package-only: under the facet model, used_by edges always source from
+    # the Package node — the App facet (if any) carries no dependency edges
+    # of its own (mirrors packages.py / entry_points.py / test_suites.py /
+    # structural_nodes.py). Querying App rows too would re-scan a dual-facet
+    # member's files a second time AND make pkg_kind_map's per-name dict
+    # nondeterministic (whichever kind SQLite returns last silently wins).
     # Multi-repo: scope to this member (see structural_nodes.emit).
     member_repo = repo_uri(ctx)
     pkg_rows = conn.execute(
-        "SELECT name, path, attrs_json, kind FROM nodes WHERE kind IN ('package', 'app') "
-        "AND (repo = ? OR repo IS NULL)",
+        "SELECT name, path, attrs_json, kind FROM nodes WHERE kind = 'package' AND (repo = ? OR repo IS NULL)",
         (member_repo,),
     ).fetchall()
     if not pkg_rows:
@@ -343,7 +346,8 @@ def refresh(
     edge_acc: dict[tuple[str, str, str], set[str]] = {}
     # Track unique (language, module_name) pairs for node emission.
     node_keys: set[tuple[str, str]] = set()
-    # Map pkg_name -> (pkg_rel, pkg_kind) for edge src construction.
+    # Map pkg_name -> (pkg_rel, pkg_kind) for edge src construction. Sourced
+    # from pkg_rows (Package-only), so pkg_kind is always "package".
     pkg_rel_map: dict[str, str | None] = {}
     pkg_kind_map: dict[str, str] = {}
 
@@ -410,9 +414,9 @@ def refresh(
         for (lang, module_name) in sorted(node_keys)
     ]
 
-    # Emit one `used_by` edge per (package/app, builtin) with the symbol union.
-    # * src uses the consumer's actual kind so App consumers
-    # resolve correctly.
+    # Emit one `used_by` edge per (package, builtin) with the symbol union.
+    # src always resolves to "package" (pkg_kind_map is Package-only) — the
+    # App facet of a dual-facet member carries no used_by edges of its own.
     builtin_edges: list[GraphEdge] = [
         GraphEdge(
             src=(

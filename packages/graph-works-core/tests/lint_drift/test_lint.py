@@ -24,7 +24,13 @@ def workspace(tmp_path):
 
 def _run(workspace, **kwargs) -> LintReport:
     layout = workspace.layout
-    return run_mechanical(layout, load_config(layout.bundle_dir), today=TODAY, repo_root=layout.repo_root, **kwargs)
+    return run_mechanical(
+        layout,
+        load_config(layout.bundle_dir, config_path=layout.repositories_path),
+        today=TODAY,
+        repo_root=layout.repo_root,
+        **kwargs,
+    )
 
 
 def _codes(report: LintReport) -> set[str]:
@@ -101,7 +107,7 @@ def test_a_repositories_yaml_edited_to_move_graph_dir_is_reported_as_drift(works
     so the two config surfaces agree at birth. Nothing else keeps them that
     way -- this is the check that catches a human moving `graph_dir` in
     `_repositories.yaml` without moving the layout to match."""
-    repositories = workspace.layout.bundle_dir / "_repositories.yaml"
+    repositories = workspace.layout.repositories_path
     text = repositories.read_text(encoding="utf-8")
     (workspace.layout.bundle_dir / "elsewhere_cache").mkdir()
     drifted = "\n".join(
@@ -115,7 +121,7 @@ def test_a_repositories_yaml_edited_to_move_graph_dir_is_reported_as_drift(works
 
 
 def test_a_repositories_yaml_edited_to_move_declarations_dir_is_reported_as_drift(workspace):
-    repositories = workspace.layout.bundle_dir / "_repositories.yaml"
+    repositories = workspace.layout.repositories_path
     text = repositories.read_text(encoding="utf-8")
     (workspace.layout.bundle_dir / "elsewhere_config").mkdir()
     drifted = "\n".join(
@@ -289,7 +295,13 @@ def curated(workspace):
 
 async def _lint(workspace, **kwargs) -> LintReport:
     layout = workspace.layout
-    return await run_lint(layout, load_config(layout.bundle_dir), today=TODAY, repo_root=layout.repo_root, **kwargs)
+    return await run_lint(
+        layout,
+        load_config(layout.bundle_dir, config_path=layout.repositories_path),
+        today=TODAY,
+        repo_root=layout.repo_root,
+        **kwargs,
+    )
 
 
 async def test_the_mechanical_half_is_unchanged_by_the_semantic_pass(curated, monkeypatch):

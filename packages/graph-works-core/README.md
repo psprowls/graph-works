@@ -10,14 +10,15 @@ makes a violation a `just check` failure.
 ```
 .works/
   workspace.yaml    the manifest — version, topic, four layout overrides
-  _config/          committed declarations: _schema/, _sections/, _tags.yaml
-  _cache/           gitignored machine state: the graph database
+  _gw/              every graph-works-owned machinery member, nested together
+    _config/        committed declarations: _schema/, _sections/, _tags.yaml
+    _cache/         gitignored machine state: the graph database
+    worktrees/      gitignored feature worktrees
+    .gitignore      /_cache/ and /worktrees/ — the workspace's own, never the repo's
   okf/              the OKF v0.2 bundle: index.md, log.md, _repositories.yaml, pages
-  worktrees/        gitignored feature worktrees
-  .gitignore        /_cache/ and /worktrees/ — the workspace's own, never the repo's
 ```
 
-`_repositories.yaml` stays at the **bundle root**, not under `_config/`:
+`_repositories.yaml` stays at the **bundle root**, not under `_gw/_config/`:
 `code_wiki_okf.config.load_config` reads it from there.
 
 ## Using it

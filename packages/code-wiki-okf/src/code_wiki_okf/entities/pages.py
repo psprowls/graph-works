@@ -31,12 +31,22 @@ def directory_for(schema_set: SchemaSet, type_name: str) -> str:
     return str(schema_set.schemas[type_name]["x-okf-directory"])
 
 
-def default_concept_id(schema_set: SchemaSet, *, type_name: str, name: str) -> str:
+def default_concept_id(schema_set: SchemaSet, *, type_name: str, name: str, repo_name: str | None = None) -> str:
     """Where a **new** page of `type_name` named `name` is created.
 
     Bundle-relative, no `.md` suffix (matching `Bundle.concepts`' own keys —
-    see `resource_index`'s `concept_id`)."""
-    return f"{directory_for(schema_set, type_name)}{slug(name)}"
+    see `resource_index`'s `concept_id`). `repo_name=None` (the default)
+    keeps a type at the bundle-root lane its schema declares -- right for
+    Repository (one page per repo, already unique) and Dependency
+    (ecosystem-wide by design). A repo-scoped type (Package, App, TestSuite,
+    AgentPlugin) passes its owning repo's name, nesting the page under
+    `repositories/<repo_name>/` so two repos declaring a same-named entity
+    never compute the same path.
+    """
+    directory = directory_for(schema_set, type_name)
+    if repo_name is None:
+        return f"{directory}{slug(name)}"
+    return f"repositories/{repo_name}/{directory}{slug(name)}"
 
 
 def new_page_text(

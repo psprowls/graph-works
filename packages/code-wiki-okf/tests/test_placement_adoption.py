@@ -13,7 +13,7 @@ import importlib.resources
 from datetime import date
 from pathlib import Path
 
-from code_wiki_okf.entities.lanes import ENTITY_DEPTH
+from code_wiki_okf.entities.lanes import ENTITY_DEPTH, placement_directories
 from code_wiki_okf.init import install_bundle
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import SyncSnapshot
@@ -45,7 +45,7 @@ def _five_rules(root: Path) -> list[Rule]:
         schema_rule(schema_set),
         section_rule(load_sections(root / "_sections")),
         vocabulary_rule(load_vocabulary(root / "_tags.yaml")),
-        placement_rule(declared_directories(schema_set), depth=ENTITY_DEPTH, severity="error"),
+        placement_rule(placement_directories(schema_set), depth=ENTITY_DEPTH, severity="error"),
     ]
 
 
@@ -77,20 +77,22 @@ def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
 
-    # A `Package` page parked in the dependency lane: outside `prune_lane`'s
-    # `packages/` scope forever, while sync keeps writing `packages/widgets.md`.
-    (root / "dependencies").mkdir()
-    (root / "dependencies" / "widgets.md").write_text(
-        '---\ntype: Package\ntitle: "widgets"\nresource: "pkg:acme/repo-a/widgets"\n---\n\n'
-        "## Purpose\n\nReal text.\n\n## Public API\n\nReal text.\n\n## Files\n\n_(none)_\n",
+    # A `Dependency` page parked in the packages lane: `directory-mismatch`
+    # still fires for Dependency -- narrowing (§5) drops only the four
+    # repo-scoped types (Package/App/TestSuite/AgentPlugin), and Dependency
+    # stays global and fully prefix-checkable.
+    (root / "packages").mkdir()
+    (root / "packages" / "httpx.md").write_text(
+        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\n---\n\n'
+        "## Why we depend on this\n\nReal text.\n\n## Gotchas / workarounds\n\nReal text.\n",
         encoding="utf-8",
     )
     # ...and a second page claiming the same resource, dropped by
     # find-by-resource and so invisible to deletion.
-    (root / "packages").mkdir()
-    (root / "packages" / "widgets.md").write_text(
-        '---\ntype: Package\ntitle: "widgets"\nresource: "pkg:acme/repo-a/widgets"\n---\n\n'
-        "## Purpose\n\nReal text.\n\n## Public API\n\nReal text.\n\n## Files\n\n_(none)_\n",
+    (root / "dependencies").mkdir()
+    (root / "dependencies" / "httpx.md").write_text(
+        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\n---\n\n'
+        "## Why we depend on this\n\nReal text.\n\n## Gotchas / workarounds\n\nReal text.\n",
         encoding="utf-8",
     )
 
@@ -98,6 +100,25 @@ def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
     fired = {finding.code for finding in report.findings if finding.code.startswith(f"{TOPIC}.")}
     assert fired == set(CODES)
     assert not report.ok  # this package passes `error`, so the report already fails
+
+
+def test_a_nested_package_page_trips_no_placement_finding(tmp_path: Path) -> None:
+    """The narrowing this task makes: a Package page correctly nested under
+    `repositories/<repo>/packages/` must not trip `placement.directory-mismatch`
+    even though its concept id no longer starts with the schema's declared
+    `packages/` directory."""
+    root = tmp_path / "bundle"
+    install_bundle(root, today=_TODAY, dry_run=False)
+    (root / "repositories" / "repo-a" / "packages").mkdir(parents=True)
+    (root / "repositories" / "repo-a" / "packages" / "widgets.md").write_text(
+        '---\ntype: Package\ntitle: "widgets"\nresource: "pkg:acme/repo-a/widgets"\n---\n\n'
+        "## Purpose\n\nReal text.\n\n## Public API\n\nReal text.\n\n## Files\n\n_(none)_\n",
+        encoding="utf-8",
+    )
+
+    report = validate(load_bundle(root), today=_TODAY, extra_rules=_five_rules(root))
+    fired = {finding.code for finding in report.findings if finding.code.startswith(f"{TOPIC}.")}
+    assert "placement.directory-mismatch" not in fired
 
 
 def test_the_seeded_bundle_reports_zero_errors_under_all_five_rules(tmp_path: Path) -> None:

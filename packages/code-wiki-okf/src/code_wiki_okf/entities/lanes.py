@@ -23,6 +23,7 @@ from types import MappingProxyType
 from code_graph_io import GraphReader
 from okf_ext.generators import Render, plan_regenerate
 from okf_ext.generators import apply as apply_regenerations
+from okf_ext.schemas import SchemaSet, declared_directories
 from okf_ext.shape import load_sections
 from okf_io import Bundle, append_log_entry, load_bundle, update_index
 
@@ -31,32 +32,76 @@ from code_wiki_okf.entities.catalog import render_repositories, repository_entri
 from code_wiki_okf.entities.delete import prune_lane
 from code_wiki_okf.entities.sync import sync_entities
 
-#: Bundle-relative prefixes `prune_lane` scopes deletion to, one per entity
-#: kind. Trailing slash matches `prune_lane`'s own `directory=` contract
-#: (`entities/delete.py`) -- a plain `"repositories/"` prefix only ever
-#: matches a page directly under it, never a repo's own
-#: `repositories/<name>/` mirror subtree (a later child's business).
-#:
-#: Public (no leading underscore) so `code_wiki_okf.sync.snapshot` can derive
-#: its own entity-lane prefix check from this single source rather than
-#: hand-duplicating the tuple -- a future lane added here must not be able to
-#: silently fall out of sync with what `.orphaned` considers "existing".
-ENTITY_LANES: tuple[str, ...] = (
-    "packages/",
-    "apps/",
-    "test-suites/",
-    "dependencies/",
-    "agent-plugins/",
-    "repositories/",
-)
+#: Bundle-relative lane-segment names for the four types nested under
+#: `repositories/<repo>/` -- Package, App, TestSuite, AgentPlugin. A repo's
+#: own segment comes first (`f"repositories/{repo_name}/{lane}"`); these are
+#: the segment `entities/pages.py::default_concept_id` appends after it.
+REPO_SCOPED_LANES: tuple[str, ...] = ("packages/", "apps/", "test-suites/", "agent-plugins/")
+
+#: Bundle-relative prefixes for the types that stay at the bundle root:
+#: Dependency, ecosystem-wide by design (`entities/sync.py`'s own module
+#: docstring). `"repositories/"` (the Repository page itself) is
+#: deliberately absent -- it keeps its own separate exact-depth handling
+#: throughout this module, same as before this lane split.
+GLOBAL_LANES: tuple[str, ...] = ("dependencies/",)
+
+#: Types `okf_ext.placement.rule`'s literal-prefix check cannot express once
+#: nested: a per-repo path has no single static string its `directories:
+#: Mapping[str, str]` contract can hold. Widening that contract is an
+#: `okf_ext` (tier 2) change, out of scope for a code-wiki-okf-only item --
+#: see `placement_directories`.
+_UNCHECKABLE_PLACEMENT_TYPES = frozenset({"Package", "App", "TestSuite", "AgentPlugin"})
+
+
+def is_entity_lane_page(concept_id: str) -> bool:
+    """True for any page code-wiki-okf's entity lanes own: a global lane
+    page, the Repository page itself, or a repo-scoped lane page nested
+    under it. False for a mirror File page (`.../fs/...`) or anything else.
+
+    Structural, not config-driven -- it matches on the fixed lane-segment
+    vocabulary (`REPO_SCOPED_LANES`/`GLOBAL_LANES`) rather than a list of
+    configured repo names, telling a Repository page apart from a mirror
+    File page by depth rather than by knowing repo names. Public so
+    `code_wiki_okf.sync.snapshot` and `graph_works_core.scan.commands` both
+    make the same "is this an entity page" call the same way -- a lane
+    change can never silently drift between the two.
+    """
+    if concept_id.startswith(GLOBAL_LANES):
+        return True
+    rest = concept_id.removeprefix("repositories/")
+    if rest == concept_id:
+        return False
+    if "/" not in rest:
+        return True  # the Repository page itself
+    _repo, remainder = rest.split("/", 1)
+    return remainder.startswith(REPO_SCOPED_LANES)
+
+
+def placement_directories(schema_set: SchemaSet) -> dict[str, str]:
+    """`okf_ext.schemas.declared_directories(schema_set)`, narrowed to the
+    types a plain directory-prefix check can still express: Repository,
+    File and Dependency. Package, App, TestSuite and AgentPlugin nest under
+    `repositories/<repo>/` and are excluded -- see
+    `_UNCHECKABLE_PLACEMENT_TYPES`.
+
+    The one vocabulary both `code_wiki_okf.cli` and
+    `graph_works_core.lint_drift.lanes` build their
+    `placement_rule(...)` call from, so the exclusion list lives in one
+    place instead of several literal copies that could drift apart.
+    """
+    return {
+        type_name: directory
+        for type_name, directory in declared_directories(schema_set).items()
+        if type_name not in _UNCHECKABLE_PLACEMENT_TYPES
+    }
+
 
 #: The two types `x-okf-directory` alone cannot place, because both declare
 #: `repositories/`: the `Repository` entity page lives directly under it, and
 #: every mirror `File` page lives below that. The same distinction
-#: `entities/delete.py`'s `exact_depth=` and
-#: `sync/snapshot.py:_is_entity_repository_page` already make.
+#: `entities/delete.py`'s `exact_depth=` and `is_entity_lane_page` already make.
 #:
-#: It lives here, beside `ENTITY_LANES`, so this module stays the single answer
+#: It lives here, beside `REPO_SCOPED_LANES`/`GLOBAL_LANES`, so this module stays the single answer
 #: to "what does this package know about its lanes" -- and it is passed into
 #: `okf_ext.placement.placement_rule`, which holds no type names of its own.
 ENTITY_DEPTH: Mapping[str, str] = MappingProxyType({"Repository": "exact", "File": "nested"})
@@ -71,7 +116,8 @@ class SyncSummary:
 
     `written` and `skipped` are `sync_entities`' own `EntitySync` fields,
     passed through unchanged. `deleted` and `declined` are `prune_lane`'s
-    results pooled across every lane in `ENTITY_LANES`. `catalog` and
+    results pooled across every repo-scoped lane (per repo) and every global
+    lane, plus the `repositories/` lane itself. `catalog` and
     `catalog_declined` are the root-index catalog pass's written members and
     its refusals -- reported rather than raised, matching how every other
     write failure in this pipeline surfaces.
@@ -110,6 +156,25 @@ def _summary_text(summary: SyncSummary) -> str:
     return "; ".join(parts)
 
 
+def _touched_directories(concept_id: str) -> tuple[str, ...]:
+    """The directory ids whose `index.md` *concept_id* affects, when it is
+    freshly written.
+
+    A global-lane page or the Repository page itself touches exactly its
+    own first path segment, same as before this lane split. A repo-scoped
+    lane page (nested `repositories/<repo>/<lane>/<slug>`) touches both
+    `repositories/<repo>` and `repositories/<repo>/<lane>` -- never the
+    bundle-root `repositories` alone, which stays the Repository page's own
+    territory (mirrors `mirror/apply.py::_mirror_directories`'s identical
+    carve-out, and its own comment on why `repositories/<repo>/index.md` is
+    legitimately reconciled by both lanes on their own runs).
+    """
+    parts = concept_id.split("/")
+    if parts[0] != "repositories" or len(parts) <= 2:
+        return (parts[0],)
+    return (f"{parts[0]}/{parts[1]}", f"{parts[0]}/{parts[1]}/{parts[2]}")
+
+
 def sync(
     bundle: Bundle,
     config: Config,
@@ -121,8 +186,12 @@ def sync(
 ) -> SyncSummary:
     """Run the full entity-lane pipeline against *bundle*'s root.
 
-    `sync_entities` runs once. Then `prune_lane` runs once per lane in
-    `ENTITY_LANES`, each lane's deletion candidates compared against
+    `sync_entities` runs once. Then `prune_lane` runs once per repo-scoped
+    lane per configured repo (`REPO_SCOPED_LANES`, nested under
+    `repositories/<repo>/`), once per global lane (`GLOBAL_LANES`), and once
+    more for the `repositories/` lane itself (the Repository pages,
+    `exact_depth=True` so a repo's own mirror subtree is never touched here).
+    Each lane's deletion candidates are compared against
     `EntitySync.current_resources` -- every resource this run's graph walk
     still names, whether or not that resource's page needed a write --
     **never** `resource_index(bundle)`. That index only ever reflects what
@@ -155,15 +224,30 @@ def sync(
     deleted: list[str] = []
     declined: list[tuple[str, str]] = []
     touched_lanes: set[str] = set()
-    for lane in ENTITY_LANES:
-        result = prune_lane(
-            current, section_set, directory=lane, should_exist=should_exist, exact_depth=(lane == "repositories/")
-        )
+    for repo_cfg in config.repos:
+        prefix = f"repositories/{repo_cfg.name}"
+        for lane in REPO_SCOPED_LANES:
+            result = prune_lane(current, section_set, directory=f"{prefix}/{lane}", should_exist=should_exist)
+            deleted.extend(result.deleted)
+            declined.extend(result.declined)
+            if result.deleted or result.declined:
+                touched_lanes.add(prefix)
+                touched_lanes.add(f"{prefix}/{lane.rstrip('/')}")
+    for lane in GLOBAL_LANES:
+        result = prune_lane(current, section_set, directory=lane, should_exist=should_exist)
         deleted.extend(result.deleted)
         declined.extend(result.declined)
         if result.deleted or result.declined:
             touched_lanes.add(lane.rstrip("/"))
-    touched_lanes.update(concept_id.split("/", 1)[0] for concept_id in entity_result.written)
+    repositories_result = prune_lane(
+        current, section_set, directory="repositories/", should_exist=should_exist, exact_depth=True
+    )
+    deleted.extend(repositories_result.deleted)
+    declined.extend(repositories_result.declined)
+    if repositories_result.deleted or repositories_result.declined:
+        touched_lanes.add("repositories")
+    for concept_id in entity_result.written:
+        touched_lanes.update(_touched_directories(concept_id))
 
     # Reload again: `current` was walked before deletion, so its own
     # `.concepts` would still list every page `prune_lane` just removed from
@@ -217,4 +301,12 @@ def sync(
     return summary
 
 
-__all__ = ["ENTITY_DEPTH", "ENTITY_LANES", "SyncSummary", "sync"]
+__all__ = [
+    "ENTITY_DEPTH",
+    "GLOBAL_LANES",
+    "REPO_SCOPED_LANES",
+    "SyncSummary",
+    "is_entity_lane_page",
+    "placement_directories",
+    "sync",
+]

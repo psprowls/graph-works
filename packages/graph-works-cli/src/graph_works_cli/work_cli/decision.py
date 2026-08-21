@@ -33,7 +33,7 @@ def _today() -> date:
 
 def _config(layout: WorkspaceLayout) -> Config:
     try:
-        return load_config(layout.bundle_dir)
+        return load_config(layout.bundle_dir, config_path=layout.repositories_path)
     except ConfigError as exc:
         rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:

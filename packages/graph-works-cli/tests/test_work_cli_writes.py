@@ -182,7 +182,7 @@ def test_file_run_file_value_error_is_reported(workspace: Path, monkeypatch: pyt
 
 
 def test_file_config_os_error_is_reported(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(_root: Path) -> object:
+    def boom(_root: Path, *, config_path: object = None) -> object:
         raise OSError("disk gone")
 
     monkeypatch.setattr(work_main, "load_config", boom)
@@ -452,7 +452,7 @@ def test_advance_json_mode_without_a_repo_note_reports_nothing_extra(workspace: 
     layout = resolve_workspace(str(workspace))
     repo_dir = tmp_path / "code-repo"
     repo_dir.mkdir()
-    config_path = layout.bundle_dir / "_repositories.yaml"
+    config_path = layout.repositories_path
     config_path.write_text(
         f"graph_dir: ../graphs/code\nrepositories:\n  main:\n    path: {repo_dir}\nignore: []\n",
         encoding="utf-8",

@@ -22,7 +22,7 @@ def lint(
     """Run the workspace's mechanical and semantic lint pipeline."""
     layout = resolve_workspace(workspace)
     try:
-        config = load_config(layout.bundle_dir)
+        config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     except (ConfigError, OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 

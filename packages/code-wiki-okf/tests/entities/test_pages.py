@@ -31,6 +31,18 @@ def test_default_concept_id_combines_directory_and_slug() -> None:
     assert default_concept_id(schema_set, type_name="Dependency", name="@babel/core") == "dependencies/@babel__core"
 
 
+def test_default_concept_id_nests_under_repository_when_repo_name_given() -> None:
+    schema_set = load_schemas(_ASSETS / "_schema")
+    assert (
+        default_concept_id(schema_set, type_name="Package", name="widgets", repo_name="repo-a")
+        == "repositories/repo-a/packages/widgets"
+    )
+    assert (
+        default_concept_id(schema_set, type_name="App", name="cli-app", repo_name="repo-a")
+        == "repositories/repo-a/apps/cli-app"
+    )
+
+
 def test_new_page_text_parses_clean_and_carries_every_declared_section() -> None:
     schema_set = load_schemas(_ASSETS / "_schema")
     section_set = load_sections(_ASSETS / "_sections")

@@ -21,10 +21,10 @@ from graph_works_core.graph import commands as graph_cmd
 
 
 def _layout_with_config(root: Path, body: str):
-    """A layout whose bundle carries `_repositories.yaml` with *body*."""
+    """A layout whose `_gw/` carries `_repositories.yaml` with *body*."""
     layout = layout_for(root, repo_root=root)
-    layout.bundle_dir.mkdir(parents=True, exist_ok=True)
-    (layout.bundle_dir / "_repositories.yaml").write_text(textwrap.dedent(body), encoding="utf-8")
+    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.repositories_path.write_text(textwrap.dedent(body), encoding="utf-8")
     return layout
 
 
@@ -90,8 +90,10 @@ def calls(monkeypatch):
     machine-dependent."""
     recorded: list[dict] = []
 
-    def _fake(members, *, graph_dir, full=False, lock_timeout_ms=None):
-        recorded.append({"members": list(members), "graph_dir": graph_dir, "full": full})
+    def _fake(members, *, graph_dir, full=False, lock_timeout_ms=None, member_ignore=None):
+        recorded.append(
+            {"members": list(members), "graph_dir": graph_dir, "full": full, "member_ignore": member_ignore}
+        )
 
     monkeypatch.setattr(graph_cmd.update, "run_workspace", _fake)
     return recorded
@@ -110,7 +112,108 @@ def test_build_drives_run_workspace_with_every_member(tmp_path, calls):
     result = graph_cmd.build(target)
     assert result.ok
     assert result.output == ""
-    assert calls == [{"members": list(target.members), "graph_dir": target.graph_dir, "full": False}]
+    assert calls == [
+        {
+            "members": list(target.members),
+            "graph_dir": target.graph_dir,
+            "full": False,
+            "member_ignore": [(), ()],
+        }
+    ]
+
+
+def test_build_threads_member_ignore_through(tmp_path, calls):
+    target = GraphTarget(
+        graph_dir=tmp_path / "graph",
+        members=(tmp_path / "repo-a", tmp_path / "repo-b"),
+        member_names=("alpha", "beta"),
+        member_ignore=(("**/fixtures/**",), ("*.generated.py",)),
+    )
+    graph_cmd.build(target)
+    assert calls[0]["member_ignore"] == [("**/fixtures/**",), ("*.generated.py",)]
+
+
+def test_only_scopes_member_ignore_to_the_selected_member(tmp_path, calls):
+    target = GraphTarget(
+        graph_dir=tmp_path / "graph",
+        members=(tmp_path / "repo-a", tmp_path / "repo-b"),
+        member_names=("alpha", "beta"),
+        member_ignore=(("alpha-ignore/**",), ("beta-ignore/**",)),
+    )
+    graph_cmd.build(target, only="beta")
+    assert calls[0]["member_ignore"] == [("beta-ignore/**",)]
+
+
+def test_graph_target_reads_repo_ignore_into_member_ignore(tmp_path):
+    (tmp_path / "repo-a").mkdir()
+    (tmp_path / "repo-b").mkdir()
+    layout = _layout_with_config(
+        tmp_path,
+        """
+        graph_dir: ../_cache/graph
+        ignore:
+          - "**/global-skip/**"
+        repositories:
+          alpha:
+            path: ../repo-a
+            ignore:
+              - "**/alpha-only/**"
+          beta:
+            path: ../repo-b
+        """,
+    )
+    target = graph_target(layout)
+    assert target.member_ignore == (("**/global-skip/**", "**/alpha-only/**"), ("**/global-skip/**",))
+
+
+def test_graph_target_bootstrap_path_has_an_empty_pattern_tuple(tmp_path):
+    layout = layout_for(tmp_path, repo_root=tmp_path)
+    target = graph_target(layout)
+    assert target.member_ignore == ((),)
+
+
+def test_ignore_pattern_reaches_the_built_graph(tmp_path):
+    import subprocess
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.1.1"\n')
+    (repo / "src").mkdir()
+    (repo / "src" / "keep.py").write_text("def keep_me():\n    return 1\n")
+    (repo / "generated").mkdir()
+    (repo / "generated" / "auto.py").write_text("def skip_me():\n    return 2\n")
+
+    def _git(args):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+    _git(["init", "-q"])
+    _git(["add", "-A"])
+    _git(["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "init"])
+
+    layout = _layout_with_config(
+        tmp_path,
+        f"""
+        graph_dir: ../_cache/graph
+        repositories:
+          demo:
+            path: {repo}
+            ignore:
+              - "generated/**"
+        """,
+    )
+    target = graph_target(layout)
+    result = graph_cmd.build(target, full=True)
+    assert result.ok
+
+    from code_graph_io import open_reader
+
+    reader = open_reader(graph_dir=target.graph_dir)
+    try:
+        names = {n.name for n in reader.find(kind="function")}
+    finally:
+        reader.close()
+    assert "keep_me" in names
+    assert "skip_me" not in names
 
 
 def test_build_passes_full_through(tmp_path, calls):
@@ -149,7 +252,7 @@ def test_a_target_with_no_members_is_not_in_git_repo(tmp_path, calls):
     ],
 )
 def test_build_maps_every_documented_failure_onto_its_exit_code(tmp_path, monkeypatch, raised, expected):
-    def _boom(members, *, graph_dir, full=False, lock_timeout_ms=None):
+    def _boom(members, *, graph_dir, full=False, lock_timeout_ms=None, member_ignore=None):
         raise raised()
 
     monkeypatch.setattr(graph_cmd.update, "run_workspace", _boom)

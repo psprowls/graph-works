@@ -11,6 +11,7 @@
     "tags": { "type": "array", "items": { "type": "string" } },
     "ecosystem": { "type": "string" },
     "version": { "type": "string" },
+    "package": { "type": "string" },
     "generated": {
       "type": "object",
       "required": ["by", "at"],

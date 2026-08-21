@@ -255,6 +255,11 @@ class AgentPluginDescription:
     Carries the plugin manifest fields plus the component inventory parsed at
     graph-build time (commands/agents/skills/scripts/hooks/mcp_servers). Each
     component is a plain dict with a stable `id`; they are NOT graph nodes.
+
+    `package_name` is the sibling Package node's name when this plugin root
+    also carries a package manifest (facet model: `Package --facet_of-->
+    agent_plugin`, linked by `agent_plugins.link_agent_plugin_facets`) —
+    `None` for a plain plugin root with no manifest.
     """
 
     name: str
@@ -268,6 +273,7 @@ class AgentPluginDescription:
     scripts: list[dict[str, Any]] = field(default_factory=list)
     hooks: list[dict[str, Any]] = field(default_factory=list)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
+    package_name: str | None = None
 
 
 def _row_to_node(row: Sequence[Any]) -> NodeRecord:
@@ -787,11 +793,15 @@ def internal_dependencies_of(conn: sqlite3.Connection, *, name: str) -> list[str
 def describe_app(conn: sqlite3.Connection, *, name: str) -> AppDescription | None:
     """Return the named App's description, or None.
 
-    mirrors `describe_package` with
-    `kind='app'` substituted in node-side filters. Consumer-side filters
-    that mirror `describe_package`'s `used_by` JOINs broaden to
-    `p.kind IN ('package', 'app')` so App consumers
-    of a dependency remain discoverable. `conn` must be opened read-only.
+    The node lookup itself reads `kind='app'` — an App's own attrs
+    (`app_kind`, `app_signals`, `language`, `version`) live only on the App
+    node. Everything else (files/entry_points/test_suites) is sourced from
+    the sibling Package node of the same name: under the facet model, a
+    Package node is created unconditionally for every manifest-bearing
+    member, and an App is an ADDITIONAL facet linked `Package
+    --facet_of--> App` — containment/entry-point/test edges source
+    exclusively from the Package side, never from the App node. `conn` must
+    be opened read-only.
     """
     pkg = conn.execute(
         "SELECT attrs_json FROM nodes WHERE kind='app' AND name = ?",
@@ -800,10 +810,13 @@ def describe_app(conn: sqlite3.Connection, *, name: str) -> AppDescription | Non
     if not pkg:
         return None
     attrs = json.loads(pkg[0]) if pkg[0] else {}
+    # contains edges always source from the Package node under the facet
+    # model — an App is always faceted off a Package of the same name, so
+    # this still resolves to the right member's files.
     files = conn.execute(
         "SELECT n.path FROM edges e "
         "JOIN nodes p ON e.src = p.id JOIN nodes n ON e.dst = n.id "
-        "WHERE p.kind='app' AND p.name = ? AND e.kind='contains' AND n.kind='file' "
+        "WHERE p.kind='package' AND p.name = ? AND e.kind='contains' AND n.kind='file' "
         "ORDER BY n.path",
         (name,),
     ).fetchall()
@@ -817,7 +830,8 @@ def describe_app(conn: sqlite3.Connection, *, name: str) -> AppDescription | Non
         ).fetchall()
         counts = {kind: count for kind, count in rows}
 
-    # EntryPoints declared by the App.
+    # EntryPoints declared by the sibling Package node (facet model: the App
+    # node never declares this edge itself).
     ep_rows = conn.execute(
         "SELECT ep.name, ep.uri, ep.attrs_json, f.path "
         "FROM nodes pkg "
@@ -825,16 +839,13 @@ def describe_app(conn: sqlite3.Connection, *, name: str) -> AppDescription | Non
         "JOIN nodes ep ON ep.id = de.dst AND ep.kind='entry_point' "
         "LEFT JOIN edges ib ON ib.src = ep.id AND ib.kind='implemented_by' "
         "LEFT JOIN nodes f ON f.id = ib.dst AND f.kind='file' "
-        # Pitfall 7: broaden the consumer-side filter so App nodes that
-        # are themselves consumers (via used_by-style joins) remain
-        # discoverable from the App's declares_entry_point graph.
-        "WHERE pkg.kind IN ('package', 'app') AND pkg.name = ? "
+        "WHERE pkg.kind = 'package' AND pkg.name = ? "
         "ORDER BY ep.name",
         (name,),
     ).fetchall()
     entry_points = [_load_entry_point_description(r) for r in ep_rows]
 
-    # TestSuites covering the App.
+    # TestSuites covering the sibling Package node (facet model).
     suite_rows = conn.execute(
         "SELECT ts.name, ts.uri, ts.attrs_json, "
         "(SELECT COUNT(*) FROM edges pc "
@@ -843,7 +854,7 @@ def describe_app(conn: sqlite3.Connection, *, name: str) -> AppDescription | Non
         "JOIN nodes ts ON t.src = ts.id "
         "JOIN nodes p ON t.dst = p.id "
         "WHERE t.kind='tests' AND ts.kind='test_suite' "
-        "AND p.kind='app' AND p.name = ? "
+        "AND p.kind='package' AND p.name = ? "
         "ORDER BY ts.name",
         (name,),
     ).fetchall()
@@ -1251,6 +1262,21 @@ def describe_agent_plugin(conn: sqlite3.Connection, *, name: str) -> AgentPlugin
     plugin_name, attrs_json, uri = row
     attrs = json.loads(attrs_json) if attrs_json else {}
     comp = attrs.get("components") or {}
+    # Sibling Package node under the facet model (Package --facet_of-->
+    # agent_plugin) — None for a plain plugin root with no manifest.
+    # Normally exactly one Package facets to a given agent_plugin. A plugin
+    # root carrying both a pyproject.toml and a package.json under different
+    # names would (invariant violation) produce two facet_of edges here;
+    # ORDER BY makes the pick deterministic rather than SQLite-row-order
+    # dependent in that case, instead of silently varying between runs.
+    pkg_row = conn.execute(
+        "SELECT p.name FROM edges e JOIN nodes p ON e.src = p.id "
+        "JOIN nodes a ON e.dst = a.id "
+        "WHERE e.kind='facet_of' AND p.kind='package' AND a.kind='agent_plugin' AND a.name = ? "
+        "ORDER BY p.name LIMIT 1",
+        (name,),
+    ).fetchone()
+    package_name = pkg_row[0] if pkg_row else None
     return AgentPluginDescription(
         name=plugin_name,
         uri=uri or "",
@@ -1263,6 +1289,7 @@ def describe_agent_plugin(conn: sqlite3.Connection, *, name: str) -> AgentPlugin
         scripts=list(comp.get("scripts") or []),
         hooks=list(comp.get("hooks") or []),
         mcp_servers=list(comp.get("mcp_servers") or []),
+        package_name=package_name,
     )
 
 

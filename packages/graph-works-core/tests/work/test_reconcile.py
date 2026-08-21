@@ -225,7 +225,7 @@ def _workspace(tmp_path, code=None):
     layout = apply_init(plan_init(repo / ".works", today=TODAY, topic="Work")).layout
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     body = f'repositories:\n  code:\n    path: "{code}"\n' if code else "repositories: {}\n"
-    (layout.bundle_dir / "_repositories.yaml").write_text(f'graph_dir: "{layout.cache_dir}"\n{body}', encoding="utf-8")
+    layout.repositories_path.write_text(f'graph_dir: "{layout.cache_dir}"\n{body}', encoding="utf-8")
     return layout
 
 
@@ -298,6 +298,7 @@ def test_the_spec_git_history_is_the_first_anchor_arm(tmp_path):
         cache_dir=code / "_cache",
         bundle_dir=code,
         worktrees_dir=code / "worktrees",
+        repositories_path=code / "_repositories.yaml",
     )
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     _write_item(layout, "a")

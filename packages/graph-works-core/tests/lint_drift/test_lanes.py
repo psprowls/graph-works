@@ -26,7 +26,13 @@ def workspace(tmp_path):
 
 def _compose(workspace, **kwargs) -> LaneSet:
     layout = workspace.layout
-    return compose_lanes(layout, load_config(layout.bundle_dir), repo_root=layout.repo_root, at=AT, **kwargs)
+    return compose_lanes(
+        layout,
+        load_config(layout.bundle_dir, config_path=layout.repositories_path),
+        repo_root=layout.repo_root,
+        at=AT,
+        **kwargs,
+    )
 
 
 def _topics(bundle: Bundle, lane) -> set[str]:
@@ -180,7 +186,9 @@ def test_a_bug_inside_a_rule_factory_propagates_rather_than_becoming_a_lane_erro
 
 def test_no_repo_root_still_composes_the_work_lane(workspace):
     layout = workspace.layout
-    lanes = compose_lanes(layout, load_config(layout.bundle_dir), repo_root=None, at=AT)
+    lanes = compose_lanes(
+        layout, load_config(layout.bundle_dir, config_path=layout.repositories_path), repo_root=None, at=AT
+    )
     assert [lane.name for lane in lanes.lanes] == ["wiki", "work"]
 
 

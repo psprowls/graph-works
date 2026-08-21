@@ -59,7 +59,7 @@ def test_render_package_empty_files_renders_none_placeholder() -> None:
     assert render.sections["Files"].strip() == "_(none)_"
 
 
-def test_render_app_mirrors_package_shape() -> None:
+def test_render_app_frontmatter_drops_packaging_facts_for_a_package_reference() -> None:
     desc = AppDescription(
         name="cli-app",
         language="typescript",
@@ -72,13 +72,7 @@ def test_render_app_mirrors_package_shape() -> None:
         test_suites=[],
     )
     render = render_app(desc, repo_name="agent-workspace")
-    assert render.frontmatter == {
-        "language": "typescript",
-        "version": "1.0.0",
-        "depends_on": [],
-        "test_suites": [],
-        "entry_points": [],
-    }
+    assert render.frontmatter == {"package": "[cli-app](/packages/cli-app.md)"}
     assert "/repositories/agent-workspace/fs/apps/cli/src/index.ts.md" in render.sections["Files"]
 
 
@@ -166,6 +160,42 @@ def test_render_agent_plugin_empty_component_lists_render_none() -> None:
     render = render_agent_plugin(desc)
     for heading in ("Commands", "Agents", "Skills", "Scripts", "Hooks", "MCP servers"):
         assert render.sections[heading].strip() == "_(none)_"
+
+
+def test_render_agent_plugin_without_sibling_package_omits_package_key() -> None:
+    """A plain plugin root (no manifest, no facet_of edge) has
+    `package_name=None` — `render_agent_plugin` must not invent a `package`
+    frontmatter key for it."""
+    desc = AgentPluginDescription(
+        name="standalone-plugin",
+        uri="agent_plugin:x/y/standalone-plugin",
+        ecosystem="claude-code",
+        version="1.0.0",
+        description="",
+    )
+    render = render_agent_plugin(desc)
+    assert render.frontmatter == {"ecosystem": "claude-code", "version": "1.0.0"}
+    assert "package" not in render.frontmatter
+
+
+def test_render_agent_plugin_with_sibling_package_adds_package_reference() -> None:
+    """A plugin root that also carries a package manifest (facet model:
+    `Package --facet_of--> agent_plugin`) gets the same `package` reference
+    key as `render_app`, in the same markdown-link format."""
+    desc = AgentPluginDescription(
+        name="graph-works",
+        uri="agent_plugin:x/y/graph-works",
+        ecosystem="claude-code",
+        version="1.0.0",
+        description="",
+        package_name="graph-works",
+    )
+    render = render_agent_plugin(desc)
+    assert render.frontmatter == {
+        "ecosystem": "claude-code",
+        "version": "1.0.0",
+        "package": "[graph-works](/packages/graph-works.md)",
+    }
 
 
 def test_render_repository_only_owns_package_count() -> None:

@@ -299,3 +299,32 @@ def test_plan_install_writes_nothing(tmp_path: Path) -> None:
     plan = plan_install(root)
     assert [planned.member for planned in plan.writes] == list(SEED_RELATIVE_PATHS)
     assert not root.exists()
+
+
+def test_seed_files_drops_repositories_yaml_when_told_not_to_seed_it() -> None:
+    assert "_repositories.yaml" in seed_files()
+    assert "_repositories.yaml" not in seed_files(seed_repositories=False)
+
+
+def test_plan_install_never_mentions_repositories_yaml_when_not_seeding_it(tmp_path: Path) -> None:
+    plan = plan_install(tmp_path, seed_repositories=False)
+    names = {planned.member for planned in plan.writes} | {item.path for item in plan.skipped}
+    names |= {refusal.path for refusal in plan.refusals}
+    assert "_repositories.yaml" not in names
+
+
+def test_install_bundle_never_writes_repositories_yaml_when_not_seeding_it(tmp_path: Path) -> None:
+    result = install_bundle(tmp_path, today=_TODAY, seed_repositories=False, dry_run=False)
+    assert result.ok
+    assert not (tmp_path / "_repositories.yaml").exists()
+
+
+def test_install_bundle_does_not_refuse_a_foreign_repositories_yaml_when_not_seeding_it(tmp_path: Path) -> None:
+    """With `seed_repositories=False`, `_repositories.yaml` is not one of this
+    call's members at all -- an existing file at that path (planted by
+    whoever else owns it) is neither compared nor refused."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    (tmp_path / "_repositories.yaml").write_text("graph_dir: elsewhere\n", encoding="utf-8")
+    result = install_bundle(tmp_path, today=_TODAY, seed_repositories=False, dry_run=False)
+    assert result.ok
+    assert (tmp_path / "_repositories.yaml").read_text(encoding="utf-8") == "graph_dir: elsewhere\n"

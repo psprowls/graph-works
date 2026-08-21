@@ -49,7 +49,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from code_wiki_okf.entities.lanes import ENTITY_LANES
+from code_wiki_okf.entities.lanes import GLOBAL_LANES, REPO_SCOPED_LANES
 from doc_wiki_okf.diataxis.classify import Unclassified, classify
 from doc_wiki_okf.proposals.filing import plan_file
 from doc_wiki_okf.proposals.lanes import LaneSet
@@ -97,7 +97,7 @@ def catalog_lanes(lane_set: LaneSet) -> tuple[str, ...]:
     5: no lane name is written down here.
     """
     proposal = tuple(lane.directory.rstrip("/") for lane in lane_set.lanes)
-    entities = tuple(lane.rstrip("/") for lane in ENTITY_LANES)
+    entities = tuple(lane.rstrip("/") for lane in (*REPO_SCOPED_LANES, *GLOBAL_LANES, "repositories/"))
     return tuple(dict.fromkeys((*proposal, *entities, SOURCES_LANE)))
 
 

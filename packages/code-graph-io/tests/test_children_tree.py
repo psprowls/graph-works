@@ -37,10 +37,14 @@ def _node_id(conn: sqlite3.Connection, kind: str, name: str) -> int:
 
 
 def test_package_or_app_depth1_direct_children(seeded_db: sqlite3.Connection) -> None:
-    # mypkg is a top-level workspace member; assert on its real seeded kind.
-    row = seeded_db.execute("SELECT kind FROM nodes WHERE name='mypkg' AND kind IN ('package','app')").fetchone()
-    assert row is not None
-    kind = row[0]
+    # mypkg carries app signals, so under the facet model it has BOTH a
+    # `package` row and an `app` row (Package unconditional, App an additive
+    # facet). Containment (subpackage/file/entry_point/test_suite children)
+    # sources exclusively from the Package node — the App node is a pure
+    # facet with no such edges of its own — so this test asserts against
+    # Package specifically, not whichever of Package/App an unordered
+    # `kind IN (...)` query happens to return.
+    kind = "package"
     rec = _node_record(seeded_db, kind, "mypkg")
     tree = queries.children_tree(seeded_db, node=rec, depth=1)
 
@@ -61,6 +65,14 @@ def test_package_or_app_depth1_direct_children(seeded_db: sqlite3.Connection) ->
         ("mypkg", kind),
     ).fetchone()[0]
     assert sum(1 for c in tree if c.kind == "test_suite") == expected_suite_count
+
+
+def test_app_facet_has_no_direct_children(seeded_db: sqlite3.Connection) -> None:
+    """mypkg's App facet (see test above) carries no containment/entry-point/
+    test-suite edges of its own — those all live on the sibling Package node
+    — so children_tree on the App node is legitimately empty."""
+    rec = _node_record(seeded_db, "app", "mypkg")
+    assert queries.children_tree(seeded_db, node=rec, depth=1) == []
 
 
 def test_subpackage_to_file_to_symbol_boundary(seeded_db: sqlite3.Connection) -> None:

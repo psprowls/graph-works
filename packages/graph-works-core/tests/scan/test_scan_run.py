@@ -18,7 +18,7 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 @pytest.fixture
 def ready(tmp_path):
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir)
+    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     seed_graph(config.graph_dir, repo)
     return layout, config
 
@@ -224,8 +224,8 @@ async def test_dry_run_is_the_default_on_run_scan(ready, monkeypatch):
 async def test_apply_previews_its_counts_without_touching_a_file(ready):
     layout, config = ready
     worklist, _ = await scan.build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
-    task = next(t for t in worklist.prose_tasks if t.page_path == "packages/widgets.md")
-    page = layout.bundle_dir / "packages" / "widgets.md"
+    task = next(t for t in worklist.prose_tasks if t.page_path == "repositories/demo/packages/widgets.md")
+    page = layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
     log = layout.bundle_dir / "log.md"
     before_page = page.read_text(encoding="utf-8")
     before_log = log.read_text(encoding="utf-8")

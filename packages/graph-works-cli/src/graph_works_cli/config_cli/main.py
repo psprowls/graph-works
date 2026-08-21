@@ -158,7 +158,7 @@ def set_cmd(
     workspace: str = _WORKSPACE_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
-    """Set a catalog key and refresh `_config/config.json`."""
+    """Set a catalog key and refresh `_gw/_config/config.json`."""
     try:
         layout, store = _store(workspace)
         result = set_key(
@@ -203,7 +203,7 @@ def sync(
     workspace: str = _WORKSPACE_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
-    """Regenerate `_config/config.json` after an out-of-band manifest edit."""
+    """Regenerate `_gw/_config/config.json` after an out-of-band manifest edit."""
     try:
         layout, store = _store(workspace)
         target = write_projection(store, layout.config_dir / "config.json")

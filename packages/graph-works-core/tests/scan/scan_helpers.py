@@ -195,8 +195,8 @@ def make_workspace(tmp_path: Path) -> tuple[WorkspaceLayout, Path]:
     # template avoids depending on that template's exact YAML shape (it emits
     # `repositories: {}` for a repo-less layout, which a substring replace on
     # `"repositories:"` mangles into invalid YAML).
-    pristine = load_config(layout.bundle_dir)
-    (layout.bundle_dir / "_repositories.yaml").write_text(
+    pristine = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    layout.repositories_path.write_text(
         f"graph_dir: {json.dumps(str(pristine.graph_dir))}\n"
         f"declarations_dir: {json.dumps(str(pristine.declarations_dir))}\n"
         f"repositories:\n  {REPO_NAME}:\n    path: {json.dumps(str(repo))}\n"

@@ -6,7 +6,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from code_graph_io._ignore import should_skip
+from code_graph_io._ignore import IgnoreSpec, should_skip
 
 # JS/TS extensions used to pick the JS vs python resolver in
 # resolve_file_imports. Mirrors import_scan._JS_EXTENSIONS; kept as a local
@@ -273,7 +273,7 @@ def sweep(conn: sqlite3.Connection) -> None:
     )
 
 
-def sweep_skip_dir_files(conn: sqlite3.Connection, skip_dirs: frozenset[str]) -> None:
+def sweep_skip_dir_files(conn: sqlite3.Connection, skip_dirs: frozenset[str], ignore: IgnoreSpec | None = None) -> None:
     """Delete file nodes that are skip-dir build artifacts (uri IS NULL, path in skip-dir).
 
     Targets nodes with kind='file', uri IS NULL, path IS NOT NULL whose path has a
@@ -289,7 +289,7 @@ def sweep_skip_dir_files(conn: sqlite3.Connection, skip_dirs: frozenset[str]) ->
         "SELECT id, path FROM nodes WHERE kind = 'file' AND uri IS NULL AND path IS NOT NULL"
     ).fetchall()
 
-    to_delete = [node_id for node_id, path in candidates if should_skip(path, skip_dirs)]
+    to_delete = [node_id for node_id, path in candidates if should_skip(path, skip_dirs, ignore)]
 
     if not to_delete:
         return

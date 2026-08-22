@@ -17,26 +17,26 @@ from importlib.resources.abc import Traversable
 
 #: Every file this package owns, bundle-relative posix, in write order.
 #:
-#: Fourteen, not thirteen (C1-I): `_sections/_fragments.work_tracker.yaml` is a
-#: member like any other, and an installed `_sections/` without it cannot
-#: resolve a single `placeholder_ref`. `index.md`, `log.md` and `_tags.yaml`
+#: Fourteen, not thirteen (C1-I): `sections/_fragments.work_tracker.yaml` is a
+#: member like any other, and an installed `sections/` without it cannot
+#: resolve a single `placeholder_ref`. `index.md`, `log.md` and `tags.yaml`
 #: are absent because they belong to `okf_ext.bundle`'s scaffold, which any of
 #: the three tier-3 packages sharing a bundle may be the first to run.
 SEED_RELATIVE_PATHS: tuple[str, ...] = (
-    "_schema/_base.schema.json",
-    "_schema/Epic.schema.json",
-    "_schema/Feature.schema.json",
-    "_schema/Bug.schema.json",
-    "_schema/TechDebt.schema.json",
-    "_schema/TestGap.schema.json",
-    "_schema/Spike.schema.json",
-    "_sections/_fragments.work_tracker.yaml",
-    "_sections/Epic.yaml",
-    "_sections/Feature.yaml",
-    "_sections/Bug.yaml",
-    "_sections/TechDebt.yaml",
-    "_sections/TestGap.yaml",
-    "_sections/Spike.yaml",
+    "schema/_base.schema.json",
+    "schema/Epic.schema.json",
+    "schema/Feature.schema.json",
+    "schema/Bug.schema.json",
+    "schema/TechDebt.schema.json",
+    "schema/TestGap.schema.json",
+    "schema/Spike.schema.json",
+    "sections/_fragments.work_tracker.yaml",
+    "sections/Epic.yaml",
+    "sections/Feature.yaml",
+    "sections/Bug.yaml",
+    "sections/TechDebt.yaml",
+    "sections/TestGap.yaml",
+    "sections/Spike.yaml",
 )
 
 

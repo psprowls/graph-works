@@ -1,8 +1,8 @@
-"""Declaration shapes shared by every capability that reads a `_sections/`
+"""Declaration shapes shared by every capability that reads a `sections/`
 directory.
 
     from okf_ext import shape
-    declaration = shape.load_sections("kb/_sections")
+    declaration = shape.load_sections("kb/sections")
 
 **The first shared module that reads files.** That is a widening of what
 "shared" means and is stated rather than smuggled: the layer already held

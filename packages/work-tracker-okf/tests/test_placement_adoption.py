@@ -2,7 +2,7 @@
 
 The rule's own behaviour is `packages/okf-ext/tests/test_placement_rule.py`'s.
 Asserted here is the composition: that the seeded schemas really do declare
-`work/`, that the narrowing keeps a shared `_schema/`'s entity types out of the
+`work/`, that the narrowing keeps a shared `schema/`'s entity types out of the
 map, that both codes fire over one built bundle at `error`, and that the writer
 honours the declaration it is handed.
 
@@ -33,7 +33,7 @@ runner = CliRunner()
 
 _TODAY = date(2026, 1, 1)
 
-#: An entity type parked into the bundle's `_schema/` to stand in for the
+#: An entity type parked into the bundle's `schema/` to stand in for the
 #: composed workspace, where `workspace/init.py` points every lane installer at
 #: one shared declarations directory and thirteen types land in it. `Package`
 #: nests under `repositories/<repo>/` (ADR-0026), so its declared `packages/`
@@ -48,7 +48,7 @@ _PACKAGE_PAGE = '---\ntype: Package\ntitle: "okf-io"\ndescription: "D"\n---\n\n#
 
 
 def _seed_schemas() -> SchemaSet:
-    return load_schemas(Path(str(assets_root() / "_schema")))
+    return load_schemas(Path(str(assets_root() / "schema")))
 
 
 def _stray_page(root: Path, *, resource: str | None = None) -> None:
@@ -81,13 +81,13 @@ def test_the_declaration_and_the_constant_agree() -> None:
 
 
 def test_placement_directories_narrows_to_this_lanes_own_types(tmp_path: Path) -> None:
-    """An allow-list, not a deny-list: the shared `_schema/` of a composed
+    """An allow-list, not a deny-list: the shared `schema/` of a composed
     workspace holds seven other types, and a deny-list keyed on names this lane
     happens to know today would let every future one through."""
-    schema_dir = tmp_path / "_schema"
+    schema_dir = tmp_path / "schema"
     schema_dir.mkdir()
     (schema_dir / "Package.schema.json").write_text(_PACKAGE_SCHEMA, encoding="utf-8")
-    seeded = Path(str(assets_root() / "_schema" / "Bug.schema.json")).read_text(encoding="utf-8")
+    seeded = Path(str(assets_root() / "schema" / "Bug.schema.json")).read_text(encoding="utf-8")
     (schema_dir / "Bug.schema.json").write_text(seeded, encoding="utf-8")
 
     schema_set = load_schemas(schema_dir)
@@ -112,16 +112,16 @@ def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
 def test_a_repo_scoped_entity_page_trips_no_placement_finding(tmp_path: Path) -> None:
     """The narrowing, end to end: a `Package` page correctly nested under
     `repositories/<repo>/packages/` must not be reported just because a shared
-    `_schema/` declares `packages/` for it."""
+    `schema/` declares `packages/` for it."""
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    (root / "_schema" / "Package.schema.json").write_text(_PACKAGE_SCHEMA, encoding="utf-8")
+    (root / "schema" / "Package.schema.json").write_text(_PACKAGE_SCHEMA, encoding="utf-8")
     page = root / "repositories" / "orca" / "packages" / "okf-io.md"
     page.parent.mkdir(parents=True)
     page.write_text(_PACKAGE_PAGE, encoding="utf-8")
 
     bundle = load_bundle(root, ignore=IGNORE)
-    schema_set = load_schemas(root / "_schema")
+    schema_set = load_schemas(root / "schema")
 
     narrowed = validate(
         bundle,
@@ -213,7 +213,7 @@ def test_the_file_command_places_the_page_where_the_bundle_declares(tmp_path: Pa
     `SchemaSet` and files into the directory the seed's type declares."""
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    schema = root / "_schema" / "Bug.schema.json"
+    schema = root / "schema" / "Bug.schema.json"
     schema.write_text(schema.read_text(encoding="utf-8").replace('"work/"', '"tickets/"'), encoding="utf-8")
 
     argv = ["file", str(root), "--type", "Bug", "--title", "A declared bug"]

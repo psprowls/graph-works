@@ -39,7 +39,7 @@ def write_set(root, **files):
 
 
 def standard_set(tmp_path):
-    root = tmp_path / "_schema"
+    root = tmp_path / "schema"
     write_set(
         root,
         **{
@@ -93,7 +93,7 @@ def test_a_ref_with_a_fragment_resolves(tmp_path):
 
 def test_the_root_is_carried(tmp_path):
     schema_set = standard_set(tmp_path)
-    assert schema_set.root == tmp_path / "_schema"
+    assert schema_set.root == tmp_path / "schema"
 
 
 def test_the_mapping_fields_survive_json_dumps(tmp_path):
@@ -107,7 +107,7 @@ def test_a_declared_draft_wins_over_the_default(tmp_path):
     from jsonschema.validators import Draft7Validator, validator_for
 
     root = write_set(
-        tmp_path / "_schema",
+        tmp_path / "schema",
         **{"old__schema__yaml": ('$schema: "http://json-schema.org/draft-07/schema#"\ntype: object\n')},
     )
     schema_set = load_schemas(root)
@@ -115,13 +115,13 @@ def test_a_declared_draft_wins_over_the_default(tmp_path):
 
 
 def test_a_str_path_is_accepted(tmp_path):
-    root = write_set(tmp_path / "_schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE})
+    root = write_set(tmp_path / "schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE})
     assert load_schemas(str(root)).types == ("metric",)
 
 
 def test_non_schema_files_are_ignored(tmp_path):
     root = write_set(
-        tmp_path / "_schema",
+        tmp_path / "schema",
         **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE, "README__md": "# notes\n"},
     )
     assert load_schemas(root).types == ("metric",)
@@ -130,7 +130,7 @@ def test_non_schema_files_are_ignored(tmp_path):
 
 def test_a_bare_suffix_filename_claims_no_type(tmp_path):
     root = write_set(
-        tmp_path / "_schema",
+        tmp_path / "schema",
         **{
             "__schema__yaml": "type: object\n",
             "metric__schema__yaml": METRIC,
@@ -141,7 +141,7 @@ def test_a_bare_suffix_filename_claims_no_type(tmp_path):
 
 
 def test_a_subdirectory_is_not_walked(tmp_path):
-    root = write_set(tmp_path / "_schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE})
+    root = write_set(tmp_path / "schema", **{"metric__schema__yaml": METRIC, "_base__schema__yaml": BASE})
     nested = root / "nested.schema.yaml"
     nested.mkdir()
     assert load_schemas(root).types == ("metric",)
@@ -158,13 +158,13 @@ def test_a_missing_directory_raises_oserror(tmp_path):
 
 
 def test_a_directory_with_no_schemas_raises(tmp_path):
-    root = write_set(tmp_path / "_schema", **{"README__md": "# nothing here\n"})
+    root = write_set(tmp_path / "schema", **{"README__md": "# nothing here\n"})
     with pytest.raises(SchemaError, match="no schema files found"):
         load_schemas(root)
 
 
 def test_non_utf8_bytes_raise(tmp_path):
-    root = tmp_path / "_schema"
+    root = tmp_path / "schema"
     root.mkdir()
     (root / "metric.schema.yaml").write_bytes(b"type: object\ntitle: \xff\xfe\n")
     with pytest.raises(SchemaError, match="not valid UTF-8"):
@@ -172,19 +172,19 @@ def test_non_utf8_bytes_raise(tmp_path):
 
 
 def test_bad_yaml_raises(tmp_path):
-    root = write_set(tmp_path / "_schema", **{"metric__schema__yaml": "type: [unclosed\n"})
+    root = write_set(tmp_path / "schema", **{"metric__schema__yaml": "type: [unclosed\n"})
     with pytest.raises(SchemaError, match="not valid YAML"):
         load_schemas(root)
 
 
 def test_bad_json_raises(tmp_path):
-    root = write_set(tmp_path / "_schema", **{"metric__schema__json": "{not json}"})
+    root = write_set(tmp_path / "schema", **{"metric__schema__json": "{not json}"})
     with pytest.raises(SchemaError, match="not valid JSON"):
         load_schemas(root)
 
 
 def test_a_schema_that_is_not_a_mapping_raises(tmp_path):
-    root = write_set(tmp_path / "_schema", **{"metric__schema__yaml": "- a\n- b\n"})
+    root = write_set(tmp_path / "schema", **{"metric__schema__yaml": "- a\n- b\n"})
     with pytest.raises(SchemaError, match="must be a mapping"):
         load_schemas(root)
 
@@ -193,14 +193,14 @@ def test_a_malformed_schema_raises_at_load_naming_the_file(tmp_path):
     """okf-schema v0.1 built its validator inside the validation loop, so one
     broken schema produced one confusing complaint against every concept using
     it. Caller configuration is always an exception."""
-    root = write_set(tmp_path / "_schema", **{"metric__schema__yaml": "type: 123\n"})
+    root = write_set(tmp_path / "schema", **{"metric__schema__yaml": "type: 123\n"})
     with pytest.raises(SchemaError, match=r"metric\.schema\.yaml: not a valid JSONSchema"):
         load_schemas(root)
 
 
 def test_two_files_claiming_one_type_raise(tmp_path):
     root = write_set(
-        tmp_path / "_schema",
+        tmp_path / "schema",
         **{"metric__schema__yaml": "type: object\n", "metric__schema__json": '{"type": "object"}'},
     )
     with pytest.raises(SchemaError, match="already claimed"):
@@ -215,8 +215,8 @@ def test_schema_error_is_a_value_error():
 
 
 def test_the_convention_constants_are_what_the_spec_names():
-    assert DEFAULT_SCHEMA_DIRNAME == "_schema"
-    assert DEFAULT_IGNORE == ("_schema/*", "*/_schema/*")
+    assert DEFAULT_SCHEMA_DIRNAME == "schema"
+    assert DEFAULT_IGNORE == ("schema/*", "*/schema/*")
 
 
 def test_a_missing_jsonschema_names_the_extra():
@@ -264,7 +264,7 @@ def _annotated_set(tmp_path, **annotations):
     A value of `...` means the annotation is omitted entirely, which is a
     different fact from a blank one and has its own test below.
     """
-    root = tmp_path / "_schema"
+    root = tmp_path / "schema"
     root.mkdir()
     for type_name, directory in annotations.items():
         document = {

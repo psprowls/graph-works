@@ -12,7 +12,7 @@ from okf_ext.bundle import SCAFFOLD_MEMBERS
 _TODAY = date(2026, 1, 1)
 _IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
-_SCAFFOLD_FILES = {"index.md", "log.md", "_tags.yaml"}
+_SCAFFOLD_FILES = {"index.md", "log.md", "tags.yaml"}
 _INSTALL_FILES = set(SEED_RELATIVE_PATHS)
 _ALL_FILES = _SCAFFOLD_FILES | _INSTALL_FILES
 
@@ -46,17 +46,7 @@ def test_install_bundle_writes_every_file(tmp_path: Path) -> None:
     for relative in _ALL_FILES:
         assert (root / relative).is_file()
     assert result.changed is True
-    assert "+ _schema/Tutorial.schema.json" in result.diff()
-
-
-def test_install_bundle_ignores_seed_repositories(tmp_path: Path) -> None:
-    """`seed_repositories` exists for `graph_works_core`'s uniform `INSTALLERS`
-    call; this package owns none of `_repositories.yaml`, so it is accepted
-    and has no effect on what gets written."""
-    root = tmp_path / "bundle"
-    result = install_bundle(root, today=_TODAY, seed_repositories=False, dry_run=False)
-    assert result.ok
-    assert set(result.scaffold.written) | set(result.install.written) == _ALL_FILES
+    assert "+ schema/Tutorial.schema.json" in result.diff()
 
 
 def test_a_second_install_writes_nothing_and_refuses_nothing(tmp_path: Path) -> None:
@@ -71,21 +61,21 @@ def test_a_second_install_writes_nothing_and_refuses_nothing(tmp_path: Path) -> 
     assert again.logged is None
     assert again.changed is False
     assert {relative: (root / relative).read_bytes() for relative in _ALL_FILES} == before
-    assert "= _schema/Source.schema.json" in again.diff()
+    assert "= schema/Source.schema.json" in again.diff()
 
 
 def test_a_modified_seed_is_refused_by_name_and_its_neighbours_still_land(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
-    (root / "_schema").mkdir(parents=True)
-    (root / "_schema/HowTo.schema.json").write_text('{"mine": true}\n', encoding="utf-8")
+    (root / "schema").mkdir(parents=True)
+    (root / "schema/HowTo.schema.json").write_text('{"mine": true}\n', encoding="utf-8")
 
     result = install_bundle(root, today=_TODAY, dry_run=False)
     assert not result.ok
-    assert [f.path for f in result.install.failed] == ["_schema/HowTo.schema.json"]
+    assert [f.path for f in result.install.failed] == ["schema/HowTo.schema.json"]
     assert result.install.failed[0].kind == "foreign-content"
-    assert (root / "_schema/HowTo.schema.json").read_text(encoding="utf-8") == '{"mine": true}\n'
+    assert (root / "schema/HowTo.schema.json").read_text(encoding="utf-8") == '{"mine": true}\n'
     for relative in SEED_RELATIVE_PATHS:
-        if relative != "_schema/HowTo.schema.json":
+        if relative != "schema/HowTo.schema.json":
             assert (root / relative).is_file()
 
 
@@ -101,14 +91,14 @@ def test_install_is_additive_over_a_bundle_code_wiki_okf_already_created(tmp_pat
 
     root = tmp_path / "bundle"
     install_code_wiki(root, today=_TODAY, dry_run=False)
-    sibling = (root / "_schema/Package.schema.json").read_bytes()
+    sibling = (root / "schema/Package.schema.json").read_bytes()
 
     result = install_bundle(root, today=_TODAY, dry_run=False)
     assert result.ok
     assert result.scaffold.written == ()  # the scaffold was already there
     assert set(result.install.written) == _INSTALL_FILES
-    assert (root / "_schema/Package.schema.json").read_bytes() == sibling
-    assert (root / "_schema/Tutorial.schema.json").is_file()
+    assert (root / "schema/Package.schema.json").read_bytes() == sibling
+    assert (root / "schema/Tutorial.schema.json").is_file()
 
 
 def test_work_tracker_okf_and_doc_wiki_okf_coexist(tmp_path: Path) -> None:
@@ -126,8 +116,8 @@ def test_work_tracker_okf_and_doc_wiki_okf_coexist(tmp_path: Path) -> None:
 
     result = install_bundle(root, today=_TODAY, dry_run=False)
     assert result.ok
-    assert (root / "_sections/_fragments.work_tracker.yaml").is_file()
-    assert (root / "_sections/_fragments.doc_wiki.yaml").is_file()
+    assert (root / "sections/_fragments.work_tracker.yaml").is_file()
+    assert (root / "sections/_fragments.doc_wiki.yaml").is_file()
 
 
 def test_install_bundle_succeeds_into_a_directory_that_is_not_empty(tmp_path: Path) -> None:
@@ -251,9 +241,9 @@ def test_declarations_dir_relocates_the_declarations(tmp_path: Path) -> None:
     elsewhere.mkdir()
     install_bundle(root, today=_TODAY, declarations_dir=elsewhere, dry_run=False)
 
-    assert (elsewhere / "_schema/Tutorial.schema.json").is_file()
-    assert (elsewhere / "_sections/_fragments.doc_wiki.yaml").is_file()
-    assert not (root / "_schema").exists()
+    assert (elsewhere / "schema/Tutorial.schema.json").is_file()
+    assert (elsewhere / "sections/_fragments.doc_wiki.yaml").is_file()
+    assert not (root / "schema").exists()
 
 
 def test_plan_install_writes_nothing(tmp_path: Path) -> None:

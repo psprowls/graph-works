@@ -34,13 +34,13 @@ sections:
 def build(tmp_path, files, *, declarations=DECLARATIONS, extra=None):
     """A purpose-built corpus plus its declaration set, loaded together."""
     root = tmp_path / "kb"
-    sections_dir = root / "_sections"
+    sections_dir = root / "sections"
     sections_dir.mkdir(parents=True)
     (sections_dir / "Feature.yaml").write_text(declarations, encoding="utf-8")
     if extra is not None:
         for name, body in extra.items():
             (sections_dir / name).write_text(body, encoding="utf-8")
-    bundle = write_bundle(root, files, ignore=("_sections/*",))
+    bundle = write_bundle(root, files, ignore=("sections/*",))
     return bundle, load_sections(sections_dir)
 
 
@@ -238,7 +238,7 @@ def test_the_declaration_filename_is_the_citation(tmp_path):
 
 def test_the_set_directory_name_is_the_citation_for_a_coverage_gap(tmp_path):
     bundle, section_set = build(tmp_path, {"a.md": doc("## Summary\n\nR.\n", type_name="Glossary")})
-    assert [f.spec for f in codes(bundle, section_set)] == ["_sections"]
+    assert [f.spec for f in codes(bundle, section_set)] == ["sections"]
 
 
 def test_the_rule_runs_over_the_committed_corpus_without_raising():

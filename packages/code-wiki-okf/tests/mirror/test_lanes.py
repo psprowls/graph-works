@@ -53,10 +53,8 @@ def _workspace(tmp_path: Path, *repo_names: str) -> tuple[Path, Config]:
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
 
     repos_yaml = "\n".join(f"  {name}:\n    path: {tmp_path / name}" for name in repo_names)
-    (bundle_root / "_repositories.yaml").write_text(
-        f"graph_dir: {graph_dir}\nrepositories:\n{repos_yaml}\n", encoding="utf-8"
-    )
-    config = load_config(bundle_root)
+    (bundle_root / "workspace.yaml").write_text(f"repositories:\n{repos_yaml}\n", encoding="utf-8")
+    config = load_config(bundle_root, graph_dir=graph_dir)
     return bundle_root, config
 
 
@@ -112,10 +110,8 @@ def test_a_non_git_repo_is_skipped_not_raised(tmp_path: Path) -> None:
 
     non_git = tmp_path / "not-a-repo"
     non_git.mkdir()
-    (bundle_root / "_repositories.yaml").write_text(
-        f"graph_dir: {graph_dir}\nrepositories:\n  acme:\n    path: {non_git}\n", encoding="utf-8"
-    )
-    config = load_config(bundle_root)
+    (bundle_root / "workspace.yaml").write_text(f"repositories:\n  acme:\n    path: {non_git}\n", encoding="utf-8")
+    config = load_config(bundle_root, graph_dir=graph_dir)
 
     with open_reader(graph_dir=graph_dir) as reader:
         summary = sync_mirror(bundle_root, config, reader, today=_TODAY, at=_AT, dry_run=False)
@@ -155,7 +151,7 @@ def test_missing_sections_directory_propagates(tmp_path: Path) -> None:
     message; a library does not decide that.
     """
     bundle_root, config = _workspace(tmp_path, "acme")
-    shutil.rmtree(config.declarations_dir / "_sections")
+    shutil.rmtree(config.declarations_dir / "sections")
     with open_reader(graph_dir=config.graph_dir) as reader, pytest.raises(OSError):
         sync_mirror(bundle_root, config, reader, today=_TODAY, at=_AT, dry_run=True)
 

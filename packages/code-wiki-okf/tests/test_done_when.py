@@ -6,9 +6,9 @@ build it. A `Topic` type disjoint from all seven code-wiki types, plus two
 `_base-<lane>.schema.json` files it `$ref`s, is exactly enough to exercise the
 three properties the whole design rests on: `load_schemas` keys the dispatch
 table on type name, an `_`-prefixed file is a `$ref` target that stays out of
-that table, and several such bases coexist in one `_schema/` directory.
+that table, and several such bases coexist in one `schema/` directory.
 
-**What this gate does not cover.** `_tags.yaml` merge coexistence is deferred
+**What this gate does not cover.** `tags.yaml` merge coexistence is deferred
 to the `2026-08-09-feature-tags-vocabulary-install-merge` work item. It also
 does not exercise type-name collisions between lanes, and the two shapes that
 word covers behave differently. `load_schemas` keys its dispatch table, and
@@ -50,7 +50,7 @@ _BASE_DIATAXIS = """{
 
 #: A second lane-prefixed base, alongside `_base-diataxis`. One base proves
 #: the `$ref` mechanism; two prove S-H's actual convention -- several bases
-#: coexisting in one `_schema/`, each reachable by its own filename.
+#: coexisting in one `schema/`, each reachable by its own filename.
 _BASE_EXTRA = """{
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$defs": {
@@ -102,10 +102,10 @@ The second lane's own page, written by nobody in this repository.
 """
 
 _SECOND_LANE_DECLARATIONS = {
-    "_schema/_base-diataxis.schema.json": _BASE_DIATAXIS,
-    "_schema/_base-extra.schema.json": _BASE_EXTRA,
-    "_schema/Topic.schema.json": _TOPIC_SCHEMA,
-    "_sections/Topic.yaml": _TOPIC_SECTIONS,
+    "schema/_base-diataxis.schema.json": _BASE_DIATAXIS,
+    "schema/_base-extra.schema.json": _BASE_EXTRA,
+    "schema/Topic.schema.json": _TOPIC_SCHEMA,
+    "sections/Topic.yaml": _TOPIC_SECTIONS,
 }
 
 
@@ -124,9 +124,9 @@ def _write_topic_page(root: Path) -> None:
 
 def _report(root: Path):
     """Validate with both lanes' schemas, sections and tags rules active."""
-    schema_set = load_schemas(root / "_schema")
-    section_set = load_sections(root / "_sections")
-    vocabulary = load_vocabulary(root / "_tags.yaml")
+    schema_set = load_schemas(root / "schema")
+    section_set = load_sections(root / "sections")
+    vocabulary = load_vocabulary(root / "tags.yaml")
     return validate(
         load_bundle(root),
         today=_TODAY,
@@ -202,7 +202,7 @@ def test_both_lanes_types_are_live_and_the_prefixed_base_stays_out_of_the_table(
     install_bundle(root, today=_TODAY, dry_run=False)
     _install_second_lane(root)
 
-    schema_set = load_schemas(root / "_schema")
+    schema_set = load_schemas(root / "schema")
     assert "Topic" in schema_set.schemas
     assert {"Package", "App", "Dependency", "TestSuite", "Repository", "AgentPlugin", "File"} <= set(schema_set.schemas)
     assert "_base-diataxis" not in schema_set.schemas

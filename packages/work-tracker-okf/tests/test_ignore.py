@@ -10,10 +10,10 @@ from work_tracker_okf.items import ARCHIVE_IGNORE, IGNORE, load_items
 _EXPECTED = (
     "*/references/*",
     "*/.DS_Store",
-    "_schema/*",
-    "*/_schema/*",
-    "_sections/*",
-    "*/_sections/*",
+    "schema/*",
+    "*/schema/*",
+    "sections/*",
+    "*/sections/*",
 )
 
 _ARTIFACTS = (
@@ -99,18 +99,18 @@ def test_the_recipe_keeps_this_packages_own_declarations_out_of_concepts(tmp_pat
     install_bundle(root, today=date(2026, 1, 1), dry_run=False)
     bundle = load_bundle(root, ignore=IGNORE)
     assert dict(bundle.concepts) == {}
-    assert bundle.has_member("_schema/_base.schema.json")
-    assert bundle.has_member("_sections/_fragments.work_tracker.yaml")
+    assert bundle.has_member("schema/_base.schema.json")
+    assert bundle.has_member("sections/_fragments.work_tracker.yaml")
 
 
 #: Written out literally for the same reason `_EXPECTED` is: this is the
 #: package's second exported recipe, and recomputing it from the tier-2
 #: defaults would make the test agree with whatever okf-ext says today.
 _EXPECTED_ARCHIVE = (
-    "_schema/*",
-    "*/_schema/*",
-    "_sections/*",
-    "*/_sections/*",
+    "schema/*",
+    "*/schema/*",
+    "sections/*",
+    "*/sections/*",
 )
 
 

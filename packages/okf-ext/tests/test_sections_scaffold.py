@@ -264,7 +264,7 @@ def test_reserved_members_are_not_reported_as_unreadable(tmp_path):
 def test_apply_writes_the_planned_body_and_reports_it(tmp_path):
     root = sectioned_copy(tmp_path)
     section_set = load_sections(SECTIONS_DIR)
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     plan = plan_sections(bundle, section_set)
     result = apply(bundle, plan)
     assert result.ok
@@ -276,10 +276,10 @@ def test_applying_twice_is_a_no_op(tmp_path):
     """A generator that re-runs is the reason this exists."""
     root = sectioned_copy(tmp_path)
     section_set = load_sections(SECTIONS_DIR)
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     apply(bundle, plan_sections(bundle, section_set))
     first = (root / "missing.md").read_bytes()
-    reloaded = load_bundle(root, ignore=("_sections/*",))
+    reloaded = load_bundle(root, ignore=("sections/*",))
     assert plan_sections(reloaded, section_set).is_empty
     assert (root / "missing.md").read_bytes() == first
 
@@ -287,7 +287,7 @@ def test_applying_twice_is_a_no_op(tmp_path):
 def test_the_in_memory_bundle_agrees_with_disk_after_apply(tmp_path):
     root = sectioned_copy(tmp_path)
     section_set = load_sections(SECTIONS_DIR)
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     apply(bundle, plan_sections(bundle, section_set))
     assert "## Plan" in bundle.concepts["missing"].body
 
@@ -296,12 +296,12 @@ def test_a_stale_digest_is_refused_as_kind_stale(tmp_path):
     """The one kind worth re-planning over."""
     root = sectioned_copy(tmp_path)
     section_set = load_sections(SECTIONS_DIR)
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     plan = plan_sections(bundle, section_set)
     (root / "missing.md").write_text(
         "---\ntype: Feature\ntitle: T\ndescription: D\n---\n\nsomething else entirely\n", encoding="utf-8"
     )
-    result = apply(load_bundle(root, ignore=("_sections/*",)), plan)
+    result = apply(load_bundle(root, ignore=("sections/*",)), plan)
     assert [(f.path, f.kind) for f in result.failed] == [("missing.md", "stale")]
 
 
@@ -312,16 +312,16 @@ def test_a_plan_from_another_bundle_raises(tmp_path):
     other = tmp_path / "other"
     shutil.copytree(root, other)
     section_set = load_sections(SECTIONS_DIR)
-    plan = plan_sections(load_bundle(root, ignore=("_sections/*",)), section_set)
+    plan = plan_sections(load_bundle(root, ignore=("sections/*",)), section_set)
     with pytest.raises(ValueError, match="different bundle"):
-        apply(load_bundle(other, ignore=("_sections/*",)), plan)
+        apply(load_bundle(other, ignore=("sections/*",)), plan)
 
 
 def test_a_splice_naming_a_concept_absent_from_this_bundle_is_reported(tmp_path):
     """A hand-built plan can name a concept that is not (or no longer) a
     member of this bundle; `plan_sections` itself can never produce one."""
     root = sectioned_copy(tmp_path)
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     ghost = SectionSplice(concept_id="ghost", path="ghost.md", inserts=(), digest="d", after="x")
     result = apply(bundle, SectionPlan(root=bundle.root, splices=(ghost,), skipped=()))
     assert [(f.path, f.kind) for f in result.failed] == [("ghost.md", "not-a-member")]
@@ -331,7 +331,7 @@ def test_a_hand_built_splice_over_a_parse_error_concept_is_refused(tmp_path):
     root = sectioned_copy(tmp_path)
     (root / "broken.md").write_text("---\ntype: [\n---\n\n# Broken\n", encoding="utf-8")
     before = (root / "broken.md").read_bytes()
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     splice = SectionSplice(concept_id="broken", path="broken.md", inserts=(), digest="d", after="x")
     result = apply(bundle, SectionPlan(root=bundle.root, splices=(splice,), skipped=()))
     assert result.failed[0].kind == "parse-error"
@@ -341,7 +341,7 @@ def test_a_hand_built_splice_over_a_parse_error_concept_is_refused(tmp_path):
 def test_a_serialize_failure_for_one_document_does_not_block_its_siblings(tmp_path, monkeypatch):
     root = sectioned_copy(tmp_path)
     section_set = load_sections(SECTIONS_DIR)
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     plan = plan_sections(bundle, section_set)
     assert "missing.md" in [s.path for s in plan.splices]
     original = Document.serialize
@@ -362,7 +362,7 @@ def test_a_plan_naming_one_concept_twice_is_refused(tmp_path):
     could -- and both splices were computed against the same body, so applying
     them in sequence would silently discard the first."""
     root = sectioned_copy(tmp_path)
-    bundle = load_bundle(root, ignore=("_sections/*",))
+    bundle = load_bundle(root, ignore=("sections/*",))
     plan = plan_sections(bundle, load_sections(SECTIONS_DIR))
     doubled = SectionPlan(root=plan.root, splices=plan.splices + plan.splices[:1], skipped=())
     result = apply(bundle, doubled)

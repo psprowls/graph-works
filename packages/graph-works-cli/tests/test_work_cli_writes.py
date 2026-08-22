@@ -10,6 +10,7 @@ from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.work_cli import main as work_main
 from graph_works_cli.workspace_resolution import resolve_workspace
+from ruamel.yaml import YAML
 from test_work_cli_reads import write_item
 from typer.testing import CliRunner
 
@@ -182,7 +183,13 @@ def test_file_run_file_value_error_is_reported(workspace: Path, monkeypatch: pyt
 
 
 def test_file_config_os_error_is_reported(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    def boom(_root: Path, *, config_path: object = None) -> object:
+    def boom(
+        _root: Path,
+        *,
+        config_path: object = None,
+        graph_dir: object = None,
+        declarations_dir: object = None,
+    ) -> object:
         raise OSError("disk gone")
 
     monkeypatch.setattr(work_main, "load_config", boom)
@@ -452,11 +459,14 @@ def test_advance_json_mode_without_a_repo_note_reports_nothing_extra(workspace: 
     layout = resolve_workspace(str(workspace))
     repo_dir = tmp_path / "code-repo"
     repo_dir.mkdir()
-    config_path = layout.repositories_path
-    config_path.write_text(
-        f"graph_dir: ../graphs/code\nrepositories:\n  main:\n    path: {repo_dir}\nignore: []\n",
-        encoding="utf-8",
-    )
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with layout.manifest_path.open(encoding="utf-8") as handle:
+        data = yaml.load(handle)
+    data["repositories"] = {"main": {"path": str(repo_dir)}}
+    data["ignore"] = []
+    with layout.manifest_path.open("w", encoding="utf-8") as handle:
+        yaml.dump(data, handle)
     result = runner.invoke(app, ["work", "advance", slug, "--workspace", str(workspace), "--json"])
     assert result.exit_code == exit_codes.SUCCESS, result.output
     assert result.stderr == ""

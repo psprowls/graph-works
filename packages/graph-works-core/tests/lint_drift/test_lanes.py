@@ -11,6 +11,8 @@ import work_tracker_okf
 from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init
 from graph_works_core.lint_drift.lanes import LaneSet, compose_lanes
+from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
+from okf_ext.tags import VOCABULARY_FILENAME
 from okf_io import Bundle, RuleContext, build_link_graph, load_bundle, validate
 
 TODAY = date(2026, 8, 13)
@@ -28,7 +30,12 @@ def _compose(workspace, **kwargs) -> LaneSet:
     layout = workspace.layout
     return compose_lanes(
         layout,
-        load_config(layout.bundle_dir, config_path=layout.repositories_path),
+        load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        ),
         repo_root=layout.repo_root,
         at=AT,
         **kwargs,
@@ -139,11 +146,11 @@ class _EmptySnapshot:
 
 def test_absent_wiki_declarations_are_a_fact_but_the_work_lane_now_requires_them(workspace, tmp_path):
     config_dir = workspace.layout.config_dir
-    for name in ("_schema", "_sections"):
+    for name in (SCHEMA_DIRNAME, SECTIONS_DIRNAME):
         for child in sorted((config_dir / name).iterdir()):
             child.unlink()
         (config_dir / name).rmdir()
-    (config_dir / "_tags.yaml").unlink()
+    (config_dir / VOCABULARY_FILENAME).unlink()
     lanes = _compose(workspace)
     assert [lane.name for lane in lanes.lanes] == ["wiki"]
     assert len(lanes.lanes[0].rules) == 2  # health + render only
@@ -163,8 +170,15 @@ def test_the_work_lane_now_validates_schema_and_section_conformance(workspace):
     assert any(finding.code.startswith("schemas.") for finding in report.findings)
 
 
+def test_a_missing_config_projection_is_reported_as_a_lane_error(workspace):
+    (workspace.layout.cache_dir / "config.json").unlink()
+    lanes = _compose(workspace)
+    assert any("config projection missing" in error for error in lanes.errors)
+    assert [lane.name for lane in lanes.lanes] == ["wiki", "work"]
+
+
 def test_a_malformed_declaration_is_one_lane_error_and_the_other_lane_still_runs(workspace):
-    (workspace.layout.config_dir / "_tags.yaml").write_text("not: [a mapping\n", encoding="utf-8")
+    (workspace.layout.config_dir / VOCABULARY_FILENAME).write_text("not: [a mapping\n", encoding="utf-8")
     lanes = _compose(workspace)
     assert len(lanes.errors) == 1
     assert "wiki" in lanes.errors[0]
@@ -187,7 +201,15 @@ def test_a_bug_inside_a_rule_factory_propagates_rather_than_becoming_a_lane_erro
 def test_no_repo_root_still_composes_the_work_lane(workspace):
     layout = workspace.layout
     lanes = compose_lanes(
-        layout, load_config(layout.bundle_dir, config_path=layout.repositories_path), repo_root=None, at=AT
+        layout,
+        load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        ),
+        repo_root=None,
+        at=AT,
     )
     assert [lane.name for lane in lanes.lanes] == ["wiki", "work"]
 

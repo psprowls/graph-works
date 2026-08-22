@@ -35,7 +35,7 @@ def render_architecture_overview(layout: WorkspaceLayout) -> str:
         ),
         (
             f"{_name(layout.config_dir, layout.root)}/",
-            "committed declarations: `_schema/`, `_sections/`, `_tags.yaml`",
+            "committed declarations: `schema/`, `sections/`, `tags.yaml`",
         ),
         (
             f"{_name(layout.cache_dir, layout.root)}/",

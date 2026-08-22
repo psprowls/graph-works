@@ -1,7 +1,7 @@
 """Body-shape declarations: what sections a concept of a given type carries.
 
     from okf_ext import shape, sections
-    section_set = shape.load_sections("kb/_sections")
+    section_set = shape.load_sections("kb/sections")
     report = validate(bundle, today=today, extra_rules=[sections.section_rule(section_set)])
     plan = sections.plan_sections(bundle, section_set)
 

@@ -34,7 +34,7 @@ from okf_io import load_bundle, validate
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _TODAY = date(2026, 1, 1)
-_SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "_sections"
+_SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "sections"
 _NOTES_HEADING = "## Notes"
 _REPO_NAME = "acme"
 
@@ -174,9 +174,9 @@ def test_synced_bundle_validates_clean(tmp_path: Path) -> None:
     # Loaded from the bundle's own seeded copies, not the package's asset
     # directory -- child 1's `test_done_when.py` pattern, and the one that
     # actually proves the *bundle* is self-describing.
-    schema_set = load_schemas(bundle_root / "_schema")
-    section_set = load_sections(bundle_root / "_sections")
-    vocabulary = load_vocabulary(bundle_root / "_tags.yaml")
+    schema_set = load_schemas(bundle_root / "schema")
+    section_set = load_sections(bundle_root / "sections")
+    vocabulary = load_vocabulary(bundle_root / "tags.yaml")
 
     bundle = load_bundle(bundle_root)
     report = validate(

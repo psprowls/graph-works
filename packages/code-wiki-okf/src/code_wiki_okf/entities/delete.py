@@ -46,7 +46,7 @@ def _decline_reason(body: str, section_set: SectionSet, type_name: str) -> str |
 
     A type with no matching declaration in *section_set* -- blank type,
     misspelled type, or a type simply absent from the currently-loaded
-    `_sections/` directory, all real possibilities under okf-io's
+    `sections/` directory, all real possibilities under okf-io's
     tolerant/never-raise content model -- declines rather than deletes.
     There is no declaration to check prose against, and the page whose type
     we cannot even resolve is exactly the one to be most cautious about, not

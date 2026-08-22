@@ -116,7 +116,12 @@ def file_proposal(
     layout = resolve_workspace(workspace)
     try:
         bundle = load_bundle(layout.bundle_dir)
-        config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+        config = load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        )
         lanes = lane_set(load_schemas(config.declarations_dir / "_schema"))
     except (ConfigError, OSError, ValueError, KeyError) as exc:
         exit_error(str(exc), cause=exc)

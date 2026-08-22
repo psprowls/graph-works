@@ -3,7 +3,7 @@ behaviors this surface deliberately changed from the module it ports.
 
 Fixture graphs come from `conftest.py`, built through the real store and read
 through the real reader — the spec's §7 residual risk is `graph_target`
-reading a `_repositories.yaml` no test wrote, so the resolution tests below
+reading a `workspace.yaml` no test wrote, so the resolution tests below
 write real ones.
 """
 
@@ -21,10 +21,10 @@ from graph_works_core.graph import commands as graph_cmd
 
 
 def _layout_with_config(root: Path, body: str):
-    """A layout whose `_gw/` carries `_repositories.yaml` with *body*."""
+    """A layout whose `workspace.yaml` carries *body*'s `repositories`/etc. blocks."""
     layout = layout_for(root, repo_root=root)
-    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.repositories_path.write_text(textwrap.dedent(body), encoding="utf-8")
+    layout.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text("version: 1\n" + textwrap.dedent(body), encoding="utf-8")
     return layout
 
 
@@ -41,7 +41,6 @@ def test_graph_target_reads_the_bundle_config(tmp_path):
     layout = _layout_with_config(
         tmp_path,
         """
-        graph_dir: ../_cache/graph
         repositories:
           alpha:
             path: ../repo-a
@@ -50,7 +49,7 @@ def test_graph_target_reads_the_bundle_config(tmp_path):
         """,
     )
     target = graph_target(layout)
-    assert target.graph_dir == (tmp_path / "_cache" / "graph").resolve()
+    assert target.graph_dir == layout.cache_dir
     assert target.member_names == ("alpha", "beta")
     assert target.members == ((tmp_path / "repo-a").resolve(), (tmp_path / "repo-b").resolve())
 
@@ -76,7 +75,7 @@ def test_graph_target_outside_any_repository_has_no_members(tmp_path):
 def test_a_malformed_config_raises_rather_than_returning_a_result(tmp_path):
     """Configuration raises; content never does. Resolution failures are the
     caller's to handle — only graph state comes back as an exit code."""
-    layout = _layout_with_config(tmp_path, "graph_dir: []\n")
+    layout = _layout_with_config(tmp_path, "repositories: [not, a, mapping]\n")
     with pytest.raises(ConfigError):
         graph_target(layout)
 

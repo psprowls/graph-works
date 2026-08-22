@@ -94,7 +94,7 @@ def test_placement_directories_excludes_the_four_repo_scoped_types() -> None:
     plain directory-prefix check can still express -- Repository, File and
     Dependency -- dropping Package, App, TestSuite and AgentPlugin, which now
     nest under `repositories/<repo>/`."""
-    schema_set = load_schemas(_ASSETS / "_schema")
+    schema_set = load_schemas(_ASSETS / "schema")
     declared = declared_directories(schema_set)
     assert declared == {
         "AgentPlugin": "agent-plugins/",
@@ -450,7 +450,7 @@ def test_a_second_sync_plans_no_root_catalog_change(tmp_path: Path) -> None:
     assert (bundle_root / "index.md").read_bytes() == before
 
     bundle = load_bundle(bundle_root)
-    section_set = load_sections(bundle_root / "_sections")
+    section_set = load_sections(bundle_root / "sections")
     plan = plan_regenerate(
         bundle,
         section_set,

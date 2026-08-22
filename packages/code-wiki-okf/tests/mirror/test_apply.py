@@ -11,7 +11,7 @@ from okf_ext.shape import load_sections
 from okf_io import load_bundle
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
-_SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "_sections"
+_SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "sections"
 _NOTES_HEADING = "## Notes"
 
 

@@ -16,16 +16,16 @@ from work_tracker_okf.resources import SEED_RELATIVE_PATHS, seed_files
 _TODAY = date(2026, 1, 1)
 _IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
-_SCAFFOLD_FILES = {"index.md", "log.md", "_tags.yaml"}
+_SCAFFOLD_FILES = {"index.md", "log.md", "tags.yaml"}
 _INSTALL_FILES = set(SEED_RELATIVE_PATHS)
 _ALL_FILES = _SCAFFOLD_FILES | _INSTALL_FILES
 
 
 def test_the_package_owns_exactly_fourteen_files() -> None:
-    """C1-I: the epic's count of thirteen missed `_sections/_fragments.work_tracker.yaml`."""
+    """C1-I: the epic's count of thirteen missed `sections/_fragments.work_tracker.yaml`."""
     assert len(SEED_RELATIVE_PATHS) == 14
     assert len(set(SEED_RELATIVE_PATHS)) == 14
-    assert "_sections/_fragments.work_tracker.yaml" in SEED_RELATIVE_PATHS
+    assert "sections/_fragments.work_tracker.yaml" in SEED_RELATIVE_PATHS
 
 
 def test_this_package_ships_none_of_the_scaffold_members() -> None:
@@ -52,17 +52,7 @@ def test_install_bundle_writes_every_file(tmp_path: Path) -> None:
     for relative in _ALL_FILES:
         assert (root / relative).is_file()
     assert result.changed is True
-    assert "+ _schema/_base.schema.json" in result.diff()
-
-
-def test_install_bundle_ignores_seed_repositories(tmp_path: Path) -> None:
-    """`seed_repositories` exists for `graph_works_core`'s uniform `INSTALLERS`
-    call; this package owns none of `_repositories.yaml`, so it is accepted
-    and has no effect on what gets written."""
-    root = tmp_path / "bundle"
-    result = install_bundle(root, today=_TODAY, seed_repositories=False, dry_run=False)
-    assert result.ok
-    assert set(result.scaffold.written) | set(result.install.written) == _ALL_FILES
+    assert "+ schema/_base.schema.json" in result.diff()
 
 
 def test_a_second_install_writes_nothing_and_refuses_nothing(tmp_path: Path) -> None:
@@ -77,21 +67,21 @@ def test_a_second_install_writes_nothing_and_refuses_nothing(tmp_path: Path) -> 
     assert again.logged is None
     assert again.changed is False
     assert {relative: (root / relative).read_bytes() for relative in _ALL_FILES} == before
-    assert "= _schema/Bug.schema.json" in again.diff()
+    assert "= schema/Bug.schema.json" in again.diff()
 
 
 def test_a_modified_seed_is_refused_by_name_and_its_neighbours_still_land(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
-    (root / "_schema").mkdir(parents=True)
-    (root / "_schema/Bug.schema.json").write_text('{"mine": true}\n', encoding="utf-8")
+    (root / "schema").mkdir(parents=True)
+    (root / "schema/Bug.schema.json").write_text('{"mine": true}\n', encoding="utf-8")
 
     result = install_bundle(root, today=_TODAY, dry_run=False)
     assert not result.ok
-    assert [f.path for f in result.install.failed] == ["_schema/Bug.schema.json"]
+    assert [f.path for f in result.install.failed] == ["schema/Bug.schema.json"]
     assert result.install.failed[0].kind == "foreign-content"
-    assert (root / "_schema/Bug.schema.json").read_text(encoding="utf-8") == '{"mine": true}\n'
+    assert (root / "schema/Bug.schema.json").read_text(encoding="utf-8") == '{"mine": true}\n'
     for relative in SEED_RELATIVE_PATHS:
-        if relative != "_schema/Bug.schema.json":
+        if relative != "schema/Bug.schema.json":
             assert (root / relative).is_file()
 
 
@@ -107,14 +97,14 @@ def test_install_is_additive_over_a_bundle_code_wiki_okf_already_created(tmp_pat
 
     root = tmp_path / "bundle"
     install_code_wiki(root, today=_TODAY, dry_run=False)
-    sibling = (root / "_schema/Package.schema.json").read_bytes()
+    sibling = (root / "schema/Package.schema.json").read_bytes()
 
     result = install_bundle(root, today=_TODAY, dry_run=False)
     assert result.ok
     assert result.scaffold.written == ()  # the scaffold was already there
     assert set(result.install.written) == _INSTALL_FILES
-    assert (root / "_schema/Package.schema.json").read_bytes() == sibling
-    assert (root / "_schema/Epic.schema.json").is_file()
+    assert (root / "schema/Package.schema.json").read_bytes() == sibling
+    assert (root / "schema/Epic.schema.json").is_file()
 
 
 def test_install_bundle_succeeds_into_a_directory_that_is_not_empty(tmp_path: Path) -> None:
@@ -240,9 +230,9 @@ def test_declarations_dir_relocates_the_declarations_and_stamps_nothing(tmp_path
     elsewhere.mkdir()
     install_bundle(root, today=_TODAY, declarations_dir=elsewhere, dry_run=False)
 
-    assert (elsewhere / "_schema/Epic.schema.json").is_file()
-    assert (elsewhere / "_sections/_fragments.work_tracker.yaml").is_file()
-    assert not (root / "_schema").exists()
+    assert (elsewhere / "schema/Epic.schema.json").is_file()
+    assert (elsewhere / "sections/_fragments.work_tracker.yaml").is_file()
+    assert not (root / "schema").exists()
     assert not (root / "_repositories.yaml").exists()
     assert sorted(p.name for p in root.iterdir()) == ["index.md", "log.md"]
 
@@ -272,17 +262,17 @@ def test_a_fresh_install_merges_both_tags_into_the_scaffolds_tags_yaml(tmp_path:
     assert result.vocabulary is not None
     assert result.vocabulary.added == ("perf", "security")
     assert result.vocabulary_write is not None
-    assert result.vocabulary_write.written == ("_tags.yaml",)
+    assert result.vocabulary_write.written == ("tags.yaml",)
 
-    vocab = load_vocabulary(root / "_tags.yaml")
+    vocab = load_vocabulary(root / "tags.yaml")
     assert {"perf", "security"} <= vocab.allowed
-    assert "+ _tags.yaml: security" in result.diff()
+    assert "+ tags.yaml: security" in result.diff()
 
 
 def test_a_second_install_merges_nothing_and_reports_unchanged(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    before = (root / "_tags.yaml").read_bytes()
+    before = (root / "tags.yaml").read_bytes()
 
     again = install_bundle(root, today=_TODAY, dry_run=False)
     assert again.ok
@@ -290,7 +280,7 @@ def test_a_second_install_merges_nothing_and_reports_unchanged(tmp_path: Path) -
     assert again.vocabulary is not None
     assert again.vocabulary.added == ()
     assert again.vocabulary.unchanged == ("perf", "security")
-    assert (root / "_tags.yaml").read_bytes() == before
+    assert (root / "tags.yaml").read_bytes() == before
 
 
 def test_a_hand_deprecated_tag_refuses_that_tag_alone_and_the_file_is_untouched(tmp_path: Path) -> None:
@@ -299,7 +289,7 @@ def test_a_hand_deprecated_tag_refuses_that_tag_alone_and_the_file_is_untouched(
     to argue with them."""
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    target = root / "_tags.yaml"
+    target = root / "tags.yaml"
     target.write_text(
         target.read_text(encoding="utf-8").replace(
             "  - name: security\n    description: A defect with a security impact.\n",
@@ -320,7 +310,7 @@ def test_a_hand_deprecated_tag_refuses_that_tag_alone_and_the_file_is_untouched(
 def test_a_reworded_description_is_reported_as_drift_and_the_install_still_succeeds(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    target = root / "_tags.yaml"
+    target = root / "tags.yaml"
     target.write_text(
         target.read_text(encoding="utf-8").replace(
             "A defect with a security impact.", "Anything a security reviewer would care about."
@@ -335,7 +325,7 @@ def test_a_reworded_description_is_reported_as_drift_and_the_install_still_succe
     assert result.vocabulary is not None
     assert [d.name for d in result.vocabulary.drift] == ["security"]
     assert target.read_bytes() == edited
-    assert "~ _tags.yaml: security" in result.diff()
+    assert "~ tags.yaml: security" in result.diff()
 
 
 def test_a_dry_run_into_a_bundle_that_does_not_exist_yet_reports_no_vocabulary_act(tmp_path: Path) -> None:
@@ -346,13 +336,13 @@ def test_a_dry_run_into_a_bundle_that_does_not_exist_yet_reports_no_vocabulary_a
     assert result.vocabulary is None
     assert result.vocabulary_write is None
     assert result.vocabulary_problems == ()
-    assert "_tags.yaml" in result.scaffold.written  # the preview still names it
+    assert "tags.yaml" in result.scaffold.written  # the preview still names it
 
 
 def test_a_dry_run_over_an_installed_bundle_previews_the_merge_without_writing(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    target = root / "_tags.yaml"
+    target = root / "tags.yaml"
     target.write_text(
         target.read_text(encoding="utf-8").replace(
             "  - name: perf\n    description: A defect whose impact is performance.\n", ""
@@ -376,9 +366,9 @@ def test_the_merge_follows_declarations_dir(tmp_path: Path) -> None:
 
     result = install_bundle(root, today=_TODAY, declarations_dir=declarations, dry_run=False)
     assert result.ok
-    assert (declarations / "_tags.yaml").is_file()
-    assert not (root / "_tags.yaml").exists()
-    assert "security" in load_vocabulary(declarations / "_tags.yaml").allowed
+    assert (declarations / "tags.yaml").is_file()
+    assert not (root / "tags.yaml").exists()
+    assert "security" in load_vocabulary(declarations / "tags.yaml").allowed
 
 
 def test_two_lanes_share_one_bundle_and_the_merged_vocabulary_validates_clean(tmp_path: Path) -> None:
@@ -394,15 +384,15 @@ def test_two_lanes_share_one_bundle_and_the_merged_vocabulary_validates_clean(tm
 
     root = tmp_path / "bundle"
     install_code_wiki(root, today=_TODAY, dry_run=False)
-    sibling = (root / "_schema/Package.schema.json").read_bytes()
+    sibling = (root / "schema/Package.schema.json").read_bytes()
 
     result = install_bundle(root, today=_TODAY, dry_run=False)
     assert result.ok
     assert result.vocabulary is not None
     assert result.vocabulary.added == ("perf", "security")
-    assert (root / "_schema/Package.schema.json").read_bytes() == sibling
+    assert (root / "schema/Package.schema.json").read_bytes() == sibling
 
-    vocab = load_vocabulary(root / "_tags.yaml")
+    vocab = load_vocabulary(root / "tags.yaml")
     assert {"perf", "security"} <= vocab.allowed
 
     bundle = load_bundle(root, ignore=IGNORE)

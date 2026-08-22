@@ -9,9 +9,9 @@ did not write."* Everything the wider contract protected is still protected:
 nothing here can clobber anything, and a refusal still names the obstruction
 and writes nothing over it.
 
-`index.md`, `log.md` and `_tags.yaml` are no longer this package's to write.
+`index.md`, `log.md` and `tags.yaml` are no longer this package's to write.
 They belong to `okf_ext.bundle`'s scaffold, which every tier-3 package calls
-and any of them may be the first to run. `_tags.yaml` in particular is the
+and any of them may be the first to run. `tags.yaml` in particular is the
 vault's vocabulary, not a package's, so the collision is removed rather than
 arbitrated.
 """
@@ -19,7 +19,6 @@ arbitrated.
 from __future__ import annotations
 
 import importlib.resources
-import json
 from dataclasses import dataclass
 from datetime import date
 from importlib.resources.abc import Traversable
@@ -39,30 +38,24 @@ from okf_ext.bundle import plan_install as plan_bundle_install
 from okf_io import append_log_entry, load_bundle
 
 #: Every file this package owns, bundle-relative posix, in write order.
-#: `_tags.yaml` is deliberately absent -- see the module docstring.
+#: `tags.yaml` is deliberately absent -- see the module docstring.
 SEED_RELATIVE_PATHS: tuple[str, ...] = (
-    "_schema/Package.schema.json",
-    "_schema/App.schema.json",
-    "_schema/Dependency.schema.json",
-    "_schema/TestSuite.schema.json",
-    "_schema/Repository.schema.json",
-    "_schema/AgentPlugin.schema.json",
-    "_schema/File.schema.json",
-    "_sections/Package.yaml",
-    "_sections/App.yaml",
-    "_sections/Dependency.yaml",
-    "_sections/TestSuite.yaml",
-    "_sections/Repository.yaml",
-    "_sections/AgentPlugin.yaml",
-    "_sections/File.yaml",
-    "_sections/_code-wiki-okf.yaml",
-    "_repositories.yaml",
+    "schema/Package.schema.json",
+    "schema/App.schema.json",
+    "schema/Dependency.schema.json",
+    "schema/TestSuite.schema.json",
+    "schema/Repository.schema.json",
+    "schema/AgentPlugin.schema.json",
+    "schema/File.schema.json",
+    "sections/Package.yaml",
+    "sections/App.yaml",
+    "sections/Dependency.yaml",
+    "sections/TestSuite.yaml",
+    "sections/Repository.yaml",
+    "sections/AgentPlugin.yaml",
+    "sections/File.yaml",
+    "sections/_code-wiki-okf.yaml",
 )
-
-#: The one member above that is the human's from birth. Seeded when absent and
-#: never compared: byte-comparing someone's own configuration file and
-#: refusing on their edits would invert the ownership the refusal protects.
-SEED_ONLY: tuple[str, ...] = ("_repositories.yaml",)
 
 
 class InitError(ValueError):
@@ -116,53 +109,22 @@ def _assets_root() -> Traversable:
     return importlib.resources.files("code_wiki_okf") / "assets"
 
 
-def seed_files(*, declarations_dir: str | Path | None = None, seed_repositories: bool = True) -> dict[str, str]:
-    """Every file this package installs, read from its own package data.
-
-    When *declarations_dir* is given, the `_repositories.yaml` template is
-    stamped with it, so every later command reads the same answer without the
-    flag being retyped -- at `init` there is no config file yet to hold it, so
-    the flag is the only place it can come from and the file it writes is the
-    only place it can go. Appended rather than substituted into the template's
-    commented-out line: a sentinel replace needs a "sentinel missing" branch
-    that can only fire on a packaging defect, and unreachable code costs
-    coverage against a 95% floor.
-
-    *seed_repositories* set to `False` drops `_repositories.yaml` from the
-    returned dict entirely -- the caller (`graph_works_core`) owns that
-    file's seeding itself, at a different address.
-    """
+def seed_files() -> dict[str, str]:
+    """Every file this package installs, read from its own package data."""
     assets = _assets_root()
-    files = {relative: (assets / relative).read_text(encoding="utf-8") for relative in SEED_RELATIVE_PATHS}
-    if declarations_dir is not None:
-        resolved = Path(declarations_dir).resolve().as_posix()
-        # `json.dumps` is the minimal correct YAML double-quoted scalar: an
-        # unquoted plain scalar breaks on an ordinary path containing " #"
-        # (read back truncated at the comment) or ": " (unparseable YAML), and
-        # a JSON string is always a valid YAML double-quoted one.
-        files["_repositories.yaml"] += (
-            f"\n# Written by `code-wiki-okf init --config-dir`.\ndeclarations_dir: {json.dumps(resolved)}\n"
-        )
-    if not seed_repositories:
-        del files["_repositories.yaml"]
-    return files
+    return {relative: (assets / relative).read_text(encoding="utf-8") for relative in SEED_RELATIVE_PATHS}
 
 
-def plan_install(
-    root: str | Path, *, declarations_dir: str | Path | None = None, seed_repositories: bool = True
-) -> InstallPlan:
+def plan_install(root: str | Path, *, declarations_dir: str | Path | None = None) -> InstallPlan:
     """Plan this package's own files into *root*.
 
     A thin wrapper over `okf_ext.bundle.plan_install`: the skip/refuse
     semantics are tier 2's, and all this adds is which files are
-    `code-wiki-okf`'s and which one of them is the human's.
+    `code-wiki-okf`'s. *declarations_dir* routes `schema/`/`sections/`
+    members to where `plan_scaffold` put them; it is not this module's own
+    config to hold, just the address it plans against.
     """
-    return plan_bundle_install(
-        root,
-        seed_files(declarations_dir=declarations_dir, seed_repositories=seed_repositories),
-        seed_only=SEED_ONLY if seed_repositories else (),
-        declarations_dir=declarations_dir,
-    )
+    return plan_bundle_install(root, seed_files(), declarations_dir=declarations_dir)
 
 
 def _preview(plan: Plan) -> ApplyResult:
@@ -185,7 +147,6 @@ def install_bundle(
     *,
     today: date,
     declarations_dir: str | Path | None = None,
-    seed_repositories: bool = True,
     dry_run: bool = True,
 ) -> BundleInstall:
     """Scaffold *root*, install this package's files into it, log the arrival.
@@ -216,7 +177,7 @@ def install_bundle(
         raise InitError(f"{root}: exists and is not a directory")
 
     scaffold: ScaffoldPlan = plan_scaffold(root, today=today, declarations_dir=declarations_dir)
-    install = plan_install(root, declarations_dir=declarations_dir, seed_repositories=seed_repositories)
+    install = plan_install(root, declarations_dir=declarations_dir)
 
     if dry_run:
         return BundleInstall(
@@ -261,7 +222,6 @@ def install_bundle(
 
 
 __all__ = [
-    "SEED_ONLY",
     "SEED_RELATIVE_PATHS",
     "BundleInstall",
     "InitError",

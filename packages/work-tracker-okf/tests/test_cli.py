@@ -23,7 +23,7 @@ def test_init_command_writes_bundle(tmp_path: Path) -> None:
     # Refusals go to stderr, never stdout -- a clean run should carry none of
     # them, and the `wrote ...` lines belong on stdout so the command stays
     # pipeable.
-    assert "wrote _schema/_base.schema.json" in result.stdout
+    assert "wrote schema/_base.schema.json" in result.stdout
     assert "refused" not in result.stderr
 
 
@@ -45,11 +45,11 @@ def test_init_command_is_idempotent(tmp_path: Path) -> None:
 
 def test_init_command_refuses_a_hand_edited_seed_by_name(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
-    (root / "_sections").mkdir(parents=True)
-    (root / "_sections/Bug.yaml").write_text("sections: []\n", encoding="utf-8")
+    (root / "sections").mkdir(parents=True)
+    (root / "sections/Bug.yaml").write_text("sections: []\n", encoding="utf-8")
     result = runner.invoke(app, ["init", str(root)])
     assert result.exit_code == 1
-    assert "_sections/Bug.yaml" in result.output
+    assert "sections/Bug.yaml" in result.output
     assert "foreign-content" in result.output
     assert "refused" in result.stderr
     assert "refused" not in result.stdout
@@ -77,8 +77,8 @@ def test_declarations_dir_relocates_the_declarations(tmp_path: Path) -> None:
     elsewhere.mkdir()
     result = runner.invoke(app, ["init", str(root), "--declarations-dir", str(elsewhere)])
     assert result.exit_code == 0
-    assert (elsewhere / "_schema/Epic.schema.json").is_file()
-    assert not (root / "_schema").exists()
+    assert (elsewhere / "schema/Epic.schema.json").is_file()
+    assert not (root / "schema").exists()
 
 
 def test_the_callback_keeps_init_an_explicit_subcommand(tmp_path: Path) -> None:

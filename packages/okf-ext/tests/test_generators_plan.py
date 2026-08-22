@@ -208,11 +208,11 @@ _ROOT_INDEX = "---\nokf_version: 0.2\n---\n\n# Bundle\n"
 
 
 def _indexed(tmp_path, files=None):
-    """A bundle with a root index and a `_sections/_index.yaml`."""
-    members = {"index.md": _ROOT_INDEX, "_sections/_index.yaml": _INDEX_DECLARATION}
+    """A bundle with a root index and a `sections/_index.yaml`."""
+    members = {"index.md": _ROOT_INDEX, "sections/_index.yaml": _INDEX_DECLARATION}
     members.update(files or {})
     bundle = write_bundle(tmp_path / "kb", members, ignore=DEFAULT_IGNORE_SECTIONS)
-    return bundle, load_sections(bundle.root / "_sections")
+    return bundle, load_sections(bundle.root / "sections")
 
 
 def test_an_index_target_is_planned_against_bundle_indexes(tmp_path):

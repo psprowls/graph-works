@@ -8,13 +8,12 @@ import inspect
 import pytest
 from graph_works_core.workspace import layout as layout_module
 from graph_works_core.workspace.layout import (
+    CACHE_DIRNAME,
     DEFAULT_BUNDLE_DIR,
-    DEFAULT_CACHE_DIR,
     DEFAULT_CONFIG_DIR,
-    DEFAULT_REPOSITORIES_PATH,
-    DEFAULT_WORKTREES_DIR,
     GW_DIRNAME,
     MANIFEST_FILENAME,
+    WORKTREES_DIRNAME,
     layout_for,
 )
 
@@ -24,9 +23,8 @@ def test_the_default_layout_puts_every_member_under_the_root(tmp_path):
     assert layout.root == tmp_path.resolve()
     assert layout.bundle_dir == tmp_path.resolve() / DEFAULT_BUNDLE_DIR
     assert layout.config_dir == tmp_path.resolve() / DEFAULT_CONFIG_DIR
-    assert layout.cache_dir == tmp_path.resolve() / DEFAULT_CACHE_DIR
-    assert layout.worktrees_dir == tmp_path.resolve() / DEFAULT_WORKTREES_DIR
-    assert layout.repositories_path == tmp_path.resolve() / DEFAULT_REPOSITORIES_PATH
+    assert layout.cache_dir == layout.config_dir / CACHE_DIRNAME
+    assert layout.worktrees_dir == layout.config_dir / WORKTREES_DIRNAME
     assert layout.repo_root is None
 
 
@@ -43,12 +41,9 @@ def test_the_manifest_name_is_fixed_at_the_root(tmp_path):
     assert MANIFEST_FILENAME == "workspace.yaml"
 
 
-def test_the_three_relocated_defaults_share_the_gw_prefix(tmp_path):
-    assert GW_DIRNAME == "_gw"
-    assert DEFAULT_CONFIG_DIR == "_gw/_config"
-    assert DEFAULT_CACHE_DIR == "_gw/_cache"
-    assert DEFAULT_WORKTREES_DIR == "_gw/worktrees"
-    assert DEFAULT_REPOSITORIES_PATH == "_gw/_repositories.yaml"
+def test_the_control_plane_default_is_dot_gw(tmp_path):
+    assert GW_DIRNAME == ".gw"
+    assert DEFAULT_CONFIG_DIR == ".gw"
     assert DEFAULT_BUNDLE_DIR == "okf"  # unchanged (D5) -- content, not machinery
 
 
@@ -58,10 +53,30 @@ def test_an_override_relocates_one_member_and_leaves_the_others(tmp_path):
     assert layout.config_dir == tmp_path.resolve() / DEFAULT_CONFIG_DIR
 
 
+def test_cache_and_worktrees_derive_from_an_overridden_config_dir(tmp_path):
+    """The consequence the anchor change exists to guarantee: relocating
+    `config_dir` moves the whole control plane as a unit, not just itself."""
+    layout = layout_for(tmp_path, config_dir="machinery")
+    assert layout.config_dir == tmp_path.resolve() / "machinery"
+    assert layout.cache_dir == tmp_path.resolve() / "machinery" / CACHE_DIRNAME
+    assert layout.worktrees_dir == tmp_path.resolve() / "machinery" / WORKTREES_DIRNAME
+
+
+def test_an_explicit_cache_dir_override_still_wins_over_derivation(tmp_path):
+    layout = layout_for(tmp_path, config_dir="machinery", cache_dir="elsewhere-cache")
+    assert layout.cache_dir == tmp_path.resolve() / "elsewhere-cache"
+
+
 def test_an_absolute_override_is_honored_as_given(tmp_path):
     elsewhere = tmp_path.parent / "elsewhere-cache"
     layout = layout_for(tmp_path, cache_dir=str(elsewhere))
     assert layout.cache_dir == elsewhere
+
+
+def test_an_absolute_cache_dir_override_contributes_no_gitignore_entry(tmp_path):
+    elsewhere = tmp_path.parent / "elsewhere-cache"
+    layout = layout_for(tmp_path, cache_dir=str(elsewhere))
+    assert layout.gitignore_entries == ("/worktrees/",)
 
 
 def test_directories_lists_every_member_init_creates(tmp_path):
@@ -76,20 +91,22 @@ def test_directories_lists_every_member_init_creates(tmp_path):
 
 
 def test_gitignore_entries_name_the_two_gitignored_members(tmp_path):
-    assert layout_for(tmp_path).gitignore_entries == ("/_cache/", "/worktrees/")
+    assert layout_for(tmp_path).gitignore_entries == ("/cache/", "/worktrees/")
 
 
-def test_gitignore_entries_follow_an_override_still_under_gw(tmp_path):
-    layout = layout_for(tmp_path, cache_dir="_gw/var-cache")
-    assert layout.gitignore_entries == ("/var-cache/", "/worktrees/")
+def test_gitignore_entries_follow_config_dir_when_it_relocates(tmp_path):
+    """The anchor is `config_dir`, wherever it resolves — not a fixed literal
+    prefix any override must stay under."""
+    layout = layout_for(tmp_path, config_dir="machinery")
+    assert layout.gitignore_entries == ("/cache/", "/worktrees/")
 
 
-def test_an_override_that_escapes_gw_is_not_gitignored_from_inside_it(tmp_path):
+def test_an_override_that_escapes_config_dir_is_not_gitignored_from_inside_it(tmp_path):
     """The spec's explicit edge case: relocating a member to a root-relative
-    path outside `_gw/` (not merely outside the workspace entirely) still
-    produces a correct, minimal `_gw/.gitignore` — the escaped member simply
-    contributes no entry, since `_gw/.gitignore` cannot ignore what is not
-    under it."""
+    path outside `config_dir` still produces a correct, minimal
+    `<config_dir>/.gitignore` — the escaped member simply contributes no
+    entry, since `<config_dir>/.gitignore` cannot ignore what is not under
+    it."""
     layout = layout_for(tmp_path, cache_dir="var/cache")
     assert layout.gitignore_entries == ("/worktrees/",)
 
@@ -125,17 +142,3 @@ def test_the_module_ships_no_path_lookup_function(tmp_path):
         if not name.startswith("_") and inspect.isfunction(value) and value.__module__ == layout_module.__name__
     ]
     assert public == ["layout_for"]
-
-
-def test_repositories_path_relocates_independently_of_the_other_three(tmp_path):
-    layout = layout_for(tmp_path, repositories_path="elsewhere/_repositories.yaml")
-    assert layout.repositories_path == tmp_path.resolve() / "elsewhere/_repositories.yaml"
-    assert layout.config_dir == tmp_path.resolve() / DEFAULT_CONFIG_DIR
-    assert layout.cache_dir == tmp_path.resolve() / DEFAULT_CACHE_DIR
-    assert layout.worktrees_dir == tmp_path.resolve() / DEFAULT_WORKTREES_DIR
-
-
-def test_repositories_path_does_not_join_directories(tmp_path):
-    """It is a file, not a directory: init must not `mkdir` it directly."""
-    layout = layout_for(tmp_path)
-    assert layout.repositories_path not in layout.directories

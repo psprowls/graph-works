@@ -88,7 +88,7 @@ def test_ls_files_none_outside_a_repo(tmp_path: Path) -> None:
 def test_compute_state_gate_disabled_is_always_allowed(scratch_repo: Path) -> None:
     gate = compute_state_gate(scratch_repo, enabled=False, branches=["main"])
     assert gate.allowed is True
-    assert gate.reason == "state gate disabled in _repositories.yaml"
+    assert gate.reason == "state gate disabled in workspace.yaml"
 
 
 def test_compute_state_gate_enabled_allowed_on_clean_main(scratch_repo: Path) -> None:

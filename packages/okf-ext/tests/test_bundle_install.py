@@ -11,8 +11,8 @@ from okf_ext.bundle import SCAFFOLD_MEMBERS, apply, plan_install, plan_scaffold
 _IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
 _FILES = {
-    "_schema/Topic.schema.json": '{"type": "object"}\n',
-    "_sections/Topic.yaml": "sections: []\n",
+    "schema/Topic.schema.json": '{"type": "object"}\n',
+    "sections/Topic.yaml": "sections: []\n",
     "_config.yaml": "key: value\n",
 }
 _SEED_ONLY = ("_config.yaml",)
@@ -34,36 +34,36 @@ def test_install_creates_everything_into_a_bare_root(tmp_path):
 def test_a_byte_identical_seed_is_skipped_not_rewritten(tmp_path):
     root = tmp_path / "bundle"
     apply(plan_install(root, _FILES, seed_only=_SEED_ONLY))
-    before = (root / "_schema/Topic.schema.json").stat().st_mtime_ns
+    before = (root / "schema/Topic.schema.json").stat().st_mtime_ns
 
     plan = plan_install(root, _FILES, seed_only=_SEED_ONLY)
     assert plan.is_empty
     assert plan.ok
     assert {item.reason for item in plan.skipped} == {"already-present"}
     apply(plan)
-    assert (root / "_schema/Topic.schema.json").stat().st_mtime_ns == before
+    assert (root / "schema/Topic.schema.json").stat().st_mtime_ns == before
 
 
 def test_a_modified_owned_template_refuses_only_that_file(tmp_path):
     """The narrowed contract, stated as a test: one edited seed does not stop
     the other files landing, and the edit itself is not overwritten."""
     root = tmp_path / "bundle"
-    (root / "_schema").mkdir(parents=True)
-    (root / "_schema/Topic.schema.json").write_text('{"type": "object", "mine": true}\n', encoding="utf-8")
+    (root / "schema").mkdir(parents=True)
+    (root / "schema/Topic.schema.json").write_text('{"type": "object", "mine": true}\n', encoding="utf-8")
 
     plan = plan_install(root, _FILES, seed_only=_SEED_ONLY)
     assert not plan.ok
-    assert [f.path for f in plan.refusals] == ["_schema/Topic.schema.json"]
+    assert [f.path for f in plan.refusals] == ["schema/Topic.schema.json"]
     assert plan.refusals[0].kind == "foreign-content"
 
     result = apply(plan)
-    assert result.written == ("_sections/Topic.yaml", "_config.yaml")
+    assert result.written == ("sections/Topic.yaml", "_config.yaml")
     assert not result.ok
-    assert (root / "_schema/Topic.schema.json").read_text(encoding="utf-8") == '{"type": "object", "mine": true}\n'
+    assert (root / "schema/Topic.schema.json").read_text(encoding="utf-8") == '{"type": "object", "mine": true}\n'
 
 
 def test_a_present_seed_only_file_is_skipped_whatever_its_contents(tmp_path):
-    """`_repositories.yaml` is the human's from birth -- an install seeds it
+    """A `seed_only` member is the human's from birth -- an install seeds it
     and never has an opinion about it again."""
     root = tmp_path / "bundle"
     root.mkdir()
@@ -81,22 +81,22 @@ def test_declaration_members_route_to_the_declarations_dir(tmp_path):
     elsewhere = tmp_path / "declarations"
     apply(plan_install(root, _FILES, seed_only=_SEED_ONLY, declarations_dir=elsewhere))
 
-    assert (elsewhere / "_schema/Topic.schema.json").is_file()
-    assert (elsewhere / "_sections/Topic.yaml").is_file()
+    assert (elsewhere / "schema/Topic.schema.json").is_file()
+    assert (elsewhere / "sections/Topic.yaml").is_file()
     assert (root / "_config.yaml").is_file()
-    assert not (root / "_schema").exists()
+    assert not (root / "schema").exists()
 
 
 def test_two_lanes_installing_disjoint_types_coexist_in_one_declaration_dir(tmp_path):
     """`load_schemas` keys on type name, so disjoint types never collide --
     the property this whole capability is built on top of."""
     root = tmp_path / "bundle"
-    apply(plan_install(root, {"_schema/Topic.schema.json": '{"type": "object"}\n'}))
-    second = plan_install(root, {"_schema/Package.schema.json": '{"type": "object"}\n'})
+    apply(plan_install(root, {"schema/Topic.schema.json": '{"type": "object"}\n'}))
+    second = plan_install(root, {"schema/Package.schema.json": '{"type": "object"}\n'})
     assert second.ok
     result = apply(second)
-    assert result.written == ("_schema/Package.schema.json",)
-    assert sorted(p.name for p in (root / "_schema").iterdir()) == [
+    assert result.written == ("schema/Package.schema.json",)
+    assert sorted(p.name for p in (root / "schema").iterdir()) == [
         "Package.schema.json",
         "Topic.schema.json",
     ]
@@ -111,7 +111,7 @@ def test_an_unreadable_file_is_refused(tmp_path):
     root.mkdir()
     # Create a file with no read permissions. Use a non-seed file so it gets
     # read-tested rather than seed-checked.
-    unreadable = root / "_sections/Topic.yaml"
+    unreadable = root / "sections/Topic.yaml"
     unreadable.parent.mkdir()
     unreadable.write_text("sections: []\n", encoding="utf-8")
     unreadable.chmod(0o000)
@@ -121,10 +121,10 @@ def test_an_unreadable_file_is_refused(tmp_path):
         assert not plan.ok
         assert len(plan.refusals) == 1
         assert plan.refusals[0].kind == "unwritable"
-        assert plan.refusals[0].path == "_sections/Topic.yaml"
+        assert plan.refusals[0].path == "sections/Topic.yaml"
         # Other files still write
         result = apply(plan)
-        assert result.written == ("_schema/Topic.schema.json", "_config.yaml")
+        assert result.written == ("schema/Topic.schema.json", "_config.yaml")
     finally:
         # Restore permissions for cleanup
         unreadable.chmod(0o644)
@@ -151,20 +151,20 @@ def test_unencodable_content_for_a_present_target_is_refused_not_raised(tmp_path
     """The reviewer's repro: an on-disk file that differs, compared against
     content that cannot even be encoded to compare. Neighbours still write."""
     root = tmp_path / "bundle"
-    (root / "_schema").mkdir(parents=True)
-    (root / "_schema/Topic.schema.json").write_text("different\n", encoding="utf-8")
+    (root / "schema").mkdir(parents=True)
+    (root / "schema/Topic.schema.json").write_text("different\n", encoding="utf-8")
 
-    files = {**_FILES, "_schema/Topic.schema.json": "\ud800"}
+    files = {**_FILES, "schema/Topic.schema.json": "\ud800"}
     plan = plan_install(root, files, seed_only=_SEED_ONLY)
 
     assert not plan.ok
-    assert [f.path for f in plan.refusals] == ["_schema/Topic.schema.json"]
+    assert [f.path for f in plan.refusals] == ["schema/Topic.schema.json"]
     assert plan.refusals[0].kind == "serialize-error"
 
     result = apply(plan)
-    assert result.written == ("_sections/Topic.yaml", "_config.yaml")
+    assert result.written == ("sections/Topic.yaml", "_config.yaml")
     assert not result.ok
-    assert (root / "_schema/Topic.schema.json").read_text(encoding="utf-8") == "different\n"
+    assert (root / "schema/Topic.schema.json").read_text(encoding="utf-8") == "different\n"
 
 
 def test_an_absolute_member_is_refused_not_written_outside_root(tmp_path):
@@ -200,19 +200,19 @@ def test_a_dot_dot_climbing_member_is_refused_not_written_above_root(tmp_path):
 
 
 def test_a_non_clean_but_inside_member_is_refused_not_silently_relocated(tmp_path):
-    """`./a/../_schema/X.json` resolves inside the root once normalized, but
+    """`./a/../schema/X.json` resolves inside the root once normalized, but
     planning it at that normalized location would leave `InstallPlan.writes[]
     .member` disagreeing with the key the caller actually passed -- refused,
     not silently rewritten."""
     root = tmp_path / "bundle"
-    plan = plan_install(root, {"./a/../_schema/X.json": '{"type": "object"}\n'})
+    plan = plan_install(root, {"./a/../schema/X.json": '{"type": "object"}\n'})
 
     assert not plan.ok
-    assert plan.refusals[0].path == "./a/../_schema/X.json"
+    assert plan.refusals[0].path == "./a/../schema/X.json"
     assert plan.refusals[0].kind == "not-a-member"
 
     apply(plan)
-    assert not (root / "_schema" / "X.json").exists()
+    assert not (root / "schema" / "X.json").exists()
 
 
 def test_an_empty_or_whitespace_member_is_refused(tmp_path):
@@ -262,19 +262,19 @@ def test_a_scaffold_member_named_by_plan_install_is_refused_and_neighbours_still
 
 
 def test_an_install_first_tag_collision_no_longer_strands_the_scaffold(tmp_path):
-    """The reviewer's reproduction: a tier-3 lane naming its own `_tags.yaml`
+    """The reviewer's reproduction: a tier-3 lane naming its own `tags.yaml`
     used to be planned by `plan_install`, and because `write_all`'s
-    create-probe regime is all-or-nothing, a later `_tags.yaml` collision in
+    create-probe regime is all-or-nothing, a later `tags.yaml` collision in
     the scaffold's own pass took `index.md` and `log.md` down with it too --
     the bundle ended up with neither. `plan_install` now refuses the
     colliding member itself, before it ever reaches `write_all`, so the
     scaffold's three land normally whichever order the two run in."""
     root = tmp_path / "bundle"
-    install = plan_install(root, {"_schema/A.json": "{}\n", "_tags.yaml": "version: 1\ntags: []\n"})
+    install = plan_install(root, {"schema/A.json": "{}\n", "tags.yaml": "version: 1\ntags: []\n"})
     assert not install.ok
-    assert [f.path for f in install.refusals] == ["_tags.yaml"]
+    assert [f.path for f in install.refusals] == ["tags.yaml"]
     install_result = apply(install)
-    assert install_result.written == ("_schema/A.json",)
+    assert install_result.written == ("schema/A.json",)
 
     scaffold_result = apply(plan_scaffold(root, today=date(2026, 1, 1)))
     assert scaffold_result.ok
@@ -282,4 +282,4 @@ def test_an_install_first_tag_collision_no_longer_strands_the_scaffold(tmp_path)
 
     assert (root / "index.md").is_file()
     assert (root / "log.md").is_file()
-    assert (root / "_tags.yaml").is_file()
+    assert (root / "tags.yaml").is_file()

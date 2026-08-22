@@ -14,6 +14,7 @@ from graph_works_core.scan.commands import (
     prose_specs,
 )
 from graph_works_core.scan.scan_contract import ProseRefreshResult, ScanResults
+from okf_ext.bundle import SECTIONS_DIRNAME
 from scan_helpers import (
     APP_URI,
     AT,
@@ -38,7 +39,12 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 def scanned(tmp_path):
     """A workspace whose graph is seeded and whose structural pass has not run yet."""
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     seed_graph(config.graph_dir, repo)
     return layout, config, repo
 
@@ -158,7 +164,7 @@ async def test_a_prose_section_added_to_a_declaration_enters_the_worklist(scanne
     """The load-bearing property (spec §3.2): the declaration decides the
     surface, so this passes with no change to any module in this package."""
     layout, config, _repo = scanned
-    declaration = config.declarations_dir / "_sections" / "Package.yaml"
+    declaration = config.declarations_dir / SECTIONS_DIRNAME / "Package.yaml"
     declaration.write_text(
         declaration.read_text(encoding="utf-8")
         + "  - heading: Operational notes\n    placeholder: |\n      > TODO: <how this is run>\n",
@@ -172,18 +178,21 @@ async def test_an_unbuildable_graph_refuses(tmp_path):
     from graph_works_core.workspace.errors import ScanError
 
     layout, _repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
     # No `code.db` and no repository git dir the builder can read: the build
     # comes back non-SUCCESS and phase 1 refuses rather than narrating nothing.
-    layout.repositories_path.write_text(
-        f"graph_dir: {config.graph_dir}\ndeclarations_dir: {config.declarations_dir}\n"
-        "repositories: {}\nstate_gate:\n  enabled: false\n",
+    layout.manifest_path.write_text(
+        "version: 1\nrepositories: {}\nstate_gate:\n  enabled: false\n",
         encoding="utf-8",
     )
     with pytest.raises(ScanError):
         await build_scan_worklist(
             layout,
-            load_config(layout.bundle_dir, config_path=layout.repositories_path),
+            load_config(
+                layout.bundle_dir,
+                config_path=layout.manifest_path,
+                graph_dir=layout.cache_dir,
+                declarations_dir=layout.config_dir,
+            ),
             today=TODAY,
             at=AT,
             dry_run=False,
@@ -593,12 +602,22 @@ async def test_a_repository_absent_from_the_graph_contributes_no_refs(tmp_path):
     from graph_works_core.graph import commands as graph
 
     layout, repo = make_workspace(tmp_path)
-    config = _load(layout.bundle_dir, config_path=layout.repositories_path)
+    config = _load(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     seed_graph(config.graph_dir, repo)
     # Rename the declared repository so no graph node answers to it.
-    text = layout.repositories_path.read_text(encoding="utf-8")
-    layout.repositories_path.write_text(text.replace("demo:", "ghost:"), encoding="utf-8")
-    renamed = _load(layout.bundle_dir, config_path=layout.repositories_path)
+    text = layout.manifest_path.read_text(encoding="utf-8")
+    layout.manifest_path.write_text(text.replace("demo:", "ghost:"), encoding="utf-8")
+    renamed = _load(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     graph.build(graph.graph_target(layout))
     reader = open_reader(graph_dir=graph.graph_target(layout).graph_dir)
     try:
@@ -616,7 +635,12 @@ def test_a_dependency_node_with_no_uri_contributes_no_ref(tmp_path):
     from code_graph_io.testing import raw_conn
 
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     seed_graph(config.graph_dir, repo)
     conn = raw_conn(config.graph_dir / "code.db", create=True)
     try:

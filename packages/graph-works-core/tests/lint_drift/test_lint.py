@@ -11,6 +11,7 @@ import pytest
 from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init
 from graph_works_core.lint_drift.lint import LaneReport, LintReport, run_mechanical
+from okf_ext.tags import VOCABULARY_FILENAME
 
 TODAY = date(2026, 8, 13)
 
@@ -26,7 +27,12 @@ def _run(workspace, **kwargs) -> LintReport:
     layout = workspace.layout
     return run_mechanical(
         layout,
-        load_config(layout.bundle_dir, config_path=layout.repositories_path),
+        load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        ),
         today=TODAY,
         repo_root=layout.repo_root,
         **kwargs,
@@ -95,43 +101,10 @@ def test_a_work_item_with_a_broken_plan_target_trips_the_work_lane(workspace):
 
 
 def test_a_malformed_declaration_becomes_an_error_line_and_the_other_lane_still_reports(workspace):
-    (workspace.layout.config_dir / "_tags.yaml").write_text("not: [a mapping\n", encoding="utf-8")
+    (workspace.layout.config_dir / VOCABULARY_FILENAME).write_text("not: [a mapping\n", encoding="utf-8")
     report = _run(workspace)
     assert len(report.errors) == 1
     assert [lane.name for lane in report.mechanical] == ["work"]
-    assert report.ok is False
-
-
-def test_a_repositories_yaml_edited_to_move_graph_dir_is_reported_as_drift(workspace):
-    """`init.py` seeds `_repositories.yaml`'s `graph_dir` from `layout.cache_dir`
-    so the two config surfaces agree at birth. Nothing else keeps them that
-    way -- this is the check that catches a human moving `graph_dir` in
-    `_repositories.yaml` without moving the layout to match."""
-    repositories = workspace.layout.repositories_path
-    text = repositories.read_text(encoding="utf-8")
-    (workspace.layout.bundle_dir / "elsewhere_cache").mkdir()
-    drifted = "\n".join(
-        line if not line.startswith("graph_dir:") else 'graph_dir: "elsewhere_cache"' for line in text.splitlines()
-    )
-    repositories.write_text(drifted + "\n", encoding="utf-8")
-
-    report = _run(workspace)
-    assert any("graph_dir" in error and "drifted" in error for error in report.errors)
-    assert report.ok is False
-
-
-def test_a_repositories_yaml_edited_to_move_declarations_dir_is_reported_as_drift(workspace):
-    repositories = workspace.layout.repositories_path
-    text = repositories.read_text(encoding="utf-8")
-    (workspace.layout.bundle_dir / "elsewhere_config").mkdir()
-    drifted = "\n".join(
-        line if not line.startswith("declarations_dir:") else 'declarations_dir: "elsewhere_config"'
-        for line in text.splitlines()
-    )
-    repositories.write_text(drifted + "\n", encoding="utf-8")
-
-    report = _run(workspace)
-    assert any("declarations_dir" in error and "drifted" in error for error in report.errors)
     assert report.ok is False
 
 
@@ -297,7 +270,12 @@ async def _lint(workspace, **kwargs) -> LintReport:
     layout = workspace.layout
     return await run_lint(
         layout,
-        load_config(layout.bundle_dir, config_path=layout.repositories_path),
+        load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        ),
         today=TODAY,
         repo_root=layout.repo_root,
         **kwargs,

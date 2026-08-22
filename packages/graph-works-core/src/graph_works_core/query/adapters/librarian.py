@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from code_graph_io import GraphReader
 from code_wiki_okf.config import load_config
+from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import load_schemas
 from okf_io import load_bundle
 from subagents_io import Prepared, RunContext
@@ -33,8 +34,13 @@ class LibrarianAdapter:
     async def prepare(self, ctx: RunContext[GraphReader], item: str) -> Prepared:
         layout = resolve(workspace=ctx.workspace)
         bundle = load_bundle(layout.bundle_dir)
-        config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
-        schema_set = load_schemas(config.declarations_dir / "_schema")
+        config = load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        )
+        schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
         prepared = query_mod._prepare_query_retrieval(
             item, layout, bundle, top_k=_TOP_K, embedder=query_mod.default_embedder()
         )

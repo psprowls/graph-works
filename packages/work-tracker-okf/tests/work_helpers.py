@@ -91,7 +91,7 @@ NONCONFORMANT_REPO = Path(__file__).parent / "fixtures" / "nonconformant_repo"
 NONCONFORMANT_GOLDEN = Path(__file__).parent / "fixtures" / "nonconformant.golden.txt"
 NONCONFORMANT_TODAY = date(2026, 8, 3)
 
-#: The empty plan table `assets/_sections/_fragments.work_tracker.yaml` seeds,
+#: The empty plan table `assets/sections/_fragments.work_tracker.yaml` seeds,
 #: so a page written by `write_item` reads back as `empty` rather than
 #: `missing`.
 EMPTY_PLAN_BODY = "\n## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n"

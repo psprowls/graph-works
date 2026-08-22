@@ -1,7 +1,7 @@
 """JSONSchema validation of OKF v0.2 concept frontmatter.
 
     from okf_ext import schemas
-    schema_set = schemas.load_schemas("kb/_schema")
+    schema_set = schemas.load_schemas("kb/schema")
     report = validate(bundle, today=today, extra_rules=[schemas.schema_rule(schema_set)])
 
 Two facts, and only two, are genuinely schema-driven: a concept's frontmatter
@@ -36,13 +36,13 @@ from okf_ext.schemas.loader import (
 from okf_ext.schemas.model import SchemaError, SchemaSet
 from okf_ext.schemas.rule import CODES, TOPIC, schema_rule
 
-#: `_schema/` is a **documented convention, not magic** -- nothing here
+#: `schema/` is a **documented convention, not magic** -- nothing here
 #: discovers it. A caller who keeps schemas inside the bundle they describe
 #: splices this into `okf_io.load_bundle(root, ignore=...)`, where an ignored
 #: member is "not a concept", not "not there". Two patterns because the first is
-#: anchored at the start and so never matches a nested `_schema/`;
+#: anchored at the start and so never matches a nested `schema/`;
 #: `tags.DEFAULT_IGNORE` carries two for the same reason.
-DEFAULT_IGNORE = ("_schema/*", "*/_schema/*")
+DEFAULT_IGNORE = ("schema/*", "*/schema/*")
 
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords, then lowercase functions,
 #: each group alphabetical -- `RUF022` enforces it and `test_ext_boundaries.py`

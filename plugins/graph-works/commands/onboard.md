@@ -81,7 +81,7 @@ gw bootstrap --topic "<topic>" --repo-root "<repo path>" --dry-run
 Add `--workspace "<path>"` when Q1 gave a non-default location. The command writes
 nothing and prints the directories and files it would create. Expect repeats:
 each installer previews the bundle scaffold independently, so `index.md`, `log.md`
-and `_tags.yaml` are listed once per installer. That is the plan reported
+and `tags.yaml` are listed once per installer. That is the plan reported
 faithfully, not a fault — say so rather than letting it read as one.
 
 Show that output, confirm with the user, then run the same command **without**

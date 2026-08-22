@@ -160,13 +160,13 @@ def test_get_refuses_a_hand_edited_invalid_manifest_value(tmp_path: Path) -> Non
 def test_list_refuses_a_hand_edited_explicit_null(tmp_path: Path) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
-    (root / "workspace.yaml").write_text("version: 1\nlayout:\n  cache_dir: null\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text("version: 1\nlayout:\n  bundle_dir: null\n", encoding="utf-8")
 
     result = runner.invoke(config_app, ["list", "--workspace", str(root)])
 
     assert result.exit_code == exit_codes.SCHEMA_MISMATCH
     assert result.stdout == ""
-    assert "layout.cache_dir: is explicitly null" in result.stderr
+    assert "layout.bundle_dir: is explicitly null" in result.stderr
 
 
 def test_list_maps_a_broken_catalog_to_the_generic_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

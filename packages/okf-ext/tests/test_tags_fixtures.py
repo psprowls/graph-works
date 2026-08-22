@@ -62,7 +62,7 @@ def test_untagged_carries_no_tags_key():
 def test_the_vocabulary_lives_inside_the_bundle():
     """So `DEFAULT_IGNORE` has something to be about, and so the corpus proves
     a bundle carrying one is an entirely ordinary OKF bundle."""
-    assert "_tags.yaml" in tagged_bundle().assets
+    assert "tags.yaml" in tagged_bundle().assets
 
 
 def test_a_copy_is_byte_identical(tmp_path):

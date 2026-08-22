@@ -44,7 +44,7 @@ class TagDefinition:
     """One tag a package contributes.
 
     Distinct from `Vocabulary`, which is the whole file. A package declares
-    these; it never ships `_tags.yaml` content -- the vocabulary is the
+    these; it never ships `tags.yaml` content -- the vocabulary is the
     vault's, and `plan_install` refuses the file as a whole-file member for
     exactly that reason.
 

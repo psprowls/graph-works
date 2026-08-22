@@ -64,11 +64,11 @@ make_workspace() {
 }
 
 # write_projection <workspace> <sha256|-> [bundle_dir]
-# Writes <workspace>/_config/config.json in the shape config_io.write_projection
+# Writes <workspace>/.gw/cache/config.json in the shape config_io.write_projection
 # emits (json.dumps(..., indent=2)). "-" records a null source_sha256.
 write_projection() {
     local ws="$1" sha="$2" bundle="${3:-}"
-    mkdir -p "$ws/_config"
+    mkdir -p "$ws/.gw/cache"
     {
         printf '{\n'
         if [ -n "$bundle" ]; then
@@ -83,7 +83,7 @@ write_projection() {
         fi
         printf '  }\n'
         printf '}\n'
-    } > "$ws/_config/config.json"
+    } > "$ws/.gw/cache/config.json"
 }
 
 # run_hook <cwd> <payload> [ENV=VALUE ...]

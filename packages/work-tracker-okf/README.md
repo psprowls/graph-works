@@ -29,7 +29,7 @@ and counting are pure functions of the item graph.
 ### Declarations directory
 
 Four commands accept `--declarations-dir`: `init`, `file`, `lint`, `advance`. It
-relocates `_schema/` and `_sections/` for that invocation. It is **not**
+relocates `schema/` and `sections/` for that invocation. It is **not**
 persisted: this package writes no configuration file, so a later command needs
 the flag again.
 
@@ -50,7 +50,7 @@ and says so instead — see [The CLI's one asymmetry](#advance-lints-after-writi
 ### Exit codes
 
 Results to stdout, refusals to stderr. A caller-configuration error — a root
-that is not a directory, a malformed `_schema/`, an unparseable `--today` —
+that is not a directory, a malformed `schema/`, an unparseable `--today` —
 exits 1 with a message rather than a traceback. A refused `FilingPlan`,
 `AdvancePlan` or `ArchivePlan` exits 1 with its refusal rendered: refusals are
 data all the way to the shell.
@@ -165,7 +165,7 @@ plan = plan_filing(
         on=date(2026, 3, 2),
         affects=("packages/work-tracker-okf",),
     ),
-    load_sections(root / "_sections"),
+    load_sections(root / "sections"),
 )
 if plan.refusal is None:
     apply(plan)  # not calling this is the dry run
@@ -395,8 +395,8 @@ report = validate(
     bundle,
     today=today,
     extra_rules=(
-        schema_rule(load_schemas(root / "_schema"), severity="error"),
-        section_rule(load_sections(root / "_sections"), severity="error"),
+        schema_rule(load_schemas(root / "schema"), severity="error"),
+        section_rule(load_sections(root / "sections"), severity="error"),
         *lane_rules(repo_root=repo),
     ),
 )

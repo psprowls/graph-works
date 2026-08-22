@@ -1,6 +1,6 @@
-"""Merging a package's tag definitions into a vault's `_tags.yaml`.
+"""Merging a package's tag definitions into a vault's `tags.yaml`.
 
-**A text splice, not a dump.** `_tags.yaml` is human-owned in the strongest
+**A text splice, not a dump.** `tags.yaml` is human-owned in the strongest
 sense this codebase has: the scaffold seeds it with an explanatory comment
 block, and from that moment it is the vault's file -- hand-edited, re-grouped,
 commented. ADR-0009 already answers this shape of problem for `index.md`:
@@ -41,7 +41,7 @@ from typing import Literal
 from okf_ext.body import split_lines
 from okf_ext.splice import assemble, dominant_newline, has_trailing_newline, insert, replace
 from okf_ext.tags.model import TagDefinition, TagDrift, Vocabulary, VocabularyPlan
-from okf_ext.tags.vocabulary import VocabularyError, load_vocabulary
+from okf_ext.tags.vocabulary import VOCABULARY_FILENAME, VocabularyError, load_vocabulary
 from okf_ext.writing import ApplyResult, PendingWrite, WriteFailure, write_all
 
 #: A value safe to write as a YAML plain scalar. Deliberately narrow rather
@@ -64,7 +64,7 @@ _RESERVED = frozenset({"y", "yes", "n", "no", "true", "false", "on", "off", "nul
 _TAGS_KEY = re.compile(r"^tags:[ \t]*(\[\])?[ \t]*$")
 
 #: The default sequence indentation, used only when the block carries no
-#: entry to copy it from. Two spaces is what `_tags.yaml` fixtures and the
+#: entry to copy it from. Two spaces is what `tags.yaml` fixtures and the
 #: scaffold's own commented example both use.
 _DEFAULT_INDENT = "  "
 
@@ -147,10 +147,12 @@ def _scalar(value: str) -> str:
 
     Plain when it safely can be -- this file is read by humans, and a
     vocabulary of quoted strings is worse to edit than one without them --
-    and `json.dumps` otherwise. That call is the one `code_wiki_okf.init`
-    already makes for `_repositories.yaml`, and for the reason documented
-    there: an unquoted plain scalar breaks on an ordinary string containing
-    `" #"` (read back truncated at the comment) or `": "` (unparseable YAML).
+    and `json.dumps` otherwise. That call is the one
+    `graph_works_core.workspace.manifest.render_initial` already makes for
+    `workspace.yaml`'s `repositories`/`ignore` blocks, and for the reason
+    documented there: an unquoted plain scalar breaks on an ordinary string
+    containing `" #"` (read back truncated at the comment) or `": "`
+    (unparseable YAML).
     """
     if _PLAIN.fullmatch(value) and not value.endswith(" ") and value.lower() not in _RESERVED:
         return value
@@ -192,7 +194,7 @@ def _check_definitions(definitions: Sequence[TagDefinition]) -> None:
 
     Caller **configuration** is always an exception in this capability; bundle
     **content** never is. These three are configuration: a package's own
-    constant, wrong. Writing them would leave a `_tags.yaml` the very next
+    constant, wrong. Writing them would leave a `tags.yaml` the very next
     install refuses whole -- our own output breaking our own idempotence --
     so they fail here, loudly, at the call that would have written them.
     """
@@ -390,7 +392,7 @@ def apply_vocabulary(plan: VocabularyPlan) -> ApplyResult:
 
     pending = [
         PendingWrite(
-            member="_tags.yaml",
+            member=VOCABULARY_FILENAME,
             path=plan.path,
             rendered=plan.after,
             on_written=_nothing_to_sync,

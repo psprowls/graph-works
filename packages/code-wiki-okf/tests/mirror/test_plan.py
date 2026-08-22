@@ -288,7 +288,7 @@ def test_the_notes_placeholder_constant_matches_the_declared_file_notes_section(
     """`plan.py` hardcodes `_NOTES_PLACEHOLDER` rather than depending on a
     loaded `SectionSet` (see its own docstring), which means nothing ties it
     to `File.yaml` today. This guards the two from drifting apart silently."""
-    assets = importlib.resources.files("code_wiki_okf") / "assets" / "_sections"
+    assets = importlib.resources.files("code_wiki_okf") / "assets" / "sections"
     section_set = load_sections(str(assets))
     notes = next(s for s in section_set.types["File"].sections if s.heading == "Notes")
     assert plan_module._NOTES_PLACEHOLDER.strip() == notes.placeholder.strip()

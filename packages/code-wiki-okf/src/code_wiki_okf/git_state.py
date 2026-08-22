@@ -169,8 +169,6 @@ def compute_state_gate(repo: Path, *, enabled: bool, branches: Sequence[str]) ->
     defers to `is_clean_on_branches()`.
     """
     if not enabled:
-        return StateGate(
-            allowed=True, reason="state gate disabled in _repositories.yaml", head_commit=head_commit(repo)
-        )
+        return StateGate(allowed=True, reason="state gate disabled in workspace.yaml", head_commit=head_commit(repo))
     ok, reason = is_clean_on_branches(repo, branches)
     return StateGate(allowed=ok, reason=reason or "clean and on an allowed branch", head_commit=head_commit(repo))

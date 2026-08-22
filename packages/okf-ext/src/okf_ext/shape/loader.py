@@ -2,7 +2,7 @@
 
 **Nothing is auto-discovered.** `load_sections(path)` reads the directory the
 caller names and no other, following `load_vocabulary` and `load_schemas`.
-`_sections/` remains a documented convention tools may default to --
+`sections/` remains a documented convention tools may default to --
 `DEFAULT_SECTIONS_DIRNAME` and `DEFAULT_IGNORE`, defined below in this same
 file, exist for callers who want it -- not magic this library performs.
 Because the path is explicit, declarations need not live inside the bundle
@@ -43,24 +43,24 @@ from okf_ext.shape.model import (
 
 #: The conventional directory name. A default tools may offer, never one this
 #: module reaches for.
-DEFAULT_SECTIONS_DIRNAME = "_sections"
+DEFAULT_SECTIONS_DIRNAME = "sections"
 
 #: Recognised suffixes. The filename stem is the type name -- there is no
-#: `type:` key, matching `_schema/<type>.schema.yaml`.
+#: `type:` key, matching `schema/<type>.schema.yaml`.
 SECTION_SUFFIXES = (".yaml", ".yml")
 
 #: The three values `ownership` may take. A tuple rather than a set so the
 #: refusal message can list them in a stable order.
 _OWNERSHIP_VALUES: tuple[Ownership, ...] = ("prose", "generated", "template")
 
-#: `_sections/` is a **documented convention, not magic** -- nothing here
+#: `sections/` is a **documented convention, not magic** -- nothing here
 #: discovers it. A caller who keeps declarations inside the bundle they
 #: describe splices this into `okf_io.load_bundle(root, ignore=...)`, where an
 #: ignored member is "not a concept", not "not there". Two patterns because
 #: the first is anchored at the start and so never matches a nested
-#: `_sections/`; `tags.DEFAULT_IGNORE` and `schemas.DEFAULT_IGNORE` each carry
+#: `sections/`; `tags.DEFAULT_IGNORE` and `schemas.DEFAULT_IGNORE` each carry
 #: two for the same reason.
-DEFAULT_IGNORE = ("_sections/*", "*/_sections/*")
+DEFAULT_IGNORE = ("sections/*", "*/sections/*")
 
 #: The deepest heading level a declaration may name. Markdown has six, and
 #: `okf_ext.body.Section.level` is read straight off `token.tag[1:]`, so a
@@ -342,7 +342,7 @@ def load_sections(path: str | Path) -> SectionSet:
     # Every `_`-prefixed file's `directories:` merges into one mapping, so the
     # three tier-3 packages that share a bundle can each declare their own
     # root section without arbitrating a single shared `_index.yaml` -- the
-    # `_tags.yaml` problem, not repeated. Two files claiming one
+    # `tags.yaml` problem, not repeated. Two files claiming one
     # `(directory, heading)` pair is refused at load, the disjointness move
     # `FrontmatterOwnership` already makes for `owned`/`provenance`.
     #

@@ -60,7 +60,7 @@ def new_page_text(
 ) -> str:
     """The full text of a brand-new entity page: universal frontmatter
     (`type`, `title`, `resource`, `description`) plus a body skeleton
-    carrying every section `_sections/<type_name>.yaml` declares.
+    carrying every section `sections/<type_name>.yaml` declares.
 
     `description` is undeclared in every type's `FrontmatterOwnership` (it
     is the human's, per okf-ext's ownership model), so it is seeded once

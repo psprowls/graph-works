@@ -32,7 +32,7 @@ _SPEC = "work_tracker_okf._rules.plan"
 #: The heading all six sections declarations require.
 _HEADING = "Plan"
 
-#: The columns `assets/_sections/_fragments.work_tracker.yaml` declares.
+#: The columns `assets/sections/_fragments.work_tracker.yaml` declares.
 PLAN_TABLE_SPEC = TableSpec(columns=(Column("action"), Column("done when"), Column("rationale")))
 
 #: work-io's token scanner: an `a/b`-shaped whitespace-delimited word. Matched

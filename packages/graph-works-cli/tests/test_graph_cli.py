@@ -99,7 +99,7 @@ def test_resolve_target_maps_config_error_to_generic(monkeypatch, capsys) -> Non
     monkeypatch.setattr(graph_main, "resolve_workspace", lambda workspace: "LAYOUT")
 
     def _boom(layout):
-        raise ConfigError("_repositories.yaml: not valid YAML")
+        raise ConfigError("workspace.yaml: not valid YAML")
 
     monkeypatch.setattr(graph_main, "graph_target", _boom)
 
@@ -107,7 +107,7 @@ def test_resolve_target_maps_config_error_to_generic(monkeypatch, capsys) -> Non
         graph_main._resolve_target("")
 
     assert excinfo.value.exit_code == exit_codes.GENERIC
-    assert capsys.readouterr().err == "Error: _repositories.yaml: not valid YAML\n"
+    assert capsys.readouterr().err == "Error: workspace.yaml: not valid YAML\n"
 
 
 def test_resolve_target_lets_workspace_not_found_exit_not_initialized(monkeypatch, capsys) -> None:
@@ -282,17 +282,18 @@ def test_export_carries_a_core_failure_to_stderr(spy) -> None:
 
 @pytest.fixture
 def seeded_workspace(tmp_path: Path) -> Path:
-    """A bootstrapped workspace whose `_gw/_cache/code.db` holds a tiny real graph.
+    """A bootstrapped workspace whose `.gw/cache/code.db` holds a tiny real graph.
 
-    `graph_target()` reads `okf/_repositories.yaml`, which bootstrap writes with
-    `graph_dir: "../_gw/_cache"` — so the graph the CLI will open is
-    `<root>/_gw/_cache`, not `paths.graph_dir(root)`.
+    `graph_target()` calls `load_config(layout.bundle_dir,
+    config_path=layout.manifest_path, graph_dir=layout.cache_dir, ...)`, so the
+    graph the CLI opens is always `layout.cache_dir` (`<root>/.gw/cache` by
+    default) — supplied by the caller, not read from the document.
     """
     root = tmp_path / "works"
     result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
     assert result.exit_code == exit_codes.SUCCESS
 
-    graph_dir = root / "_gw" / "_cache"
+    graph_dir = root / ".gw" / "cache"
     graph_dir.mkdir(parents=True, exist_ok=True)
     conn = raw_conn(graph_dir / "code.db", create=True)
     try:
@@ -404,7 +405,7 @@ def path_less_workspace(tmp_path: Path) -> Path:
     root = tmp_path / "works"
     assert runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)]).exit_code == 0
 
-    graph_dir = root / "_gw" / "_cache"
+    graph_dir = root / ".gw" / "cache"
     graph_dir.mkdir(parents=True, exist_ok=True)
     conn = raw_conn(graph_dir / "code.db", create=True)
     try:

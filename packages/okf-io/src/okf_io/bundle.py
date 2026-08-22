@@ -111,7 +111,7 @@ class Bundle:
 
         Concepts, reserved files, assets **and** ignored members all count:
         ``ignore=`` declares "this is not a concept", not "this is not there",
-        so a bundle that ignores ``_schema/`` and links into it has a working
+        so a bundle that ignores ``schema/`` and links into it has a working
         link, not a broken one.
 
         Matching is NFC-insensitive (§ADR-0027): the exact-match body above is
@@ -218,8 +218,8 @@ def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
     """Walk *root* once and load every member.
 
     *ignore* patterns are ``fnmatch`` globs matched case-sensitively against
-    bundle-relative posix paths (``"_schema/*"``, ``"**/*.tmp"``). ``*`` crosses
-    ``/``, so ``"_schema/*"`` also excludes anything nested beneath it.
+    bundle-relative posix paths (``"schema/*"``, ``"**/*.tmp"``). ``*`` crosses
+    ``/``, so ``"schema/*"`` also excludes anything nested beneath it.
     ``fnmatchcase`` rather than ``fnmatch``: the latter folds case on macOS and
     Windows, so the same bundle would load differently on different machines.
 

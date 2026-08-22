@@ -110,7 +110,7 @@ def test_plan_from_vocabulary_collapses_where_the_replacement_is_present():
 
 
 def test_a_deprecated_tag_with_no_replacement_plans_nothing(tmp_path):
-    target = tmp_path / "_tags.yaml"
+    target = tmp_path / "tags.yaml"
     target.write_text("version: 1\ntags:\n  - name: kpi\n    deprecated: true\n", encoding="utf-8")
     assert plan_from_vocabulary(tagged_bundle(), load_vocabulary(target)).is_empty
 

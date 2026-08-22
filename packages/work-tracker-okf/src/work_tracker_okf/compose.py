@@ -56,7 +56,7 @@ from work_tracker_okf.rules import PLAN_TABLE_SPEC, lane_rules
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID
 
-#: The heading `_rules/plan.py` reads and all six `_sections/` declarations
+#: The heading `_rules/plan.py` reads and all six `sections/` declarations
 #: require. Named here rather than imported: `_rules` is private, and one
 #: string is cheaper than widening a private module's surface.
 PLAN_HEADING = "Plan"
@@ -128,10 +128,10 @@ def rule_set(
     exit 1 with the message.
     """
     declarations = root if declarations_dir is None else declarations_dir
-    schema_set = load_schemas(declarations / "_schema")
+    schema_set = load_schemas(declarations / "schema")
     return (
         schema_rule(schema_set, severity="error"),
-        section_rule(load_sections(declarations / "_sections"), severity="error"),
+        section_rule(load_sections(declarations / "sections"), severity="error"),
         render_rule(),
         placement_rule(placement_directories(schema_set), severity="error"),
         *lane_rules(repo_root=repo_root),

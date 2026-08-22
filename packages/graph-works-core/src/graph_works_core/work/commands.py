@@ -54,6 +54,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from code_wiki_okf.config import Config
+from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import load_sections
 from okf_io import Bundle, IndexUpdate, load, load_bundle, update_index
 from okf_io import validate as okf_validate
@@ -130,7 +131,7 @@ def run_file(
         bundle,
         load_items(bundle),
         seed,
-        load_sections(config.declarations_dir / "_sections"),
+        load_sections(config.declarations_dir / SECTIONS_DIRNAME),
     )
     if dry_run or outcome.plan.refusal is not None:
         return outcome
@@ -698,7 +699,7 @@ def run_decision_overturn(
             depends_on=(),
             affects=tuple(follow_up_affects),
         ),
-        load_sections(config.declarations_dir / "_sections"),
+        load_sections(config.declarations_dir / SECTIONS_DIRNAME),
     )
     refusal: Literal["decision-refused", "follow-up-refused"] | None = (
         "decision-refused"

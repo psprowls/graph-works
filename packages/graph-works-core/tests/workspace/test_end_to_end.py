@@ -13,6 +13,8 @@ from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init, resolve
 from graph_works_core.workspace.errors import WorkspaceNotFound
 from graph_works_core.workspace.manifest import read, set_value
+from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
+from okf_ext.tags import VOCABULARY_FILENAME
 
 TODAY = date(2026, 8, 13)
 
@@ -56,9 +58,15 @@ def test_step_3b_a_written_override_reaches_the_next_resolve(workspace):
 
 
 def test_step_4_the_two_config_surfaces_agree(workspace):
-    """Asserted rather than assumed: `_repositories.yaml` is written from the
-    layout, and this is the property that says so."""
-    config = load_config(workspace.layout.bundle_dir, config_path=workspace.layout.repositories_path)
+    """Asserted rather than assumed: `workspace.yaml`'s merged `repositories:`/
+    `ignore:` blocks are written from the layout, and this is the property
+    that says so."""
+    config = load_config(
+        workspace.layout.bundle_dir,
+        config_path=workspace.layout.manifest_path,
+        graph_dir=workspace.layout.cache_dir,
+        declarations_dir=workspace.layout.config_dir,
+    )
     assert config.graph_dir == workspace.layout.cache_dir
     assert config.declarations_dir == workspace.layout.config_dir
 
@@ -70,11 +78,16 @@ def test_step_5_a_second_plan_over_the_same_root_is_empty(workspace):
 def test_the_declarations_land_where_the_config_says_they_do(workspace):
     """The `declarations_dir` seam's first production consumer. Every shipped
     test of it exercises the bundle-root default; this one does not."""
-    config = load_config(workspace.layout.bundle_dir, config_path=workspace.layout.repositories_path)
-    assert (config.declarations_dir / "_schema" / "Package.schema.json").is_file()
-    assert (config.declarations_dir / "_sections" / "Feature.yaml").is_file()
-    assert (config.declarations_dir / "_tags.yaml").is_file()
-    assert not (workspace.layout.bundle_dir / "_schema").exists()
+    config = load_config(
+        workspace.layout.bundle_dir,
+        config_path=workspace.layout.manifest_path,
+        graph_dir=workspace.layout.cache_dir,
+        declarations_dir=workspace.layout.config_dir,
+    )
+    assert (config.declarations_dir / SCHEMA_DIRNAME / "Package.schema.json").is_file()
+    assert (config.declarations_dir / SECTIONS_DIRNAME / "Feature.yaml").is_file()
+    assert (config.declarations_dir / VOCABULARY_FILENAME).is_file()
+    assert not (workspace.layout.bundle_dir / SCHEMA_DIRNAME).exists()
 
 
 def test_the_bundle_loads_as_an_okf_bundle(workspace):

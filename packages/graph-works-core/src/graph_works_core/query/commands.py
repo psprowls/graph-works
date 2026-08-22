@@ -45,6 +45,7 @@ from langchain_core.tools import BaseTool, tool
 from models_io import make_bedrock_embeddings
 from models_io.pricing import cost_for_usage
 from okf_ext import search as ext_search
+from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import load_schemas
 from okf_io import Bundle, load_bundle
 from subagents_io import FanOutResult, SubagentPool, TaskResult, write_trace_record
@@ -994,8 +995,13 @@ async def _run_fixed_query(
     """
     bundle = prepared.bundle
     layout = prepared.layout
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
-    schema_set = load_schemas(config.declarations_dir / "_schema")
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
+    schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
     librarian_system = build_librarian_system(schema_set=schema_set)
 
     librarian_binding = role_binding("librarian", layout=layout)

@@ -17,7 +17,7 @@ _GOOD = {
 
 @pytest.fixture
 def schema_set():
-    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"
+    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "schema"
     return load_schemas(str(assets))
 
 
@@ -54,8 +54,8 @@ def test_an_unrecognised_type_is_unknown_type(schema_set) -> None:
 
 
 def test_a_rubric_type_with_no_installed_schema_is_undeclared_type(tmp_path) -> None:
-    """The declarations were never installed. A partial `_schema/` is the case."""
-    partial = tmp_path / "_schema"
+    """The declarations were never installed. A partial `schema/` is the case."""
+    partial = tmp_path / "schema"
     partial.mkdir()
     (partial / "Tutorial.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema",'

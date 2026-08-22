@@ -24,7 +24,7 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tuple[Path | None, str | None]:
     """The code repo this workspace describes, and why there is none.
 
-    `_repositories.yaml` is authoritative **always**, not only when the
+    `workspace.yaml`'s `repositories` block is authoritative **always**, not only when the
     workspace and the code repo are separate repositories. The layout's
     `repo_root` is a `.git` walk-up from the workspace root: in the split
     topology it resolves to the *vault*, and every git call made against it
@@ -44,9 +44,14 @@ def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tu
       line `code_wiki_okf.config` draws for itself and `_routing_rules` draws
       for a hand-edited manifest.
     """
-    path = layout.repositories_path
+    path = layout.manifest_path
     try:
-        config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+        config = load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        )
     except OSError:
         return None, f"{path}: absent, so this workspace declares no code repository"
     except ConfigError as exc:

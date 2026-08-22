@@ -181,7 +181,7 @@ async def test_a_workspace_outside_a_repo_skips_the_code_fallback(tmp_path, monk
     # No repo_root= -- tmp_path has no .git ancestor, so plan_init's own
     # walk-up resolves it to None, same as the bare layout_for(tmp_path) this
     # replaces. build_librarian_system now needs a schema-installed layout
-    # (_repositories.yaml, _schema/), which that bare layout never had.
+    # (workspace.yaml, schema/), which that bare layout never had.
     layout = apply_init(plan_init(tmp_path, today=date(2026, 8, 16), topic="Query tests")).layout
     root = layout.bundle_dir
     (root / "concepts").mkdir(parents=True)

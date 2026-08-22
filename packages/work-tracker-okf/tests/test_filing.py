@@ -424,8 +424,8 @@ def test_the_filed_page_validates_against_its_own_declarations(vault: Path, sect
         bundle,
         today=_ON,
         extra_rules=(
-            schema_rule(load_schemas(vault / "_schema"), severity="error"),
-            section_rule(load_sections(vault / "_sections"), severity="error"),
+            schema_rule(load_schemas(vault / "schema"), severity="error"),
+            section_rule(load_sections(vault / "sections"), severity="error"),
         ),
     )
     assert [f"{f.code} {f.path}: {f.message}" for f in report.errors] == []

@@ -126,7 +126,7 @@ def test_top_level_does_not_import_any_capability():
 def test_the_capability_is_still_reachable_as_a_submodule():
     from okf_ext import tags
 
-    assert tags.DEFAULT_IGNORE == ("_tags.yaml", "*/_tags.yaml")
+    assert tags.DEFAULT_IGNORE == ("tags.yaml", "*/tags.yaml")
 
 
 def test_the_top_level_still_imports_no_capability_now_that_there_are_ten():
@@ -149,7 +149,7 @@ def test_the_top_level_still_imports_no_capability_now_that_there_are_ten():
 def test_the_second_capability_is_reachable_as_a_submodule():
     from okf_ext import schemas
 
-    assert schemas.DEFAULT_IGNORE == ("_schema/*", "*/_schema/*")
+    assert schemas.DEFAULT_IGNORE == ("schema/*", "*/schema/*")
 
 
 def test_the_third_capability_is_reachable_as_a_submodule():
@@ -167,7 +167,7 @@ def test_the_fourth_capability_is_reachable_as_a_submodule():
 def test_the_fifth_capability_is_reachable_as_a_submodule():
     from okf_ext import sections
 
-    assert sections.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+    assert sections.DEFAULT_IGNORE == ("sections/*", "*/sections/*")
 
 
 def test_the_sixth_capability_is_reachable_as_a_submodule():

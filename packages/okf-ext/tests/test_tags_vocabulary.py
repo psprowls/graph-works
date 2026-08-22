@@ -6,7 +6,7 @@ from okf_ext.tags.vocabulary import VocabularyError, load_vocabulary
 
 
 def write(tmp_path, text):
-    target = tmp_path / "_tags.yaml"
+    target = tmp_path / "tags.yaml"
     target.write_text(text, encoding="utf-8")
     return target
 
@@ -32,7 +32,7 @@ def test_descriptions_are_kept_and_optional():
 
 
 def test_source_is_the_filename_because_that_is_what_a_finding_cites():
-    assert load_vocabulary(VOCABULARY).source == "_tags.yaml"
+    assert load_vocabulary(VOCABULARY).source == "tags.yaml"
 
 
 def test_a_str_path_is_accepted_and_coerced():
@@ -41,7 +41,7 @@ def test_a_str_path_is_accepted_and_coerced():
     bare `AttributeError: 'str' object has no attribute 'name'` -- the only
     caller error in this module that was not a legible `VocabularyError`."""
     vocab = load_vocabulary(str(VOCABULARY))
-    assert vocab.source == "_tags.yaml"
+    assert vocab.source == "tags.yaml"
     assert vocab.allowed == frozenset({"metric", "finance", "data-quality", "revenue"})
 
 
@@ -198,7 +198,7 @@ def test_non_utf8_bytes_raise_vocabularyerror_not_unicodedecodeerror(tmp_path):
     (`VocabularyError` for content, `OSError` for a missing path) has no
     slot for. Pattern matches okf-io's `test_bundle.py::
     test_a_non_utf8_member_becomes_unreadable_not_an_exception`."""
-    target = tmp_path / "_tags.yaml"
+    target = tmp_path / "tags.yaml"
     target.write_bytes(b"version: 1\ntags:\n  - name: metric\xff\xfe\n")
     with pytest.raises(VocabularyError, match="UTF-8"):
         load_vocabulary(target)

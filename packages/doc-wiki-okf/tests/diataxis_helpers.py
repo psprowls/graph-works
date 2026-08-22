@@ -28,11 +28,11 @@ EXT_TOPICS = ("schemas.", "sections.", "render.", "health.")
 
 
 def schema_set() -> SchemaSet:
-    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "schema"))
 
 
 def section_set() -> SectionSet:
-    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_sections"))
+    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "sections"))
 
 
 def declaration_rules() -> tuple[Rule, ...]:
@@ -43,7 +43,7 @@ def declaration_rules() -> tuple[Rule, ...]:
 def full_ext_rules() -> tuple[Rule, ...]:
     """Every okf-ext rule that reads a document, for spec §7.5.
 
-    `tags.vocabulary_rule` is absent: it needs a `_tags.yaml` this lane does not
+    `tags.vocabulary_rule` is absent: it needs a `tags.yaml` this lane does not
     ship, and a bundle without one has no vocabulary to violate.
     """
     return (*declaration_rules(), render_rule(), health_rule())

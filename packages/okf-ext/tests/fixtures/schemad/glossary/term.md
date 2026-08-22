@@ -6,4 +6,4 @@ description: A customer who stopped paying.
 
 # Churn
 
-Nothing in `_schema/` claims `Glossary`.
+Nothing in `schema/` claims `Glossary`.

@@ -30,6 +30,7 @@ from datetime import date, datetime
 from types import MappingProxyType
 
 from code_graph_io import GraphReader, NodeRecord
+from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.generators import Render, plan_regenerate
 from okf_ext.generators import apply as apply_regenerations
 from okf_ext.schemas import SchemaSet, load_schemas
@@ -136,7 +137,7 @@ class _Target:
 
 def _repo_uri_by_name(reader: GraphReader) -> dict[str, str]:
     """`{repo short name: repo: URI}`, from every Repository node's own
-    `.name` / `.attrs["uri"]` -- the `_repositories.yaml` template's own
+    `.name` / `.attrs["uri"]` -- `workspace.yaml`'s `repositories` block's own
     contract: the config key names both `repositories/<name>.md` and must
     match the graph's `repo:` URI member name."""
     out: dict[str, str] = {}
@@ -393,7 +394,7 @@ def _resolve_placements(
     for repo_cfg in config.repos:
         repo_uri = repo_uris.get(repo_cfg.name)
         if repo_uri is None:
-            continue  # declared in _repositories.yaml but not (yet) present in the graph
+            continue  # declared in workspace.yaml but not (yet) present in the graph
         sha = head_commit(repo_cfg.path)
 
         for target in _package_targets(
@@ -559,8 +560,8 @@ def sync_entities(
     new page's default path already occupied by a file with no matching
     `resource:`.
     """
-    schema_set = load_schemas(config.declarations_dir / "_schema")
-    section_set = load_sections(config.declarations_dir / "_sections")
+    schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
+    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
     existing = resource_index(bundle).by_resource
 
     placed = _resolve_placements(bundle, config, reader, schema_set=schema_set, existing=existing, at=at)
@@ -588,7 +589,7 @@ def sync_entities(
     # Phase 2: reload so new pages are bundle members, then regenerate only
     # targets whose CONTENT changed (owned keys + sections, excluding
     # provenance) plus every freshly-created page this run. Provenance keys
-    # are declared alongside `owned` ones in each type's `_sections/<Type>.yaml`
+    # are declared alongside `owned` ones in each type's `sections/<Type>.yaml`
     # and get rewritten by `plan_regenerate` whenever ANY of a render's
     # frontmatter differs from disk -- `generated.at` is a fresh wall-clock
     # timestamp on every real invocation, so unconditionally handing every
@@ -665,8 +666,8 @@ def plan_entities(bundle: Bundle, config: Config, reader: GraphReader, *, at: da
     so `missing` reads off it directly rather than re-deriving existence a
     second way.
     """
-    schema_set = load_schemas(config.declarations_dir / "_schema")
-    section_set = load_sections(config.declarations_dir / "_sections")
+    schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
+    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
     existing = resource_index(bundle).by_resource
     placed = _resolve_placements(bundle, config, reader, schema_set=schema_set, existing=existing, at=at)
 

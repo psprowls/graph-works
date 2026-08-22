@@ -15,8 +15,8 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   `cli.py`, the one module allowed to call it.
 - Never discovers paths: the bundle root is always explicit.
 - Config raises (`ConfigError`); bundle content never does — okf-io's
-  never-raise rule is for concept content, not this package's own
-  `_repositories.yaml`.
+  never-raise rule is for concept content, not the `repositories`/`ignore`/
+  `state_gate` blocks this package reads from `workspace.yaml`.
 - Tier 3 per ADR-0005: depends on `okf-io`, `okf-ext[schemas]`,
   `code-graph-io`. Nothing depends on this package.
 

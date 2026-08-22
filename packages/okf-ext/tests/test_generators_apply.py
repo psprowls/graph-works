@@ -15,7 +15,7 @@ from okf_ext.shape import load_sections
 from okf_io import load_bundle
 
 SECTION_SET = load_sections(GENERATED_DIR)
-IGNORE = ("_sections/*", "*/_sections/*")
+IGNORE = ("sections/*", "*/sections/*")
 
 DRIFTED = Render(
     frontmatter={"title": "okf-ext", "sources": ["[[new]]"], "content_hash": "fresh"},
@@ -369,10 +369,10 @@ def test_two_index_targets_in_one_plan_both_write(tmp_path):
     files = {
         "index.md": "---\nokf_version: 0.2\n---\n\n# Bundle\n",
         "packages/index.md": "---\n---\n\n# Packages\n",
-        "_sections/_index.yaml": _INDEX_DECLARATION,
+        "sections/_index.yaml": _INDEX_DECLARATION,
     }
     bundle = write_bundle(root, files, ignore=DEFAULT_IGNORE_SECTIONS)
-    section_set = load_sections(root / "_sections")
+    section_set = load_sections(root / "sections")
     plan = plan_regenerate(
         bundle,
         section_set,
@@ -393,9 +393,9 @@ def test_an_index_write_preserves_every_other_byte(tmp_path):
     root = tmp_path / "kb"
     before = "---\nokf_version: 0.2\n---\n\n# Bundle\n\nHand-written prose nobody may touch.\n"
     bundle = write_bundle(
-        root, {"index.md": before, "_sections/_index.yaml": _INDEX_DECLARATION}, ignore=DEFAULT_IGNORE_SECTIONS
+        root, {"index.md": before, "sections/_index.yaml": _INDEX_DECLARATION}, ignore=DEFAULT_IGNORE_SECTIONS
     )
-    section_set = load_sections(root / "_sections")
+    section_set = load_sections(root / "sections")
     index_renders = {"": Render(sections={"Repositories": "- [a](/a.md)"})}
     plan = plan_regenerate(bundle, section_set, {}, index_renders=index_renders)
     apply(bundle, plan)

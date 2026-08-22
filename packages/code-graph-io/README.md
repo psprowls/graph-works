@@ -52,7 +52,7 @@ The scanner skips a built-in set of directories by default:
 `.git`, `node_modules`, `.worktrees`, `.venv`, `venv`, `dist`, `build`, `__pycache__`, `.tox`, `.nox`
 
 To skip additional paths, callers compile `ignore:` glob patterns (from a
-workspace's `_repositories.yaml`, via `code_wiki_okf.config.load_config`) into
+workspace's `workspace.yaml`, via `code_wiki_okf.config.load_config`) into
 an `IgnoreSpec` (`code_graph_io._ignore.compile_ignore`) and pass it through —
 code-graph-io itself reads no ignore file. See `_ignore.py` for the pattern
 syntax (git-pathspec-glob-like: `*`/`?` do not cross `/`, `**` does, a

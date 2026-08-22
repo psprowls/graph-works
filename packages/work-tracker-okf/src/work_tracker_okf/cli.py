@@ -145,17 +145,17 @@ def _echo_findings(findings: tuple[Finding, ...], errors: tuple[Finding, ...]) -
 
 
 def _sections(root: Path, declarations_dir: Path | None) -> SectionSet:
-    """The bundle's own `_sections/`, not this package's assets.
+    """The bundle's own `sections/`, not this package's assets.
 
     Normally identical -- `init` seeds byte-for-byte copies -- but they diverge
-    the moment a human edits the bundle's `_sections/Bug.yaml`, and then `file`
+    the moment a human edits the bundle's `sections/Bug.yaml`, and then `file`
     writes a body from one shape while `lint` checks it against another. One
     bundle, one answer about what a `Bug` page looks like. `code-wiki-okf`'s
     `sync` makes the identical call for the identical reason.
     """
     declarations = root if declarations_dir is None else declarations_dir
     try:
-        return load_sections(declarations / "_sections")
+        return load_sections(declarations / "sections")
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -175,7 +175,7 @@ def _lane_dir(root: Path, declarations_dir: Path | None, type_: str) -> str | No
     """
     declarations = root if declarations_dir is None else declarations_dir
     try:
-        schema_set = load_schemas(declarations / "_schema")
+        schema_set = load_schemas(declarations / "schema")
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -189,7 +189,7 @@ def init(
     declarations_dir: Path | None = typer.Option(  # noqa: B008
         None,
         "--declarations-dir",
-        help="Where `_schema/` and `_sections/` live. Defaults to BUNDLE_ROOT. Not persisted: "
+        help="Where `schema/` and `sections/` live. Defaults to BUNDLE_ROOT. Not persisted: "
         "this package writes no configuration file, so pass it again if a later command needs it.",
     ),
     today_option: str | None = typer.Option(
@@ -230,9 +230,9 @@ def init(
         _echo_failure(result.log_failure)
     if result.vocabulary is not None:
         for name in result.vocabulary.added:
-            typer.echo(f"{verb} _tags.yaml: {name}")
+            typer.echo(f"{verb} tags.yaml: {name}")
         for drifted in result.vocabulary.drift:
-            typer.echo(f"kept your description of `{drifted.name}` in _tags.yaml; ours differs", err=True)
+            typer.echo(f"kept your description of `{drifted.name}` in tags.yaml; ours differs", err=True)
     for failure in result.vocabulary_problems:
         _echo_failure(failure)
     if result.logged is not None:
@@ -335,7 +335,7 @@ def lint(
     declarations_dir: Path | None = typer.Option(  # noqa: B008
         None,
         "--declarations-dir",
-        help="Where `_schema/` and `_sections/` live. Defaults to ROOT. Not persisted.",
+        help="Where `schema/` and `sections/` live. Defaults to ROOT. Not persisted.",
     ),
     strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures."),
     today: str | None = typer.Option(None, "--today", help="Validate as of YYYY-MM-DD instead of now."),
@@ -375,7 +375,7 @@ def file(
     affects: list[str] = typer.Option([], "--affects", help="Repeatable repo path."),  # noqa: B008
     tags: list[str] = typer.Option([], "--tags", help="Repeatable."),  # noqa: B008
     declarations_dir: Path | None = typer.Option(  # noqa: B008
-        None, "--declarations-dir", help="Where `_schema/` and `_sections/` live. Defaults to ROOT. Not persisted."
+        None, "--declarations-dir", help="Where `schema/` and `sections/` live. Defaults to ROOT. Not persisted."
     ),
     today: str | None = typer.Option(None, "--today", help="File as of YYYY-MM-DD instead of now."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
@@ -443,7 +443,7 @@ def advance(
         None, "--repo-root", help="Where `affects` and plan-action tokens resolve, for the post-write check."
     ),
     declarations_dir: Path | None = typer.Option(  # noqa: B008
-        None, "--declarations-dir", help="Where `_schema/` and `_sections/` live. Defaults to ROOT."
+        None, "--declarations-dir", help="Where `schema/` and `sections/` live. Defaults to ROOT."
     ),
     today: str | None = typer.Option(None, "--today", help="Stamp `updated` with YYYY-MM-DD instead of now."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
@@ -460,7 +460,7 @@ def advance(
     minus its last line.
     """
     day = _today(today)
-    # The rule set is composed *first*: a malformed `_schema/` is caller
+    # The rule set is composed *first*: a malformed `schema/` is caller
     # configuration, and discovering it after the write would leave the page
     # advanced and the check unreportable.
     rules = _rules(root, repo_root=repo_root, declarations_dir=declarations_dir)

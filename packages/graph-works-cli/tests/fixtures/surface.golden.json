@@ -328,8 +328,8 @@
     },
     {
       "name": "gw config set",
-      "help": "Set a catalog key and refresh `_gw/_config/config.json`.",
-      "short_help": "Set a catalog key and refresh `_gw/_config/config.json`.",
+      "help": "Set a catalog key and refresh `.gw/cache/config.json`.",
+      "short_help": "Set a catalog key and refresh `.gw/cache/config.json`.",
       "usage": [
         "[OPTIONS]",
         "{key}",
@@ -379,8 +379,8 @@
     },
     {
       "name": "gw config sync",
-      "help": "Regenerate `_gw/_config/config.json` after an out-of-band manifest edit.",
-      "short_help": "Regenerate `_gw/_config/config.json` after an out-of-band manifest edit.",
+      "help": "Regenerate `.gw/cache/config.json` after an out-of-band manifest edit.",
+      "short_help": "Regenerate `.gw/cache/config.json` after an out-of-band manifest edit.",
       "usage": [
         "[OPTIONS]"
       ],
@@ -506,7 +506,7 @@
             "--only"
           ],
           "secondary_opts": [],
-          "help": "Build one member by its `_repositories.yaml` key.",
+          "help": "Build one member by its `workspace.yaml` `repositories` key.",
           "required": false,
           "default": "",
           "is_flag": false

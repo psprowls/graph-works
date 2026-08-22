@@ -1,19 +1,18 @@
 """Install `work-tracker-okf`'s own files into an OKF v0.2 bundle, additively.
 
 Four acts, all idempotent: `plan_scaffold` -> `plan_install` -> this package's
-tags merged into `_tags.yaml` -> one `log.md` line when the install actually
+tags merged into `tags.yaml` -> one `log.md` line when the install actually
 wrote something. The vocabulary merge runs *after* the scaffold specifically
-because it needs the `_tags.yaml` the scaffold creates -- there is nothing to
+because it needs the `tags.yaml` the scaffold creates -- there is nothing to
 merge into before that file exists. In a bundle three tier-3 packages share,
 `log.md` then reads as a record of each arrival, which is what a human opening
 a shared bundle wants it to say.
 
-**There is no `SEED_ONLY` here.** `code-wiki-okf` exempts `_repositories.yaml`
-from byte comparison because that file is the human's from birth; this package
-ships no such file, so all fourteen members are owned templates -- created when
-absent, skipped when byte-identical, refused per file when they differ.
-`index.md`, `log.md` and `_tags.yaml` belong to `okf_ext.bundle`'s scaffold,
-not here.
+**There is no `SEED_ONLY` here.** This package never shipped a file of its
+own that needed exempting from byte comparison, so all fourteen members are
+owned templates -- created when absent, skipped when byte-identical, refused
+per file when they differ. `index.md`, `log.md` and `tags.yaml` belong to
+`okf_ext.bundle`'s scaffold, not here.
 """
 
 from __future__ import annotations
@@ -63,7 +62,7 @@ class BundleInstall:
     logged: str | None
     log_failure: WriteFailure | None
     vocabulary: VocabularyPlan | None = None
-    """This package's tags merged into the bundle's `_tags.yaml`, or `None`
+    """This package's tags merged into the bundle's `tags.yaml`, or `None`
     when there was no file to merge into -- a dry run against a bundle the
     scaffold has not created yet, and nothing else."""
 
@@ -124,7 +123,7 @@ def plan_install(root: str | Path, *, declarations_dir: str | Path | None = None
 
 def _plan_vocabulary(path: Path) -> VocabularyPlan | None:
     """This package's tags merged into *path*, or `None` when there is no
-    `_tags.yaml` to merge into.
+    `tags.yaml` to merge into.
 
     Absent only on a dry run against a bundle the scaffold has not created
     yet: the wet path plans this *after* `apply(scaffold)`, which creates the
@@ -151,20 +150,16 @@ def install_bundle(
     *,
     today: date,
     declarations_dir: str | Path | None = None,
-    seed_repositories: bool = True,
     dry_run: bool = True,
 ) -> BundleInstall:
     """Scaffold *root*, install this package's files into it, merge this
-    package's tags into its `_tags.yaml`, log the arrival.
+    package's tags into its `tags.yaml`, log the arrival.
 
     All four acts are idempotent, so installing into a bundle another package
     created simply works, and a second run writes nothing and refuses nothing.
 
     `today` is injected -- nothing below `cli.py` reads the clock. `dry_run`
-    defaults to `True`, matching okf-io's writer convention. `seed_repositories`
-    is accepted for signature parity with every installer `graph_works_core`
-    drives uniformly; this package does not own `_repositories.yaml` and
-    ignores it.
+    defaults to `True`, matching okf-io's writer convention.
 
     Raises `InitError` only for a *root* that exists and is not a directory.
     """

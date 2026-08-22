@@ -67,8 +67,8 @@ def test_the_vault_validates_with_zero_errors(conformant_root: Path) -> None:
         bundle,
         today=CONFORMANT_TODAY,
         extra_rules=(
-            schema_rule(load_schemas(conformant_root / "_schema"), severity="error"),
-            section_rule(load_sections(conformant_root / "_sections"), severity="error"),
+            schema_rule(load_schemas(conformant_root / "schema"), severity="error"),
+            section_rule(load_sections(conformant_root / "sections"), severity="error"),
         ),
     )
     assert [f"{f.code} {f.path}: {f.message}" for f in report.errors] == []
@@ -128,8 +128,8 @@ def test_no_page_uses_wikilink_form() -> None:
 def test_the_vault_ships_no_declarations_of_its_own() -> None:
     """C2-I: materialized by `init`, not committed — no drift between the fixture
     and the package assets."""
-    assert not (CONFORMANT_ROOT / "_schema").exists()
-    assert not (CONFORMANT_ROOT / "_sections").exists()
+    assert not (CONFORMANT_ROOT / "schema").exists()
+    assert not (CONFORMANT_ROOT / "sections").exists()
 
 
 def test_all_six_types_appear(conformant_root: Path) -> None:
@@ -149,8 +149,8 @@ def test_the_vault_validates_with_zero_errors_with_the_lane_rules(conformant_roo
         bundle,
         today=CONFORMANT_TODAY,
         extra_rules=(
-            schema_rule(load_schemas(conformant_root / "_schema"), severity="error"),
-            section_rule(load_sections(conformant_root / "_sections"), severity="error"),
+            schema_rule(load_schemas(conformant_root / "schema"), severity="error"),
+            section_rule(load_sections(conformant_root / "sections"), severity="error"),
             *lane_rules(repo_root=None),
         ),
     )

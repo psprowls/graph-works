@@ -395,8 +395,8 @@ def test_the_documented_schemas_surface_is_present() -> None:
     assert callable(schemas.declared_directories)
     assert schemas.TOPIC == "schemas"
     assert schemas.CODES == ("schemas.invalid", "schemas.no-schema-for-type")
-    assert schemas.DEFAULT_SCHEMA_DIRNAME == "_schema"
-    assert schemas.DEFAULT_IGNORE == ("_schema/*", "*/_schema/*")
+    assert schemas.DEFAULT_SCHEMA_DIRNAME == "schema"
+    assert schemas.DEFAULT_IGNORE == ("schema/*", "*/schema/*")
 
 
 def test_the_documented_render_surface_is_present() -> None:
@@ -542,9 +542,9 @@ def test_the_documented_sections_surface_is_present() -> None:
         "sections.unexpected",
         "sections.no-declaration-for-type",
     )
-    assert sections.DEFAULT_SECTIONS_DIRNAME == "_sections"
+    assert sections.DEFAULT_SECTIONS_DIRNAME == "sections"
     assert sections.SECTION_SUFFIXES == (".yaml", ".yml")
-    assert sections.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+    assert sections.DEFAULT_IGNORE == ("sections/*", "*/sections/*")
 
 
 def test_the_documented_splice_surface_is_present() -> None:
@@ -568,9 +568,9 @@ def test_the_documented_shape_surface_is_present() -> None:
     from okf_ext import shape
 
     assert callable(shape.load_sections)
-    assert shape.DEFAULT_SECTIONS_DIRNAME == "_sections"
+    assert shape.DEFAULT_SECTIONS_DIRNAME == "sections"
     assert shape.SECTION_SUFFIXES == (".yaml", ".yml")
-    assert shape.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+    assert shape.DEFAULT_IGNORE == ("sections/*", "*/sections/*")
     assert shape.SectionSpec.__dataclass_fields__.keys() == {
         "heading",
         "level",
@@ -691,8 +691,10 @@ def test_the_documented_bundle_surface_is_present() -> None:
 
     for name in ("plan_scaffold", "plan_install", "apply"):
         assert callable(getattr(bundle, name))
-    assert bundle.DECLARATION_PREFIXES == ("_schema/", "_sections/")
-    assert bundle.DECLARATION_MEMBERS == ("_tags.yaml",)
+    assert bundle.SCHEMA_DIRNAME == "schema"
+    assert bundle.SECTIONS_DIRNAME == "sections"
+    assert bundle.DECLARATION_PREFIXES == ("schema/", "sections/")
+    assert bundle.DECLARATION_MEMBERS == ("tags.yaml",)
     assert bundle.PlannedFile.__dataclass_fields__.keys() == {"member", "path", "content"}
     assert bundle.ScaffoldPlan.__dataclass_fields__.keys() == {
         "root",

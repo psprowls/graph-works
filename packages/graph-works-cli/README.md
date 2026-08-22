@@ -37,22 +37,22 @@ Mutating commands apply by default. `--dry-run` is the only preview, and two com
 ### Scan worklist handoff
 
 Use the emitted JSON to hand per-entity prose tasks to another process. Artifacts always live below
-the workspace's `_gw/_cache/scan/` directory.
+the workspace's `.gw/cache/scan/` directory.
 
 ```console
 $ gw scan --emit-worklist --workspace .works
 {
-  "worklist_path": ".works/_gw/_cache/scan/worklist.json",
-  "briefs_dir": ".works/_gw/_cache/scan/briefs",
-  "results_dir": ".works/_gw/_cache/scan/results",
+  "worklist_path": ".works/.gw/cache/scan/worklist.json",
+  "briefs_dir": ".works/.gw/cache/scan/briefs",
+  "results_dir": ".works/.gw/cache/scan/results",
   "short_head": "abc1234",
   "entities_written": [],
   "entities_deleted": [],
   "entity_errors": []
 }
 
-$ # Write one result JSON per task into .works/_gw/_cache/scan/results/.
-$ gw scan --apply --results-dir .works/_gw/_cache/scan/results --short-head abc1234 --workspace .works
+$ # Write one result JSON per task into .works/.gw/cache/scan/results/.
+$ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc1234 --workspace .works
 {
   "narrated": 1,
   "sections_filled": 2,
@@ -89,7 +89,7 @@ $ gw scan --apply --results-dir .works/_gw/_cache/scan/results --short-head abc1
     gw config hooks enable transcript [--repo PATH] [--json]
     gw config hooks disable transcript [--repo PATH] [--json]
 
-`set` and `unset` refresh `_gw/_config/config.json` automatically. `sync` is the manual refresh after a
+`set` and `unset` refresh `.gw/cache/config.json` automatically. `sync` is the manual refresh after a
 hand edit. Hook commands update only `.claude/settings.local.json`; their merge/remove behavior lives
 in `graph_works_core.hooks`.
 

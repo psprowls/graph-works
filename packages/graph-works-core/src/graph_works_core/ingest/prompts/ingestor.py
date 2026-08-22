@@ -23,7 +23,7 @@ The architecture overview is a renderer, not a constant (C2 §6.3), so this is
 There is deliberately no `INGESTOR_SYSTEM` backward-compat constant: it could
 not be built without a layout, and now also could not be built without
 `kinds` -- the `source_kind` vocabulary is the bundle's own, read at run time
-from its `_schema/Source.schema.json` (K-D), not this package's -- and
+from its `schema/Source.schema.json` (K-D), not this package's -- and
 nothing in the rebuild imports either as a constant.
 """
 
@@ -56,7 +56,7 @@ def _source_landing(kinds: Sequence[str]) -> str:
 
     A function rather than a module constant for the same reason the
     architecture overview is one: the list is the vault's, read at run time
-    from `_schema/Source.schema.json`, and a constant here could only restate
+    from `schema/Source.schema.json`, and a constant here could only restate
     it -- which is exactly the duplication K-D removes.
     """
     return (
@@ -148,8 +148,8 @@ def build_ingestor_system(
     than defaulted: a prompt listing a vocabulary the bundle does not declare
     is worse than a caller having to say which bundle it means.
 
-    *schema_set* is the target bundle's loaded `_schema/` set --
-    `okf_ext.schemas.load_schemas(config.declarations_dir / "_schema")` for a
+    *schema_set* is the target bundle's loaded `schema/` set --
+    `okf_ext.schemas.load_schemas(config.declarations_dir / "schema")` for a
     caller holding a `Config`. It drives `render_page_categories`, for the
     same reason *kinds* is required: a category table naming a directory the
     bundle does not declare is worse than the caller having to say which

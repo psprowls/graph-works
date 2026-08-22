@@ -30,7 +30,6 @@ def fake_resolve(monkeypatch):
             cache_dir=Path("/default/_cache"),
             bundle_dir=Path("/default/okf"),
             worktrees_dir=Path("/default/worktrees"),
-            repositories_path=Path("/default/_repositories.yaml"),
         )
 
     monkeypatch.setattr("graph_works_cli.workspace_resolution.discovery.resolve", _fake)

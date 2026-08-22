@@ -46,7 +46,7 @@ DEFAULT_SOURCE_KIND = "doc"
 def source_kinds(schema_set: SchemaSet) -> tuple[str, ...]:
     """The `source_kind` vocabulary *schema_set*'s `Source` declares, in its order.
 
-    The vocabulary is authored in `_schema/Source.schema.json` and nowhere
+    The vocabulary is authored in `schema/Source.schema.json` and nowhere
     else, so a vault that edits its own declarations changes what the CLI
     accepts and what the ingestor prompt lists, in one edit.
 
@@ -75,7 +75,7 @@ def seed_source_kinds() -> tuple[str, ...]:
     nothing. Still one authored list -- this reads the same file the installer
     copies rather than restating its contents.
     """
-    schema = json.loads(seed_files()["_schema/Source.schema.json"])
+    schema = json.loads(seed_files()["schema/Source.schema.json"])
     return tuple(str(value) for value in schema["properties"]["source_kind"]["enum"])
 
 

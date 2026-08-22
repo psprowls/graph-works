@@ -37,7 +37,7 @@ SECTION_SET = load_sections(GENERATED_DIR)
 #: A single `DECLARATION = SECTION_SET.types["Entity"]` would extend to a
 #: second declared type only if someone remembered to update every test by
 #: hand; parametrizing over the declaration set means a type added to
-#: `generated/_sections/` is covered automatically, with no test to edit.
+#: `generated/sections/` is covered automatically, with no test to edit.
 DECLARATIONS = sorted(SECTION_SET.types)
 
 #: Every concept, including the ones whose frontmatter is broken: this

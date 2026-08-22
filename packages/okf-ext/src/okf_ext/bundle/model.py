@@ -15,18 +15,25 @@ from pathlib import Path
 
 from okf_ext.writing import Skipped, WriteFailure
 
+#: The two declaration directory names. A named constant rather than a
+#: repo-wide literal: eight call sites across three packages named
+#: `"_schema"` / `"_sections"` directly before this existed, and a rename
+#: three call sites deep is how they drift.
+SCHEMA_DIRNAME = "schema"
+SECTIONS_DIRNAME = "sections"
+
 #: Members that live under the *declaration* directory rather than the bundle
-#: root. Two shapes because `_schema/` and `_sections/` are directories and
-#: `_tags.yaml` is a file; there is no third rule hiding here. Every other
+#: root. Two shapes because `schema/` and `sections/` are directories and
+#: `tags.yaml` is a file; there is no third rule hiding here. Every other
 #: member a caller names resolves against the bundle root.
-DECLARATION_PREFIXES: tuple[str, ...] = ("_schema/", "_sections/")
-DECLARATION_MEMBERS: tuple[str, ...] = ("_tags.yaml",)
+DECLARATION_PREFIXES: tuple[str, ...] = (f"{SCHEMA_DIRNAME}/", f"{SECTIONS_DIRNAME}/")
+DECLARATION_MEMBERS: tuple[str, ...] = ("tags.yaml",)
 
 #: The three files `plan_scaffold` writes. These are tier 2's to write, not
 #: any tier-3 package's -- a `plan_install` call naming one of them is refused
 #: rather than planned, so a tier-3 author knows to leave them to the
 #: scaffold rather than shipping its own.
-SCAFFOLD_MEMBERS: tuple[str, ...] = ("index.md", "log.md", "_tags.yaml")
+SCAFFOLD_MEMBERS: tuple[str, ...] = ("index.md", "log.md", "tags.yaml")
 
 #: The empty vocabulary the scaffold writes. A module constant rather than
 #: package data: eight lines is not worth adding package-data machinery to
@@ -129,6 +136,8 @@ __all__ = [
     "DECLARATION_PREFIXES",
     "EMPTY_TAGS_YAML",
     "SCAFFOLD_MEMBERS",
+    "SCHEMA_DIRNAME",
+    "SECTIONS_DIRNAME",
     "InstallPlan",
     "Plan",
     "PlannedFile",

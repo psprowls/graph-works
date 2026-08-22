@@ -51,7 +51,7 @@ def new_page_text(
     """The full text of a brand-new Diátaxis page.
 
     Base frontmatter (`type`, `title`, `description`) plus a body carrying every
-    section `_sections/<type>.yaml` declares. Built through `okf_io.parse("")`
+    section `sections/<type>.yaml` declares. Built through `okf_io.parse("")`
     and `Document.set` rather than hand-assembled YAML, so each key lands where
     okf-io's `PREFERRED_KEY_ORDER` implies -- the move
     `work_tracker_okf.filing.apply` makes.

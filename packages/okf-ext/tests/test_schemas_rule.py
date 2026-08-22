@@ -36,7 +36,7 @@ VALID = "---\ntype: Metric\ntitle: Revenue\nowner:\n  name: finance\n---\n\n# Re
 
 def build(tmp_path, **concepts):
     """A bundle plus a schema set beside it, never inside it."""
-    schema_dir = tmp_path / "_schema"
+    schema_dir = tmp_path / "schema"
     schema_dir.mkdir()
     (schema_dir / "_base.schema.yaml").write_text(BASE, encoding="utf-8")
     (schema_dir / "Metric.schema.yaml").write_text(METRIC, encoding="utf-8")
@@ -131,7 +131,7 @@ def test_dates_reach_the_schema_as_iso_strings(tmp_path):
     """`fm_data(dates="iso")` renders `date` objects as strings. Validating
     `fm_raw` instead would hand jsonschema a `datetime.date`, where both
     `format: date` and `type: string` misfire."""
-    schema_dir = tmp_path / "_schema"
+    schema_dir = tmp_path / "schema"
     schema_dir.mkdir()
     (schema_dir / "metric.schema.yaml").write_text(
         "type: object\nproperties:\n  updated: {type: string}\n", encoding="utf-8"
@@ -147,7 +147,7 @@ def test_dates_reach_the_schema_as_iso_strings(tmp_path):
 def test_additional_properties_false_sees_unknown_keys(tmp_path):
     """`fm_data()` is a plain projection of `fm_raw`, which holds every key the
     document carries. The typed `Frontmatter` view is not involved."""
-    schema_dir = tmp_path / "_schema"
+    schema_dir = tmp_path / "schema"
     schema_dir.mkdir()
     (schema_dir / "metric.schema.yaml").write_text(
         "type: object\nproperties:\n  type: {type: string}\nadditionalProperties: false\n",

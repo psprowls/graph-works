@@ -55,7 +55,7 @@ from doc_wiki_okf.proposals.render import ReviewRenderer
 from doc_wiki_okf.resources import seed_files
 from doc_wiki_okf.sources import SOURCE_TYPE, plan_ingest, seed_source_kinds, source_kinds
 
-#: `_schema/` and `_sections/` are declarations, not concepts, and
+#: `schema/` and `sections/` are declarations, not concepts, and
 #: `sources/references/` holds copies of ingested material. Two patterns each,
 #: for the reason `okf_ext.schemas.DEFAULT_IGNORE` gives: the first is anchored
 #: at the start and so never matches a nested one.
@@ -71,10 +71,10 @@ from doc_wiki_okf.sources import SOURCE_TYPE, plan_ingest, seed_source_kinds, so
 #: absent because the walk still excludes that one; only the nested case
 #: reaches here.
 IGNORE = (
-    "_schema/*",
-    "*/_schema/*",
-    "_sections/*",
-    "*/_sections/*",
+    "schema/*",
+    "*/schema/*",
+    "sections/*",
+    "*/sections/*",
     "sources/references/*",
     "*/sources/references/*",
     "*/.DS_Store",
@@ -125,9 +125,9 @@ def _bundle(root: Path) -> Bundle:
 def _schema_set(root: Path, declarations_dir: Path | None) -> SchemaSet:
     declarations = root if declarations_dir is None else declarations_dir
     try:
-        return load_schemas(declarations / "_schema")
+        return load_schemas(declarations / "schema")
     except (OSError, ValueError, KeyError) as exc:
-        typer.echo(f"{declarations / '_schema'}: {exc}", err=True)
+        typer.echo(f"{declarations / 'schema'}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
 
@@ -140,16 +140,16 @@ def _lanes(root: Path, declarations_dir: Path | None) -> LaneSet:
 
 
 def _sections(root: Path, declarations_dir: Path | None) -> SectionSet:
-    """The bundle's own `_sections/`, not this package's assets.
+    """The bundle's own `sections/`, not this package's assets.
 
     Normally identical -- `init` seeds byte-for-byte copies -- but they diverge
-    the moment a human edits the bundle's `_sections/Explanation.yaml`, and then
+    the moment a human edits the bundle's `sections/Explanation.yaml`, and then
     `promote` writes a body from one shape while a lint checks it against
     another. One bundle, one answer.
     """
     declarations = root if declarations_dir is None else declarations_dir
     try:
-        return load_sections(declarations / "_sections")
+        return load_sections(declarations / "sections")
     except (OSError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -216,7 +216,7 @@ def _bundle_source_kinds(root: Path, declarations_dir: Path | None) -> tuple[str
     """
     declarations = root if declarations_dir is None else declarations_dir
     try:
-        schema_set = load_schemas(declarations / "_schema")
+        schema_set = load_schemas(declarations / "schema")
     except (OSError, ValueError):
         return seed_source_kinds()
     if SOURCE_TYPE not in schema_set.schemas:
@@ -315,7 +315,7 @@ def init(
     declarations_dir: Path | None = typer.Option(  # noqa: B008
         None,
         "--declarations-dir",
-        help="Where `_schema/` and `_sections/` are written. Defaults to BUNDLE_ROOT. Not persisted.",
+        help="Where `schema/` and `sections/` are written. Defaults to BUNDLE_ROOT. Not persisted.",
     ),
     today_option: str | None = typer.Option(
         None, "--today", help="Stamp the `log.md` entry with YYYY-MM-DD instead of now."
@@ -358,7 +358,7 @@ def proposals(
     page_status: str | None = typer.Option(
         None, "--page-status", help=f"Filter on the coerced value; one of {list(PAGE_STATUSES)}."
     ),
-    declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where `_schema/` lives."),  # noqa: B008
+    declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where `schema/` lives."),  # noqa: B008
     json_output: bool = typer.Option(False, "--json", help="Emit the list as JSON."),
 ) -> None:
     """List every proposal in ROOT, malformed ones included. Never writes.
@@ -385,7 +385,7 @@ def proposals(
 def show(
     root: Path = typer.Argument(..., help="Bundle root to read."),  # noqa: B008
     target: Path = typer.Argument(..., help="The page the proposal argues for, bundle-relative."),  # noqa: B008
-    declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where `_schema/` lives."),  # noqa: B008
+    declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where `schema/` lives."),  # noqa: B008
     json_output: bool = typer.Option(False, "--json", help="Emit the proposal as JSON instead."),
 ) -> None:
     """Print the review artifact for the proposal targeting TARGET.
@@ -422,7 +422,7 @@ def file_proposal(
     rationale: str = typer.Option("", "--rationale", help="Why this source argues for the page."),
     evidence: list[str] = typer.Option(None, "--evidence", help="Repeatable evidence bullet."),  # noqa: B008
     by: str = typer.Option("agent:doc-wiki-okf", "--by", help="Who is filing; stamped into `generated.by`."),
-    declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where `_schema/` lives."),  # noqa: B008
+    declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where `schema/` lives."),  # noqa: B008
     today_option: str | None = typer.Option(None, "--today", help="Stamp `generated.at` from YYYY-MM-DD."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     json_output: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),

@@ -24,7 +24,7 @@ _LANES = {
 
 
 def _schema_set():
-    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"
+    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "schema"
     return load_schemas(str(assets))
 
 

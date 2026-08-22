@@ -522,7 +522,7 @@ safety property.
 **`prose` is the ownership default**, on both axes: a declaration that says
 nothing about a key or a section gets the reading that cannot destroy
 anything, so the machine only claims territory by an explicit grant in
-`_sections/`. That is the same direction of default `sections` already made
+`sections/`. That is the same direction of default `sections` already made
 for required/optional; `generators` makes it again for who-may-write.
 
 **An omitted `owned` frontmatter key is deleted; an omitted `generated`

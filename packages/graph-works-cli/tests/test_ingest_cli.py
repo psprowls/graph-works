@@ -13,6 +13,7 @@ from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import ingest as ingest_module
 from graph_works_core.ingest.commands import IngestResult
 from models_io import BedrockAccessDenied, ProviderNotInstalled
+from ruamel.yaml import YAML
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -28,14 +29,16 @@ def initialized_workspace(tmp_path: Path) -> Path:
 
 
 def _configure_repositories(workspace: Path, *repos: Path) -> None:
-    """Write only the configured repositories needed by the adapter contract."""
-    repository_rows = "\n".join(
-        f"  repo-{index}:\n    path: {json.dumps(str(repo))}" for index, repo in enumerate(repos, start=1)
-    )
-    (workspace / "_gw" / "_repositories.yaml").write_text(
-        f'graph_dir: "../_cache"\ndeclarations_dir: "."\nrepositories:\n{repository_rows or " {}"}\nignore: []\n',
-        encoding="utf-8",
-    )
+    """Merge the configured repositories into `workspace.yaml`'s `repositories` block."""
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    manifest_path = workspace / "workspace.yaml"
+    with manifest_path.open(encoding="utf-8") as handle:
+        data = yaml.load(handle)
+    data["repositories"] = {f"repo-{index}": {"path": str(repo)} for index, repo in enumerate(repos, start=1)}
+    data["ignore"] = []
+    with manifest_path.open("w", encoding="utf-8") as handle:
+        yaml.dump(data, handle)
 
 
 def test_ingest_runs_one_source_against_the_first_configured_repo(
@@ -290,7 +293,13 @@ def test_ingest_reports_unreadable_configuration_before_any_model_call(
     source = tmp_path / "source.md"
     source.write_text("# Source\n", encoding="utf-8")
 
-    def fail(_bundle_root: object, *, config_path: object = None) -> object:
+    def fail(
+        _bundle_root: object,
+        *,
+        config_path: object = None,
+        graph_dir: object = None,
+        declarations_dir: object = None,
+    ) -> object:
         raise ConfigError("config.yaml is malformed")
 
     monkeypatch.setattr(ingest_module, "load_config", fail)

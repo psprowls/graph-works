@@ -946,7 +946,7 @@ def run_orchestrate(
     Never mutates a work item, a worktree or the manifest.
 
     `repo` defaults to `resolve_repo(layout, repo_name=repo_name)` -- the code
-    repo `_repositories.yaml` declares, not the layout's `repo_root`. An
+    repo `workspace.yaml` declares, not the layout's `repo_root`. An
     explicit `repo` still wins and **skips the config read entirely**: an
     argument is not a default. `repo_name` selects among several declared
     repositories and is ignored when `repo` is given.

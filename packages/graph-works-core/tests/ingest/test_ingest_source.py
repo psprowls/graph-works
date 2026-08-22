@@ -10,6 +10,7 @@ import pytest
 from graph_works_core.ingest.commands import BUNDLE_IGNORE, run_ingest_source
 from graph_works_core.workspace.layout import layout_for
 from ingest_helpers import AT, TODAY, FakeLLM, FakeReader, FakeResponse
+from okf_ext.bundle import SCHEMA_DIRNAME
 from suggest_fixtures import make_bundle
 
 _RESPONSE = (
@@ -48,13 +49,18 @@ def workspace(tmp_path):
     root = tmp_path / ".works"
     root.mkdir()
     make_bundle(root)  # -> <root>/okf
-    layout = layout_for(root)
+    # `config_dir` matches `bundle_dir` here, so `run_ingest_source`'s
+    # `declarations_dir=layout.config_dir` resolves to where `make_bundle`
+    # installed the `schema`/`sections` seeds -- `layout_for`'s default
+    # `config_dir` (`.gw`) would miss them.
+    layout = layout_for(root, config_dir="okf")
     # `repositories` is a MAPPING keyed by repo name, not a list -- see
-    # `code_wiki_okf.config.load_config`. `declarations_dir` is absent, which
-    # means "at the bundle root", where `make_bundle` installed the seeds.
-    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.repositories_path.write_text(
-        f"graph_dir: {tmp_path / 'graph'}\nrepositories:\n  repo:\n    path: {tmp_path / 'repo'}\n",
+    # `code_wiki_okf.config.load_config`. `graph_dir`/`declarations_dir` are
+    # supplied by the caller (`layout.cache_dir`/`layout.config_dir`), not
+    # read from `workspace.yaml` any more.
+    layout.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text(
+        f"version: 1\nrepositories:\n  repo:\n    path: {tmp_path / 'repo'}\n",
         encoding="utf-8",
     )
     repo = tmp_path / "repo"
@@ -131,14 +137,14 @@ async def test_a_present_matcher_writes_the_uri_and_the_forward_link(workspace, 
     # Without it `entity_match.page_id_for` declines (logs and returns
     # `None`) rather than raising, so this test adds the one schema file the
     # forward-link path actually needs.
-    (layout.bundle_dir / "_schema" / "Package.schema.json").write_text(
+    (layout.bundle_dir / SCHEMA_DIRNAME / "Package.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
         ' "required": ["type"], "properties": {"type": {"const": "Package"}},'
         ' "x-okf-directory": "packages/"}',
         encoding="utf-8",
     )
     reader = FakeReader(by_path={"docs/thing.md": ("okf-io", "pkg:okf-io")})
-    schema_set = load_schemas(layout.bundle_dir / "_schema")
+    schema_set = load_schemas(layout.bundle_dir / SCHEMA_DIRNAME)
     result = await run_ingest_source(
         material,
         layout=layout,
@@ -164,14 +170,14 @@ async def test_a_matcher_and_a_gate_supplied_together_do_not_interfere(workspace
 
     # Same schema seed as `test_a_present_matcher_writes_the_uri_and_the_forward_link`:
     # the forward-link path declines silently without `Package.schema.json`.
-    (layout.bundle_dir / "_schema" / "Package.schema.json").write_text(
+    (layout.bundle_dir / SCHEMA_DIRNAME / "Package.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
         ' "required": ["type"], "properties": {"type": {"const": "Package"}},'
         ' "x-okf-directory": "packages/"}',
         encoding="utf-8",
     )
     reader = FakeReader(by_path={"docs/thing.md": ("okf-io", "pkg:okf-io")})
-    schema_set = load_schemas(layout.bundle_dir / "_schema")
+    schema_set = load_schemas(layout.bundle_dir / SCHEMA_DIRNAME)
 
     def gate(repo_path, /, *, workspace):
         return {"allowed": True, "reason": "", "head_commit": "cafe1234"}
@@ -209,7 +215,7 @@ async def test_no_ingest_writes_a_drift_stamp(workspace, monkeypatch):
 async def test_an_uninitialized_graph_degrades_rather_than_raising(workspace, monkeypatch):
     layout, repo, material = workspace
     _models(monkeypatch)
-    # `graph_dir` in `_repositories.yaml` points at a directory with no code.db.
+    # `graph_dir` (`layout.cache_dir`) points at a directory with no code.db.
     result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
     assert result.ok
     assert result.entity_uri is None
@@ -221,16 +227,18 @@ async def test_a_real_but_empty_graph_builds_and_closes_its_own_matcher(workspac
     closes the reader in its `finally` on the way out.
 
     `code_graph_io.testing.open_store` is the sanctioned test-only seam for
-    standing up a real (empty) `code.db` -- `graph_dir` in `_repositories.yaml`
-    is `<tmp_path>/graph`, matching the `workspace` fixture. An empty graph has
-    no rows to match against, so `entity_uri` stays `None`; the point is that
-    the reader opened and closed cleanly, not that it found anything.
+    standing up a real (empty) `code.db` -- `graph_dir` is always
+    `layout.cache_dir` now (the caller supplies it; `workspace.yaml` no
+    longer carries it), matching the `workspace` fixture's layout. An empty
+    graph has no rows to match against, so `entity_uri` stays `None`; the
+    point is that the reader opened and closed cleanly, not that it found
+    anything.
     """
     from code_graph_io import testing as graph_testing
 
     layout, repo, material = workspace
     _models(monkeypatch)
-    store = graph_testing.open_store(tmp_path / "graph" / "code.db", create=True)
+    store = graph_testing.open_store(layout.cache_dir / "code.db", create=True)
     store.close()
     result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
     assert result.ok
@@ -1014,14 +1022,14 @@ async def test_the_entity_match_re_runs_against_the_models_title(workspace, monk
     _models(monkeypatch, ingestor=_RETITLED)
     # Same schema seed as the forward-link tests above: without
     # `Package.schema.json`, `page_id_for` declines and writes no link.
-    (layout.bundle_dir / "_schema" / "Package.schema.json").write_text(
+    (layout.bundle_dir / SCHEMA_DIRNAME / "Package.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
         ' "required": ["type"], "properties": {"type": {"const": "Package"}},'
         ' "x-okf-directory": "packages/"}',
         encoding="utf-8",
     )
     reader = FakeReader(by_name={"The Splicing Writer": [("okf-io", "pkg:okf-io", "package")]})
-    schema_set = load_schemas(layout.bundle_dir / "_schema")
+    schema_set = load_schemas(layout.bundle_dir / SCHEMA_DIRNAME)
     result = await run_ingest_source(
         material,
         layout=layout,

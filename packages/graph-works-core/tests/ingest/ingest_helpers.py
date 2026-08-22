@@ -13,6 +13,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 from typing import Any
 
+from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.schemas import load_schemas
 from okf_ext.shape import load_sections
 
@@ -74,8 +75,8 @@ class FakeLLM:
 
 
 def declarations(root: Path) -> tuple[Any, Any]:
-    """The bundle's `_schema/` and `_sections/`, loaded."""
-    return load_schemas(root / "_schema"), load_sections(root / "_sections")
+    """The bundle's `schema/` and `sections/`, loaded."""
+    return load_schemas(root / SCHEMA_DIRNAME), load_sections(root / SECTIONS_DIRNAME)
 
 
 def json_fence(payload: Any) -> str:

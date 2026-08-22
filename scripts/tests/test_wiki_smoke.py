@@ -51,7 +51,7 @@ def test_smoke_run_creates_one_mirror_page_per_tracked_file(tmp_path: Path) -> N
     `packages/` etc. is never mistaken for an entity page.
     """
     bundle_dir = tmp_path / "bundle"
-    result = wiki_smoke.run(_REAL_CHECKOUT, bundle_dir, graph_dir=tmp_path / "graph")
+    result = wiki_smoke.run(_REAL_CHECKOUT, bundle_dir)
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
@@ -67,7 +67,7 @@ def test_smoke_run_creates_one_mirror_page_per_tracked_file(tmp_path: Path) -> N
 
 
 def test_smoke_run_syncs_entities_when_repo_name_matches_the_graph(tmp_path: Path) -> None:
-    result = wiki_smoke.run(_REAL_CHECKOUT, tmp_path / "bundle", graph_dir=tmp_path / "graph")
+    result = wiki_smoke.run(_REAL_CHECKOUT, tmp_path / "bundle")
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
@@ -76,9 +76,9 @@ def test_smoke_run_syncs_entities_when_repo_name_matches_the_graph(tmp_path: Pat
 
 def test_smoke_run_flags_a_repo_name_mismatch_instead_of_silently_syncing_zero_entities(tmp_path: Path) -> None:
     """The undocumented failure mode this item exists to close: a typo'd
-    `_repositories.yaml` key currently makes `sync` exit 0 having synced no
-    Repository/Package page for that repo at all -- with nothing in its
-    output distinguishing that from "up to date, nothing changed". Only
+    `workspace.yaml` `repositories` key currently makes `sync` exit 0 having
+    synced no Repository/Package page for that repo at all -- with nothing in
+    its output distinguishing that from "up to date, nothing changed". Only
     ecosystem-wide entities (dependencies) are unaffected, since
     `entities/sync.py`'s own docstring notes those carry no repo attribution
     to begin with. `wiki_smoke.run` must surface the repo-scoped silence as
@@ -87,7 +87,6 @@ def test_smoke_run_flags_a_repo_name_mismatch_instead_of_silently_syncing_zero_e
     result = wiki_smoke.run(
         _REAL_CHECKOUT,
         tmp_path / "bundle",
-        graph_dir=tmp_path / "graph",
         repo_name="definitely-not-the-graphs-name",
     )
 
@@ -101,8 +100,6 @@ def test_main_exits_nonzero_on_a_repo_name_mismatch(tmp_path: Path) -> None:
         [
             str(_REAL_CHECKOUT),
             str(tmp_path / "bundle"),
-            "--graph-dir",
-            str(tmp_path / "graph"),
             "--repo-name",
             "definitely-not-the-graphs-name",
         ]
@@ -111,5 +108,5 @@ def test_main_exits_nonzero_on_a_repo_name_mismatch(tmp_path: Path) -> None:
 
 
 def test_main_exits_zero_on_a_clean_run(tmp_path: Path) -> None:
-    exit_code = wiki_smoke.main([str(_REAL_CHECKOUT), str(tmp_path / "bundle"), "--graph-dir", str(tmp_path / "graph")])
+    exit_code = wiki_smoke.main([str(_REAL_CHECKOUT), str(tmp_path / "bundle")])
     assert exit_code == 0

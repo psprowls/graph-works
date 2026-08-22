@@ -51,7 +51,7 @@ def test_every_new_bad_directory_raises_a_legible_section_error(name, expected):
 def test_a_declaration_with_neither_new_field_is_unchanged(tmp_path):
     """The additive promise, stated as a test rather than as a comment: this
     is exactly what a declaration written before this capability looks like."""
-    root = tmp_path / "_sections"
+    root = tmp_path / "sections"
     root.mkdir()
     (root / "feature.yaml").write_text("sections:\n  - heading: Summary\n    required: true\n", encoding="utf-8")
     declaration = load_sections(root).types["feature"]
@@ -60,7 +60,7 @@ def test_a_declaration_with_neither_new_field_is_unchanged(tmp_path):
 
 
 def test_ownership_is_read_and_frontmatter_lists_become_tuples(tmp_path):
-    root = tmp_path / "_sections"
+    root = tmp_path / "sections"
     root.mkdir()
     (root / "entity.yaml").write_text(
         "frontmatter:\n"
@@ -85,7 +85,7 @@ def test_template_implies_seeded_is_complete(tmp_path):
     """A template section's content *is* its placeholder, so without this
     every required template section reports `sections.unfilled` on every walk,
     forever, for being in exactly the state it is supposed to be in."""
-    root = tmp_path / "_sections"
+    root = tmp_path / "sections"
     root.mkdir()
     (root / "entity.yaml").write_text(
         "sections:\n"
@@ -104,7 +104,7 @@ def test_an_unknown_key_inside_frontmatter_is_tolerated(tmp_path):
     """Matching the loader's existing policy for the same reason: a
     declaration written against a newer field must not refuse to load in an
     older reader."""
-    root = tmp_path / "_sections"
+    root = tmp_path / "sections"
     root.mkdir()
     (root / "entity.yaml").write_text(
         "frontmatter:\n  owned: [title]\n  future_class: [x]\nsections: []\n", encoding="utf-8"
@@ -113,15 +113,15 @@ def test_an_unknown_key_inside_frontmatter_is_tolerated(tmp_path):
 
 
 def test_an_empty_frontmatter_block_is_the_empty_ownership(tmp_path):
-    root = tmp_path / "_sections"
+    root = tmp_path / "sections"
     root.mkdir()
     (root / "entity.yaml").write_text("frontmatter: {}\nsections: []\n", encoding="utf-8")
     assert load_sections(root).types["entity"].frontmatter == FrontmatterOwnership()
 
 
 def _declared(tmp_path, files):
-    """A `_sections` directory written from `{filename: text}`."""
-    root = tmp_path / "_sections"
+    """A `sections` directory written from `{filename: text}`."""
+    root = tmp_path / "sections"
     root.mkdir()
     for name, text in files.items():
         (root / name).write_text(text, encoding="utf-8")

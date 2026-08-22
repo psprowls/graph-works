@@ -9,7 +9,7 @@ is the whole job.
 **No command raises for a graph-state reason.** A missing graph, a stale
 schema, a build already in flight — each comes back as a `GraphResult`
 carrying its code. Only `graph_target` raises, and only for configuration:
-a malformed `_repositories.yaml` is a `ConfigError`, following the line
+a malformed `workspace.yaml` is a `ConfigError`, following the line
 `code_wiki_okf.config` draws and `okf_ext`'s `VocabularyError` sets.
 
 There is no Typer surface here and no tracing. Both live in E7, which builds
@@ -44,8 +44,8 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 class GraphTarget:
     """Where the graph lives and which repos feed it, fully resolved.
 
-    `member_names` is index-aligned with `members` — the `_repositories.yaml`
-    key for each path, which is what `build(only=…)` scopes by.
+    `member_names` is index-aligned with `members` — the `workspace.yaml`
+    `repositories` key for each path, which is what `build(only=…)` scopes by.
     `member_ignore` is index-aligned with `members` too — each member's
     `ignore:` glob patterns (global + per-repo, already merged by
     `code_wiki_okf.config.load_config`). All three are empty when there is
@@ -81,9 +81,9 @@ class GraphResult:
 def graph_target(layout: WorkspaceLayout) -> GraphTarget:
     """Resolve *layout* into the one target every command takes.
 
-    Reads `<root>/_gw/_repositories.yaml` when it is there. When it is not,
-    falls back to `code_graph_io.paths.graph_dir(layout.root)` with
-    `layout.repo_root` as the single member — the bootstrap path
+    Reads `<root>/workspace.yaml`'s `repositories` block when the manifest is
+    there. When it is not, falls back to `code_graph_io.paths.graph_dir(layout.root)`
+    with `layout.repo_root` as the single member — the bootstrap path
     `code_graph_io.update.run` documents in its own docstring, where the graph
     DB is created before any manifest may exist. A workspace outside any
     repository resolves to no members at all, and a build against that target
@@ -93,9 +93,9 @@ def graph_target(layout: WorkspaceLayout) -> GraphTarget:
     target complete: every command reads the target and nothing else, so a
     caller constructing one by hand needs no layout.
 
-    Raises `code_wiki_okf.ConfigError` for a malformed `_repositories.yaml`.
+    Raises `code_wiki_okf.ConfigError` for a malformed `workspace.yaml`.
     """
-    if not layout.repositories_path.exists():
+    if not layout.manifest_path.exists():
         if layout.repo_root is None:
             return GraphTarget(graph_dir=paths.graph_dir(layout.root))
         return GraphTarget(
@@ -104,7 +104,12 @@ def graph_target(layout: WorkspaceLayout) -> GraphTarget:
             member_names=(layout.repo_root.name,),
             member_ignore=((),),
         )
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     return GraphTarget(
         graph_dir=config.graph_dir,
         members=tuple(repo.path for repo in config.repos),
@@ -131,10 +136,10 @@ def _open(target: GraphTarget) -> tuple[GraphReader | None, GraphResult]:
 def build(target: GraphTarget, *, full: bool = False, only: str | None = None) -> GraphResult:
     """Build or refresh the graph at `target.graph_dir` from its members.
 
-    `only` names one member by its `_repositories.yaml` key — the file is
-    name-keyed, so matching a resolved path against the member list (what the
-    module this ports from did) was both fragile and unnameable from a command
-    line. An unknown key returns `GENERIC` naming what is declared.
+    `only` names one member by its `workspace.yaml` `repositories` key — the
+    mapping is name-keyed, so matching a resolved path against the member list
+    (what the module this ports from did) was both fragile and unnameable from
+    a command line. An unknown key returns `GENERIC` naming what is declared.
 
     `update.run_workspace` returns nothing on success, so `output` is always
     empty. It is not *silent*, though: a schema rebuild under `full` and a
@@ -159,7 +164,7 @@ def build(target: GraphTarget, *, full: bool = False, only: str | None = None) -
         return GraphResult(
             exit_codes.NOT_IN_GIT_REPO,
             "",
-            "error: no repositories to build; declare one under `repositories` in _repositories.yaml",
+            "error: no repositories to build; declare one under `repositories` in workspace.yaml",
         )
     try:
         update.run_workspace(members, graph_dir=target.graph_dir, full=full, member_ignore=member_ignore)

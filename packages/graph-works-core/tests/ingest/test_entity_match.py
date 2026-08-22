@@ -14,12 +14,13 @@ from graph_works_core.ingest.entity_match import (
     page_id_for,
 )
 from ingest_helpers import FakeReader
+from okf_ext.bundle import SCHEMA_DIRNAME
 
 
 def _schema_set(tmp_path: Path):
     from okf_ext.schemas import load_schemas
 
-    directory = tmp_path / "_schema"
+    directory = tmp_path / SCHEMA_DIRNAME
     directory.mkdir()
     (directory / "Package.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'

@@ -1,14 +1,14 @@
 """The controlled vocabulary: its file format and its loader.
 
 **Nothing is auto-discovered.** The caller passes a path or the `Vocabulary`
-itself. `_tags.yaml` is a documented convention that tools may default to, not
+itself. `tags.yaml` is a documented convention that tools may default to, not
 magic this library performs.
 
-Auto-discovery mirroring okf-schema's `_schema/` was rejected: it invents
+Auto-discovery mirroring okf-schema's `schema/` was rejected: it invents
 format SPEC.md does not define and makes behaviour change because a file
 appeared — a trap this project has been caught by before. Under this design
 a bundle
-carrying a `_tags.yaml` is an entirely ordinary OKF bundle to every other
+carrying a `tags.yaml` is an entirely ordinary OKF bundle to every other
 reader, and a house rule only fires when someone names it.
 
 The rule that turns a loaded `Vocabulary` into `Finding`s against a bundle
@@ -58,7 +58,7 @@ SUPPORTED_VERSION = 1
 
 #: The conventional filename. A default tools may offer, never one this module
 #: reaches for.
-VOCABULARY_FILENAME = "_tags.yaml"
+VOCABULARY_FILENAME = "tags.yaml"
 
 #: The only keys a document may carry, top level and per entry. Anything else
 #: is rejected — see the module docstring for why strictness is the default

@@ -55,7 +55,7 @@ def write_set(root: Path, **files: str) -> Path:
 
 def standard_set(tmp_path: Path):
     root = write_set(
-        tmp_path / "_sections",
+        tmp_path / "sections",
         **{"_common__yaml": COMMON, "feature__yaml": FEATURE, "Reference__yml": REFERENCE},
     )
     return load_sections(root)
@@ -81,8 +81,8 @@ def test_sources_name_the_file_that_says_so(tmp_path):
 
 
 def test_a_str_path_is_accepted(tmp_path):
-    write_set(tmp_path / "_sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
-    assert load_sections(str(tmp_path / "_sections")).type_names == ("feature",)
+    write_set(tmp_path / "sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
+    assert load_sections(str(tmp_path / "sections")).type_names == ("feature",)
 
 
 def test_refs_resolve_at_load_so_a_spec_needs_no_registry(tmp_path):
@@ -121,9 +121,9 @@ def test_the_string_mapping_fields_survive_json_dumps(tmp_path):
 
 
 def test_the_constants_are_what_a_caller_splices_into_load_bundle():
-    assert DEFAULT_SECTIONS_DIRNAME == "_sections"
+    assert DEFAULT_SECTIONS_DIRNAME == "sections"
     assert SECTION_SUFFIXES == (".yaml", ".yml")
-    assert DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+    assert DEFAULT_IGNORE == ("sections/*", "*/sections/*")
 
 
 def test_a_missing_directory_raises_oserror_not_sectionerror(tmp_path):
@@ -137,7 +137,7 @@ def test_a_file_that_is_not_valid_utf8_is_refused(tmp_path):
     """Built here rather than committed: `.gitattributes` marks only okf-io's
     fixtures `-text`, so a byte-exact file under okf-ext could be normalized
     on someone else's checkout."""
-    root = tmp_path / "_sections"
+    root = tmp_path / "sections"
     root.mkdir()
     (root / "feature.yaml").write_bytes(b"sections:\n  - heading: \xff\xfe\n")
     with pytest.raises(SectionError, match="not valid UTF-8"):
@@ -204,25 +204,25 @@ def test_every_bad_fixture_directory_is_covered_by_the_table():
 def test_a_directory_of_fragments_alone_is_a_set_with_no_types(tmp_path):
     """Not an error: `load_schemas` accepts a directory of `$ref` targets for
     the same reason. The empty-directory refusal is about a wrong path."""
-    section_set = load_sections(write_set(tmp_path / "_sections", **{"_common__yaml": COMMON}))
+    section_set = load_sections(write_set(tmp_path / "sections", **{"_common__yaml": COMMON}))
     assert section_set.type_names == ()
     assert section_set.fragments["plan-table"]
 
 
 def test_a_non_declaration_file_is_ignored(tmp_path):
-    root = write_set(tmp_path / "_sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
+    root = write_set(tmp_path / "sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
     (root / "README.md").write_text("not a declaration\n", encoding="utf-8")
     assert load_sections(root).type_names == ("feature",)
 
 
 def test_a_subdirectory_is_not_walked(tmp_path):
     """A declaration set is a directory of declarations, not a tree."""
-    root = write_set(tmp_path / "_sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
+    root = write_set(tmp_path / "sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
     write_set(root / "nested", **{"other__yaml": REFERENCE})
     assert load_sections(root).type_names == ("feature",)
 
 
 def test_a_file_named_exactly_dot_yaml_claims_no_type(tmp_path):
-    root = write_set(tmp_path / "_sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
+    root = write_set(tmp_path / "sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
     (root / ".yaml").write_text("sections: []\n", encoding="utf-8")
     assert load_sections(root).type_names == ("feature",)

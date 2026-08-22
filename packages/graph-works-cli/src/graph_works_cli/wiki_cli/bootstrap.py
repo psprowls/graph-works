@@ -26,7 +26,8 @@ def bootstrap(
     # `--repo-root` reaches `plan_init` unvalidated: the path need not exist and
     # need not carry a `.git`. That is the flag's point — it names a repo the
     # walk-up cannot find — so a typo is accepted and written into
-    # `_repositories.yaml` just as a real path would be. `--dry-run` previews it.
+    # `workspace.yaml`'s `repositories:` block just as a real path would be.
+    # `--dry-run` previews it.
     now = datetime.now(UTC)
     root = resolve_root(workspace=workspace or None, cwd=Path.cwd(), environ=os.environ)
     try:

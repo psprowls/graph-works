@@ -15,7 +15,7 @@ from okf_io import Bundle, load_bundle
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 TAGGED = FIXTURES / "tagged"
-VOCABULARY = TAGGED / "_tags.yaml"
+VOCABULARY = TAGGED / "tags.yaml"
 BAD_VERSION = FIXTURES / "bad_vocab_version.yaml"
 BAD_DANGLING = FIXTURES / "bad_vocab_dangling.yaml"
 
@@ -52,7 +52,7 @@ def snapshot(root: Path) -> dict[str, bytes]:
 
 
 SCHEMAD = FIXTURES / "schemad"
-SCHEMA_DIR = SCHEMAD / "_schema"
+SCHEMA_DIR = SCHEMAD / "schema"
 
 #: What the schema walk must report, as `(code, path)`. Asserted against rather
 #: than restated inside the test, so a fixture change cannot leave a test
@@ -244,7 +244,7 @@ def linked_bad_copy(tmp_path: Path) -> Path:
 SECTIONS_BAD = FIXTURES / "sections_bad"
 
 SECTIONED = FIXTURES / "sectioned"
-SECTIONS_DIR = SECTIONED / "_sections"
+SECTIONS_DIR = SECTIONED / "sections"
 
 #: What the sections walk must report over `sectioned/`, as `(code, path)`.
 #: Asserted against rather than restated inside the test, so a fixture change
@@ -272,7 +272,7 @@ def sectioned_copy(tmp_path: Path) -> Path:
     return target
 
 
-WORK_BODIES = FIXTURES / "work_bodies" / "_sections"
+WORK_BODIES = FIXTURES / "work_bodies" / "sections"
 
 #: The nine per-kind section shapes, vendored from work-io's
 #: `assets/bodies/<kind>.md`. Restated here rather than derived, so a
@@ -292,7 +292,7 @@ WORK_BODY_HEADINGS = {
 }
 
 GENERATED = FIXTURES / "generated"
-GENERATED_DIR = GENERATED / "_sections"
+GENERATED_DIR = GENERATED / "sections"
 
 #: What each concept in `generated/` is there to prove. Hand-written and
 #: asserted against rather than derived, so a fixture added or removed without

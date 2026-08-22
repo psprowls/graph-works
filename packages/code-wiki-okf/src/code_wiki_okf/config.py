@@ -1,8 +1,17 @@
-"""Load `_repositories.yaml` — the bundle's only configuration surface.
+"""Load `workspace.yaml` — the workspace's `repositories` / `ignore` /
+`state_gate` blocks.
 
 Config raises; content never does. okf-io's never-raise rule is for
-concept content, and `_repositories.yaml` is configuration — following the
+concept content, and the workspace manifest is configuration — following the
 `VocabularyError` / `SchemaError` / `SectionError` precedent in okf-ext.
+
+This reads the same file `graph_works_core.workspace.manifest` reads, but
+independently: this package cannot depend on `graph_works_core` (ADR-0005 —
+`code-wiki-okf` is tier 3, `graph_works_core` sits above it), so it has its
+own permissive top-level parse rather than importing `Manifest`/`CATALOG`.
+Every key this module does not name (`version`, `roles`, `layout`, ...) is
+ignored rather than rejected -- the manifest catalog owns top-level
+validation. The three blocks' *internal* shape is still checked strictly.
 """
 
 from __future__ import annotations
@@ -14,13 +23,13 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-CONFIG_FILENAME = "_repositories.yaml"
+MANIFEST_FILENAME = "workspace.yaml"
 
 _DEFAULT_STATE_GATE_BRANCHES: tuple[str, ...] = ("main",)
 
 
 class ConfigError(ValueError):
-    """A `_repositories.yaml` the caller got wrong.
+    """A `workspace.yaml` the caller got wrong.
 
     Subclasses `ValueError` so a caller catching either works, mirroring
     `okf_ext.tags.VocabularyError` / `okf_ext.schemas.SchemaError`.
@@ -99,40 +108,67 @@ def _require_nonempty_string(value: Any, *, name: str, where: str) -> str:  # no
     return value
 
 
-def load_config(bundle_root: str | Path, *, config_path: str | Path | None = None) -> Config:
-    """Load and validate `_repositories.yaml`, from *config_path* when given,
-    else `<bundle_root>/_repositories.yaml`.
+def _require_nonempty_kwarg(value: str | Path, *, param: str) -> str:
+    """Raise ConfigError if a caller-supplied `graph_dir`/`declarations_dir` is blank.
 
-    *bundle_root* still resolves every relative path the document declares
-    (`graph_dir`, `declarations_dir`, each repo's `path`) -- only the
-    document's own address is independent of it.
+    Checked on the raw value, before any `str(...)` coercion -- `str(Path(""))`
+    is `"."`, which would silently pass a blank-string check downstream. Only a
+    blank *string* is a typo; a `Path` is never blank by this test; `Path("")`
+    already normalizes to the current directory, a real answer, not one.
 
-    Raises `ConfigError` naming the file and key for any malformed shape.
-    Propagates `OSError` unchanged when the file is missing.
+    Named after the parameter, not the document: this is a call-site error, and
+    the file `load_config` is reading has nothing to do with it.
+    """
+    if isinstance(value, str) and not value.strip():
+        raise ConfigError(f"`{param}` is required and must be a non-empty string")
+    return str(value)
+
+
+def load_config(
+    bundle_root: str | Path,
+    *,
+    config_path: str | Path | None = None,
+    graph_dir: str | Path,
+    declarations_dir: str | Path | None = None,
+) -> Config:
+    """Load and validate the workspace manifest's `repositories` / `ignore` /
+    `state_gate` blocks, from *config_path* when given, else
+    `<bundle_root>/workspace.yaml`.
+
+    *graph_dir* is required: the document does not carry it, so the caller
+    supplies it from the resolved workspace layout, e.g.
+    `graph_dir=layout.cache_dir`. No default -- a silently-wrong graph
+    location is worse than a `TypeError` at the call site that got it wrong.
+
+    *declarations_dir* defaults to *bundle_root* itself when absent.
+
+    *bundle_root* resolves every relative path the document declares (each
+    repo's `path`) -- only the document's own address is independent of it.
+
+    Every top-level key other than `repositories`, `ignore`, `state_gate` is
+    ignored -- the manifest catalog (`graph_works_core.workspace.manifest`)
+    owns top-level validation; this reader only owns the three blocks it
+    consumes.
+
+    Raises `ConfigError` naming the file and key for any malformed shape
+    within those three blocks. Propagates `OSError` unchanged when the file
+    is missing.
     """
     bundle_root = Path(bundle_root)
-    path = Path(config_path) if config_path is not None else bundle_root / CONFIG_FILENAME
+    path = Path(config_path) if config_path is not None else bundle_root / MANIFEST_FILENAME
     raw = _read_yaml(path)
     name = path.name
 
     doc = _require_mapping(raw, name=name, where="the document") if raw is not None else {}
-    allowed_top = {"graph_dir", "declarations_dir", "repositories", "ignore", "state_gate"}
-    _reject_unknown_keys(doc, allowed=allowed_top, name=name, where="at top level")
 
-    graph_dir_raw = _require_nonempty_string(doc.get("graph_dir"), name=name, where="`graph_dir`")
-    graph_dir = _resolve(bundle_root, graph_dir_raw)
+    resolved_graph_dir = _resolve(bundle_root, _require_nonempty_kwarg(graph_dir, param="graph_dir"))
 
-    # Absent means "in the bundle", which is both the default layout and the
-    # only one that needs no coordination between the packages sharing a
-    # bundle. Present-but-blank is a typo, so it goes through the same
-    # non-empty check every other path key uses rather than falling back.
-    declarations_raw = doc.get("declarations_dir")
-    if declarations_raw is None:
-        declarations_dir = bundle_root
+    if declarations_dir is None:
+        resolved_declarations_dir = bundle_root
     else:
-        declarations_dir = _resolve(
+        resolved_declarations_dir = _resolve(
             bundle_root,
-            _require_nonempty_string(declarations_raw, name=name, where="`declarations_dir`"),
+            _require_nonempty_kwarg(declarations_dir, param="declarations_dir"),
         )
 
     global_ignore = _string_list(doc.get("ignore"), name=name, where="`ignore`")
@@ -168,8 +204,8 @@ def load_config(bundle_root: str | Path, *, config_path: str | Path | None = Non
         state_gate = StateGateConfig(enabled=enabled, branches=branches)
 
     return Config(
-        graph_dir=graph_dir,
-        declarations_dir=declarations_dir,
+        graph_dir=resolved_graph_dir,
+        declarations_dir=resolved_declarations_dir,
         repos=tuple(repos),
         state_gate=state_gate,
     )

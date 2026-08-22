@@ -73,7 +73,7 @@ _EXPECTED_GENERATED = {
 
 
 def _seed_sections():
-    assets = importlib.resources.files("code_wiki_okf") / "assets" / "_sections"
+    assets = importlib.resources.files("code_wiki_okf") / "assets" / "sections"
     return load_sections(str(assets))
 
 
@@ -176,7 +176,7 @@ def test_a_dependency_without_ecosystem_reports_schemas_invalid(tmp_path: Path) 
     """Design spec §3.2: closed by the declaration rather than a rule, and
     `schemas.invalid` is the code for "frontmatter does not satisfy the schema
     for its type"."""
-    assets = importlib.resources.files("code_wiki_okf") / "assets" / "_schema"
+    assets = importlib.resources.files("code_wiki_okf") / "assets" / "schema"
     root = _bundle_with(
         tmp_path,
         "dependencies/ruamel.yaml.md",

@@ -6,7 +6,7 @@ from code_wiki_okf.mirror.create import write_new_page
 from okf_ext.shape import load_sections
 from okf_io import parse
 
-_SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "_sections"
+_SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "sections"
 
 
 def _repo() -> RepoConfig:

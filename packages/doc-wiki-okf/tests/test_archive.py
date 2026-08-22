@@ -238,20 +238,20 @@ _EXPECTED_IGNORE = (
     "sources/references/*",
     "*/sources/references/*",
     "*/.DS_Store",
-    "_schema/*",
-    "*/_schema/*",
-    "_sections/*",
-    "*/_sections/*",
+    "schema/*",
+    "*/schema/*",
+    "sections/*",
+    "*/sections/*",
 )
 
 #: Written out literally for the same reason `_EXPECTED_IGNORE` is: this is
 #: the package's second exported recipe, and recomputing it from the tier-2
 #: defaults would make the test agree with whatever okf-ext says today.
 _EXPECTED_ARCHIVE_IGNORE = (
-    "_schema/*",
-    "*/_schema/*",
-    "_sections/*",
-    "*/_sections/*",
+    "schema/*",
+    "*/schema/*",
+    "sections/*",
+    "*/sections/*",
 )
 
 
@@ -278,7 +278,7 @@ def test_the_two_recipes_differ_by_exactly_the_move_blind_patterns() -> None:
 
 
 def _schema_set():
-    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"
+    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "schema"
     return load_schemas(str(assets))
 
 

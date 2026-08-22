@@ -2,7 +2,7 @@
 
 | Files | Absent | Present |
 |---|---|---|
-| **Scaffold** -- `index.md`, `log.md`, `_tags.yaml` | create | skip if valid; refuse if not |
+| **Scaffold** -- `index.md`, `log.md`, `tags.yaml` | create | skip if valid; refuse if not |
 | **Owned template** -- passed to `plan_install` | create | skip if byte-identical; refuse naming it if not |
 | **Human config** -- the `seed_only` subset of those | create | skip, never compared |
 
@@ -15,7 +15,7 @@ change by design -- a log gains an entry per sync, an index is reconciled as
 pages come and go -- so byte-comparing them against a template would report a
 difference on essentially every real bundle. They are checked for validity
 instead: `index.md` parses and carries `okf_version`, `log.md` parses,
-`_tags.yaml` parses as YAML and is a mapping (or empty).
+`tags.yaml` parses as YAML and is a mapping (or empty).
 
 That last predicate is `ruamel.yaml` and deliberately **not**
 `okf_ext.tags.load_vocabulary`: capabilities never import each other. It is
@@ -138,7 +138,7 @@ def plan_scaffold(
     for member, content, problem_of in (
         ("index.md", _index_text(root.name), _index_problem),
         ("log.md", _log_text(today), _log_problem),
-        ("_tags.yaml", EMPTY_TAGS_YAML, _tags_problem),
+        ("tags.yaml", EMPTY_TAGS_YAML, _tags_problem),
     ):
         path = _target(root, declarations, member)
         if not path.exists():
@@ -218,7 +218,7 @@ def plan_install(
     created when absent, skipped when byte-identical, refused -- naming the
     file, `kind="foreign-content"` -- when it differs.
 
-    A member in `SCAFFOLD_MEMBERS` (`index.md`, `log.md`, `_tags.yaml`) is
+    A member in `SCAFFOLD_MEMBERS` (`index.md`, `log.md`, `tags.yaml`) is
     refused the same way, `kind="not-a-member"`: those three are the
     scaffold's to write, and a tier-3 package shipping one of its own would
     collide with `write_all`'s all-or-nothing create-probe regime and take

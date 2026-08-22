@@ -14,6 +14,7 @@ import pytest
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import reconcile
 from graph_works_core.workspace.layout import WorkspaceLayout
+from ruamel.yaml import YAML
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import WorkItem
 
@@ -224,8 +225,14 @@ def _workspace(tmp_path, code=None):
     (repo / ".git").mkdir(parents=True)
     layout = apply_init(plan_init(repo / ".works", today=TODAY, topic="Work")).layout
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
-    body = f'repositories:\n  code:\n    path: "{code}"\n' if code else "repositories: {}\n"
-    layout.repositories_path.write_text(f'graph_dir: "{layout.cache_dir}"\n{body}', encoding="utf-8")
+    if code:
+        yaml = YAML()
+        yaml.preserve_quotes = True
+        with layout.manifest_path.open(encoding="utf-8") as handle:
+            data = yaml.load(handle)
+        data["repositories"] = {"code": {"path": str(code)}}
+        with layout.manifest_path.open("w", encoding="utf-8") as handle:
+            yaml.dump(data, handle)
     return layout
 
 
@@ -298,7 +305,6 @@ def test_the_spec_git_history_is_the_first_anchor_arm(tmp_path):
         cache_dir=code / "_cache",
         bundle_dir=code,
         worktrees_dir=code / "worktrees",
-        repositories_path=code / "_repositories.yaml",
     )
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     _write_item(layout, "a")

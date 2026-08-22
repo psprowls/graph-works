@@ -10,8 +10,9 @@ call it, and nothing below band 3 does.
 `repo_root` is **the repo the workspace lives in** — used for gitignore
 placement and worktree roots, and `None` when the workspace sits outside any
 repository. It is *not* the scan target: scan targets are declared, with
-paths, in `_repositories.yaml`. Naming the distinction in the type is what
-stops a caller with one `Path` to hand from conflating them.
+paths, in the workspace manifest's `repositories:` block. Naming the
+distinction in the type is what stops a caller with one `Path` to hand from
+conflating them.
 """
 
 from __future__ import annotations
@@ -26,18 +27,20 @@ MANIFEST_FILENAME = "workspace.yaml"
 #: What a `.git` walk-up defaults to: `<repo>/.works`.
 DEFAULT_WORKSPACE_NAME = ".works"
 
-#: The one directory every graph-works-owned member nests under, except
-#: `workspace.yaml` itself (the discovery anchor, D1) and `bundle_dir` (the
-#: human's content, D5). Not an override key -- there is no `WorkspaceLayout`
-#: field for it, only this shared literal prefix and the fixed location
-#: `.gitignore` nests under.
-GW_DIRNAME = "_gw"
+#: The control-plane directory. Also `config_dir`'s default value — not an
+#: independent anchor, `config_dir` is: `WorkspaceLayout.gitignore_entries`
+#: anchors at `self.config_dir`, whatever that resolves to, and `.gw` is only
+#: what it resolves to when nobody overrides it.
+GW_DIRNAME = ".gw"
+
+#: Relative names, not paths — resolved against the *resolved* `config_dir`,
+#: not the workspace root, so an override of `config_dir` carries its
+#: derived members with it.
+CACHE_DIRNAME = "cache"
+WORKTREES_DIRNAME = "worktrees"
 
 DEFAULT_BUNDLE_DIR = "okf"
-DEFAULT_CACHE_DIR = f"{GW_DIRNAME}/_cache"
-DEFAULT_CONFIG_DIR = f"{GW_DIRNAME}/_config"
-DEFAULT_WORKTREES_DIR = f"{GW_DIRNAME}/worktrees"
-DEFAULT_REPOSITORIES_PATH = f"{GW_DIRNAME}/_repositories.yaml"
+DEFAULT_CONFIG_DIR = GW_DIRNAME
 
 
 def _member(root: Path, raw: str) -> Path:
@@ -64,7 +67,6 @@ class WorkspaceLayout:
     cache_dir: Path
     bundle_dir: Path
     worktrees_dir: Path
-    repositories_path: Path
     repo_root: Path | None = None
 
     @property
@@ -78,23 +80,22 @@ class WorkspaceLayout:
 
     @property
     def gitignore_entries(self) -> tuple[str, ...]:
-        """Lines for `<root>/_gw/.gitignore` — the gitignored members, relative
-        to `_gw/` rather than the workspace root.
+        """Lines for `<config_dir>/.gitignore` — the gitignored members,
+        relative to `config_dir` rather than the workspace root.
 
         Derived from the resolved members rather than hard-coded, so an
         override moves the entry with the directory. A member relocated
-        outside `_gw/` contributes nothing: `<root>/_gw/.gitignore` cannot
-        ignore what is not under it -- the same "outside the anchor, not our
-        problem" behavior this had relative to `root` before, now scoped one
-        level deeper.
+        outside `config_dir` contributes nothing: `<config_dir>/.gitignore`
+        cannot ignore what is not under it -- the same "outside the anchor,
+        not our problem" behavior this had relative to `root` before, now
+        anchored at `config_dir` instead of a fixed `GW_DIRNAME` literal.
         """
-        gw_root = self.root / GW_DIRNAME
-        relatives = (_relative(self.cache_dir, gw_root), _relative(self.worktrees_dir, gw_root))
+        relatives = (_relative(self.cache_dir, self.config_dir), _relative(self.worktrees_dir, self.config_dir))
         return tuple(f"/{relative}/" for relative in relatives if relative is not None)
 
     @property
     def scanner_excludes(self) -> tuple[str, ...]:
-        """Repo-relative git pathspecs for `_repositories.yaml`'s `ignore:`.
+        """Repo-relative git pathspecs for the workspace manifest's `ignore:`.
 
         In the default layout the workspace sits inside the repo it describes,
         and a scan that walks its own output grows every run. Empty when the
@@ -111,39 +112,47 @@ def layout_for(
     *,
     bundle_dir: str = DEFAULT_BUNDLE_DIR,
     config_dir: str = DEFAULT_CONFIG_DIR,
-    cache_dir: str = DEFAULT_CACHE_DIR,
-    worktrees_dir: str = DEFAULT_WORKTREES_DIR,
-    repositories_path: str = DEFAULT_REPOSITORIES_PATH,
+    cache_dir: str | None = None,
+    worktrees_dir: str | None = None,
     repo_root: str | Path | None = None,
 ) -> WorkspaceLayout:
-    """Build the layout for *root*, applying the manifest's five overrides.
+    """Build the layout for *root*, applying the manifest's four overrides.
 
     The single constructor, called by `discovery.resolve` and `init.plan_init`.
     It is not a path lookup: it takes every override at once and returns the
     whole object, so there is never a call site asking this module for one
     directory.
+
+    `cache_dir`/`worktrees_dir` default to `None`, meaning "derive from the
+    resolved `config_dir`" — `config_dir / CACHE_DIRNAME` /
+    `config_dir / WORKTREES_DIRNAME`. Resolving them against `config_dir`
+    (already resolved from *its own* override) rather than against a literal
+    is what makes relocating `config_dir` move the whole control plane as a
+    unit, and what makes `gitignore_entries`' anchor always cover its own
+    derived members.
     """
     resolved = Path(root).expanduser().resolve()
+    resolved_config_dir = _member(resolved, config_dir)
     return WorkspaceLayout(
         root=resolved,
-        config_dir=_member(resolved, config_dir),
-        cache_dir=_member(resolved, cache_dir),
+        config_dir=resolved_config_dir,
+        cache_dir=(resolved_config_dir / CACHE_DIRNAME if cache_dir is None else _member(resolved, cache_dir)),
         bundle_dir=_member(resolved, bundle_dir),
-        worktrees_dir=_member(resolved, worktrees_dir),
-        repositories_path=_member(resolved, repositories_path),
+        worktrees_dir=(
+            resolved_config_dir / WORKTREES_DIRNAME if worktrees_dir is None else _member(resolved, worktrees_dir)
+        ),
         repo_root=None if repo_root is None else Path(repo_root).expanduser().resolve(),
     )
 
 
 __all__ = [
+    "CACHE_DIRNAME",
     "DEFAULT_BUNDLE_DIR",
-    "DEFAULT_CACHE_DIR",
     "DEFAULT_CONFIG_DIR",
-    "DEFAULT_REPOSITORIES_PATH",
     "DEFAULT_WORKSPACE_NAME",
-    "DEFAULT_WORKTREES_DIR",
     "GW_DIRNAME",
     "MANIFEST_FILENAME",
+    "WORKTREES_DIRNAME",
     "WorkspaceLayout",
     "layout_for",
 ]

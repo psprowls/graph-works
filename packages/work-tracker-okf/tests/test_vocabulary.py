@@ -6,7 +6,7 @@ from work_tracker_okf import vocabulary
 
 
 def _base_schema() -> dict:
-    path = importlib.resources.files("work_tracker_okf") / "assets" / "_schema" / "_base.schema.json"
+    path = importlib.resources.files("work_tracker_okf") / "assets" / "schema" / "_base.schema.json"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -28,7 +28,7 @@ def test_the_schema_pattern_is_this_modules_pattern_character_for_character() ->
 
 
 def test_the_six_schema_files_are_exactly_TYPES() -> None:
-    directory = importlib.resources.files("work_tracker_okf") / "assets" / "_schema"
+    directory = importlib.resources.files("work_tracker_okf") / "assets" / "schema"
     stems = {entry.name[: -len(".schema.json")] for entry in directory.iterdir() if entry.name.endswith(".json")}
     assert stems - {"_base"} == vocabulary.TYPES
 

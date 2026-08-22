@@ -5,15 +5,13 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from code_wiki_okf.config import load_config
-from code_wiki_okf.init import SEED_RELATIVE_PATHS, InitError, install_bundle, plan_install, seed_files
+from code_wiki_okf.init import SEED_RELATIVE_PATHS, InitError, install_bundle, plan_install
 from okf_ext.bundle import SCAFFOLD_MEMBERS
-from ruamel.yaml import YAML
 
 _TODAY = date(2026, 1, 1)
 _IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
-_SCAFFOLD_FILES = {"index.md", "log.md", "_tags.yaml"}
+_SCAFFOLD_FILES = {"index.md", "log.md", "tags.yaml"}
 _INSTALL_FILES = set(SEED_RELATIVE_PATHS)
 _ALL_FILES = _SCAFFOLD_FILES | _INSTALL_FILES
 
@@ -74,26 +72,25 @@ def test_install_bundle_succeeds_into_a_directory_that_is_not_empty(tmp_path: Pa
 
 def test_a_modified_seed_is_refused_by_name_and_its_neighbours_still_land(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
-    (root / "_schema").mkdir(parents=True)
-    (root / "_schema/File.schema.json").write_text('{"mine": true}\n', encoding="utf-8")
+    (root / "schema").mkdir(parents=True)
+    (root / "schema/File.schema.json").write_text('{"mine": true}\n', encoding="utf-8")
 
     result = install_bundle(root, today=_TODAY, dry_run=False)
     assert not result.ok
-    assert [f.path for f in result.install.failed] == ["_schema/File.schema.json"]
+    assert [f.path for f in result.install.failed] == ["schema/File.schema.json"]
     assert result.install.failed[0].kind == "foreign-content"
-    assert (root / "_schema/File.schema.json").read_text(encoding="utf-8") == '{"mine": true}\n'
-    assert (root / "_schema/Package.schema.json").is_file()
+    assert (root / "schema/File.schema.json").read_text(encoding="utf-8") == '{"mine": true}\n'
+    assert (root / "schema/Package.schema.json").is_file()
 
 
-def test_a_hand_edited_repositories_yaml_is_never_compared(tmp_path: Path) -> None:
-    """Human config, seeded once and never argued with."""
+def test_install_bundle_never_writes_a_repositories_yaml(tmp_path: Path) -> None:
+    """`workspace.yaml` is `load_config`'s only source. A bundle's own
+    `_repositories.yaml`, if one exists, is not one of this package's
+    members: neither written, compared, nor refused."""
     root = tmp_path / "bundle"
-    install_bundle(root, today=_TODAY, dry_run=False)
-    (root / "_repositories.yaml").write_text("graph_dir: ../mine\n", encoding="utf-8")
-
-    again = install_bundle(root, today=_TODAY, dry_run=False)
-    assert again.ok
-    assert (root / "_repositories.yaml").read_text(encoding="utf-8") == "graph_dir: ../mine\n"
+    result = install_bundle(root, today=_TODAY, dry_run=False)
+    assert result.ok
+    assert not (root / "_repositories.yaml").exists()
 
 
 def test_install_bundle_refuses_a_root_that_is_a_file(tmp_path: Path) -> None:
@@ -235,7 +232,7 @@ def test_seeds_are_byte_identical_to_the_packages_assets(tmp_path: Path) -> None
 
 
 def test_the_package_no_longer_seeds_a_tags_vocabulary() -> None:
-    assert "_tags.yaml" not in SEED_RELATIVE_PATHS
+    assert "tags.yaml" not in SEED_RELATIVE_PATHS
 
 
 def test_this_package_ships_none_of_the_scaffold_members() -> None:
@@ -246,51 +243,21 @@ def test_this_package_ships_none_of_the_scaffold_members() -> None:
     assert not set(SEED_RELATIVE_PATHS) & set(SCAFFOLD_MEMBERS)
 
 
-def test_declarations_dir_relocates_the_declarations_and_is_stamped_into_the_config(tmp_path: Path) -> None:
-    """At `init` there is no `_repositories.yaml` yet, so the flag is the only
-    place the answer can come from -- and the file it writes is the only place
-    it can go, so every later command agrees without it being retyped."""
+def test_declarations_dir_relocates_the_declarations(tmp_path: Path) -> None:
+    """`declarations_dir` still routes `schema/`/`sections/`/`tags.yaml`
+    elsewhere -- `plan_scaffold` (tier 2) still takes the parameter, so
+    `install_bundle` keeps threading it through. It is no longer stamped
+    anywhere: there is no config file left for `init` to write it into, so a
+    caller who wants every later command to agree passes `--config-path` at
+    `workspace.yaml`'s own address instead."""
     root = tmp_path / "bundle"
     elsewhere = tmp_path / "declarations"
     elsewhere.mkdir()
     install_bundle(root, today=_TODAY, declarations_dir=elsewhere, dry_run=False)
 
-    assert (elsewhere / "_schema/File.schema.json").is_file()
-    assert (elsewhere / "_tags.yaml").is_file()
-    assert not (root / "_schema").exists()
-    doc = YAML(typ="safe").load((root / "_repositories.yaml").read_text(encoding="utf-8"))
-    assert Path(doc["declarations_dir"]) == elsewhere.resolve()
-
-
-def test_declarations_dir_containing_a_hash_round_trips_through_load_config(tmp_path: Path) -> None:
-    """An unquoted YAML plain scalar breaks on a `#`: everything from the
-    first ` #` on is read as a comment, so an unquoted stamp would silently
-    truncate `.../weird #2/decl` down to `.../weird`. `~/Documents/Project #2`
-    is an ordinary macOS path."""
-    root = tmp_path / "bundle"
-    elsewhere = tmp_path / "weird #2" / "decl"
-    elsewhere.mkdir(parents=True)
-    install_bundle(root, today=_TODAY, declarations_dir=elsewhere, dry_run=False)
-
-    config = load_config(root)
-    assert config.declarations_dir == elsewhere.resolve()
-
-
-def test_declarations_dir_containing_a_colon_space_round_trips_through_load_config(tmp_path: Path) -> None:
-    """`: ` (colon-space) starts a mapping in YAML; unquoted, it turns the
-    stamped scalar into a nested mapping and `load_config` raises `ConfigError`
-    trying to parse it, rather than reading back the path that was written."""
-    root = tmp_path / "bundle"
-    elsewhere = tmp_path / "weird: dir"
-    elsewhere.mkdir(parents=True)
-    install_bundle(root, today=_TODAY, declarations_dir=elsewhere, dry_run=False)
-
-    config = load_config(root)
-    assert config.declarations_dir == elsewhere.resolve()
-
-
-def test_seed_files_leaves_the_template_alone_when_no_config_dir_is_given(tmp_path: Path) -> None:
-    assert "declarations_dir:" not in seed_files()["_repositories.yaml"].replace("# declarations_dir:", "")
+    assert (elsewhere / "schema/File.schema.json").is_file()
+    assert (elsewhere / "tags.yaml").is_file()
+    assert not (root / "schema").exists()
 
 
 def test_plan_install_writes_nothing(tmp_path: Path) -> None:
@@ -299,32 +266,3 @@ def test_plan_install_writes_nothing(tmp_path: Path) -> None:
     plan = plan_install(root)
     assert [planned.member for planned in plan.writes] == list(SEED_RELATIVE_PATHS)
     assert not root.exists()
-
-
-def test_seed_files_drops_repositories_yaml_when_told_not_to_seed_it() -> None:
-    assert "_repositories.yaml" in seed_files()
-    assert "_repositories.yaml" not in seed_files(seed_repositories=False)
-
-
-def test_plan_install_never_mentions_repositories_yaml_when_not_seeding_it(tmp_path: Path) -> None:
-    plan = plan_install(tmp_path, seed_repositories=False)
-    names = {planned.member for planned in plan.writes} | {item.path for item in plan.skipped}
-    names |= {refusal.path for refusal in plan.refusals}
-    assert "_repositories.yaml" not in names
-
-
-def test_install_bundle_never_writes_repositories_yaml_when_not_seeding_it(tmp_path: Path) -> None:
-    result = install_bundle(tmp_path, today=_TODAY, seed_repositories=False, dry_run=False)
-    assert result.ok
-    assert not (tmp_path / "_repositories.yaml").exists()
-
-
-def test_install_bundle_does_not_refuse_a_foreign_repositories_yaml_when_not_seeding_it(tmp_path: Path) -> None:
-    """With `seed_repositories=False`, `_repositories.yaml` is not one of this
-    call's members at all -- an existing file at that path (planted by
-    whoever else owns it) is neither compared nor refused."""
-    tmp_path.mkdir(parents=True, exist_ok=True)
-    (tmp_path / "_repositories.yaml").write_text("graph_dir: elsewhere\n", encoding="utf-8")
-    result = install_bundle(tmp_path, today=_TODAY, seed_repositories=False, dry_run=False)
-    assert result.ok
-    assert (tmp_path / "_repositories.yaml").read_text(encoding="utf-8") == "graph_dir: elsewhere\n"

@@ -28,7 +28,7 @@ _TODAY = date(2026, 1, 1)
 
 
 def _seed_schemas():
-    assets = importlib.resources.files("code_wiki_okf") / "assets" / "_schema"
+    assets = importlib.resources.files("code_wiki_okf") / "assets" / "schema"
     return load_schemas(str(assets))
 
 
@@ -39,12 +39,12 @@ def _five_rules(root: Path) -> list[Rule]:
     is self-describing. `SyncSnapshot.empty()` stands in for the graph walk:
     nothing here reads a graph.
     """
-    schema_set = load_schemas(root / "_schema")
+    schema_set = load_schemas(root / "schema")
     return [
         sync_rule(SyncSnapshot.empty()),
         schema_rule(schema_set),
-        section_rule(load_sections(root / "_sections")),
-        vocabulary_rule(load_vocabulary(root / "_tags.yaml")),
+        section_rule(load_sections(root / "sections")),
+        vocabulary_rule(load_vocabulary(root / "tags.yaml")),
         placement_rule(placement_directories(schema_set), depth=ENTITY_DEPTH, severity="error"),
     ]
 
@@ -138,5 +138,5 @@ def test_the_packaged_assets_and_the_seeded_bundle_agree(tmp_path: Path) -> None
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
     assets = importlib.resources.files("code_wiki_okf") / "assets"
-    for relative in ("_schema/Dependency.schema.json", "_sections/Package.yaml", "_sections/File.yaml"):
+    for relative in ("schema/Dependency.schema.json", "sections/Package.yaml", "sections/File.yaml"):
         assert (root / relative).read_text(encoding="utf-8") == (assets / relative).read_text(encoding="utf-8")

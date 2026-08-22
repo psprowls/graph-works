@@ -5,9 +5,9 @@ added to it without clobbering another's.
     from okf_ext import bundle
 
     scaffold = bundle.plan_scaffold(root, today=date(2026, 8, 9))
-    bundle.apply(scaffold)                       # index.md, log.md, _tags.yaml
+    bundle.apply(scaffold)                       # index.md, log.md, tags.yaml
 
-    install = bundle.plan_install(root, {"_schema/Topic.schema.json": text})
+    install = bundle.plan_install(root, {"schema/Topic.schema.json": text})
     result = bundle.apply(install)
     if not result.ok:
         for failure in result.failed:
@@ -26,15 +26,15 @@ by design, so byte-comparing them would report a difference on every real
 bundle), owned templates for *byte-identity*, and human configuration is only
 ever *seeded*.
 
-**Declaration files are routed, not assumed.** `_schema/*`, `_sections/*` and
-`_tags.yaml` resolve against `declarations_dir` and everything else against
+**Declaration files are routed, not assumed.** `schema/*`, `sections/*` and
+`tags.yaml` resolve against `declarations_dir` and everything else against
 the bundle root, so a caller who keeps one declaration set for several bundles
 gets the same skip/refuse semantics with no second code path. Defaulting
 `declarations_dir` to the root is today's behaviour, unchanged.
 
 **Naming convention: no shared `_base`.** `load_schemas` keys the dispatch
 table on type name and holds `_`-prefixed files as `$ref` targets only, so
-several bases coexist in one `_schema/` and each stays reachable by filename.
+several bases coexist in one `schema/` and each stays reachable by filename.
 That makes one shared `_base.schema.json` an unforced collision between
 packages that have no business coupling: each lane names its own
 `_base-<lane>.schema.json` (`_base-code-wiki.schema.json`,
@@ -62,6 +62,8 @@ from okf_ext.bundle.model import (
     DECLARATION_PREFIXES,
     EMPTY_TAGS_YAML,
     SCAFFOLD_MEMBERS,
+    SCHEMA_DIRNAME,
+    SECTIONS_DIRNAME,
     InstallPlan,
     Plan,
     PlannedFile,
@@ -79,6 +81,8 @@ __all__ = [
     "EMPTY_TAGS_YAML",
     "SCAFFOLD_LOG_ENTRY",
     "SCAFFOLD_MEMBERS",
+    "SCHEMA_DIRNAME",
+    "SECTIONS_DIRNAME",
     "ApplyResult",
     "FailureKind",
     "InstallPlan",

@@ -10,7 +10,8 @@ from pathlib import Path
 
 from code_graph_io.testing import raw_conn
 from code_wiki_okf.config import load_config
-from graph_works_core.workspace.layout import DEFAULT_REPOSITORIES_PATH
+from graph_works_core.workspace.layout import CACHE_DIRNAME, DEFAULT_CONFIG_DIR, MANIFEST_FILENAME
+from ruamel.yaml import YAML
 
 PACKAGE_URI = "pkg:acme/demo/widgets"
 FILLED_PURPOSE = "Widgets exposes the demo package's public behavior."
@@ -50,23 +51,20 @@ def _seed_scan_workspace(tmp_path: Path) -> tuple[Path, Path]:
     assert bootstrap.returncode == 0, bootstrap.stderr
 
     bundle_dir = workspace / "okf"
-    repositories_path = workspace / DEFAULT_REPOSITORIES_PATH
-    pristine = load_config(bundle_dir, config_path=repositories_path)
-    repositories_path.write_text(
-        "\n".join(
-            (
-                f"graph_dir: {json.dumps(str(pristine.graph_dir))}",
-                f"declarations_dir: {json.dumps(str(pristine.declarations_dir))}",
-                "repositories:",
-                "  demo:",
-                f"    path: {json.dumps(str(repository))}",
-                "state_gate:",
-                "  enabled: false",
-                "",
-            )
-        ),
-        encoding="utf-8",
+    manifest_path = workspace / MANIFEST_FILENAME
+    graph_dir = workspace / DEFAULT_CONFIG_DIR / CACHE_DIRNAME
+    declarations_dir = workspace / DEFAULT_CONFIG_DIR
+    pristine = load_config(
+        bundle_dir, config_path=manifest_path, graph_dir=graph_dir, declarations_dir=declarations_dir
     )
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with manifest_path.open(encoding="utf-8") as handle:
+        manifest_doc = yaml.load(handle)
+    manifest_doc["repositories"] = {"demo": {"path": str(repository)}}
+    manifest_doc["state_gate"] = {"enabled": False}
+    with manifest_path.open("w", encoding="utf-8") as handle:
+        yaml.dump(manifest_doc, handle)
     connection = raw_conn(pristine.graph_dir / "code.db", create=True)
     try:
         with connection:
@@ -132,7 +130,7 @@ def test_scan_emit_and_apply_round_trip_across_processes_and_refuse_unsafe_hando
         "mirror_skipped_repos",
         "mirror_errors",
     }
-    scan_cache = (workspace / "_gw" / "_cache" / "scan").resolve()
+    scan_cache = (workspace / DEFAULT_CONFIG_DIR / CACHE_DIRNAME / "scan").resolve()
     worklist_path = Path(emitted["worklist_path"]).resolve()
     briefs_dir = Path(emitted["briefs_dir"]).resolve()
     results_dir = Path(emitted["results_dir"]).resolve()

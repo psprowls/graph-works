@@ -1,4 +1,4 @@
-"""The declaration types every consumer of a `_sections/` directory reads.
+"""The declaration types every consumer of a `sections/` directory reads.
 
 **Shared layer, not a capability.** `okf_ext.sections` seeds and validates
 against this declaration; `okf_ext.generators` regenerates from it. The
@@ -9,7 +9,7 @@ means -- and two copies is how two capabilities end up promising two
 different things by the same word. That is the fourth hoist of its kind,
 after `okf_ext.body`, `okf_ext.writing` and `okf_ext.splice`.
 
-**`SectionSet` keeps its name and `_sections/` keeps its convention**, both
+**`SectionSet` keeps its name and `sections/` keeps its convention**, both
 of which now understate the file: it declares frontmatter keys as well as
 body sections. Renaming would churn a just-landed public type, a documented
 directory convention, every vendored fixture declaration and every citation

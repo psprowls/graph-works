@@ -24,11 +24,11 @@ BY = "agent:test"
 
 
 def schema_set() -> SchemaSet:
-    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "schema"))
 
 
 def section_set() -> SectionSet:
-    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_sections"))
+    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "sections"))
 
 
 def build_bundle(root: Path, members: Mapping[str, str] | None = None) -> Bundle:

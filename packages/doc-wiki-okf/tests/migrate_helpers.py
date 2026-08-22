@@ -24,9 +24,9 @@ from pathlib import Path
 from okf_io import Bundle, load_bundle
 from proposal_helpers import seeded_root
 
-#: `_schema/` and `_sections/` are declarations, not concepts -- `cli.IGNORE`,
+#: `schema/` and `sections/` are declarations, not concepts -- `cli.IGNORE`,
 #: restated here so the helper does not import the CLI.
-IGNORE = ("_schema/*", "*/_schema/*", "_sections/*", "*/_sections/*")
+IGNORE = ("schema/*", "*/schema/*", "sections/*", "*/sections/*")
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "proposals"
 

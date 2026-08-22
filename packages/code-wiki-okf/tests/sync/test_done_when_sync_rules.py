@@ -66,7 +66,7 @@ def synced_bundle(tmp_path: Path):
         repos=(RepoConfig(name="repo-a", path=repo_root, ignore=()),),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
-    section_set = load_sections(bundle_root / "_sections")
+    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)

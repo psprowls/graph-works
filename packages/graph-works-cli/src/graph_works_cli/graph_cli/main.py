@@ -75,7 +75,7 @@ def _resolve_target(workspace: str) -> GraphTarget:
 @graph_app.command("build")
 def build(
     full: bool = typer.Option(False, "--full", help="Rebuild from scratch instead of refreshing."),
-    only: str = typer.Option("", "--only", help="Build one member by its `_repositories.yaml` key."),
+    only: str = typer.Option("", "--only", help="Build one member by its `workspace.yaml` `repositories` key."),
     workspace: str = typer.Option("", "--workspace", help="Workspace root."),
 ) -> None:
     """Build or refresh the code graph from the workspace's declared repositories."""

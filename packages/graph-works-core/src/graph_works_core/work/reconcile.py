@@ -208,7 +208,7 @@ def run_reconcile_context(
     *repo* is an explicit override for the code repository; when it is `None`,
     `resolve_repo(layout, repo_name=repo_name)` decides and its resolution note
     is folded into `warnings`. `resolve_repo`'s own refusals — an ambiguous or
-    malformed `_repositories.yaml` — propagate as `WorkspaceError`; they are
+    malformed `workspace.yaml` — propagate as `WorkspaceError`; they are
     that function's closed contract, not a degrade this module invents around.
 
     Raises:

@@ -132,7 +132,7 @@ def test_findings_cite_the_vocabulary_as_their_spec():
     """`Finding.spec` answers "what says so", and for a house rule the honest
     answer is the house-rules file."""
     findings = [f for f in report().findings if f.code.startswith("tags.")]
-    assert {f.spec for f in findings} == {"_tags.yaml"}
+    assert {f.spec for f in findings} == {"tags.yaml"}
 
 
 def test_strict_promotes_house_rules_with_no_second_namespace():
@@ -198,7 +198,7 @@ def test_probe_deprecated_with_no_replacement(tmp_path):
     from okf_io import load_bundle
 
     # Create a vocabulary with a deprecated tag that has no replacement
-    vocab_file = tmp_path / "_tags.yaml"
+    vocab_file = tmp_path / "tags.yaml"
     vocab_file.write_text(
         "version: 1\ntags:\n  - name: legacy\n    deprecated: true\n",
         encoding="utf-8",
@@ -254,7 +254,7 @@ def test_probe_non_canonical_suppression_boundary_all_cases(tmp_path):
     from okf_io import load_bundle
 
     # Test first four cases with YAML fixture
-    vocab_file = tmp_path / "_tags.yaml"
+    vocab_file = tmp_path / "tags.yaml"
     vocab_file.write_text(
         "version: 1\ntags:\n"
         "  - name: metric\n"
@@ -354,7 +354,7 @@ def test_probe_unknown_suggestion_can_be_deprecated(tmp_path):
     from okf_io import load_bundle
 
     # Create a vocabulary where the suggested match is deprecated
-    vocab_file = tmp_path / "_tags.yaml"
+    vocab_file = tmp_path / "tags.yaml"
     vocab_file.write_text(
         "version: 1\ntags:\n  - name: metric\n  - name: kpi\n    deprecated: true\n    replaced_by: metric\n",
         encoding="utf-8",

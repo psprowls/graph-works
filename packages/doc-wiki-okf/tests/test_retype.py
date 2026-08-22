@@ -91,7 +91,7 @@ def test_a_type_outside_the_rubric_is_refused(bundle_root: Path) -> None:
 
 
 def test_a_rubric_type_with_no_installed_schema_is_refused(bundle_root: Path, tmp_path: Path) -> None:
-    partial = tmp_path / "_schema"
+    partial = tmp_path / "schema"
     partial.mkdir()
     (partial / "Explanation.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema",'

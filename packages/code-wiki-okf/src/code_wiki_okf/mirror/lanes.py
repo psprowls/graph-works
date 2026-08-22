@@ -33,6 +33,7 @@ from datetime import date, datetime
 from pathlib import Path
 
 from code_graph_io import GraphReader
+from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import load_sections
 from okf_io import append_log_entry, load_bundle
 
@@ -145,14 +146,14 @@ def sync_mirror(
     - **`load_sections` reads the *bundle's* declarations**, not this
       package's own assets. Normally identical -- the install seeds
       byte-for-byte copies -- but they diverge the moment a human edits the
-      bundle's `_sections/File.yaml`, and then `sync` writes pages from one
+      bundle's `sections/File.yaml`, and then `sync` writes pages from one
       shape while `validate` checks them against another. One bundle, one
       answer about what a `File` page looks like. `OSError` / `ValueError`
       from it propagate to the caller, matching `entities.lanes.sync`; a
       library does not decide how a caller-configuration problem is
       presented.
     """
-    section_set = load_sections(config.declarations_dir / "_sections")
+    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
     walked = tracked_files(config)
 
     plans: list[MirrorPlan] = []

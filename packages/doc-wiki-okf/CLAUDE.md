@@ -13,8 +13,8 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   two functions are deliberately **not** on it: `reading/` is an internal
   subpackage and its `__init__` exports what the rest of the lane consumes.
 - `src/doc_wiki_okf/assets/` — the twelve files this package installs into a
-  bundle: six `_schema/` JSON schemas (a `_base-diataxis` `$ref` target plus
-  the four Diátaxis types plus `Source`) and six `_sections/` declarations
+  bundle: six `schema/` JSON schemas (a `_base-diataxis` `$ref` target plus
+  the four Diátaxis types plus `Source`) and six `sections/` declarations
   (`_fragments.doc_wiki.yaml` plus the same five). Read through
   `importlib.resources`; installed by `okf_ext.bundle.plan_install`, which is
   C3's call.
@@ -62,8 +62,8 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   `doc_wiki_okf.reading` only, so a new file under `reading/` reaching sideways
   fails it with no edit to the test.
 - **The type list lives once.** `TYPE_NAMES` is unpacked from `RUBRIC`, and
-  `tests/test_rubric.py` asserts every name in it has both a `_schema/` and a
-  `_sections/` file in `SEED_RELATIVE_PATHS`. Adding a fifth type without its two
+  `tests/test_rubric.py` asserts every name in it has both a `schema/` and a
+  `sections/` file in `SEED_RELATIVE_PATHS`. Adding a fifth type without its two
   declaration files fails there rather than at a consumer.
 - **The classifier never guesses.** Diátaxis types differ by author intent and
   text signals do not carry intent, so `classify()` validates a decision and

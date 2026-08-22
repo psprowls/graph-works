@@ -9,29 +9,25 @@ manifest alone" is a plan you edit, not a flag you pass.
 
 **The acts, in the order `apply_init` performs them:**
 
-1. Directories — `root`, `_gw/_config/`, `_gw/_cache/`, `okf/`, `_gw/worktrees/`.
-2. `<root>/_gw/.gitignore` — the gitignored members. Self-contained inside the
-   workspace; the repo's own root `.gitignore` is never edited.
-3. `<root>/workspace.yaml` — written when absent, never overwritten.
-4. `<root>/_gw/_repositories.yaml` — seeded *from* the layout, so the two
-   config surfaces cannot disagree at birth.
-5. `<layout.repo_root or layout.root>/{CLAUDE.md,AGENTS.md}` — identical
+1. Directories — `root`, `.gw/` (the config dir), `.gw/cache/`, `okf/`,
+   `.gw/worktrees/`.
+2. `<config_dir>/.gitignore` — the gitignored members. Self-contained inside
+   the workspace; the repo's own root `.gitignore` is never edited.
+3. `<root>/workspace.yaml` — written when absent, never overwritten. Carries
+   the `repositories:`/`ignore:` blocks alongside the four layout overrides
+   and provenance -- the workspace's one configuration surface.
+4. `<layout.repo_root or layout.root>/{CLAUDE.md,AGENTS.md}` — identical
    bodies, seeding the project context `graph_works_core.prompts
    .project_context` reads. First render fills the template; a re-render
    splices a fresh auto block into the installer-roster region and leaves
    hand-edited prose alone.
-6. `okf_ext.bundle.plan_scaffold` — `index.md`, `log.md`, `_tags.yaml`, with
+5. `okf_ext.bundle.plan_scaffold` — `index.md`, `log.md`, `tags.yaml`, with
    declaration members routed to `config_dir`.
-7. Each installer in `INSTALLERS`, called with `seed_repositories=False` --
-   `_repositories.yaml` now lives outside every installer's own bundle-root
-   write surface, so none of them plans, seeds, or refuses it. `code_wiki_okf`
-   used to ship its own `_repositories.yaml` template as a `SEED_ONLY` member
-   there (created when absent, skipped when present, never compared), and act
-   4 ran first specifically so that skip would fire before act 7 could collide
-   with it. `seed_repositories=False` removes the collision itself, so acts 4
-   and 6-7 no longer need to be ordered around it -- they are left in this
-   order because nothing requires reverting it, not because it is load-bearing
-   anymore.
+6. Each installer in `INSTALLERS`.
+7. `<cache_dir>/config.json` — the manifest catalog's projection, written
+   from the manifest `apply_init` just confirmed on disk. Closes the silent
+   dormancy a gitignored, absent projection would otherwise leave every
+   fail-open hook and routing check in until someone runs `gw` by hand.
 
 Idempotence surfaces as an **empty plan**, the vocabulary four okf-ext
 capabilities already use. Refusals stay `okf_ext.bundle.WriteFailure` data
@@ -41,7 +37,6 @@ clock.
 
 from __future__ import annotations
 
-import json
 import os
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -52,17 +47,17 @@ from typing import Literal, Protocol
 import code_wiki_okf.init
 import doc_wiki_okf.init
 import work_tracker_okf.init
+from config_io import PROJECTION_FILENAME, PlainYamlStore, write_projection
 from okf_ext.bundle import ApplyResult, ScaffoldPlan, apply, plan_scaffold
 
 from graph_works_core.workspace.context_seed import render_context_file
 from graph_works_core.workspace.discovery import find_repo_root
 from graph_works_core.workspace.errors import InitError
-from graph_works_core.workspace.layout import GW_DIRNAME, MANIFEST_FILENAME, WorkspaceLayout, layout_for
+from graph_works_core.workspace.layout import MANIFEST_FILENAME, WorkspaceLayout, layout_for
 from graph_works_core.workspace.manifest import defaults, read, render_initial
 from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
 
 GITIGNORE_FILENAME = ".gitignore"
-REPOSITORIES_FILENAME = "_repositories.yaml"
 CONTEXT_FILENAMES = ("CLAUDE.md", "AGENTS.md")
 
 _GITIGNORE_HEADER = "# Written by graph-works-core at workspace init.\n"
@@ -104,7 +99,6 @@ class Installer(Protocol):
         *,
         today: date,
         declarations_dir: str | Path | None = None,
-        seed_repositories: bool = True,
         dry_run: bool = True,
     ) -> InstallResult: ...
 
@@ -114,7 +108,7 @@ class Installer(Protocol):
 #: without editing core.
 #:
 #: `doc_wiki_okf` and `work_tracker_okf` both shipped an asset at
-#: `_sections/_fragments.yaml` with genuinely different content (`see_also`
+#: `sections/_fragments.yaml` with genuinely different content (`see_also`
 #: vs. `plan_table` fragments); `okf_ext.bundle.plan_install` compares owned
 #: templates by whole-file bytes, so whichever installer ran second refused
 #: the other's file as foreign content. Resolved by renaming each package's
@@ -145,11 +139,9 @@ class PlannedWrite:
 class WorkspacePlan:
     """A preview of initializing one workspace. Writes nothing.
 
-    Every installer in `installs` is called with `seed_repositories=False`, so
-    none of their previews mention `_repositories.yaml` -- act 4's own write is
-    the only place it appears. Before that keyword existed, a fresh root's plan
-    double-reported the file (once from act 4, once from `code_wiki_okf`'s own
-    preview of a file it would find already present); that asymmetry is gone.
+    No installer plans, seeds, or refuses anything under `repositories:`/
+    `ignore:` -- those live in `workspace.yaml`, act 3's own write, and
+    nothing in `installs` mentions them.
     """
 
     layout: WorkspaceLayout
@@ -180,9 +172,7 @@ class WorkspacePlan:
         Refusals come from `scaffold.refusals` — `failed` is the *applied*
         result's field, and a plan has not applied anything yet.
 
-        `_repositories.yaml` itself no longer over-reports (see the class
-        docstring) since every installer runs with `seed_repositories=False`.
-        `index.md`, `log.md` and `_tags.yaml` still do: every installer previews
+        `index.md`, `log.md` and `tags.yaml` still over-report: every installer previews
         the bundle scaffold against the filesystem as it stands, so a first init
         lists each of those once per installer — four times each, as of the
         three shipped installers plus act 5's own scaffold plan. This is
@@ -234,7 +224,11 @@ class WorkspaceInit:
 
 
 def _gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
-    """`<root>/_gw/.gitignore` — the workspace's own, never the repo's.
+    """`<config_dir>/.gitignore` — the workspace's own, never the repo's.
+
+    Anchored at `layout.config_dir`, wherever it resolves — not a hardcoded
+    `GW_DIRNAME`-relative path — so a workspace that overrides `config_dir`
+    still gets its `.gitignore` in the right place.
 
     Created with every entry when absent; when present, only the *missing*
     entries are appended. That makes re-entrance a checked fact rather than a
@@ -243,8 +237,8 @@ def _gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
     entries = layout.gitignore_entries
     if not entries:
         return None
-    path = layout.root / GW_DIRNAME / GITIGNORE_FILENAME
-    label = f"{GW_DIRNAME}/{GITIGNORE_FILENAME}"
+    path = layout.config_dir / GITIGNORE_FILENAME
+    label = f"{layout.config_dir.name}/{GITIGNORE_FILENAME}"
     body = "".join(f"{entry}\n" for entry in entries)
     if not path.exists():
         return PlannedWrite(label=label, path=path, content=_GITIGNORE_HEADER + body, mode="create")
@@ -256,46 +250,16 @@ def _gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
 
 
 def _bundle_relative(target: Path, bundle_dir: Path) -> str:
-    """*target* as `_repositories.yaml` should carry it.
+    """*target* as `workspace.yaml`'s `repositories.<name>.path` should carry it.
 
-    Relative to the bundle root, which is what that file resolves relative
-    paths against — and relative rather than absolute because the file is
-    committed, so an absolute path would pin the workspace to one machine.
+    Relative to *bundle_dir*, not the workspace root -- every reader
+    (`code_wiki_okf.config.load_config`, called with `bundle_root=
+    layout.bundle_dir` at every production call site) resolves a declared
+    repo's relative `path` against that same directory. Relative rather than
+    absolute because the file is committed, so an absolute path would pin the
+    workspace to one machine.
     """
     return Path(os.path.relpath(target, start=bundle_dir)).as_posix()
-
-
-def _repositories_text(layout: WorkspaceLayout) -> str:
-    """`_repositories.yaml`, written *from* the layout, so the two config
-    surfaces cannot disagree at birth.
-
-    They can still drift afterwards: a human editing `graph_dir` here moves the
-    cache out from under the layout, and nothing catches it. That check belongs
-    to the lint work item, not to this writer.
-    """
-    lines = [
-        "# Written by graph-works-core at workspace init, from the resolved",
-        "# workspace layout. `graph_dir` and `declarations_dir` mirror the",
-        "# layout's cache and config directories; editing them here moves",
-        "# those directories out from under the workspace.",
-        f"graph_dir: {json.dumps(_bundle_relative(layout.cache_dir, layout.bundle_dir))}",
-        f"declarations_dir: {json.dumps(_bundle_relative(layout.config_dir, layout.bundle_dir))}",
-        "",
-    ]
-    if layout.repo_root is None:
-        lines.append("repositories: {}")
-    else:
-        lines.append("repositories:")
-        lines.append(f"  {layout.repo_root.name}:")
-        lines.append(f"    path: {json.dumps(_bundle_relative(layout.repo_root, layout.bundle_dir))}")
-    lines.append("")
-    excludes = layout.scanner_excludes
-    if excludes:
-        lines.append("ignore:")
-        lines.extend(f"  - {json.dumps(pattern)}" for pattern in excludes)
-    else:
-        lines.append("ignore: []")
-    return "\n".join(lines) + "\n"
 
 
 def _context_writes(layout: WorkspaceLayout, installers: Sequence[Installer], today: date) -> list[PlannedWrite]:
@@ -352,7 +316,6 @@ def plan_init(
         config_dir=manifest.config_dir,
         cache_dir=manifest.cache_dir,
         worktrees_dir=manifest.worktrees_dir,
-        repositories_path=manifest.repositories_path,
         repo_root=repo_root if repo_root is not None else find_repo_root(root),
     )
 
@@ -361,21 +324,20 @@ def plan_init(
     if gitignore is not None:
         writes.append(gitignore)
     if not layout.manifest_path.exists():
+        repositories: dict[str, str] = {}
+        if layout.repo_root is not None:
+            repositories[layout.repo_root.name] = _bundle_relative(layout.repo_root, layout.bundle_dir)
         writes.append(
             PlannedWrite(
                 label=MANIFEST_FILENAME,
                 path=layout.manifest_path,
-                content=render_initial(today=today, topic=topic, relay_tail=RELAY_TAIL_SEED),
-                mode="create",
-            )
-        )
-    repositories = layout.repositories_path
-    if not repositories.exists():
-        writes.append(
-            PlannedWrite(
-                label=_bundle_relative(repositories, layout.root),
-                path=repositories,
-                content=_repositories_text(layout),
+                content=render_initial(
+                    today=today,
+                    topic=topic,
+                    relay_tail=RELAY_TAIL_SEED,
+                    repositories=repositories,
+                    ignore=layout.scanner_excludes,
+                ),
                 mode="create",
             )
         )
@@ -392,7 +354,6 @@ def plan_init(
                 layout.bundle_dir,
                 today=today,
                 declarations_dir=layout.config_dir,
-                seed_repositories=False,
                 dry_run=True,
             )
             for installer in installers
@@ -417,6 +378,12 @@ def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
             write.path.write_text(existing + separator + write.content, encoding="utf-8")
         written.append(write.label)
 
+    projection_path = plan.layout.cache_dir / PROJECTION_FILENAME
+    before = projection_path.read_bytes() if projection_path.exists() else None
+    write_projection(PlainYamlStore(plan.layout.manifest_path), projection_path)
+    if projection_path.read_bytes() != before:
+        written.append(f"{plan.layout.cache_dir.name}/{PROJECTION_FILENAME}")
+
     return WorkspaceInit(
         layout=plan.layout,
         created=plan.directories,
@@ -427,7 +394,6 @@ def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
                 plan.layout.bundle_dir,
                 today=plan.today,
                 declarations_dir=plan.layout.config_dir,
-                seed_repositories=False,
                 dry_run=False,
             )
             for installer in plan.installers
@@ -438,7 +404,6 @@ def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
 __all__ = [
     "GITIGNORE_FILENAME",
     "INSTALLERS",
-    "REPOSITORIES_FILENAME",
     "InstallResult",
     "Installer",
     "PlannedWrite",

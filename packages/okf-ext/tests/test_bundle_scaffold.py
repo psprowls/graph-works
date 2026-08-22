@@ -62,9 +62,9 @@ def test_an_unparseable_index_is_a_foreign_content_refusal_not_a_crash(tmp_path)
 
     # The other two are still this plan's to write -- one refusal does not
     # take its neighbours down with it.
-    assert [planned.member for planned in plan.writes] == ["log.md", "_tags.yaml"]
+    assert [planned.member for planned in plan.writes] == ["log.md", "tags.yaml"]
     result = apply(plan)
-    assert result.written == ("log.md", "_tags.yaml")
+    assert result.written == ("log.md", "tags.yaml")
     assert not result.ok
     assert (root / "index.md").read_text(encoding="utf-8") == content
 
@@ -97,10 +97,10 @@ def test_a_log_with_real_entries_is_skipped_never_compared(tmp_path):
 def test_a_malformed_tags_file_is_refused_but_a_list_shaped_one_names_its_shape(tmp_path):
     root = tmp_path / "bundle"
     root.mkdir()
-    (root / "_tags.yaml").write_text("- one\n- two\n", encoding="utf-8")
+    (root / "tags.yaml").write_text("- one\n- two\n", encoding="utf-8")
 
     plan = plan_scaffold(root, today=_TODAY)
-    refusal = next(f for f in plan.refusals if f.path == "_tags.yaml")
+    refusal = next(f for f in plan.refusals if f.path == "tags.yaml")
     assert refusal.kind == "foreign-content"
     assert "not a mapping" in refusal.error
 
@@ -113,8 +113,8 @@ def test_declarations_dir_relocates_only_the_declaration_member(tmp_path):
 
     assert (root / "index.md").is_file()
     assert (root / "log.md").is_file()
-    assert (elsewhere / "_tags.yaml").is_file()
-    assert not (root / "_tags.yaml").exists()
+    assert (elsewhere / "tags.yaml").is_file()
+    assert not (root / "tags.yaml").exists()
 
 
 def test_the_scaffold_log_entry_names_no_package(tmp_path):
@@ -131,10 +131,10 @@ def test_the_scaffold_log_entry_names_no_package(tmp_path):
 def test_genuinely_malformed_tags_yaml_is_refused(tmp_path):
     root = tmp_path / "bundle"
     root.mkdir()
-    (root / "_tags.yaml").write_text("tags: {a: 1", encoding="utf-8")
+    (root / "tags.yaml").write_text("tags: {a: 1", encoding="utf-8")
 
     plan = plan_scaffold(root, today=_TODAY)
-    refusal = next(f for f in plan.refusals if f.path == "_tags.yaml")
+    refusal = next(f for f in plan.refusals if f.path == "tags.yaml")
     assert refusal.kind == "foreign-content"
     assert "not valid YAML" in refusal.error
 
@@ -147,11 +147,11 @@ def test_deeply_nested_tags_yaml_does_not_crash(tmp_path):
     # frames ruamel spends per level.
     depth = sys.getrecursionlimit() * 3
     pathological = "tags: " + "[" * depth + "]" * depth
-    (root / "_tags.yaml").write_text(pathological, encoding="utf-8")
+    (root / "tags.yaml").write_text(pathological, encoding="utf-8")
 
     plan = plan_scaffold(root, today=_TODAY)
     assert not plan.ok
-    refusal = next(f for f in plan.refusals if f.path == "_tags.yaml")
+    refusal = next(f for f in plan.refusals if f.path == "tags.yaml")
     assert refusal.kind == "foreign-content"
     assert "not valid YAML" in refusal.error
 

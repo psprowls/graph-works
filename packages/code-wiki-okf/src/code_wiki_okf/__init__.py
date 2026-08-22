@@ -1,7 +1,7 @@
 """code-wiki-okf: generates and updates a standalone OKF v0.2 bundle from the
 shared code graph.
 
-This package (epic child 1) ships the package skeleton, `_repositories.yaml`
+This package (epic child 1) ships the package skeleton, `workspace.yaml`
 config, `install_bundle()`, and the shared plumbing later children write
 through: find-by-resource (`resources.py`), provenance stamping
 (`provenance.py`), and a `git_state` port with the state gate.

@@ -1,14 +1,10 @@
-"""`<root>/workspace.yaml` — a thin manifest, stored through `config-io`.
+"""`<root>/workspace.yaml` — the workspace's one configuration surface.
 
-Five layout overrides, five role-override wildcards, a version, a provenance
-stamp, a topic, and one `env-only` entry documenting the discovery override.
-Keys a workspace manifest might be expected to carry are owned elsewhere:
-`repositories`, `graph_dir`, `declarations_dir`, `ignore` and `state_gate` are
-bundle-declared in `_repositories.yaml`; the plugin backends belong to
-`models-io`; the guidance and workflow blocks are deferred until their consumers
-exist. Two config surfaces are the accepted cost of that split, and this
-docstring plus the design spec's §6.3 table are where the boundary is written
-down.
+Four layout overrides, five role-override wildcards, the bundle declarations
+(`repositories`, `ignore`, `state_gate`), a version, a provenance stamp, a
+topic, and one `env-only` entry documenting the discovery override.
+The plugin backends belong to `models-io`; the guidance and workflow blocks
+are deferred until their consumers exist.
 
 `roles` is the one line C2 amends. The role *concept* does belong to
 `subagents-io` and `models-io` — `resolve_role_spec` takes both mappings as
@@ -31,7 +27,7 @@ come for free, and roughly 250 lines of bespoke checking does not get written.
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -51,10 +47,7 @@ from subagents_io.dispatch import DISPATCH_MODES
 from graph_works_core.workspace.errors import WorkspaceError, WorkspaceNotFound
 from graph_works_core.workspace.layout import (
     DEFAULT_BUNDLE_DIR,
-    DEFAULT_CACHE_DIR,
     DEFAULT_CONFIG_DIR,
-    DEFAULT_REPOSITORIES_PATH,
-    DEFAULT_WORKTREES_DIR,
     MANIFEST_FILENAME,
     WorkspaceLayout,
 )
@@ -104,25 +97,57 @@ CATALOG: tuple[ConfigEntry, ...] = (
         key="layout.config_dir",
         type="str",
         default=DEFAULT_CONFIG_DIR,
-        description="Committed declarations (`_schema/`, `_sections/`, `_tags.yaml`), relative to the root.",
+        description=(
+            "The control plane — declarations (`schema/`, `sections/`, `tags.yaml`) "
+            "and the `.gitignore` anchor — relative to the root."
+        ),
     ),
     ConfigEntry(
         key="layout.cache_dir",
         type="str",
-        default=DEFAULT_CACHE_DIR,
-        description="Gitignored machine state — the graph database — relative to the root.",
+        default=None,
+        description=(
+            "Gitignored machine state — the graph database — relative to the root. "
+            "Absent derives from `layout.config_dir`."
+        ),
     ),
     ConfigEntry(
         key="layout.worktrees_dir",
         type="str",
-        default=DEFAULT_WORKTREES_DIR,
-        description="Gitignored feature worktrees, relative to the root.",
+        default=None,
+        description=("Gitignored feature worktrees, relative to the root. Absent derives from `layout.config_dir`."),
+    ),
+    # The bundle declarations. `repositories.*.path` mirrors the
+    # `roles.*.<field>` wildcard shape: one entry per repo, keyed on name.
+    ConfigEntry(
+        key="repositories.*.path",
+        type="str",
+        default=None,
+        description="Checkout path for one repository this workspace scans, relative to the workspace root.",
     ),
     ConfigEntry(
-        key="layout.repositories_path",
-        type="str",
-        default=DEFAULT_REPOSITORIES_PATH,
-        description="Where `_repositories.yaml` lives, relative to the workspace root.",
+        key="repositories.*.ignore",
+        type="list[str]",
+        default=None,
+        description="Per-repository git glob pathspecs to exclude, merged with the global `ignore:` list.",
+    ),
+    ConfigEntry(
+        key="ignore",
+        type="list[str]",
+        default=[],
+        description="Global git glob pathspecs excluded from every repository's scan.",
+    ),
+    ConfigEntry(
+        key="state_gate.enabled",
+        type="bool",
+        default=True,
+        description="Whether the state gate blocks a scan on an unclean branch.",
+    ),
+    ConfigEntry(
+        key="state_gate.branches",
+        type="list[str]",
+        default=["main"],
+        description="Branches the state gate treats as clean-required. Empty list is valid and intentional.",
     ),
     # The workspace role override. Five wildcard entries rather than one per
     # role per field: `config_io.expand_wildcards` handles the
@@ -229,16 +254,20 @@ CATALOG: tuple[ConfigEntry, ...] = (
 @dataclass(frozen=True, slots=True)
 class Manifest:
     """One `workspace.yaml`, resolved. Every field is a value, never a path:
-    turning the five overrides into resolved paths is `layout_for`'s job."""
+    turning the four overrides into resolved paths is `layout_for`'s job.
+
+    `cache_dir` and `worktrees_dir` are `None` when the manifest does not
+    override them — `layout_for` reads `None` as "derive from `config_dir`",
+    the same absent-means-derive contract the catalog entries above declare.
+    """
 
     version: int
     initialized_at: str
     topic: str | None
     bundle_dir: str
     config_dir: str
-    cache_dir: str
-    worktrees_dir: str
-    repositories_path: str
+    cache_dir: str | None
+    worktrees_dir: str | None
 
 
 def defaults() -> Manifest:
@@ -249,15 +278,19 @@ def defaults() -> Manifest:
         topic=None,
         bundle_dir=DEFAULT_BUNDLE_DIR,
         config_dir=DEFAULT_CONFIG_DIR,
-        cache_dir=DEFAULT_CACHE_DIR,
-        worktrees_dir=DEFAULT_WORKTREES_DIR,
-        repositories_path=DEFAULT_REPOSITORIES_PATH,
+        cache_dir=None,
+        worktrees_dir=None,
     )
 
 
 def _text(values: Mapping[str, object], key: str, fallback: str) -> str:
     value = values.get(key)
     return value if isinstance(value, str) and value.strip() else fallback
+
+
+def _optional_text(values: Mapping[str, object], key: str) -> str | None:
+    value = values.get(key)
+    return value if isinstance(value, str) and value.strip() else None
 
 
 def _version(value: object, path: Path) -> int:
@@ -317,9 +350,8 @@ def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manif
         topic=topic if isinstance(topic, str) and topic.strip() else None,
         bundle_dir=_text(values, "layout.bundle_dir", DEFAULT_BUNDLE_DIR),
         config_dir=_text(values, "layout.config_dir", DEFAULT_CONFIG_DIR),
-        cache_dir=_text(values, "layout.cache_dir", DEFAULT_CACHE_DIR),
-        worktrees_dir=_text(values, "layout.worktrees_dir", DEFAULT_WORKTREES_DIR),
-        repositories_path=_text(values, "layout.repositories_path", DEFAULT_REPOSITORIES_PATH),
+        cache_dir=_optional_text(values, "layout.cache_dir"),
+        worktrees_dir=_optional_text(values, "layout.worktrees_dir"),
     )
 
 
@@ -432,20 +464,32 @@ def set_value(path: str | Path, key: str, raw_value: str) -> Resolved:
     return set_key(CATALOG, key, raw_value, store=PlainYamlStore(Path(path)))
 
 
-def render_initial(*, today: date, topic: str | None = None, relay_tail: str | None = None) -> str:
+def render_initial(
+    *,
+    today: date,
+    topic: str | None = None,
+    relay_tail: str | None = None,
+    repositories: Mapping[str, str] | None = None,
+    ignore: Sequence[str] = (),
+) -> str:
     """The manifest a fresh workspace is born with.
 
-    Rendered by hand rather than dumped: two keys and two optional scalars is
-    not worth a YAML serializer this package does not otherwise declare, and
+    Rendered by hand rather than dumped: the scalars and blocks here are not
+    worth a YAML serializer this package does not otherwise declare, and
     `json.dumps` is the minimal correct YAML double-quoted scalar — the same
     call `code_wiki_okf.seed_files` makes, for the same reason.
 
-    The five layout keys are deliberately absent: an unset override *is* the
+    The four layout keys are deliberately absent: an unset override *is* the
     default, and writing them out would freeze today's defaults into every new
-    workspace.
+    workspace. `repositories`/`ignore` are the opposite case: they carry the
+    bootstrap-time content itself (the repo this workspace was created for,
+    the scanner excludes derived from the layout), not an override of a
+    default, so they are always rendered — an empty `repositories: {}` when
+    there is no repo root, same as `_repositories_text` used to write.
 
-    **`relay_tail` is the exception, and the distinction is the reason it is
-    safe.** `workflow.pipeline.branch.prompt_tail` has **no packaged default**
+    **`relay_tail` is the exception among the *override* keys, and the
+    distinction is the reason it is safe.** `workflow.pipeline.branch.prompt_tail`
+    has **no packaged default**
     (`pipeline.PACKAGED_PIPELINE["branch"].prompt_tail` is `None`), so an unset
     key there is a *hole* rather than an inherited default — a `relay` worker
     dispatched without it falls into an interactive menu with nobody watching.
@@ -464,6 +508,18 @@ def render_initial(*, today: date, topic: str | None = None, relay_tail: str | N
                 f"      prompt_tail: {json.dumps(relay_tail)}",
             ]
         )
+    if repositories:
+        lines.append("repositories:")
+        for name, path in repositories.items():
+            lines.append(f"  {json.dumps(name)}:")
+            lines.append(f"    path: {json.dumps(path)}")
+    else:
+        lines.append("repositories: {}")
+    if ignore:
+        lines.append("ignore:")
+        lines.extend(f"  - {json.dumps(pattern)}" for pattern in ignore)
+    else:
+        lines.append("ignore: []")
     return "\n".join(lines) + "\n"
 
 

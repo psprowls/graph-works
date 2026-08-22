@@ -23,7 +23,7 @@ _UNIVERSAL_REQUIRED = ["type", "title", "resource"]
 
 
 def test_seed_schemas_load_and_declare_directories() -> None:
-    assets = importlib.resources.files("code_wiki_okf") / "assets" / "_schema"
+    assets = importlib.resources.files("code_wiki_okf") / "assets" / "schema"
     schema_set = load_schemas(str(assets))
     assert set(schema_set.types) == set(_EXPECTED_DIRECTORY)
     for type_name, directory in _EXPECTED_DIRECTORY.items():

@@ -16,7 +16,7 @@ _PLAN_TABLE = "| Action | Done when | Rationale |\n| --- | --- | --- |\n"
 
 
 def _section_set():
-    assets = importlib.resources.files("work_tracker_okf") / "assets" / "_sections"
+    assets = importlib.resources.files("work_tracker_okf") / "assets" / "sections"
     return load_sections(str(assets))
 
 

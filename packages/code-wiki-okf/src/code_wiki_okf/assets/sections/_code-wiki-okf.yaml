@@ -4,7 +4,7 @@
 # that claims no type: a typed file's sections belong to its type. That is
 # also what makes this shareable -- three tier-3 packages write into one
 # bundle, and each declares its own root sections in its own file. A single
-# `_index.yaml` they all edited would recreate the `_tags.yaml` arbitration
+# `_index.yaml` they all edited would recreate the `tags.yaml` arbitration
 # problem that was solved by hoisting that file out of the packages.
 directories:
   "":

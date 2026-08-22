@@ -1,6 +1,6 @@
 # The one shared fragment. `_`-prefixed so `load_sections` reads it for its
 # `fragments:` mapping and keeps it out of the type dispatch table -- the same
-# rule `_base.schema.json` lives under in `_schema/`.
+# rule `_base.schema.json` lives under in `schema/`.
 #
 # Every type declares `## Plan` by reference to this, so the empty table's
 # columns cannot drift between six files. `okf_ext.tables` reads the table back

@@ -7,7 +7,7 @@ instruction that describes it in one file.
 
 What the refresher may write is decided by the *declaration*: the task carries
 its type's `ownership == "prose"` headings and nothing else, so a section a
-`_sections/*.yaml` marks `generated` is unrepresentable in the answer rather
+`sections/*.yaml` marks `generated` is unrepresentable in the answer rather
 than defended against downstream.
 """
 

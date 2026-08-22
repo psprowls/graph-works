@@ -12,7 +12,7 @@ dependencies = [
     # Tier 2 depends on the core, never the other way round (ADR-0005).
     # Pre-1.0 policy is minor = breaking (ADR-0007), so the ceiling is 0.3.
     "okf-io>=0.2.3,<0.3",
-    # Read `_tags.yaml`. Declared rather than inherited through okf-io: an
+    # Read `tags.yaml`. Declared rather than inherited through okf-io: an
     # undeclared transitive import breaks the day the core swaps YAML libraries,
     # and reaching into `okf_io._yaml` would couple this package to a private
     # module of the one it sits above.

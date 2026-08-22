@@ -33,7 +33,7 @@ _SEE_ALSO = "> TODO: related pages, as root-absolute markdown links, one per lin
 
 
 def _section_set():
-    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "_sections"
+    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "sections"
     return load_sections(str(assets))
 
 

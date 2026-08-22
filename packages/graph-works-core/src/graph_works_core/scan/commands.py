@@ -16,7 +16,7 @@ and applies prose-refresh work and nothing else; the lint vertical builds its ow
 worklist over the same graph.
 
 **The prose surface is declaration-driven.** `ownership == "prose"` in a type's
-`_sections/*.yaml` is the definition of what this fills. Adding a prose section
+`sections/*.yaml` is the definition of what this fills. Adding a prose section
 to a declaration puts it in the worklist with no change here.
 
 This module imports `commands.graph`, and deliberately: the graph surface is
@@ -49,6 +49,7 @@ from code_wiki_okf.git_state import changed_files_since, head_commit
 from code_wiki_okf.mirror.lanes import MirrorSummary, sync_mirror
 from langchain_core.tools import BaseTool
 from okf_ext.body import find_section, split_lines
+from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import SectionSet, SectionSpec, load_sections
 from okf_ext.splice import assemble, bare_lines, dominant_newline, has_trailing_newline
 from okf_ext.splice import replace as splice_replace
@@ -238,7 +239,7 @@ def entity_refs(reader: GraphReader, config: Config) -> dict[str, _EntityRef]:
 
     Per-repo HEAD comes from `Config.repositories`, the same source
     `entities.sync` reads (design spec §3.5). A repository declared in
-    `_repositories.yaml` but absent from the graph contributes nothing, matching
+    `workspace.yaml` but absent from the graph contributes nothing, matching
     `sync`'s own skip.
 
     Dependencies are ecosystem-wide: no repo, no root, no head. They can only
@@ -631,7 +632,7 @@ async def build_scan_worklist(
         # snapshot. Under `dry_run` neither wrote anything, so this is the same
         # snapshot.
         bundle = load_bundle(layout.bundle_dir)
-        section_set = load_sections(config.declarations_dir / "_sections")
+        section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
         refs = entity_refs(reader, config)
         phase1 = _classify_pages(bundle, section_set, refs, reader, layout.bundle_dir)
     finally:
@@ -767,7 +768,7 @@ def apply_scan_results(
     counts describe what *would* have landed; `ApplyResult.dry_run` is what
     stops a caller reading them as what did.
     """
-    section_set = load_sections(config.declarations_dir / "_sections")
+    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
     bundle = load_bundle(bundle_root)
     by_uri = {task.uri: task for task in worklist.prose_tasks}
 

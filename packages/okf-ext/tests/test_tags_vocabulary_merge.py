@@ -28,7 +28,7 @@ def test_a_tag_definition_is_frozen_and_defaults_to_live():
 
 def test_a_plan_with_no_refusals_is_ok_and_one_with_no_additions_is_empty():
     plan = VocabularyPlan(
-        path=Path("_tags.yaml"),
+        path=Path("tags.yaml"),
         before="version: 1\ntags: []\n",
         after="version: 1\ntags: []\n",
         added=(),
@@ -223,12 +223,12 @@ def test_a_differing_replaced_by_refuses_that_tag_alone(tmp_path):
 
 
 def test_a_malformed_vocabulary_refuses_the_whole_merge(tmp_path):
-    target = tmp_path / "_tags.yaml"
+    target = tmp_path / "tags.yaml"
     target.write_bytes(ext_helpers.BAD_VERSION.read_bytes())
     plan = plan_vocabulary_merge(target, [SECURITY])
     assert len(plan.refusals) == 1
     assert plan.refusals[0].kind == "foreign-content"
-    assert plan.refusals[0].path == "_tags.yaml"
+    assert plan.refusals[0].path == "tags.yaml"
     assert plan.added == ()
     assert plan.after == plan.before
 
@@ -238,7 +238,7 @@ def test_invalid_utf8_bytes_refuse_the_whole_merge_rather_than_raising(tmp_path)
     content, not a caller error -- this must not crash with
     `UnicodeDecodeError` either, and must refuse the whole file the same way
     any other malformed vocabulary does."""
-    target = tmp_path / "_tags.yaml"
+    target = tmp_path / "tags.yaml"
     target.write_bytes(b'version: 1\ntags:\n  - name: metric\n    description: "bad byte: \xff"\n')
     plan = plan_vocabulary_merge(target, [SECURITY])
     assert len(plan.refusals) == 1
@@ -306,7 +306,7 @@ def test_apply_writes_the_plan(tmp_path):
     plan = plan_vocabulary_merge(target, [SECURITY])
     result = apply_vocabulary(plan)
     assert result.ok
-    assert result.written == ("_tags.yaml",)
+    assert result.written == ("tags.yaml",)
     assert target.read_bytes().decode("utf-8") == plan.after
 
 
@@ -340,4 +340,4 @@ def test_apply_reports_a_refusal_once_not_twice(tmp_path):
     ours = TagDefinition(name="metric", description="A measurable quantity.", deprecated=True)
     result = apply_vocabulary(plan_vocabulary_merge(target, [ours, SECURITY]))
     assert len(result.failed) == 1
-    assert result.written == ("_tags.yaml",)
+    assert result.written == ("tags.yaml",)

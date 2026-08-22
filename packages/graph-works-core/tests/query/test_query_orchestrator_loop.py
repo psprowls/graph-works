@@ -90,7 +90,7 @@ def patched(monkeypatch, tmp_path):
 @pytest.fixture
 def librarian_layout(tmp_path):
     """A real, schema-installed workspace -- `build_librarian_system` now
-    needs `_repositories.yaml` and `_schema/` on disk, which the bare
+    needs `workspace.yaml` and `schema/` on disk, which the bare
     `_bundle(tmp_path)` fixture above never wrote."""
     from datetime import date
 

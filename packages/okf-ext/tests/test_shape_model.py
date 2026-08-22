@@ -63,9 +63,9 @@ def test_shape_imports_no_other_okf_ext_module():
 
 
 def test_the_defaults_are_unchanged_by_the_move():
-    assert shape.DEFAULT_SECTIONS_DIRNAME == "_sections"
+    assert shape.DEFAULT_SECTIONS_DIRNAME == "sections"
     assert shape.SECTION_SUFFIXES == (".yaml", ".yml")
-    assert shape.DEFAULT_IGNORE == ("_sections/*", "*/_sections/*")
+    assert shape.DEFAULT_IGNORE == ("sections/*", "*/sections/*")
 
 
 def test_the_spec_defaults_are_unchanged_by_the_move():

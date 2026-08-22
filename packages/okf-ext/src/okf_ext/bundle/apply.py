@@ -2,7 +2,7 @@
 
 Every file either plan carries is a **create**, so each is handed to
 `okf_ext.writing.write_all` with `create=True`: the parent directory is made
-(`_schema/` may not exist), a target that appeared *since* the plan was
+(`schema/` may not exist), a target that appeared *since* the plan was
 computed is refused as `stale`, and staging and commit are the same two steps
 every other capability's writes go through. The two I/O regimes -- probe and
 staging all-or-nothing, per-file commit -- are inherited unchanged.

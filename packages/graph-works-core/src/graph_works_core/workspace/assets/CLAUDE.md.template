@@ -16,7 +16,7 @@ holds everything graph-works owns about it.
 - `_gw/_config/` — declarations the installed verticals own (schemas, sections, tags).
 - `_gw/_cache/` — the derived code graph and traces. Gitignored.
 - `_gw/worktrees/` — feature-work worktrees created under this workspace. Gitignored.
-- `_gw/_repositories.yaml` — the scanned repositories, seeded from the layout at init.
+- `workspace.yaml` — the scanned repositories (`repositories:`/`ignore:`), seeded from the layout at init.
 
 ## Plugins installed
 

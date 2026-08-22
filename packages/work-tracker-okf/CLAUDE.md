@@ -27,7 +27,7 @@ Python ≥3.12 (the workspace floor). Tests are pytest.
   migrated child specs. It consumes an already-loaded bundle and item
   projection; it never discovers a workspace or invokes Git.
 - `work_tracker_okf.assets` — package-data seed files copied byte-for-byte
-  by `plan_install()`: seven `_schema/` documents and seven `_sections/`
+  by `plan_install()`: seven `schema/` documents and seven `sections/`
   declarations
 - The pytest suite includes the `minimal` fixture vault.
 

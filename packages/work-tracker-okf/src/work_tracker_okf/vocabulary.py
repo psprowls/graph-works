@@ -7,7 +7,7 @@ and `DIAGNOSIS_TYPES` shrink; `PARENT_TYPES` absorbs the old
 `target` are deleted.
 
 **These sets exist twice** -- here as `frozenset`s and in
-`assets/_schema/_base.schema.json` as `enum` arrays. Generating one from the
+`assets/schema/_base.schema.json` as `enum` arrays. Generating one from the
 other means either a build step or import-time file I/O, both to avoid a
 problem `tests/test_vocabulary.py` solves by asserting the two agree. That is
 the move `okf_io`'s `test_catalog.py` already makes for the rule catalog.
@@ -63,7 +63,7 @@ SMALL_EFFORTS: frozenset[str] = frozenset({"xtra-small", "small"})
 #: and `target` are deleted.
 PARENT_TYPES: frozenset[str] = frozenset({"Epic", "Feature"})
 
-#: The tags this package contributes to a shared vault's `_tags.yaml`.
+#: The tags this package contributes to a shared vault's `tags.yaml`.
 #:
 #: W-K's two. `security` and `perf` stopped being *kinds* and became `Bug`
 #: *tags*, and until now nothing in the shipped code declared either string
@@ -71,7 +71,7 @@ PARENT_TYPES: frozenset[str] = frozenset({"Epic", "Feature"})
 #: at install time by `init.install_bundle`, which is what puts them in front
 #: of `vocabulary_rule`'s "Did you mean `security`?" suggestion.
 #:
-#: A package contributes *entries*; it never ships `_tags.yaml` itself. The
+#: A package contributes *entries*; it never ships `tags.yaml` itself. The
 #: file is the vault's, and `okf_ext.bundle.plan_install` refuses it as a
 #: whole-file member for exactly that reason.
 CONTRIBUTED_TAGS: tuple[TagDefinition, ...] = (

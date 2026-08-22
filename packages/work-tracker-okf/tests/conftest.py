@@ -32,14 +32,14 @@ def section_set() -> SectionSet:
 
     Not from an installed vault: `test_filing` wants the declaration without
     wanting a bundle, which is the split `resources.py` exists for."""
-    return load_sections(Path(str(assets_root() / "_sections")))
+    return load_sections(Path(str(assets_root() / "sections")))
 
 
 @pytest.fixture
 def conformant_root(tmp_path: Path) -> Path:
     """A writable copy of the conformant vault with its declarations materialized.
 
-    C2-I: the vault carries no `_schema/` or `_sections/` of its own. Installing
+    C2-I: the vault carries no `schema/` or `sections/` of its own. Installing
     them here removes any drift between the fixture and the package assets, and
     exercises the installer against a non-empty bundle as a side effect."""
     root = tmp_path / "conformant"

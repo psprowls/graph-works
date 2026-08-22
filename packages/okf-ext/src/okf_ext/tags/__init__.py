@@ -58,12 +58,12 @@ from okf_ext.tags.vocabulary import (
     vocabulary_rule,
 )
 
-#: `_tags.yaml` is a **documented convention, not magic** — nothing here
+#: `tags.yaml` is a **documented convention, not magic** — nothing here
 #: discovers it. A caller who keeps a vocabulary inside its own bundle splices
 #: this into `okf_io.load_bundle(root, ignore=...)`; no okf-ext function ever
 #: changes behaviour because a file appeared. Two patterns because `fnmatch`
 #: needs a literal `/` to match a nested path and the bare name to match root.
-DEFAULT_IGNORE = ("_tags.yaml", "*/_tags.yaml")
+DEFAULT_IGNORE = ("tags.yaml", "*/tags.yaml")
 
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords classes, then lowercase
 #: functions, each group alphabetical — `ruff`'s `RUF022` enforces exactly

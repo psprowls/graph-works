@@ -21,9 +21,9 @@ def _workspace(tmp_path, manifest_text="version: 1\n"):
 
 
 def _repositories(layout, body: str) -> None:
-    """Write `_repositories.yaml` at its layout address. `graph_dir` is required."""
-    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.repositories_path.write_text(f'graph_dir: "{layout.cache_dir}"\n{body}', encoding="utf-8")
+    """Overwrite `workspace.yaml` with `body`'s `repositories`/etc. blocks."""
+    layout.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text(f"version: 1\n{body}", encoding="utf-8")
 
 
 def test_resolve_repo_returns_the_one_declared_repository(tmp_path):
@@ -78,9 +78,12 @@ def test_resolve_repo_degrades_when_none_are_declared(tmp_path):
 
 
 def test_resolve_repo_degrades_when_the_file_is_missing(tmp_path):
-    # `load_config` propagates OSError for a missing file; a workspace that has
-    # not been initialized is not an error here, it is a degrade.
-    layout = _workspace(tmp_path)
+    # `load_config` propagates OSError for a missing `workspace.yaml`; a
+    # workspace that has not been initialized is not an error here, it is a
+    # degrade.
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    layout = layout_for(tmp_path)
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     resolved, note = repos.resolve_repo(layout)
     assert resolved is None
     assert note
@@ -88,9 +91,8 @@ def test_resolve_repo_degrades_when_the_file_is_missing(tmp_path):
 
 def test_resolve_repo_refuses_a_malformed_declarations_file(tmp_path):
     layout = _workspace(tmp_path)
-    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.repositories_path.write_text("graph_dir: [not, a, string]\n", encoding="utf-8")
-    with pytest.raises(WorkspaceError, match=r"_repositories\.yaml"):
+    layout.manifest_path.write_text("version: 1\nrepositories: [not, a, mapping]\n", encoding="utf-8")
+    with pytest.raises(WorkspaceError, match=r"workspace\.yaml"):
         repos.resolve_repo(layout)
 
 

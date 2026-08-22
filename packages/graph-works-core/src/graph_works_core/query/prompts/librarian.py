@@ -82,7 +82,7 @@ Use `NO_RELEVANT_CONTENT` when: the page contains no relevant passage; or the pa
 def build_librarian_system(*, schema_set: SchemaSet) -> str:
     """Assemble the librarian system prompt.
 
-    *schema_set* is the target bundle's loaded `_schema/` set, the same
+    *schema_set* is the target bundle's loaded `schema/` set, the same
     input `build_ingestor_system` requires for the same reason: a page
     category table naming a directory the bundle does not declare is worse
     than the caller having to say which bundle it means.

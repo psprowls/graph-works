@@ -20,6 +20,7 @@ from graph_works_core.ingest.suggest_pages import (
     run_suggest_phase,
 )
 from ingest_helpers import AT, FakeLLM, FakeResponse, declarations, json_fence
+from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_io import load_bundle
 from suggest_fixtures import make_bundle  # see Step 2
 
@@ -406,7 +407,7 @@ async def test_a_classify_refusal_drops_the_suggestion_and_records_the_reason(tm
     root = make_bundle(tmp_path)
     narrow_dir = tmp_path / "narrow"
     narrow_dir.mkdir()
-    for schema in (root / "_schema").glob("*.json"):
+    for schema in (root / SCHEMA_DIRNAME).glob("*.json"):
         if schema.name != "Reference.schema.json":
             (narrow_dir / schema.name).write_text(schema.read_text(encoding="utf-8"), encoding="utf-8")
 
@@ -714,7 +715,7 @@ async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypa
     root = make_bundle(tmp_path)
     narrow_dir = tmp_path / "narrow"
     narrow_dir.mkdir()
-    for schema in (root / "_schema").glob("*.json"):
+    for schema in (root / SCHEMA_DIRNAME).glob("*.json"):
         if schema.name != "Reference.schema.json":
             (narrow_dir / schema.name).write_text(schema.read_text(encoding="utf-8"), encoding="utf-8")
 

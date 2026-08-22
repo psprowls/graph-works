@@ -207,13 +207,13 @@ def test_directory_symlinks_are_not_followed(tmp_path):
 
 def test_ignore_excludes_concepts_but_leaves_them_resolvable(tmp_path):
     write(tmp_path, "a.md", CONCEPT)
-    write(tmp_path, "_schema/kinds.md", CONCEPT)
+    write(tmp_path, "schema/kinds.md", CONCEPT)
     write(tmp_path, "build/out.tmp", "x")
-    loaded = bundle.load(tmp_path, ignore=["_schema/*", "**/*.tmp"])
+    loaded = bundle.load(tmp_path, ignore=["schema/*", "**/*.tmp"])
     assert set(loaded.concepts) == {"a"}
-    assert loaded.ignored == frozenset({"_schema/kinds.md", "build/out.tmp"})
+    assert loaded.ignored == frozenset({"schema/kinds.md", "build/out.tmp"})
     assert loaded.assets == frozenset()
-    assert loaded.has_member("_schema/kinds.md")
+    assert loaded.has_member("schema/kinds.md")
 
 
 def test_mappings_are_read_only(acme):

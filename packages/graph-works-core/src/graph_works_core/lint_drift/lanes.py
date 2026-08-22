@@ -7,7 +7,7 @@ each carrying the root to walk, the `ignore=` recipe to walk it with, and the
 lanes and a new lane is a declaration, not an aggregator edit.
 
 **Absent declarations are a fact about the workspace, not a fault — for the
-wiki lane.** An empty `_schema/` means the workspace declared no schemas, so
+wiki lane.** An empty `schema/` means the workspace declared no schemas, so
 that capability contributes no rule and no error. A declaration directory
 that is *present but malformed* is a caller-configuration mistake and becomes
 one lane error, with every other lane still composed. **The work lane does
@@ -15,7 +15,7 @@ not share this softness.** It validates through
 `work_tracker_okf.compose.rule_set` — the same function
 `graph_works_core.work.commands.run_lint` uses, so the standalone and
 combined checks can never validate the work lane differently — and that
-function requires `_schema/` and `_sections/` to exist, matching
+function requires `schema/` and `sections/` to exist, matching
 `work-tracker-okf/cli.py`'s own `lint` command. A missing declarations
 directory there is reported the same way as a malformed one: one lane error,
 wiki lane unaffected.
@@ -41,13 +41,15 @@ from code_wiki_okf.config import Config, ConfigError
 from code_wiki_okf.entities import lanes as entity_lanes
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import snapshot_bundle
+from config_io import PROJECTION_FILENAME
+from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.health import health_rule
 from okf_ext.placement import placement_rule
 from okf_ext.render import render_rule
 from okf_ext.schemas import SchemaError, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionError, load_sections
-from okf_ext.tags import VocabularyError, load_vocabulary, vocabulary_rule
+from okf_ext.tags import VOCABULARY_FILENAME, VocabularyError, load_vocabulary, vocabulary_rule
 from okf_io import Finding, Rule, RuleContext
 from work_tracker_okf.compose import rule_set
 
@@ -56,6 +58,22 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 #: The two lane names a default workspace composes, in report order.
 WIKI_LANE = "wiki"
 WORK_LANE = "work"
+
+
+def _check_config_projection(layout: WorkspaceLayout) -> str | None:
+    """A missing `config.json` projection is a silent-dormancy risk, not a
+    bundle fault: every consumer of the projection (`pre-agent-model-routing`,
+    `pre-taskcreate-model-tier`, `pre-askuser-handoff-guard`, `session-start`,
+    and `plugins/graph-works/hooks/skill-doc-routing`) treats an absent file
+    as dormant and allows silently. Reported here so `gw lint` names it rather
+    than letting the absence stay invisible until someone happens to run
+    `gw config sync`.
+    """
+    projection = layout.cache_dir / PROJECTION_FILENAME
+    if projection.is_file():
+        return None
+    return f"config projection missing: {projection} — run `gw config sync`"
+
 
 #: What a malformed declaration set raises, named one by one rather than caught
 #: through their shared `ValueError` base.
@@ -105,12 +123,12 @@ def _wiki_rules(config: Config, reader: GraphReader | None, *, at: datetime) -> 
     one reader-gated.
 
     `health` and `render` read only the bundle, so they are always on.
-    `placement` is gated on `_schema/` because `x-okf-directory` is a schema
+    `placement` is gated on `schema/` because `x-okf-directory` is a schema
     annotation — with no schemas there is nothing to place against.
     """
     rules: list[Rule] = [health_rule(), render_rule()]
 
-    schema_dir = config.declarations_dir / "_schema"
+    schema_dir = config.declarations_dir / SCHEMA_DIRNAME
     if schema_dir.is_dir():
         schema_set = load_schemas(schema_dir)
         rules.append(schema_rule(schema_set))
@@ -120,11 +138,11 @@ def _wiki_rules(config: Config, reader: GraphReader | None, *, at: datetime) -> 
             )
         )
 
-    sections_dir = config.declarations_dir / "_sections"
+    sections_dir = config.declarations_dir / SECTIONS_DIRNAME
     if sections_dir.is_dir():
         rules.append(section_rule(load_sections(sections_dir)))
 
-    tags_path = config.declarations_dir / "_tags.yaml"
+    tags_path = config.declarations_dir / VOCABULARY_FILENAME
     if tags_path.is_file():
         rules.append(vocabulary_rule(load_vocabulary(tags_path)))
 
@@ -201,8 +219,8 @@ def _compose_work(layout: WorkspaceLayout, config: Config, *, repo_root: Path | 
     `lane_rules(repo_root=...)` — the same function
     `graph_works_core.work.commands.run_lint` uses, so the standalone and
     combined checks can never validate the work lane differently. That widens
-    what this lane needs to compose: `rule_set` requires `_schema/` and
-    `_sections/` to exist under `config.declarations_dir` and raises
+    what this lane needs to compose: `rule_set` requires `schema/` and
+    `sections/` to exist under `config.declarations_dir` and raises
     `OSError` when either is missing, where bare `lane_rules` read neither
     directory at all. `compose_lanes` still catches that as one lane error,
     same as a malformed declaration.
@@ -245,6 +263,9 @@ def compose_lanes(
             lanes.append(build())
         except _DECLARATION_ERRORS as exc:
             errors.append(f"{name} lane: {exc}")
+    projection_error = _check_config_projection(layout)
+    if projection_error is not None:
+        errors.append(projection_error)
     return LaneSet(lanes=tuple(lanes), errors=tuple(errors))
 
 

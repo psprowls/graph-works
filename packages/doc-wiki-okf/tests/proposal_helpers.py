@@ -19,11 +19,11 @@ BY = "agent:test"
 
 
 def schema_set() -> SchemaSet:
-    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "schema"))
 
 
 def section_set() -> SectionSet:
-    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_sections"))
+    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "sections"))
 
 
 def lanes() -> LaneSet:
@@ -44,16 +44,16 @@ def seeded_root(root: Path) -> Path:
 def build_bundle(root: Path, pages: Mapping[str, str] | None = None) -> Bundle:
     """Load *root* as a bundle, writing *pages* (concept id -> text) first.
 
-    `_schema/` and `_sections/` are ignored so the declarations are not read
+    `schema/` and `sections/` are ignored so the declarations are not read
     back as concepts -- `okf_ext.schemas.DEFAULT_IGNORE`'s two patterns, plus
-    the same pair for `_sections/`.
+    the same pair for `sections/`.
     """
     seeded_root(root)
     for concept_id, text in (pages or {}).items():
         target = root / f"{concept_id}.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8")
-    return load_bundle(root, ignore=("_schema/*", "*/_schema/*", "_sections/*", "*/_sections/*"))
+    return load_bundle(root, ignore=("schema/*", "*/schema/*", "sections/*", "*/sections/*"))
 
 
 def source(identifier: str, resource: str, **extra: object) -> dict[str, object]:

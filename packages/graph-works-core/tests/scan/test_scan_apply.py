@@ -27,7 +27,12 @@ FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 async def synced(tmp_path):
     """A workspace whose structural pass has run, with a worklist in hand."""
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     seed_graph(config.graph_dir, repo)
     worklist, _ = await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
     return layout, config, repo, worklist

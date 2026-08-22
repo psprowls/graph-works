@@ -27,6 +27,7 @@ from graph_works_core.query.prompts.librarian import build_librarian_system
 from graph_works_core.query.prompts.query_orchestrator import QUERY_ORCHESTRATOR_SYSTEM
 from graph_works_core.query.prompts.synthesizer import SYNTHESIZER_SYSTEM
 from graph_works_core.workspace.layout import layout_for
+from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import SchemaSet, load_schemas
 
 _TODAY = date(2026, 8, 16)
@@ -41,8 +42,13 @@ def _full_schema_set(tmp_path) -> SchemaSet:
     `code_wiki_okf`'s and `work_tracker_okf`'s schemas.
     """
     init = apply_init(plan_init(tmp_path, today=_TODAY, topic="Prompt tests", repo_root=tmp_path))
-    config = load_config(init.layout.bundle_dir, config_path=init.layout.repositories_path)
-    return load_schemas(config.declarations_dir / "_schema")
+    config = load_config(
+        init.layout.bundle_dir,
+        config_path=init.layout.manifest_path,
+        graph_dir=init.layout.cache_dir,
+        declarations_dir=init.layout.config_dir,
+    )
+    return load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
 
 
 #: Fragment modules that export a renderer and no text constant, so the walk

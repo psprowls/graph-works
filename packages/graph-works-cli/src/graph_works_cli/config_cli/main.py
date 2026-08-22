@@ -9,6 +9,7 @@ from typing import Never
 
 import typer
 from config_io import (
+    PROJECTION_FILENAME,
     PlainYamlStore,
     RegistryError,
     StoreValidationError,
@@ -158,7 +159,7 @@ def set_cmd(
     workspace: str = _WORKSPACE_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
-    """Set a catalog key and refresh `_gw/_config/config.json`."""
+    """Set a catalog key and refresh `.gw/cache/config.json`."""
     try:
         layout, store = _store(workspace)
         result = set_key(
@@ -166,7 +167,7 @@ def set_cmd(
             key,
             value,
             store=store,
-            projection=layout.config_dir / "config.json",
+            projection=layout.cache_dir / PROJECTION_FILENAME,
         )
     except RegistryError as exc:
         _exit_config_error(exc, code=exit_codes.GENERIC)
@@ -188,7 +189,7 @@ def unset_cmd(
             manifest.CATALOG,
             key,
             store=store,
-            projection=layout.config_dir / "config.json",
+            projection=layout.cache_dir / PROJECTION_FILENAME,
         )
         result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
     except RegistryError as exc:
@@ -203,10 +204,10 @@ def sync(
     workspace: str = _WORKSPACE_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
-    """Regenerate `_gw/_config/config.json` after an out-of-band manifest edit."""
+    """Regenerate `.gw/cache/config.json` after an out-of-band manifest edit."""
     try:
         layout, store = _store(workspace)
-        target = write_projection(store, layout.config_dir / "config.json")
+        target = write_projection(store, layout.cache_dir / PROJECTION_FILENAME)
     except RegistryError as exc:
         _exit_config_error(exc, code=exit_codes.GENERIC)
     except (StoreValidationError, WorkspaceError) as exc:

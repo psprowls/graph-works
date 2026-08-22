@@ -11,7 +11,7 @@ from okf_io import load_bundle, parse
 from okf_io import validate as okf_validate
 from proposal_helpers import AT, BY, TODAY, build_bundle, lanes, schema_set, section_set, source
 
-IGNORE = ("_schema/*", "*/_schema/*", "_sections/*", "*/_sections/*")
+IGNORE = ("schema/*", "*/schema/*", "sections/*", "*/sections/*")
 
 
 def _approved(root, *, lane="adr", title="Bulk Write Staging Protocol"):

@@ -4,7 +4,7 @@ Single source of truth for which paths the file scanner and the manifest
 scanner skip. `DEFAULT_SKIP_DIRS` is an unconditional floor — VCS metadata,
 build output, dependency caches, and virtualenvs are skipped by directory-
 component name alone, regardless of any config. On top of that floor, a
-workspace's `_repositories.yaml` `ignore:` patterns (global and per-repo,
+workspace's `workspace.yaml` `ignore:` patterns (global and per-repo,
 already merged by `code_wiki_okf.config.load_config`) compile to an
 `IgnoreSpec` and are matched against each file's path relative to its repo
 root.

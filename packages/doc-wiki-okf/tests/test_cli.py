@@ -679,11 +679,11 @@ def test_ingest_briefs_a_single_document(tmp_path):
 
 
 def test_ingest_falls_back_to_the_seed_when_the_bundle_declares_no_source(tmp_path):
-    """A readable `_schema/` that declares no `Source` is not a misconfigured
+    """A readable `schema/` that declares no `Source` is not a misconfigured
     vocabulary -- it is a bundle that has nothing to say about source kinds, so
     the seed answers. Distinct from the malformed-enum case, which exits."""
     workspace = _ingest_workspace(tmp_path)
-    declarations = workspace / "wiki" / "_schema"
+    declarations = workspace / "wiki" / "schema"
     declarations.mkdir(parents=True)
     (declarations / "Explanation.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
@@ -913,11 +913,11 @@ def test_source_add_rejects_an_unknown_source_kind(tmp_path) -> None:
 
 
 def test_source_add_checks_against_the_bundles_own_enum(tmp_path) -> None:
-    """K-D: a vault that edits `_schema/Source.schema.json` changes what the
+    """K-D: a vault that edits `schema/Source.schema.json` changes what the
     CLI accepts, with no code change here."""
     root = tmp_path / "b"
     _init(root)
-    schema = root / "_schema" / "Source.schema.json"
+    schema = root / "schema" / "Source.schema.json"
     document = json.loads(schema.read_text(encoding="utf-8"))
     document["properties"]["source_kind"]["enum"] = ["memo"]
     schema.write_text(json.dumps(document), encoding="utf-8")
@@ -936,7 +936,7 @@ def test_source_add_refuses_a_source_schema_with_no_source_kind_enum(tmp_path) -
     against a vocabulary this vault never declared."""
     root = tmp_path / "b"
     _init(root)
-    schema = root / "_schema" / "Source.schema.json"
+    schema = root / "schema" / "Source.schema.json"
     document = json.loads(schema.read_text(encoding="utf-8"))
     document["properties"]["source_kind"] = {"type": "string"}
     schema.write_text(json.dumps(document), encoding="utf-8")
@@ -1031,10 +1031,10 @@ def test_the_ignore_list_covers_reference_copies() -> None:
     from doc_wiki_okf.cli import IGNORE
 
     assert IGNORE == (
-        "_schema/*",
-        "*/_schema/*",
-        "_sections/*",
-        "*/_sections/*",
+        "schema/*",
+        "*/schema/*",
+        "sections/*",
+        "*/sections/*",
         "sources/references/*",
         "*/sources/references/*",
         "*/.DS_Store",

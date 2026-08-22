@@ -2,7 +2,7 @@
 graph over it, and small builders for pages and tasks.
 
 The workspace is built the way a caller builds one -- `plan_init` then
-`apply_init` -- so the `_sections/` declarations under test are the shipped
+`apply_init` -- so the `sections/` declarations under test are the shipped
 assets, not a hand-written copy that could drift from them.
 """
 
@@ -14,9 +14,9 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 from code_graph_io.testing import raw_conn
-from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init
 from graph_works_core.workspace.layout import WorkspaceLayout
+from ruamel.yaml import YAML
 
 TODAY = date(2026, 8, 13)
 AT = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
@@ -181,7 +181,8 @@ def seed_graph(graph_dir: Path, repo: Path) -> None:
 
 
 def make_workspace(tmp_path: Path) -> tuple[WorkspaceLayout, Path]:
-    """A real workspace beside a real repo, with `_repositories.yaml` pointing at it.
+    """A real workspace beside a real repo, with `workspace.yaml`'s `repositories`
+    block pointing at it.
 
     Returns `(layout, repo)`. The graph is seeded but the caller decides whether
     to let `commands.graph.build` re-run over it.
@@ -189,20 +190,21 @@ def make_workspace(tmp_path: Path) -> tuple[WorkspaceLayout, Path]:
     repo = make_repo(tmp_path)
     init = apply_init(plan_init(tmp_path / ".works", today=TODAY, topic="Scan"))
     layout = init.layout
-    # `load_config` first, before the rewrite below, to read the `graph_dir` /
-    # `declarations_dir` the init already resolved -- rewriting the whole
-    # document from those values rather than string-surgering the shipped
-    # template avoids depending on that template's exact YAML shape (it emits
-    # `repositories: {}` for a repo-less layout, which a substring replace on
-    # `"repositories:"` mangles into invalid YAML).
-    pristine = load_config(layout.bundle_dir, config_path=layout.repositories_path)
-    layout.repositories_path.write_text(
-        f"graph_dir: {json.dumps(str(pristine.graph_dir))}\n"
-        f"declarations_dir: {json.dumps(str(pristine.declarations_dir))}\n"
-        f"repositories:\n  {REPO_NAME}:\n    path: {json.dumps(str(repo))}\n"
-        "state_gate:\n  enabled: false\n",
-        encoding="utf-8",
-    )
+    # `repositories`/`ignore`/`state_gate` are merged into `workspace.yaml`
+    # itself (ADR-0033), alongside `version`/`layout`/`roles` that `init`
+    # already rendered -- so this loads the pristine document with the
+    # YAML round-trip loader, edits just the three blocks `load_config`
+    # reads, and rewrites the whole file. That keeps every other key
+    # (`version`, `layout.*`, `roles`) intact instead of depending on this
+    # test's own idea of the template's exact shape.
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with layout.manifest_path.open(encoding="utf-8") as handle:
+        data = yaml.load(handle)
+    data["repositories"] = {REPO_NAME: {"path": str(repo)}}
+    data["state_gate"] = {"enabled": False}
+    with layout.manifest_path.open("w", encoding="utf-8") as handle:
+        yaml.dump(data, handle)
     return layout, repo
 
 
@@ -244,7 +246,7 @@ def _page(
 
 
 #: Each declaration's prose placeholders, verbatim from
-#: `code_wiki_okf/assets/_sections/*.yaml`. A body equal to one of these is what
+#: `code_wiki_okf/assets/sections/*.yaml`. A body equal to one of these is what
 #: `is_unfilled` calls a first fill.
 PLACEHOLDERS: dict[str, dict[str, str]] = {
     "Package": {

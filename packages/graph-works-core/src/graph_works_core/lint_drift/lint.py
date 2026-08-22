@@ -261,31 +261,6 @@ def _lane_reports(
     return tuple(reports), bundles, tuple(errors)
 
 
-def _layout_drift_errors(layout: WorkspaceLayout, config: Config) -> tuple[str, ...]:
-    """`_repositories.yaml` disagreeing with the workspace layout it was
-    seeded from.
-
-    `init.py`'s act 6 writes `graph_dir` / `declarations_dir` *from*
-    `layout.cache_dir` / `layout.config_dir`, so the two config surfaces agree
-    at birth — but nothing catches a human editing `_repositories.yaml`
-    afterwards and moving the cache or declarations out from under the
-    layout. That is the risk the design spec recorded and deferred to lint
-    (`init.py`'s `_repositories_text` docstring); this is that check.
-    """
-    errors: list[str] = []
-    if config.graph_dir != layout.cache_dir:
-        errors.append(
-            f"_repositories.yaml: graph_dir ({config.graph_dir}) does not match the workspace "
-            f"layout's cache_dir ({layout.cache_dir}) — the two config surfaces have drifted apart"
-        )
-    if config.declarations_dir != layout.config_dir:
-        errors.append(
-            f"_repositories.yaml: declarations_dir ({config.declarations_dir}) does not match the "
-            f"workspace layout's config_dir ({layout.config_dir}) — the two config surfaces have drifted apart"
-        )
-    return tuple(errors)
-
-
 def _bucket(filed: date | None, today: date) -> str:
     """Which of `AGE_BUCKETS` a proposal last filed on *filed* lands in."""
     if filed is None:
@@ -367,7 +342,7 @@ def _run_mechanical(
             mechanical=reports,
             semantic=(),
             open_proposals=_open_proposals(bundles, today=today),
-            errors=lane_set.errors + walk_errors + _layout_drift_errors(layout, config),
+            errors=lane_set.errors + walk_errors,
         ),
         bundles,
     )

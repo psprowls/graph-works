@@ -2,7 +2,7 @@
 
     from okf_ext import shape, generators
 
-    section_set = shape.load_sections(bundle.root / "_sections")
+    section_set = shape.load_sections(bundle.root / "sections")
     render = generators.Render(
         frontmatter={"title": "okf-io", "sources": [...]},
         sections={"Sources": "- [[a]]\\n- [[b]]"},

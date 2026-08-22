@@ -30,6 +30,7 @@ from code_wiki_okf.config import load_config
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 from models_io.pricing import cost_for_usage
+from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.schemas import SchemaSet, load_schemas
 from okf_io import Bundle, Document
 from subagents_io import FanOutResult, PerItemError, SubagentPool, TaskResult
@@ -910,8 +911,13 @@ async def run_worker_batch(
                     _worker_error_row(task, "layout is required for librarian workers") for task in role_tasks
                 )
                 continue
-            config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
-            schema_set = load_schemas(config.declarations_dir / "_schema")
+            config = load_config(
+                layout.bundle_dir,
+                config_path=layout.manifest_path,
+                graph_dir=layout.cache_dir,
+                declarations_dir=layout.config_dir,
+            )
+            schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
             task_runner = _build_librarian_task_runner(
                 binding.make_llm(), query=query, bundle=bundle, schema_set=schema_set
             )

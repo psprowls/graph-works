@@ -63,17 +63,17 @@ def test_every_rubric_type_has_both_declaration_files() -> None:
     """Spec §7.7: adding a fifth type without its two files fails here rather
     than at a consumer."""
     for name in TYPE_NAMES:
-        assert f"_schema/{name}.schema.json" in SEED_RELATIVE_PATHS
-        assert f"_sections/{name}.yaml" in SEED_RELATIVE_PATHS
+        assert f"schema/{name}.schema.json" in SEED_RELATIVE_PATHS
+        assert f"sections/{name}.yaml" in SEED_RELATIVE_PATHS
 
 
 def test_no_declaration_names_a_type_the_rubric_does_not() -> None:
     """The other direction: a schema shipped for a type nothing can classify,
     minus the types declared outside the rubric on purpose."""
     declared = {
-        path.removeprefix("_schema/").removesuffix(".schema.json")
+        path.removeprefix("schema/").removesuffix(".schema.json")
         for path in SEED_RELATIVE_PATHS
-        if path.startswith("_schema/") and not path.startswith("_schema/_")
+        if path.startswith("schema/") and not path.startswith("schema/_")
     }
     assert declared - NON_RUBRIC_TYPES == set(TYPE_NAMES)
     assert declared & NON_RUBRIC_TYPES == NON_RUBRIC_TYPES
@@ -89,7 +89,7 @@ def test_a_non_rubric_type_is_still_refused_by_classify_and_retype(tmp_path: Pat
     from doc_wiki_okf.diataxis.retype import plan_retype
     from okf_ext.schemas import load_schemas
 
-    schemas = load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    schemas = load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "schema"))
     outcome = classify(schemas, type_name="Source", title="A source", rationale="because", decided_by="agent:test")
     assert isinstance(outcome, Unclassified)
     assert outcome.reason == "unknown-type"

@@ -101,7 +101,7 @@ def test_a_merge_renders_a_body_naming_both_sources(tmp_path) -> None:
 def test_the_lane_map_agrees_with_the_declarations() -> None:
     """Spec §7: the declarations stay the single source for the four Diátaxis
     directories -- restated here as an acceptance property, not only a unit."""
-    schema_set = load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    schema_set = load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "schema"))
     built = lanes()
     for name, type_name in DIATAXIS_LANES.items():
         assert built[name].directory == directory_for(schema_set, type_name)

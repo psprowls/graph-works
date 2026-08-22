@@ -33,7 +33,7 @@ def test_the_whole_surface_ends_at_zero_errors(tmp_path: Path) -> None:
 
     # init
     _run("init", root, "--today", TODAY)
-    assert (tmp_path / "_schema" / "_base.schema.json").is_file()
+    assert (tmp_path / "schema" / "_base.schema.json").is_file()
 
     # file
     _run(

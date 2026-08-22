@@ -166,7 +166,7 @@ def test_synced_bundle_is_silent(tmp_path: Path, mirror_repo: Path, graph_dir: P
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "_sections")
+    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
@@ -198,7 +198,7 @@ def test_orphan_after_source_removed(tmp_path: Path, mirror_repo: Path, graph_di
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "_sections")
+    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
@@ -236,7 +236,7 @@ def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "_sections")
+    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
@@ -284,7 +284,7 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "_sections")
+    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)

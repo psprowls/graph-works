@@ -9,17 +9,22 @@ makes a violation a `just check` failure.
 
 ```
 .works/
-  workspace.yaml    the manifest — version, topic, four layout overrides
-  _gw/              every graph-works-owned machinery member, nested together
-    _config/        committed declarations: _schema/, _sections/, _tags.yaml
-    _cache/         gitignored machine state: the graph database
+  workspace.yaml    the manifest — version, topic, four layout overrides,
+                    plus the bundle declarations (`repositories`, `ignore`,
+                    `state_gate`) merged in per ADR-0033
+  .gw/              every graph-works-owned machinery member, flattened together
+    schema/         committed declarations
+    sections/       committed declarations
+    tags.yaml       committed declaration
+    cache/          gitignored machine state: the graph database, config.json
     worktrees/      gitignored feature worktrees
-    .gitignore      /_cache/ and /worktrees/ — the workspace's own, never the repo's
-  okf/              the OKF v0.2 bundle: index.md, log.md, _repositories.yaml, pages
+    .gitignore      /cache/ and /worktrees/ — the workspace's own, never the repo's
+  okf/              the OKF v0.2 bundle: index.md, log.md, pages
 ```
 
-`_repositories.yaml` stays at the **bundle root**, not under `_gw/_config/`:
-`code_wiki_okf.config.load_config` reads it from there.
+`workspace.yaml` stays at the **workspace root**, not under `.gw/` or the
+bundle: `code_wiki_okf.config.load_config` reads it from there (or from wherever
+`config_path=` points it).
 
 ## Using it
 
@@ -39,16 +44,14 @@ layout = resolve()  # explicit argument -> GRAPH_WORKS_DIR -> .git walk-up
 is no `dry_run` flag, following the six shipped writers in `okf-ext` and
 `work-tracker-okf` that return plans.
 
-## Two config surfaces
+## One config surface
 
-| Surface | Owns |
-|---|---|
-| `workspace.yaml` | `version`, `initialized_at`, `topic`, the four layout overrides |
-| `okf/_repositories.yaml` | `graph_dir`, `declarations_dir`, `repositories`, `ignore`, `state_gate` |
-
-Init writes the second **from** the layout, so the two cannot disagree at
-birth. They can drift afterwards — a human editing `graph_dir` moves the cache
-out from under the layout — and catching that belongs to lint, not to a writer.
+`workspace.yaml` is the workspace's one configuration file:
+`version`, `initialized_at`, `topic`, the four layout overrides, and the
+bundle declarations `code_wiki_okf.config.load_config` reads — `repositories`,
+`ignore`, `state_gate`. `graph_dir` and `declarations_dir` are not stored in
+it; they are resolved from the layout and supplied by the caller at read time
+(e.g. `graph_dir=layout.cache_dir`).
 
 ## The agent substrate
 
@@ -323,11 +326,11 @@ if not result.ok:
     print(result.error)
 ```
 
-`graph_target` reads `<bundle>/_repositories.yaml` for the graph directory and
-the members. With no such file it falls back to
+`graph_target` reads `<root>/workspace.yaml`'s `repositories` block for the
+graph directory and the members. With no such file it falls back to
 `code_graph_io.paths.graph_dir(layout.root)` and the workspace's own repo — the
 bootstrap path that exists because the graph DB is created before any manifest
-may exist. A malformed `_repositories.yaml` raises `ConfigError`; config
+may exist. A malformed `workspace.yaml` raises `ConfigError`; config
 raises, content never does.
 
 **No command raises for a graph-state reason.** Each returns a `GraphResult`
@@ -453,9 +456,9 @@ disk; the manifest write `plan_init` proposes only occurs when it is absent, so
 re-applying over an existing workspace won't arm an old one. The manual fix is
 `gw config set workflow.pipeline.branch.prompt_tail "…"`.
 
-**The code repo comes from `_repositories.yaml`, not from a `.git` walk-up.**
-Both shells default `repo` to `resolve_repo(layout, repo_name=…)`. The
-declarations file is authoritative always, not only when the workspace and the
+**The code repo comes from `workspace.yaml`'s `repositories` block, not from a
+`.git` walk-up.** Both shells default `repo` to `resolve_repo(layout,
+repo_name=…)`. The declared block is authoritative always, not only when the workspace and the
 code live in separate repositories — in that split topology `layout.repo_root`
 resolves to the *workspace's* repo, and `worktree_state` and `results_facts`
 then both degrade to `None` without a word. Ambiguity refuses rather than
@@ -515,7 +518,7 @@ new frontmatter key and no new lane. The untrusted region becomes
 drift-checkable using machinery that already ships.
 
 Two alternatives were rejected: making the provenance block a JSONSchema
-requirement in `_schema/`, which enforces mechanically but pushes a graph-works
+requirement in `schema/`, which enforces mechanically but pushes a graph-works
 opinion about extraction into okf-ext's deliberately generic schema capability;
 and a quarantine lane with a TTL, which is cheap to specify but accepts a
 permanently untrusted region — the outcome this model exists to avoid.

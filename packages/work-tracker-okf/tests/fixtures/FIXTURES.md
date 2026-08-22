@@ -9,7 +9,7 @@ The smallest vault carrying every projection shape the item view has to
 survive: eight items across both lanes, one working directory with a
 non-markdown member (`03-plan-transcript.txt`), one deliberately broken page
 (`broken-eta.md`), and a `notes/` directory outside the lane. It carries no
-`_schema/` or `_sections/`; tests that need them install them into a copy.
+`schema/` or `sections/`; tests that need them install them into a copy.
 
 ## `conformant/`
 

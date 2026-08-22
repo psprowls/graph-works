@@ -271,8 +271,8 @@ def test_the_archived_vault_still_validates_with_zero_errors(conformant_root: Pa
         bundle,
         today=CONFORMANT_TODAY,
         extra_rules=(
-            schema_rule(load_schemas(conformant_root / "_schema"), severity="error"),
-            section_rule(load_sections(conformant_root / "_sections"), severity="error"),
+            schema_rule(load_schemas(conformant_root / "schema"), severity="error"),
+            section_rule(load_sections(conformant_root / "sections"), severity="error"),
         ),
     )
     assert [f"{f.code} {f.path}: {f.message}" for f in report.errors] == []

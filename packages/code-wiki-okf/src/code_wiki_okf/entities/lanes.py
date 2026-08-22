@@ -21,6 +21,7 @@ from datetime import date, datetime
 from types import MappingProxyType
 
 from code_graph_io import GraphReader
+from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.generators import Render, plan_regenerate
 from okf_ext.generators import apply as apply_regenerations
 from okf_ext.schemas import SchemaSet, declared_directories
@@ -218,7 +219,7 @@ def sync(
     # `sync_entities` already committed its writes; reload once so deletion
     # sees the pages it just created or regenerated.
     current = load_bundle(bundle.root)
-    section_set = load_sections(config.declarations_dir / "_sections")
+    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
     should_exist = set(entity_result.current_resources)
 
     deleted: list[str] = []

@@ -300,9 +300,9 @@ def test_a_results_stub_lands_when_the_stage_actually_completed(tmp_path):
 
 
 def _repositories(layout, body: str) -> None:
-    """Write `_repositories.yaml` at its layout address. `graph_dir` is required."""
-    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.repositories_path.write_text(f'graph_dir: "{layout.cache_dir}"\n{body}', encoding="utf-8")
+    """Overwrite `workspace.yaml` with `body`'s `repositories`/etc. blocks."""
+    layout.manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    layout.manifest_path.write_text(f"version: 1\n{body}", encoding="utf-8")
 
 
 def test_orchestrate_keeps_no_compatibility_re_export_for_resolve_repo():
@@ -321,8 +321,7 @@ def test_an_explicit_repo_beats_a_declared_one_and_skips_the_read(tmp_path):
     # malformed file proves the read is skipped, not merely overridden.
     layout = _workspace(tmp_path)
     _write_item(layout, "a")
-    layout.repositories_path.parent.mkdir(parents=True, exist_ok=True)
-    layout.repositories_path.write_text("graph_dir: [bad]\n", encoding="utf-8")
+    layout.manifest_path.write_text("version: 1\nrepositories: [bad]\n", encoding="utf-8")
     result = orchestrate.run_orchestrate(layout, "a", repo=tmp_path)
     assert [d.slug for d in result.dispatches] == ["a"]
 
@@ -332,7 +331,7 @@ def test_a_missing_declarations_file_warns_rather_than_failing_the_plan(tmp_path
     _write_item(layout, "a")
     result = orchestrate.run_orchestrate(layout, "a")
     assert [d.slug for d in result.dispatches] == ["a"]
-    assert any("_repositories.yaml" in warning for warning in result.warnings)
+    assert any("workspace.yaml" in warning for warning in result.warnings)
 
 
 def test_the_declared_repo_supplies_the_default_base(tmp_path):
@@ -377,7 +376,7 @@ def test_a_stage_advance_carries_the_repo_note(tmp_path):
     _write_item(layout, "a")
     result = orchestrate.run_stage_advance(layout, "a", today=date(2026, 8, 14))
     assert result.repo_note is not None
-    assert "_repositories.yaml" in result.repo_note
+    assert "workspace.yaml" in result.repo_note
 
 
 def test_a_stage_advance_with_an_explicit_repo_carries_no_note(tmp_path):

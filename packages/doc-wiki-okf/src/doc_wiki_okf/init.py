@@ -9,7 +9,7 @@ a human opening a shared bundle wants it to say.
 ships no file another package's human is expected to edit, so all twelve
 members are owned templates -- created when absent, skipped when
 byte-identical, refused per file when they differ. `index.md`, `log.md` and
-`_tags.yaml` belong to `okf_ext.bundle`'s scaffold, not here.
+`tags.yaml` belong to `okf_ext.bundle`'s scaffold, not here.
 """
 
 from __future__ import annotations
@@ -104,7 +104,6 @@ def install_bundle(
     *,
     today: date,
     declarations_dir: str | Path | None = None,
-    seed_repositories: bool = True,
     dry_run: bool = True,
 ) -> BundleInstall:
     """Scaffold *root*, install this package's files into it, log the arrival.
@@ -113,10 +112,7 @@ def install_bundle(
     created simply works, and a second run writes nothing and refuses nothing.
 
     `today` is injected -- nothing below `cli.py` reads the clock. `dry_run`
-    defaults to `True`, matching okf-io's writer convention. `seed_repositories`
-    is accepted for signature parity with every installer `graph_works_core`
-    drives uniformly; this package does not own `_repositories.yaml` and
-    ignores it.
+    defaults to `True`, matching okf-io's writer convention.
 
     Raises `InitError` only for a *root* that exists and is not a directory.
     """

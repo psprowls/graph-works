@@ -251,7 +251,6 @@ def test_the_entity_lane_is_reached_by_the_bundle_walk(tmp_path):
         cache_dir=tmp_path / ".works" / "_cache",
         bundle_dir=bundle_root,
         worktrees_dir=tmp_path / ".works" / "worktrees",
-        repositories_path=tmp_path / ".works" / "_repositories.yaml",
     )
 
     update = run_tokens_update(layout, dry_run=False)

@@ -25,9 +25,9 @@ def test_default_ignore_makes_the_schema_dir_not_a_concept():
     ignored = schemad_bundle(ignore=DEFAULT_IGNORE)
     plain = schemad_bundle()
     names = {
-        "_schema/_base.schema.yaml",
-        "_schema/Metric.schema.yaml",
-        "_schema/Reference.schema.json",
+        "schema/_base.schema.yaml",
+        "schema/Metric.schema.yaml",
+        "schema/Reference.schema.json",
     }
     assert names <= set(ignored.ignored)
     assert not (names & set(ignored.assets))
@@ -36,7 +36,7 @@ def test_default_ignore_makes_the_schema_dir_not_a_concept():
 
 def test_an_ignored_member_is_still_a_link_target():
     ignored = schemad_bundle(ignore=DEFAULT_IGNORE)
-    assert ignored.has_member("_schema/Metric.schema.yaml")
+    assert ignored.has_member("schema/Metric.schema.yaml")
 
 
 def test_the_walk_reports_exactly_the_expected_pairs():
@@ -75,7 +75,7 @@ def test_severity_error_reaches_the_walk():
 
 
 def test_the_vendored_bundles_stay_clean():
-    """`acme_retail` and `ga4` carry no `_schema/`, so nothing here may change
+    """`acme_retail` and `ga4` carry no `schema/`, so nothing here may change
     their zero-error result. Their own suite proves they are clean; this proves
     the schema rule adds nothing when pointed at them."""
     vendored = SCHEMAD.parents[3] / "okf-io" / "tests" / "fixtures" / "bundles"

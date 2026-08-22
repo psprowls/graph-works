@@ -94,7 +94,12 @@ def scan(
                 code=exit_codes.STALE,
             )
         try:
-            config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+            config = load_config(
+                layout.bundle_dir,
+                config_path=layout.manifest_path,
+                graph_dir=layout.cache_dir,
+                declarations_dir=layout.config_dir,
+            )
             applied = apply_scan_worklist(
                 worklist_path=worklist_path,
                 worklist=worklist,
@@ -112,7 +117,12 @@ def scan(
         return
 
     try:
-        config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+        config = load_config(
+            layout.bundle_dir,
+            config_path=layout.manifest_path,
+            graph_dir=layout.cache_dir,
+            declarations_dir=layout.config_dir,
+        )
     except (ConfigError, OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 

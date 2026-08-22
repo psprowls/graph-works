@@ -1,7 +1,8 @@
 """Workspace resolution: explicit argument -> `GRAPH_WORKS_DIR` -> `.git` walk-up.
 
 Discovery resolves **the workspace**, and nothing else. It does not discover
-repositories: those are declared, with paths, in `_repositories.yaml`.
+repositories: those are declared, with paths, in `workspace.yaml`'s
+`repositories` block.
 
 Three more things are dropped deliberately rather than overlooked:
 
@@ -12,7 +13,7 @@ Three more things are dropped deliberately rather than overlooked:
   file that only exists in the old repository, which is read-only and
   untouched.
 - **The `repo-directory:` pin** — repos are declared, with paths, in
-  `_repositories.yaml`.
+  `workspace.yaml`'s `repositories` block.
 """
 
 from __future__ import annotations
@@ -80,8 +81,8 @@ def resolve(
     walk-up `find_repo_root` cannot find. Nothing persists a `repo_root` given
     at init, so without this parameter every later `resolve()` silently
     re-derives one, and for that workspace shape re-deriving means `None` —
-    not the repo `_repositories.yaml` actually names. A caller that already
-    knows the intended repo (because it read it from `_repositories.yaml`, or
+    not the repo `workspace.yaml` actually names. A caller that already
+    knows the intended repo (because it read it from `workspace.yaml`, or
     because it is the same caller that pinned it at init) passes it here
     instead of losing it to the walk-up again.
     """
@@ -94,7 +95,6 @@ def resolve(
         config_dir=manifest.config_dir,
         cache_dir=manifest.cache_dir,
         worktrees_dir=manifest.worktrees_dir,
-        repositories_path=manifest.repositories_path,
         repo_root=Path(repo_root).expanduser().resolve() if repo_root is not None else find_repo_root(root),
     )
 

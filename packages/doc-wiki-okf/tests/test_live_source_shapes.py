@@ -59,7 +59,7 @@ The one-paragraph serialize-then-write model.
 
 
 def _schema_set():
-    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "schema"))
 
 
 def _codes(tmp_path: Path, frontmatter: str) -> list[str]:

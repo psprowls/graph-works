@@ -37,7 +37,7 @@ def _write_package_page(
 def test_untouched_prose_page_is_deleted(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_package_page(tmp_path, "gone", "pkg:acme/repo/gone")
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="packages/", should_exist={"pkg:acme/repo/still-here"})
@@ -55,7 +55,7 @@ def test_hand_edited_required_prose_section_is_declined(tmp_path: Path) -> None:
         "pkg:acme/repo/gone",
         purpose_text="A human wrote this by hand and it must never be deleted automatically.",
     )
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="packages/", should_exist=set())
@@ -79,7 +79,7 @@ def test_hand_edited_optional_prose_section_is_also_declined(tmp_path: Path) -> 
         "pkg:acme/repo/gone",
         public_api_text="`okf_io.load_bundle(root)` is the one entry point most callers need.",
     )
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="packages/", should_exist=set())
@@ -100,7 +100,7 @@ def test_generated_section_edits_never_block_deletion(tmp_path: Path) -> None:
         "pkg:acme/repo/gone",
         files_text="- [some/real/file.py](/repositories/acme-repo/some/real/file.py.md)\n",
     )
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="packages/", should_exist=set())
@@ -113,7 +113,7 @@ def test_generated_section_edits_never_block_deletion(tmp_path: Path) -> None:
 def test_page_still_in_should_exist_is_never_a_candidate(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_package_page(tmp_path, "still-here", "pkg:acme/repo/still-here")
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="packages/", should_exist={"pkg:acme/repo/still-here"})
@@ -131,7 +131,7 @@ def test_pages_outside_directory_are_ignored(tmp_path: Path) -> None:
     # A Package page whose resource is gone, but pruning is scoped to
     # "dependencies/" here -- it must be left alone.
     _write_package_page(tmp_path, "gone", "pkg:acme/repo/gone")
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="dependencies/", should_exist=set())
@@ -144,7 +144,7 @@ def test_pages_outside_directory_are_ignored(tmp_path: Path) -> None:
 def test_undeclared_type_is_declined_not_deleted(tmp_path: Path) -> None:
     """A candidate page whose `type:` has no matching declaration in the
     passed-in `section_set` -- blank, misspelled, or simply not one of the
-    types loaded from `_sections/` -- must decline rather than delete: with
+    types loaded from `sections/` -- must decline rather than delete: with
     no declaration there is nothing to check prose against, and that is a
     reason for caution, not a reason to skip the check entirely."""
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
@@ -154,7 +154,7 @@ def test_undeclared_type_is_declined_not_deleted(tmp_path: Path) -> None:
         '---\ntype: NotARealType\ntitle: "gone"\nresource: "pkg:acme/repo/gone"\n---\n\n## Purpose\n\nirrelevant\n',
         encoding="utf-8",
     )
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="packages/", should_exist=set())
@@ -166,7 +166,7 @@ def test_undeclared_type_is_declined_not_deleted(tmp_path: Path) -> None:
 
 def test_no_resource_candidates_yields_empty_result(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="packages/", should_exist=set())
@@ -211,7 +211,7 @@ def test_exact_depth_leaves_mirror_file_pages_alone(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_repository_page(tmp_path, "acme", "repo:acme/acme")
     _write_mirror_file_page(tmp_path, "acme", "src/mod.py", "file:acme/src/mod.py")
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="repositories/", should_exist=set(), exact_depth=True)
@@ -229,7 +229,7 @@ def test_without_exact_depth_the_mirror_subtree_is_incorrectly_swept(tmp_path: P
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     _write_repository_page(tmp_path, "acme", "repo:acme/acme")
     _write_mirror_file_page(tmp_path, "acme", "src/mod.py", "file:acme/src/mod.py")
-    section_set = load_sections(tmp_path / "_sections")
+    section_set = load_sections(tmp_path / "sections")
     bundle = load_bundle(tmp_path)
 
     result = prune_lane(bundle, section_set, directory="repositories/", should_exist=set())

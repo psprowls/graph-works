@@ -29,7 +29,12 @@ from scan_helpers import AT, REPO_NAME, TODAY, make_workspace, seed_graph
 
 async def test_a_scan_leaves_no_broken_links_into_the_mirror_lane(tmp_path: Path) -> None:
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     seed_graph(config.graph_dir, repo)
 
     await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
@@ -41,7 +46,12 @@ async def test_a_scan_leaves_no_broken_links_into_the_mirror_lane(tmp_path: Path
 
 async def test_a_scan_writes_a_page_for_every_tracked_file(tmp_path: Path) -> None:
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     seed_graph(config.graph_dir, repo)
 
     await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
@@ -57,7 +67,12 @@ async def test_a_dry_run_writes_no_mirror_page(tmp_path: Path) -> None:
     lane must not be the one thing that leaks a write through a preview.
     """
     layout, repo = make_workspace(tmp_path)
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
     seed_graph(config.graph_dir, repo)
 
     _worklist, structural = await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=True)

@@ -79,6 +79,7 @@ from doc_wiki_okf.proposals.lanes import lane_set
 from doc_wiki_okf.sources import copy_target, page_target, plan_ingest, preflight_ingest, source_kinds
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
+from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.proposals import apply as apply_plan
 from okf_ext.schemas import SchemaSet, load_schemas
 from okf_ext.shape import load_sections
@@ -298,10 +299,10 @@ _DEFAULT_BY = "agent:graph-works-core"
 #: library taking a CLI framework as a transitive import to read one tuple is
 #: worse than six lines that a test pins to the original.
 BUNDLE_IGNORE: tuple[str, ...] = (
-    "_schema/*",
-    "*/_schema/*",
-    "_sections/*",
-    "*/_sections/*",
+    f"{SCHEMA_DIRNAME}/*",
+    f"*/{SCHEMA_DIRNAME}/*",
+    f"{SECTIONS_DIRNAME}/*",
+    f"*/{SECTIONS_DIRNAME}/*",
     "sources/references/*",
     "*/sources/references/*",
     "*/.DS_Store",
@@ -442,10 +443,15 @@ async def run_ingest_source(
     the same `origin`, so a re-ingest whose model picks a different title is
     still refused rather than landing a second page.
     """
-    config = load_config(layout.bundle_dir, config_path=layout.repositories_path)
-    schema_set = load_schemas(config.declarations_dir / "_schema")
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
+    schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
     kinds = source_kinds(schema_set)
-    section_set = load_sections(config.declarations_dir / "_sections")
+    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
     lanes = lane_set(schema_set)
     bundle = load_bundle(layout.bundle_dir, ignore=BUNDLE_IGNORE)
 

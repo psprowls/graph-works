@@ -37,7 +37,7 @@ def test_set_coerces_persists_and_refreshes_projection(tmp_path: Path) -> None:
     assert payload["origin"] == "manifest"
     stored = PlainYamlStore(root / "workspace.yaml").read_explicit()
     assert stored["workflow"] == {"auto_drive": {"max_parallel": 3}}
-    projection = json.loads((root / "_gw" / "_config" / "config.json").read_text(encoding="utf-8"))
+    projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
     assert projection["workflow"]["auto_drive"]["max_parallel"] == 3
     assert set(projection["_meta"]) == {"source_mtime", "source_sha256"}
 
@@ -60,7 +60,7 @@ def test_unset_removes_explicit_value_refreshes_projection_and_reports_default(t
     assert payload["origin"] == "default"
     stored = PlainYamlStore(root / "workspace.yaml").read_explicit()
     assert "workflow" not in stored
-    projection = json.loads((root / "_gw" / "_config" / "config.json").read_text(encoding="utf-8"))
+    projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
     assert "workflow" not in projection
 
 
@@ -75,7 +75,7 @@ def test_set_rejects_invalid_values_without_writing(tmp_path: Path) -> None:
     assert result.exit_code == exit_codes.GENERIC
     assert "expects an integer" in result.stderr
     assert PlainYamlStore(root / "workspace.yaml").read_explicit() == {"version": 1}
-    assert not (root / "_gw" / "_config" / "config.json").exists()
+    assert not (root / ".gw" / "cache" / "config.json").exists()
 
 
 def test_set_rejects_read_only_catalog_keys(tmp_path: Path) -> None:
@@ -141,7 +141,7 @@ def test_sync_regenerates_projection_after_a_hand_edit(tmp_path: Path) -> None:
 
     result = runner.invoke(config_app, ["sync", "--workspace", str(root)])
 
-    target = root / "_gw" / "_config" / "config.json"
+    target = root / ".gw" / "cache" / "config.json"
     assert result.exit_code == 0
     assert result.stdout == f"[ok] projection: {target}\n"
     assert json.loads(target.read_text(encoding="utf-8"))["topic"] == "Hand edited"
@@ -153,7 +153,7 @@ def test_sync_json_names_the_projection_path(tmp_path: Path) -> None:
     result = runner.invoke(config_app, ["sync", "--workspace", str(root), "--json"])
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {"projection": str(root / "_gw" / "_config" / "config.json")}
+    assert json.loads(result.stdout) == {"projection": str(root / ".gw" / "cache" / "config.json")}
 
 
 def test_sync_maps_a_registry_fault_to_the_generic_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

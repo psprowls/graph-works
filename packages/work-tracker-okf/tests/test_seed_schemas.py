@@ -11,7 +11,7 @@ _TYPES = ("Bug", "Epic", "Feature", "Spike", "TechDebt", "TestGap")
 
 
 def _schema_set():
-    assets = importlib.resources.files("work_tracker_okf") / "assets" / "_schema"
+    assets = importlib.resources.files("work_tracker_okf") / "assets" / "schema"
     return load_schemas(str(assets))
 
 

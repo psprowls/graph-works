@@ -20,12 +20,12 @@ _LANES = {
 
 @pytest.fixture
 def schema_set():
-    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_schema"))
+    return load_schemas(str(importlib.resources.files("doc_wiki_okf") / "assets" / "schema"))
 
 
 @pytest.fixture
 def section_set():
-    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "_sections"))
+    return load_sections(str(importlib.resources.files("doc_wiki_okf") / "assets" / "sections"))
 
 
 def test_directory_for_reads_each_declared_lane(schema_set) -> None:
@@ -85,7 +85,7 @@ def test_new_page_text_defaults_description_to_empty(schema_set, section_set) ->
 
 
 def test_new_page_text_raises_for_a_type_no_schema_declares(section_set, tmp_path) -> None:
-    partial = tmp_path / "_schema"
+    partial = tmp_path / "schema"
     partial.mkdir()
     (partial / "Tutorial.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema",'

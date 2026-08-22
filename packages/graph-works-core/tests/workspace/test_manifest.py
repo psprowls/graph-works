@@ -42,7 +42,11 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "layout.config_dir",
         "layout.cache_dir",
         "layout.worktrees_dir",
-        "layout.repositories_path",
+        "repositories.*.path",
+        "repositories.*.ignore",
+        "ignore",
+        "state_gate.enabled",
+        "state_gate.branches",
         "roles.*.model_id",
         "roles.*.backend",
         "roles.*.region",
@@ -85,12 +89,16 @@ def test_a_minimal_manifest_resolves_every_layout_key_to_its_default(tmp_path):
 def test_an_override_is_read_back(tmp_path):
     manifest = read(_write(tmp_path, "version: 1\nlayout:\n  bundle_dir: wiki\n"))
     assert manifest.bundle_dir == "wiki"
-    assert manifest.config_dir == "_gw/_config"
+    assert manifest.config_dir == ".gw"
 
 
-def test_a_repositories_path_override_is_read_back(tmp_path):
-    manifest = read(_write(tmp_path, "version: 1\nlayout:\n  repositories_path: elsewhere/_repositories.yaml\n"))
-    assert manifest.repositories_path == "elsewhere/_repositories.yaml"
+def test_an_explicit_null_on_cache_dir_reads_as_absent_rather_than_refused(tmp_path):
+    """`layout.cache_dir`/`layout.worktrees_dir` now default to `None`, so a
+    hand-written `null` is just the ordinary absent value -- not the
+    deliberate-null-hides-a-real-default case `_check_resolved` refuses."""
+    manifest = read(_write(tmp_path, "version: 1\nlayout:\n  cache_dir: null\n  worktrees_dir: null\n"))
+    assert manifest.cache_dir is None
+    assert manifest.worktrees_dir is None
 
 
 def test_a_topic_and_a_stamp_are_read_back(tmp_path):
@@ -152,6 +160,94 @@ def test_a_layout_override_round_trips_through_the_write_path(tmp_path):
     assert read(path).cache_dir == "var/cache"
 
 
+def test_a_repository_path_round_trips_through_the_write_path(tmp_path):
+    path = _write(tmp_path, "version: 1\n")
+    set_value(path, "repositories.agent-workspace.path", "../..")
+    from config_io import PlainYamlStore, expand_wildcards
+
+    store = PlainYamlStore(path)
+    assert expand_wildcards(CATALOG, store=store) == ["repositories.agent-workspace.path"]
+    assert resolve_key(CATALOG, "repositories.agent-workspace.path", store=store, environ={}).value == "../.."
+
+
+def test_a_repository_ignore_round_trips_through_the_write_path(tmp_path):
+    path = _write(tmp_path, "version: 1\nrepositories:\n  agent-workspace:\n    path: ../..\n")
+    set_value(path, "repositories.agent-workspace.ignore", "tmp/**, *.lock")
+    from config_io import PlainYamlStore
+
+    store = PlainYamlStore(path)
+    assert resolve_key(CATALOG, "repositories.agent-workspace.ignore", store=store, environ={}).value == [
+        "tmp/**",
+        "*.lock",
+    ]
+
+
+def test_render_initial_carries_repositories_and_ignore_content_through_the_hand_rendered_yaml(tmp_path):
+    text = render_initial(
+        today=TODAY,
+        repositories={"agent-workspace": "../..", "other-repo": "../other-repo"},
+        ignore=["tmp/**", "*.lock"],
+    )
+    manifest_path = _write(tmp_path, text)
+    import yaml as _yaml
+
+    parsed = _yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert parsed["repositories"] == {
+        "agent-workspace": {"path": "../.."},
+        "other-repo": {"path": "../other-repo"},
+    }
+    assert parsed["ignore"] == ["tmp/**", "*.lock"]
+    # And every rendered value is still readable back through the catalog.
+    from config_io import PlainYamlStore
+
+    store = PlainYamlStore(manifest_path)
+    assert resolve_key(CATALOG, "repositories.agent-workspace.path", store=store, environ={}).value == "../.."
+    assert resolve_key(CATALOG, "ignore", store=store, environ={}).value == ["tmp/**", "*.lock"]
+
+
+def test_render_initial_quotes_a_repository_name_needing_it(tmp_path):
+    text = render_initial(today=TODAY, repositories={"needs: quoting": "../.."})
+    manifest_path = _write(tmp_path, text)
+    import yaml as _yaml
+
+    parsed = _yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    assert parsed["repositories"] == {"needs: quoting": {"path": "../.."}}
+
+
+def test_state_gate_defaults_when_the_block_is_absent(tmp_path):
+    path = _write(tmp_path, "version: 1\n")
+    store = PlainYamlStore(path)
+    assert resolve_key(CATALOG, "state_gate.enabled", store=store, environ={}).value is True
+    assert resolve_key(CATALOG, "state_gate.branches", store=store, environ={}).value == ["main"]
+
+
+def test_a_set_roles_write_leaves_repositories_ignore_and_state_gate_content_intact(tmp_path):
+    # `PlainYamlStore.write` re-dumps the whole file through `yaml.safe_dump`
+    # (see `packages/config-io/src/config_io/store.py`) rather than splicing
+    # like okf-io's writer, so quoting/flow-style is not preserved byte for
+    # byte across an unrelated write — only the parsed content is a contract.
+    text = (
+        "version: 1\n"
+        "repositories:\n"
+        "  agent-workspace:\n"
+        "    path: ../..\n"
+        "ignore:\n"
+        '  - "tmp/**"\n'
+        "state_gate:\n"
+        "  enabled: true\n"
+        "  branches: [main]\n"
+    )
+    path = _write(tmp_path, text)
+    set_value(path, "roles.librarian.model_id", "some-model")
+    import yaml as _yaml
+
+    after = _yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert after["repositories"] == {"agent-workspace": {"path": "../.."}}
+    assert after["ignore"] == ["tmp/**"]
+    assert after["state_gate"] == {"enabled": True, "branches": ["main"]}
+    assert after["roles"]["librarian"]["model_id"] == "some-model"
+
+
 def test_the_version_is_hand_edit_only(tmp_path):
     with pytest.raises(ReadOnlyKeyError):
         set_value(_write(tmp_path, "version: 1\n"), "version", "2")
@@ -159,7 +255,7 @@ def test_the_version_is_hand_edit_only(tmp_path):
 
 def test_an_unknown_key_is_refused_by_the_catalog(tmp_path):
     with pytest.raises(UnknownKeyError):
-        set_value(_write(tmp_path, "version: 1\n"), "state_gate.enabled", "false")
+        set_value(_write(tmp_path, "version: 1\n"), "state_gate.bogus", "false")
 
 
 def test_the_initial_manifest_parses_back_and_carries_no_layout_block(tmp_path):
@@ -208,14 +304,17 @@ def test_the_backend_override_is_a_closed_vocabulary():
     assert entry.allowed == ("bedrock", "vercel")
 
 
-def test_every_wildcard_catalog_entry_is_a_role_or_pipeline_entry():
+def test_every_wildcard_catalog_entry_is_a_role_pipeline_or_repository_entry():
     # `roles.py` and `pipeline.py` each regroup `expand_wildcards` results and
-    # each filters by its own prefix. This is the assumption that makes the
-    # pair exhaustive: a third wildcard family added with no consumer would be
-    # silently dropped by both, and this test is what reports it.
+    # each filters by its own prefix; `repositories.*` is read directly by
+    # `code_wiki_okf.config.load_config`, not through this catalog's
+    # `Manifest` — it exists here only so `gw config get/set` can reach it.
+    # This is the assumption that makes the pair (now trio) exhaustive: a
+    # fourth wildcard family added with no consumer would be silently
+    # dropped, and this test is what reports it.
     for entry in CATALOG:
         if "*" in entry.key:
-            assert entry.key.startswith(("roles.", "workflow.pipeline.")), entry.key
+            assert entry.key.startswith(("roles.", "workflow.pipeline.", "repositories.")), entry.key
 
 
 def test_role_keys_expand_only_for_roles_present_in_the_file(tmp_path):
@@ -375,9 +474,9 @@ def test_resolve_checked_key_refuses_a_hand_edited_invalid_type(tmp_path):
 
 
 def test_resolve_checked_all_refuses_a_hand_edited_explicit_null(tmp_path):
-    layout = _layout(tmp_path, "version: 1\nlayout:\n  cache_dir: null\n")
+    layout = _layout(tmp_path, "version: 1\nlayout:\n  bundle_dir: null\n")
 
-    with pytest.raises(WorkspaceError, match=r"layout\.cache_dir: is explicitly null"):
+    with pytest.raises(WorkspaceError, match=r"layout\.bundle_dir: is explicitly null"):
         resolve_checked_all(layout, environ={})
 
 

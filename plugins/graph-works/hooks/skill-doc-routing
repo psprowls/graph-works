@@ -115,16 +115,18 @@ if [ ! -f "$WORKSPACE/workspace.yaml" ]; then
 fi
 
 # The projection is the read surface for consumers that must not spawn Python.
-# Absent is not an error: `workspace.init` does not write it — only
-# `gw config set` / `unset` / `sync` do — so a freshly bootstrapped workspace
-# legitimately has none, and every absent value falls back to its default.
+# `gw init` writes this file as of the .gw/ rename, so a freshly bootstrapped
+# workspace normally has one; it can still be absent on an older workspace
+# that has not re-run init, or when `gw config sync` has never run there —
+# both fall back to defaults below, same as before.
 #
-# `_config` is the DEFAULT_CONFIG_DIR, hardcoded rather than resolved, and that
-# is a known limit: a workspace overriding `layout.config_dir` keeps its
-# projection somewhere else and this hook falls back to the defaults for all of
-# it. Resolving the override is circular — the override lives in the manifest,
-# and reading the manifest is the YAML parse this hook exists to avoid.
-PROJECTION="$WORKSPACE/_config/config.json"
+# The path is hardcoded rather than resolved, and that is a known limit: a
+# workspace overriding `layout.config_dir` (and, since it derives from that,
+# `layout.cache_dir`) keeps its projection somewhere else and this hook falls
+# back to the defaults for all of it. Resolving the override is circular — the
+# override lives in the manifest, and reading the manifest is the YAML parse
+# this hook exists to avoid.
+PROJECTION="$WORKSPACE/.gw/cache/config.json"
 BUNDLE_DIR="okf"
 STALE_NOTICE=""
 

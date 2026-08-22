@@ -2,7 +2,7 @@
 
 **Nothing is auto-discovered.** `load_schemas(path)` reads the directory the
 caller names and no other, following the precedent `tags/vocabulary.py` set.
-`_schema/` remains a documented convention that tools may default to —
+`schema/` remains a documented convention that tools may default to —
 `DEFAULT_SCHEMA_DIRNAME` and `okf_ext.schemas.DEFAULT_IGNORE` exist for callers
 who want it — not magic this library performs.
 
@@ -29,7 +29,7 @@ from okf_ext.schemas.model import SchemaError, SchemaSet
 
 #: The conventional directory name. A default tools may offer, never one this
 #: module reaches for.
-DEFAULT_SCHEMA_DIRNAME = "_schema"
+DEFAULT_SCHEMA_DIRNAME = "schema"
 
 #: Recognised filenames. YAML and JSON only
 SCHEMA_SUFFIXES = (".schema.yaml", ".schema.yml", ".schema.json")

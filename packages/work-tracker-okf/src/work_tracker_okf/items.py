@@ -41,7 +41,7 @@ def placement_directories(schema_set: SchemaSet) -> dict[str, str]:
     An **allow**-list, where `code_wiki_okf.entities.lanes.placement_directories`
     excludes four type names outright. A deny-list is correct only while the
     schema set holds nothing but its own lane's types, and a composed workspace
-    points every lane installer at one shared `_schema/` -- so it already holds
+    points every lane installer at one shared `schema/` -- so it already holds
     thirteen. Four of those nest under `repositories/<repo>/` (ADR-0026) and
     have no single static prefix this rule's `Mapping[str, str]` can express;
     passing them through at `severity="error"` would report every correctly

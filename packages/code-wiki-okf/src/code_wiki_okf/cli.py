@@ -18,7 +18,7 @@ from okf_ext.placement import placement_rule
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
-from okf_ext.tags import load_vocabulary, vocabulary_rule
+from okf_ext.tags import VOCABULARY_FILENAME, load_vocabulary, vocabulary_rule
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
 
@@ -80,8 +80,7 @@ def init(
     config_dir: Path | None = typer.Option(  # noqa: B008
         None,
         "--config-dir",
-        help="Where `_schema/`, `_sections/` and `_tags.yaml` live. Defaults to BUNDLE_ROOT; "
-        "when given, it is written into the `_repositories.yaml` this command creates.",
+        help="Where `schema/`, `sections/` and `tags.yaml` live. Defaults to BUNDLE_ROOT.",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
 ) -> None:
@@ -177,14 +176,21 @@ def sync(
     config_dir: Path | None = typer.Option(  # noqa: B008
         None,
         "--config-dir",
-        help="Where `_schema/`, `_sections/` and `_tags.yaml` live. "
-        "Defaults to the value in `_repositories.yaml`, or BUNDLE_ROOT. Applies to this run only -- not persisted.",
+        help="Where `schema/`, `sections/` and `tags.yaml` live. Defaults to BUNDLE_ROOT. "
+        "Applies to this run only -- not persisted.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config-path",
+        help="Where `workspace.yaml` lives. Defaults to BUNDLE_ROOT/workspace.yaml -- "
+        "point this at a graph-works workspace's own workspace.yaml to read that "
+        "workspace's `repositories`/`ignore`/`state_gate` blocks instead.",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print each lane's plan instead of writing."),
 ) -> None:
     """Sync entity pages and the repository mirror lane against the code graph.
 
-    Reads `_repositories.yaml`, loads the graph and bundle, runs the entity
+    Reads `workspace.yaml`, loads the graph and bundle, runs the entity
     sync pipeline once (it already iterates every configured repo
     internally), then the mirror sync pipeline once per configured repo, and
     reports counts for both. `--dry-run` defaults off, matching `init`'s own
@@ -195,11 +201,19 @@ def sync(
     entry for the whole run rather than one per repo, for the same reason
     `entities.lanes.sync` appends exactly one: the log stays a readable
     per-run record, not a per-repo flood.
+
+    `graph_dir` is always `bundle_root` here -- this standalone CLI has no
+    workspace layout of its own to derive a separate graph location from, so
+    `load_config`'s `graph_dir=` is fixed rather than exposed as a flag.
+    `init` no longer seeds `workspace.yaml` (2026-08-22 tech-debt item), so a
+    bundle that was `init`'d but never given a `workspace.yaml` -- by hand or
+    via `--config-path` -- surfaces as an uncaught `OSError` here, not a
+    clean `ConfigError` exit; a known, deliberately unfixed gap.
     """
     today = datetime.now(UTC).date()
     at = datetime.now(UTC)
     try:
-        config = _with_config_dir(load_config(bundle_root), config_dir)
+        config = _with_config_dir(load_config(bundle_root, config_path=config_path, graph_dir=bundle_root), config_dir)
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -211,7 +225,7 @@ def sync(
     except (OSError, ValueError) as exc:
         # `ValueError` for the two `_resolve_placements` collision cases;
         # `OSError` because `lanes.sync` -> `sync_entities` loads
-        # `config.declarations_dir`'s `_schema`/`_sections` too, and a missing
+        # `config.declarations_dir`'s `schema`/`sections` too, and a missing
         # one is the same caller-configuration problem `validate` already
         # guards against, not a raw traceback.
         typer.echo(str(exc), err=True)
@@ -266,16 +280,27 @@ def validate(
     config_dir: Path | None = typer.Option(  # noqa: B008
         None,
         "--config-dir",
-        help="Where `_schema/`, `_sections/` and `_tags.yaml` live. "
-        "Defaults to the value in `_repositories.yaml`, or BUNDLE_ROOT. Applies to this run only -- not persisted.",
+        help="Where `schema/`, `sections/` and `tags.yaml` live. Defaults to BUNDLE_ROOT. "
+        "Applies to this run only -- not persisted.",
+    ),
+    config_path: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config-path",
+        help="Where `workspace.yaml` lives. Defaults to BUNDLE_ROOT/workspace.yaml -- "
+        "point this at a graph-works workspace's own workspace.yaml to read that "
+        "workspace's `repositories`/`ignore`/`state_gate` blocks instead.",
     ),
     strict: bool = typer.Option(False, "--strict", help="Treat warnings as failures."),
 ) -> None:
-    """Report drift and conformance findings for BUNDLE_ROOT. Never writes."""
+    """Report drift and conformance findings for BUNDLE_ROOT. Never writes.
+
+    `graph_dir` is always `bundle_root` -- see `sync`'s docstring for why,
+    and for the known gap on a `workspace.yaml`-less bundle.
+    """
     today = datetime.now(UTC).date()
     at = datetime.now(UTC)
     try:
-        config = _with_config_dir(load_config(bundle_root), config_dir)
+        config = _with_config_dir(load_config(bundle_root, config_path=config_path, graph_dir=bundle_root), config_dir)
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
@@ -289,14 +314,14 @@ def validate(
         raise typer.Exit(code=1) from exc
 
     try:
-        schema_set = load_schemas(config.declarations_dir / "_schema")
-        section_set = load_sections(config.declarations_dir / "_sections")
-        vocabulary = load_vocabulary(config.declarations_dir / "_tags.yaml")
+        schema_set = load_schemas(config.declarations_dir / "schema")
+        section_set = load_sections(config.declarations_dir / "sections")
+        vocabulary = load_vocabulary(config.declarations_dir / VOCABULARY_FILENAME)
     except (OSError, ValueError) as exc:
         # `load_schemas`/`load_sections` raise `SchemaError`/`SectionError`
         # (both `ValueError`) for a malformed set and propagate `OSError` for
         # a missing directory; `load_vocabulary` does the same with
-        # `VocabularyError` for a missing/malformed `_tags.yaml`. All three
+        # `VocabularyError` for a missing/malformed `tags.yaml`. All three
         # are caller-configuration problems -- matching `ConfigError` and
         # `snapshot_bundle`'s `ValueError` above, not a raw traceback.
         typer.echo(str(exc), err=True)

@@ -376,7 +376,7 @@ def test_source_kinds_reads_the_bundles_own_enum(tmp_path: Path) -> None:
     from doc_wiki_okf.sources import source_kinds
     from okf_ext.schemas import load_schemas
 
-    declarations = tmp_path / "_schema"
+    declarations = tmp_path / "schema"
     declarations.mkdir()
     (declarations / "Source.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
@@ -394,7 +394,7 @@ def test_source_kinds_raises_no_schema_when_source_itself_is_absent(tmp_path: Pa
     from doc_wiki_okf.sources import source_kinds
     from okf_ext.schemas import load_schemas
 
-    declarations = tmp_path / "_schema"
+    declarations = tmp_path / "schema"
     declarations.mkdir()
     (declarations / "Explanation.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'
@@ -409,7 +409,7 @@ def test_source_kinds_raises_naming_the_root_when_the_enum_is_absent(tmp_path: P
     from doc_wiki_okf.sources import source_kinds
     from okf_ext.schemas import load_schemas
 
-    declarations = tmp_path / "_schema"
+    declarations = tmp_path / "schema"
     declarations.mkdir()
     (declarations / "Source.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object",'

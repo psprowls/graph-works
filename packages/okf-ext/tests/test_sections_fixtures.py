@@ -41,8 +41,8 @@ def test_every_reported_code_is_a_member_of_codes():
 def test_the_default_ignore_keeps_the_declarations_out_of_the_bundle():
     """An ignored member is 'not a concept', not 'not there'."""
     bundle = load_bundle(SECTIONED, ignore=DEFAULT_IGNORE)
-    assert any(member.startswith("_sections/") for member in bundle.ignored)
-    assert not any(member.startswith("_sections/") for member in bundle.assets)
+    assert any(member.startswith("sections/") for member in bundle.ignored)
+    assert not any(member.startswith("sections/") for member in bundle.assets)
 
 
 def test_declarations_need_not_live_inside_the_bundle_they_describe():

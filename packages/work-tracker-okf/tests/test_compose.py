@@ -47,7 +47,7 @@ def bundle(tmp_path: Path) -> Bundle:
 
 @pytest.fixture
 def section_set():
-    return load_sections(assets_root() / "_sections")
+    return load_sections(assets_root() / "sections")
 
 
 def seed() -> FilingSeed:
@@ -186,7 +186,7 @@ def test_rule_set_takes_declarations_from_the_override(tmp_path: Path, conforman
         rule_set(conformant_root, declarations_dir=empty)
     except (OSError, ValueError):
         return
-    raise AssertionError("a declarations dir with no _schema/ must raise")
+    raise AssertionError("a declarations dir with no schema/ must raise")
 
 
 def test_rule_set_with_a_repo_root_adds_the_two_path_rules(conformant_root: Path) -> None:
@@ -417,7 +417,7 @@ def _plan_at(root: Path, filing_seed: FilingSeed):
         loaded,
         load_items(loaded),
         filing_seed,
-        load_sections(assets_root() / "_sections"),
+        load_sections(assets_root() / "sections"),
     )
 
 

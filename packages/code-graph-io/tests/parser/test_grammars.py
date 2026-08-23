@@ -67,3 +67,38 @@ def test_grammar_load_failure_is_wrapped_as_unsupported_language(monkeypatch):
             grammars_module.get_language("python")
     finally:
         grammars_module.get_language.cache_clear()
+
+
+def test_csharp_loads():
+    lang = get_language("csharp")
+    parser = Parser(lang)
+    tree = parser.parse(b"class Foo {}\n")
+    assert tree.root_node is not None
+    assert not tree.root_node.has_error
+
+
+def test_csharp_lookup_is_cached():
+    a = get_language("csharp")
+    b = get_language("csharp")
+    assert a is b
+
+
+def test_csharp_uses_fallback_not_language_pack(monkeypatch):
+    """csharp must route through the tree-sitter-c-sharp fallback, not the pack.
+
+    Regression guard: if tree_sitter_language_pack ever ships a csharp/c_sharp
+    grammar, this test's monkeypatch (which breaks the pack path) would start
+    failing loudly instead of silently switching code paths.
+    """
+    import code_graph_io.parser.grammars as grammars_module
+
+    def _boom(_name):
+        raise RuntimeError("pack has no csharp grammar")
+
+    monkeypatch.setattr(grammars_module, "_pack_get_language", _boom)
+    grammars_module.get_language.cache_clear()
+    try:
+        lang = grammars_module.get_language("csharp")
+        assert lang is not None
+    finally:
+        grammars_module.get_language.cache_clear()

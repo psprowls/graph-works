@@ -771,7 +771,7 @@ def test_sweep_type_placeholder_resolves_to_real_type_node(conn: sqlite3.Connect
                 name="APIGatewayProxyEvent",
                 path="node_modules/@types/aws-lambda/index.d.ts",
                 line=10,
-                attrs={"ts_kind": "interface"},
+                attrs={"subkind": "interface"},
             ),
         ],
         edges=[
@@ -814,7 +814,7 @@ def test_sweep_function_placeholder_resolves_to_type_node_cross_kind(conn: sqlit
                 name="APIGatewayProxyEvent",
                 path="types/aws.d.ts",
                 line=5,
-                attrs={"ts_kind": "interface"},
+                attrs={"subkind": "interface"},
             ),
         ],
         edges=[

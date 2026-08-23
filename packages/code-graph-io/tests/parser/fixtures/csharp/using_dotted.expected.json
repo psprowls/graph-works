@@ -1,0 +1,21 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "csharp",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "import", "target_name": "System.Collections.Generic", "target_module": "System.Collections.Generic", "attrs": {}}
+  ],
+  "children": [
+    {
+      "kind": "class",
+      "name": "Empty",
+      "language": "csharp",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

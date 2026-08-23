@@ -1,17 +1,17 @@
 {
   "kind": "file",
   "name": null,
-  "language": "typescript",
+  "language": "csharp",
   "package": "fixtures",
   "attrs": {},
   "refs": [],
   "children": [
     {
-      "kind": "type",
-      "name": "Direction",
-      "language": "typescript",
+      "kind": "class",
+      "name": "Empty",
+      "language": "csharp",
       "package": "fixtures",
-      "attrs": {"subkind": "enum"},
+      "attrs": {},
       "refs": [],
       "children": []
     }

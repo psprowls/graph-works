@@ -47,6 +47,10 @@ def agent_plugin_uri(ctx: RepoContext, name: str) -> str:
     return f"agent_plugin:{ctx.org}/{ctx.repo}/{name}"
 
 
+def solution_uri(ctx: RepoContext, name: str) -> str:
+    return f"solution:{ctx.org}/{ctx.repo}/{name}"
+
+
 def dependency_uri(ecosystem: str, name: str) -> str:
     return f"dependency:{ecosystem}/{name}"
 

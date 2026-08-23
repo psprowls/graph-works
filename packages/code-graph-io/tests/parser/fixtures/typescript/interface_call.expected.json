@@ -11,7 +11,7 @@
       "name": "IFoo",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "interface"},
+      "attrs": {"subkind": "interface"},
       "refs": [],
       "children": []
     },

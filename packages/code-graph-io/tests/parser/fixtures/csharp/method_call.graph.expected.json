@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {"kind": "file", "name": "PATH", "path": "PATH", "line": null, "attrs": {}},
+    {"kind": "class", "name": "Caller", "path": "PATH", "line": 1, "attrs": {}},
+    {"kind": "method", "name": "Caller.Run", "path": "PATH", "line": 3, "attrs": {}}
+  ],
+  "edges": [
+    {"src": ["file", "PATH", "PATH"], "dst": ["class", "Caller", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["class", "Caller", "PATH"], "dst": ["method", "Caller.Run", "PATH"], "kind": "contains", "attrs": {}},
+    {"src": ["method", "Caller.Run", "PATH"], "dst": ["function", "DoWork", null], "kind": "calls", "attrs": {"is_member": false}},
+    {"src": ["method", "Caller.Run", "PATH"], "dst": ["function", "Method", null], "kind": "calls", "attrs": {"is_member": true, "receiver": "obj"}}
+  ]
+}

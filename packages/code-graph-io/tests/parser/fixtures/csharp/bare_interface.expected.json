@@ -1,17 +1,17 @@
 {
   "kind": "file",
   "name": null,
-  "language": "typescript",
+  "language": "csharp",
   "package": "fixtures",
   "attrs": {},
   "refs": [],
   "children": [
     {
       "kind": "type",
-      "name": "Direction",
-      "language": "typescript",
+      "name": "IWidget",
+      "language": "csharp",
       "package": "fixtures",
-      "attrs": {"subkind": "enum"},
+      "attrs": {"subkind": "interface"},
       "refs": [],
       "children": []
     }

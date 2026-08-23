@@ -15,7 +15,7 @@
       "name": "IResponse",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "interface"},
+      "attrs": {"subkind": "interface"},
       "refs": [],
       "children": []
     },
@@ -24,7 +24,7 @@
       "name": "ResponseId",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "type_alias"},
+      "attrs": {"subkind": "type_alias"},
       "refs": [],
       "children": []
     },
@@ -33,7 +33,7 @@
       "name": "Status",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "enum"},
+      "attrs": {"subkind": "enum"},
       "refs": [],
       "children": []
     }

@@ -16,6 +16,7 @@ requires-python = ">=3.12"
 dependencies = [
   "tree-sitter>=0.23.0",
   "tree-sitter-language-pack>=0.8.0,<=1.6.2",
+  "tree-sitter-c-sharp>=0.23.0",
   "pyyaml>=6.0",
   "tiktoken>=0.7",
 ]

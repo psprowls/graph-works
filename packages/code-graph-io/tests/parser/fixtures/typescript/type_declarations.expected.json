@@ -11,7 +11,7 @@
       "name": "IUser",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "interface"},
+      "attrs": {"subkind": "interface"},
       "refs": [],
       "children": []
     },
@@ -20,7 +20,7 @@
       "name": "UserId",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "type_alias"},
+      "attrs": {"subkind": "type_alias"},
       "refs": [],
       "children": []
     },
@@ -29,7 +29,7 @@
       "name": "Color",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "enum"},
+      "attrs": {"subkind": "enum"},
       "refs": [],
       "children": []
     }

@@ -1443,3 +1443,15 @@ def test_runtime_dependency_wins_over_dep_group(tmp_path: Path, conn: sqlite3.Co
     assert len(rows) == 1
     attrs = json.loads(rows[0][0]) if rows[0][0] else {}
     assert attrs == {}
+
+
+def test_dependency_registry_url_nuget() -> None:
+    assert (
+        packages._dependency_registry_url("nuget", "Newtonsoft.Json")
+        == "https://www.nuget.org/packages/Newtonsoft.Json/"
+    )
+
+
+def test_dependency_registry_url_unsupported_still_raises() -> None:
+    with pytest.raises(ValueError, match="unsupported dependency ecosystem"):
+        packages._dependency_registry_url("gems", "rails")

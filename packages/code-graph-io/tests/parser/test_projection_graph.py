@@ -48,6 +48,7 @@ GRAPH_FIXTURES = [
     ("typescript", "exported_type_alias.ts"),
     ("typescript", "exported_enum.ts"),
     ("typescript", "type_reexport.ts"),
+    ("csharp", "method_call.cs"),
 ]
 
 

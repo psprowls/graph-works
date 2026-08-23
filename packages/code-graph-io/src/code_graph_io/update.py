@@ -10,7 +10,7 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from code_graph_io import _ignore, builtins, packages, resolve, schema, store, tokens, upsert
+from code_graph_io import _ignore, builtins, csharp_projects, packages, resolve, schema, store, tokens, upsert
 from code_graph_io.parser.parse import parse_bytes
 from code_graph_io.parser.projections.graph import to_graph_records
 from code_graph_io.uri import repo_uri
@@ -246,6 +246,13 @@ def _update_one_repo(
             deferred_repo_deps=deferred_repo_deps,
             ignore=ignore,
         )
+        discovered_solutions = csharp_projects.refresh(
+            conn,
+            repo_root=repo_root,
+            ctx=ctx,
+            current_repo=repo_uri_val,
+            ignore=ignore,
+        )
         builtins.refresh(conn, repo_root=repo_root, graph_dir=graph_dir, ctx=ctx)
         # Resolve file-import edges to real file nodes BEFORE the full-mode cleanup
         # DELETE (below). The cleanup purges specifier-path stub file nodes (not in
@@ -272,14 +279,14 @@ def _update_one_repo(
                 placeholders = ",".join("?" for _ in tracked_paths)
                 conn.execute(
                     "DELETE FROM nodes WHERE repo = ? "
-                    "AND kind NOT IN ('package', 'app', 'builtin', 'dependency') "
+                    "AND kind NOT IN ('package', 'app', 'builtin', 'dependency', 'solution') "
                     f"AND path IS NOT NULL AND path NOT IN ({placeholders})",
                     (repo_uri_val, *tracked_paths),
                 )
             else:
                 conn.execute(
                     "DELETE FROM nodes WHERE repo = ? "
-                    "AND kind NOT IN ('package', 'app', 'builtin', 'dependency') "
+                    "AND kind NOT IN ('package', 'app', 'builtin', 'dependency', 'solution') "
                     "AND path IS NOT NULL",
                     (repo_uri_val,),
                 )
@@ -299,6 +306,7 @@ def _update_one_repo(
         # dependencies are re-sourced to the Repository node, which
         # structural_nodes.emit is what creates.
         packages.link_repository_dependencies(conn, deferred_repo_deps, ctx=ctx)
+        csharp_projects.link_repository_solutions(conn, discovered_solutions, ctx=ctx)
         agent_plugins.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
         # Packages emitted above (packages.refresh) and plugins emitted just
         # now may share a directory; link the Package facet to its

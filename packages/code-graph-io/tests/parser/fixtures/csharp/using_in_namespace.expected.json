@@ -1,0 +1,21 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "csharp",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "import", "target_name": "System.Text", "target_module": "System.Text", "attrs": {}}
+  ],
+  "children": [
+    {
+      "kind": "class",
+      "name": "Widget",
+      "language": "csharp",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

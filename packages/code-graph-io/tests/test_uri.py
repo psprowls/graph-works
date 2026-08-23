@@ -16,6 +16,7 @@ from code_graph_io.uri import (
     parse_remote_url,
     pkg_uri,
     repo_uri,
+    solution_uri,
     subpkg_uri,
 )
 from code_graph_io.uri import test_suite_uri as _test_suite_uri  # alias: avoid pytest collection
@@ -73,6 +74,10 @@ def test_valid_kinds_excludes_package_family() -> None:
 def test_agent_plugin_uri() -> None:
     ctx = RepoContext(org="test", repo="repo")
     assert agent_plugin_uri(ctx, "agent-workspace") == "agent_plugin:test/repo/agent-workspace"
+
+
+def test_solution_uri() -> None:
+    assert solution_uri(RepoContext("org", "repo"), "MyApp") == "solution:org/repo/MyApp"
 
 
 def test_dependency_uri() -> None:

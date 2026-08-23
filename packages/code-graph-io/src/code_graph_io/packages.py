@@ -71,11 +71,20 @@ def _prune_vanished(
     (schema.py) removes the node's edges along with it.
     """
     rows = conn.execute(
-        "SELECT id, kind, name, path FROM nodes WHERE kind IN ('package', 'app') "
+        "SELECT id, kind, name, path, attrs_json FROM nodes WHERE kind IN ('package', 'app') "
         "AND ((? IS NULL AND repo IS NULL) OR repo = ?)",
         (current_repo, current_repo),
     ).fetchall()
-    stale_ids = [row[0] for row in rows if (row[1], row[2], row[3]) not in keep_keys]
+    stale_ids = [
+        row[0]
+        for row in rows
+        # C#-sourced package rows belong to csharp_projects._prune_vanished_packages.
+        # Without this, they are deleted here and re-inserted by csharp_projects.refresh
+        # on every pass -- the end state is correct, but node ids churn and every edge
+        # touching them is cascade-deleted and rebuilt.
+        if (json.loads(row[4]) if row[4] else {}).get("language") != "csharp"
+        and (row[1], row[2], row[3]) not in keep_keys
+    ]
     if stale_ids:
         placeholders = ",".join("?" for _ in stale_ids)
         conn.execute(f"DELETE FROM nodes WHERE id IN ({placeholders})", stale_ids)
@@ -119,6 +128,8 @@ def _dependency_registry_url(ecosystem: str, name: str) -> str:
         return f"https://pypi.org/project/{name}/"
     if ecosystem == "npm":
         return f"https://www.npmjs.com/package/{name}"
+    if ecosystem == "nuget":
+        return f"https://www.nuget.org/packages/{name}/"
     raise ValueError(f"unsupported dependency ecosystem: {ecosystem!r}")
 
 

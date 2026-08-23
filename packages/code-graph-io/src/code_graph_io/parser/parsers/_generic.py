@@ -69,6 +69,12 @@ def _collect_parse_errors(root: tree_sitter.Node) -> list[dict[str, int]]:
     return errors
 
 
+def _unwrap_call_node(node: tree_sitter.Node, config: LanguageConfig) -> tree_sitter.Node:
+    if node.type not in config.call_unwrap_node_types:
+        return node
+    return next((c for c in node.children if c.type == "identifier"), node)
+
+
 def _extract_call_target(
     call_node: tree_sitter.Node, source: bytes, config: LanguageConfig
 ) -> tuple[str, dict[str, Any]]:
@@ -83,9 +89,9 @@ def _extract_call_target(
             attrs["receiver"] = _text(obj, source)
         prop = fn.child_by_field_name(config.call_member_field)
         if prop is not None:
-            return (_text(prop, source), attrs)
-        return (_text(fn, source), attrs)
-    return (_text(fn, source), {"is_member": False})
+            return (_text(_unwrap_call_node(prop, config), source), attrs)
+        return (_text(_unwrap_call_node(fn, config), source), attrs)
+    return (_text(_unwrap_call_node(fn, config), source), {"is_member": False})
 
 
 def _extract_calls(body: tree_sitter.Node, source: bytes, config: LanguageConfig) -> list[Reference]:
@@ -138,7 +144,7 @@ def _build_function_node(
         language=language,
         package=package,
     )
-    if kind == "method" and name in ("constructor",):
+    if kind == "method" and (node.type == "constructor_declaration" or name in ("constructor",)):
         fn.attrs["is_constructor"] = True
     if body is not None:
         fn.refs.extend(_extract_calls(body, source, config))
@@ -147,15 +153,18 @@ def _build_function_node(
     return fn
 
 
-_TS_KIND_MAP: dict[str, str] = {
+_KIND_ALIASES: dict[str, str] = {
     "interface_declaration": "interface",
     "type_alias_declaration": "type_alias",
     "enum_declaration": "enum",
+    "abstract_class_declaration": "abstract_class",  # TS — untagged before this rename
+    "record_declaration": "record",  # C#
+    "struct_declaration": "struct",  # C#
 }
 
 
-def _ts_kind_for(node_type: str) -> str:
-    return _TS_KIND_MAP.get(node_type, node_type)
+def _kind_for(node_type: str) -> str:
+    return _KIND_ALIASES.get(node_type, node_type)
 
 
 def _build_type_node(
@@ -174,7 +183,7 @@ def _build_type_node(
         path=path,
         language=language,
         package=package,
-        attrs={"ts_kind": _ts_kind_for(node.type)},
+        attrs={"subkind": _kind_for(node.type)},
     )
 
 
@@ -195,6 +204,7 @@ def _build_class_node(
         path=path,
         language=language,
         package=package,
+        attrs={"subkind": _kind_for(node.type)} if node.type in _KIND_ALIASES else {},
     )
     if body is not None:
         for child in body.children:
@@ -289,6 +299,11 @@ def _walk_container(
     """
     out: list[SourceNode] = []
     for child in node.children:
+        if child.type in config.transparent_container_types:
+            body = _resolve_body(child, config)
+            if body is not None:
+                out.extend(_walk_container(body, source, path, language, package, config))
+            continue
         if child.type in config.class_types:
             out.append(_build_class_node(child, source, path, language, package, config))
         elif child.type in config.function_types:
@@ -326,7 +341,34 @@ def _extract_imports(file_root: tree_sitter.Node, source: bytes, config: Languag
     """Pull import edges off the top level of a file."""
     refs: list[Reference] = []
     for child in file_root.children:
+        if child.type in config.transparent_container_types:
+            body = _resolve_body(child, config)
+            if body is not None:
+                refs.extend(_extract_imports(body, source, config))
+            continue
         if child.type not in config.import_types:
+            continue
+        if config.import_module_node_types:
+            alias_node = child.child_by_field_name(config.name_field)
+            # `!=` (not `is not`): alias_node and each c come from separate
+            # tree-sitter accessor calls, so even the "same" underlying node
+            # can surface as distinct Node wrapper objects.
+            target = next(
+                (c for c in child.children if c.type in config.import_module_node_types and c != alias_node),
+                None,
+            )
+            if target is None:
+                continue
+            attrs: dict[str, Any] = {"alias": _text(alias_node, source)} if alias_node is not None else {}
+            refs.append(
+                Reference(
+                    kind="import",
+                    target_name=_text(target, source),
+                    target_module=_text(target, source),
+                    site=_span(child),
+                    attrs=attrs,
+                )
+            )
             continue
         # Module path is typically the first 'string' descendant.
         module = None

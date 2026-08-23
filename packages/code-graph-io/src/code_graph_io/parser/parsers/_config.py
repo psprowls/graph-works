@@ -44,6 +44,31 @@ class LanguageConfig:
     # when looking for symbols at one nesting level).
     function_boundary_types: frozenset[str] = frozenset()
 
+    transparent_container_types: frozenset[str] = frozenset()
+    """Containers that hold declarations but emit no SourceNode of their own.
+
+    C#'s `namespace_declaration` is the motivating case: symbols inside it belong
+    to the file, not to a namespace node. Walked through in both directions --
+    `_walk_container` descends for symbols, `_extract_imports` for import refs.
+    """
+
+    import_module_node_types: frozenset[str] = frozenset()
+    """Child node types of an import directive that name the imported module.
+
+    When set, the FIRST matching child that is not the directive's `name`-field
+    child supplies the whole import target, replacing the identifier walk. C#
+    needs this because a `using` has no string literal: `using System.Text.Json;`
+    is one `qualified_name`, which the identifier walk shreds into three refs.
+    """
+
+    call_unwrap_node_types: frozenset[str] = frozenset()
+    """Wrapper nodes to descend through when naming a call target.
+
+    C#'s `Foo<int>()` puts a `generic_name` in the invocation's `function` field;
+    its text includes the type arguments, so the target never matches a symbol
+    named `Foo`.
+    """
+
     # Per-language attribute extractors are wired in `_generic.py`; this
     # struct stays declarative so it can be inspected/diffed in tests.
     extra_attrs: tuple[str, ...] = field(default_factory=tuple)

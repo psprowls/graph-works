@@ -13,7 +13,7 @@
       "name": "MyId",
       "language": "typescript",
       "package": "fixtures",
-      "attrs": {"ts_kind": "type_alias"},
+      "attrs": {"subkind": "type_alias"},
       "refs": [],
       "children": []
     }

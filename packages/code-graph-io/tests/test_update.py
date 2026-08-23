@@ -76,3 +76,115 @@ def test_full_build_package_node_carries_language(tmp_path: Path) -> None:
         assert json.loads(attrs_json)["language"] == "python"
     finally:
         conn.close()
+
+
+@pytest.mark.integration
+def test_csharp_solution_wired_into_full_update(tmp_path: Path) -> None:
+    """Regression: csharp_projects is wired into the update pipeline.
+
+    A full update over a repo with a .sln + .csproj produces a `solution`
+    node with a `physically_contains` edge FROM the `repository` node
+    (Task 8). A second full-mode pass must not delete the solution node
+    (regression guard for Task 5's DELETE-exclusion fix).
+    """
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "src/MyLib/MyLib.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                "<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>\n"
+            ),
+            "MyApp.sln": (
+                "Microsoft Visual Studio Solution File, Format Version 12.00\n"
+                "# Visual Studio Version 17\n"
+                'Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MyLib", '
+                '"src\\MyLib\\MyLib.csproj", "{EEEEEEEE-EEEE-EEEE-EEEE-EEEEEEEEEEEE}"\nEndProject\n'
+            ),
+        },
+        "init",
+    )
+
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
+
+    conn = _open_ro(tmp_path)
+    try:
+        sol_row = conn.execute("SELECT id, name FROM nodes WHERE kind='solution' AND name='MyApp'").fetchone()
+        assert sol_row is not None, "solution node not found"
+        sol_id, _ = sol_row
+
+        repo_row = conn.execute("SELECT id FROM nodes WHERE kind='repository'").fetchone()
+        assert repo_row is not None, "repository node not found"
+        repo_id = repo_row[0]
+
+        edge = conn.execute(
+            "SELECT 1 FROM edges WHERE src = ? AND dst = ? AND kind = 'physically_contains'",
+            (repo_id, sol_id),
+        ).fetchone()
+        assert edge is not None, "expected repository -physically_contains-> solution edge"
+    finally:
+        conn.close()
+
+    # Second full-mode pass: the solution node must survive (regression guard
+    # for Task 5's DELETE-exclusion fix in `_update_one_repo`'s full-mode
+    # cleanup, which excludes kind='solution').
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
+
+    conn = _open_ro(tmp_path)
+    try:
+        sol_row = conn.execute("SELECT id FROM nodes WHERE kind='solution' AND name='MyApp'").fetchone()
+        assert sol_row is not None, "solution node was deleted by a second full-mode rebuild"
+    finally:
+        conn.close()
+
+
+@pytest.mark.integration
+def test_csharp_package_node_id_stable_across_runs(tmp_path: Path) -> None:
+    """Regression: packages._prune_vanished must not delete C#-sourced package
+    rows -- it deletes them and csharp_projects.refresh immediately re-inserts
+    them with a new row id, so the id churns on every full-mode pass
+    (observed 5 -> 11) and every edge touching the node is cascade-rebuilt.
+    """
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "src/Core/Core.csproj": (
+                '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup>'
+                "<TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>\n"
+            ),
+        },
+        "init",
+    )
+
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
+    conn = _open_ro(tmp_path)
+    try:
+        first_id = conn.execute("SELECT id FROM nodes WHERE kind='package' AND name='Core'").fetchone()[0]
+    finally:
+        conn.close()
+
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
+    conn = _open_ro(tmp_path)
+    try:
+        second_id = conn.execute("SELECT id FROM nodes WHERE kind='package' AND name='Core'").fetchone()[0]
+    finally:
+        conn.close()
+
+    assert first_id == second_id
+
+
+@pytest.mark.integration
+def test_full_update_with_csharp_using_and_project_completes(tmp_path: Path) -> None:
+    """A C# using must not introduce a null-path import stub into builtins.refresh."""
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "App.csproj": '<Project Sdk="Microsoft.NET.Sdk" />\n',
+            "Program.cs": "using System;\nclass Program {}\n",
+        },
+        "init",
+    )
+
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)

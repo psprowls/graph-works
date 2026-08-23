@@ -1,0 +1,23 @@
+{
+  "kind": "file",
+  "name": null,
+  "language": "csharp",
+  "package": "fixtures",
+  "attrs": {},
+  "refs": [
+    {"kind": "import", "target_name": "System.X.Y", "target_module": "System.X.Y", "attrs": {"alias": "Alias"}},
+    {"kind": "import", "target_name": "System.Console", "target_module": "System.Console", "attrs": {}},
+    {"kind": "import", "target_name": "System.Linq", "target_module": "System.Linq", "attrs": {}}
+  ],
+  "children": [
+    {
+      "kind": "class",
+      "name": "Empty",
+      "language": "csharp",
+      "package": "fixtures",
+      "attrs": {},
+      "refs": [],
+      "children": []
+    }
+  ]
+}

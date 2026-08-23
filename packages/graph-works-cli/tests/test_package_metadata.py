@@ -10,8 +10,11 @@ from email.parser import BytesParser
 from email.policy import default
 from pathlib import Path
 
+import pytest
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
+
+_WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 
 #: The fake index this test resolves against. Each workspace entry must carry
 #: that package's **currently declared** version, or the resolution below is
@@ -21,8 +24,8 @@ from packaging.utils import canonicalize_name
 #: `test_every_stubbed_workspace_version_is_the_declared_one` pins that.
 _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "click": ("8.0.0",),
-    "code-graph-io": ("0.1.0", "0.1.1", "0.2.0"),
-    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0"),
+    "code-graph-io": ("0.1.0", "0.1.1", "0.2.0", "0.3.0"),
+    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0"),
     "config-io": ("0.1.0",),
     "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2"),
     "langchain-core": ("1.4.0",),
@@ -42,6 +45,60 @@ def _metadata_requirements(wheel: Path) -> tuple[Requirement, ...]:
     return tuple(Requirement(value) for value in message.get_all("Requires-Dist", []))
 
 
+def _manifest_requirements(relative_manifest: str) -> dict[str, Requirement]:
+    with (_WORKSPACE_ROOT / relative_manifest).open("rb") as handle:
+        project = tomllib.load(handle)["project"]
+    return {
+        canonicalize_name(requirement.name): requirement
+        for raw in project["dependencies"]
+        for requirement in (Requirement(raw),)
+    }
+
+
+@pytest.mark.parametrize(
+    ("manifest", "name", "interval"),
+    [
+        (
+            "packages/code-wiki-okf/pyproject.toml",
+            "code-graph-io",
+            frozenset({">=0.3", "<0.4"}),
+        ),
+        (
+            "packages/graph-works-core/pyproject.toml",
+            "code-graph-io",
+            frozenset({">=0.3", "<0.4"}),
+        ),
+        (
+            "packages/graph-works-core/pyproject.toml",
+            "code-wiki-okf",
+            frozenset({">=0.5", "<0.6"}),
+        ),
+        (
+            "packages/graph-works-cli/pyproject.toml",
+            "code-graph-io",
+            frozenset({">=0.3", "<0.4"}),
+        ),
+        (
+            "packages/graph-works-cli/pyproject.toml",
+            "code-wiki-okf",
+            frozenset({">=0.5", "<0.6"}),
+        ),
+    ],
+)
+def test_breaking_code_contract_has_exact_dependency_intervals(
+    manifest: str,
+    name: str,
+    interval: frozenset[str],
+) -> None:
+    """A stale lower/upper bound must fail even when another version resolves."""
+    requirement = _manifest_requirements(manifest)[name]
+
+    assert requirement.marker is None
+    assert requirement.url is None
+    assert not requirement.extras
+    assert frozenset(str(specifier) for specifier in requirement.specifier) == interval
+
+
 def _write_stub_wheel(directory: Path, name: str, version: str, *, extras: set[str]) -> None:
     wheel_name = canonicalize_name(name).replace("-", "_")
     dist_info = f"{wheel_name}-{version}.dist-info"
@@ -59,7 +116,7 @@ def _write_stub_wheel(directory: Path, name: str, version: str, *, extras: set[s
 
 def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path: Path) -> None:
     """Reintroducing mutually exclusive CLI/core constraints must break resolution."""
-    workspace_root = Path(__file__).resolve().parents[3]
+    workspace_root = _WORKSPACE_ROOT
     wheelhouse = tmp_path / "wheelhouse"
     wheelhouse.mkdir()
     for package in ("graph-works-cli", "graph-works-core"):
@@ -132,7 +189,7 @@ def test_every_stubbed_workspace_version_is_the_declared_one() -> None:
     when the bound has gone wrong. Asserting containment (not equality) keeps
     the older entries, which are what make an over-tight lower bound fail.
     """
-    workspace_root = Path(__file__).resolve().parents[3]
+    workspace_root = _WORKSPACE_ROOT
     for manifest in sorted(workspace_root.glob("packages/*/pyproject.toml")):
         with manifest.open("rb") as handle:
             project = tomllib.load(handle)["project"]

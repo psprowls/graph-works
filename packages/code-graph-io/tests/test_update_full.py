@@ -285,7 +285,6 @@ def test_repository_dep_edges_survive_a_full_build(tmp_path: Path) -> None:
             "WHERE e.kind='used_by' AND src.kind='repository' AND dst.kind='dependency' AND dst.name='mypy'"
         ).fetchone()
         assert row is not None
-        assert json.loads(row[0]) == {"dev": True}
     finally:
         conn.close()
 

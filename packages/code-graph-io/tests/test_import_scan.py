@@ -28,7 +28,9 @@ def _setup(tmp_path: Path) -> sqlite3.Connection:
 def _emit_pipeline(conn: sqlite3.Connection, repo_root: Path) -> None:
     """packages.refresh + structural_nodes.emit (populates File.attrs.is_test)."""
     with store.transaction(conn):
-        packages.refresh(conn, repo_root=repo_root, ctx=CTX)
+        packages.refresh(
+            conn, repo_root=repo_root, ctx=CTX, manifests=packages.discover_manifest_packages(repo_root, ctx=CTX)
+        )
         structural_nodes.emit(conn, repo_root=repo_root, ctx=CTX, skip_dirs=frozenset())
 
 

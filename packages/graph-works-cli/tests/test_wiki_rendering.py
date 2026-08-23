@@ -5,9 +5,9 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
-from code_wiki_okf.entities.lanes import SyncSummary
-from code_wiki_okf.mirror.lanes import MirrorSummary
+from code_wiki_okf.entities.sync import SyncSummary
 from code_wiki_okf.mirror.model import MirrorResult
+from code_wiki_okf.sync import MirrorSummary
 from graph_works_cli.wiki_cli.rendering import (
     bootstrap_payload,
     bootstrap_plan_payload,
@@ -291,3 +291,29 @@ def test_stats_and_proposal_payloads_have_exact_keys() -> None:
     }
     assert proposal_result["sources"] == [{"resource": "/sources/demo.md"}]
     assert proposal_result["verified"] == [{"by": "reviewer"}]
+
+
+def test_both_scan_payloads_report_identical_structural_errors(tmp_path: Path) -> None:
+    """`entity_errors` is the partial-write signal the scanner agent reports
+    verbatim (plugins/graph-works/agents/scanner.md). Emit mode must not
+    render a narrower set than normal mode, or a failed mirror repo becomes
+    invisible to the agent driving the scan.
+    """
+    structural = StructuralSummary(
+        entities=SyncSummary(
+            skipped=("packages/a.md: generator: boom",),
+            catalog_declined=(("packages/index.md", "stale"),),
+        ),
+        mirror=MirrorSummary(failed_repos=(("demo", "disk full"),)),
+    )
+
+    emit = scan_emit_payload(
+        worklist_path=tmp_path / "worklist.json",
+        briefs_dir=tmp_path / "briefs",
+        results_dir=tmp_path / "results",
+        short_head="abc1234",
+        structural=structural,
+    )
+
+    assert emit["entity_errors"] == list(structural.errors)
+    assert "demo: mirror sync failed: disk full" in emit["entity_errors"]

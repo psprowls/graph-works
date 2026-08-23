@@ -66,10 +66,10 @@ def test_skipped_pages_and_adoptions_round_trip():
         prose_tasks=(_task("pkg:a/b/widgets"),),
         truncated=1,
         skipped=(
-            SkippedPage(page="packages/ghost.md", reason="unresolved-resource"),
-            SkippedPage(page="packages/stuck.md", reason="attempts-exhausted"),
+            SkippedPage(page="repositories/demo/packages/ghost.md", reason="unresolved-resource"),
+            SkippedPage(page="repositories/demo/packages/stuck.md", reason="attempts-exhausted"),
         ),
-        adopted=("repositories/demo.md",),
+        adopted=("repositories/demo/repository.md",),
     )
     text = json.dumps(worklist_payload(worklist))
     assert worklist_from_payload(json.loads(text)) == worklist

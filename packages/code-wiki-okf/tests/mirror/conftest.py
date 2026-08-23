@@ -45,6 +45,7 @@ def graph_repo(tmp_path: Path) -> GraphRepoFixture:
     _git(["init", "-q", "-b", "main"], repo_root)
     _git(["config", "user.email", "t@t"], repo_root)
     _git(["config", "user.name", "t"], repo_root)
+    _git(["remote", "add", "origin", "https://github.com/local/pkg-repo.git"], repo_root)
     _git(["add", "-A"], repo_root)
     _git(["commit", "-q", "-m", "init"], repo_root)
 

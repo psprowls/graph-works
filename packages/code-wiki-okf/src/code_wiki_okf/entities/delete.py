@@ -1,8 +1,10 @@
-"""Deletion is reconciliation with a prose guard (epic, "Drift, staleness,
-deletion"). A page whose resource is no longer in the graph is deleted
-outright ONLY if every one of its declared `prose`-ownership sections still
-equals that section's seeded placeholder. `generated`/`template` sections
-are never checked -- they are never human-authored.
+"""Policy-typed deletion with provenance and prose guards.
+
+A stale page is considered only when its declared type belongs to the
+code-wiki placement vocabulary. It is deleted only when code-wiki provenance
+claims it and every declared ``prose`` section still equals its seeded
+placeholder. ``generated``/``template`` sections are never checked because
+they are not human-authored.
 
 The comparison logic mirrors `okf_ext.sections.rule._normalized` (line
 endings normalised, each line stripped, leading/trailing blank lines
@@ -16,13 +18,16 @@ protect an untouched optional section like Package's `## Public API`).
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Set
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from okf_ext.body import find_section
-from okf_ext.shape import SectionSet
+from okf_ext.bundle import SECTIONS_DIRNAME
+from okf_ext.shape import SectionSet, load_sections
 from okf_io import Bundle
 
-from code_wiki_okf.resources import resource_index
+from code_wiki_okf.placement import is_code_wiki_type
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,47 +72,62 @@ def _decline_reason(body: str, section_set: SectionSet, type_name: str) -> str |
     return None
 
 
-def prune_lane(
-    bundle: Bundle,
-    section_set: SectionSet,
-    *,
-    directory: str,
-    should_exist: set[str],
-    exact_depth: bool = False,
-) -> PruneResult:
-    """*directory* is a bundle-relative prefix (`"packages/"`) -- the entity
-    lane only; the mirror lane's own subdirectory under `repositories/<name>/`
-    is child 3's business and is never touched here.
+def _is_generated(document_frontmatter: Mapping[str, object]) -> bool:
+    generated = document_frontmatter.get("generated")
+    if not isinstance(generated, Mapping):
+        return False
+    actor = generated.get("by")
+    return isinstance(actor, str) and (actor == "code-wiki-okf" or actor.startswith("code-wiki-okf/"))
 
-    `exact_depth=True` additionally requires no further `/` after *directory*
-    in the concept id. A plain prefix match on `"repositories/"` also catches
-    a repo's own mirror subtree (`repositories/<name>/<rel_path>`) -- this
-    was documented as a caveat here but not actually enforced, and combining
-    the entity and mirror lanes in one `sync` run surfaced it as a real bug:
-    the entity lane would delete mirror File pages it has no business
-    touching. Callers pass `exact_depth=True` for the `repositories/` lane
-    specifically; the other five lanes have no such nested subtree and don't
-    need it.
+
+def plan_prune_entities(
+    bundle: Bundle,
+    current_resources: Set[str],
+    *,
+    declarations_dir: Path | None = None,
+) -> PruneResult:
+    """Classify stale pages without changing the bundle.
+
+    Directory names and depths are deliberately irrelevant: a misplaced
+    generated page is still ours to remove, while an unrelated human concept
+    beneath a generated directory is not.  Generated provenance and every
+    declared prose section must both remain untouched before deletion is
+    allowed.
     """
-    index = resource_index(bundle)
+    declarations_root = bundle.root if declarations_dir is None else declarations_dir
+    section_set = load_sections(declarations_root / SECTIONS_DIRNAME)
     deleted: list[str] = []
     declined: list[tuple[str, str]] = []
 
-    for resource, entry in sorted(index.by_resource.items()):
-        if not entry.concept_id.startswith(directory):
-            continue
-        if exact_depth and "/" in entry.concept_id.removeprefix(directory):
-            continue
-        if resource in should_exist:
-            continue
-        document = entry.document
+    for concept_id, document in sorted(bundle.concepts.items()):
         type_name = (document.fm.type or "").strip()
+        resource = document.fm.resource
+        if not is_code_wiki_type(type_name) or resource is None:
+            continue
+        if resource in current_resources:
+            continue
         reason = _decline_reason(document.body, section_set, type_name)
+        if reason is None and not _is_generated(document.fm_raw):
+            reason = "not-generated"
         if reason is None:
-            path = bundle.root / f"{entry.concept_id}.md"
-            path.unlink()
-            deleted.append(entry.concept_id)
+            deleted.append(concept_id)
         else:
-            declined.append((entry.concept_id, reason))
+            declined.append((concept_id, reason))
 
     return PruneResult(deleted=tuple(deleted), declined=tuple(declined))
+
+
+def prune_entities(
+    bundle: Bundle,
+    current_resources: Set[str],
+    *,
+    declarations_dir: Path | None = None,
+) -> PruneResult:
+    """Apply the exact guarded deletion classification for this bundle."""
+    plan = plan_prune_entities(bundle, current_resources, declarations_dir=declarations_dir)
+    for concept_id in plan.deleted:
+        (bundle.root / f"{concept_id}.md").unlink()
+    return plan
+
+
+__all__ = ["PruneResult", "plan_prune_entities", "prune_entities"]

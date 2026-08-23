@@ -149,7 +149,9 @@ def test_plugin_root_with_manifest_links_facet_of_to_package(tmp_path: Path, con
     (pdir / "pyproject.toml").write_text('[project]\nname = "demo"\nversion = "0.1.0"\n')
 
     ctx = RepoContext(org="t", repo="r")
-    packages.refresh(conn, repo_root=tmp_path, ctx=ctx)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=ctx, manifests=packages.discover_manifest_packages(tmp_path, ctx=ctx)
+    )
     agent_plugins.emit(conn, repo_root=tmp_path, ctx=ctx)
     agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=ctx)
 
@@ -190,7 +192,9 @@ def test_plain_package_without_plugin_gets_no_facet_of(tmp_path: Path, conn: sql
     (pdir / "pyproject.toml").write_text('[project]\nname = "plain"\nversion = "0.1.0"\n')
 
     ctx = RepoContext(org="t", repo="r")
-    packages.refresh(conn, repo_root=tmp_path, ctx=ctx)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=ctx, manifests=packages.discover_manifest_packages(tmp_path, ctx=ctx)
+    )
     agent_plugins.emit(conn, repo_root=tmp_path, ctx=ctx)
     agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=ctx)
 

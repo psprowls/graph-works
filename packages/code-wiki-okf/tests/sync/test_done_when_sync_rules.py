@@ -31,7 +31,6 @@ from code_wiki_okf.mirror.plan import plan_mirror
 from code_wiki_okf.mirror.walk import tracked_files
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import SyncSnapshot, snapshot_bundle
-from okf_ext.shape import load_sections
 from okf_io import load_bundle, validate
 
 _TODAY = date(2026, 1, 1)
@@ -66,13 +65,11 @@ def synced_bundle(tmp_path: Path):
         repos=(RepoConfig(name="repo-a", path=repo_root, ignore=()),),
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
-    section_set = load_sections(bundle_root / "sections")
-
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
         repo = config.repos[0]
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=walked[repo.name], sha=first_sha, at=_AT)
-        apply_mirror(load_bundle(bundle_root), plan, repo, section_set=section_set)
+        apply_mirror(bundle_root, plan, today=_TODAY)
 
     return repo_root, graph_dir, bundle_root, config, first_sha
 
@@ -93,18 +90,18 @@ def test_doctored_last_updated_commit_fires_stale_page(synced_bundle) -> None:
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
 
-    assert "file:repo-a/src/mod.py" in snapshot.stale
+    assert "file:local/repo-a/src/mod.py" in snapshot.stale
 
     report = validate(load_bundle(bundle_root), today=_TODAY, extra_rules=[sync_rule(snapshot)])
     findings = report.by_code("sync.stale-page")
     assert len(findings) == 1
-    assert "file:repo-a/src/mod.py" in findings[0].message
+    assert "file:local/repo-a/src/mod.py" in findings[0].message
 
 
 def test_orphan_after_source_removed_regardless_of_prose_edit(synced_bundle) -> None:
     repo_root, graph_dir, bundle_root, config, _first_sha = synced_bundle
 
-    page_path = bundle_root / "repositories" / "repo-a" / "fs" / "src" / "mod.py.md"
+    page_path = bundle_root / "repositories" / "repo-a" / "files" / "src" / "mod.py.md"
     assert page_path.exists()
 
     # A human-authored prose edit -- `apply_mirror`'s deletion guard (see
@@ -126,12 +123,12 @@ def test_orphan_after_source_removed_regardless_of_prose_edit(synced_bundle) -> 
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
 
-    assert "file:repo-a/src/mod.py" in snapshot.orphaned
+    assert "file:local/repo-a/src/mod.py" in snapshot.orphaned
 
     report = validate(load_bundle(bundle_root), today=_TODAY, extra_rules=[sync_rule(snapshot)])
     findings = report.by_code("sync.orphan-page")
     assert len(findings) == 1
-    assert findings[0].path == "repositories/repo-a/fs/src/mod.py.md"
+    assert findings[0].path == "repositories/repo-a/files/src/mod.py.md"
 
 
 def test_vendored_bundles_report_zero_sync_findings() -> None:

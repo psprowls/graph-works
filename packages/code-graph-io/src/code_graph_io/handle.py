@@ -28,6 +28,7 @@ from code_graph_io.queries import (
     EntryPointDescription,
     ExporterRecord,
     ExportRecord,
+    FileDescription,
     ImporterRecord,
     ImportRecord,
     MatchRecord,
@@ -123,16 +124,20 @@ class GraphReader:
         return queries.describe_symbol(self._conn, kind=kind, name=name, in_package=in_package, path=path, line=line)
 
     @_locked
-    def describe_package(self, *, name: str) -> PackageDescription | None:
-        return queries.describe_package(self._conn, name=name)
+    def describe_package(self, *, name: str, uri: str | None = None) -> PackageDescription | None:
+        return queries.describe_package(self._conn, name=name, uri=uri)
 
     @_locked
-    def describe_app(self, *, name: str) -> AppDescription | None:
-        return queries.describe_app(self._conn, name=name)
+    def describe_app(self, *, name: str, uri: str | None = None) -> AppDescription | None:
+        return queries.describe_app(self._conn, name=name, uri=uri)
 
     @_locked
     def describe_path(self, *, path: str) -> PathDescription | None:
         return queries.describe_path(self._conn, path=path)
+
+    @_locked
+    def describe_file(self, *, uri: str) -> FileDescription | None:
+        return queries.describe_file(self._conn, uri=uri)
 
     @_locked
     def describe_repository(self) -> RepoDescription | None:
@@ -143,8 +148,8 @@ class GraphReader:
         return queries.describe_entry_point(self._conn, package_name=package_name, entry_name=entry_name)
 
     @_locked
-    def describe_test_suite(self, *, suite_name: str) -> SuiteDescription | None:
-        return queries.describe_test_suite(self._conn, suite_name=suite_name)
+    def describe_test_suite(self, *, suite_name: str, uri: str | None = None) -> SuiteDescription | None:
+        return queries.describe_test_suite(self._conn, suite_name=suite_name, uri=uri)
 
     @_locked
     def describe_dependency(self, *, ecosystem: str, name: str) -> DependencyDescription | None:
@@ -155,8 +160,8 @@ class GraphReader:
         return queries.describe_builtin(self._conn, language=language, module_name=module_name)
 
     @_locked
-    def describe_agent_plugin(self, *, name: str) -> AgentPluginDescription | None:
-        return queries.describe_agent_plugin(self._conn, name=name)
+    def describe_agent_plugin(self, *, name: str, uri: str | None = None) -> AgentPluginDescription | None:
+        return queries.describe_agent_plugin(self._conn, name=name, uri=uri)
 
     # --- call graph ---
     @_locked

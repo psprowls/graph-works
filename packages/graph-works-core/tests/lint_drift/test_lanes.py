@@ -127,6 +127,54 @@ def test_the_wiki_lane_carries_every_declared_capability(workspace):
     assert len(wiki.rules) == 6  # health, render, schema, section, vocabulary, placement — no reader
 
 
+def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
+    bundle_dir = workspace.layout.bundle_dir
+    page = bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\n"
+        "type: Package\n"
+        "title: Widgets\n"
+        "resource: pkg:acme/demo/widgets\n"
+        "description: A demo package.\n"
+        "---\n\n"
+        "## Purpose\n\nA demo.\n\n"
+        "## Public API\n\nNone.\n\n"
+        "## Files\n\n_(none)_\n",
+        encoding="utf-8",
+    )
+
+    wiki, _work = _compose(workspace).lanes
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+
+    assert not any(finding.code == "placement.directory-mismatch" for finding in report.findings)
+
+
+def test_the_wiki_lane_rejects_the_retired_flat_package_lane(workspace):
+    bundle_dir = workspace.layout.bundle_dir
+    page = bundle_dir / "packages" / "widgets.md"
+    page.parent.mkdir(parents=True)
+    page.write_text(
+        "---\n"
+        "type: Package\n"
+        "title: Widgets\n"
+        "resource: pkg:acme/demo/widgets\n"
+        "description: A demo package.\n"
+        "---\n\n"
+        "## Purpose\n\nA demo.\n\n"
+        "## Public API\n\nNone.\n\n"
+        "## Files\n\n_(none)_\n",
+        encoding="utf-8",
+    )
+
+    wiki, _work = _compose(workspace).lanes
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+
+    mismatch = [finding for finding in report.findings if finding.code == "placement.directory-mismatch"]
+    assert len(mismatch) == 1
+    assert "repositories/demo/packages/widgets" in mismatch[0].message
+
+
 def test_a_reader_adds_the_sync_rule(workspace, monkeypatch):
     from graph_works_core.lint_drift import lanes as lanes_module
 
@@ -153,7 +201,7 @@ def test_absent_wiki_declarations_are_a_fact_but_the_work_lane_now_requires_them
     (config_dir / VOCABULARY_FILENAME).unlink()
     lanes = _compose(workspace)
     assert [lane.name for lane in lanes.lanes] == ["wiki"]
-    assert len(lanes.lanes[0].rules) == 2  # health + render only
+    assert len(lanes.lanes[0].rules) == 3  # health + render + code-wiki placement
     assert len(lanes.errors) == 1
     assert "work" in lanes.errors[0]
 

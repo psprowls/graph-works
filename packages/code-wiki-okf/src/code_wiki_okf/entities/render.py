@@ -1,9 +1,10 @@
 """Pure `describe_* -> okf_ext.generators.Render` translations.
 
 No I/O, no graph reads, no clock — matching `provenance.py`'s style. The one
-intra-package import is `mirror.paths`, a `pathlib`-only leaf module: the
-`## Files` links must agree with the lane's writers about where a File page
-lives, and two hard-coded copies of that path is how they stopped agreeing.
+intra-package import is `placement`: the `## Files` links must agree with the
+lane's writers about where a File page lives, and two hard-coded copies of
+that path is how they stopped agreeing. Both sides now compute it from the
+same policy rather than each spelling the lane out.
 Provenance keys `generated` and `last_updated_commit` are added by `sync.py`,
 not here: a renderer knows a `PackageDescription`, not a commit SHA. `tokens`
 is also a declared provenance key but neither this module nor `sync.py` adds
@@ -29,17 +30,14 @@ from code_graph_io import (
 )
 from okf_ext.generators import Render
 
-from code_wiki_okf.entities.pages import slug
-from code_wiki_okf.mirror.paths import mirror_concept_id
+from code_wiki_okf.placement import canonical_member, context_from_resource
 
 _NONE_PLACEHOLDER = "_(none)_"
 
 
 def _files_section(files: Sequence[str], *, repo_name: str) -> str:
     """A `## Files` body: one root-absolute link per file into the mirror
-    lane, keyed by `mirror/paths.mirror_concept_id` — the same convention the
-    lane's own writers use, so there is one answer to where a File page lives
-    rather than a renderer's guess and a writer's.
+    lane, keyed by the canonical placement policy used by the lane's writers.
 
     **These links are existence-checked.** `okf_io._rules.links::broken` calls
     `ctx.bundle.has_member(...)` for every internal link, absolute form
@@ -49,12 +47,15 @@ def _files_section(files: Sequence[str], *, repo_name: str) -> str:
     opposite and used it to justify emitting links into a lane the caller
     might never fill — which is exactly what `gw scan` did, for 1311
     warnings. The rule is correct as written and is not to be narrowed: any
-    caller that renders these links must also run the mirror lane
-    (`mirror.lanes.sync_mirror`).
+    caller that renders these links must run the composite sync so the File
+    targets are applied in the same preflighted operation.
     """
     if not files:
         return _NONE_PLACEHOLDER
-    lines = [f"- [{path}](/{mirror_concept_id(repo_name, path)}.md)" for path in sorted(files)]
+    lines = [
+        f"- [{path}](/{canonical_member(context_from_resource('File', f'file:placement/{repo_name}/{path}'))})"
+        for path in sorted(files)
+    ]
     return "\n".join(lines) + "\n"
 
 
@@ -87,7 +88,8 @@ def _package_reference(name: str, *, repo_name: str) -> str:
     `repo_name` is the right one. Hardcoding the bundle-root `packages/`
     here would dangle on every App and dual-facet AgentPlugin page.
     """
-    return f"[{name}](/repositories/{repo_name}/packages/{slug(name)}.md)"
+    member = canonical_member(context_from_resource("Package", f"pkg:placement/{repo_name}/{name}"))
+    return f"[{name}](/{member})"
 
 
 def render_app(desc: AppDescription, *, repo_name: str) -> Render:
@@ -112,6 +114,7 @@ def render_dependency(desc: DependencyDescription) -> Render:
     return Render(
         frontmatter={
             "ecosystem": desc.ecosystem,
+            "implemented_by": list(desc.implemented_by),
             "used_by": list(desc.used_by),
             "versions_in_use": list(desc.versions_in_use),
         },

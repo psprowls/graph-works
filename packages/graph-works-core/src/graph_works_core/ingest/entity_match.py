@@ -7,24 +7,24 @@ every package in this workspace returns nothing -- so it lives here, with its
 only consumer. If a second consumer appears, moving this module into
 `code-wiki-okf` is the follow-up, and the ADR is the reason.
 
-Importing `code_graph_io` and `code_wiki_okf.entities.pages` from here is
+Importing `code_graph_io` and `code_wiki_okf.placement` from here is
 composition, not a sibling reach: `graph-works-core` is band 3, above both
 `doc-wiki-okf` and `code-wiki-okf`, and the ADR governs two packages at the
 *same* tier.
 
-**The page id is not re-derived.** `code_wiki_okf.entities.pages.slug` is the
-scanner's own naming rule and `default_concept_id` composes it with the type's
-`x-okf-directory`; anything else here would produce a forward link resolving to
-no page.
+**The page id is not re-derived.** Resource identity is handed to the same
+placement policy the scanner's composite sync uses; anything else here would
+produce a forward link resolving to no page.
 """
 
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
 from code_graph_io import GraphReader
-from code_wiki_okf.entities.pages import default_concept_id
+from code_wiki_okf.placement import canonical_concept_id, context_from_resource
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatch, EntityMatcher
 from okf_ext.schemas import SchemaSet
 
@@ -39,20 +39,29 @@ ENTITY_KINDS: tuple[str, ...] = ("class", "function", "method", "package")
 PAGE_TYPES: dict[str, str] = {"package": "Package"}
 
 
-def lookup_by_path(reader: GraphReader, repo: Path, source: Path) -> tuple[str, str, str] | None:
+def lookup_by_path(
+    reader: GraphReader,
+    repo: Path,
+    source: Path,
+    *,
+    repository_resource: str,
+) -> tuple[str, str, str] | None:
     """`(uri, name, kind)` for the package **containing** *source*, or `None`.
 
     `None` when *source* is outside *repo* or no package contains it.
-    `package_for_file` already applies the falsy-uri guard.
+    The exact File URI scopes containment to *repo*, even when another
+    configured repository has the same relative path.
     """
     try:
         relative = source.resolve().relative_to(repo.resolve()).as_posix()
     except ValueError:
         return None
-    hit = reader.package_for_file(path=relative)
-    if hit is None:
+    repository = context_from_resource("Repository", repository_resource)
+    payload = repository.resource.removeprefix("repo:")
+    description = reader.describe_file(uri=f"file:{payload}/{relative}")
+    if description is None or description.package is None:
         return None
-    name, uri = hit
+    name, uri = description.package
     return str(uri), str(name), "package"
 
 
@@ -74,7 +83,7 @@ def lookup_by_name(reader: GraphReader, name: str) -> tuple[str, str, str] | Non
     return str(matched_uri), str(matched_name), str(kind)
 
 
-def page_id_for(schema_set: SchemaSet, *, name: str, kind: str) -> str | None:
+def page_id_for(schema_set: SchemaSet, *, resource: str, kind: str) -> str | None:
     """The entity page id for a graph hit, or `None` when its kind has no page.
 
     A `SchemaSet` that does not declare the type is a bundle whose entity lane
@@ -84,14 +93,18 @@ def page_id_for(schema_set: SchemaSet, *, name: str, kind: str) -> str | None:
     type_name = PAGE_TYPES.get(kind)
     if type_name is None:
         return None
-    try:
-        return default_concept_id(schema_set, type_name=type_name, name=name)
-    except KeyError:
-        logger.warning("no %s schema in this bundle; no entity link written for %r", type_name, name)
+    if type_name not in schema_set.schemas:
+        logger.warning("no %s schema in this bundle; no entity link written for %r", type_name, resource)
         return None
+    return canonical_concept_id(context_from_resource(type_name, resource))
 
 
-def entity_matcher(reader: GraphReader, schema_set: SchemaSet) -> EntityMatcher:
+def entity_matcher(
+    reader: GraphReader,
+    schema_set: SchemaSet,
+    *,
+    repository_resources: Mapping[Path, str],
+) -> EntityMatcher:
     """Bind *reader* and *schema_set* into the `(repo, source, title, /)` seam.
 
     The lookup order is legacy's, unchanged: by containing package path first,
@@ -100,13 +113,18 @@ def entity_matcher(reader: GraphReader, schema_set: SchemaSet) -> EntityMatcher:
     """
 
     def match_entity(repo: Path, source: Path, title: str, /) -> EntityMatch:
-        hit = lookup_by_path(reader, repo, source)
+        repository_resource = repository_resources.get(repo.resolve())
+        hit = (
+            lookup_by_path(reader, repo, source, repository_resource=repository_resource)
+            if repository_resource is not None
+            else None
+        )
         if hit is None:
             hit = lookup_by_name(reader, title)
         if hit is None:
             return NO_ENTITY
-        uri, name, kind = hit
-        return EntityMatch(uri=uri, entity_filename=page_id_for(schema_set, name=name, kind=kind))
+        uri, _name, kind = hit
+        return EntityMatch(uri=uri, entity_filename=page_id_for(schema_set, resource=uri, kind=kind))
 
     return match_entity
 

@@ -11,9 +11,10 @@ from code_graph_io import update as graph_update
 from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
-from code_wiki_okf.entities.sync import sync_entities
+from code_wiki_okf.entities.sync import apply_entities, plan_entities
 from code_wiki_okf.init import install_bundle
-from code_wiki_okf.sync.snapshot import snapshot_bundle
+from code_wiki_okf.placement import PlacementError
+from code_wiki_okf.sync.snapshot import _existing_resources_by_lane, snapshot_bundle
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
@@ -90,7 +91,7 @@ def _seed_repo(db_path: Path, org: str, repo: str, *, packages: Sequence[str] = 
 
 
 def test_package_lane_orphan_is_detected_after_removal_from_graph(tmp_path: Path) -> None:
-    """`_existing_entity_resources` (`sync/snapshot.py`) folds every entity
+    """`_existing_resources_by_lane` (`sync/snapshot.py`) folds every entity
     lane's prefix into one combined orphan check, but until now only the
     `repositories/` prefix (Repository entity vs. mirror File pages, see
     `test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page`
@@ -118,7 +119,8 @@ def test_package_lane_orphan_is_detected_after_removal_from_graph(tmp_path: Path
     )
 
     with open_reader(graph_dir=graph_dir) as reader:
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        entity_plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+        apply_entities(bundle_root, entity_plan, today=_TODAY)
 
     package_doc = load_bundle(bundle_root).concept("repositories/repo-a/packages/widgets")
     assert package_doc is not None
@@ -150,7 +152,7 @@ def test_untouched_bundle_reports_the_tracked_file_as_missing(
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
 
-    assert "file:repo-a/src/mod.py" in snapshot.missing
+    assert "file:local/repo-a/src/mod.py" in snapshot.missing
     assert not snapshot.stale
     assert not snapshot.orphaned
     assert not any(bundle_root.rglob("mod.py.md"))  # nothing written
@@ -161,12 +163,10 @@ def test_synced_bundle_is_silent(tmp_path: Path, mirror_repo: Path, graph_dir: P
     from code_wiki_okf.mirror.apply import apply_mirror
     from code_wiki_okf.mirror.plan import plan_mirror
     from code_wiki_okf.mirror.walk import tracked_files
-    from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
@@ -174,11 +174,12 @@ def test_synced_bundle_is_silent(tmp_path: Path, mirror_repo: Path, graph_dir: P
         sha = head_commit(repo.path)
         assert sha is not None
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=walked[repo.name], sha=sha, at=_AT)
-        apply_mirror(load_bundle(bundle_root), plan, repo, section_set=section_set)
+        apply_mirror(bundle_root, plan, today=_TODAY)
         # "synced" means both lanes -- the entity lane (here, just repo-a's
         # own Repository page) also has to land, or its resource shows up in
         # `.missing` forever, since nothing else in this test ever creates it.
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        entity_plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+        apply_entities(bundle_root, entity_plan, today=_TODAY)
 
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
@@ -193,12 +194,10 @@ def test_orphan_after_source_removed(tmp_path: Path, mirror_repo: Path, graph_di
     from code_wiki_okf.mirror.apply import apply_mirror
     from code_wiki_okf.mirror.plan import plan_mirror
     from code_wiki_okf.mirror.walk import tracked_files
-    from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
@@ -206,7 +205,7 @@ def test_orphan_after_source_removed(tmp_path: Path, mirror_repo: Path, graph_di
         sha = head_commit(repo.path)
         assert sha is not None
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=walked[repo.name], sha=sha, at=_AT)
-        apply_mirror(load_bundle(bundle_root), plan, repo, section_set=section_set)
+        apply_mirror(bundle_root, plan, today=_TODAY)
 
     (mirror_repo / "src" / "mod.py").unlink()
     _git(["add", "-A"], mirror_repo)
@@ -215,7 +214,7 @@ def test_orphan_after_source_removed(tmp_path: Path, mirror_repo: Path, graph_di
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
 
-    assert "file:repo-a/src/mod.py" in snapshot.orphaned
+    assert "file:local/repo-a/src/mod.py" in snapshot.orphaned
 
 
 def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it(
@@ -231,12 +230,10 @@ def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it
     from code_wiki_okf.mirror.apply import apply_mirror
     from code_wiki_okf.mirror.plan import plan_mirror
     from code_wiki_okf.mirror.walk import tracked_files
-    from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
@@ -244,9 +241,9 @@ def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it
         sha = head_commit(repo.path)
         assert sha is not None
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=walked[repo.name], sha=sha, at=_AT)
-        apply_mirror(load_bundle(bundle_root), plan, repo, section_set=section_set)
+        apply_mirror(bundle_root, plan, today=_TODAY)
 
-    page_path = bundle_root / "repositories" / "repo-a" / "fs" / "src" / "mod.py.md"
+    page_path = bundle_root / "repositories" / "repo-a" / "files" / "src" / "mod.py.md"
     assert page_path.exists()
     placeholder = (
         "> TODO: anything a reader should know about this file that the generated sections below don't capture."
@@ -262,29 +259,30 @@ def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
 
-    assert "file:repo-a/src/mod.py" in snapshot.orphaned
+    assert "file:local/repo-a/src/mod.py" in snapshot.orphaned
 
 
 def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
     tmp_path: Path, mirror_repo: Path, graph_dir: Path
 ) -> None:
-    """`repositories/repo-a` (the Repository entity page) and
-    `repositories/repo-a/fs/src/mod.py` (a mirror File page) coexist under the
+    """The canonical Repository entity and File page coexist below one repo.
+
+    `repositories/repo-a/repository` and
+    `repositories/repo-a/files/src/mod.py` must be classified from their
+    declared types and canonical resources, not from their relative depths.
     same `repositories/` prefix. Removing the mirrored file's *source* must
     orphan only the mirror page, never the Repository entity page whose own
     resource (`repo:...`) is unrelated and still current. This is the
-    guarantee `is_entity_lane_page`'s depth check exists for.
+    guarantee the placement policy owns.
     """
     from code_wiki_okf.git_state import head_commit
     from code_wiki_okf.mirror.apply import apply_mirror
     from code_wiki_okf.mirror.plan import plan_mirror
     from code_wiki_okf.mirror.walk import tracked_files
-    from okf_ext.shape import load_sections
 
     bundle_root = tmp_path / "bundle"
     install_bundle(bundle_root, today=_TODAY, dry_run=False)
     config = _config(tmp_path, graph_dir, mirror_repo, bundle_root=bundle_root)
-    section_set = load_sections(bundle_root / "sections")
 
     with open_reader(graph_dir=graph_dir) as reader:
         walked = tracked_files(config)
@@ -292,12 +290,13 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
         sha = head_commit(repo.path)
         assert sha is not None
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=walked[repo.name], sha=sha, at=_AT)
-        apply_mirror(load_bundle(bundle_root), plan, repo, section_set=section_set)
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        apply_mirror(bundle_root, plan, today=_TODAY)
+        entity_plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+        apply_entities(bundle_root, entity_plan, today=_TODAY)
 
     after_sync = load_bundle(bundle_root)
-    assert (bundle_root / "repositories" / "repo-a.md").exists()
-    repo_resource = after_sync.concepts["repositories/repo-a"].fm.resource
+    assert (bundle_root / "repositories" / "repo-a" / "repository.md").exists()
+    repo_resource = after_sync.concepts["repositories/repo-a/repository"].fm.resource
     assert repo_resource is not None
 
     # Both lanes are fully synced and the source file still exists: nothing
@@ -305,7 +304,7 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
     # -- if the depth check were instead too permissive (treating every
     # `repositories/repo-a/**` mirror page as an entity resource too), the
     # still-current mirror File page would be wrongly folded into
-    # `_existing_entity_resources` and then subtracted against
+    # `_existing_resources_by_lane` and then subtracted against
     # `entity_plan.current_resources` (which knows nothing about mirror
     # resources), reporting it as orphaned despite its source being intact.
     with open_reader(graph_dir=graph_dir) as reader:
@@ -319,5 +318,83 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
     with open_reader(graph_dir=graph_dir) as reader:
         snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
 
-    assert "file:repo-a/src/mod.py" in snapshot.orphaned
+    assert "file:local/repo-a/src/mod.py" in snapshot.orphaned
     assert repo_resource not in snapshot.orphaned
+
+
+def _write_document(root: Path, concept_id: str, *, type_name: str, resource: str) -> None:
+    target = root / f"{concept_id}.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        f'---\ntype: "{type_name}"\ntitle: page\nresource: {resource}\n---\n',
+        encoding="utf-8",
+    )
+
+
+def test_existing_resources_use_declared_type_not_lane_shaped_depth(tmp_path: Path) -> None:
+    _write_document(
+        tmp_path,
+        "repositories/demo/packages/human-note",
+        type_name="Concept",
+        resource="concept:human-note",
+    )
+    _write_document(
+        tmp_path,
+        "repositories/demo/packages/widgets",
+        type_name="Package",
+        resource="pkg:acme/demo/widgets",
+    )
+    _write_document(
+        tmp_path,
+        "repositories/demo/packages/spaced",
+        type_name=" Package ",
+        resource="pkg:acme/demo/spaced",
+    )
+    _write_document(
+        tmp_path,
+        "repositories/demo/files/src/main.py",
+        type_name="File",
+        resource="file:acme/demo/src/main.py",
+    )
+
+    entity_resources, file_resources = _existing_resources_by_lane(load_bundle(tmp_path))
+
+    assert entity_resources == frozenset({"pkg:acme/demo/widgets"})
+    assert file_resources == frozenset({"file:acme/demo/src/main.py"})
+
+
+def test_existing_resources_refuse_noncanonical_owned_page(tmp_path: Path) -> None:
+    _write_document(
+        tmp_path,
+        "repositories/demo/packages/main.py",
+        type_name="File",
+        resource="file:acme/demo/src/main.py",
+    )
+
+    with pytest.raises(PlacementError, match=r"repositories/demo/files/src/main.py"):
+        _existing_resources_by_lane(load_bundle(tmp_path))
+
+
+def test_file_from_removed_repository_remains_owned_and_is_orphaned(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed_repo(graph_dir / "code.db", "acme", "active")
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    resource = "file:acme/retired/src/mod.py"
+    _write_document(
+        bundle_root,
+        "repositories/retired/files/src/mod.py",
+        type_name="File",
+        resource=resource,
+    )
+    config = Config(
+        graph_dir=graph_dir,
+        declarations_dir=bundle_root,
+        repos=(),
+        state_gate=StateGateConfig(enabled=False, branches=()),
+    )
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        snapshot = snapshot_bundle(load_bundle(bundle_root), config, reader, at=_AT)
+
+    assert resource in snapshot.orphaned

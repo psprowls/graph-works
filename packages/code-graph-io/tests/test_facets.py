@@ -14,7 +14,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from code_graph_io import agent_plugins, packages, store, upsert
+from code_graph_io import agent_plugins, dependencies, packages, store, upsert
 from code_graph_io.queries import list_agent_plugins, list_apps, list_packages
 from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.uri import RepoContext
@@ -63,7 +63,9 @@ def test_both_derived_kinds_reachable_from_package_lane(tmp_path: Path, conn: sq
     (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "demo-plugin"}))
     (plugin_dir / "pyproject.toml").write_text('[project]\nname = "demo-plugin"\nversion = "0.1.0"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     agent_plugins.emit(conn, repo_root=tmp_path, ctx=_CTX)
     agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=_CTX)
 
@@ -91,7 +93,9 @@ def test_facet_of_resolves_for_both_derived_kinds(tmp_path: Path, conn: sqlite3.
     (plugin_dir / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "demo-plugin"}))
     (plugin_dir / "pyproject.toml").write_text('[project]\nname = "demo-plugin"\nversion = "0.1.0"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     agent_plugins.emit(conn, repo_root=tmp_path, ctx=_CTX)
     agent_plugins.link_agent_plugin_facets(conn, repo_root=tmp_path, ctx=_CTX)
 
@@ -112,9 +116,8 @@ def test_faceted_member_edges_all_source_from_package(tmp_path: Path, conn: sqli
     """Regression guard: for a dual-facet member, used_by/depends_on_package/
     contains edges must source exclusively from the Package node, never the
     App node. `depends_on_package` needs an INTERNAL (workspace) dependency
-    to fire at all (packages.py only emits it for workspace-to-workspace
-    deps, never external ones) — myapp depends on a sibling workspace
-    package for exactly that reason."""
+    to fire at all — myapp depends on a sibling workspace package for
+    exactly that reason."""
     internal_dir = tmp_path / "internal-lib"
     internal_dir.mkdir(parents=True)
     (internal_dir / "pyproject.toml").write_text('[project]\nname = "internal-lib"\nversion = "0.1.0"\n')
@@ -126,7 +129,9 @@ def test_faceted_member_edges_all_source_from_package(tmp_path: Path, conn: sqli
         '[project.scripts]\nmyapp = "myapp.cli:main"\n'
     )
     _seed_file_node(conn, "myapp/src/cli.py")
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    manifests = packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX, manifests=manifests)
+    dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
 
     for edge_kind in ("used_by", "depends_on_package", "contains"):
         src_kinds = {

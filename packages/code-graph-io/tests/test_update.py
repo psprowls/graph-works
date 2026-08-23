@@ -8,12 +8,37 @@ from pathlib import Path
 
 import pytest
 from _git_repo import init_repo, write_and_commit
-from code_graph_io import update
+from code_graph_io import packages, update
 from code_graph_io.paths import graph_dir
 
 
 def _open_ro(repo: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{graph_dir(repo) / 'code.db'}?mode=ro", uri=True)
+
+
+@pytest.mark.integration
+def test_run_workspace_discovers_each_member_manifest_once(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    init_repo(first)
+    init_repo(second)
+    write_and_commit(first, {"pyproject.toml": '[project]\nname = "first"\n'}, "init")
+    write_and_commit(second, {"pyproject.toml": '[project]\nname = "second"\n'}, "init")
+
+    original = packages.discover_manifest_packages
+    discovered: list[Path] = []
+
+    def record_discovery(repo_root: Path, *, ctx, ignore=None):
+        discovered.append(repo_root.resolve())
+        return original(repo_root, ctx=ctx, ignore=ignore)
+
+    monkeypatch.setattr(packages, "discover_manifest_packages", record_discovery)
+
+    update.run_workspace([first, second], graph_dir=graph_dir(tmp_path), full=True)
+
+    assert discovered == [first.resolve(), second.resolve()]
 
 
 @pytest.mark.integration

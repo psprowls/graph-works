@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 from code_wiki_okf.config import load_config
+from code_wiki_okf.placement import PlacementError
 from graph_works_core.scan.commands import (
     PROSE_ANCHOR_KEY,
     PROSE_ATTEMPTS_KEY,
@@ -80,7 +81,7 @@ async def test_equal_anchors_on_a_written_page_are_not_stale(scanned):
     )
     worklist, _ = await _worklist(layout, config)
     # Not a whole-worklist emptiness check: the structural pass also scaffolds
-    # `repositories/demo.md` with its own placeholder prose (§3.2's own
+    # `repositories/demo/repository.md` with its own placeholder prose (§3.2's own
     # `first_fill` rule, correctly applied to a page this suite never fills),
     # so it legitimately stays in every worklist below. The property under
     # test is the *package* page's own staleness classification.
@@ -271,7 +272,7 @@ async def test_a_dotted_package_directory_still_sees_its_own_changes(scanned):
 def _repo_page(layout, *, prose_refreshed_commit=None):
     write_page(
         layout,
-        "repositories/demo.md",
+        "repositories/demo/repository.md",
         entity_page(
             "Repository",
             title="demo",
@@ -373,7 +374,7 @@ async def test_a_page_whose_resource_no_longer_resolves_is_reported_not_dropped(
     ]
 
 
-async def test_a_lane_page_with_a_foreign_type_is_reported(scanned):
+async def test_a_non_code_wiki_type_under_a_code_wiki_directory_is_ignored(scanned):
     layout, config, _repo = scanned
     await _worklist(layout, config)
     write_page(
@@ -382,7 +383,7 @@ async def test_a_lane_page_with_a_foreign_type_is_reported(scanned):
         '---\ntype: Concept\ntitle: "odd"\ndescription: ""\n---\n\n## Purpose\n\nprose\n',
     )
     worklist, _ = await _worklist(layout, config)
-    assert ("repositories/demo/packages/odd.md", "unknown-type") in [(s.page, s.reason) for s in worklist.skipped]
+    assert not [s for s in worklist.skipped if s.page == "repositories/demo/packages/odd.md"]
 
 
 async def test_a_page_outside_the_entity_lanes_is_never_reported(scanned):
@@ -585,7 +586,7 @@ async def test_a_dependency_page_can_only_ever_first_fill(scanned):
     await _worklist(layout, config)
     write_page(
         layout,
-        "dependencies/httpx.md",
+        "dependencies/pypi/httpx.md",
         entity_page("Dependency", title="httpx", resource=DEPENDENCY_URI),
     )
     worklist, _ = await _worklist(layout, config)
@@ -718,13 +719,8 @@ def test_a_type_that_declares_no_prose_sections_yields_no_task(tmp_path):
     assert classification.skipped == ()
 
 
-async def test_a_page_whose_type_does_not_match_its_resource_is_reported(scanned):
-    """Filled prose, not placeholders: `entities.sync`'s own `prune_lane`
-    deletes a lane page outright the moment its `resource:` fails to resolve
-    *for that lane*, unless a declared prose section holds real content (see
-    `test_a_page_whose_resource_no_longer_resolves_is_reported_not_dropped`
-    above). `repositories/demo/apps/mismatch.md` carries a `pkg:` resource, which is not among
-    the apps lane's own resources, so it must be filled to survive to phase 1."""
+async def test_a_page_whose_type_does_not_match_its_resource_refuses_sync(scanned):
+    """The composite preflight refuses a duplicate resource before any write."""
     layout, config, _repo = scanned
     await _worklist(layout, config)
     write_page(
@@ -742,16 +738,16 @@ async def test_a_page_whose_type_does_not_match_its_resource_is_reported(scanned
             },
         ),
     )
-    worklist, _ = await _worklist(layout, config)
-    assert ("repositories/demo/apps/mismatch.md", "type-mismatch") in [(s.page, s.reason) for s in worklist.skipped]
+    with pytest.raises(PlacementError, match="duplicate resource"):
+        await _worklist(layout, config)
 
 
-async def test_an_unparseable_lane_page_is_reported(scanned):
+async def test_an_unparseable_page_is_not_claimed_by_its_directory(scanned):
     layout, config, _repo = scanned
     await _worklist(layout, config)
     write_page(layout, "repositories/demo/packages/broken.md", "---\ntype: [Package\n---\n\n## Purpose\n\nx\n")
     worklist, _ = await _worklist(layout, config)
-    assert ("repositories/demo/packages/broken.md", "parse-error") in [(s.page, s.reason) for s in worklist.skipped]
+    assert not [s for s in worklist.skipped if s.page == "repositories/demo/packages/broken.md"]
 
 
 async def test_a_parse_error_outside_the_entity_lanes_is_never_reported(scanned):
@@ -765,7 +761,7 @@ async def test_a_parse_error_outside_the_entity_lanes_is_never_reported(scanned)
     assert not [s for s in worklist.skipped if s.page.startswith("concepts/")]
 
 
-async def test_a_type_mismatch_outside_the_entity_lanes_is_never_reported(scanned):
+async def test_a_misplaced_code_wiki_type_refuses_composite_sync(scanned):
     layout, config, _repo = scanned
     await _worklist(layout, config)
     write_page(
@@ -773,8 +769,8 @@ async def test_a_type_mismatch_outside_the_entity_lanes_is_never_reported(scanne
         "concepts/mismatch.md",
         entity_page("Package", title="mismatch", resource=APP_URI),
     )
-    worklist, _ = await _worklist(layout, config)
-    assert not [s for s in worklist.skipped if s.page.startswith("concepts/")]
+    with pytest.raises(PlacementError, match="duplicate resource"):
+        await _worklist(layout, config)
 
 
 def test_an_unopenable_graph_raises_scan_error(tmp_path):

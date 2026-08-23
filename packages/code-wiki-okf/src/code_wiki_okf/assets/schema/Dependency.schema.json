@@ -10,6 +10,7 @@
     "description": { "type": "string" },
     "tags": { "type": "array", "items": { "type": "string" } },
     "ecosystem": { "type": "string" },
+    "implemented_by": { "type": "array", "items": { "type": "string" } },
     "used_by": { "type": "array", "items": { "type": "string" } },
     "versions_in_use": { "type": "array", "items": { "type": "string" } },
     "generated": {

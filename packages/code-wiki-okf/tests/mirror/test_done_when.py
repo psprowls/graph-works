@@ -20,13 +20,12 @@ from pathlib import Path
 from code_graph_io.handle import open_reader
 from code_graph_io.update import run_workspace
 from code_wiki_okf.config import RepoConfig
-from code_wiki_okf.entities.lanes import ENTITY_DEPTH
 from code_wiki_okf.git_state import ls_files
 from code_wiki_okf.init import install_bundle
 from code_wiki_okf.mirror.apply import apply_mirror
 from code_wiki_okf.mirror.plan import plan_mirror
-from okf_ext.placement import placement_rule
-from okf_ext.schemas import declared_directories, load_schemas, schema_rule
+from code_wiki_okf.placement import placement_rule
+from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
 from okf_ext.tags import load_vocabulary, vocabulary_rule
@@ -34,7 +33,6 @@ from okf_io import load_bundle, validate
 
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
 _TODAY = date(2026, 1, 1)
-_SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "sections"
 _NOTES_HEADING = "## Notes"
 _REPO_NAME = "acme"
 
@@ -111,6 +109,7 @@ def _fixture_repo(tmp_path: Path) -> Path:
     _git(repo, "init", "-q", "-b", "main")
     _git(repo, "config", "user.email", "t@t")
     _git(repo, "config", "user.name", "t")
+    _git(repo, "remote", "add", "origin", "https://github.com/local/acme.git")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-q", "-m", "init")
     return repo
@@ -123,11 +122,11 @@ def _new_bundle(tmp_path: Path) -> Path:
 
 
 def _collect_mirror_paths(bundle_root: Path, repo_name: str) -> set[str]:
-    """Every `.md` path under `repositories/<repo_name>/fs`, mirror-root-relative,
+    """Every `.md` path under a repository's canonical File lane, mirror-root-relative,
     excluding `index.md` at any depth -- those are the lane's own reconciled
     directory indexes, not a mirrored tracked file.
     """
-    root = bundle_root / "repositories" / repo_name / "fs"
+    root = bundle_root / "repositories" / repo_name / "files"
     if not root.exists():
         return set()
     return {path.relative_to(root).as_posix() for path in root.rglob("*.md") if path.name != "index.md"}
@@ -146,11 +145,10 @@ def _sync(bundle_root: Path, repo_root: Path, graph_dir: Path) -> None:
     tracked = ls_files(repo_root)
     assert tracked is not None, f"{repo_root}: not a git checkout"
     repo = RepoConfig(name=_REPO_NAME, path=repo_root, ignore=())
-    section_set = load_sections(_SECTIONS_DIR)
     with open_reader(graph_dir=graph_dir) as reader:
         bundle = load_bundle(bundle_root)
         plan = plan_mirror(bundle, reader, repo, tracked=tuple(tracked), sha=_head(repo_root), at=_AT)
-        apply_mirror(bundle, plan, repo, section_set=section_set)
+        apply_mirror(bundle_root, plan, today=_TODAY)
 
 
 def test_mirror_matches_fixture_tree_exactly(tmp_path: Path) -> None:
@@ -186,11 +184,11 @@ def test_synced_bundle_validates_clean(tmp_path: Path) -> None:
             schema_rule(schema_set),
             section_rule(section_set),
             vocabulary_rule(vocabulary),
-            placement_rule(declared_directories(schema_set), depth=ENTITY_DEPTH, severity="error"),
+            placement_rule(severity="error"),
         ],
     )
     assert report.ok, report.errors
-    # Every mirror page is a `File` at `repositories/<repo>/fs/<rel>`; the
+    # Every mirror page is a `File` at the placement policy's canonical member; the
     # depth half of `placement.directory-mismatch` (design spec §3.1) must not
     # false-positive on any of them, and `Repository`/`File` sharing one
     # `x-okf-directory` is exactly the case a plain prefix check would miss.
@@ -205,7 +203,7 @@ def test_rename_preserves_prose_and_repairs_inbound_links(tmp_path: Path) -> Non
 
     _sync(bundle_root, repo_root, graph_dir)
 
-    mirror_root = bundle_root / "repositories" / _REPO_NAME / "fs"
+    mirror_root = bundle_root / "repositories" / _REPO_NAME / "files"
     base_target = mirror_root / "src" / "pkg" / "base.py.md"
     user_target = mirror_root / "src" / "pkg" / "user.py.md"
     assert base_target.exists()

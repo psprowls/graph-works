@@ -384,7 +384,7 @@ def test_the_file_tools_refuse_an_entity_with_no_repository_root(tmp_path):
         uri="dependency:pypi/httpx",
         kind="Dependency",
         name="httpx",
-        page_path="dependencies/httpx.md",
+        page_path="dependencies/pypi/httpx.md",
         entity_root="",
         trigger="first_fill",
     )

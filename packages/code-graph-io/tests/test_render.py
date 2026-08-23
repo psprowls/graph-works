@@ -168,16 +168,37 @@ def test_format_dependency_spine() -> None:
     from code_graph_io.queries import DependencyDescription
 
     desc = DependencyDescription(
-        ecosystem="pypi", name="boto3", uri="dependency:pypi/boto3", versions_in_use=["1.38"], used_by=["demo"]
+        ecosystem="pypi",
+        name="boto3",
+        uri="dependency:pypi/boto3",
+        versions_in_use=["1.38"],
+        used_by=["demo"],
+        implemented_by=["pkg:acme/one/boto3", "pkg:acme/two/boto3"],
     )
     human = render.format_dependency(desc, fmt="human")
     assert human.startswith("dependency boto3\n  uri: dependency:pypi/boto3")
     assert "  ecosystem:       pypi" in human
     assert "  versions_in_use: 1.38" in human
     assert "  used_by:" in human and "demo" in human
+    assert "  implemented_by:" in human
+    assert "pkg:acme/one/boto3" in human
+    assert "pkg:acme/two/boto3" in human
     parsed = json.loads(render.format_dependency(desc, fmt="json"))
     assert parsed["attributes"]["versions_in_use"] == ["1.38"]
+    assert parsed["attributes"]["ambiguous"] is True
     assert parsed["relationships"]["used_by"] == ["demo"]
+    assert parsed["relationships"]["implemented_by"] == ["pkg:acme/one/boto3", "pkg:acme/two/boto3"]
+
+
+def test_format_dependency_json_marks_no_implementation_as_unambiguous() -> None:
+    from code_graph_io.queries import DependencyDescription
+
+    desc = DependencyDescription(ecosystem="pypi", name="boto3", uri="dependency:pypi/boto3")
+
+    parsed = json.loads(render.format_dependency(desc, fmt="json"))
+
+    assert parsed["attributes"]["ambiguous"] is False
+    assert parsed["relationships"] == {"implemented_by": []}
 
 
 def test_format_builtin_spine() -> None:

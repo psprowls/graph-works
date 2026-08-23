@@ -498,8 +498,10 @@ def format_dependency(desc: DependencyDescription, fmt: str) -> str:
     attributes = [
         Attr.scalar("ecosystem", "ecosystem", desc.ecosystem),
         Attr.joined("versions_in_use", "versions_in_use", list(desc.versions_in_use)),
+        Attr.scalar("ambiguous", "ambiguous", desc.ambiguous),
     ]
     rels = [Rel("used_by", "used_by", list(desc.used_by))] if desc.used_by else []
+    rels.append(Rel("implemented_by", "implemented_by", list(desc.implemented_by)))
     return describe_block(
         kind="dependency",
         name=desc.name,

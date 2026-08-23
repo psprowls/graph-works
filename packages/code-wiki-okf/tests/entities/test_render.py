@@ -1,3 +1,4 @@
+import pytest
 from code_graph_io import (
     AgentPluginDescription,
     AppDescription,
@@ -49,8 +50,8 @@ def test_render_package_owned_frontmatter_and_files_section() -> None:
         "entry_points": ["okf-io"],
     }
     assert render.sections.keys() == {"Files"}
-    assert "/repositories/agent-workspace/fs/packages/okf-io/src/okf_io/bundle.py.md" in render.sections["Files"]
-    assert "/repositories/agent-workspace/fs/packages/okf-io/src/okf_io/document.py.md" in render.sections["Files"]
+    assert "/repositories/agent-workspace/files/packages/okf-io/src/okf_io/bundle.py.md" in render.sections["Files"]
+    assert "/repositories/agent-workspace/files/packages/okf-io/src/okf_io/document.py.md" in render.sections["Files"]
 
 
 def test_render_package_empty_files_renders_none_placeholder() -> None:
@@ -73,7 +74,7 @@ def test_render_app_frontmatter_drops_packaging_facts_for_a_package_reference() 
     )
     render = render_app(desc, repo_name="agent-workspace")
     assert render.frontmatter == {"package": "[cli-app](/repositories/agent-workspace/packages/cli-app.md)"}
-    assert "/repositories/agent-workspace/fs/apps/cli/src/index.ts.md" in render.sections["Files"]
+    assert "/repositories/agent-workspace/files/apps/cli/src/index.ts.md" in render.sections["Files"]
 
 
 def test_render_test_suite_uses_passed_in_tested_packages() -> None:
@@ -96,7 +97,7 @@ def test_render_test_suite_lists_files_like_package_and_app() -> None:
         files=["packages/okf-io/tests/test_document.py"],
     )
     render = render_test_suite(desc, tested_packages=["okf-io"], repo_name="agent-workspace")
-    assert "/repositories/agent-workspace/fs/packages/okf-io/tests/test_document.py.md" in render.sections["Files"]
+    assert "/repositories/agent-workspace/files/packages/okf-io/tests/test_document.py.md" in render.sections["Files"]
 
 
 def test_render_test_suite_empty_files_renders_none_placeholder() -> None:
@@ -105,17 +106,27 @@ def test_render_test_suite_empty_files_renders_none_placeholder() -> None:
     assert render.sections["Files"].strip() == "_(none)_"
 
 
-def test_render_dependency_has_no_generated_sections() -> None:
+@pytest.mark.parametrize(
+    "implemented_by",
+    [
+        [],
+        ["pkg:acme/one/ruamel.yaml"],
+        ["pkg:acme/one/ruamel.yaml", "pkg:acme/two/ruamel.yaml"],
+    ],
+)
+def test_render_dependency_preserves_zero_one_or_many_implementations(implemented_by: list[str]) -> None:
     desc = DependencyDescription(
         ecosystem="pypi",
         name="ruamel.yaml",
         uri="dependency:pypi/ruamel.yaml",
         versions_in_use=["0.18.6"],
         used_by=["okf-io", "okf-ext"],
+        implemented_by=implemented_by,
     )
     render = render_dependency(desc)
     assert render.frontmatter == {
         "ecosystem": "pypi",
+        "implemented_by": implemented_by,
         "used_by": ["okf-io", "okf-ext"],
         "versions_in_use": ["0.18.6"],
     }

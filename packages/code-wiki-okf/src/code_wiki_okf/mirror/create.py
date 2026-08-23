@@ -24,9 +24,6 @@ from okf_ext.sections.scaffold import render_skeleton
 from okf_ext.shape import SectionSet
 from okf_io import parse
 
-from code_wiki_okf.config import RepoConfig
-from code_wiki_okf.mirror.paths import mirror_page_path
-
 #: The order keys are set in. `Document.set` places each one per
 #: `PREFERRED_KEY_ORDER` when the core schema knows it, and appends at the
 #: end otherwise -- so this order only matters for keys the core schema does
@@ -48,20 +45,19 @@ _KEY_ORDER: tuple[str, ...] = (
 
 def write_new_page(
     bundle_root: Path,
-    repo: RepoConfig,
-    rel_path: str,
+    member: str,
     frontmatter: dict[str, Any],
     *,
     section_set: SectionSet,
 ) -> Path:
-    """Write a fresh File page for *rel_path* at its mirrored location.
+    """Write a fresh File page at the already-planned bundle *member*.
 
     Raises `FileExistsError` if the target already exists -- this path never
     overwrites; an existing page is always an update through
     `okf_ext.generators` instead. Raises `KeyError` if `section_set` carries
     no `"File"` declaration (a caller/config error, not content).
     """
-    target = mirror_page_path(bundle_root, repo.name, rel_path)
+    target = bundle_root / member
     if target.exists():
         raise FileExistsError(f"{target}: a page already exists here; write_new_page never overwrites")
 

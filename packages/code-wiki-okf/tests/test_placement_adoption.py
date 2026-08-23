@@ -1,11 +1,4 @@
-"""What this package still owns after the rule moved to tier 2.
-
-The rule's own behaviour is `packages/okf-ext/tests/test_placement_rule.py`'s.
-What is asserted here is the composition: that the seeded declarations really
-do declare every entity lane, that the depth map covers the one pair no
-annotation can separate, and that `install_bundle`'s bundle still reports zero
-errors under the full five-rule set `cli.py:validate` builds.
-"""
+"""Adoption of the code-wiki vocabulary-specific placement policy."""
 
 from __future__ import annotations
 
@@ -13,11 +6,11 @@ import importlib.resources
 from datetime import date
 from pathlib import Path
 
-from code_wiki_okf.entities.lanes import ENTITY_DEPTH, placement_directories
+import pytest
 from code_wiki_okf.init import install_bundle
+from code_wiki_okf.placement import is_entity_lane_page, placement_rule
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import SyncSnapshot
-from okf_ext.placement import CODES, TOPIC, placement_rule
 from okf_ext.schemas import declared_directories, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
@@ -33,11 +26,10 @@ def _seed_schemas():
 
 
 def _five_rules(root: Path) -> list[Rule]:
-    """The exact list `cli.py:validate` builds, loaded from the bundle's own
-    seeded declarations rather than the package's asset directory -- child 1's
-    `test_done_when.py` pattern, and the one that actually proves the *bundle*
-    is self-describing. `SyncSnapshot.empty()` stands in for the graph walk:
-    nothing here reads a graph.
+    """The Task 4 validation composition, loaded from the seeded bundle.
+
+    `SyncSnapshot.empty()` stands in for the graph walk: nothing here reads a
+    graph. Command-level adoption follows in the later integration tasks.
     """
     schema_set = load_schemas(root / "schema")
     return [
@@ -45,42 +37,56 @@ def _five_rules(root: Path) -> list[Rule]:
         schema_rule(schema_set),
         section_rule(load_sections(root / "sections")),
         vocabulary_rule(load_vocabulary(root / "tags.yaml")),
-        placement_rule(placement_directories(schema_set), depth=ENTITY_DEPTH, severity="error"),
+        placement_rule(severity="error"),
     ]
 
 
-def test_the_seeded_schemas_declare_every_entity_lane() -> None:
-    """The composed call is only as good as what the assets declare: a schema
-    that loses its `x-okf-directory` would silently stop being checked, with
-    nothing else in the suite noticing."""
+def test_the_seeded_schemas_pin_every_type_to_its_lane_segment() -> None:
     assert declared_directories(_seed_schemas()) == {
         "AgentPlugin": "agent-plugins/",
         "App": "apps/",
         "Dependency": "dependencies/",
-        "File": "repositories/",
+        "File": "files/",
         "Package": "packages/",
         "Repository": "repositories/",
         "TestSuite": "test-suites/",
     }
 
 
-def test_the_depth_map_covers_the_one_pair_annotations_cannot_separate() -> None:
-    """`Repository` and `File` both declare `repositories/`. Every other type
-    owns its directory outright and needs no entry."""
-    declared = declared_directories(_seed_schemas())
-    shared = {name for name, directory in declared.items() if list(declared.values()).count(directory) > 1}
-    assert shared == set(ENTITY_DEPTH)
-    assert dict(ENTITY_DEPTH) == {"Repository": "exact", "File": "nested"}
+@pytest.mark.parametrize(
+    "concept_id",
+    [
+        "repositories/demo/repository",
+        "repositories/demo/packages/lib",
+        "repositories/demo/apps/web",
+        "repositories/demo/agent-plugins/reviewer",
+        "repositories/demo/test-suites/unit",
+        "dependencies/pypi/httpx",
+    ],
+)
+def test_entity_lane_ownership_recognizes_canonical_entity_ids(concept_id: str) -> None:
+    assert is_entity_lane_page(concept_id)
+
+
+@pytest.mark.parametrize(
+    "concept_id",
+    [
+        "repositories/demo/files/src/main.py",
+        "repositories/demo/repository/extra",
+        "dependencies/httpx",
+        "dependencies/pypi/httpx/extra",
+    ],
+)
+def test_entity_lane_ownership_refuses_file_and_noncanonical_ids(concept_id: str) -> None:
+    assert not is_entity_lane_page(concept_id)
 
 
 def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
 
-    # A `Dependency` page parked in the packages lane: `directory-mismatch`
-    # still fires for Dependency -- narrowing (§5) drops only the four
-    # repo-scoped types (Package/App/TestSuite/AgentPlugin), and Dependency
-    # stays global and fully prefix-checkable.
+    # A Dependency page parked in the packages lane must disagree with the
+    # exact ID computed from its resource.
     (root / "packages").mkdir()
     (root / "packages" / "httpx.md").write_text(
         '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\n---\n\n'
@@ -89,24 +95,21 @@ def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
     )
     # ...and a second page claiming the same resource, dropped by
     # find-by-resource and so invisible to deletion.
-    (root / "dependencies").mkdir()
-    (root / "dependencies" / "httpx.md").write_text(
+    (root / "dependencies" / "pypi").mkdir(parents=True)
+    (root / "dependencies" / "pypi" / "httpx.md").write_text(
         '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\n---\n\n'
         "## Why we depend on this\n\nReal text.\n\n## Gotchas / workarounds\n\nReal text.\n",
         encoding="utf-8",
     )
 
     report = validate(load_bundle(root), today=_TODAY, extra_rules=_five_rules(root))
-    fired = {finding.code for finding in report.findings if finding.code.startswith(f"{TOPIC}.")}
-    assert fired == set(CODES)
+    fired = {finding.code for finding in report.findings if finding.code.startswith("placement.")}
+    assert fired == {"placement.directory-mismatch", "placement.duplicate-resource"}
     assert not report.ok  # this package passes `error`, so the report already fails
 
 
 def test_a_nested_package_page_trips_no_placement_finding(tmp_path: Path) -> None:
-    """The narrowing this task makes: a Package page correctly nested under
-    `repositories/<repo>/packages/` must not trip `placement.directory-mismatch`
-    even though its concept id no longer starts with the schema's declared
-    `packages/` directory."""
+    """A Package at the exact resource-derived ID has no mismatch."""
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
     (root / "repositories" / "repo-a" / "packages").mkdir(parents=True)
@@ -117,7 +120,7 @@ def test_a_nested_package_page_trips_no_placement_finding(tmp_path: Path) -> Non
     )
 
     report = validate(load_bundle(root), today=_TODAY, extra_rules=_five_rules(root))
-    fired = {finding.code for finding in report.findings if finding.code.startswith(f"{TOPIC}.")}
+    fired = {finding.code for finding in report.findings if finding.code.startswith("placement.")}
     assert "placement.directory-mismatch" not in fired
 
 

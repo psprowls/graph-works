@@ -143,7 +143,8 @@ async def test_a_present_matcher_writes_the_uri_and_the_forward_link(workspace, 
         ' "x-okf-directory": "packages/"}',
         encoding="utf-8",
     )
-    reader = FakeReader(by_path={"docs/thing.md": ("okf-io", "pkg:okf-io")})
+    resource = "pkg:acme/demo/okf-io"
+    reader = FakeReader(by_file_uri={"file:acme/demo/docs/thing.md": ("okf-io", resource)})
     schema_set = load_schemas(layout.bundle_dir / SCHEMA_DIRNAME)
     result = await run_ingest_source(
         material,
@@ -151,11 +152,15 @@ async def test_a_present_matcher_writes_the_uri_and_the_forward_link(workspace, 
         repo=repo,
         today=TODAY,
         at=AT,
-        match_entity=entity_matcher(reader, schema_set),
+        match_entity=entity_matcher(
+            reader,
+            schema_set,
+            repository_resources={repo.resolve(): "repo:acme/demo"},
+        ),
     )
     page = (layout.bundle_dir / result.page).read_text(encoding="utf-8")
-    assert result.entity_uri == "pkg:okf-io"
-    assert "[/packages/okf-io.md](/packages/okf-io.md)" in page
+    assert result.entity_uri == resource
+    assert "[/repositories/demo/packages/okf-io.md](/repositories/demo/packages/okf-io.md)" in page
 
 
 async def test_a_matcher_and_a_gate_supplied_together_do_not_interfere(workspace, monkeypatch):
@@ -176,7 +181,8 @@ async def test_a_matcher_and_a_gate_supplied_together_do_not_interfere(workspace
         ' "x-okf-directory": "packages/"}',
         encoding="utf-8",
     )
-    reader = FakeReader(by_path={"docs/thing.md": ("okf-io", "pkg:okf-io")})
+    resource = "pkg:acme/demo/okf-io"
+    reader = FakeReader(by_file_uri={"file:acme/demo/docs/thing.md": ("okf-io", resource)})
     schema_set = load_schemas(layout.bundle_dir / SCHEMA_DIRNAME)
 
     def gate(repo_path, /, *, workspace):
@@ -188,12 +194,16 @@ async def test_a_matcher_and_a_gate_supplied_together_do_not_interfere(workspace
         repo=repo,
         today=TODAY,
         at=AT,
-        match_entity=entity_matcher(reader, schema_set),
+        match_entity=entity_matcher(
+            reader,
+            schema_set,
+            repository_resources={repo.resolve(): "repo:acme/demo"},
+        ),
         state_gate=gate,
     )
     page = (layout.bundle_dir / result.page).read_text(encoding="utf-8")
-    assert result.entity_uri == "pkg:okf-io"
-    assert "[/packages/okf-io.md](/packages/okf-io.md)" in page
+    assert result.entity_uri == resource
+    assert "[/repositories/demo/packages/okf-io.md](/repositories/demo/packages/okf-io.md)" in page
     assert "last_sync_commit" not in page
 
 
@@ -1028,7 +1038,8 @@ async def test_the_entity_match_re_runs_against_the_models_title(workspace, monk
         ' "x-okf-directory": "packages/"}',
         encoding="utf-8",
     )
-    reader = FakeReader(by_name={"The Splicing Writer": [("okf-io", "pkg:okf-io", "package")]})
+    resource = "pkg:acme/demo/okf-io"
+    reader = FakeReader(by_name={"The Splicing Writer": [("okf-io", resource, "package")]})
     schema_set = load_schemas(layout.bundle_dir / SCHEMA_DIRNAME)
     result = await run_ingest_source(
         material,
@@ -1036,10 +1047,16 @@ async def test_the_entity_match_re_runs_against_the_models_title(workspace, monk
         repo=repo,
         today=TODAY,
         at=AT,
-        match_entity=entity_matcher(reader, schema_set),
+        match_entity=entity_matcher(
+            reader,
+            schema_set,
+            repository_resources={repo.resolve(): "repo:acme/demo"},
+        ),
     )
-    assert result.entity_uri == "pkg:okf-io"
-    assert "[/packages/okf-io.md](/packages/okf-io.md)" in (layout.bundle_dir / result.page).read_text(encoding="utf-8")
+    assert result.entity_uri == resource
+    assert "[/repositories/demo/packages/okf-io.md](/repositories/demo/packages/okf-io.md)" in (
+        layout.bundle_dir / result.page
+    ).read_text(encoding="utf-8")
 
 
 async def test_the_entity_match_is_not_re_run_when_the_model_agrees(workspace, monkeypatch):

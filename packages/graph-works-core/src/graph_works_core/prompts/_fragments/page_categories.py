@@ -6,7 +6,7 @@ declarations rather than hand-maintained.
 
 The old `PAGE_CATEGORIES` constant was the legacy graph-wiki plugin's
 category list, not this bundle's: it named a `concept` row and a `kind:`
-frontmatter field neither schema declares, and it omitted six of the eleven
+frontmatter field neither schema declares, and it omitted seven of the twelve
 directories the bundle's own schemas *do* declare
 (`okf_ext.schemas.declared_directories`). A renderer cannot drift the way a
 hand-written table did -- add, rename or remove a schema's
@@ -19,26 +19,23 @@ prompts.
 `doc_wiki_okf.proposals.lanes.ADR_DIRECTORY`). `work_tracker_okf`'s own
 schemas (`Epic`, `Bug`, `Feature`, `Spike`, `TechDebt`, `TestGap`) do declare
 `x-okf-directory: "work/"` and are installed alongside the rest -- `work` is
-hardcoded rather than schema-derived for the same reason `File` contributes
-no second `repositories/` row below: `_TYPE_GLOSSES` is keyed on only the
-eleven top-level page kinds, so none of those six work-item types appear in
+hardcoded rather than schema-derived because `_TYPE_GLOSSES` is keyed on only
+the twelve top-level page kinds. None of those six work-item types appear in
 it, and a single `work` row (from `work_tracker_okf.WORK_DIR`) stands in for
 all six.
 
-`File` also declares `x-okf-directory: "repositories/"` -- the same
-directory `Repository` declares, for `File`'s own mirror sub-pages
-(`code_wiki_okf.entities.lanes.ENTITY_DEPTH` already names this exact
-ambiguity: `{"Repository": "exact", "File": "nested"}`). `_TYPE_GLOSSES`
-is keyed on only the eleven top-level page kinds, so `File` contributes no
-second `repositories/` row.
+`File` declares the repository-local lane segment `files/`. Its row says so
+explicitly: the schema annotation is not a claim that a top-level `files/`
+catalog exists. Repository and Dependency rows likewise name the additional
+resource identity that qualifies their canonical placement.
 
 Glosses cannot come off the schema either -- no schema property carries
 prose. Four (`tutorial`, `how-to`, `reference`, `explanation`) are reused
 verbatim from `lane_list.LANE_GLOSSES` rather than re-authored. The rest
 carry over from the retired `PAGE_CATEGORIES` constant's own prose
 unchanged (`app`, `package`, `dependency`, `source`, `adr`, `work`), or are
-new one-liners for the three directories the old table omitted
-(`test-suite`, `agent-plugin`, `repository`).
+new one-liners for the four directories the old table omitted
+(`test-suite`, `agent-plugin`, `repository`, `file`).
 """
 
 from __future__ import annotations
@@ -52,18 +49,25 @@ from work_tracker_okf import WORK_DIR
 from graph_works_core.prompts._fragments.lane_list import LANE_GLOSSES
 
 #: type_name -> (category name, gloss), for every schema type this table
-#: names a row for. A type declaring `x-okf-directory` but absent here (e.g.
-#: `File`) contributes no row -- see the module docstring.
+#: names a row for. Types absent here contribute no row -- see the module
+#: docstring for the deliberately collapsed work-item types.
 _TYPE_GLOSSES: Mapping[str, tuple[str, str]] = {
     "App": ("app", "One application workspace (web, mobile, CLI) — platform, entry points, deployment"),
     "Package": ("package", "One library/service workspace — what it exports, who depends on it, key patterns"),
-    "Dependency": ("dependency", "An external package or service the monorepo depends on"),
+    "Dependency": (
+        "dependency",
+        "An ecosystem-qualified external package or service under `dependencies/<ecosystem>/`",
+    ),
     "AgentPlugin": (
         "agent-plugin",
         "An agent or skill plugin the workspace installs — what it does, how it's invoked",
     ),
     "TestSuite": ("test-suite", "The test coverage for a package or app — what's covered, how to run it"),
-    "Repository": ("repository", "One version-controlled repository this workspace tracks"),
+    "Repository": (
+        "repository",
+        "One version-controlled repository, represented by `repositories/<repo>/repository`",
+    ),
+    "File": ("file", "A repository-local source-file mirror under that repository's `files/` lane"),
     "Tutorial": ("tutorial", LANE_GLOSSES["tutorial"]),
     "HowTo": ("how-to", LANE_GLOSSES["how-to"]),
     "Reference": ("reference", LANE_GLOSSES["reference"]),

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from pathlib import PurePosixPath
 from typing import Any
 
 from code_graph_io.handle import GraphReader
@@ -20,10 +21,17 @@ from okf_io import Bundle, Document
 
 from code_wiki_okf.config import RepoConfig
 from code_wiki_okf.git_state import earliest_common_ancestor, find_renames
-from code_wiki_okf.mirror.model import DeclinedDeletion, MirrorPlan
-from code_wiki_okf.mirror.paths import mirror_prefix
+from code_wiki_okf.mirror.model import DeclinedDeletion, MirrorPlan, MirrorTarget
 from code_wiki_okf.mirror.render import render_file
-from code_wiki_okf.resources import resource_index
+from code_wiki_okf.placement import (
+    PlacementContext,
+    PlacementError,
+    canonical_concept_id,
+    canonical_member,
+    context_from_resource,
+    filesystem_member_identity,
+)
+from code_wiki_okf.resources import ResourceIndex, resource_index
 
 _NOTES_PLACEHOLDER = (
     "> TODO: anything a reader should know about this file that the generated sections below don't capture."
@@ -99,6 +107,45 @@ def _render_matches_disk(document: Document, render: Render) -> bool:
     return all(_heading_body(document.body, heading) == content.strip() for heading, content in render.sections.items())
 
 
+def _repository_resource(reader: GraphReader, repo: RepoConfig) -> str:
+    resources = tuple(
+        sorted(
+            str(uri) for node in reader.list_repositories() if node.name == repo.name and (uri := node.attrs.get("uri"))
+        )
+    )
+    if not resources:
+        raise PlacementError(
+            resource=f"repo:{repo.name}",
+            reason=f"no graph Repository resource matches configured repository {repo.name!r}",
+        )
+    if len(resources) > 1:
+        raise PlacementError(
+            resource=resources[0],
+            reason=f"repository name {repo.name!r} is claimed by {', '.join(resources)}",
+        )
+    return resources[0]
+
+
+def _target(context: PlacementContext) -> MirrorTarget:
+    member = canonical_member(context)
+    source_path = context.source_path
+    if source_path is None:
+        raise PlacementError(resource=context.resource, reason="File placement context has no source path")
+    if PurePosixPath(member).name == "index.md":
+        raise PlacementError(
+            resource=context.resource,
+            reason="File page would collide with a reserved directory index.md",
+            expected=canonical_concept_id(context),
+        )
+    return MirrorTarget(resource=context.resource, source_path=source_path, member=member)
+
+
+def _target_from_source(repository_resource: str, source_path: str) -> MirrorTarget:
+    payload = repository_resource.removeprefix("repo:")
+    resource = f"file:{payload}/{source_path}"
+    return _target(context_from_resource("File", resource))
+
+
 def plan_mirror(
     bundle: Bundle,
     reader: GraphReader,
@@ -107,17 +154,98 @@ def plan_mirror(
     tracked: tuple[str, ...],
     sha: str,
     at: datetime,
+    index: ResourceIndex | None = None,
 ) -> MirrorPlan:
     """Plan this repo's mirror sync: creates, rich-page updates, renames, deletions."""
-    prefix = mirror_prefix(repo.name)
-    index = resource_index(bundle)
-    previous: dict[str, str] = {}  # rel_path -> concept_id, for this repo's mirror only
-    resource_prefix = f"file:{repo.name}/"
-    for resource, entry in index.by_resource.items():
-        if resource.startswith(resource_prefix):
-            previous[resource[len(resource_prefix) :]] = entry.concept_id
+    repository_resource = _repository_resource(reader, repo)
+    repository_context = context_from_resource("Repository", repository_resource)
+    repository_name = repository_context.repository
+    if repository_name is None:
+        raise PlacementError(resource=repository_resource, reason="Repository placement context has no repository")
 
-    tracked_set = set(tracked)
+    desired = {
+        source_path: _target_from_source(repository_resource, source_path) for source_path in sorted(set(tracked))
+    }
+    index = resource_index(bundle) if index is None else index
+    resource_prefix = f"file:{repository_resource.removeprefix('repo:')}/"
+    for resource, members in index.members_by_resource.items():
+        if resource.startswith(resource_prefix) and len(members) > 1:
+            raise PlacementError(
+                resource=resource,
+                reason=f"duplicate resource in {', '.join(sorted(members))}; delete duplicate pages and regenerate",
+            )
+
+    previous: dict[str, MirrorTarget] = {}
+    for resource, entry in index.by_resource.items():
+        if not resource.startswith(resource_prefix):
+            continue
+        target = _target(context_from_resource("File", resource))
+        actual_member = f"{entry.concept_id}.md"
+        if actual_member != target.member:
+            raise PlacementError(
+                resource=resource,
+                reason=f"found at {actual_member}; delete the old pre-release page and regenerate",
+                expected=target.member.removesuffix(".md"),
+            )
+        actual_type = entry.document.fm.type or ""
+        if actual_type != "File":
+            raise PlacementError(
+                resource=resource,
+                reason=f"{actual_member} declares type {actual_type or '(blank)'} instead of File",
+                expected=target.member.removesuffix(".md"),
+            )
+        previous[target.source_path] = target
+
+    resource_by_member: dict[str, tuple[str, str]] = {}
+    for target in desired.values():
+        identity = filesystem_member_identity(target.member)
+        prior = resource_by_member.get(identity)
+        if prior is not None and prior[1] != target.resource:
+            raise PlacementError(
+                resource=target.resource,
+                reason=(
+                    f"canonical member {target.member} is filesystem-equivalent to {prior[0]}, "
+                    f"which also belongs to {prior[1]}"
+                ),
+                expected=target.member.removesuffix(".md"),
+            )
+        resource_by_member[identity] = (target.member, target.resource)
+
+        path_conflicts = index.filesystem_path_conflicts_for(target.member)
+        if path_conflicts:
+            raise PlacementError(
+                resource=target.resource,
+                reason=(
+                    f"canonical member {target.member} has a filesystem-equivalent path type conflict with existing "
+                    f"{', '.join(path_conflicts)}"
+                ),
+                expected=target.member.removesuffix(".md"),
+            )
+        existing = bundle.concept(target.member.removesuffix(".md"))
+        if existing is not None and existing.fm.resource != target.resource:
+            raise PlacementError(
+                resource=target.resource,
+                reason=f"found an existing page at {target.member} with no matching resource",
+                expected=target.member.removesuffix(".md"),
+            )
+        equivalent_members = index.filesystem_members_for(target.member)
+        if equivalent_members and equivalent_members != (target.member,):
+            raise PlacementError(
+                resource=target.resource,
+                reason=(
+                    f"canonical member {target.member} is filesystem-equivalent to existing "
+                    f"{', '.join(equivalent_members)}"
+                ),
+                expected=target.member.removesuffix(".md"),
+            )
+        if existing is None and (bundle.root / target.member).exists():
+            raise PlacementError(
+                resource=target.resource,
+                reason=f"found an existing page at {target.member} with no matching resource",
+                expected=target.member.removesuffix(".md"),
+            )
+
+    tracked_set = set(desired)
     previous_set = set(previous)
     candidate_creates = tracked_set - previous_set
     candidate_deletions = previous_set - tracked_set
@@ -128,7 +256,7 @@ def plan_mirror(
     # commit must not widen the diff window.
     commits: list[str] = []
     for rel_path in candidate_deletions:
-        document = bundle.concepts[previous[rel_path]]
+        document = bundle.concepts[previous[rel_path].member.removesuffix(".md")]
         commit = document.fm.extra.get("last_updated_commit")
         if isinstance(commit, str) and commit:
             commits.append(commit)
@@ -150,20 +278,21 @@ def plan_mirror(
     candidate_creates -= set(rename_map.values())
     candidate_deletions -= set(rename_map.keys())
 
-    # `dest` is the conventional mirrored path -- exactly where a fresh
-    # create would land, since nothing lives there yet. `source` is the
-    # page's *actual* concept_id from the resource index, not a
-    # reconstruction of the conventional path from `old` -- a page found by
-    # resource may not live at the path its resource would conventionally
-    # imply, and `plan_move_many` would refuse a source that is not truly a
-    # bundle member.
-    moves_mapping = {f"{previous[old]}.md": f"{prefix}/{new}.md" for old, new in rename_map.items()}
+    # Both sides are the canonical members preflighted above. A page found at
+    # any other member has already refused planning rather than being moved as
+    # an implicit migration.
+    moves_mapping = {previous[old].member: desired[new].member for old, new in rename_map.items()}
     moves_plan = plan_move_many(bundle, moves_mapping)
 
     # --- creates ---
     creates: dict[str, tuple[dict[str, Any], Render]] = {}
     for rel_path in sorted(candidate_creates):
-        creates[rel_path] = render_file(reader, repo, rel_path, at=at, sha=sha)
+        creates[rel_path] = render_file(
+            reader,
+            context_from_resource("File", desired[rel_path].resource),
+            at=at,
+            sha=sha,
+        )
 
     # --- updates: rich pages already present, present in both sets ---
     # Keyed by the page's *actual* concept_id from the resource index, not a
@@ -171,10 +300,15 @@ def plan_mirror(
     # `resource`, never by expected path (see `resources.py`).
     updates: dict[str, Render] = {}
     for rel_path in sorted(tracked_set & previous_set):
-        _frontmatter, render = render_file(reader, repo, rel_path, at=at, sha=sha)
+        _frontmatter, render = render_file(
+            reader,
+            context_from_resource("File", desired[rel_path].resource),
+            at=at,
+            sha=sha,
+        )
         if not render.sections:  # rich only -- a bare Render() against a declared type deletes owned keys
             continue
-        concept_id = previous[rel_path]
+        concept_id = previous[rel_path].member.removesuffix(".md")
         if _render_matches_disk(bundle.concepts[concept_id], render):
             continue  # already on disk -- proposing it again is not idempotent
         updates[concept_id] = render
@@ -183,7 +317,7 @@ def plan_mirror(
     deletions: list[str] = []
     declined: list[DeclinedDeletion] = []
     for rel_path in sorted(candidate_deletions):
-        concept_id = previous[rel_path]
+        concept_id = previous[rel_path].member.removesuffix(".md")
         document = bundle.concepts[concept_id]
         if _notes_matches_placeholder(document.body):
             deletions.append(rel_path)
@@ -197,7 +331,8 @@ def plan_mirror(
             )
 
     return MirrorPlan(
-        repo=repo.name,
+        repo=repository_name,
+        targets=tuple(sorted({*desired.values(), *previous.values()}, key=lambda target: target.source_path)),
         moves=moves_plan,
         creates=creates,
         updates=updates,

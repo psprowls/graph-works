@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import logging
+import subprocess
 from pathlib import Path
 
+from code_graph_io import open_reader
+from code_graph_io.update import run_workspace
 from doc_wiki_okf.ingest.seams import NO_ENTITY
 from graph_works_core.ingest.entity_match import (
     ENTITY_KINDS,
@@ -31,17 +34,43 @@ def _schema_set(tmp_path: Path):
     return load_schemas(directory)
 
 
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+
+
+def _real_repo(root: Path, *, name: str, package: str) -> tuple[Path, Path]:
+    repo = root / name
+    source = repo / "src" / "shared" / "thing.py"
+    source.parent.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        f'[project]\nname = "{package}"\nversion = "0.1.0"\ndependencies = []\n',
+        encoding="utf-8",
+    )
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    _git(repo, "init", "-q", "-b", "main")
+    _git(repo, "config", "user.email", "t@t")
+    _git(repo, "config", "user.name", "t")
+    _git(repo, "remote", "add", "origin", f"https://github.com/acme/{name}.git")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-q", "-m", "init")
+    return repo, source
+
+
 def test_a_file_inside_a_graphed_package_matches_by_path(tmp_path):
     repo = tmp_path / "repo"
     (repo / "packages/okf-io/src").mkdir(parents=True)
     source = repo / "packages/okf-io/src/thing.py"
     source.write_text("x = 1", encoding="utf-8")
-    reader = FakeReader(by_path={"packages/okf-io/src/thing.py": ("okf-io", "pkg:okf-io")})
+    reader = FakeReader(by_file_uri={"file:acme/demo/packages/okf-io/src/thing.py": ("okf-io", "pkg:acme/demo/okf-io")})
 
-    match = entity_matcher(reader, _schema_set(tmp_path))(repo, source, "Anything")
+    match = entity_matcher(
+        reader,
+        _schema_set(tmp_path),
+        repository_resources={repo.resolve(): "repo:acme/demo"},
+    )(repo, source, "Anything")
 
-    assert match.uri == "pkg:okf-io"
-    assert match.entity_filename == "packages/okf-io"
+    assert match.uri == "pkg:acme/demo/okf-io"
+    assert match.entity_filename == "repositories/demo/packages/okf-io"
 
 
 def test_a_source_outside_the_repo_falls_through_to_the_name_lookup(tmp_path):
@@ -49,12 +78,16 @@ def test_a_source_outside_the_repo_falls_through_to_the_name_lookup(tmp_path):
     repo.mkdir()
     outside = tmp_path / "elsewhere.md"
     outside.write_text("hi", encoding="utf-8")
-    reader = FakeReader(by_name={"Okf Io": [("okf-io", "pkg:okf-io", "package")]})
+    reader = FakeReader(by_name={"Okf Io": [("okf-io", "pkg:acme/demo/okf-io", "package")]})
 
-    match = entity_matcher(reader, _schema_set(tmp_path))(repo, outside, "Okf Io")
+    match = entity_matcher(
+        reader,
+        _schema_set(tmp_path),
+        repository_resources={repo.resolve(): "repo:acme/demo"},
+    )(repo, outside, "Okf Io")
 
-    assert match.uri == "pkg:okf-io"
-    assert match.entity_filename == "packages/okf-io"
+    assert match.uri == "pkg:acme/demo/okf-io"
+    assert match.entity_filename == "repositories/demo/packages/okf-io"
 
 
 def test_no_hit_anywhere_is_NO_ENTITY(tmp_path):
@@ -63,7 +96,14 @@ def test_no_hit_anywhere_is_NO_ENTITY(tmp_path):
     source = repo / "loose.md"
     source.write_text("hi", encoding="utf-8")
 
-    assert entity_matcher(FakeReader(), _schema_set(tmp_path))(repo, source, "Loose") == NO_ENTITY
+    assert (
+        entity_matcher(
+            FakeReader(),
+            _schema_set(tmp_path),
+            repository_resources={repo.resolve(): "repo:acme/demo"},
+        )(repo, source, "Loose")
+        == NO_ENTITY
+    )
 
 
 def test_an_ambiguous_name_is_a_miss_and_is_logged_once(tmp_path, caplog):
@@ -85,14 +125,26 @@ def test_a_symbol_hit_carries_a_uri_but_no_page(tmp_path):
     source.write_text("hi", encoding="utf-8")
     reader = FakeReader(by_name={"Splice": [("Splice", "cls:okf_ext.splice#Splice", "class")]})
 
-    match = entity_matcher(reader, _schema_set(tmp_path))(repo, source, "Splice")
+    match = entity_matcher(
+        reader,
+        _schema_set(tmp_path),
+        repository_resources={repo.resolve(): "repo:acme/demo"},
+    )(repo, source, "Splice")
 
     assert match.uri == "cls:okf_ext.splice#Splice"
     assert match.entity_filename is None
 
 
-def test_the_page_id_uses_the_scanners_own_slug_rule(tmp_path):
-    assert page_id_for(_schema_set(tmp_path), name="@babel/core", kind="package") == "packages/@babel__core"
+def test_the_page_id_uses_resource_identity_and_the_placement_policy(tmp_path):
+    schema_set = _schema_set(tmp_path)
+
+    assert (
+        page_id_for(schema_set, resource="pkg:acme/demo/@babel/core", kind="package")
+        == "repositories/demo/packages/@babel__core"
+    )
+    assert page_id_for(schema_set, resource="pkg:acme/other/@babel/core", kind="package") == (
+        "repositories/other/packages/@babel__core"
+    )
 
 
 def test_a_schema_set_without_Package_declines_rather_than_raising(tmp_path, caplog):
@@ -113,7 +165,7 @@ def test_a_schema_set_without_Package_declines_rather_than_raising(tmp_path, cap
         encoding="utf-8",
     )
     with caplog.at_level(logging.WARNING):
-        assert page_id_for(load_schemas(empty), name="okf-io", kind="package") is None
+        assert page_id_for(load_schemas(empty), resource="pkg:acme/demo/okf-io", kind="package") is None
     assert any("no Package schema" in record.message for record in caplog.records)
 
 
@@ -122,10 +174,27 @@ def test_lookup_by_path_returns_none_when_the_package_has_no_row(tmp_path):
     repo.mkdir()
     source = repo / "a.py"
     source.write_text("", encoding="utf-8")
-    assert lookup_by_path(FakeReader(), repo, source) is None
+    assert lookup_by_path(FakeReader(), repo, source, repository_resource="repo:acme/demo") is None
 
 
 def test_the_name_lookup_is_restricted_to_the_four_entity_kinds():
     assert ENTITY_KINDS == ("class", "function", "method", "package")
     reader = FakeReader(by_name={"thing": [("thing", "file:thing", "file")]})
     assert lookup_by_name(reader, "thing") is None
+
+
+def test_entity_match_scopes_same_relative_path_to_its_repository(tmp_path: Path) -> None:
+    alpha, _alpha_source = _real_repo(tmp_path, name="alpha", package="alpha-pkg")
+    beta, beta_source = _real_repo(tmp_path, name="beta", package="beta-pkg")
+    graph_dir = tmp_path / "graph"
+    run_workspace([alpha, beta], graph_dir=graph_dir, full=True)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        match = entity_matcher(
+            reader,
+            _schema_set(tmp_path),
+            repository_resources={beta.resolve(): "repo:acme/beta"},
+        )(beta, beta_source, "Anything")
+
+    assert match.uri == "pkg:acme/beta/beta-pkg"
+    assert match.entity_filename == "repositories/beta/packages/beta-pkg"

@@ -106,7 +106,7 @@ def scan_emit_payload(
         "short_head": short_head,
         "entities_written": list(structural.entities.written),
         "entities_deleted": list(structural.entities.deleted),
-        "entity_errors": [f"{path}: {kind}" for path, kind in structural.entities.catalog_declined],
+        "entity_errors": list(structural.errors),
         **_mirror_keys(structural),
     }
 

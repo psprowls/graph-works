@@ -38,13 +38,12 @@ from pathlib import Path
 import work_tracker_okf
 from code_graph_io import GraphReader
 from code_wiki_okf.config import Config, ConfigError
-from code_wiki_okf.entities import lanes as entity_lanes
+from code_wiki_okf.placement import placement_rule as code_wiki_placement_rule
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import snapshot_bundle
 from config_io import PROJECTION_FILENAME
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.health import health_rule
-from okf_ext.placement import placement_rule
 from okf_ext.render import render_rule
 from okf_ext.schemas import SchemaError, load_schemas, schema_rule
 from okf_ext.sections import section_rule
@@ -119,24 +118,19 @@ def _deferred_sync_rule(config: Config, reader: GraphReader, *, at: datetime) ->
 
 
 def _wiki_rules(config: Config, reader: GraphReader | None, *, at: datetime) -> tuple[Rule, ...]:
-    """The wiki lane's rule set: two unconditional, four declaration-gated,
+    """The wiki lane's rule set: three unconditional, three declaration-gated,
     one reader-gated.
 
-    `health` and `render` read only the bundle, so they are always on.
-    `placement` is gated on `schema/` because `x-okf-directory` is a schema
-    annotation — with no schemas there is nothing to place against.
+    `health` and `render` read only the bundle, so they are always on. The
+    code-wiki placement rule reads resource identity and type ownership, not
+    generic schema directory prefixes, so it is unconditional too.
     """
-    rules: list[Rule] = [health_rule(), render_rule()]
+    rules: list[Rule] = [health_rule(), render_rule(), code_wiki_placement_rule(severity="error")]
 
     schema_dir = config.declarations_dir / SCHEMA_DIRNAME
     if schema_dir.is_dir():
         schema_set = load_schemas(schema_dir)
         rules.append(schema_rule(schema_set))
-        rules.append(
-            placement_rule(
-                entity_lanes.placement_directories(schema_set), depth=entity_lanes.ENTITY_DEPTH, severity="error"
-            )
-        )
 
     sections_dir = config.declarations_dir / SECTIONS_DIRNAME
     if sections_dir.is_dir():

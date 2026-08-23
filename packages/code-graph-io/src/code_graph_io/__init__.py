@@ -5,7 +5,7 @@ The public access surface is the GraphReader / GraphStore handle pair and the
 open_reader / open_writer openers re-exported below.
 """
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 from code_graph_io.handle import GraphReader, GraphStore, open_reader, open_writer
 from code_graph_io.queries import _VALID_KINDS as VALID_KINDS
@@ -19,6 +19,7 @@ from code_graph_io.queries import (
     EntryPointDescription,
     ExporterRecord,
     ExportRecord,
+    FileDescription,
     ImporterRecord,
     ImportRecord,
     MatchRecord,
@@ -45,6 +46,7 @@ __all__ = [
     "EntryPointDescription",
     "ExportRecord",
     "ExporterRecord",
+    "FileDescription",
     "GraphNotInitializedError",
     "GraphReader",
     "GraphStore",

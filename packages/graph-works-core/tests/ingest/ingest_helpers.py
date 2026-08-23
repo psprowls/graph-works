@@ -2,8 +2,8 @@
 model, and a bundle builder.
 
 No live model call anywhere in this vertical's tests, and no SQLite either --
-`code_graph_io.GraphReader` is reached through four methods, and a stub that
-implements exactly those four is a sharper contract than a real database.
+`code_graph_io.GraphReader` is reached through three methods, and a stub that
+implements exactly those three is a sharper contract than a real database.
 """
 
 from __future__ import annotations
@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, date, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
@@ -22,20 +23,21 @@ AT = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
 
 
 class FakeReader:
-    """The four `GraphReader` methods this vertical calls, and nothing else."""
+    """The three `GraphReader` methods this vertical calls, and nothing else."""
 
     def __init__(
         self,
         *,
-        by_path: dict[str, tuple[str, str]] | None = None,
+        by_file_uri: dict[str, tuple[str, str]] | None = None,
         by_name: dict[str, list[tuple[str, str, str]]] | None = None,
     ) -> None:
-        self.by_path = by_path or {}
+        self.by_file_uri = by_file_uri or {}
         self.by_name = by_name or {}
         self.closed = False
 
-    def package_for_file(self, *, path: str) -> tuple[str, str] | None:
-        return self.by_path.get(path)
+    def describe_file(self, *, uri: str) -> Any | None:
+        package = self.by_file_uri.get(uri)
+        return None if package is None else SimpleNamespace(package=package)
 
     def entity_by_name(self, *, name: str, kinds: tuple[str, ...] = ()) -> list[tuple[Any, ...]]:
         return [row for row in self.by_name.get(name, []) if not kinds or row[2] in kinds]

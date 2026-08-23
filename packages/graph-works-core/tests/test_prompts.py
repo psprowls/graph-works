@@ -380,9 +380,7 @@ def test_the_rendered_categories_match_the_schemas_declarations_exactly(tmp_path
     }
 
     expected = {"adr", "work"}
-    for type_name, directory in declared_directories(schema_set).items():
-        if type_name == "File":
-            continue  # File shares Repository's directory for its own mirror sub-pages; not a top-level category
+    for _type_name, directory in declared_directories(schema_set).items():
         expected.add(directory.rstrip("/"))
     # Directory names and category names differ only by pluralization for the
     # eleven schema-sourced rows (e.g. "how-tos" -> "how-to"); assert on
@@ -401,6 +399,7 @@ def test_the_rendered_categories_match_the_schemas_declarations_exactly(tmp_path
         "reference",
         "explanation",
         "source",
+        "file",
         "adr",
         "work",
     } == rendered_categories
@@ -419,16 +418,13 @@ def test_a_schema_set_with_no_wiki_types_renders_only_the_constant_rows(tmp_path
     assert "`concept`" not in rendered
 
 
-def test_file_does_not_produce_a_second_repositories_row(tmp_path):
-    # File.schema.json declares the same x-okf-directory as Repository, for
-    # its own mirror sub-pages -- a naive one-row-per-type render would show
-    # `repositories/` twice. Counted by table row, not raw substring: the
-    # `repository` row's own gloss text ("...repository this workspace
-    # tracks") already contains the word a second time.
+def test_code_wiki_categories_name_nested_repository_file_and_dependency_placement(tmp_path):
     schema_set = _full_schema_set(tmp_path)
     rendered = prompts.render_page_categories(schema_set)
-    rows = [line for line in rendered.splitlines() if line.startswith("| `repository`")]
-    assert len(rows) == 1
+
+    assert "`files/`" in rendered
+    assert "`repositories/<repo>/repository`" in rendered
+    assert "`dependencies/<ecosystem>/`" in rendered
 
 
 def test_the_orchestrator_prompt_states_the_json_contract():

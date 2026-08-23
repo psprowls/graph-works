@@ -9,7 +9,7 @@ through: find-by-resource (`resources.py`), provenance stamping
 
 from __future__ import annotations
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 from code_wiki_okf.config import (
     Config,
@@ -27,6 +27,17 @@ from code_wiki_okf.git_state import (
     ls_files,
 )
 from code_wiki_okf.init import BundleInstall, InitError, install_bundle, plan_install
+from code_wiki_okf.placement import (
+    CODE_WIKI_TYPES,
+    PlacementContext,
+    PlacementError,
+    affected_directories,
+    canonical_concept_id,
+    canonical_member,
+    context_from_resource,
+    is_code_wiki_type,
+    placement_rule,
+)
 from code_wiki_okf.provenance import (
     generated_value,
     last_updated_commit_value,
@@ -39,25 +50,34 @@ from code_wiki_okf.resources import (
 )
 
 __all__ = [
+    "CODE_WIKI_TYPES",
     "BundleInstall",
     "Config",
     "ConfigError",
     "InitError",
+    "PlacementContext",
+    "PlacementError",
     "RepoConfig",
     "ResourceEntry",
     "ResourceIndex",
     "StateGate",
     "StateGateConfig",
     "__version__",
+    "affected_directories",
+    "canonical_concept_id",
+    "canonical_member",
     "changed_files_since",
     "compute_state_gate",
+    "context_from_resource",
     "generated_value",
     "head_commit",
     "install_bundle",
     "is_clean_on_branches",
+    "is_code_wiki_type",
     "last_updated_commit_value",
     "load_config",
     "ls_files",
+    "placement_rule",
     "plan_install",
     "resource_index",
     "tokens_value",

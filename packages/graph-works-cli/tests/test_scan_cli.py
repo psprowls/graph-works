@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 from code_wiki_okf.config import ConfigError
-from code_wiki_okf.entities.lanes import SyncSummary
+from code_wiki_okf.entities.sync import SyncSummary
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import scan as scan_module
@@ -139,6 +139,29 @@ def test_normal_scan_exits_one_for_structural_catalog_declines_in_every_mode(
         assert json.loads(result.stdout)["entity_errors"] == ["packages/broken.md: parse-error"]
     else:
         assert result.stdout == ""
+    assert result.stderr == "Error: scan completed with entity errors\n"
+
+
+def test_normal_scan_exits_one_for_incomplete_entity_writes(
+    monkeypatch: pytest.MonkeyPatch,
+    initialized_workspace: Path,
+) -> None:
+    structural = StructuralSummary(
+        entities=SyncSummary(skipped=("repositories/demo/packages/widgets.md: commit-error: disk full",))
+    )
+
+    async def fake_run_scan(*args: object, **kwargs: object) -> ScanResult:
+        return ScanResult(
+            structural=structural,
+            worklist=ScanWorklist(short_head="abc123"),
+            errors=structural.errors,
+        )
+
+    monkeypatch.setattr(scan_module, "run_scan", fake_run_scan)
+
+    result = runner.invoke(app, ["scan", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
     assert result.stderr == "Error: scan completed with entity errors\n"
 
 
@@ -429,6 +452,30 @@ def test_emit_fails_when_the_catalog_declined_an_entity(
     assert result.exit_code == exit_codes.GENERIC
     assert "scan emitted entity errors" in result.stderr
     assert json.loads(result.stdout)["short_head"] == "abc123"
+
+
+def test_emit_reports_incomplete_entity_writes_in_worklist_json(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
+) -> None:
+    """An omitted skipped-write failure would leave automation unable to repair the entity."""
+
+    async def fake_build_worklist(*_args: object, **_kwargs: object) -> tuple[ScanWorklist, StructuralSummary]:
+        return ScanWorklist(short_head="abc123"), StructuralSummary(
+            entities=SyncSummary(
+                skipped=("repositories/demo/packages/widgets.md: commit-error: disk full",),
+                catalog_declined=(("packages/demo", "unadmitted"),),
+            )
+        )
+
+    monkeypatch.setattr(scan_module, "build_scan_worklist", fake_build_worklist)
+
+    result = runner.invoke(app, ["scan", "--emit-worklist", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert json.loads(result.stdout)["entity_errors"] == [
+        "entity sync incomplete: repositories/demo/packages/widgets.md: commit-error: disk full",
+        "packages/demo: unadmitted",
+    ]
 
 
 def test_scan_reports_a_failed_run_instead_of_a_traceback(

@@ -17,7 +17,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from code_wiki_okf.entities.lanes import is_entity_lane_page
+from code_wiki_okf.placement import is_entity_lane_page
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -71,18 +71,13 @@ def test_smoke_run_syncs_entities_when_repo_name_matches_the_graph(tmp_path: Pat
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
-    assert (tmp_path / "bundle" / "repositories" / f"{result.repo_name}.md").exists()
+    assert (tmp_path / "bundle" / "repositories" / result.repo_name / "repository.md").exists()
 
 
 def test_smoke_run_flags_a_repo_name_mismatch_instead_of_silently_syncing_zero_entities(tmp_path: Path) -> None:
-    """The undocumented failure mode this item exists to close: a typo'd
-    `workspace.yaml` `repositories` key currently makes `sync` exit 0 having
-    synced no Repository/Package page for that repo at all -- with nothing in
-    its output distinguishing that from "up to date, nothing changed". Only
-    ecosystem-wide entities (dependencies) are unaffected, since
-    `entities/sync.py`'s own docstring notes those carry no repo attribution
-    to begin with. `wiki_smoke.run` must surface the repo-scoped silence as
-    `mismatch=True`.
+    """A typo'd repository key is an explicit failed sync, never a silent
+    zero-entity success. `wiki_smoke.run` retains its own mismatch signal so
+    callers can distinguish identity mismatch from another sync refusal.
     """
     result = wiki_smoke.run(
         _REAL_CHECKOUT,
@@ -90,9 +85,9 @@ def test_smoke_run_flags_a_repo_name_mismatch_instead_of_silently_syncing_zero_e
         repo_name="definitely-not-the-graphs-name",
     )
 
-    assert result.sync_exit_code == 0  # the CLI itself still doesn't raise -- that's the gap
+    assert result.sync_exit_code != 0
     assert result.mismatch
-    assert not (tmp_path / "bundle" / "repositories" / "definitely-not-the-graphs-name.md").exists()
+    assert not (tmp_path / "bundle" / "repositories" / "definitely-not-the-graphs-name" / "repository.md").exists()
 
 
 def test_main_exits_nonzero_on_a_repo_name_mismatch(tmp_path: Path) -> None:
@@ -110,3 +105,48 @@ def test_main_exits_nonzero_on_a_repo_name_mismatch(tmp_path: Path) -> None:
 def test_main_exits_zero_on_a_clean_run(tmp_path: Path) -> None:
     exit_code = wiki_smoke.main([str(_REAL_CHECKOUT), str(tmp_path / "bundle")])
     assert exit_code == 0
+
+
+def test_smoke_run_files_the_packages_own_dependency_under_its_ecosystem(tmp_path: Path) -> None:
+    """Spec decision 10: every manifest-backed distributable Package creates a
+    Dependency. `config-io` is distributable, so its own consumption-facing
+    page must exist at the PEP 503 distribution name.
+
+    This assertion is the gate that was missing. `scripts/gw-smoke/run.sh`
+    checked the dependency lane but nothing runs it; this file runs inside
+    `just check` but never looked at `dependencies/`, so a Dependency filed
+    under an import name shipped unnoticed.
+    """
+    bundle_dir = tmp_path / "bundle"
+    result = wiki_smoke.run(_REAL_CHECKOUT, bundle_dir)
+
+    assert result.sync_exit_code == 0, result.sync_output
+    assert not result.mismatch
+    assert (bundle_dir / "dependencies" / "pypi" / "config-io.md").is_file()
+    assert not (bundle_dir / "dependencies" / "pypi" / "config_io.md").exists()
+
+
+def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:
+    """The top-level lanes are discovery indexes, never canonical concepts,
+    and there is deliberately no global File catalog (spec decision 7).
+    """
+    bundle_dir = tmp_path / "bundle"
+    result = wiki_smoke.run(_REAL_CHECKOUT, bundle_dir)
+
+    assert result.sync_exit_code == 0, result.sync_output
+    for member in (
+        "index.md",
+        "repositories/index.md",
+        "packages/index.md",
+        "apps/index.md",
+        "agent-plugins/index.md",
+        "test-suites/index.md",
+        "dependencies/index.md",
+        "dependencies/pypi/index.md",
+    ):
+        assert (bundle_dir / member).is_file(), member
+
+    assert not (bundle_dir / "files").exists()
+    for lane in ("packages", "apps", "agent-plugins", "test-suites"):
+        extras = [p.name for p in (bundle_dir / lane).glob("*.md") if p.name != "index.md"]
+        assert extras == [], f"{lane} is discovery-only, found {extras}"

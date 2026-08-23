@@ -1,9 +1,10 @@
 # Manual smoke test: `gw` (graph-works-cli) against this repo
 
 Goal: exercise the **new** `gw` (this repo's `packages/graph-works-cli`) end to end —
-bootstrap, scan (all three modes), lint, query, work — against `agent-workspace` itself,
-and eyeball the results. No eval harness, no automated assertions: this is a runbook,
-not a test suite.
+bootstrap, scan (all three modes), lint, query, work — against `agent-workspace` itself.
+The deterministic flow also asserts the canonical placement tree, completes deterministic
+human-owned prose, runs strict validation with zero findings, and proves a second structural scan
+preserves that prose byte for byte.
 
 ## 0. Why this matters
 
@@ -13,7 +14,7 @@ already-installed package). This repo's `gw` only exists inside
 uses `.venv/bin/gw` explicitly so you never accidentally exercise the old implementation.
 
 ```bash
-cd /Users/pat/Personal/agent-workspace
+cd /path/to/agent-workspace
 which gw            # <- probably NOT what you want
 .venv/bin/gw --help  # <- this repo's build
 ```
@@ -32,20 +33,23 @@ plumbing works.
 
 ## 1. Pick a scratch workspace location
 
-Use `tmp/` — it's gitignored, so a generated wiki (dozens of entity pages, state/ artifacts,
-log.md) never shows up in `git status`. `scratch/` (where this file lives) is **not**
-gitignored, so don't point `--workspace` there.
+Use a fresh temporary directory so a generated bundle and control-plane artifacts never
+touch the checkout.
 
 ```bash
-export GW=/Users/pat/Personal/agent-workspace/.venv/bin/gw
-export TEST_WS=/Users/pat/Personal/agent-workspace/tmp/gw-smoke-ws
-rm -rf "$TEST_WS"   # start clean each run; safe, it's disposable
-mkdir -p "$(dirname "$TEST_WS")"
+export REPO_ROOT="$(pwd -P)"
+export GW="$REPO_ROOT/.venv/bin/gw"
+export TEST_WS="$(mktemp -d "${TMPDIR:-/tmp}/gw-smoke.XXXXXX")"
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=core.quotePath
+export GIT_CONFIG_VALUE_0=false
 ```
 
-`--repo-root` will point at the real `agent-workspace` checkout (`/Users/pat/Personal/agent-workspace`)
-so the scan has real code/packages/entities to walk — the workspace itself lives outside
-the repo it catalogs, same as `$GRAPH_WIKI_WORKSPACE` does for the legacy tool.
+`--repo-root` points at the real checkout so the scan has real code/packages/entities to
+walk, while the workspace itself remains outside the repository. Placement must be the
+same for this external workspace as it is for one committed inside the checkout.
+The Git environment override keeps machine-readable non-ASCII tracked paths unquoted;
+it changes no repository or user configuration.
 
 ## 2. Bootstrap
 
@@ -54,7 +58,7 @@ Dry run first — this only prints a plan, writes nothing:
 ```bash
 $GW bootstrap --topic "gw smoke test" \
   --workspace "$TEST_WS" \
-  --repo-root /Users/pat/Personal/agent-workspace \
+  --repo-root "$REPO_ROOT" \
   --dry-run
 ```
 
@@ -63,8 +67,12 @@ Then for real:
 ```bash
 $GW bootstrap --topic "gw smoke test" \
   --workspace "$TEST_WS" \
-  --repo-root /Users/pat/Personal/agent-workspace
+  --repo-root "$REPO_ROOT"
 ```
+
+If the checkout directory is a feature-worktree name rather than the repository's graph
+identity, re-key the temporary manifest to the remote repository name before scanning.
+`run.sh` performs this adjustment automatically.
 
 Inspect what got created:
 
@@ -225,15 +233,59 @@ Watch stderr with `-v` if you want to see it work:
 $GW -v scan --workspace "$TEST_WS"
 ```
 
-Inspect. Entity pages land under `okf/repositories/<repo-name>/<packages|apps|test-suites|agent-plugins>/`,
-mirroring the repo's own directory shape (not a flat `entities/` folder with URI-derived
-filenames — that's a docs-vs-code mismatch worth knowing about, see step 6):
+Inspect the canonical repository-owned lanes and global Dependencies:
 
 ```bash
 find "$TEST_WS/okf/repositories" -name '*.md' | sort | head -20
 cat "$TEST_WS/okf/repositories/agent-workspace/packages/graph-works-cli.md"
+cat "$TEST_WS/okf/repositories/agent-workspace/repository.md"
+cat "$TEST_WS/okf/dependencies/pypi/code-graph-io.md"
 tail -20 "$TEST_WS/okf/log.md"
 ```
+
+The invariant catalog tree is:
+
+```text
+okf/
+  index.md
+  repositories/index.md
+  repositories/<repo>/
+    index.md
+    repository.md
+    packages/index.md
+    apps/index.md
+    agent-plugins/index.md
+    test-suites/index.md
+    files/index.md
+  packages/index.md
+  apps/index.md
+  agent-plugins/index.md
+  test-suites/index.md
+  dependencies/
+    index.md
+    <ecosystem>/index.md
+```
+
+Canonical Package, App, AgentPlugin, TestSuite, and File pages live in their
+repository-local typed lanes. The four top-level typed lanes contain discovery indexes
+only; there is no global Files lane. Dependencies are canonical at
+`dependencies/<ecosystem>/<slug>.md`.
+
+After a no-narrate scan, complete the smoke fixture's human-owned descriptions and required prose,
+reconcile those descriptions into the discovery catalogs, then run the executable path and
+strict-validation assertions:
+
+```bash
+uv run --package graph-works-core python scripts/gw-smoke/complete_prose.py "$TEST_WS"
+$GW scan --no-narrate --workspace "$TEST_WS" --json
+uv run --package graph-works-core python scripts/gw-smoke/assert_contract.py "$TEST_WS"
+```
+
+This deterministic fixture step substitutes only for the human/model prose that `--no-narrate`
+intentionally leaves blank. The reconciliation scan is required because discovery-index entries
+include each concept's description. The strict assertion filters nothing: every finding fails the
+smoke. The following structural scan must preserve the filled human-owned fields and reconciled
+catalogs without changing a byte.
 
 ## 4. Scan — mode 2: no narration (mechanical only)
 
@@ -241,8 +293,9 @@ Rebuilds/refreshes entity pages, skips the prose-refresh pass entirely — faste
 mechanical, good for "did the graph walk work" checks.
 
 ```bash
-rm -rf "$TEST_WS" && $GW bootstrap --topic "gw smoke test" --workspace "$TEST_WS" \
-  --repo-root /Users/pat/Personal/agent-workspace   # fresh workspace, see step 6 for why
+rm -rf -- "$TEST_WS"
+export TEST_WS="$(mktemp -d "${TMPDIR:-/tmp}/gw-smoke.XXXXXX")"
+$GW bootstrap --topic "gw smoke test" --workspace "$TEST_WS" --repo-root "$REPO_ROOT"
 $GW scan --no-narrate --workspace "$TEST_WS" --json
 ```
 
@@ -286,10 +339,10 @@ cat "$TEST_WS"/.gw/cache/scan/briefs/*.md | head -60   # eyeball a brief — thi
 Stub script (fast path) — writes a trivial-but-valid result for every emitted brief:
 
 ```bash
-python3 scratch/gw-smoke/stub_results.py "$TEST_WS"
+python3 scripts/gw-smoke/stub_results.py "$TEST_WS"
 ```
 
-(See `scratch/gw-smoke/stub_results.py` — reads `worklist.json`'s `prose_tasks`, writes
+(See `scripts/gw-smoke/stub_results.py` — reads `worklist.json`'s `prose_tasks`, writes
 one `{"uri": ..., "sections": {...}}` per task into `results/<page-stem>.json`.)
 
 **Phase 3 — apply:**
@@ -324,20 +377,14 @@ $GW wiki stats --workspace "$TEST_WS" --top 10
 $GW wiki index --workspace "$TEST_WS"
 ```
 
-A real end-to-end run against this repo (1627 pages, 2089 edges) came back with only
-`warn`-level findings (missing `description`, unfilled `## Purpose` placeholders on
-pages the narrated pass errored on) — no `error`-level lint failures. That's a good
-sign for the mechanical + lint path.
-
-One thing worth flagging: `plugins/graph-works/skills/graph-works/references/scan-workflow.md`
-(§"What gets written") describes entity pages landing in a flat `<workspace>/wiki/entities/`
-folder with URI-derived filenames (`pkg_<name>.md`). What this build actually writes is
-`<workspace>/okf/repositories/<repo>/<packages|apps|test-suites|agent-plugins>/<name>.md` —
-a directory tree mirroring the repo, under `okf/` (`layout.bundle_dir`), not a flat `wiki/entities/`.
-That doc opens by saying "treat a disagreement between this page and [the epic work item]
-as this page being stale" — so this is likely just a stale doc, not a `gw` bug, but it's
-exactly the kind of doc/code drift worth confirming against the epic item before assuming
-either side is right.
+For the release smoke, use `assert_contract.py` above as the strict, model-free code-wiki
+gate. It loads the workspace's graph and declarations, computes the public sync snapshot,
+and runs the same schema, section, vocabulary, placement, and sync rules as
+`code-wiki-okf validate`, with warnings promoted to failures. Because this flow deliberately
+uses `--no-narrate`, it reports and excludes only the expected
+`frontmatter.description-recommended` and `sections.unfilled` prose findings; every other
+warning or error fails the structural gate. All seven code-wiki types are checked by the
+same resource-derived placement policy the writers use.
 
 ## 7. Query
 
@@ -385,22 +432,24 @@ $GW config get workflow.commit_strategy --workspace "$TEST_WS" 2>&1 || true
 
 ## Cleanup
 
-Everything lives under `tmp/gw-smoke-ws`, gitignored and disposable:
+Everything lives under the temporary workspace and is disposable:
 
 ```bash
-rm -rf /Users/pat/Personal/agent-workspace/tmp/gw-smoke-ws
+rm -rf -- "$TEST_WS"
 ```
 
 ## Automating the create → scan → lint sweep
 
-`scratch/gw-smoke/run.sh` does steps 1–6 (fresh bootstrap, plain scan, lint, stats) in one
-shot and prints the lint report at the end — useful as a quick "did I break `gw`" check
-after touching `graph-works-core`/`graph-works-cli`. Run it with:
+`scripts/gw-smoke/run.sh` performs the release-contract flow in one shot: fresh bootstrap,
+no-narrate scan, canonical-path assertions, strict mechanical validation, a sorted `okf/`
+member listing, and a second scan checked with `git diff --no-index`. Run it with:
 
 ```bash
-bash scratch/gw-smoke/run.sh
+bash scripts/gw-smoke/run.sh
 ```
 
-It intentionally stops short of the emit/apply subagent-fan-out path (step 5) — that one's
-worth doing by hand at least once so you actually read a brief and a result, not just a
-pass/fail.
+The temporary workspace is removed on success. Set `KEEP_SMOKE_WS=1` to retain both the
+workspace and first-run snapshot for inspection. Bootstrap refreshes the repository's
+`CLAUDE.md`/`AGENTS.md` context files, so the script backs up and restores both around the
+run; the source checkout is byte-unchanged afterward. The script intentionally stops short
+of the model-backed narration and emit/apply fan-out path; those remain manual exercises.

@@ -9,7 +9,7 @@ _EXPECTED_DIRECTORY = {
     "TestSuite": "test-suites/",
     "Repository": "repositories/",
     "AgentPlugin": "agent-plugins/",
-    "File": "repositories/",
+    "File": "files/",
 }
 
 #: `Dependency` is the one type whose `required` reaches past the universal

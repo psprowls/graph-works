@@ -14,7 +14,6 @@ import typer
 from code_graph_io import open_reader
 from okf_ext.bundle import WriteFailure
 from okf_ext.moves import Stranded, stranded_summary
-from okf_ext.placement import placement_rule
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import load_sections
@@ -23,10 +22,10 @@ from okf_io import load_bundle
 from okf_io import validate as okf_validate
 
 from code_wiki_okf.config import Config, ConfigError, load_config
-from code_wiki_okf.entities import lanes
 from code_wiki_okf.init import InitError, install_bundle
-from code_wiki_okf.mirror.lanes import sync_mirror
 from code_wiki_okf.mirror.model import MirrorPlan, MirrorResult
+from code_wiki_okf.placement import placement_rule
+from code_wiki_okf.sync import sync_bundle
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import snapshot_bundle
 
@@ -188,19 +187,11 @@ def sync(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print each lane's plan instead of writing."),
 ) -> None:
-    """Sync entity pages and the repository mirror lane against the code graph.
+    """Preflight and sync every code-wiki page in one composite run.
 
-    Reads `workspace.yaml`, loads the graph and bundle, runs the entity
-    sync pipeline once (it already iterates every configured repo
-    internally), then the mirror sync pipeline once per configured repo, and
-    reports counts for both. `--dry-run` defaults off, matching `init`'s own
-    convention: nothing is written unless the flag is passed.
-
-    Each lane owns its own `log.md` entry -- the entity half already did
-    (`entities.lanes.sync`); the mirror half gets a matching one here, one
-    entry for the whole run rather than one per repo, for the same reason
-    `entities.lanes.sync` appends exactly one: the log stays a readable
-    per-run record, not a per-repo flood.
+    Reads `workspace.yaml`, loads the graph once, and refuses before writing
+    when any entity or File target is invalid. `--dry-run` returns that same
+    immutable plan without touching the bundle.
 
     `graph_dir` is always `bundle_root` here -- this standalone CLI has no
     workspace layout of its own to derive a separate graph location from, so
@@ -211,66 +202,83 @@ def sync(
     clean `ConfigError` exit; a known, deliberately unfixed gap.
     """
     today = datetime.now(UTC).date()
-    at = datetime.now(UTC)
+    at = datetime.now(UTC).isoformat()
     try:
         config = _with_config_dir(load_config(bundle_root, config_path=config_path, graph_dir=bundle_root), config_dir)
     except ConfigError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    # --- entity half: one call, every configured repo in one pass ---
     try:
         with open_reader(graph_dir=config.graph_dir) as reader:
-            entity_result = lanes.sync(load_bundle(bundle_root), config, reader, today=today, at=at, dry_run=dry_run)
+            result = sync_bundle(
+                bundle_root,
+                config=config,
+                reader=reader,
+                at=at,
+                today=today,
+                dry_run=dry_run,
+            )
     except (OSError, ValueError) as exc:
-        # `ValueError` for the two `_resolve_placements` collision cases;
-        # `OSError` because `lanes.sync` -> `sync_entities` loads
-        # `config.declarations_dir`'s `schema`/`sections` too, and a missing
-        # one is the same caller-configuration problem `validate` already
-        # guards against, not a raw traceback.
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    for warning in result.warnings:
+        typer.echo(f"warning: {warning}", err=True)
+
     if dry_run:
-        typer.echo("entities: dry run, no changes made")
+        typer.echo("sync: dry run, no writes made")
+        entity_changes = False
+        for concept_id in result.entities.created:
+            entity_changes = True
+            typer.echo(f"entities: would create {concept_id}")
+        for concept_id in result.entities.updated:
+            entity_changes = True
+            typer.echo(f"entities: would update {concept_id}")
+        for concept_id in result.entities.deleted:
+            entity_changes = True
+            typer.echo(f"entities: would delete {concept_id}")
+        for concept_id, reason in result.entities.declined:
+            entity_changes = True
+            typer.echo(f"entities: would decline deletion of {concept_id} ({reason})")
+        if not entity_changes:
+            typer.echo("entities: no changes")
+
+        catalog_changes = False
+        for member in result.entities.catalog_created:
+            catalog_changes = True
+            typer.echo(f"catalog: would create {member}")
+        for member in result.entities.catalog_updated:
+            catalog_changes = True
+            typer.echo(f"catalog: would update {member}")
+        for path, reason in result.entities.catalog_declined:
+            catalog_changes = True
+            typer.echo(f"catalog: would refuse {path} ({reason})", err=True)
+        if not catalog_changes:
+            typer.echo("catalog: no changes")
     else:
         typer.echo(
-            f"entities: written {len(entity_result.written)}, deleted {len(entity_result.deleted)}, "
-            f"declined {len(entity_result.declined)}"
+            f"entities: written {len(result.entities.written)}, deleted {len(result.entities.deleted)}, "
+            f"declined {len(result.entities.declined)}"
         )
+        for skipped in result.entities.skipped:
+            typer.echo(f"entities: write incomplete: {skipped}", err=True)
+        for path, reason in result.entities.catalog_declined:
+            typer.echo(f"catalog: write incomplete: {path} ({reason})", err=True)
 
-    # --- mirror half: one library call, every configured repo in one pass ---
-    # The loop that used to live here is `mirror.lanes.sync_mirror` -- an
-    # inline loop in a CLI body is reachable by exactly one caller, and
-    # `graph_works_core.scan` being the second one is why this moved.
-    # Everything below is presentation: this command's per-repo output is a
-    # stable contract `test_cli.py` matches on.
-    try:
-        with open_reader(graph_dir=config.graph_dir) as reader:
-            mirror = sync_mirror(bundle_root, config, reader, today=today, at=at, dry_run=dry_run)
-    except (OSError, ValueError) as exc:
-        # `load_sections` raises `SectionError` (a `ValueError`) for a
-        # malformed set and propagates `OSError` for a missing directory --
-        # a caller-configuration problem, matching `validate`'s identical
-        # guard on the same load, not a raw traceback. `sync_mirror` lets
-        # both through deliberately; turning them into an exit code is this
-        # band's job.
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=1) from exc
-
-    for repo_name in mirror.skipped_repos:
+    for repo_name in result.mirror.skipped_repos:
         typer.echo(f"{repo_name}: not a git checkout, skipping", err=True)
     if dry_run:
-        for plan in mirror.plans:
+        for plan in result.mirror.plans:
             _echo_plan(plan.repo, plan)
     else:
-        stranded_by_repo = {plan.repo: plan.moves.stranded for plan in mirror.plans}
-        for result in mirror.results:
-            _echo_result(result.repo, result, stranded_by_repo.get(result.repo, ()))
-    for repo_name, error in mirror.failed_repos:
+        stranded_by_repo = {plan.repo: plan.moves.stranded for plan in result.mirror.plans}
+        for mirror_result in result.mirror.results:
+            _echo_result(mirror_result.repo, mirror_result, stranded_by_repo.get(mirror_result.repo, ()))
+    for repo_name, error in result.mirror.failed_repos:
         typer.echo(f"{repo_name}: sync failed: {error}", err=True)
 
-    if not mirror.ok:
+    if not result.ok:
         raise typer.Exit(code=1)
 
 
@@ -335,7 +343,7 @@ def validate(
             schema_rule(schema_set),
             section_rule(section_set),
             vocabulary_rule(vocabulary),
-            placement_rule(lanes.placement_directories(schema_set), depth=lanes.ENTITY_DEPTH, severity="error"),
+            placement_rule(severity="error"),
         ],
         strict=strict,
     )

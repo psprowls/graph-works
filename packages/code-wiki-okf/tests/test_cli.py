@@ -2,6 +2,7 @@ import os
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from code_graph_io.testing import open_store
 from code_wiki_okf.cli import _echo_plan, _echo_result, app
 from code_wiki_okf.init import SEED_RELATIVE_PATHS, install_bundle
 from code_wiki_okf.mirror.model import DeclinedDeletion, MirrorPlan, MirrorResult
+from code_wiki_okf.sync import SyncResult
+from code_wiki_okf.sync import sync_bundle as run_sync_bundle
 from okf_ext.generators import Render
 from okf_ext.moves.model import Move, MovePlan, Stranded
 from typer.testing import CliRunner
@@ -181,11 +184,8 @@ def test_main_module_runs_init(tmp_path: Path) -> None:
 
 # --- sync command: entity-lane coverage -----------------------------------
 #
-# `sync` runs the entity half (`entities.lanes.sync`, one call covering every
-# configured repo) and the mirror half (one `plan_mirror`/`apply_mirror` pass
-# per repo) in the same invocation. `--dry-run` defaults off, matching
-# `init`'s own convention -- entity-lanes' original `--dry-run/--no-dry-run`
-# (default on) was the outlier and lost the reconciliation.
+# `sync` plans every entity and File target together, then applies that one
+# immutable composite plan. `--dry-run` defaults off, matching `init`.
 
 
 def _repo_node(org: str, repo: str) -> GraphNode:
@@ -347,7 +347,7 @@ def _scratch_workspace(tmp_path: Path) -> Path:
     # so the graph db is written there directly rather than to a separate
     # directory named in the config.
     run_workspace([repo_root], graph_dir=bundle_root, full=True)
-    (bundle_root / "workspace.yaml").write_text(f"repositories:\n  acme:\n    path: {repo_root}\n", encoding="utf-8")
+    (bundle_root / "workspace.yaml").write_text(f"repositories:\n  repo:\n    path: {repo_root}\n", encoding="utf-8")
     return bundle_root
 
 
@@ -355,7 +355,7 @@ def test_sync_command_creates_file_pages(tmp_path: Path) -> None:
     bundle_root = _scratch_workspace(tmp_path)
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "acme" / "fs" / "a.py.md").exists()
+    assert (bundle_root / "repositories" / "repo" / "files" / "a.py.md").exists()
 
 
 def test_sync_command_dry_run_writes_nothing(tmp_path: Path) -> None:
@@ -363,7 +363,23 @@ def test_sync_command_dry_run_writes_nothing(tmp_path: Path) -> None:
     result = runner.invoke(app, ["sync", str(bundle_root), "--dry-run"])
     assert result.exit_code == 0, result.output
     assert not (bundle_root / "repositories").exists()
-    assert "a.py" in result.output
+    assert "entities: would create repositories/repo/repository" in result.stdout
+    assert "catalog: would create packages/index.md" in result.stdout
+    assert "repo: would create a.py" in result.stdout
+
+
+def test_sync_command_idempotent_dry_run_reports_no_entity_or_catalog_changes(tmp_path: Path) -> None:
+    bundle_root = _scratch_workspace(tmp_path)
+    applied = runner.invoke(app, ["sync", str(bundle_root)])
+    assert applied.exit_code == 0, applied.output
+
+    result = runner.invoke(app, ["sync", str(bundle_root), "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert "entities: no changes" in result.stdout
+    assert "catalog: no changes" in result.stdout
+    assert "entities: would" not in result.stdout
+    assert "catalog: would" not in result.stdout
 
 
 def test_sync_command_reports_malformed_config(tmp_path: Path) -> None:
@@ -410,16 +426,16 @@ def test_sync_command_syncs_every_configured_repo(tmp_path: Path) -> None:
     assert result.exit_code == 0
     run_workspace([repo_a, repo_b], graph_dir=bundle_root, full=True)
     (bundle_root / "workspace.yaml").write_text(
-        f"repositories:\n  acme:\n    path: {repo_a}\n  beta:\n    path: {repo_b}\n",
+        f"repositories:\n  repo_a:\n    path: {repo_a}\n  repo_b:\n    path: {repo_b}\n",
         encoding="utf-8",
     )
 
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "acme" / "fs" / "a.py.md").exists()
-    assert (bundle_root / "repositories" / "beta" / "fs" / "b.py.md").exists()
-    assert "acme: created 1" in result.output
-    assert "beta: created 1" in result.output
+    assert (bundle_root / "repositories" / "repo_a" / "files" / "a.py.md").exists()
+    assert (bundle_root / "repositories" / "repo_b" / "files" / "b.py.md").exists()
+    assert "repo_a: created 1" in result.output
+    assert "repo_b: created 1" in result.output
 
 
 def test_sync_command_exit_code_is_unchanged_by_stranded_wikilinks(tmp_path: Path) -> None:
@@ -434,7 +450,7 @@ def test_sync_command_exit_code_is_unchanged_by_stranded_wikilinks(tmp_path: Pat
     bundle_root = tmp_path / "bundle"
     assert runner.invoke(app, ["init", str(bundle_root)]).exit_code == 0
     run_workspace([repo_root], graph_dir=bundle_root, full=True)
-    (bundle_root / "workspace.yaml").write_text(f"repositories:\n  acme:\n    path: {repo_root}\n", encoding="utf-8")
+    (bundle_root / "workspace.yaml").write_text(f"repositories:\n  repo:\n    path: {repo_root}\n", encoding="utf-8")
 
     quiet = runner.invoke(app, ["sync", str(bundle_root)])
     assert quiet.exit_code == 0, quiet.output
@@ -446,7 +462,7 @@ def test_sync_command_exit_code_is_unchanged_by_stranded_wikilinks(tmp_path: Pat
     citing.parent.mkdir(parents=True, exist_ok=True)
     citing.write_text(
         "---\ntype: Explanation\ntitle: Citing\ndescription: d\n---\n\n"
-        "## Summary\n\nSee [[repositories/acme/fs/a.py]] for the rest.\n",
+        "## Summary\n\nSee [[repositories/repo/files/a.py]] for the rest.\n",
         encoding="utf-8",
     )
     _git(repo_root, "mv", "a.py", "renamed.py")
@@ -455,7 +471,7 @@ def test_sync_command_exit_code_is_unchanged_by_stranded_wikilinks(tmp_path: Pat
 
     loud = runner.invoke(app, ["sync", str(bundle_root)])
     assert loud.exit_code == quiet.exit_code == 0, loud.output
-    assert "acme: ! 1 inbound [[wikilink]]" in loud.output
+    assert "repo: ! 1 inbound [[wikilink]]" in loud.output
 
 
 def test_sync_command_reports_failure_and_still_processes_other_repos(
@@ -470,10 +486,26 @@ def test_sync_command_reports_failure_and_still_processes_other_repos(
     def _boom(*args: object, **kwargs: object) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr("code_wiki_okf.mirror.lanes.apply_mirror", _boom)
+    monkeypatch.setattr("code_wiki_okf.sync.run.apply_mirror", _boom)
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 1
-    assert "acme: sync failed: disk full" in result.output
+    assert "repo: sync failed: disk full" in result.stderr
+    assert "sync failed" not in result.stdout
+
+
+def test_sync_command_prints_warnings_only_to_stderr(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle_root = _scratch_workspace(tmp_path)
+
+    def warned(*args: object, **kwargs: object) -> SyncResult:
+        return replace(run_sync_bundle(*args, **kwargs), warnings=("dependency has multiple implementations",))
+
+    monkeypatch.setattr("code_wiki_okf.cli.sync_bundle", warned)
+    result = runner.invoke(app, ["sync", str(bundle_root)])
+
+    assert result.exit_code == 0, result.output
+    assert "warning: dependency has multiple implementations" in result.stderr
+    assert "warning:" not in result.stdout
+    assert "entities: written" in result.stdout
 
 
 def test_sync_command_reports_missing_sections_cleanly(tmp_path: Path) -> None:
@@ -494,12 +526,7 @@ def test_sync_command_reports_missing_sections_cleanly(tmp_path: Path) -> None:
 
 
 def test_sync_command_dry_run_reports_missing_sections_cleanly(tmp_path: Path) -> None:
-    """`--dry-run` short-circuits the entity half (`lanes.sync` returns before
-    ever loading `sections`) but still runs the mirror half's own preview,
-    which has its own `load_sections(config.declarations_dir / "sections")`
-    call and its own guard -- this is the one path that actually exercises
-    it, distinct from the entity half's guard the non-dry-run test above
-    exercises."""
+    """Accurate entity/catalog previews require the write declarations."""
     bundle_root = _scratch_workspace(tmp_path)
     shutil.rmtree(bundle_root / "sections")
 
@@ -517,6 +544,7 @@ def _empty_move_plan(bundle_root: Path) -> MovePlan:
 def test_echo_plan_reports_no_changes_for_an_empty_plan(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     plan = MirrorPlan(
         repo="acme",
+        targets=(),
         moves=_empty_move_plan(tmp_path),
         creates={},
         updates={},
@@ -530,7 +558,13 @@ def test_echo_plan_reports_no_changes_for_an_empty_plan(tmp_path: Path, capsys: 
 def test_echo_plan_reports_every_kind_of_change(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     move_plan = MovePlan(
         root=tmp_path,
-        moves=(Move(source="repositories/acme/fs/old.py.md", dest="repositories/acme/fs/new.py.md", is_asset=False),),
+        moves=(
+            Move(
+                source="repositories/acme/files/old.py.md",
+                dest="repositories/acme/files/new.py.md",
+                is_asset=False,
+            ),
+        ),
         edits=(),
         refusals=(),
         unrebased=(),
@@ -538,21 +572,26 @@ def test_echo_plan_reports_every_kind_of_change(tmp_path: Path, capsys: pytest.C
     )
     plan = MirrorPlan(
         repo="acme",
+        targets=(),
         moves=move_plan,
         creates={"a.py": ({}, Render())},
-        updates={"repositories/acme/fs/b.py": Render()},
+        updates={"repositories/acme/files/b.py": Render()},
         deletions=("c.py",),
         declined_deletions=(
-            DeclinedDeletion(resource="file:acme/d.py", path="repositories/acme/fs/d.py.md", reason="prose-edited"),
+            DeclinedDeletion(
+                resource="file:acme/d.py",
+                path="repositories/acme/files/d.py.md",
+                reason="prose-edited",
+            ),
         ),
     )
     _echo_plan("acme", plan)
     output = capsys.readouterr().out
     assert "acme: would create a.py" in output
-    assert "acme: would update repositories/acme/fs/b.py" in output
-    assert "acme: would move repositories/acme/fs/old.py.md -> repositories/acme/fs/new.py.md" in output
+    assert "acme: would update repositories/acme/files/b.py" in output
+    assert "acme: would move repositories/acme/files/old.py.md -> repositories/acme/files/new.py.md" in output
     assert "acme: would delete c.py" in output
-    assert "acme: would decline deletion of repositories/acme/fs/d.py.md (prose-edited)" in output
+    assert "acme: would decline deletion of repositories/acme/files/d.py.md (prose-edited)" in output
 
 
 def _content_files(root: Path) -> dict[Path, bytes]:
@@ -800,8 +839,8 @@ def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
     result = runner.invoke(app, ["validate", str(bundle_root)])
 
     assert result.exit_code == 1
-    assert "placement.directory-mismatch" in result.output
-    assert "error" in result.output.lower()
+    assert "found at packages/httpx.md" in result.output
+    assert "expected dependencies/pypi/httpx" in result.output
 
 
 def test_validate_still_reports_sync_findings_alongside_new_rules(tmp_path: Path) -> None:
@@ -816,12 +855,16 @@ def test_validate_still_reports_sync_findings_alongside_new_rules(tmp_path: Path
 def test_echo_result_reports_every_kind_of_change(capsys: pytest.CaptureFixture[str]) -> None:
     result = MirrorResult(
         repo="acme",
-        moved=(("repositories/acme/fs/old.py.md", "repositories/acme/fs/new.py.md"),),
+        moved=(("repositories/acme/files/old.py.md", "repositories/acme/files/new.py.md"),),
         created=("a.py",),
-        regenerated=("repositories/acme/fs/b.py",),
+        regenerated=("repositories/acme/files/b.py",),
         deleted=("c.py",),
         declined_deletions=(
-            DeclinedDeletion(resource="file:acme/d.py", path="repositories/acme/fs/d.py.md", reason="prose-edited"),
+            DeclinedDeletion(
+                resource="file:acme/d.py",
+                path="repositories/acme/files/d.py.md",
+                reason="prose-edited",
+            ),
         ),
         index_updates=(),
     )
@@ -829,10 +872,10 @@ def test_echo_result_reports_every_kind_of_change(capsys: pytest.CaptureFixture[
     output = capsys.readouterr().out
     assert "acme: created 1, updated 1, moved 1, deleted 1" in output
     assert "acme: created a.py" in output
-    assert "acme: updated repositories/acme/fs/b.py" in output
-    assert "acme: moved repositories/acme/fs/old.py.md -> repositories/acme/fs/new.py.md" in output
+    assert "acme: updated repositories/acme/files/b.py" in output
+    assert "acme: moved repositories/acme/files/old.py.md -> repositories/acme/files/new.py.md" in output
     assert "acme: deleted c.py" in output
-    assert "acme: declined deletion of repositories/acme/fs/d.py.md (prose-edited)" in output
+    assert "acme: declined deletion of repositories/acme/files/d.py.md (prose-edited)" in output
 
 
 def test_echo_plan_reports_stranded_wikilinks_on_stderr(tmp_path, capsys):
@@ -840,14 +883,22 @@ def test_echo_plan_reports_stranded_wikilinks_on_stderr(tmp_path, capsys):
     of these is stderr, and not one changes an exit code."""
     move_plan = MovePlan(
         root=tmp_path,
-        moves=(Move(source="repositories/acme/fs/old.py.md", dest="repositories/acme/fs/new.py.md", is_asset=False),),
+        moves=(
+            Move(
+                source="repositories/acme/files/old.py.md",
+                dest="repositories/acme/files/new.py.md",
+                is_asset=False,
+            ),
+        ),
         edits=(),
         refusals=(),
         unrebased=(),
         digests={},
-        stranded=(Stranded(member="concepts/citing.md", target="repositories/acme/fs/old.py.md", line=9),),
+        stranded=(Stranded(member="concepts/citing.md", target="repositories/acme/files/old.py.md", line=9),),
     )
-    plan = MirrorPlan(repo="acme", moves=move_plan, creates={}, updates={}, deletions=(), declined_deletions=())
+    plan = MirrorPlan(
+        repo="acme", targets=(), moves=move_plan, creates={}, updates={}, deletions=(), declined_deletions=()
+    )
     _echo_plan("acme", plan)
     captured = capsys.readouterr()
     assert "acme: ! 1 inbound [[wikilink]]" in captured.err
@@ -859,7 +910,7 @@ def test_echo_result_summary_line_is_byte_identical_with_stranded_present(tmp_pa
     -- append, never alter."""
     result = MirrorResult(
         repo="acme",
-        moved=(("repositories/acme/fs/old.py.md", "repositories/acme/fs/new.py.md"),),
+        moved=(("repositories/acme/files/old.py.md", "repositories/acme/files/new.py.md"),),
         created=(),
         regenerated=(),
         deleted=(),

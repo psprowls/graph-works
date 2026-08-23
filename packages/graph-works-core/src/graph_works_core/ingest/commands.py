@@ -335,7 +335,17 @@ def _matcher_for(
         yield None
         return
     try:
-        yield entity_matcher(reader, schema_set)
+        resources_by_name: dict[str, list[str]] = {}
+        for node in reader.list_repositories():
+            uri = node.attrs.get("uri")
+            if uri:
+                resources_by_name.setdefault(node.name, []).append(str(uri))
+        repository_resources = {
+            repo.path.resolve(): resources[0]
+            for repo in config.repos
+            if len(resources := sorted(set(resources_by_name.get(repo.name, ())))) == 1
+        }
+        yield entity_matcher(reader, schema_set, repository_resources=repository_resources)
     finally:
         reader.close()
 

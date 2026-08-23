@@ -27,9 +27,16 @@ def _run_emit_pipeline(conn: sqlite3.Connection, repo_root: Path) -> None:
     """Run packages.refresh + structural_nodes.emit + test_suites.emit
     inside a single transaction (mirrors update.run order)."""
     with store.transaction(conn):
-        packages.refresh(conn, repo_root=repo_root, ctx=CTX)
+        packages.refresh(
+            conn, repo_root=repo_root, ctx=CTX, manifests=packages.discover_manifest_packages(repo_root, ctx=CTX)
+        )
         structural_nodes.emit(conn, repo_root=repo_root, ctx=CTX, skip_dirs=frozenset())
-        test_suites.emit(conn, repo_root=repo_root, ctx=CTX, skip_dirs=frozenset())
+        test_suites.emit(
+            conn,
+            repo_root=repo_root,
+            ctx=CTX,
+            skip_dirs=frozenset(),
+        )
 
 
 def _write_pyproject(pkg_dir: Path, *, name: str | None = None, body: str = "") -> None:
@@ -154,7 +161,9 @@ def test_emit_excludes_test_roots_matching_ignore(tmp_path: Path) -> None:
     (fixture_tests / "test_b.py").write_text("def test_b(): pass\n")
 
     with store.transaction(conn):
-        packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+        packages.refresh(
+            conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+        )
         structural_nodes.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
         test_suites.emit(
             conn,
@@ -181,7 +190,9 @@ def test_direct_test_file_not_orphaned_by_sibling_ignored_subdir(tmp_path: Path)
     (ignored_sub / "test_b.py").write_text("def test_b(): pass\n")
 
     with store.transaction(conn):
-        packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+        packages.refresh(
+            conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+        )
         structural_nodes.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
         test_suites.emit(
             conn,
@@ -444,12 +455,19 @@ def test_malformed_pyproject_does_not_crash(tmp_path: Path, capsys: pytest.Captu
     conn = _setup(tmp_path)
     # Run a clean pass first so packages.refresh writes the row.
     with store.transaction(conn):
-        packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+        packages.refresh(
+            conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+        )
         structural_nodes.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
     # Now corrupt pyproject before test_suites.emit reads it for testpaths.
     (pkg_dir / "pyproject.toml").write_text("[tool.pytest.ini_options\nbad")
     with store.transaction(conn):
-        test_suites.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
+        test_suites.emit(
+            conn,
+            repo_root=tmp_path,
+            ctx=CTX,
+            skip_dirs=frozenset(),
+        )
 
     # Suite still discovered via conventional FS walk.
     rows = _suite_rows(conn)
@@ -475,7 +493,12 @@ def test_idempotency_two_runs_identical_edges(tmp_path: Path) -> None:
 
     # Second run inside a new transaction (emit() is independently invocable).
     with store.transaction(conn):
-        test_suites.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
+        test_suites.emit(
+            conn,
+            repo_root=tmp_path,
+            ctx=CTX,
+            skip_dirs=frozenset(),
+        )
     snap2 = conn.execute(
         "SELECT src, dst, kind FROM edges WHERE kind IN ('physically_contains','tests') ORDER BY src, dst, kind"
     ).fetchall()

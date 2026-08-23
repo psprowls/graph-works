@@ -38,14 +38,12 @@ def placement_directories(schema_set: SchemaSet) -> dict[str, str]:
     consistent with, which is what the drift test in
     `tests/test_placement_adoption.py` anchors on.
 
-    An **allow**-list, where `code_wiki_okf.entities.lanes.placement_directories`
-    excludes four type names outright. A deny-list is correct only while the
-    schema set holds nothing but its own lane's types, and a composed workspace
-    points every lane installer at one shared `schema/` -- so it already holds
-    thirteen. Four of those nest under `repositories/<repo>/` (ADR-0026) and
-    have no single static prefix this rule's `Mapping[str, str]` can express;
-    passing them through at `severity="error"` would report every correctly
-    placed entity page as misplaced.
+    This must remain an **allow**-list. A composed workspace points every lane
+    installer at one shared `schema/`, which also contains the seven code-wiki
+    types. Their repository/ecosystem-aware paths are owned and validated by
+    `code_wiki_okf.placement`; passing every declared directory to this generic
+    static-prefix rule would duplicate that authority and misclassify canonical
+    pages.
     """
     return {
         type_name: directory for type_name, directory in declared_directories(schema_set).items() if type_name in TYPES

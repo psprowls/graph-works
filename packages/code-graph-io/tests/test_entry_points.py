@@ -105,7 +105,9 @@ def test_pyproject_scripts_emits_entry_point(tmp_path: Path) -> None:
     _write_pyproject(pkg_dir, scripts={"foo-cli": "foo_pkg.cli:main"})
     _write_python_src(pkg_dir, "foo_pkg.cli")
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     row = conn.execute("SELECT name, attrs_json FROM nodes WHERE kind='entry_point' AND name='foo-cli'").fetchone()
@@ -129,7 +131,9 @@ def test_pyproject_entry_points_console_scripts(tmp_path: Path) -> None:
     )
     _write_python_src(pkg_dir, "bar_pkg.cli")
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='entry_point' AND name='bar'").fetchone()
@@ -150,7 +154,9 @@ def test_pyproject_entry_points_library_group(tmp_path: Path) -> None:
     )
     _write_python_src(pkg_dir, "myapp.formatters")
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='entry_point' AND name='jsonfmt'").fetchone()
@@ -170,7 +176,9 @@ def test_implemented_by_null_on_missing_file(tmp_path: Path, capsys: pytest.Capt
     (pkg_dir / "src" / "ghost").mkdir(parents=True)
     (pkg_dir / "src" / "ghost" / "__init__.py").write_text("")
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     row = conn.execute("SELECT 1 FROM nodes WHERE kind='entry_point' AND name='ghost-cli'").fetchone()
@@ -191,7 +199,9 @@ def test_packagejson_bin_string_form(tmp_path: Path) -> None:
     (pkg_dir / "src" / "cli.js").write_text("#!/usr/bin/env node\n")
     _write_package_json(pkg_dir, {"name": "jspkg", "bin": "./src/cli.js"})
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='entry_point' AND name='jspkg'").fetchone()
@@ -214,7 +224,9 @@ def test_packagejson_bin_object_form(tmp_path: Path) -> None:
         {"name": "multi", "bin": {"foo-cli": "./src/foo.js", "bar-cli": "./src/bar.js"}},
     )
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     for name in ("foo-cli", "bar-cli"):
@@ -245,7 +257,9 @@ def test_packagejson_main_and_module(tmp_path: Path) -> None:
         },
     )
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     main_row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='entry_point' AND name='main'").fetchone()
@@ -281,7 +295,9 @@ def test_packagejson_exports_recursive_walk(tmp_path: Path) -> None:
         },
     )
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     rows = conn.execute("SELECT name, attrs_json FROM nodes WHERE kind='entry_point'").fetchall()
@@ -314,7 +330,9 @@ def test_declares_entry_point_edge_present(tmp_path: Path) -> None:
     (pkg_dir / "src" / "main.js").write_text("")
     _write_package_json(pkg_dir, {"name": "edgepkg", "main": "./src/main.js", "bin": "./src/main.js"})
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     ep_names = [r[0] for r in conn.execute("SELECT name FROM nodes WHERE kind='entry_point'").fetchall()]
@@ -332,7 +350,9 @@ def test_shebang_script_does_not_emit_entry_point(tmp_path: Path) -> None:
     shebang = pkg_dir / "scripts" / "run.py"
     shebang.write_text("#!/usr/bin/env python3\nprint('hi')\n")
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=CTX, skip_dirs=frozenset())
 
     cnt = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='entry_point'").fetchone()[0]
@@ -349,7 +369,9 @@ def test_faceted_member_gets_exactly_one_declares_entry_point_edge(tmp_path: Pat
     )
     _write_python_src(pkg_dir, "myapp.cli")
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
 
     # Sanity: this member is actually faceted (has both Package and App rows)
     # under Task 1's facet model — otherwise this test would not exercise the
@@ -375,7 +397,9 @@ def test_malformed_pyproject_does_not_crash(tmp_path: Path, capsys: pytest.Captu
     _write_pyproject(pkg_dir, name="okpkg", scripts={"ok": "okpkg.cli:main"})
     _write_python_src(pkg_dir, "okpkg.cli")
     conn = _setup_db(tmp_path)
-    packages.refresh(conn, repo_root=tmp_path, ctx=CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=CTX)
+    )
     # Now corrupt the manifest before entry_points.emit reads it. We rewrite
     # in-place so the Package row remains but tomllib will fail.
     (pkg_dir / "pyproject.toml").write_text("not [valid toml [at all")

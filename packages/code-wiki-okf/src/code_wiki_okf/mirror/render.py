@@ -1,19 +1,14 @@
 """Render one tracked file's frontmatter + generator `Render` -- rich when
-`describe_path()` knows it, minimal otherwise.
+the exact repository-scoped File URI is in the graph, minimal otherwise.
 
 Rich: owned keys `language` (from `code_graph_io.source_meta.extension_languages`
--- `describe_path()`'s `PathDescription` carries no language field of its own),
-`package` (`GraphReader.containing_package`), `role_flags` (the flags that are
+-- `FileDescription` carries no language field of its own), `package` (from
+the exact File's containment edge), `role_flags` (the flags that are
 `true`, as a list -- `File.schema.json` declares the key as an array). Four
-generated sections: `Symbols` from `description.children`, `Exports` from
-`description.exports` (already the `list[ExportRecord]` shape this section
-renders from -- `describe_path()` computes it internally, so reusing it costs
-nothing extra), and `Imports` / `Imported By` from the reader's own dedicated
-queries (`reader.imports`, `reader.imported_by`) -- `PathDescription.imports`
-is a `list[NodeRecord]` (a lighter projection used for the containment view),
-while `reader.imports()` returns the richer `ImportRecord` shape the Imports
-section renders from. `PathDescription` carries no `imported_by` equivalent at
-all, so that section has no other source.
+generated sections: `Symbols`, `Exports`, `Imports`, and `Imported By` from
+that same dossier. The single URI-scoped read prevents identical relative
+paths in sibling repositories from contributing package, symbol, or
+relationship data.
 
 Minimal: no owned keys at all -- not written as empty/null, simply absent from
 the frontmatter dict, so `key_edits` (which only touches keys it is handed)
@@ -48,19 +43,35 @@ from code_graph_io.source_meta import extension_languages
 from okf_ext.generators import Render
 
 from code_wiki_okf import __version__
-from code_wiki_okf.config import RepoConfig
+from code_wiki_okf.placement import PlacementContext, PlacementError, canonical_member, context_from_resource
 from code_wiki_okf.provenance import generated_value, last_updated_commit_value
 
 _NONE_MARKER = "_(none)_"
 _GENERATOR_ID = f"code-wiki-okf/{__version__}"
 
 
-def _resource(repo: RepoConfig, rel_path: str) -> str:
-    return f"file:{repo.name}/{rel_path}"
-
-
 def _title(rel_path: str) -> str:
     return Path(rel_path).name
+
+
+def _repository_identity(context: PlacementContext) -> tuple[str, str]:
+    payload = context.resource.removeprefix("file:")
+    parts = payload.split("/", 2)
+    if len(parts) != 3:
+        raise PlacementError(resource=context.resource, reason="File resource has no repository identity")
+    return parts[0], parts[1]
+
+
+def _file_link(context: PlacementContext, path: str, *, label: str) -> str:
+    organization, repository = _repository_identity(context)
+    related = context_from_resource("File", f"file:{organization}/{repository}/{path}")
+    return f"[{label}](/{canonical_member(related)})"
+
+
+def _package_link(context: PlacementContext, name: str) -> str:
+    organization, repository = _repository_identity(context)
+    package = context_from_resource("Package", f"pkg:{organization}/{repository}/{name}")
+    return f"[{name}](/{canonical_member(package)})"
 
 
 def _render_symbols(children: list[NodeRecord]) -> str:
@@ -70,10 +81,14 @@ def _render_symbols(children: list[NodeRecord]) -> str:
     return "\n".join(lines)
 
 
-def _render_imports(imports: list[ImportRecord]) -> str:
+def _render_imports(imports: list[ImportRecord], context: PlacementContext) -> str:
     if not imports:
         return _NONE_MARKER
-    lines = [f"- `{record.name}`" + (f" -> `{record.path}`" if record.path else " (unresolved)") for record in imports]
+    lines = [
+        f"- `{record.name}`"
+        + (f" -> {_file_link(context, record.path, label=record.path)}" if record.path else " (unresolved)")
+        for record in imports
+    ]
     return "\n".join(lines)
 
 
@@ -86,31 +101,36 @@ def _render_exports(exports: list[ExportRecord]) -> str:
     return "\n".join(lines)
 
 
-def _render_imported_by(importers: list[ImporterRecord]) -> str:
+def _render_imported_by(importers: list[ImporterRecord], context: PlacementContext) -> str:
     if not importers:
         return _NONE_MARKER
     lines = [
-        f"- `{record.path}`" + (f" -- {', '.join(record.symbols)}" if record.symbols else "") for record in importers
+        f"- {_file_link(context, record.path, label=record.path)}"
+        + (f" -- {', '.join(record.symbols)}" if record.symbols else "")
+        for record in importers
     ]
     return "\n".join(lines)
 
 
 def render_file(
     reader: GraphReader,
-    repo: RepoConfig,
-    rel_path: str,
+    context: PlacementContext,
     *,
     at: datetime,
     sha: str,
 ) -> tuple[dict[str, Any], Render]:
     """Frontmatter + `Render` for one tracked path. Never raises on content."""
+    canonical_member(context)
+    rel_path = context.source_path
+    if rel_path is None:
+        raise PlacementError(resource=context.resource, reason="File placement context has no source path")
     frontmatter: dict[str, Any] = {
         "type": "File",
         "title": _title(rel_path),
-        "resource": _resource(repo, rel_path),
+        "resource": context.resource,
     }
 
-    description = reader.describe_path(path=rel_path)
+    description = reader.describe_file(uri=context.resource)
     if description is None:
         frontmatter["generated"] = generated_value(by=_GENERATOR_ID, at=at)
         frontmatter["last_updated_commit"] = last_updated_commit_value(sha)
@@ -119,16 +139,16 @@ def render_file(
     language = extension_languages().get(Path(rel_path).suffix)
     if language is not None:
         frontmatter["language"] = language
-    package = reader.containing_package(path=rel_path)
-    if package is not None:
-        frontmatter["package"] = package
+    if description.package is not None:
+        package_name, _package_uri = description.package
+        frontmatter["package"] = _package_link(context, package_name)
     if description.role_flags:
         frontmatter["role_flags"] = [flag for flag, value in description.role_flags.items() if value]
 
     symbols = _render_symbols(description.children)
-    imports = _render_imports(reader.imports(path=rel_path))
+    imports = _render_imports(description.imports, context)
     exports = _render_exports(description.exports)
-    imported_by = _render_imported_by(reader.imported_by(path=rel_path, depth=1))
+    imported_by = _render_imported_by(description.imported_by, context)
 
     frontmatter["generated"] = generated_value(by=_GENERATOR_ID, at=at)
     frontmatter["last_updated_commit"] = last_updated_commit_value(sha)

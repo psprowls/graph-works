@@ -1,12 +1,11 @@
-"""A real OKF bundle carrying the five proposal lanes' declarations.
+"""A real OKF bundle carrying proposal and code-wiki declarations.
 
-Built from `doc_wiki_okf.resources.seed_files()` -- the twelve packaged
-declaration files, keyed by bundle-relative posix path and valued with their
-**text** -- rather than hand-written JSON: the lane directories come from each
-schema's `x-okf-directory`, and a hand-written copy of those would drift from
-the package that owns them. This is `doc-wiki-okf`'s own
-`tests/proposal_helpers.seeded_root`, with an added `log.md` because this
-vertical appends to one.
+Built from both packages' packaged seed files rather than hand-written JSON:
+proposal lanes come from doc-wiki declarations, while proposal catalog
+discovery reads the installed code-wiki type/catalog policy. This is
+`doc-wiki-okf`'s own `tests/proposal_helpers.seeded_root`, widened with the
+code-wiki declarations and an added `log.md` because this vertical appends to
+one.
 
 No `Proposal` declaration is installed and none is needed: `okf_ext.proposals`
 carries its own type, which is why `doc-wiki-okf`'s proposal suite seeds
@@ -17,6 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from code_wiki_okf.init import seed_files as code_wiki_seed_files
 from doc_wiki_okf.resources import seed_files
 
 
@@ -28,7 +28,8 @@ def make_bundle(tmp_path: Path, *, without: str | None = None) -> Path:
     """
     root = tmp_path / "okf"
     root.mkdir(parents=True, exist_ok=True)
-    for relative, text in seed_files().items():
+    files = {**seed_files(), **code_wiki_seed_files()}
+    for relative, text in files.items():
         if without is not None and Path(relative).name.startswith(f"{without}."):
             continue
         target = root / relative

@@ -10,7 +10,18 @@ import sys
 from collections.abc import Iterable
 from pathlib import Path
 
-from code_graph_io import _ignore, builtins, csharp_projects, packages, resolve, schema, store, tokens, upsert
+from code_graph_io import (
+    _ignore,
+    builtins,
+    csharp_projects,
+    dependencies,
+    packages,
+    resolve,
+    schema,
+    store,
+    tokens,
+    upsert,
+)
 from code_graph_io.parser.parse import parse_bytes
 from code_graph_io.parser.projections.graph import to_graph_records
 from code_graph_io.uri import repo_uri
@@ -200,15 +211,14 @@ def _update_one_repo(
     graph_dir: Path,
     *,
     full: bool,
-    global_workspace: dict[str, tuple[str, str, str, str]],
-    deferred: list[packages.CrossRepoLink],
+    manifests: tuple[packages.ManifestPackage, ...],
     ignore: _ignore.IgnoreSpec,
 ) -> None:
     """Run the single-repo pipeline for one member, then stamp its nodes.
 
     Lifts the per-repo body of the former monolithic `run()` into a function
-    invoked once per workspace member. Global steps (resolve.sweep, strict-tree
-    invariant, workspace-level metadata, cross-repo link pass) stay in
+    invoked once per workspace member. Global steps (dependency reconciliation,
+    resolve.sweep, strict-tree invariant, workspace-level metadata) stay in
     `run_workspace`. After the pipeline runs, every node this member produced
     that is still unstamped (`repo IS NULL`, excluding the global builtin /
     dependency nodes) is stamped with this member's `repo:` URI, and the
@@ -235,15 +245,12 @@ def _update_one_repo(
     upsert.set_current_repo(conn, repo_uri_val)
     try:
         _process_files(conn, repo_root, changed, skip_dirs, repo_uri_val, ignore)
-        deferred_repo_deps: list[packages.RepositoryDepLink] = []
         packages.refresh(
             conn,
             repo_root=repo_root,
             ctx=ctx,
+            manifests=manifests,
             current_repo=repo_uri_val,
-            global_workspace=global_workspace,
-            deferred_cross_repo=deferred,
-            deferred_repo_deps=deferred_repo_deps,
             ignore=ignore,
         )
         discovered_solutions = csharp_projects.refresh(
@@ -302,10 +309,6 @@ def _update_one_repo(
         )
 
         structural_nodes.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
-        # Must run after structural_nodes.emit: a virtual manifest's
-        # dependencies are re-sourced to the Repository node, which
-        # structural_nodes.emit is what creates.
-        packages.link_repository_dependencies(conn, deferred_repo_deps, ctx=ctx)
         csharp_projects.link_repository_solutions(conn, discovered_solutions, ctx=ctx)
         agent_plugins.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
         # Packages emitted above (packages.refresh) and plugins emitted just
@@ -351,9 +354,9 @@ def run_workspace(
 
     Each member runs the per-repo pipeline (`_update_one_repo`) in sequence
     inside one SQLite transaction; nodes are stamped with the producing
-    member's `repo:` URI. After the member loop, cross-repo internal-package
-    edges collected in `deferred` are emitted, then the global resolve /
-    strict-tree / workspace-metadata steps run once.
+    member's `repo:` URI. After the member loop, global dependency facets are
+    reconciled, then the resolve / strict-tree / workspace-metadata steps run
+    once.
 
     `members` and `graph_dir` are independent: the graph directory need not sit
     inside — or above — any member repo.
@@ -397,25 +400,42 @@ def run_workspace(
                     file=sys.stderr,
                 )
                 full = True
-            # Compiled once and shared: `build_workspace_index` must apply the
-            # same per-member scope the member's own build does, or the
-            # cross-repo index would resolve dependencies against manifests
-            # that member's graph never admits.
+            # Discover each configured repository once, then share that typed
+            # inventory between workspace reconciliation and package emission.
             specs = [_ignore.compile_ignore(patterns) for patterns in member_ignore]
-            global_workspace = packages.build_workspace_index(members, specs)
-            deferred: list[packages.CrossRepoLink] = []
+            from code_graph_io.repo_context import repo_context
+
+            manifests_by_repo = {
+                repo_uri(ctx): packages.discover_manifest_packages(member, ctx=ctx, ignore=spec)
+                for member, spec in zip(members, specs, strict=True)
+                for ctx in [repo_context(member)]
+            }
             with store.transaction(conn):
                 for repo_root, spec in zip(members, specs, strict=True):
+                    member_uri = repo_uri(repo_context(repo_root))
                     _update_one_repo(
                         conn,
                         repo_root,
                         graph_dir,
                         full=full,
-                        global_workspace=global_workspace,
-                        deferred=deferred,
+                        manifests=manifests_by_repo[member_uri],
                         ignore=spec,
                     )
-                packages.link_cross_repo_packages(conn, deferred)
+                all_manifests = tuple(manifest for manifests in manifests_by_repo.values() for manifest in manifests)
+                virtual_repository_dependencies = {
+                    member_uri: tuple(
+                        dependency
+                        for manifest in manifests
+                        if not manifest.distributable
+                        for dependency in manifest.dependencies
+                    )
+                    for member_uri, manifests in manifests_by_repo.items()
+                }
+                dependencies.reconcile_dependencies(
+                    conn,
+                    manifests=all_manifests,
+                    virtual_repository_dependencies=virtual_repository_dependencies,
+                )
                 resolve.sweep(conn)
                 _enforce_strict_tree_invariant(conn)
                 # Single-repo back-compat: mirror the lone member's per-repo

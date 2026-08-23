@@ -9,8 +9,7 @@ import pytest
 from code_wiki_okf.config import load_config
 from graph_works_core.scan import commands as scan
 from graph_works_core.scan.scan_contract import ProseRefreshResult, ScanResults
-from ingest_helpers import FakeLLM, FakeResponse
-from scan_helpers import AT, TODAY, make_workspace, seed_graph
+from scan_helpers import AT, TODAY, FakeLLM, FakeResponse, make_workspace, seed_graph
 
 FILLED = "Widgets is the demo package. It exists to exercise this pipeline."
 
@@ -45,6 +44,25 @@ async def test_narrate_false_stops_after_phase_one(ready, monkeypatch):
     assert result.applied == scan.ApplyResult()
 
 
+async def test_phase_one_calls_the_composite_sync_once(ready, monkeypatch):
+    layout, config = ready
+    real_sync_bundle = scan.sync_bundle
+    calls = 0
+
+    def counted_sync_bundle(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return real_sync_bundle(*args, **kwargs)
+
+    monkeypatch.setattr(scan, "sync_bundle", counted_sync_bundle)
+
+    result = await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
+
+    assert calls == 1
+    assert result.structural.entities.written
+    assert result.structural.mirror.results
+
+
 async def test_narrate_false_reports_structural_catalog_declines(ready, monkeypatch):
     """An early structural-only return must still be a failed scan result."""
     layout, config = ready
@@ -64,6 +82,26 @@ async def test_narrate_false_reports_structural_catalog_declines(ready, monkeypa
     result = await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
 
     assert result.errors == ("packages/broken.md: parse-error",)
+    assert not result.ok
+
+
+async def test_narrate_false_reports_incomplete_entity_writes(ready, monkeypatch):
+    layout, config = ready
+    real_build = scan.build_scan_worklist
+
+    async def build_with_incomplete_entity(*args, **kwargs):
+        worklist, structural = await real_build(*args, **kwargs)
+        entities = replace(
+            structural.entities,
+            skipped=("repositories/demo/packages/widgets.md: commit-error: disk full",),
+        )
+        return worklist, replace(structural, entities=entities)
+
+    monkeypatch.setattr(scan, "build_scan_worklist", build_with_incomplete_entity)
+
+    result = await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
+
+    assert result.errors == ("entity sync incomplete: repositories/demo/packages/widgets.md: commit-error: disk full",)
     assert not result.ok
 
 
@@ -197,8 +235,8 @@ async def test_traces_land_under_the_cache_dir(ready, monkeypatch):
 
 
 async def test_a_dry_run_writes_nothing_and_reports_what_it_would_do(ready, monkeypatch):
-    """The preview runs phase 1's classification and stops: no structural pass,
-    no model, no page write, no log entry."""
+    """The composite preview reports both structural halves without writes,
+    model construction, page changes, or log entries."""
     layout, config = ready
 
     def _no_model(*args, **kwargs):
@@ -209,9 +247,11 @@ async def test_a_dry_run_writes_nothing_and_reports_what_it_would_do(ready, monk
     result = await scan.run_scan(layout, config, today=TODAY, at=AT, dry_run=True)
     after = sorted(p.name for p in layout.bundle_dir.rglob("*.md"))
 
-    assert after == before  # the structural pass did not create pages
-    assert result.structural.entities == scan.SyncSummary()  # `entities.sync(dry_run=True)` is a no-op
-    assert result.structural.mirror.results == ()  # `sync_mirror(dry_run=True)` writes nothing either
+    assert after == before
+    assert result.structural.entities.created
+    assert result.structural.entities.written == result.structural.entities.created
+    assert result.structural.mirror.plans
+    assert result.structural.mirror.results == ()
     assert result.applied == scan.ApplyResult()
 
 

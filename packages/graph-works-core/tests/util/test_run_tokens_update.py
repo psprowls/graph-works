@@ -14,12 +14,11 @@ from code_graph_io import open_reader
 from code_graph_io.records import GraphNode, GraphRecords
 from code_graph_io.testing import open_store
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
-from code_wiki_okf.entities.sync import sync_entities
 from code_wiki_okf.init import install_bundle
+from code_wiki_okf.sync import sync_bundle
 from graph_works_core.util import commands
 from graph_works_core.util.commands import SkippedPage, run_tokens_update
 from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
-from okf_io import load_bundle
 
 PAGE = """---
 type: Explanation
@@ -189,10 +188,10 @@ def test_the_index_and_the_log_are_never_candidates(tmp_path):
 
 
 def test_the_entity_lane_is_reached_by_the_bundle_walk(tmp_path):
-    """`code_wiki_okf.entities.sync` no longer stamps `tokens` (it stopped
+    """`code_wiki_okf.sync` no longer stamps `tokens` (it stopped
     being a proxy-per-kind key -- 2026-08-19-tech-debt-tokens-metric-proxy-string).
-    This is the other half of that fix: an entity page written by
-    `sync_entities` must still be an ordinary candidate for `run_tokens_update`'s
+    This is the other half of that fix: an entity page written by the composite
+    sync must still be an ordinary candidate for `run_tokens_update`'s
     single bundle walk, or the field would end up with no writer at all."""
     graph_dir = tmp_path / "graph"
     store = open_store(graph_dir / "code.db", create=True)
@@ -239,8 +238,13 @@ def test_the_entity_lane_is_reached_by_the_bundle_walk(tmp_path):
         state_gate=StateGateConfig(enabled=False, branches=()),
     )
     with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        sync_entities(bundle, config, reader, today=date(2026, 1, 1), at=datetime(2026, 1, 1, tzinfo=UTC))
+        sync_bundle(
+            bundle_root,
+            config=config,
+            reader=reader,
+            today=date(2026, 1, 1),
+            at=datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
+        )
 
     pkg_page = bundle_root / "repositories/repo-a/packages/widgets.md"
     assert "tokens:" not in pkg_page.read_text(encoding="utf-8")

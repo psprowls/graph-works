@@ -1,11 +1,12 @@
 from pathlib import Path
 
+import pytest
 from code_wiki_okf.entities.pages import (
     default_concept_id,
-    directory_for,
     new_page_text,
     slug,
 )
+from code_wiki_okf.placement import PlacementError
 from okf_ext.schemas import load_schemas
 from okf_ext.shape import load_sections
 from okf_io import parse
@@ -18,29 +19,21 @@ def test_slug_replaces_slash() -> None:
     assert slug("okf-io") == "okf-io"
 
 
-def test_directory_for_reads_x_okf_directory_from_schema() -> None:
-    schema_set = load_schemas(_ASSETS / "schema")
-    assert directory_for(schema_set, "Dependency") == "dependencies/"
-    assert directory_for(schema_set, "Repository") == "repositories/"
-    assert directory_for(schema_set, "Package") == "packages/"
-
-
-def test_default_concept_id_combines_directory_and_slug() -> None:
-    schema_set = load_schemas(_ASSETS / "schema")
-    assert default_concept_id(schema_set, type_name="Package", name="okf-io") == "packages/okf-io"
-    assert default_concept_id(schema_set, type_name="Dependency", name="@babel/core") == "dependencies/@babel__core"
-
-
-def test_default_concept_id_nests_under_repository_when_repo_name_given() -> None:
-    schema_set = load_schemas(_ASSETS / "schema")
+def test_default_concept_id_delegates_placement_to_the_resource_policy() -> None:
     assert (
-        default_concept_id(schema_set, type_name="Package", name="widgets", repo_name="repo-a")
+        default_concept_id(type_name="Package", resource="pkg:acme/repo-a/widgets")
         == "repositories/repo-a/packages/widgets"
     )
     assert (
-        default_concept_id(schema_set, type_name="App", name="cli-app", repo_name="repo-a")
-        == "repositories/repo-a/apps/cli-app"
+        default_concept_id(type_name="Dependency", resource="dependency:npm/@babel/core")
+        == "dependencies/npm/@babel__core"
     )
+
+
+def test_default_concept_id_refuses_an_unsafe_resource_identity() -> None:
+    resource = "pkg:acme/repo-a/trailing."
+    with pytest.raises(PlacementError, match=resource):
+        default_concept_id(type_name="Package", resource=resource)
 
 
 def test_new_page_text_parses_clean_and_carries_every_declared_section() -> None:

@@ -5,11 +5,10 @@ that talks to a model. Phase 3 is deterministic and decides *what lands*. The
 split is what makes a scan resumable: a run that dies after phase 1 replays from
 `worklist.json` without re-walking the graph.
 
-**The structural half is not here.** `code_wiki_okf.entities.lanes.sync` and
-`code_wiki_okf.mirror.lanes.sync_mirror` between them create, regenerate,
-prune, reconcile indexes and append their own log entries; this module calls
-both, in that order, and reports their summaries unchanged as a
-`StructuralSummary`.
+**The structural half is not here.** `code_wiki_okf.sync.sync_bundle` owns the
+complete entity/File plan, preflight and application. This module invokes that
+one composite operation and adapts its result to graph-works' structural
+summary.
 
 **Drift propagation is not here either** (design spec §3.1). This vertical emits
 and applies prose-refresh work and nothing else; the lint vertical builds its own
@@ -44,9 +43,15 @@ from code_graph_io import (
     open_reader,
 )
 from code_wiki_okf.config import Config, RepoConfig
-from code_wiki_okf.entities.lanes import SyncSummary, is_entity_lane_page, sync
+from code_wiki_okf.entities.sync import SyncSummary
 from code_wiki_okf.git_state import changed_files_since, head_commit
-from code_wiki_okf.mirror.lanes import MirrorSummary, sync_mirror
+from code_wiki_okf.placement import (
+    PlacementError,
+    canonical_concept_id,
+    context_from_resource,
+    is_code_wiki_type,
+)
+from code_wiki_okf.sync import MirrorSummary, SyncResult, sync_bundle
 from langchain_core.tools import BaseTool
 from okf_ext.body import find_section, split_lines
 from okf_ext.bundle import SECTIONS_DIRNAME
@@ -95,20 +100,10 @@ PROSE_ATTEMPTS_KEY = "prose_refresh_attempts"
 #: code always earns a fresh attempt and the counter self-heals.
 MAX_PROSE_ATTEMPTS = 3
 
-#: The mirror lane's okf type. Its pages live under `repositories/<repo>/fs/`,
-#: inside an entity lane, and this vertical's structural pass now writes them
-#: (`mirror.lanes.sync_mirror`). It is named here for one narrower reason:
-#: `File` declares no prose sections, so a mirror page is neither a
-#: prose-refresh candidate nor an `unknown-type` `SkippedPage` -- without this
-#: constant `_classify_pages` would report every one of them as walked past
-#: for a reason that does not apply. Not dead code, and not a claim that the
-#: vertical leaves the lane alone.
-_MIRROR_TYPE = "File"
-
 #: The okf type of each entity lane whose *prose* this vertical fills, mapped
 #: to the graph kind `graph_tools.describe` renders it under. Mirror `File` is
 #: absent because it has no prose lane to fill -- not because the structural
-#: pass does not touch it; it does (`mirror.lanes.sync_mirror`).
+#: pass does not touch it; it does (`sync_bundle`).
 LANE_TYPES: Mapping[str, str] = {
     "Package": "package",
     "App": "app",
@@ -338,12 +333,14 @@ def _render_diff(changed: Sequence[str]) -> tuple[str, tuple[str, ...]]:
     return rendered, kept
 
 
-def _diff_gate(ref: _EntityRef, anchor: str, last_updated: str) -> tuple[bool, str | None, tuple[str, ...]]:
-    """`(stale, rendered_diff, changed_files)` for a page whose anchors differ.
+def _diff_gate(ref: _EntityRef, anchor: str) -> tuple[bool, str | None, tuple[str, ...]]:
+    """`(stale, rendered_diff, changed_files)` for prose behind repository HEAD.
 
-    `changed_files_since` diffs `anchor..HEAD`, which is the right range exactly
-    because the structural pass stamped `last_updated_commit` to HEAD earlier in
-    this same run. Its `None` -- git unavailable, or an anchor the repo does not
+    `changed_files_since` diffs `anchor..HEAD`. The current head comes from the
+    entity reference rather than the page's `last_updated_commit`: composite
+    sync deliberately avoids provenance-only rewrites, so that page field can
+    remain equal to the prose anchor when generated entity content did not
+    change. A `None` diff -- git unavailable, or an anchor the repo does not
     know -- is the rewritten-history case and comes back as stale with no diff.
 
     The repository lane is the one lane whose `relative_root` is `""`, so
@@ -351,7 +348,7 @@ def _diff_gate(ref: _EntityRef, anchor: str, last_updated: str) -> tuple[bool, s
     this repo change". `_repository_scoped` narrows the answer instead; empty
     after narrowing is not stale, and costs no model call.
     """
-    if ref.repo_path is None or anchor == last_updated:
+    if ref.repo_path is None or ref.head is None or anchor == ref.head:
         return False, None, ()
     sub_paths = (ref.relative_root,) if ref.relative_root else ()
     changed = changed_files_since(ref.repo_path, anchor, sub_paths=sub_paths)
@@ -462,17 +459,12 @@ def _classify_pages(
 
     The per-page decision, in order:
 
-    1. **Skip and report.** A parse error, a foreign `type`, a `resource:` that
-       resolves to nothing, or a type mismatch appends a `SkippedPage`. Only for
-       pages inside an entity lane, and never for the mirror `File` type -- see
-       `is_entity_lane_page`. Every one of the four reasons is gated on
-       `is_entity_lane_page` uniformly, not just the first two: a page outside
-       an entity lane was never a candidate for this vertical, so it is never
-       "skipped" no matter which of the four checks it would otherwise fail,
-       and reporting it regardless would put every concept, ADR and source
-       page in the vault into `skipped` on every scan. A page whose type
-       declares no prose sections is skipped silently: reporting it would fire
-       on every page of that type on every scan.
+    1. **Establish ownership.** A readable document must declare a code-wiki
+       type and its resource must validate to this exact canonical concept ID.
+       This is type/resource policy, never a guess from the directory spelling.
+       `File` is structurally owned but declares no prose sections, so it exits
+       silently. A canonical prose entity whose graph resource is absent or of
+       another kind appends a `SkippedPage`.
     2. **Adopt.** No anchor, a `last_updated_commit`, and nothing unfilled means
        a person wrote this prose. Stamp the anchor at that commit and yield no
        task -- §5.2's intent (every page is anchor-tracked) met with no model
@@ -496,24 +488,24 @@ def _classify_pages(
     for concept_id in sorted(bundle.concepts):
         document = bundle.concepts[concept_id]
         member = f"{concept_id}.md"
-        in_lane = is_entity_lane_page(concept_id)
         if document.parse_error is not None:
-            if in_lane:
-                skipped.append(SkippedPage(page=member, reason="parse-error"))
             continue
         type_name = str(document.fm.type or "")
-        if type_name not in LANE_TYPES:
-            if in_lane and type_name != _MIRROR_TYPE:
-                skipped.append(SkippedPage(page=member, reason="unknown-type"))
+        if not is_code_wiki_type(type_name):
             continue
-        ref = refs.get(str(document.fm.resource or ""))
+        resource = str(document.fm.resource or "")
+        try:
+            canonical_id = canonical_concept_id(context_from_resource(type_name, resource))
+        except PlacementError:
+            continue
+        if canonical_id != concept_id or type_name not in LANE_TYPES:
+            continue
+        ref = refs.get(resource)
         if ref is None:
-            if in_lane:
-                skipped.append(SkippedPage(page=member, reason="unresolved-resource"))
+            skipped.append(SkippedPage(page=member, reason="unresolved-resource"))
             continue
         if ref.type_name != type_name:
-            if in_lane:
-                skipped.append(SkippedPage(page=member, reason="type-mismatch"))
+            skipped.append(SkippedPage(page=member, reason="type-mismatch"))
             continue
         specs = prose_specs(section_set, type_name)
         if not specs:
@@ -528,9 +520,7 @@ def _classify_pages(
             adoptions.append(_stage_adoption(document, member=member, bundle_root=bundle_root, at=last_updated))
             continue
 
-        diff_stale, diff, changed = (
-            _diff_gate(ref, anchor, last_updated) if anchor and last_updated else (False, None, ())
-        )
+        diff_stale, diff, changed = _diff_gate(ref, anchor) if anchor else (False, None, ())
         if not first_fill and not diff_stale:
             continue
         if first_fill and not diff_stale and _attempts(document) >= MAX_PROSE_ATTEMPTS:
@@ -578,30 +568,16 @@ async def build_scan_worklist(
     so a caller can report the mechanical result independently of whether any
     prose ran.
 
-    The structural pass is **both** lanes: `entities.lanes.sync` then
-    `mirror.lanes.sync_mirror`, in that order, sharing one open reader. Running
-    only the first is what left every `## Files` link this vertical renders
-    pointing at a page nothing created -- 1311 `links.broken` warnings in the
-    first production run of `gw bootstrap` + `gw scan`.
-
-    The two lanes' `dry_run` semantics differ, deliberately and at their own
-    level: `entities.lanes.sync(dry_run=True)` calls nothing and returns an
-    empty summary, while `mirror.lanes.sync_mirror(dry_run=True)` genuinely
-    plans and returns the plans. Both write nothing, which is all this
-    function's own `dry_run` promises.
+    The structural pass is the standalone composite `sync_bundle`, sharing one
+    open graph reader across entity and File planning. Its dry run is a real
+    preview of both halves and writes nothing.
 
     `async` for signature uniformity with `run_scan`; nothing here awaits.
 
-    `dry_run=True` is the default, matching `entities.sync`'s own stance and the
-    repo convention that a writer defaults to the preview and takes the write as
-    an explicit argument. **The preview has one limitation that cannot be
-    engineered away:** `entities.sync(dry_run=True)` returns an empty
-    `SyncSummary` and does nothing (`entities/lanes.py`), so it is a no-op, not
-    a preview. The previewed worklist is therefore what a scan sees *before* the
-    structural pass, not after -- pages `sync` would have created are absent,
-    and `last_updated_commit` has not been advanced to HEAD, so the diff gate
-    reads against the previous run's anchors. Adoption (design spec D5) is
-    likewise reported in `ScanWorklist.adopted` and not written.
+    `dry_run=True` is the default, matching the repo convention that a writer
+    previews unless application is explicit. The previewed worklist still
+    reads the unchanged on-disk bundle, so pages the structural preview would
+    create are absent and adoption remains reported rather than written.
 
     Raises `ScanError` when the graph cannot be built or opened -- environment,
     not content.
@@ -613,21 +589,16 @@ async def build_scan_worklist(
 
     reader = _open_reader(target)
     try:
-        entity_summary = sync(load_bundle(layout.bundle_dir), config, reader, today=today, at=at, dry_run=dry_run)
-        # **Entity lane first, mirror lane second, and the order is
-        # load-bearing** -- it is the order `code-wiki-okf sync` has always
-        # used. The entity half regenerates the root index's `## Repositories`
-        # catalog and reconciles the top-level lanes; the mirror half then
-        # reconciles only `repositories/<repo>/fs/**`. Reversed, the entity
-        # pass would reconcile a `repositories/` lane whose subtree is about
-        # to change underneath it.
-        #
-        # The open `reader` is reused across both lanes -- one graph
-        # connection for the whole structural pass, which `cli.py` opens twice
-        # and does not manage.
-        mirror_summary = sync_mirror(layout.bundle_dir, config, reader, today=today, at=at, dry_run=dry_run)
-        summary = StructuralSummary(entities=entity_summary, mirror=mirror_summary)
-        # Both lanes committed their writes; reload so the classifier reads the
+        synced = sync_bundle(
+            layout.bundle_dir,
+            config=config,
+            reader=reader,
+            at=at.isoformat(),
+            today=today,
+            dry_run=dry_run,
+        )
+        summary = StructuralSummary.from_sync_result(synced)
+        # The composite committed its writes; reload so the classifier reads the
         # pages they just created and re-stamped rather than the pre-sync
         # snapshot. Under `dry_run` neither wrote anything, so this is the same
         # snapshot.
@@ -896,6 +867,11 @@ class StructuralSummary:
     entities: SyncSummary = field(default_factory=SyncSummary)
     mirror: MirrorSummary = field(default_factory=MirrorSummary)
 
+    @classmethod
+    def from_sync_result(cls, result: SyncResult) -> StructuralSummary:
+        """Adapt the domain composite without exposing it to scan callers."""
+        return cls(entities=result.entities, mirror=result.mirror)
+
     @property
     def errors(self) -> tuple[str, ...]:
         """Every structural failure, in the shape `ScanResult.errors` takes.
@@ -905,8 +881,10 @@ class StructuralSummary:
         exit code -- `gw scan` writing 755 pages and exiting 0 on a lane that
         failed is the defect class this whole epic closes.
         """
-        return tuple(f"{path}: {kind}" for path, kind in self.entities.catalog_declined) + tuple(
-            f"{repo}: mirror sync failed: {error}" for repo, error in self.mirror.failed_repos
+        return (
+            tuple(f"entity sync incomplete: {error}" for error in self.entities.skipped)
+            + tuple(f"{path}: {kind}" for path, kind in self.entities.catalog_declined)
+            + tuple(f"{repo}: mirror sync failed: {error}" for repo, error in self.mirror.failed_repos)
         )
 
 

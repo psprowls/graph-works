@@ -12,6 +12,7 @@ import json
 import subprocess
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any
 
 from code_graph_io.testing import raw_conn
 from graph_works_core import apply_init, plan_init
@@ -32,6 +33,31 @@ APP_URI = "app:acme/demo/console"
 SUITE_URI = "test_suite:acme/demo/tests"
 PLUGIN_URI = "agent_plugin:acme/demo/demo-plugin"
 DEPENDENCY_URI = "dependency:pypi/httpx"
+
+
+class FakeResponse:
+    def __init__(self, content: Any) -> None:
+        self.content = content
+        self.tool_calls: list[dict[str, Any]] = []
+
+
+class FakeLLM:
+    """A minimal scripted chat model for scan composition tests."""
+
+    def __init__(self, *responses: Any, fail: bool = False) -> None:
+        self.responses = list(responses)
+        self.fail = fail
+
+    def bind_tools(self, tools: list[Any]) -> FakeLLM:
+        _ = tools
+        return self
+
+    async def ainvoke(self, messages: list[Any]) -> FakeResponse:
+        if self.fail:
+            raise RuntimeError("model unavailable")
+        item = self.responses.pop(0) if self.responses else ""
+        return item if isinstance(item, FakeResponse) else FakeResponse(item)
+
 
 #: Every lane node's `path` is the entity's **directory**, which is what
 #: `code_graph_io` actually stores -- a package's is its manifest's *parent*

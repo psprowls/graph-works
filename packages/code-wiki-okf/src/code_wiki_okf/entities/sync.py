@@ -1,25 +1,11 @@
-"""The GraphReader-driven entity-lane orchestrator.
+"""Plan every entity placement, then apply that immutable plan.
 
-Enumerate -> resolve each entity to an existing-or-new page target -> create
-new pages on disk -> reload the bundle -> stamp provenance -> plan_regenerate
-+ apply. Two phases (create-then-regenerate) because `plan_regenerate` only
-edits documents already in `bundle.concepts`; it creates nothing
-(`entities/pages.py`'s own docstring makes the same point about
-`new_page_text`).
-
-Dependency is enumerated ecosystem-wide, no repo filter: a dependency node is
-one of code-graph-io's `_GLOBAL_KINDS` (`upsert.py`) and is never
-repo-attributed, so there is no per-repo set to filter it against, and
-`dependencies/ruamel.yaml.md` aggregating `used_by` across every consuming
-repo is the point.
-
-Repository does **not** use `GraphReader.describe_repository()`: that method
-guarantees exactly one Repository row per DB (`queries.describe_repository`'s
-own docstring), which held for a single-repo graph but not for the shared
-multi-repo one this orchestrator reads. `package_count` is computed per repo
-instead, by filtering `list_packages()` down to that repo's attribution
-(the `repo` column code-graph-io's `upsert.py` stamps on every path-bearing,
-non-global-kind node while `set_current_repo` is active for that member).
+The planner is the only graph-reading half of this module. It resolves every
+Repository, repository-owned entity, and Dependency through
+``code_wiki_okf.placement``; checks duplicate, wrong-path, occupied-path, and
+target-collision failures; and returns complete bundle members. The applier
+receives no reader or workspace config and therefore cannot rediscover or
+silently redirect a target after preflight.
 """
 
 from __future__ import annotations
@@ -27,13 +13,14 @@ from __future__ import annotations
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 from code_graph_io import GraphReader, NodeRecord
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.generators import Render, plan_regenerate
 from okf_ext.generators import apply as apply_regenerations
-from okf_ext.schemas import SchemaSet, load_schemas
+from okf_ext.schemas import load_schemas
 from okf_ext.sections import apply as apply_sections
 from okf_ext.sections import plan_sections
 from okf_ext.shape import load_sections
@@ -41,8 +28,7 @@ from okf_io import Bundle, load_bundle
 
 from code_wiki_okf import __version__
 from code_wiki_okf.config import Config
-from code_wiki_okf.entities.catalog import CatalogEntry, contents_groups, render_contents
-from code_wiki_okf.entities.pages import default_concept_id, new_page_text
+from code_wiki_okf.entities.pages import new_page_text
 from code_wiki_okf.entities.render import (
     render_agent_plugin,
     render_app,
@@ -52,158 +38,155 @@ from code_wiki_okf.entities.render import (
     render_test_suite,
 )
 from code_wiki_okf.git_state import head_commit
+from code_wiki_okf.placement import (
+    PlacementContext,
+    PlacementError,
+    canonical_member,
+    context_from_resource,
+    filesystem_member_identity,
+)
 from code_wiki_okf.provenance import generated_value, last_updated_commit_value
-from code_wiki_okf.resources import ResourceEntry, resource_index
+from code_wiki_okf.resources import ResourceIndex, resource_index
 
-#: Shared empty `by_repository` default -- mirrors `generators/model.py`'s
-#: `_EMPTY_FM` and `shape/model.py`'s `_NO_INDEXES`: one frozen instance
-#: rather than a fresh `MappingProxyType({})` per default-constructed
-#: `EntitySync`.
-_NO_REPOSITORIES: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+_PROVENANCE_KEYS = frozenset({"generated", "last_updated_commit", "tokens"})
+_UNIVERSAL_KEYS = frozenset({"type", "title", "resource", "description"})
+
+
+def _freeze(value: object) -> object:
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(key): _freeze(item) for key, item in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {str(key): _thaw(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw(item) for item in value]
+    if isinstance(value, frozenset):
+        return [_thaw(item) for item in sorted(value, key=repr)]
+    return value
 
 
 @dataclass(frozen=True, slots=True)
-class EntitySync:
-    """What `sync_entities` did.
+class _PlannedFrontmatter(Mapping[str, object]):
+    """Immutable mapping view plus the generated body owned by one render.
 
-    `written` is bundle-relative concept ids (no `.md`), matching
-    `Bundle.concepts`' own keys -- `okf_ext.writing.ApplyResult.written`
-    carries the `.md` member path instead, and this package's convention
-    (`resources.py`, `pages.py`) is the suffix-less id, so the suffix is
-    stripped once here rather than leaking to every caller.
-
-    `current_resources` is every `resource:` string this run resolved to a
-    live target -- the `.resource` of each `_Target` in `placed` (`placed` is
-    keyed by `concept_id`, so this is read off its values, not its keys) --
-    whether or not that target's page actually needed a write. This is
-    deliberately wider than `written`: a deletion caller
-    (`entities.lanes.sync`) needs "every resource the graph still names," and
-    `resource_index(bundle)` cannot answer that -- it indexes whatever is
-    *currently on disk*, which trivially includes every stale page too.
-    Using "on disk" as "should exist" would make deletion a permanent no-op.
-
-    `by_repository` maps each configured repository's name to the sorted
-    concept ids this run placed under it -- the grouping `_resolve_placements`
-    already has in hand at `place(target, repo_label=repo_cfg.name)`, exposed
-    rather than re-derived from the graph. Dependencies are absent: they are
-    ecosystem-wide and belong to no repository.
+    ``EntityWrite`` intentionally exposes only its frontmatter mapping. This
+    private mapping retains the corresponding generated sections so the plan
+    remains self-contained without widening the public plan shape or asking
+    the applier to query the graph again.
     """
 
-    written: tuple[str, ...] = field(default_factory=tuple)
-    skipped: tuple[str, ...] = field(default_factory=tuple)
-    current_resources: frozenset[str] = field(default_factory=frozenset)
-    by_repository: Mapping[str, tuple[str, ...]] = field(default=_NO_REPOSITORIES)
+    _values: Mapping[str, object]
+    sections: Mapping[str, str]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "_values",
+            MappingProxyType({key: _freeze(value) for key, value in self._values.items()}),
+        )
+        object.__setattr__(self, "sections", MappingProxyType(dict(self.sections)))
+
+    def __getitem__(self, key: str) -> object:
+        return self._values[key]
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
 
 
-#: `File.yaml`-style provenance keys that must never count as content drift.
-#: `generated.at` is a fresh wall-clock timestamp every call, so comparing it
-#: would make every existing page look stale on every run. `tokens` is excluded
-#: for a different reason: this lane no longer stamps it at all -- it is owned
-#: by `run_tokens_update` (graph-works-core) alone -- so a *foreign* writer
-#: changes it between runs; comparing it would make every page look stale on
-#: the first `gw util tokens` after a scan. Mirrors
-#: `mirror.plan._render_matches_disk`'s own `_PROVENANCE_KEYS` exclusion.
-_PROVENANCE_KEYS = frozenset({"generated", "last_updated_commit", "tokens"})
-
-#: The repo label `_resolve_placements` gives a dependency. A dependency node
-#: is one of code-graph-io's global kinds and is never repo-attributed, so it
-#: belongs to no repository's catalog.
-_ECOSYSTEM_WIDE = "(ecosystem-wide)"
+@dataclass(frozen=True, slots=True)
+class EntityWrite:
+    context: PlacementContext
+    member: str
+    frontmatter: Mapping[str, object]
 
 
 @dataclass(frozen=True, slots=True)
 class EntityPlan:
-    """A read-only preview of what `sync_entities` would change, keyed by
-    `resource` rather than `concept_id` -- `code_wiki_okf.sync`'s staleness
-    rule reports against resources, the identity `SyncSnapshot` uses for
-    both lanes.
-    """
-
-    stale: frozenset[str] = field(default_factory=frozenset)
-    missing: frozenset[str] = field(default_factory=frozenset)
-    current_resources: frozenset[str] = field(default_factory=frozenset)
+    writes: tuple[EntityWrite, ...]
+    current_resources: frozenset[str]
+    warnings: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
-class _Target:
-    """One entity resolved to a page: where it lives, and what it renders to."""
+class SyncSummary:
+    """Entity application result consumed by the composite sync task."""
 
-    concept_id: str
-    render: Render
-    type_name: str
-    title: str
-    resource: str
+    created: tuple[str, ...] = field(default_factory=tuple)
+    updated: tuple[str, ...] = field(default_factory=tuple)
+    written: tuple[str, ...] = field(default_factory=tuple)
+    skipped: tuple[str, ...] = field(default_factory=tuple)
+    warnings: tuple[str, ...] = field(default_factory=tuple)
+    deleted: tuple[str, ...] = field(default_factory=tuple)
+    declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    catalog: tuple[str, ...] = field(default_factory=tuple)
+    catalog_created: tuple[str, ...] = field(default_factory=tuple)
+    catalog_updated: tuple[str, ...] = field(default_factory=tuple)
+    catalog_declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+
+    @property
+    def ok(self) -> bool:
+        return not self.skipped and not self.catalog_declined
 
 
-def _repo_uri_by_name(reader: GraphReader) -> dict[str, str]:
-    """`{repo short name: repo: URI}`, from every Repository node's own
-    `.name` / `.attrs["uri"]` -- `workspace.yaml`'s `repositories` block's own
-    contract: the config key names both `repositories/<name>.md` and must
-    match the graph's `repo:` URI member name."""
-    out: dict[str, str] = {}
+def _repo_uris_by_name(reader: GraphReader) -> Mapping[str, tuple[str, ...]]:
+    grouped: dict[str, list[str]] = {}
     for node in reader.list_repositories():
         uri = node.attrs.get("uri")
         if uri:
-            out[node.name] = str(uri)
-    return out
+            grouped.setdefault(node.name, []).append(str(uri))
+    return MappingProxyType({name: tuple(sorted(uris)) for name, uris in sorted(grouped.items())})
 
 
 def _nodes_for_repo(nodes: Sequence[NodeRecord], repo_uri: str) -> list[NodeRecord]:
-    """`nodes` attributed to `repo_uri` by code-graph-io's `repo` column
-    (folded into `attrs["repo"]` by `queries._row_to_node`)."""
-    return [n for n in nodes if n.attrs.get("repo") == repo_uri]
+    return [node for node in nodes if node.attrs.get("repo") == repo_uri]
 
 
 def _resource_text(node: NodeRecord) -> str:
     uri = node.attrs.get("uri")
     if not uri:
-        raise ValueError(f"{node.kind} node {node.name!r} carries no uri -- cannot resolve a page resource for it")
+        raise PlacementError(resource=f"{node.kind}:{node.name}", reason="graph node carries no resource URI")
     return str(uri)
 
 
-def _resolve_target(
-    *,
-    existing: Mapping[str, ResourceEntry],
-    schema_set: SchemaSet,
-    type_name: str,
-    name: str,
-    resource: str,
-    render: Render,
-    repo_name: str | None = None,
-) -> _Target:
-    """An existing page (found by `resource`) wins over a fresh path -- this
-    is what lets a page moved within its lane be found and updated in place
-    instead of duplicated. `repo_name` nests a repo-scoped type's *fresh*
-    path under `repositories/<repo_name>/` -- see
-    `entities.pages.default_concept_id`.
+def _repository_name(context: PlacementContext) -> str:
+    if context.repository is None:
+        raise PlacementError(resource=context.resource, reason="placement context has no repository")
+    return context.repository
 
-    But only if that page's own on-disk `type:` agrees with `type_name` --
-    the type this call site's node-kind loop (`_package_targets`,
-    `_app_targets`, ...) is asserting. `existing` is keyed by `resource`, not
-    by type, so a page whose declared type disagrees with the resource it
-    claims (or a `resource_index` collision where a same-resource page of a
-    *different* type shadowed the one this node actually matches, per
-    `ResourceIndex.duplicates`) must not receive a render shaped for the
-    wrong type -- `plan_regenerate` would then either refuse it outright (an
-    ungranted-key `ValueError`) or, worse, silently overwrite a page with
-    content foreign to its declared type. Treating the mismatch as "no
-    existing page claims this resource" and falling through to
-    `default_concept_id` defers the call entirely to graph-works-core's
-    `_classify_pages`, which already reports the untouched page as
-    `type-mismatch` once this lane leaves it alone."""
-    entry = existing.get(resource)
-    if entry is not None and str(entry.document.fm.type or "") == type_name:
-        concept_id = entry.concept_id
-    else:
-        concept_id = default_concept_id(schema_set, type_name=type_name, name=name, repo_name=repo_name)
-    return _Target(concept_id=concept_id, render=render, type_name=type_name, title=name, resource=resource)
+
+def _dependency_identity(context: PlacementContext) -> tuple[str, str]:
+    if context.ecosystem is None or context.name is None:
+        raise PlacementError(resource=context.resource, reason="placement context has no dependency identity")
+    return context.ecosystem, context.name
+
+
+def _require_description[T](value: T | None, *, resource: str) -> T:
+    if value is None:
+        raise PlacementError(resource=resource, reason="graph listed this node but cannot describe it")
+    return value
+
+
+def _at_datetime(at: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(at)
+    except ValueError as exc:
+        raise ValueError(f"at must be an ISO-8601 instant, got {at!r}") from exc
+    if parsed.tzinfo is None:
+        raise ValueError("at must include a timezone offset")
+    return parsed
 
 
 def _stamp_provenance(render: Render, *, sha: str | None, at: datetime) -> Render:
-    """`tokens` is not stamped here: `run_tokens_update`
-    (graph-works-core) is its sole writer, keyed off D-041. Stamping a
-    per-kind proxy here would double-write the key -- see
-    2026-08-19-tech-debt-tokens-metric-proxy-string."""
     frontmatter = dict(render.frontmatter)
     frontmatter["generated"] = generated_value(by=f"code-wiki-okf/{__version__}", at=at)
     if sha:
@@ -211,492 +194,371 @@ def _stamp_provenance(render: Render, *, sha: str | None, at: datetime) -> Rende
     return Render(frontmatter=frontmatter, sections=render.sections)
 
 
-def _package_targets(
-    nodes: Sequence[NodeRecord],
-    reader: GraphReader,
-    *,
-    repo_name: str,
-    existing: Mapping[str, ResourceEntry],
-    schema_set: SchemaSet,
-    sha: str | None,
-    at: datetime,
-) -> Iterator[_Target]:
-    for node in nodes:
-        desc = reader.describe_package(name=node.name)
-        if desc is None:
-            continue
-        render = _stamp_provenance(render_package(desc, repo_name=repo_name), sha=sha, at=at)
-        yield _resolve_target(
-            existing=existing,
-            schema_set=schema_set,
-            type_name="Package",
-            name=node.name,
-            resource=_resource_text(node),
-            render=render,
-            repo_name=repo_name,
-        )
-
-
-def _app_targets(
-    nodes: Sequence[NodeRecord],
-    reader: GraphReader,
-    *,
-    repo_name: str,
-    existing: Mapping[str, ResourceEntry],
-    schema_set: SchemaSet,
-    sha: str | None,
-    at: datetime,
-) -> Iterator[_Target]:
-    for node in nodes:
-        desc = reader.describe_app(name=node.name)
-        if desc is None:
-            continue
-        render = _stamp_provenance(render_app(desc, repo_name=repo_name), sha=sha, at=at)
-        yield _resolve_target(
-            existing=existing,
-            schema_set=schema_set,
-            type_name="App",
-            name=node.name,
-            resource=_resource_text(node),
-            render=render,
-            repo_name=repo_name,
-        )
-
-
-def _test_suite_targets(
-    nodes: Sequence[NodeRecord],
-    reader: GraphReader,
-    *,
-    repo_name: str,
-    existing: Mapping[str, ResourceEntry],
-    schema_set: SchemaSet,
-    sha: str | None,
-    at: datetime,
-) -> Iterator[_Target]:
-    for node in nodes:
-        desc = reader.describe_test_suite(suite_name=node.name)
-        if desc is None:
-            continue
-        tested = reader.consumer_packages(kind="test_suite", entity_uri=desc.uri)
-        render = _stamp_provenance(render_test_suite(desc, tested_packages=tested, repo_name=repo_name), sha=sha, at=at)
-        yield _resolve_target(
-            existing=existing,
-            schema_set=schema_set,
-            type_name="TestSuite",
-            name=node.name,
-            resource=_resource_text(node),
-            render=render,
-            repo_name=repo_name,
-        )
-
-
-def _agent_plugin_targets(
-    nodes: Sequence[NodeRecord],
-    reader: GraphReader,
-    *,
-    repo_name: str,
-    existing: Mapping[str, ResourceEntry],
-    schema_set: SchemaSet,
-    sha: str | None,
-    at: datetime,
-) -> Iterator[_Target]:
-    for node in nodes:
-        desc = reader.describe_agent_plugin(name=node.name)
-        if desc is None:
-            continue
-        render = _stamp_provenance(render_agent_plugin(desc, repo_name=repo_name), sha=sha, at=at)
-        yield _resolve_target(
-            existing=existing,
-            schema_set=schema_set,
-            type_name="AgentPlugin",
-            name=node.name,
-            resource=_resource_text(node),
-            render=render,
-            repo_name=repo_name,
-        )
-
-
-def _dependency_targets(
-    nodes: Sequence[NodeRecord],
-    reader: GraphReader,
-    *,
-    existing: Mapping[str, ResourceEntry],
-    schema_set: SchemaSet,
-    at: datetime,
-) -> Iterator[_Target]:
-    """Ecosystem-wide: no repo attribution and no commit SHA (a dependency
-    is not owned by any one repo, so `last_updated_commit` never applies)."""
-    for node in nodes:
-        ecosystem = str(node.attrs.get("ecosystem", ""))
-        desc = reader.describe_dependency(ecosystem=ecosystem, name=node.name)
-        if desc is None:
-            continue
-        render = _stamp_provenance(render_dependency(desc), sha=None, at=at)
-        yield _resolve_target(
-            existing=existing,
-            schema_set=schema_set,
-            type_name="Dependency",
-            name=node.name,
-            resource=_resource_text(node),
-            render=render,
-        )
-
-
-def _collision_message(collisions: dict[str, list[tuple[str, str]]]) -> str:
-    parts = []
-    for concept_id, entries in sorted(collisions.items()):
-        named = ", ".join(f"{repo_label!r} ({resource})" for repo_label, resource in entries)
-        parts.append(f"{concept_id}: {named}")
-    return (
-        "entity name collision -- these entries would resolve to the same page with different resources: "
-        f"{'; '.join(parts)}. This can occur for Repository and Dependency (ecosystem-wide) or within a repo "
-        "for Package, App, TestSuite or AgentPlugin if the same entity is declared twice with different "
-        "`resource:` values. Rename one of the entities, or give it a distinct `resource:`."
+def _write(context: PlacementContext, *, title: str, render: Render) -> EntityWrite:
+    frontmatter: dict[str, object] = {
+        "type": context.type_name,
+        "title": title,
+        "resource": context.resource,
+        **render.frontmatter,
+    }
+    return EntityWrite(
+        context=context,
+        member=canonical_member(context),
+        frontmatter=_PlannedFrontmatter(frontmatter, render.sections),
     )
 
 
-def _resolve_placements(
-    bundle: Bundle,
-    config: Config,
-    reader: GraphReader,
-    *,
-    schema_set: SchemaSet,
-    existing: Mapping[str, ResourceEntry],
-    at: datetime,
-) -> dict[str, tuple[_Target, str]]:
-    """Resolve every entity this run's graph walk names to a page target,
-    without writing anything. Shared by `sync_entities` (which writes what
-    this returns) and `plan_entities` (which only previews it) -- extracted
-    so the two can never compute a different "what should exist" answer.
+def _duplicate_error(index: ResourceIndex) -> PlacementError | None:
+    duplicates = {resource: members for resource, members in index.members_by_resource.items() if len(members) > 1}
+    if not duplicates:
+        return None
+    resource, members = min(duplicates.items())
+    return PlacementError(
+        resource=resource,
+        reason=f"duplicate resource in {', '.join(sorted(members))}; delete duplicate pre-release pages and regenerate",
+    )
 
-    Raises `ValueError` for the same two cases `sync_entities` always has: a
-    same-target collision between two repos' entities, and a new target whose
-    default page path is already occupied by an unattributed file. Both
-    checks are read-only themselves, so a preview caller gets them too.
-    """
-    repo_uris = _repo_uri_by_name(reader)
+
+def _preflight_existing(bundle: Bundle, index: ResourceIndex, writes: Sequence[EntityWrite]) -> None:
+    for write in writes:
+        actual = index.member_for(write.context.resource)
+        expected = write.member.removesuffix(".md")
+        path_conflicts = index.filesystem_path_conflicts_for(write.member)
+        if path_conflicts:
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=(
+                    f"canonical member {write.member} has a filesystem-equivalent path type conflict with existing "
+                    f"{', '.join(path_conflicts)}; delete the old pre-release page and regenerate"
+                ),
+                expected=expected,
+            )
+        if actual is not None and actual != write.member:
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=f"found at {actual}; delete the old pre-release page and regenerate",
+                expected=expected,
+            )
+        entry = index.get(write.context.resource)
+        if entry is not None:
+            actual_type = (entry.document.fm.type or "").strip()
+            if actual_type != write.context.type_name:
+                raise PlacementError(
+                    resource=write.context.resource,
+                    reason=(
+                        f"{write.member} declares type {actual_type or '(blank)'} instead of "
+                        f"{write.context.type_name}; delete the old pre-release page and regenerate"
+                    ),
+                    expected=expected,
+                )
+        equivalent_members = index.filesystem_members_for(write.member)
+        if equivalent_members and equivalent_members != (write.member,):
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=(
+                    f"canonical member {write.member} is filesystem-equivalent to existing "
+                    f"{', '.join(equivalent_members)}; delete the old pre-release page and regenerate"
+                ),
+                expected=expected,
+            )
+        if entry is None and (bundle.root / write.member).exists():
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=(
+                    f"found an existing page at {write.member} with no matching resource; "
+                    "delete the old pre-release page and regenerate"
+                ),
+                expected=expected,
+            )
+
+
+def plan_entities(
+    bundle: Bundle,
+    reader: GraphReader,
+    config: Config,
+    *,
+    at: str,
+    index: ResourceIndex | None = None,
+) -> EntityPlan:
+    """Resolve and preflight every desired entity without touching disk."""
+    index = resource_index(bundle) if index is None else index
+    duplicate_error = _duplicate_error(index)
+    if duplicate_error is not None:
+        raise duplicate_error
+
+    generated_at = _at_datetime(at)
+    repo_uris = _repo_uris_by_name(reader)
     all_packages = reader.list_packages()
     all_apps = reader.list_apps()
     all_suites = reader.list_test_suites()
     all_plugins = reader.list_agent_plugins()
 
-    placed: dict[str, tuple[_Target, str]] = {}
-    collisions: dict[str, list[tuple[str, str]]] = {}
+    writes: list[EntityWrite] = []
+    warnings: list[str] = []
+    resource_by_member: dict[str, tuple[str, str]] = {}
 
-    def place(target: _Target, *, repo_label: str) -> None:
-        prior = placed.get(target.concept_id)
-        if prior is not None and prior[0].resource != target.resource:
-            bucket = collisions.setdefault(target.concept_id, [(prior[1], prior[0].resource)])
-            bucket.append((repo_label, target.resource))
-            return
-        placed[target.concept_id] = (target, repo_label)
+    def add(write: EntityWrite) -> None:
+        if PurePosixPath(write.member).name == "index.md":
+            raise PlacementError(
+                resource=write.context.resource,
+                reason="entity page would collide with a reserved directory index.md",
+                expected=write.member.removesuffix(".md"),
+            )
+        identity = filesystem_member_identity(write.member)
+        prior = resource_by_member.get(identity)
+        if prior is not None and prior[1] != write.context.resource:
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=(
+                    f"canonical member {write.member} is filesystem-equivalent to {prior[0]}, "
+                    f"which also belongs to {prior[1]}"
+                ),
+                expected=write.member.removesuffix(".md"),
+            )
+        resource_by_member[identity] = (write.member, write.context.resource)
+        writes.append(write)
 
-    for repo_cfg in config.repos:
-        repo_uri = repo_uris.get(repo_cfg.name)
-        if repo_uri is None:
-            continue  # declared in workspace.yaml but not (yet) present in the graph
-        sha = head_commit(repo_cfg.path)
+    for repo_config in config.repos:
+        matching_repo_uris = repo_uris.get(repo_config.name, ())
+        if not matching_repo_uris:
+            continue
+        if len(matching_repo_uris) > 1:
+            resource = matching_repo_uris[0]
+            context = context_from_resource("Repository", resource)
+            raise PlacementError(
+                resource=resource,
+                reason=f"repository name {repo_config.name!r} is claimed by {', '.join(matching_repo_uris)}",
+                expected=canonical_member(context).removesuffix(".md"),
+            )
+        repo_uri = matching_repo_uris[0]
+        sha = head_commit(repo_config.path)
 
-        for target in _package_targets(
-            _nodes_for_repo(all_packages, repo_uri),
-            reader,
-            repo_name=repo_cfg.name,
-            existing=existing,
-            schema_set=schema_set,
-            sha=sha,
-            at=at,
-        ):
-            place(target, repo_label=repo_cfg.name)
+        for node in _nodes_for_repo(all_packages, repo_uri):
+            context = context_from_resource("Package", _resource_text(node))
+            package_description = _require_description(
+                reader.describe_package(name=node.name, uri=context.resource),
+                resource=context.resource,
+            )
+            render = _stamp_provenance(
+                render_package(package_description, repo_name=_repository_name(context)),
+                sha=sha,
+                at=generated_at,
+            )
+            add(_write(context, title=node.name, render=render))
 
-        for target in _app_targets(
-            _nodes_for_repo(all_apps, repo_uri),
-            reader,
-            repo_name=repo_cfg.name,
-            existing=existing,
-            schema_set=schema_set,
-            sha=sha,
-            at=at,
-        ):
-            place(target, repo_label=repo_cfg.name)
+        for node in _nodes_for_repo(all_apps, repo_uri):
+            context = context_from_resource("App", _resource_text(node))
+            app_description = _require_description(
+                reader.describe_app(name=node.name, uri=context.resource),
+                resource=context.resource,
+            )
+            render = _stamp_provenance(
+                render_app(app_description, repo_name=_repository_name(context)),
+                sha=sha,
+                at=generated_at,
+            )
+            add(_write(context, title=node.name, render=render))
 
-        for target in _test_suite_targets(
-            _nodes_for_repo(all_suites, repo_uri),
-            reader,
-            repo_name=repo_cfg.name,
-            existing=existing,
-            schema_set=schema_set,
-            sha=sha,
-            at=at,
-        ):
-            place(target, repo_label=repo_cfg.name)
+        for node in _nodes_for_repo(all_suites, repo_uri):
+            context = context_from_resource("TestSuite", _resource_text(node))
+            suite_description = _require_description(
+                reader.describe_test_suite(suite_name=node.name, uri=context.resource),
+                resource=context.resource,
+            )
+            tested_packages = reader.consumer_packages(kind="test_suite", entity_uri=suite_description.uri)
+            render = _stamp_provenance(
+                render_test_suite(
+                    suite_description,
+                    tested_packages=tested_packages,
+                    repo_name=_repository_name(context),
+                ),
+                sha=sha,
+                at=generated_at,
+            )
+            add(_write(context, title=node.name, render=render))
 
-        for target in _agent_plugin_targets(
-            _nodes_for_repo(all_plugins, repo_uri),
-            reader,
-            repo_name=repo_cfg.name,
-            existing=existing,
-            schema_set=schema_set,
-            sha=sha,
-            at=at,
-        ):
-            place(target, repo_label=repo_cfg.name)
+        for node in _nodes_for_repo(all_plugins, repo_uri):
+            context = context_from_resource("AgentPlugin", _resource_text(node))
+            plugin_description = _require_description(
+                reader.describe_agent_plugin(name=node.name, uri=context.resource),
+                resource=context.resource,
+            )
+            render = _stamp_provenance(
+                render_agent_plugin(plugin_description, repo_name=_repository_name(context)),
+                sha=sha,
+                at=generated_at,
+            )
+            add(_write(context, title=node.name, render=render))
 
         package_count = len(_nodes_for_repo(all_packages, repo_uri))
-        repo_render = _stamp_provenance(render_repository(package_count=package_count), sha=sha, at=at)
-        place(
-            _resolve_target(
-                existing=existing,
-                schema_set=schema_set,
-                type_name="Repository",
-                name=repo_cfg.name,
-                resource=repo_uri,
-                render=repo_render,
-            ),
-            repo_label=repo_cfg.name,
+        repository_context = context_from_resource("Repository", repo_uri)
+        repository_render = _stamp_provenance(
+            render_repository(package_count=package_count),
+            sha=sha,
+            at=generated_at,
         )
+        add(_write(repository_context, title=_repository_name(repository_context), render=repository_render))
 
-    for target in _dependency_targets(
-        reader.list_dependencies(), reader, existing=existing, schema_set=schema_set, at=at
-    ):
-        place(target, repo_label=_ECOSYSTEM_WIDE)
+    for node in reader.list_dependencies():
+        context = context_from_resource("Dependency", _resource_text(node))
+        ecosystem, dependency_name = _dependency_identity(context)
+        dependency_description = _require_description(
+            reader.describe_dependency(ecosystem=ecosystem, name=dependency_name),
+            resource=context.resource,
+        )
+        implementations = sorted(dependency_description.implemented_by)
+        dependency_description = replace(dependency_description, implemented_by=implementations)
+        render = _stamp_provenance(render_dependency(dependency_description), sha=None, at=generated_at)
+        add(_write(context, title=dependency_name, render=render))
+        if len(implementations) > 1:
+            warnings.append(f"{context.resource} has multiple implementations: {', '.join(implementations)}")
 
-    if collisions:
-        raise ValueError(_collision_message(collisions))
-
-    occupied = sorted(
-        target.concept_id
-        for target, _repo_label in placed.values()
-        if target.resource not in existing and (bundle.root / f"{target.concept_id}.md").exists()
+    ordered_writes = tuple(sorted(writes, key=lambda write: (write.member, write.context.resource)))
+    _preflight_existing(bundle, index, ordered_writes)
+    return EntityPlan(
+        writes=ordered_writes,
+        current_resources=frozenset(write.context.resource for write in ordered_writes),
+        warnings=tuple(sorted(warnings)),
     )
-    if occupied:
-        raise ValueError(
-            f"refusing to create: {', '.join(occupied)} -- a file already exists at each of these paths "
-            f"with no matching `resource:` (missing, blank, or one okf-io could not coerce), so code-wiki-okf "
-            f"cannot tell whether it is the same entity the graph now names. Give the existing page a "
-            f"`resource:` matching the graph, or move it out of the way, before syncing again."
-        )
-
-    return placed
 
 
-def _by_repository(placed: dict[str, tuple[_Target, str]]) -> Mapping[str, tuple[str, ...]]:
-    grouped: dict[str, list[str]] = {}
-    for target, repo_label in placed.values():
-        if repo_label == _ECOSYSTEM_WIDE:
-            continue
-        grouped.setdefault(repo_label, []).append(target.concept_id)
-    return MappingProxyType({name: tuple(sorted(ids)) for name, ids in sorted(grouped.items())})
-
-
-def _with_contents(
-    placed: dict[str, tuple[_Target, str]],
-    bundle: Bundle,
-    by_repository: Mapping[str, tuple[str, ...]],
-    existing: Mapping[str, ResourceEntry],
-) -> dict[str, tuple[_Target, str]]:
-    """Give every Repository target its `## Contents` render.
-
-    Computed here rather than in `render_repository`, and after phase 1,
-    because the section lists sibling *pages* and carries their
-    `description`s -- neither of which exists until the pages do, and neither
-    of which a `describe_*` record can see.
-
-    The section is folded into the render `sync_entities` already builds for
-    that page rather than written by a second `plan_regenerate` pass. A
-    sections-only `Render` against a declared type deletes every `owned`
-    frontmatter key it does not supply (`okf_ext.generators.Render`'s own
-    docstring), so a separate pass would silently drop `package_count`.
-
-    `existing` is the pre-placement `{resource: ResourceEntry}` map both
-    callers already computed. A placed target whose resource is not in it is one
-    phase 1 would create -- or, for `sync_entities`'s post-reload call,
-    already did. Either way `bundle` might not have that page yet (it never
-    does for `plan_entities`'s preview, which never runs phase 1 at all), so
-    every such target is handed to `contents_groups` as a synthetic stand-in:
-    title and concept id straight from the target, description `""` to match
-    exactly what `new_page_text` seeds a freshly created page with. Without
-    this, a sibling entity this run is about to place gets silently dropped
-    from its repository's `## Contents` preview -- the id is genuinely absent
-    from `bundle`, not broken, so `contents_groups`'s ordinary "unreadable
-    page" drop must not apply to it.
-    """
-    synthetic = {
-        concept_id: (target.type_name, CatalogEntry(title=target.title, concept_id=concept_id, description=""))
-        for concept_id, (target, _repo_label) in placed.items()
-        if target.resource not in existing
+def _render_for_apply(write: EntityWrite, *, content_only: bool) -> Render:
+    frontmatter = {
+        key: _thaw(value)
+        for key, value in write.frontmatter.items()
+        if key not in _UNIVERSAL_KEYS and (not content_only or key not in _PROVENANCE_KEYS)
     }
-    out = dict(placed)
-    for concept_id, (target, repo_label) in placed.items():
-        if target.type_name != "Repository":
-            continue
-        groups = contents_groups(bundle, by_repository.get(target.title, ()), synthetic=synthetic)
-        render = Render(
-            frontmatter=target.render.frontmatter,
-            sections={**target.render.sections, "Contents": render_contents(groups)},
-        )
-        out[concept_id] = (replace(target, render=render), repo_label)
-    return out
+    sections = write.frontmatter.sections if isinstance(write.frontmatter, _PlannedFrontmatter) else {}
+    return Render(frontmatter=frontmatter, sections=sections)
 
 
-def sync_entities(
-    bundle: Bundle,
-    config: Config,
-    reader: GraphReader,
+def apply_entities(
+    bundle_root: Path,
+    plan: EntityPlan,
     *,
     today: date,
-    at: datetime,
-) -> EntitySync:
-    """Enumerate every Package/App/TestSuite/AgentPlugin/Dependency/Repository
-    node `config` and `reader` can see, resolve each to an existing-or-new
-    page, create the new ones on disk, then regenerate every target's owned
-    frontmatter and generated sections in one `plan_regenerate` / `apply`
-    pass.
+    declarations_dir: Path | None = None,
+) -> SyncSummary:
+    """Apply exactly *plan*'s members, without consulting the graph or config."""
+    _ = today
+    members: dict[str, tuple[str, str]] = {}
+    for write in plan.writes:
+        canonical = canonical_member(write.context)
+        if canonical != write.member:
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=f"planned member {write.member} is not canonical",
+                expected=canonical.removesuffix(".md"),
+            )
+        identity = filesystem_member_identity(write.member)
+        prior = members.get(identity)
+        if prior is not None and prior[1] != write.context.resource:
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=(
+                    f"planned member {write.member} is filesystem-equivalent to {prior[0]}, "
+                    f"which also belongs to {prior[1]}"
+                ),
+                expected=write.member.removesuffix(".md"),
+            )
+        members[identity] = (write.member, write.context.resource)
 
-    `today` carries no clock-dependent logic today; it is accepted so a
-    future rule needing it does not need to widen every call site.
+    bundle = load_bundle(bundle_root)
+    index = resource_index(bundle)
+    for write in plan.writes:
+        path_conflicts = index.filesystem_path_conflicts_for(write.member)
+        if path_conflicts:
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=(
+                    f"planned member {write.member} has a filesystem-equivalent path type conflict with occupied "
+                    f"{', '.join(path_conflicts)}; re-plan"
+                ),
+                expected=write.member.removesuffix(".md"),
+            )
+        equivalent_members = index.filesystem_members_for(write.member)
+        if equivalent_members and equivalent_members != (write.member,):
+            raise PlacementError(
+                resource=write.context.resource,
+                reason=(
+                    f"planned member {write.member} is filesystem-equivalent to occupied "
+                    f"{', '.join(equivalent_members)}; re-plan"
+                ),
+                expected=write.member.removesuffix(".md"),
+            )
 
-    Raises `ValueError` in the two cases `_resolve_placements` checks, both
-    before any write lands: an entity-name collision between two repos, and a
-    new page's default path already occupied by a file with no matching
-    `resource:`.
-    """
-    schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
-    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
-    existing = resource_index(bundle).by_resource
+    declarations_root = bundle_root if declarations_dir is None else declarations_dir
+    schema_set = load_schemas(declarations_root / SCHEMA_DIRNAME)
+    section_set = load_sections(declarations_root / SECTIONS_DIRNAME)
+    created_ids = tuple(
+        write.member.removesuffix(".md")
+        for write in plan.writes
+        if bundle.concept(write.member.removesuffix(".md")) is None
+    )
 
-    placed = _resolve_placements(bundle, config, reader, schema_set=schema_set, existing=existing, at=at)
-
-    # Phase 1: create every new page's skeleton on disk. A target whose
-    # resource was already in the bundle -- whether at its default path or
-    # one a human moved it to -- is left alone here; only its frontmatter and
-    # generated sections change, in phase 2.
-    created_any = False
-    for target, _repo_label in placed.values():
-        if target.resource in existing:
+    for write in plan.writes:
+        concept_id = write.member.removesuffix(".md")
+        if bundle.concept(concept_id) is not None:
             continue
         text = new_page_text(
             schema_set=schema_set,
             section_set=section_set,
-            type_name=target.type_name,
-            title=target.title,
-            resource=target.resource,
+            type_name=write.context.type_name,
+            title=str(write.frontmatter["title"]),
+            resource=write.context.resource,
         )
-        page_path = bundle.root / f"{target.concept_id}.md"
-        page_path.parent.mkdir(parents=True, exist_ok=True)
-        page_path.write_text(text, encoding="utf-8")
-        created_any = True
+        path = bundle_root / write.member
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
 
-    # Phase 2: reload so new pages are bundle members, then regenerate only
-    # targets whose CONTENT changed (owned keys + sections, excluding
-    # provenance) plus every freshly-created page this run. Provenance keys
-    # are declared alongside `owned` ones in each type's `sections/<Type>.yaml`
-    # and get rewritten by `plan_regenerate` whenever ANY of a render's
-    # frontmatter differs from disk -- `generated.at` is a fresh wall-clock
-    # timestamp on every real invocation, so unconditionally handing every
-    # target's full render to `plan_regenerate` would regenerate every page on
-    # every run regardless of whether anything actually changed. This mirrors
-    # `mirror.plan._render_matches_disk`'s existing content-only pre-filter,
-    # and reuses the exact comparison `plan_entities` already performs for its
-    # own read-only preview -- entity sync just never got the same treatment
-    # on its real write path.
-    working_bundle = load_bundle(bundle.root) if created_any else bundle
-
-    # Scaffold before regenerate, the composition `okf_ext.sections` itself
-    # recommends. `regenerate_body` never creates a section for a concept, so
-    # a page created before its type declared a new required section would
-    # report `section-missing` on every run and never gain it -- exactly the
-    # case a Repository page predating `## Contents` is in.
-    #
-    # Filtered to the pages this run placed: `plan_sections` walks every
-    # concept in the bundle, and a bundle three tier-3 packages share is not
-    # this command's to repair wholesale. `apply` commits through
-    # `document.set_body`, so `working_bundle` agrees with disk immediately
-    # and the regenerate pass below sees the scaffolded body with no reload.
-    placed_ids = {target.concept_id for target, _repo_label in placed.values()}
+    working_bundle = load_bundle(bundle_root)
+    planned_ids = {write.member.removesuffix(".md") for write in plan.writes}
     scaffold = plan_sections(working_bundle, section_set)
-    mine = tuple(splice for splice in scaffold.splices if splice.concept_id in placed_ids)
+    scaffold_splices = tuple(splice for splice in scaffold.splices if splice.concept_id in planned_ids)
     scaffold_failed: tuple[str, ...] = ()
-    if mine:
-        scaffold_result = apply_sections(working_bundle, replace(scaffold, splices=mine, skipped=()))
-        # Folded into `skipped` below rather than asserted `.ok` -- a
-        # per-document scaffold failure must not abort every sibling this
-        # pass would otherwise fix.
-        scaffold_failed = tuple(f"{item.path}: {item.kind}: {item.error}" for item in scaffold_result.failed)
-
-    by_repository = _by_repository(placed)
-    placed = _with_contents(placed, working_bundle, by_repository, existing)
-
-    content_plan = plan_regenerate(
-        working_bundle,
-        section_set,
-        {
-            target.concept_id: Render(
-                frontmatter={k: v for k, v in target.render.frontmatter.items() if k not in _PROVENANCE_KEYS},
-                sections=target.render.sections,
-            )
-            for target, _repo_label in placed.values()
-        },
-    )
-    stale_or_new = frozenset(content_plan.concept_ids) | {
-        target.concept_id for target, _repo_label in placed.values() if target.resource not in existing
-    }
-
-    renders = {
-        target.concept_id: target.render for target, _repo_label in placed.values() if target.concept_id in stale_or_new
-    }
-    plan = plan_regenerate(working_bundle, section_set, renders)
-    result = apply_regenerations(working_bundle, plan)
-
-    written = tuple(member.removesuffix(".md") for member in result.written)
-    skipped = scaffold_failed + tuple(f"{item.path}: {item.reason}" for item in result.skipped)
-    current_resources = frozenset(target.resource for target, _repo_label in placed.values())
-    return EntitySync(
-        written=written, skipped=skipped, current_resources=current_resources, by_repository=by_repository
-    )
-
-
-def plan_entities(bundle: Bundle, config: Config, reader: GraphReader, *, at: datetime) -> EntityPlan:
-    """Preview `sync_entities` without writing anything.
-
-    Resolves the same placements `sync_entities` would (`_resolve_placements`,
-    shared), then asks `plan_regenerate` -- itself a read-only preview, per
-    its own docstring -- what a content-only version of those renders would
-    change. A target `plan_regenerate` cannot find as a bundle member
-    surfaces as `Skipped(reason="unreadable")`; that is exactly "no page yet",
-    so `missing` reads off it directly rather than re-deriving existence a
-    second way.
-    """
-    schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
-    section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
-    existing = resource_index(bundle).by_resource
-    placed = _resolve_placements(bundle, config, reader, schema_set=schema_set, existing=existing, at=at)
-
-    # The preview must render what `sync_entities` writes, or its staleness
-    # answer diverges from the run it is previewing. `bundle` here is the
-    # pre-creation bundle passed in -- `plan_entities` never runs phase 1 --
-    # so `existing` (also pre-creation) is what tells `_with_contents` which
-    # placed siblings need a synthetic stand-in to be seen at all.
-    placed = _with_contents(placed, bundle, _by_repository(placed), existing)
-
-    renders: dict[str, Render] = {}
-    resource_by_concept: dict[str, str] = {}
-    for target, _repo_label in placed.values():
-        content_only = Render(
-            frontmatter={k: v for k, v in target.render.frontmatter.items() if k not in _PROVENANCE_KEYS},
-            sections=target.render.sections,
+    if scaffold_splices:
+        scaffold_result = apply_sections(
+            working_bundle,
+            replace(scaffold, splices=scaffold_splices, skipped=()),
         )
-        renders[target.concept_id] = content_only
-        resource_by_concept[target.concept_id] = target.resource
+        scaffold_failed = tuple(
+            f"{failure.path}: {failure.kind}: {failure.error}" for failure in scaffold_result.failed
+        )
 
-    plan = plan_regenerate(bundle, section_set, renders)
-    stale = frozenset(resource_by_concept[concept_id] for concept_id in plan.concept_ids)
-    missing = frozenset(
-        resource_by_concept[skipped.concept_id]
-        for skipped in plan.skipped
-        if skipped.reason == "unreadable" and skipped.concept_id in resource_by_concept
+    content_renders = {
+        write.member.removesuffix(".md"): _render_for_apply(write, content_only=True) for write in plan.writes
+    }
+    content_plan = plan_regenerate(working_bundle, section_set, content_renders)
+    stale_ids = frozenset(content_plan.concept_ids)
+    renders = {
+        write.member.removesuffix(".md"): _render_for_apply(write, content_only=False)
+        for write in plan.writes
+        if write.member.removesuffix(".md") in stale_ids
+    }
+    regeneration_plan = plan_regenerate(working_bundle, section_set, renders)
+    result = apply_regenerations(working_bundle, regeneration_plan)
+
+    regenerated = tuple(member.removesuffix(".md") for member in result.written)
+    created_set = set(created_ids)
+    updated = tuple(concept_id for concept_id in regenerated if concept_id not in created_set)
+    written = tuple(dict.fromkeys((*created_ids, *updated)))
+    return SyncSummary(
+        created=created_ids,
+        updated=updated,
+        written=written,
+        skipped=(
+            scaffold_failed
+            + tuple(f"{failure.path}: {failure.kind}: {failure.error}" for failure in result.failed)
+            + tuple(f"{item.path}: {item.reason}" for item in result.skipped)
+        ),
+        warnings=plan.warnings,
     )
-    current_resources = frozenset(target.resource for target, _repo_label in placed.values())
-    return EntityPlan(stale=stale, missing=missing, current_resources=current_resources)
 
 
-__all__ = ["EntityPlan", "EntitySync", "plan_entities", "sync_entities"]
+__all__ = [
+    "EntityPlan",
+    "EntityWrite",
+    "SyncSummary",
+    "apply_entities",
+    "plan_entities",
+]

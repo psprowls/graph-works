@@ -1,39 +1,24 @@
-"""Tests for the GraphReader-driven entity-lane orchestrator.
-
-Fixture graphs are built directly through `code_graph_io.testing.open_store`
-(a writable `GraphStore` on an arbitrary db path) rather than a nonexistent
-`code_graph_io.testing.build_records` helper -- see this task's brief. Node
-shapes below are read from the real emitters
-(`code_graph_io/structural_nodes.py`, `test_suites.py`, `agent_plugins.py`)
-and confirmed to round-trip through `code_graph_io.open_reader` before being
-used here.
-"""
+"""Entity planning and application through the canonical placement policy."""
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from datetime import UTC, date, datetime
 from pathlib import Path
 
-import code_wiki_okf
 import pytest
 from code_graph_io import open_reader
-from code_graph_io.records import GraphNode, GraphRecords
+from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 from code_graph_io.testing import open_store
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
-from code_wiki_okf.entities.sync import _stamp_provenance, plan_entities, sync_entities
+from code_wiki_okf.entities.sync import EntityPlan, EntityWrite, apply_entities, plan_entities
 from code_wiki_okf.init import install_bundle
-from okf_ext.generators import Render
+from code_wiki_okf.placement import PlacementError, canonical_member, context_from_resource
+from okf_ext.writing import ApplyResult, WriteFailure
 from okf_io import load_bundle
 
 _TODAY = date(2026, 1, 1)
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
-
-
-# --- Fixture node factories -------------------------------------------------
-# Attrs shapes mirror the real emitters closely enough for the describe_*
-# queries to resolve, kept minimal per this task's brief ("only enough to
-# prove the acceptance criteria, not a realistic full graph").
 
 
 def _repo_node(org: str, repo: str) -> GraphNode:
@@ -42,17 +27,17 @@ def _repo_node(org: str, repo: str) -> GraphNode:
         name=repo,
         path="",
         line=None,
-        attrs={"uri": f"repo:{org}/{repo}", "owner": org, "name": repo, "url": "", "default_branch": "main"},
+        attrs={"uri": f"repo:{org}/{repo}", "owner": org, "name": repo},
     )
 
 
-def _package_node(org: str, repo: str, name: str, *, version: str = "0.1.0") -> GraphNode:
+def _package_node(org: str, repo: str, name: str) -> GraphNode:
     return GraphNode(
         kind="package",
         name=name,
-        path=f"packages/{name}/pyproject.toml",
+        path=f"packages/{repo}/{name}/pyproject.toml",
         line=None,
-        attrs={"uri": f"pkg:{org}/{repo}/{name}", "language": "python", "version": version},
+        attrs={"uri": f"pkg:{org}/{repo}/{name}", "language": "python", "version": "0.1.0"},
     )
 
 
@@ -60,7 +45,7 @@ def _app_node(org: str, repo: str, name: str) -> GraphNode:
     return GraphNode(
         kind="app",
         name=name,
-        path=f"apps/{name}/package.json",
+        path=f"apps/{repo}/{name}/package.json",
         line=None,
         attrs={
             "uri": f"app:{org}/{repo}/{name}",
@@ -72,11 +57,11 @@ def _app_node(org: str, repo: str, name: str) -> GraphNode:
     )
 
 
-def _test_suite_node(org: str, repo: str, name: str = "tests") -> GraphNode:
+def _test_suite_node(org: str, repo: str, name: str) -> GraphNode:
     return GraphNode(
         kind="test_suite",
         name=name,
-        path=name,
+        path=f"{repo}/{name}",
         line=None,
         attrs={
             "uri": f"test_suite:{org}/{repo}/{name}",
@@ -91,14 +76,12 @@ def _agent_plugin_node(org: str, repo: str, name: str) -> GraphNode:
     return GraphNode(
         kind="agent_plugin",
         name=name,
-        path=".claude-plugin",
+        path=f"{repo}/.claude-plugin",
         line=None,
         attrs={
             "uri": f"agent_plugin:{org}/{repo}/{name}",
             "ecosystem": "claude-code",
-            "name": name,
             "version": "1.0.0",
-            "description": "demo plugin",
             "components": {
                 "commands": [],
                 "agents": [],
@@ -111,13 +94,17 @@ def _agent_plugin_node(org: str, repo: str, name: str) -> GraphNode:
     )
 
 
-def _dependency_node(ecosystem: str, name: str, *, versions: Sequence[str] = ("2.31.0",)) -> GraphNode:
+def _dependency_node(ecosystem: str, name: str) -> GraphNode:
     return GraphNode(
         kind="dependency",
         name=name,
-        path=f"dependency:{ecosystem}/{name}",
+        path=None,
         line=None,
-        attrs={"uri": f"dependency:{ecosystem}/{name}", "ecosystem": ecosystem, "versions_in_use": list(versions)},
+        attrs={
+            "uri": f"dependency:{ecosystem}/{name}",
+            "ecosystem": ecosystem,
+            "versions_in_use": ["1.0"],
+        },
     )
 
 
@@ -141,54 +128,192 @@ class _RepoSeed:
 
 
 def _seed(graph_dir: Path, repos: Sequence[_RepoSeed], dependencies: Sequence[GraphNode] = ()) -> None:
-    """Seed `graph_dir/code.db` (via the public `GraphStore` upsert surface,
-    never raw SQL) with one Repository per `repos` entry plus its declared
-    Package/App/TestSuite/AgentPlugin nodes, and any ecosystem-wide
-    Dependency nodes (unattributed to a repo, matching production: a
-    dependency is one of code-graph-io's `_GLOBAL_KINDS`)."""
     store = open_store(graph_dir / "code.db", create=True)
     try:
         for seed in repos:
             store.set_current_repo(f"repo:{seed.org}/{seed.repo}")
-            nodes: list[GraphNode] = [_repo_node(seed.org, seed.repo)]
+            nodes = [_repo_node(seed.org, seed.repo)]
             nodes += [_package_node(seed.org, seed.repo, name) for name in seed.packages]
             nodes += [_app_node(seed.org, seed.repo, name) for name in seed.apps]
             nodes += [_test_suite_node(seed.org, seed.repo, name) for name in seed.test_suites]
             nodes += [_agent_plugin_node(seed.org, seed.repo, name) for name in seed.agent_plugins]
-            with store.transaction() as tx:
-                tx.upsert_records(GraphRecords(nodes=tuple(nodes), edges=()))
-            store.set_current_repo(None)
-        if dependencies:
-            with store.transaction() as tx:
-                tx.upsert_records(GraphRecords(nodes=tuple(dependencies), edges=()))
-    finally:
-        store.close()
-
-
-def _bump_package_version(graph_dir: Path, *, org: str, repo: str, name: str, version: str) -> None:
-    """Re-upsert a Package node with a new `version`, identity-matched
-    (kind, name, path, repo) onto the existing row -- an update, not a
-    duplicate."""
-    store = open_store(graph_dir / "code.db", create=True)
-    try:
-        store.set_current_repo(f"repo:{org}/{repo}")
-        with store.transaction() as tx:
-            tx.upsert_records(GraphRecords(nodes=(_package_node(org, repo, name, version=version),), edges=()))
+            with store.transaction() as transaction:
+                transaction.upsert_records(GraphRecords(nodes=tuple(nodes), edges=()))
         store.set_current_repo(None)
+        if dependencies:
+            with store.transaction() as transaction:
+                transaction.upsert_records(GraphRecords(nodes=tuple(dependencies), edges=()))
     finally:
         store.close()
 
 
-def _add_app_to_repo(graph_dir: Path, *, org: str, repo: str, name: str) -> None:
-    """Add a new App node to an already-seeded repo, leaving its existing
-    Package/Repository rows untouched -- mirrors a human adding a new app to
-    a repo the wiki already has a page for, without bumping anything the
-    repo page's own owned frontmatter (`package_count`) would react to."""
+def _seed_dependency_edges(
+    graph_dir: Path,
+    *,
+    dependency: tuple[str, str],
+    implementations: Sequence[tuple[str, str]],
+    consumer: tuple[str, str] | None = None,
+) -> None:
+    _ecosystem, dependency_name = dependency
+    edges = [
+        GraphEdge(
+            src=("dependency", dependency_name, None),
+            dst=("package", package_name, f"packages/{repo}/{package_name}/pyproject.toml"),
+            kind="implemented_by",
+            attrs={},
+        )
+        for repo, package_name in implementations
+    ]
+    if consumer is not None:
+        repo, package_name = consumer
+        edges.append(
+            GraphEdge(
+                src=("package", package_name, f"packages/{repo}/{package_name}/pyproject.toml"),
+                dst=("dependency", dependency_name, None),
+                kind="used_by",
+                attrs={},
+            )
+        )
+    store = open_store(graph_dir / "code.db", create=True)
+    try:
+        with store.transaction() as transaction:
+            transaction.upsert_records(GraphRecords(nodes=(), edges=tuple(edges)))
+    finally:
+        store.close()
+
+
+def _seed_isolated_same_name_entities(graph_dir: Path, *, org: str, repo: str, marker: str) -> None:
+    package_path = f"packages/{repo}/shared/pyproject.toml"
+    app_package_path = f"packages/{repo}/shared-app/package.json"
+    app_path = f"apps/{repo}/shared-app/package.json"
+    suite_path = f"{repo}/shared-tests"
+    plugin_path = f"{repo}/.claude-plugin"
+    package_file = f"src/{marker}_package.py"
+    app_file = f"src/{marker}_app.ts"
+    suite_file = f"tests/{marker}_test.py"
+    nodes = (
+        _repo_node(org, repo),
+        GraphNode(
+            kind="package",
+            name="shared",
+            path=package_path,
+            line=None,
+            attrs={"uri": f"pkg:{org}/{repo}/shared", "language": "python", "version": f"{marker}.0"},
+        ),
+        GraphNode(
+            kind="package",
+            name="shared-app",
+            path=app_package_path,
+            line=None,
+            attrs={
+                "uri": f"pkg:{org}/{repo}/shared-app",
+                "language": "typescript",
+                "version": f"{marker}.0",
+            },
+        ),
+        GraphNode(
+            kind="app",
+            name="shared-app",
+            path=app_path,
+            line=None,
+            attrs={
+                "uri": f"app:{org}/{repo}/shared-app",
+                "language": "typescript",
+                "version": f"{marker}.0",
+                "app_kind": "cli",
+                "app_signals": [marker],
+            },
+        ),
+        GraphNode(
+            kind="test_suite",
+            name="shared-tests",
+            path=suite_path,
+            line=None,
+            attrs={
+                "uri": f"test_suite:{org}/{repo}/shared-tests",
+                "suite_kind": f"{marker}-suite",
+                "path": suite_path,
+                "owner_kind": "repository",
+            },
+        ),
+        GraphNode(
+            kind="agent_plugin",
+            name="shared-plugin",
+            path=plugin_path,
+            line=None,
+            attrs={
+                "uri": f"agent_plugin:{org}/{repo}/shared-plugin",
+                "ecosystem": "claude-code",
+                "version": f"{marker}.0",
+                "components": {
+                    "commands": [
+                        {
+                            "id": f"command:{marker}",
+                            "name": f"{marker}-command",
+                            "description": f"{marker} command",
+                        }
+                    ],
+                    "agents": [],
+                    "skills": [],
+                    "scripts": [],
+                    "hooks": [],
+                    "mcp_servers": [],
+                },
+            },
+        ),
+        GraphNode(
+            kind="file",
+            name=package_file,
+            path=package_file,
+            line=None,
+            attrs={"uri": f"file:{org}/{repo}/{package_file}"},
+        ),
+        GraphNode(
+            kind="file",
+            name=app_file,
+            path=app_file,
+            line=None,
+            attrs={"uri": f"file:{org}/{repo}/{app_file}"},
+        ),
+        GraphNode(
+            kind="file",
+            name=suite_file,
+            path=suite_file,
+            line=None,
+            attrs={"uri": f"file:{org}/{repo}/{suite_file}"},
+        ),
+    )
+    edges = (
+        GraphEdge(
+            src=("package", "shared", package_path),
+            dst=("file", package_file, package_file),
+            kind="contains",
+            attrs={},
+        ),
+        GraphEdge(
+            src=("package", "shared-app", app_package_path),
+            dst=("file", app_file, app_file),
+            kind="contains",
+            attrs={},
+        ),
+        GraphEdge(
+            src=("package", "shared-app", app_package_path),
+            dst=("app", "shared-app", app_path),
+            kind="facet_of",
+            attrs={},
+        ),
+        GraphEdge(
+            src=("test_suite", "shared-tests", suite_path),
+            dst=("file", suite_file, suite_file),
+            kind="physically_contains",
+            attrs={},
+        ),
+    )
     store = open_store(graph_dir / "code.db", create=True)
     try:
         store.set_current_repo(f"repo:{org}/{repo}")
-        with store.transaction() as tx:
-            tx.upsert_records(GraphRecords(nodes=(_app_node(org, repo, name),), edges=()))
+        with store.transaction() as transaction:
+            transaction.upsert_records(GraphRecords(nodes=nodes, edges=edges))
         store.set_current_repo(None)
     finally:
         store.close()
@@ -203,549 +328,535 @@ def _config(tmp_path: Path, graph_dir: Path, repo_names: Sequence[str], *, bundl
     )
 
 
-# --- Sanity: the fixture pattern itself round-trips -------------------------
+def _installed_bundle(tmp_path: Path) -> Path:
+    bundle_root = tmp_path / "bundle"
+    install_bundle(bundle_root, today=_TODAY, dry_run=False)
+    return bundle_root
 
 
-def test_fixture_seed_round_trips_through_open_reader(tmp_path: Path) -> None:
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    with open_reader(graph_dir=graph_dir) as reader:
-        assert [n.name for n in reader.list_repositories()] == ["repo-a"]
-        assert [n.name for n in reader.list_packages()] == ["widgets"]
-        desc = reader.describe_package(name="widgets")
-        assert desc is not None
-        assert desc.language == "python"
+def _bundle_member_bytes(root: Path) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
 
-# --- tokens is no longer a sync-owned key ------------------------------------
-# `run_tokens_update` (graph-works-core) is the field's sole writer now; a
-# per-kind proxy string here would double-write it. See
-# 2026-08-19-tech-debt-tokens-metric-proxy-string.
-
-
-def test_stamp_provenance_does_not_write_tokens() -> None:
-    render = _stamp_provenance(Render(), sha="deadbeef", at=_AT)
-
-    assert "tokens" not in render.frontmatter
-
-
-# --- Acceptance criteria -----------------------------------------------------
-
-
-def test_sync_creates_one_page_per_kind_and_is_idempotent(tmp_path: Path) -> None:
+def test_plan_builds_the_complete_canonical_entity_matrix_before_apply(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
     _seed(
         graph_dir,
         [
             _RepoSeed(
                 "acme",
-                "repo-a",
-                packages=["widgets"],
-                apps=["cli-app"],
-                test_suites=["tests"],
-                agent_plugins=["demo-plugin"],
+                "demo",
+                packages=("lib",),
+                apps=("web",),
+                test_suites=("unit",),
+                agent_plugins=("reviewer",),
             )
         ],
-        dependencies=[_dependency_node("pypi", "requests")],
+        dependencies=(_dependency_node("pypi", "httpx"),),
     )
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        result = sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-        expected = {
-            "repositories/repo-a/packages/widgets",
-            "repositories/repo-a/apps/cli-app",
-            "repositories/repo-a/test-suites/tests",
-            "repositories/repo-a/agent-plugins/demo-plugin",
-            "dependencies/requests",
-            "repositories/repo-a",
-        }
-        assert expected <= set(result.written)
+    assert {write.member for write in plan.writes} == {
+        "repositories/demo/repository.md",
+        "repositories/demo/packages/lib.md",
+        "repositories/demo/apps/web.md",
+        "repositories/demo/test-suites/unit.md",
+        "repositories/demo/agent-plugins/reviewer.md",
+        "dependencies/pypi/httpx.md",
+    }
+    assert not any((bundle_root / write.member).exists() for write in plan.writes)
 
-        # second run: idempotent -- nothing left to regenerate. Uses a
-        # DISTINCT `at` from the first call (not `_AT` again) so this
-        # actually exercises "does a merely-different generated.at timestamp
-        # get treated as real content drift" -- two identical `at` values
-        # would pass even if provenance weren't excluded from the diff.
-        later = datetime(2026, 6, 1, tzinfo=UTC)
-        bundle2 = load_bundle(bundle_root)
-        result2 = sync_entities(bundle2, config, reader, today=_TODAY, at=later)
-        assert result2.written == ()
+    summary = apply_entities(bundle_root, plan, today=_TODAY)
 
-    bundle_after = load_bundle(bundle_root)
+    assert set(summary.written) == {write.member.removesuffix(".md") for write in plan.writes}
+    assert summary.warnings == ()
+    assert all((bundle_root / write.member).is_file() for write in plan.writes)
 
-    pkg_doc = bundle_after.concept("repositories/repo-a/packages/widgets")
-    assert pkg_doc is not None
-    assert pkg_doc.fm_raw.get("language") == "python"
-    assert pkg_doc.fm_raw.get("version") == "0.1.0"
-    assert pkg_doc.fm_raw.get("depends_on") == []
-    assert pkg_doc.fm_raw.get("test_suites") == []
-    assert pkg_doc.fm_raw.get("entry_points") == []
-    generated = pkg_doc.fm_raw.get("generated")
-    assert generated is not None and generated.get("by") == f"code-wiki-okf/{code_wiki_okf.__version__}"
-    assert "tokens" not in pkg_doc.fm_raw
-
-    app_doc = bundle_after.concept("repositories/repo-a/apps/cli-app")
-    assert app_doc is not None
-    assert app_doc.fm_raw.get("package") == "[cli-app](/repositories/repo-a/packages/cli-app.md)"
-
-    suite_doc = bundle_after.concept("repositories/repo-a/test-suites/tests")
-    assert suite_doc is not None
-    assert suite_doc.fm_raw.get("suite_kind") == "unit"
-    assert suite_doc.fm_raw.get("file_count") == 0
-    assert suite_doc.fm_raw.get("tested_packages") == []
-
-    plugin_doc = bundle_after.concept("repositories/repo-a/agent-plugins/demo-plugin")
-    assert plugin_doc is not None
-    assert plugin_doc.fm_raw.get("ecosystem") == "claude-code"
-    assert plugin_doc.fm_raw.get("version") == "1.0.0"
-
-    dep_doc = bundle_after.concept("dependencies/requests")
-    assert dep_doc is not None
-    assert dep_doc.fm_raw.get("ecosystem") == "pypi"
-    assert dep_doc.fm_raw.get("versions_in_use") == ["2.31.0"]
-
-    repo_doc = bundle_after.concept("repositories/repo-a")
-    assert repo_doc is not None
-    assert repo_doc.fm_raw.get("package_count") == 1
-
-
-def test_sync_preserves_hand_edited_prose_section(tmp_path: Path) -> None:
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
-
-    page = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
-    original = page.read_text(encoding="utf-8")
-    placeholder = "> TODO: what this package does, who uses it, and why it exists, in one paragraph."
-    assert placeholder in original
-    edited = original.replace(placeholder, "Widgets, hand-built for the acme storefront.")
-    page.write_text(edited, encoding="utf-8")
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle2 = load_bundle(bundle_root)
-        result = sync_entities(bundle2, config, reader, today=_TODAY, at=_AT)
-
-    final_text = page.read_text(encoding="utf-8")
-    assert "Widgets, hand-built for the acme storefront." in final_text
-    assert "repositories/repo-a/packages/widgets" not in result.written
-
-
-def test_sync_page_moved_within_lane_is_updated_in_place_not_duplicated(tmp_path: Path) -> None:
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
-
-    original = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
-    assert original.exists()
-    moved = bundle_root / "repositories" / "repo-a" / "packages" / "moved-widgets.md"
-    moved.write_text(original.read_text(encoding="utf-8"), encoding="utf-8")
-    original.unlink()
-
-    # Bump the package's version in the graph too, so this test also proves
-    # the moved page gets UPDATED at its new location, not left stale.
-    _bump_package_version(graph_dir, org="acme", repo="repo-a", name="widgets", version="0.2.0")
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle2 = load_bundle(bundle_root)
-        result = sync_entities(bundle2, config, reader, today=_TODAY, at=_AT)
-
-    assert not original.exists()
-    assert moved.exists()
-    assert "repositories/repo-a/packages/moved-widgets" in result.written
-
-    bundle_after = load_bundle(bundle_root)
-    assert "repositories/repo-a/packages/widgets" not in bundle_after.concepts
-    moved_doc = bundle_after.concept("repositories/repo-a/packages/moved-widgets")
-    assert moved_doc is not None
-    assert moved_doc.fm_raw.get("version") == "0.2.0"
-    assert moved_doc.fm.resource == "pkg:acme/repo-a/widgets"
-
-
-def test_sync_leaves_a_wrong_typed_resource_claim_untouched(tmp_path: Path) -> None:
-    """A page whose own on-disk `type:` disagrees with the graph node its
-    `resource:` names must never receive that node's render -- regression
-    for the bug traced through `_resolve_target`: `existing` is keyed by
-    `resource` alone, so a same-resource page of the *wrong* type used to win
-    the lookup just as readily as the right one, handing `plan_regenerate` a
-    Package-shaped render for a page declared `type: App`. That always raised
-    (an ungranted-keys `ValueError`) once a type's granted-key set stopped
-    numerically overlapping another type's -- see
-    `packages/graph-works-core/tests/scan/test_scan_worklist.py::
-    test_a_page_whose_type_does_not_match_its_resource_is_reported`, the
-    integration-level twin of this test.
-
-    `apps/mismatch` sorts before `repositories/repo-a/packages/widgets` in
-    `Bundle.concepts` (`okf_io.bundle` builds it `sorted()`), so it is the
-    one `resource_index` keeps for `pkg:acme/repo-a/widgets` -- reproducing
-    the exact shadowing that exposed the bug, not a friendlier ordering that
-    would hide it.
-    """
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
-
-    # A page of a different declared type now claims the SAME resource the
-    # real `repositories/repo-a/packages/widgets.md` page above already claims.
-    mismatch = bundle_root / "apps" / "mismatch.md"
-    mismatch.parent.mkdir(parents=True, exist_ok=True)
-    mismatch_text = (
-        '---\ntype: App\ntitle: "mismatch"\nresource: "pkg:acme/repo-a/widgets"\ndescription: ""\n---\n\n'
-        "## Purpose\n\nWrongly typed, deliberately -- claims the Package's own resource.\n"
-    )
-    mismatch.write_text(mismatch_text, encoding="utf-8")
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle2 = load_bundle(bundle_root)
-        result = sync_entities(bundle2, config, reader, today=_TODAY, at=_AT)  # must not raise
-
-    # The mismatched page is left exactly as authored -- not written to, not
-    # deleted, not reshaped.
-    assert mismatch.read_text(encoding="utf-8") == mismatch_text
-    assert "apps/mismatch" not in result.written
-
-    # The real page still gets (and keeps) the Package-shaped render.
-    bundle_after = load_bundle(bundle_root)
-    pkg_doc = bundle_after.concept("repositories/repo-a/packages/widgets")
-    assert pkg_doc is not None
-    assert pkg_doc.fm.type == "Package"
-    assert pkg_doc.fm_raw.get("language") == "python"
-
-
-def test_sync_two_repos_same_package_name_no_longer_collides(tmp_path: Path) -> None:
-    graph_dir = tmp_path / "graph"
-    _seed(
-        graph_dir,
-        [
-            _RepoSeed("acme", "repo-a", packages=["shared-name"]),
-            _RepoSeed("acme", "repo-b", packages=["shared-name"]),
-        ],
-    )
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a", "repo-b"], bundle_root=bundle_root)
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        result = sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
-
-    assert "repositories/repo-a/packages/shared-name" in result.written
-    assert "repositories/repo-b/packages/shared-name" in result.written
-
-    bundle_after = load_bundle(bundle_root)
-    repo_a_doc = bundle_after.concept("repositories/repo-a/packages/shared-name")
-    repo_b_doc = bundle_after.concept("repositories/repo-b/packages/shared-name")
-    assert repo_a_doc is not None and repo_a_doc.fm.resource == "pkg:acme/repo-a/shared-name"
-    assert repo_b_doc is not None and repo_b_doc.fm.resource == "pkg:acme/repo-b/shared-name"
-
-
-def test_sync_refuses_to_overwrite_unregistered_page_at_default_path(tmp_path: Path) -> None:
-    """A hand-authored page with no (or an uncoercible) `resource:` is still
-    a bundle member -- okf-io never raises on content -- but is invisible to
-    `resource_index()`. If it already occupies the exact default path a
-    graph entity would compute, `sync_entities` must refuse rather than
-    silently clobber it with a fresh skeleton."""
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
-    # Pre-place a page at the exact default path `sync_entities` would
-    # compute for Package "widgets" (`repositories/repo-a/packages/widgets.md`),
-    # authored before anyone filled in `resource:`.
-    unregistered = bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md"
-    unregistered.parent.mkdir(parents=True, exist_ok=True)
-    original_text = (
-        '---\ntype: Package\ntitle: "hand-authored, not yet linked to the graph"\ndescription: ""\n---\n\n'
-        "## Purpose\n\nHand-written before `resource:` was ever filled in.\n"
-    )
-    unregistered.write_text(original_text, encoding="utf-8")
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        preexisting = bundle.concept("repositories/repo-a/packages/widgets")
-        assert preexisting is not None
-        assert preexisting.fm.resource is None  # confirms it's invisible to resource_index()
-
-        with pytest.raises(ValueError, match="repositories/repo-a/packages/widgets") as exc_info:
-            sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
-
-    assert "resource" in str(exc_info.value)
-    # Refused, not clobbered: the file is exactly as it was.
-    assert unregistered.read_text(encoding="utf-8") == original_text
-
-
-def test_sync_repository_package_count_is_per_repo_not_global(tmp_path: Path) -> None:
-    """Regression test for the `describe_repository()` single-repo
-    assumption: repo-a has 1 package, repo-b has 2 -- each Repository page's
-    `package_count` must reflect only its own repo, not the global total
-    of 3."""
-    graph_dir = tmp_path / "graph"
-    _seed(
-        graph_dir,
-        [
-            _RepoSeed("acme", "repo-a", packages=["one"]),
-            _RepoSeed("acme", "repo-b", packages=["two", "three"]),
-        ],
-    )
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a", "repo-b"], bundle_root=bundle_root)
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        bundle = load_bundle(bundle_root)
-        sync_entities(bundle, config, reader, today=_TODAY, at=_AT)
-
-    bundle_after = load_bundle(bundle_root)
-    repo_a_doc = bundle_after.concept("repositories/repo-a")
-    repo_b_doc = bundle_after.concept("repositories/repo-b")
-    assert repo_a_doc is not None and repo_a_doc.fm_raw.get("package_count") == 1
-    assert repo_b_doc is not None and repo_b_doc.fm_raw.get("package_count") == 2
-
-
-def test_plan_entities_reports_missing_for_a_page_that_does_not_exist_yet(tmp_path: Path) -> None:
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
     bundle = load_bundle(bundle_root)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+    repository = bundle.concept("repositories/demo/repository")
+    package = bundle.concept("repositories/demo/packages/lib")
+    dependency = bundle.concept("dependencies/pypi/httpx")
+    assert repository is not None and repository.fm_raw["package_count"] == 1
+    assert package is not None and package.fm.resource == "pkg:acme/demo/lib"
+    assert dependency is not None and dependency.fm_raw["ecosystem"] == "pypi"
+    package_text = (bundle_root / "repositories/demo/packages/lib.md").read_text(encoding="utf-8")
+    assert "## Files\n\n_(none)_" in package_text
 
-    with open_reader(graph_dir=graph_dir) as reader:
-        plan = plan_entities(bundle, config, reader, at=_AT)
 
-    assert "pkg:acme/repo-a/widgets" in plan.missing
-    assert "pkg:acme/repo-a/widgets" not in plan.stale
-    assert not (bundle_root / "packages" / "widgets.md").exists()  # nothing written
-
-
-def test_plan_entities_reports_stale_for_a_page_whose_content_changed(tmp_path: Path) -> None:
+def test_applying_one_complete_plan_twice_is_idempotent(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
     with open_reader(graph_dir=graph_dir) as reader:
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)  # first sync: creates the page
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    _bump_package_version(graph_dir, org="acme", repo="repo-a", name="widgets", version="0.2.0")
+    first = apply_entities(bundle_root, plan, today=_TODAY)
+    after_first = {write.member: (bundle_root / write.member).read_bytes() for write in plan.writes}
+    second = apply_entities(bundle_root, plan, today=_TODAY)
 
-    with open_reader(graph_dir=graph_dir) as reader:
-        plan = plan_entities(load_bundle(bundle_root), config, reader, at=_AT)
-
-    assert "pkg:acme/repo-a/widgets" in plan.stale
-    assert "pkg:acme/repo-a/widgets" not in plan.missing
+    assert first.written
+    assert second.written == ()
+    assert {write.member: (bundle_root / write.member).read_bytes() for write in plan.writes} == after_first
 
 
-def test_plan_entities_is_silent_once_synced_and_unchanged(tmp_path: Path) -> None:
+def test_entity_apply_reports_generator_write_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
     with open_reader(graph_dir=graph_dir) as reader:
-        sync_result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+    failure = WriteFailure(path="repositories/demo/packages/lib.md", kind="commit-error", error="disk full")
+    monkeypatch.setattr(
+        "code_wiki_okf.entities.sync.apply_regenerations",
+        lambda *_args, **_kwargs: ApplyResult(written=(), failed=(failure,), skipped=()),
+    )
 
-    with open_reader(graph_dir=graph_dir) as reader:
-        plan = plan_entities(load_bundle(bundle_root), config, reader, at=_AT)
+    summary = apply_entities(bundle_root, plan, today=_TODAY)
 
-    assert not plan.stale
-    assert not plan.missing
-    assert plan.current_resources == sync_result.current_resources
-
-
-def test_plan_entities_ignores_a_fresh_generated_at_timestamp(tmp_path: Path) -> None:
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
-
-    later = datetime(2026, 6, 1, tzinfo=UTC)  # different `at`, no content change
-    with open_reader(graph_dir=graph_dir) as reader:
-        plan = plan_entities(load_bundle(bundle_root), config, reader, at=later)
-
-    assert "pkg:acme/repo-a/widgets" not in plan.stale
-    assert "pkg:acme/repo-a/widgets" not in plan.missing
+    assert summary.skipped == ("repositories/demo/packages/lib.md: commit-error: disk full",)
+    assert not summary.ok
 
 
-# --- Repository contents / scaffold pass ------------------------------------
-
-
-def test_by_repository_groups_every_placed_page_under_its_repo(tmp_path: Path) -> None:
+def test_same_name_packages_in_two_repositories_have_distinct_members(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
     _seed(
         graph_dir,
-        [_RepoSeed("acme", "repo-a", packages=["widgets", "gadgets"])],
-        dependencies=[_dependency_node("pypi", "requests")],
+        [
+            _RepoSeed("acme", "one", packages=("shared",)),
+            _RepoSeed("acme", "two", packages=("shared",)),
+        ],
     )
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("one", "two"), bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
-        result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    assert set(result.by_repository) == {"repo-a"}
-    assert result.by_repository["repo-a"] == (
-        "repositories/repo-a",
-        "repositories/repo-a/packages/gadgets",
-        "repositories/repo-a/packages/widgets",
-    )
-    # Dependencies are ecosystem-wide and belong to no repository -- confirm
-    # the seeded one is absent from every `by_repository` value, not merely
-    # absent from `repo-a`'s (the only key this run happens to produce).
-    assert "dependencies/requests" not in {concept_id for ids in result.by_repository.values() for concept_id in ids}
+    package_writes = {
+        write.context.resource: write.member for write in plan.writes if write.context.type_name == "Package"
+    }
+    assert package_writes == {
+        "pkg:acme/one/shared": "repositories/one/packages/shared.md",
+        "pkg:acme/two/shared": "repositories/two/packages/shared.md",
+    }
 
 
-def test_the_repository_page_gains_a_contents_section(tmp_path: Path) -> None:
+def test_same_short_repository_name_with_two_resources_refuses(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+    _seed(
+        graph_dir,
+        [
+            _RepoSeed("acme", "demo"),
+            _RepoSeed("other", "demo"),
+        ],
+    )
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        assert {str(node.attrs["uri"]) for node in reader.list_repositories()} == {
+            "repo:acme/demo",
+            "repo:other/demo",
+        }
+        with pytest.raises(PlacementError) as raised:
+            plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    page = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
-    assert "## Contents\n\n### Packages\n\n- [widgets](/repositories/repo-a/packages/widgets.md)\n" in page
-    # Empty groups are omitted, and the repo does not list itself.
-    assert "### Apps" not in page
-    assert "/repositories/repo-a.md" not in page
-    # The owned key survived the sections-carrying render.
-    assert "package_count: 1" in page
+    assert raised.value.resource in {"repo:acme/demo", "repo:other/demo"}
+    assert raised.value.expected == "repositories/demo/repository"
+    assert "repo:acme/demo" in raised.value.reason
+    assert "repo:other/demo" in raised.value.reason
+    assert not (bundle_root / "repositories/demo/repository.md").exists()
 
 
-def test_a_repository_page_missing_contents_is_scaffolded_then_regenerated(tmp_path: Path) -> None:
-    """The upgrade path: a page created before `Contents` was declared. The
-    generators capability never creates a section for a concept, so without
-    the scaffold pass this page would report `section-missing` forever."""
+def test_same_named_entities_render_only_their_repository_metadata(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-    page = bundle_root / "repositories" / "repo-a.md"
-    page.parent.mkdir(parents=True, exist_ok=True)
-    page.write_text(
-        '---\ntype: Repository\ntitle: "repo-a"\nresource: "repo:acme/repo-a"\ndescription: ""\n---\n\n'
-        "## Overview\n\nHand-written prose.\n",
+    _seed_isolated_same_name_entities(graph_dir, org="acme", repo="one", marker="one")
+    _seed_isolated_same_name_entities(graph_dir, org="acme", repo="two", marker="two")
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("one", "two"), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+    apply_entities(bundle_root, plan, today=_TODAY)
+
+    bundle = load_bundle(bundle_root)
+    one_package = bundle.concept("repositories/one/packages/shared")
+    two_package = bundle.concept("repositories/two/packages/shared")
+    one_suite = bundle.concept("repositories/one/test-suites/shared-tests")
+    two_suite = bundle.concept("repositories/two/test-suites/shared-tests")
+    one_plugin = bundle.concept("repositories/one/agent-plugins/shared-plugin")
+    two_plugin = bundle.concept("repositories/two/agent-plugins/shared-plugin")
+    assert one_package is not None and one_package.fm_raw["version"] == "one.0"
+    assert two_package is not None and two_package.fm_raw["version"] == "two.0"
+    assert "one_package.py" in one_package.body and "two_package.py" not in one_package.body
+    assert "two_package.py" in two_package.body and "one_package.py" not in two_package.body
+    assert one_suite is not None and one_suite.fm_raw["suite_kind"] == "one-suite"
+    assert two_suite is not None and two_suite.fm_raw["suite_kind"] == "two-suite"
+    assert "one_test.py" in one_suite.body and "two_test.py" not in one_suite.body
+    assert "two_test.py" in two_suite.body and "one_test.py" not in two_suite.body
+    assert one_plugin is not None and one_plugin.fm_raw["version"] == "one.0"
+    assert two_plugin is not None and two_plugin.fm_raw["version"] == "two.0"
+    assert "one-command" in one_plugin.body and "two-command" not in one_plugin.body
+    assert "two-command" in two_plugin.body and "one-command" not in two_plugin.body
+
+    one_app = bundle.concept("repositories/one/apps/shared-app")
+    two_app = bundle.concept("repositories/two/apps/shared-app")
+    assert one_app is not None and "one_app.ts" in one_app.body and "two_app.ts" not in one_app.body
+    assert two_app is not None and "two_app.ts" in two_app.body and "one_app.ts" not in two_app.body
+
+
+def test_existing_resource_at_wrong_member_refuses_without_duplicate(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo")])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+    wrong = bundle_root / "repositories" / "demo.md"
+    wrong.parent.mkdir(parents=True, exist_ok=True)
+    wrong.write_text("---\ntype: Repository\ntitle: demo\nresource: repo:acme/demo\n---\n", encoding="utf-8")
+
+    with open_reader(graph_dir=graph_dir) as reader, pytest.raises(PlacementError) as raised:
+        plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert raised.value.resource == "repo:acme/demo"
+    assert raised.value.expected == "repositories/demo/repository"
+    assert "repositories/demo.md" in raised.value.reason
+    assert "delete" in raised.value.reason and "regenerate" in raised.value.reason
+    assert not (bundle_root / "repositories" / "demo" / "repository.md").exists()
+
+
+def test_duplicate_resources_refuse_before_any_entity_write(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+    for relative in ("old/first.md", "old/second.md"):
+        path = bundle_root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            "---\ntype: Package\ntitle: lib\nresource: pkg:acme/demo/lib\n---\n",
+            encoding="utf-8",
+        )
+
+    with open_reader(graph_dir=graph_dir) as reader, pytest.raises(PlacementError) as raised:
+        plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert raised.value.resource == "pkg:acme/demo/lib"
+    assert "old/first.md" in raised.value.reason
+    assert "old/second.md" in raised.value.reason
+    assert not (bundle_root / "repositories/demo/packages/lib.md").exists()
+
+
+def test_unregistered_page_at_a_canonical_target_refuses(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+    occupied = bundle_root / "repositories/demo/packages/lib.md"
+    occupied.parent.mkdir(parents=True, exist_ok=True)
+    before = "---\ntype: Package\ntitle: hand-authored\n---\n\nDo not overwrite.\n"
+    occupied.write_text(before, encoding="utf-8")
+
+    with open_reader(graph_dir=graph_dir) as reader, pytest.raises(PlacementError, match="no matching resource"):
+        plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert occupied.read_text(encoding="utf-8") == before
+
+
+def test_entity_plan_and_frontmatter_are_immutable(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    write = next(item for item in plan.writes if item.context.type_name == "Package")
+    assert isinstance(write, EntityWrite)
+    with pytest.raises(TypeError):
+        write.frontmatter["title"] = "changed"  # type: ignore[index]
+    generated = write.frontmatter["generated"]
+    assert isinstance(generated, Mapping)
+    with pytest.raises(TypeError):
+        generated["by"] = "changed"  # type: ignore[index]
+    depends_on = write.frontmatter["depends_on"]
+    assert isinstance(depends_on, tuple)
+    with pytest.raises(AttributeError):
+        depends_on.append("pkg:other/repo/mutated")  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError):
+        plan.writes = ()  # type: ignore[misc]
+
+
+def test_dependency_preserves_multiple_implementations_and_warns(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(
+        graph_dir,
+        [
+            _RepoSeed("acme", "one", packages=("first",)),
+            _RepoSeed("acme", "two", packages=("second",)),
+        ],
+        dependencies=(_dependency_node("pypi", "shared"),),
+    )
+    _seed_dependency_edges(
+        graph_dir,
+        dependency=("pypi", "shared"),
+        implementations=(("two", "second"), ("one", "first")),
+    )
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("one", "two"), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    dependency = next(write for write in plan.writes if write.context.resource == "dependency:pypi/shared")
+    assert dependency.frontmatter["implemented_by"] == ("pkg:acme/one/first", "pkg:acme/two/second")
+    assert plan.warnings == (
+        "dependency:pypi/shared has multiple implementations: pkg:acme/one/first, pkg:acme/two/second",
+    )
+
+    summary = apply_entities(bundle_root, plan, today=_TODAY)
+    assert summary.warnings == plan.warnings
+    document = load_bundle(bundle_root).concept("dependencies/pypi/shared")
+    assert document is not None
+    assert document.fm_raw["implemented_by"] == ["pkg:acme/one/first", "pkg:acme/two/second"]
+
+
+def test_dependency_with_a_consumer_and_no_implementation_remains(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(
+        graph_dir,
+        [_RepoSeed("acme", "demo", packages=("consumer",))],
+        dependencies=(_dependency_node("pypi", "external"),),
+    )
+    _seed_dependency_edges(
+        graph_dir,
+        dependency=("pypi", "external"),
+        implementations=(),
+        consumer=("demo", "consumer"),
+    )
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    dependency = next(write for write in plan.writes if write.context.resource == "dependency:pypi/external")
+    assert dependency.frontmatter["used_by"] == ("consumer",)
+    assert dependency.frontmatter["implemented_by"] == ()
+    assert plan.warnings == ()
+
+
+def test_dependency_absent_from_the_reconciled_graph_is_not_planned(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo")])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert not [write for write in plan.writes if write.context.type_name == "Dependency"]
+
+
+@pytest.mark.parametrize("at", ("not-a-timestamp", "2026-01-01T00:00:00"))
+def test_entity_planning_refuses_invalid_or_naive_timestamps_before_writes(tmp_path: Path, at: str) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo")])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader, pytest.raises(ValueError, match=r"ISO-8601|timezone offset"):
+        plan_entities(load_bundle(bundle_root), reader, config, at=at)
+
+    assert not (bundle_root / "repositories/demo/repository.md").exists()
+
+
+def test_unmatched_configured_repository_produces_no_entity_writes(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "other")])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("missing",), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert plan.writes == ()
+    assert plan.current_resources == frozenset()
+
+
+def test_existing_canonical_resource_with_the_wrong_type_is_refused(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+    occupied = bundle_root / "repositories/demo/packages/lib.md"
+    occupied.parent.mkdir(parents=True, exist_ok=True)
+    occupied.write_text(
+        "---\ntype: App\ntitle: lib\nresource: pkg:acme/demo/lib\n---\n",
         encoding="utf-8",
     )
 
-    with open_reader(graph_dir=graph_dir) as reader:
-        result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
-
-    after = page.read_text(encoding="utf-8")
-    assert "Hand-written prose." in after
-    assert "- [widgets](/repositories/repo-a/packages/widgets.md)" in after
-    assert not [item for item in result.skipped if "section-missing" in item]
+    with open_reader(graph_dir=graph_dir) as reader, pytest.raises(PlacementError, match="declares type App"):
+        plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
 
-def test_the_scaffold_pass_leaves_pages_this_run_did_not_place_alone(tmp_path: Path) -> None:
-    """`plan_sections` walks every concept in the bundle. A bundle three
-    tier-3 packages share is not this command's to repair wholesale, so the
-    plan is filtered to the pages this run placed."""
+def test_entity_apply_revalidates_canonical_members_before_writes(tmp_path: Path) -> None:
+    bundle_root = _installed_bundle(tmp_path)
+    context = context_from_resource("Package", "pkg:acme/demo/lib")
+    plan = EntityPlan(
+        writes=(EntityWrite(context=context, member="packages/lib.md", frontmatter={}),),
+        current_resources=frozenset({context.resource}),
+        warnings=(),
+    )
+
+    with pytest.raises(PlacementError, match="is not canonical"):
+        apply_entities(bundle_root, plan, today=_TODAY)
+
+    assert not (bundle_root / "packages/lib.md").exists()
+
+
+def test_entity_apply_refuses_two_resources_with_the_same_canonical_member(tmp_path: Path) -> None:
+    bundle_root = _installed_bundle(tmp_path)
+    first = context_from_resource("Package", "pkg:acme/demo/@acme/web")
+    second = context_from_resource("Package", "pkg:acme/demo/@acme__web")
+    member = canonical_member(first)
+    assert canonical_member(second) == member
+    plan = EntityPlan(
+        writes=(
+            EntityWrite(context=first, member=member, frontmatter={}),
+            EntityWrite(context=second, member=member, frontmatter={}),
+        ),
+        current_resources=frozenset({first.resource, second.resource}),
+        warnings=(),
+    )
+
+    with pytest.raises(PlacementError, match="also belongs"):
+        apply_entities(bundle_root, plan, today=_TODAY)
+
+    assert not (bundle_root / member).exists()
+
+
+def test_entity_plan_refuses_filesystem_equivalent_canonical_members(tmp_path: Path) -> None:
     graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-    stranger = bundle_root / "packages" / "not-in-the-graph.md"
-    stranger.parent.mkdir(parents=True, exist_ok=True)
-    before = '---\ntype: Package\ntitle: "orphan"\nresource: "pkg:x/y/orphan"\n---\n\nno sections at all\n'
-    stranger.write_text(before, encoding="utf-8")
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("Widget", "widget"))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
 
+    with open_reader(graph_dir=graph_dir) as reader, pytest.raises(PlacementError, match="filesystem-equivalent"):
+        plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert not (bundle_root / "repositories/demo/packages/Widget.md").exists()
+    assert not (bundle_root / "repositories/demo/packages/widget.md").exists()
+
+
+def test_entity_apply_refuses_filesystem_equivalent_tampered_targets_before_writes(tmp_path: Path) -> None:
+    bundle_root = _installed_bundle(tmp_path)
+    first = context_from_resource("Package", "pkg:acme/demo/Widget")
+    second = context_from_resource("Package", "pkg:acme/demo/widget")
+    plan = EntityPlan(
+        writes=(
+            EntityWrite(context=first, member=canonical_member(first), frontmatter={}),
+            EntityWrite(context=second, member=canonical_member(second), frontmatter={}),
+        ),
+        current_resources=frozenset({first.resource, second.resource}),
+        warnings=(),
+    )
+
+    with pytest.raises(PlacementError, match="filesystem-equivalent"):
+        apply_entities(bundle_root, plan, today=_TODAY)
+
+    assert not (bundle_root / canonical_member(first)).exists()
+    assert not (bundle_root / canonical_member(second)).exists()
+
+
+def test_entity_apply_refuses_late_filesystem_equivalent_occupant(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("widget",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
     with open_reader(graph_dir=graph_dir) as reader:
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+    occupied = bundle_root / "repositories" / "demo" / "packages" / "WIDGET.md"
+    occupied.parent.mkdir(parents=True, exist_ok=True)
+    occupied.write_text("---\ntype: Note\ntitle: occupied\n---\n", encoding="utf-8")
+    before = occupied.read_bytes()
 
-    assert stranger.read_text(encoding="utf-8") == before
+    with pytest.raises(PlacementError, match="filesystem-equivalent"):
+        apply_entities(bundle_root, plan, today=_TODAY)
+
+    assert occupied.read_bytes() == before
 
 
-def test_plan_entities_flags_repo_as_stale_when_a_new_sibling_would_be_added(tmp_path: Path) -> None:
-    """Regression: AC6 requires `plan_entities`'s staleness preview to never
-    diverge from what `sync_entities` actually writes.
+def test_entity_apply_refuses_case_equivalent_ancestor_file_before_any_write(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    repo-a starts with one package and is synced -- its page gains
-    `## Contents` / `### Packages`. A new app is then added to repo-a in the
-    graph. That change touches no owned frontmatter key on the repo page
-    itself (`package_count` counts packages, and this is a new app, not a
-    new package); the repo page is stale ONLY because its Contents section
-    would gain an `### Apps` group listing the not-yet-created app page.
+    assert len(plan.writes) > 1
+    occupied = bundle_root / "repositories" / "demo" / "PACKAGES"
+    occupied.parent.mkdir(parents=True, exist_ok=True)
+    occupied.write_bytes(b"pre-existing ancestor file\n")
+    before = _bundle_member_bytes(bundle_root)
 
-    Before the fix, `plan_entities` computed that Contents preview against
-    the pre-creation bundle, which has no page for the new app yet, so the
-    group came back empty and `repo-a` never surfaced as stale -- while a
-    real `sync_entities` run in the very same state DOES rewrite the page,
-    because by the time it renders Contents it has already created the new
-    app's page on disk (phase 1) and reloaded the bundle.
+    with pytest.raises(PlacementError, match="filesystem-equivalent"):
+        apply_entities(bundle_root, plan, today=_TODAY)
+
+    assert _bundle_member_bytes(bundle_root) == before
+    assert all(not (bundle_root / write.member).exists() for write in plan.writes)
+
+
+@pytest.mark.parametrize(
+    ("method", "expected_resource"),
+    [
+        ("describe_package", "pkg:acme/demo/lib"),
+        ("describe_app", "app:acme/demo/web"),
+        ("describe_test_suite", "test_suite:acme/demo/unit"),
+        ("describe_agent_plugin", "agent_plugin:acme/demo/reviewer"),
+        ("describe_dependency", "dependency:pypi/httpx"),
+    ],
+)
+def test_plan_refuses_a_graph_node_it_cannot_describe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    method: str,
+    expected_resource: str,
+) -> None:
+    """`list_*` and `describe_*` disagreeing is an invariant violation.
+
+    It must fail the plan, never silently drop the entity: a dropped entity
+    leaves `current_resources`, which makes its existing page a prune
+    candidate, so the old behaviour laundered a broken graph into a deleted
+    page.
     """
     graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
+    _seed(
+        graph_dir,
+        [
+            _RepoSeed(
+                "acme",
+                "demo",
+                packages=("lib",),
+                apps=("web",),
+                test_suites=("unit",),
+                agent_plugins=("reviewer",),
+            )
+        ],
+        dependencies=(_dependency_node("pypi", "httpx"),),
+    )
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
 
     with open_reader(graph_dir=graph_dir) as reader:
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
+        monkeypatch.setattr(reader, method, lambda **_kwargs: None)
+        with pytest.raises(PlacementError, match="cannot describe it") as excinfo:
+            plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    page_before = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
-    assert "### Packages" in page_before
-    assert "### Apps" not in page_before
-
-    _add_app_to_repo(graph_dir, org="acme", repo="repo-a", name="cli-app")
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        plan = plan_entities(load_bundle(bundle_root), config, reader, at=_AT)
-
-    assert "repo:acme/repo-a" in plan.stale  # the bug: this came back empty
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        result = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
-
-    assert "repositories/repo-a" in result.written
-    page_after = (bundle_root / "repositories" / "repo-a.md").read_text(encoding="utf-8")
-    assert "### Apps\n\n- [cli-app](/repositories/repo-a/apps/cli-app.md)" in page_after
-
-
-def test_a_second_sync_with_no_graph_change_writes_nothing(tmp_path: Path) -> None:
-    graph_dir = tmp_path / "graph"
-    _seed(graph_dir, [_RepoSeed("acme", "repo-a", packages=["widgets"])])
-    bundle_root = tmp_path / "bundle"
-    install_bundle(bundle_root, today=_TODAY, dry_run=False)
-    config = _config(tmp_path, graph_dir, ["repo-a"], bundle_root=bundle_root)
-
-    with open_reader(graph_dir=graph_dir) as reader:
-        sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
-        second = sync_entities(load_bundle(bundle_root), config, reader, today=_TODAY, at=_AT)
-
-    assert second.written == ()
+    assert expected_resource in str(excinfo.value)

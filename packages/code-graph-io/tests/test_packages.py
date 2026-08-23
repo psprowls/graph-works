@@ -7,7 +7,7 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from code_graph_io import packages, store, upsert
+from code_graph_io import dependencies, packages, store, upsert
 from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 from code_graph_io.uri import RepoContext
 
@@ -40,13 +40,63 @@ def _seed_file_node(conn: sqlite3.Connection, path: str) -> None:
     )
 
 
+def _reconcile_dependencies(conn: sqlite3.Connection, tmp_path: Path) -> None:
+    manifests = packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
+
+
+def test_manifest_discovery_preserves_distribution_contract(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text('[project]\nname = "py-dist"\ndependencies = ["HTTPX>=0.27"]\n')
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "package.json").write_text(
+        json.dumps(
+            {
+                "name": "@acme/web",
+                "private": True,
+                "dependencies": {"react": "^19"},
+                "devDependencies": {"vite": "^7"},
+            }
+        )
+    )
+
+    found = packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+
+    assert [(item.name, item.ecosystem, item.distributable) for item in found] == [
+        ("py-dist", "pypi", True),
+        ("@acme/web", "npm", True),
+    ]
+    assert found[0].dependencies == (
+        packages.ManifestDependency(ecosystem="pypi", name="httpx", spec=">=0.27", dev=False),
+    )
+    assert found[1].dependencies == (
+        packages.ManifestDependency(ecosystem="npm", name="react", spec="^19", dev=False),
+        packages.ManifestDependency(ecosystem="npm", name="vite", spec="^7", dev=True),
+    )
+
+
+def test_manifest_package_discovery_marks_uv_virtual_projects_non_distributable(tmp_path: Path) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname = "workspace"\ndependencies = ["pytest>=8"]\n\n[tool.uv]\npackage = false\n'
+    )
+
+    found = packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+
+    assert found[0].distributable is False
+    assert found[0].dependencies == (
+        packages.ManifestDependency(ecosystem="pypi", name="pytest", spec=">=8", dev=False),
+    )
+
+
 def test_refresh_pyproject(tmp_path: Path, conn: sqlite3.Connection) -> None:
     pkg_dir = tmp_path / "packages" / "alpha"
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "pyproject.toml").write_text('[project]\nname = "alpha"\nversion = "0.1.1"\ndependencies = ["beta"]\n')
     _seed_file_node(conn, "packages/alpha/src/a.py")
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT name, attrs_json FROM nodes WHERE kind='package'").fetchone()
     assert row[0] == "alpha"
@@ -63,7 +113,9 @@ def test_refresh_package_json(tmp_path: Path, conn: sqlite3.Connection) -> None:
         json.dumps({"name": "frontend", "version": "1.0.0", "dependencies": {"x": "1"}})
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT name, attrs_json FROM nodes WHERE kind='package'").fetchone()
     assert row[0] == "frontend"
@@ -80,7 +132,9 @@ def test_refresh_pyproject_stores_description(tmp_path: Path, conn: sqlite3.Conn
         '[project]\nname = "alpha"\nversion = "0.1.1"\ndescription = "A test package."\n'
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='package' AND name=?", ("alpha",)).fetchone()
     attrs = json.loads(row[0])
@@ -93,7 +147,9 @@ def test_refresh_pyproject_absent_description_is_empty(tmp_path: Path, conn: sql
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "pyproject.toml").write_text('[project]\nname = "beta"\nversion = "0.1.1"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='package' AND name=?", ("beta",)).fetchone()
     attrs = json.loads(row[0])
@@ -108,7 +164,9 @@ def test_refresh_creates_contains_edges(tmp_path: Path, conn: sqlite3.Connection
     _seed_file_node(conn, "alpha/src/b.py")
     _seed_file_node(conn, "outside/c.py")
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     rows = conn.execute(
         "SELECT n2.name FROM edges e "
@@ -133,7 +191,9 @@ def test_refresh_does_not_contain_import_specifier_stubs(
         "VALUES ('file', 'ImportedSymbol', './real.js', NULL, NULL, NULL)"
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     contained = {
         row[0]
@@ -156,7 +216,9 @@ def test_refresh_skips_venv_manifests(tmp_path: Path, conn: sqlite3.Connection) 
     real_pkg.mkdir(parents=True)
     (real_pkg / "pyproject.toml").write_text('[project]\nname = "real-pkg"\nversion = "0.1.1"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     rows = conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()
     names = {row[0] for row in rows}
@@ -169,7 +231,9 @@ def test_refresh_skips_broken_pyproject(tmp_path: Path, conn: sqlite3.Connection
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "pyproject.toml").write_text("not valid toml [[[[")
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     captured = capsys.readouterr()
     assert "alpha" in captured.err or "pyproject.toml" in captured.err
@@ -183,7 +247,10 @@ def test_refresh_writes_pkg_uri_on_package_nodes(tmp_path: Path, conn: sqlite3.C
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "pyproject.toml").write_text('[project]\nname = "foo"\nversion = "0.1.1"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=RepoContext("myorg", "myrepo"))
+    ctx = RepoContext("myorg", "myrepo")
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=ctx, manifests=packages.discover_manifest_packages(tmp_path, ctx=ctx)
+    )
 
     row = conn.execute("SELECT uri, attrs_json FROM nodes WHERE kind='package' AND name='foo'").fetchone()
     assert row is not None
@@ -234,14 +301,17 @@ def test_dependency_ingestion_from_workspace(tmp_path: Path, conn: sqlite3.Conne
         '[dependency-groups]\ndev = ["pytest>=8"]\n'
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
-    # 3 distinct deps emitted as nodes: boto3, langchain-aws, pytest
+    # Every distributable package and declared dependency has a facet.
     dep_rows = conn.execute("SELECT name, attrs_json, uri FROM nodes WHERE kind='dependency' ORDER BY name").fetchall()
     names = [r[0] for r in dep_rows]
-    assert names == ["boto3", "langchain-aws", "pytest"]
+    assert names == ["boto3", "langchain-aws", "pkg-a", "pkg-b", "pytest"]
     # boto3 attrs.versions_in_use collects both PEP 508 strings (sorted)
-    boto3_row = dep_rows[0]
+    boto3_row = next(row for row in dep_rows if row[0] == "boto3")
     boto3_attrs = json.loads(boto3_row[1])
     assert boto3_attrs["ecosystem"] == "pypi"
     assert boto3_attrs["url"] == "https://pypi.org/project/boto3/"
@@ -273,7 +343,10 @@ def test_used_by_edge_dedupes_per_consumer(tmp_path: Path, conn: sqlite3.Connect
         'dependencies = ["boto3>=1.38"]\n'
         '[dependency-groups]\nextra = ["boto3>=1.40"]\n'
     )
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
     count = conn.execute(
         "SELECT COUNT(*) FROM edges e "
         "JOIN nodes src ON e.src = src.id "
@@ -306,16 +379,12 @@ def test_workspace_dep_suppressed_and_depends_on_package_emitted(tmp_path: Path,
         '[project]\nname = "beta"\nversion = "0.1.1"\ndependencies = ["code-graph-io>=0.1", "boto3>=1.38"]\n'
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
-    # no `dependency` node for the normalized workspace name
-    # (declared as `code-graph-io`, normalizes to `code_graph_io`).
-    for candidate in ("code_graph_io", "code-graph-io"):
-        count = conn.execute(
-            "SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name=?",
-            (candidate,),
-        ).fetchone()[0]
-        assert count == 0, f"workspace dep should be suppressed, found {candidate!r}"
+    assert conn.execute("SELECT COUNT(*) FROM nodes WHERE uri='dependency:pypi/code-graph-io'").fetchone()[0] == 1
 
     # Regression: the external dep STILL has a `dependency` node + used_by.
     boto3_node = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='boto3'").fetchone()[0]
@@ -340,16 +409,16 @@ def test_workspace_dep_suppressed_and_depends_on_package_emitted(tmp_path: Path,
     assert src_kind in ("package", "app") and src_name == "beta"
     assert dst_kind in ("package", "app") and dst_name == "code_graph_io"
 
-    # the used_by edge for the internal pair points at the
-    # package/app node, NOT a `dependency` node.
+    # The used_by edge always targets the Dependency facet, including internal
+    # workspace packages.
     internal_used_by = conn.execute(
         "SELECT dst.kind FROM edges e "
         "JOIN nodes src ON e.src = src.id "
         "JOIN nodes dst ON e.dst = dst.id "
-        "WHERE e.kind='used_by' AND src.name='beta' AND dst.name='code_graph_io'"
+        "WHERE e.kind='used_by' AND src.name='beta' AND dst.uri='dependency:pypi/code-graph-io'"
     ).fetchall()
     assert len(internal_used_by) == 1
-    assert internal_used_by[0][0] in ("package", "app")
+    assert internal_used_by == [("dependency",)]
 
 
 def test_internal_dep_edges_dedupe_per_consumer(tmp_path: Path, conn: sqlite3.Connection) -> None:
@@ -368,13 +437,16 @@ def test_internal_dep_edges_dedupe_per_consumer(tmp_path: Path, conn: sqlite3.Co
         '[dependency-groups]\ndev = ["alpha>=0.1"]\n'
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
     used_by_count = conn.execute(
         "SELECT COUNT(*) FROM edges e "
         "JOIN nodes src ON e.src = src.id "
         "JOIN nodes dst ON e.dst = dst.id "
-        "WHERE e.kind='used_by' AND src.name='beta' AND dst.name='alpha'"
+        "WHERE e.kind='used_by' AND src.name='beta' AND dst.uri='dependency:pypi/alpha'"
     ).fetchone()[0]
     assert used_by_count == 1
     dop_count = conn.execute(
@@ -404,18 +476,21 @@ def test_internal_dep_on_app_target_resolves_package_kind(tmp_path: Path, conn: 
         '[project]\nname = "beta"\nversion = "0.1.1"\ndependencies = ["mytool>=0.1"]\n'
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
-    for kind in ("used_by", "depends_on_package"):
+    for kind, expected_dst_kind in (("used_by", "dependency"), ("depends_on_package", "package")):
         dst_kind = conn.execute(
             "SELECT dst.kind FROM edges e "
             "JOIN nodes src ON e.src = src.id "
             "JOIN nodes dst ON e.dst = dst.id "
-            "WHERE e.kind=? AND src.name='beta' AND dst.name='mytool'",
+            "WHERE e.kind=? AND src.name='beta' AND (dst.name='mytool' OR dst.uri='dependency:pypi/mytool')",
             (kind,),
         ).fetchall()
         assert len(dst_kind) == 1, f"expected one {kind} edge to mytool"
-        assert dst_kind[0][0] == "package", f"{kind} dst should resolve to package"
+        assert dst_kind[0][0] == expected_dst_kind
 
 
 # ============================================================================
@@ -514,7 +589,9 @@ def test_app_signals_add_a_facet_not_a_flip(tmp_path: Path, conn: sqlite3.Connec
     pkg_dir.mkdir(parents=True)
     manifest = pkg_dir / "pyproject.toml"
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     pkg_row = conn.execute("SELECT id, kind, uri FROM nodes WHERE name='myapp'").fetchone()
     assert pkg_row is not None
     pkg_id, pkg_kind, pkg_uri_val = pkg_row
@@ -522,7 +599,9 @@ def test_app_signals_add_a_facet_not_a_flip(tmp_path: Path, conn: sqlite3.Connec
     assert pkg_uri_val.startswith("pkg:")
 
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n[project.scripts]\nmyapp = "myapp.cli:main"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     rows = conn.execute("SELECT id, kind, uri, attrs_json FROM nodes WHERE name='myapp' ORDER BY kind").fetchall()
     assert [r[1] for r in rows] == ["app", "package"], f"expected one app row and one package row; got {rows!r}"
@@ -555,14 +634,18 @@ def test_app_facet_pruned_when_signals_disappear_package_survives(tmp_path: Path
     pkg_dir.mkdir(parents=True)
     manifest = pkg_dir / "pyproject.toml"
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n[project.scripts]\nmyapp = "myapp.cli:main"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     pkg_row = conn.execute("SELECT id FROM nodes WHERE name='myapp' AND kind='package'").fetchone()
     assert pkg_row is not None
     pkg_id = pkg_row[0]
     assert conn.execute("SELECT COUNT(*) FROM nodes WHERE name='myapp' AND kind='app'").fetchone()[0] == 1
 
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     rows = conn.execute("SELECT id, kind FROM nodes WHERE name='myapp'").fetchall()
     assert [r[1] for r in rows] == ["package"], f"App facet should be pruned; got {rows!r}"
@@ -577,7 +660,9 @@ def test_app_facet_edges_do_not_survive_kind_flip_fk(tmp_path: Path, conn: sqlit
     pkg_dir.mkdir(parents=True)
     manifest = pkg_dir / "pyproject.toml"
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n[project.scripts]\nmyapp = "myapp.cli:main"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     upsert._upsert_edge(
         conn,
@@ -593,7 +678,9 @@ def test_app_facet_edges_do_not_survive_kind_flip_fk(tmp_path: Path, conn: sqlit
     assert inbound_before == 1
 
     manifest.write_text('[project]\nname = "myapp"\nversion = "0.1.1"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     assert conn.execute("SELECT id FROM nodes WHERE name='myapp' AND kind='package'").fetchone()[0] == pkg_id
     inbound_after = conn.execute("SELECT COUNT(*) FROM edges WHERE dst=?", (pkg_id,)).fetchone()[0]
@@ -605,14 +692,18 @@ def test_no_kind_flip_for_zero_signal_manifest(tmp_path: Path, conn: sqlite3.Con
     pkg_dir = tmp_path / "purelib"
     pkg_dir.mkdir(parents=True)
     (pkg_dir / "pyproject.toml").write_text('[project]\nname = "purelib"\nversion = "0.1.1"\n')
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     rows_before = conn.execute("SELECT id, kind, uri FROM nodes WHERE name='purelib'").fetchall()
     assert len(rows_before) == 1
     pkg_id, kind_before, uri_before = rows_before[0]
     assert kind_before == "package"
 
     # Re-run with identical manifest — no flip should occur.
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     rows_after = conn.execute("SELECT id, kind, uri FROM nodes WHERE name='purelib'").fetchall()
     assert len(rows_after) == 1, "zero-signal re-run must not duplicate the row"
     assert rows_after[0] == (pkg_id, kind_before, uri_before)
@@ -630,7 +721,9 @@ def _refresh_and_fetch(
     the given `kind`. Under the facet model a manifest with app signals gets
     BOTH a package row and an app row sharing `name`, so callers that mean to
     inspect the App facet must pass kind="app" explicitly."""
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     row = conn.execute("SELECT kind, uri, attrs_json FROM nodes WHERE name=? AND kind=?", (name, kind)).fetchone()
     assert row is not None, f"no {kind!r} row named {name!r} after refresh"
     return row[0], row[1], json.loads(row[2]) if row[2] else {}
@@ -792,7 +885,9 @@ def test_refresh_app_node_attrs_json_contains_app_kind_and_signals(tmp_path: Pat
     pkg_dir.mkdir()
     (pkg_dir / "pyproject.toml").write_text('[project]\nname = "purelib"\nversion = "0.1.1"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     app_row = conn.execute(
         "SELECT json_extract(attrs_json, '$.app_kind'), "
@@ -842,7 +937,9 @@ def test_refresh_electron_app_from_dev_deps(tmp_path: Path, conn: sqlite3.Connec
     )
     (app_dir / "index.html").write_text("<!doctype html><html></html>")
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT kind, attrs_json FROM nodes WHERE name='app-electron-ts' AND kind='app'").fetchone()
     assert row is not None
@@ -872,7 +969,9 @@ def test_refresh_js_dev_dep_marker_splits_runtime_vs_dev(tmp_path: Path, conn: s
         )
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE name='myapp'").fetchone()
     assert row is not None
@@ -889,7 +988,9 @@ def test_refresh_python_package_dev_dependencies_empty(tmp_path: Path, conn: sql
     pkg_dir.mkdir()
     (pkg_dir / "pyproject.toml").write_text('[project]\nname = "pypkg"\nversion = "0.1.1"\ndependencies = ["boto3"]\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE name='pypkg'").fetchone()
     assert row is not None
@@ -928,7 +1029,10 @@ def test_js_npm_dependency_parity_full_monorepo(tmp_path: Path, conn: sqlite3.Co
         )
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
     # 1. react → dependency node with ecosystem=npm, correct URI, versions_in_use
     react_row = conn.execute(
@@ -973,13 +1077,13 @@ def test_js_npm_dependency_parity_full_monorepo(tmp_path: Path, conn: sqlite3.Co
     assert vitest_edge is not None, "used_by edge jspkg->vitest must exist"
     vitest_edge_attrs = json.loads(vitest_edge[0]) if vitest_edge[0] else {}
 
-    # 2. dev marker distinction: vitest=True, react=not True
-    assert vitest_edge_attrs.get("dev") is True, "vitest (dev-only) must carry dev=True"
-    assert not react_edge_attrs.get("dev"), "react (runtime) must not carry dev=True"
+    # Dependency relationship ownership does not encode a source-group marker.
+    assert vitest_edge_attrs == {}
+    assert react_edge_attrs == {}
 
-    # 3. jslib (internal) → depends_on_package, NO dependency node
+    # 3. jslib (internal) owns a Dependency facet and a direct package edge.
     jslib_dep_count = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='jslib'").fetchone()[0]
-    assert jslib_dep_count == 0, "internal workspace package jslib must not produce a dependency node"
+    assert jslib_dep_count == 1
 
     dop_rows = conn.execute(
         "SELECT src.name, dst.name FROM edges e "
@@ -1016,7 +1120,10 @@ def test_js_versions_in_use_aggregates_across_consumers(tmp_path: Path, conn: sq
         )
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
     react_attrs_json = conn.execute("SELECT attrs_json FROM nodes WHERE kind='dependency' AND name='react'").fetchone()[
         0
@@ -1113,7 +1220,10 @@ def test_plugin_root_manifest_also_gets_a_package_node(tmp_path: Path, conn: sql
     nested.mkdir(parents=True)
     (nested / "pyproject.toml").write_text('[project]\nname = "demo-helper"\nversion = "0"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=RepoContext(org="t", repo="r"))
+    ctx = RepoContext(org="t", repo="r")
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=ctx, manifests=packages.discover_manifest_packages(tmp_path, ctx=ctx)
+    )
     names = {r[0] for r in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
     assert "demo-plugin-pkg" in names
     assert "demo-helper" in names
@@ -1165,7 +1275,9 @@ def test_refresh_app_node_carries_language(tmp_path: Path, conn: sqlite3.Connect
         '[project]\nname = "appy"\nversion = "0.1.0"\n[project.scripts]\nappy = "appy:main"\n'
     )
     _seed_file_node(conn, "packages/appy/src/appy/__init__.py")
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     # appy has [project.scripts] → also gets an App facet alongside its Package node.
     row = conn.execute("SELECT kind, attrs_json FROM nodes WHERE name='appy' AND kind='app'").fetchone()
     assert row is not None
@@ -1201,7 +1313,9 @@ def test_refresh_falls_back_to_dominant_language_when_manifest_silent(
 
     monkeypatch.setattr(packages, "_read_pyproject", _silent_reader)
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='package' AND name='silentpkg'").fetchone()
     assert row is not None
@@ -1216,11 +1330,15 @@ def test_refresh_prunes_package_whose_manifest_vanished(tmp_path: Path, conn: sq
     manifest = pkg_dir / "pyproject.toml"
     manifest.write_text('[project]\nname = "gone"\nversion = "0.1.0"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='gone'").fetchone() is not None
 
     manifest.unlink()
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='gone'").fetchone() is None
 
@@ -1236,9 +1354,13 @@ def test_refresh_prune_leaves_surviving_packages_alone(tmp_path: Path, conn: sql
     keep_dir.mkdir()
     (keep_dir / "pyproject.toml").write_text('[project]\nname = "keep"\nversion = "0.1.0"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     manifest.unlink()
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='gone'").fetchone() is None
     assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='keep'").fetchone() is not None
@@ -1253,12 +1375,16 @@ def test_refresh_prune_cascades_edges(tmp_path: Path, conn: sqlite3.Connection) 
     manifest.write_text('[project]\nname = "gone"\nversion = "0.1.0"\ndependencies = ["requests"]\n')
     _seed_file_node(conn, "gone/a.py")
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
     node_id = conn.execute("SELECT id FROM nodes WHERE kind='package' AND name='gone'").fetchone()[0]
     assert conn.execute("SELECT COUNT(*) FROM edges WHERE src=? OR dst=?", (node_id, node_id)).fetchone()[0] > 0
 
     manifest.unlink()
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     assert conn.execute("SELECT 1 FROM nodes WHERE id=?", (node_id,)).fetchone() is None
     assert conn.execute("SELECT COUNT(*) FROM edges WHERE src=? OR dst=?", (node_id, node_id)).fetchone()[0] == 0
@@ -1280,16 +1406,34 @@ def test_refresh_prune_scoped_to_current_repo(tmp_path: Path, conn: sqlite3.Conn
     # stamps nodes.repo at insert time) is set around each member's refresh,
     # in step with the `current_repo` argument.
     upsert.set_current_repo(conn, "repo:a")
-    packages.refresh(conn, repo_root=member_a, ctx=_CTX, current_repo="repo:a")
+    packages.refresh(
+        conn,
+        repo_root=member_a,
+        ctx=_CTX,
+        manifests=packages.discover_manifest_packages(member_a, ctx=_CTX),
+        current_repo="repo:a",
+    )
     upsert.set_current_repo(conn, "repo:b")
-    packages.refresh(conn, repo_root=member_b, ctx=_CTX, current_repo="repo:b")
+    packages.refresh(
+        conn,
+        repo_root=member_b,
+        ctx=_CTX,
+        manifests=packages.discover_manifest_packages(member_b, ctx=_CTX),
+        current_repo="repo:b",
+    )
     upsert.set_current_repo(conn, None)
     assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='a'").fetchone() is not None
 
     # member_b's manifest vanishes; only member_b's refresh runs again.
     b_manifest.unlink()
     upsert.set_current_repo(conn, "repo:b")
-    packages.refresh(conn, repo_root=member_b, ctx=_CTX, current_repo="repo:b")
+    packages.refresh(
+        conn,
+        repo_root=member_b,
+        ctx=_CTX,
+        manifests=packages.discover_manifest_packages(member_b, ctx=_CTX),
+        current_repo="repo:b",
+    )
     upsert.set_current_repo(conn, None)
 
     assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='a'").fetchone() is not None
@@ -1307,7 +1451,9 @@ def test_virtual_root_emits_no_package_node(tmp_path: Path, conn: sqlite3.Connec
     alpha.mkdir(parents=True)
     (alpha / "pyproject.toml").write_text('[project]\nname = "alpha"\nversion = "0.1.0"\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
     assert names == {"alpha"}
@@ -1330,51 +1476,43 @@ def test_tool_uv_package_true_still_emits_a_package(tmp_path: Path, conn: sqlite
     bare_dir.mkdir()
     (bare_dir / "pyproject.toml").write_text('[project]\nname = "bare_pkg"\nversion = "0.1.0"\n[tool.uv]\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     names = {row[0] for row in conn.execute("SELECT name FROM nodes WHERE kind='package'").fetchall()}
     assert names == {"true_pkg", "bare_pkg"}
 
 
-def test_virtual_root_external_deps_defer_to_repository(tmp_path: Path, conn: sqlite3.Connection) -> None:
+def test_virtual_root_has_no_package_or_dependency_side_effect_during_refresh(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "ws"\nversion = "0.0.0"\n'
         "[tool.uv]\npackage = false\n"
         '[dependency-groups]\ndev = ["mypy>=1.0"]\n'
     )
-    deferred: list[packages.RepositoryDepLink] = []
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX, deferred_repo_deps=deferred)
-
-    # no repository-sourced used_by edge lands in the DB from refresh() alone —
-    # the Repository node doesn't exist yet.
-    used_by_from_ws = conn.execute(
-        "SELECT COUNT(*) FROM edges e JOIN nodes n ON e.src = n.id WHERE n.kind='repository' AND e.kind='used_by'"
-    ).fetchone()[0]
-    assert used_by_from_ws == 0
-    # the dependency node itself IS written by refresh().
-    dep_row = conn.execute("SELECT name FROM nodes WHERE kind='dependency' AND name='mypy'").fetchone()
-    assert dep_row is not None
-    # and the deferred edge is queued for the Repository, carrying dev=True.
-    assert deferred == [("pypi", "mypy", True)]
+    assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind IN ('package', 'dependency')").fetchone()[0] == 0
 
 
-def test_virtual_root_internal_deps_are_dropped(tmp_path: Path, conn: sqlite3.Connection) -> None:
+def test_virtual_root_internal_deps_are_not_linked_during_package_refresh(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
     (tmp_path / "pyproject.toml").write_text(
         '[project]\nname = "ws"\nversion = "0.0.0"\n[tool.uv]\npackage = false\n[dependency-groups]\ndev = ["alpha"]\n'
     )
     alpha = tmp_path / "packages" / "alpha"
     alpha.mkdir(parents=True)
     (alpha / "pyproject.toml").write_text('[project]\nname = "alpha"\nversion = "0.1.0"\n')
-    deferred_cross_repo: list[packages.CrossRepoLink] = []
-    deferred_repo_deps: list[packages.RepositoryDepLink] = []
-
     packages.refresh(
         conn,
         repo_root=tmp_path,
         ctx=_CTX,
-        deferred_cross_repo=deferred_cross_repo,
-        deferred_repo_deps=deferred_repo_deps,
+        manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX),
     )
 
     used_by = conn.execute(
@@ -1383,8 +1521,6 @@ def test_virtual_root_internal_deps_are_dropped(tmp_path: Path, conn: sqlite3.Co
     assert used_by == 0
     dop = conn.execute("SELECT COUNT(*) FROM edges WHERE kind='depends_on_package'").fetchone()[0]
     assert dop == 0
-    assert deferred_cross_repo == []
-    assert deferred_repo_deps == []
 
 
 def test_previously_admitted_root_is_pruned(tmp_path: Path, conn: sqlite3.Connection) -> None:
@@ -1401,7 +1537,9 @@ def test_previously_admitted_root_is_pruned(tmp_path: Path, conn: sqlite3.Connec
 
     (tmp_path / "pyproject.toml").write_text('[project]\nname = "ws"\nversion = "0.0.0"\n[tool.uv]\npackage = false\n')
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
 
     assert conn.execute("SELECT 1 FROM nodes WHERE kind='package' AND name='ws'").fetchone() is None
 
@@ -1413,7 +1551,10 @@ def test_python_dep_group_edges_carry_dev_attr(tmp_path: Path, conn: sqlite3.Con
         '[project]\nname = "pkg"\nversion = "0.1.0"\ndependencies = ["requests"]\n[dependency-groups]\ndev = ["mypy"]\n'
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
     def _edge_attrs(dep_name: str) -> dict:
         row = conn.execute(
@@ -1423,7 +1564,7 @@ def test_python_dep_group_edges_carry_dev_attr(tmp_path: Path, conn: sqlite3.Con
         return json.loads(row[0]) if row and row[0] else {}
 
     assert _edge_attrs("requests") == {}
-    assert _edge_attrs("mypy") == {"dev": True}
+    assert _edge_attrs("mypy") == {}
 
 
 def test_runtime_dependency_wins_over_dep_group(tmp_path: Path, conn: sqlite3.Connection) -> None:
@@ -1435,7 +1576,10 @@ def test_runtime_dependency_wins_over_dep_group(tmp_path: Path, conn: sqlite3.Co
         '[project]\nname = "pkg"\nversion = "0.1.0"\ndependencies = ["mypy"]\n[dependency-groups]\ndev = ["mypy"]\n'
     )
 
-    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    _reconcile_dependencies(conn, tmp_path)
 
     rows = conn.execute(
         "SELECT e.attrs_json FROM edges e JOIN nodes d ON e.dst = d.id WHERE d.name='mypy' AND e.kind='used_by'"

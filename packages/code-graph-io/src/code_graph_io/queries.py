@@ -228,6 +228,21 @@ class PathDescription:
 
 
 @dataclass(frozen=True)
+class FileDescription:
+    """Repository-scoped dossier for the exact File identified by ``uri``."""
+
+    uri: str
+    path: str
+    children: list[NodeRecord]
+    imports: list[ImportRecord]
+    imported_by: list[ImporterRecord]
+    package: tuple[str, str] | None = None
+    role_flags: dict[str, bool] | None = None
+    token_count: int | None = None
+    exports: list[ExportRecord] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class DependencyDescription:
     """Description of a `dependency` node."""
 
@@ -236,6 +251,12 @@ class DependencyDescription:
     uri: str
     versions_in_use: list[str] = field(default_factory=list)
     used_by: list[str] = field(default_factory=list)
+    implemented_by: list[str] = field(default_factory=list)
+
+    @property
+    def ambiguous(self) -> bool:
+        """Whether more than one workspace Package implements this dependency."""
+        return len(self.implemented_by) > 1
 
 
 @dataclass(frozen=True)
@@ -668,29 +689,61 @@ def imports(conn: sqlite3.Connection, *, path: str) -> list[ImportRecord]:
     return [ImportRecord(name=r[0], path=r[1]) for r in rows]
 
 
-def describe_package(conn: sqlite3.Connection, *, name: str) -> PackageDescription | None:
-    pkg = conn.execute(
-        "SELECT attrs_json FROM nodes WHERE kind='package' AND name = ?",
-        (name,),
-    ).fetchone()
+def describe_package(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    uri: str | None = None,
+) -> PackageDescription | None:
+    """Return a package description, optionally scoped to its stable URI.
+
+    Name-only callers retain the historical lookup and aggregation semantics.
+    Multi-repository callers should pass ``uri`` so every related query is
+    constrained to the selected package node.
+    """
+    if uri is None:
+        pkg = conn.execute(
+            "SELECT id, attrs_json FROM nodes WHERE kind='package' AND name = ?",
+            (name,),
+        ).fetchone()
+    else:
+        pkg = conn.execute(
+            "SELECT id, attrs_json FROM nodes WHERE kind='package' AND name = ? AND uri = ?",
+            (name, uri),
+        ).fetchone()
     if not pkg:
         return None
-    attrs = json.loads(pkg[0]) if pkg[0] else {}
+    package_id, attrs_json = pkg
+    attrs = json.loads(attrs_json) if attrs_json else {}
+    package_filter = "p.name = ?" if uri is None else "p.id = ?"
+    package_filter_value: str | int = name if uri is None else package_id
     files = conn.execute(
-        "SELECT n.path FROM edges e "
+        "SELECT n.id, n.path FROM edges e "
         "JOIN nodes p ON e.src = p.id JOIN nodes n ON e.dst = n.id "
-        "WHERE p.kind='package' AND p.name = ? AND e.kind='contains' AND n.kind='file' "
+        f"WHERE p.kind='package' AND {package_filter} AND e.kind='contains' AND n.kind='file' "
         "ORDER BY n.path",
-        (name,),
+        (package_filter_value,),
     ).fetchall()
-    file_paths = [row[0] for row in files]
+    file_ids = [row[0] for row in files]
+    file_paths = [row[1] for row in files]
     counts: dict[str, int] = {}
     if file_paths:
-        placeholders = ",".join("?" for _ in file_paths)
-        rows = conn.execute(
-            f"SELECT kind, COUNT(*) FROM nodes WHERE path IN ({placeholders}) AND kind != 'file' GROUP BY kind",
-            file_paths,
-        ).fetchall()
+        if uri is None:
+            placeholders = ",".join("?" for _ in file_paths)
+            rows = conn.execute(
+                f"SELECT kind, COUNT(*) FROM nodes WHERE path IN ({placeholders}) AND kind != 'file' GROUP BY kind",
+                file_paths,
+            ).fetchall()
+        else:
+            placeholders = ",".join("?" for _ in file_ids)
+            rows = conn.execute(
+                f"SELECT n.kind, COUNT(*) FROM nodes n "
+                "WHERE n.kind != 'file' AND EXISTS ("
+                f"SELECT 1 FROM nodes f WHERE f.id IN ({placeholders}) "
+                "AND f.path = n.path AND f.repo IS n.repo) "
+                "GROUP BY n.kind",
+                file_ids,
+            ).fetchall()
         counts = {kind: count for kind, count in rows}
 
     # EntryPoints declared by the package
@@ -701,9 +754,9 @@ def describe_package(conn: sqlite3.Connection, *, name: str) -> PackageDescripti
         "JOIN nodes ep ON ep.id = de.dst AND ep.kind='entry_point' "
         "LEFT JOIN edges ib ON ib.src = ep.id AND ib.kind='implemented_by' "
         "LEFT JOIN nodes f ON f.id = ib.dst AND f.kind='file' "
-        "WHERE pkg.kind='package' AND pkg.name = ? "
+        f"WHERE pkg.kind='package' AND {'pkg.name = ?' if uri is None else 'pkg.id = ?'} "
         "ORDER BY ep.name",
-        (name,),
+        (package_filter_value,),
     ).fetchall()
     entry_points = [_load_entry_point_description(r) for r in ep_rows]
 
@@ -716,9 +769,9 @@ def describe_package(conn: sqlite3.Connection, *, name: str) -> PackageDescripti
         "JOIN nodes ts ON t.src = ts.id "
         "JOIN nodes p ON t.dst = p.id "
         "WHERE t.kind='tests' AND ts.kind='test_suite' "
-        "AND p.kind='package' AND p.name = ? "
+        f"AND p.kind='package' AND {package_filter} "
         "ORDER BY ts.name",
-        (name,),
+        (package_filter_value,),
     ).fetchall()
     test_suites = [_load_suite_description(r) for r in suite_rows]
 
@@ -730,10 +783,10 @@ def describe_package(conn: sqlite3.Connection, *, name: str) -> PackageDescripti
         "JOIN nodes src ON e.src = src.id "
         "JOIN nodes dst ON e.dst = dst.id "
         "WHERE e.kind='depends_on_package' "
-        "AND src.kind IN ('package', 'app') AND src.name = ? "
+        f"AND src.kind IN ('package', 'app') AND {'src.name = ?' if uri is None else 'src.id = ?'} "
         "AND dst.kind IN ('package', 'app') "
         "ORDER BY dst.name",
-        (name,),
+        (package_filter_value,),
     ).fetchall()
     internal_dependencies = [r[0] for r in internal_dep_rows]
     # Internal DEPENDENTS (incoming): workspace packages that depend on this one —
@@ -743,10 +796,10 @@ def describe_package(conn: sqlite3.Connection, *, name: str) -> PackageDescripti
         "JOIN nodes src ON e.src = src.id "
         "JOIN nodes dst ON e.dst = dst.id "
         "WHERE e.kind='depends_on_package' "
-        "AND dst.kind IN ('package', 'app') AND dst.name = ? "
+        f"AND dst.kind IN ('package', 'app') AND {'dst.name = ?' if uri is None else 'dst.id = ?'} "
         "AND src.kind IN ('package', 'app') "
         "ORDER BY src.name",
-        (name,),
+        (package_filter_value,),
     ).fetchall()
     internal_dependents = [r[0] for r in internal_dependent_rows]
 
@@ -790,7 +843,12 @@ def internal_dependencies_of(conn: sqlite3.Connection, *, name: str) -> list[str
     return [r[0] for r in rows]
 
 
-def describe_app(conn: sqlite3.Connection, *, name: str) -> AppDescription | None:
+def describe_app(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    uri: str | None = None,
+) -> AppDescription | None:
     """Return the named App's description, or None.
 
     The node lookup itself reads `kind='app'` — an App's own attrs
@@ -803,61 +861,99 @@ def describe_app(conn: sqlite3.Connection, *, name: str) -> AppDescription | Non
     exclusively from the Package side, never from the App node. `conn` must
     be opened read-only.
     """
-    pkg = conn.execute(
-        "SELECT attrs_json FROM nodes WHERE kind='app' AND name = ?",
-        (name,),
-    ).fetchone()
-    if not pkg:
+    if uri is None:
+        app = conn.execute(
+            "SELECT id, attrs_json FROM nodes WHERE kind='app' AND name = ?",
+            (name,),
+        ).fetchone()
+    else:
+        app = conn.execute(
+            "SELECT id, attrs_json FROM nodes WHERE kind='app' AND name = ? AND uri = ?",
+            (name, uri),
+        ).fetchone()
+    if not app:
         return None
-    attrs = json.loads(pkg[0]) if pkg[0] else {}
+    app_id, attrs_json = app
+    attrs = json.loads(attrs_json) if attrs_json else {}
+    sibling_package_id: int | None = None
+    if uri is not None:
+        sibling = conn.execute(
+            "SELECT pkg.id FROM edges facet "
+            "JOIN nodes pkg ON facet.src = pkg.id "
+            "WHERE facet.kind='facet_of' AND facet.dst = ? AND pkg.kind='package' "
+            "ORDER BY pkg.id LIMIT 1",
+            (app_id,),
+        ).fetchone()
+        sibling_package_id = sibling[0] if sibling else None
+
+    package_filter = "p.name = ?" if uri is None else "p.id = ?"
+    package_filter_value: str | int | None = name if uri is None else sibling_package_id
     # contains edges always source from the Package node under the facet
     # model — an App is always faceted off a Package of the same name, so
     # this still resolves to the right member's files.
-    files = conn.execute(
-        "SELECT n.path FROM edges e "
-        "JOIN nodes p ON e.src = p.id JOIN nodes n ON e.dst = n.id "
-        "WHERE p.kind='package' AND p.name = ? AND e.kind='contains' AND n.kind='file' "
-        "ORDER BY n.path",
-        (name,),
-    ).fetchall()
-    file_paths = [row[0] for row in files]
+    files = []
+    if package_filter_value is not None:
+        files = conn.execute(
+            "SELECT n.id, n.path FROM edges e "
+            "JOIN nodes p ON e.src = p.id JOIN nodes n ON e.dst = n.id "
+            f"WHERE p.kind='package' AND {package_filter} AND e.kind='contains' AND n.kind='file' "
+            "ORDER BY n.path",
+            (package_filter_value,),
+        ).fetchall()
+    file_ids = [row[0] for row in files]
+    file_paths = [row[1] for row in files]
     counts: dict[str, int] = {}
     if file_paths:
-        placeholders = ",".join("?" for _ in file_paths)
-        rows = conn.execute(
-            f"SELECT kind, COUNT(*) FROM nodes WHERE path IN ({placeholders}) AND kind != 'file' GROUP BY kind",
-            file_paths,
-        ).fetchall()
+        if uri is None:
+            placeholders = ",".join("?" for _ in file_paths)
+            rows = conn.execute(
+                f"SELECT kind, COUNT(*) FROM nodes WHERE path IN ({placeholders}) AND kind != 'file' GROUP BY kind",
+                file_paths,
+            ).fetchall()
+        else:
+            placeholders = ",".join("?" for _ in file_ids)
+            rows = conn.execute(
+                f"SELECT n.kind, COUNT(*) FROM nodes n "
+                "WHERE n.kind != 'file' AND EXISTS ("
+                f"SELECT 1 FROM nodes f WHERE f.id IN ({placeholders}) "
+                "AND f.path = n.path AND f.repo IS n.repo) "
+                "GROUP BY n.kind",
+                file_ids,
+            ).fetchall()
         counts = {kind: count for kind, count in rows}
 
     # EntryPoints declared by the sibling Package node (facet model: the App
     # node never declares this edge itself).
-    ep_rows = conn.execute(
-        "SELECT ep.name, ep.uri, ep.attrs_json, f.path "
-        "FROM nodes pkg "
-        "JOIN edges de ON de.src = pkg.id AND de.kind='declares_entry_point' "
-        "JOIN nodes ep ON ep.id = de.dst AND ep.kind='entry_point' "
-        "LEFT JOIN edges ib ON ib.src = ep.id AND ib.kind='implemented_by' "
-        "LEFT JOIN nodes f ON f.id = ib.dst AND f.kind='file' "
-        "WHERE pkg.kind = 'package' AND pkg.name = ? "
-        "ORDER BY ep.name",
-        (name,),
-    ).fetchall()
+    ep_rows = []
+    if package_filter_value is not None:
+        ep_rows = conn.execute(
+            "SELECT ep.name, ep.uri, ep.attrs_json, f.path "
+            "FROM nodes pkg "
+            "JOIN edges de ON de.src = pkg.id AND de.kind='declares_entry_point' "
+            "JOIN nodes ep ON ep.id = de.dst AND ep.kind='entry_point' "
+            "LEFT JOIN edges ib ON ib.src = ep.id AND ib.kind='implemented_by' "
+            "LEFT JOIN nodes f ON f.id = ib.dst AND f.kind='file' "
+            f"WHERE pkg.kind = 'package' AND {'pkg.name = ?' if uri is None else 'pkg.id = ?'} "
+            "ORDER BY ep.name",
+            (package_filter_value,),
+        ).fetchall()
     entry_points = [_load_entry_point_description(r) for r in ep_rows]
 
     # TestSuites covering the sibling Package node (facet model).
-    suite_rows = conn.execute(
-        "SELECT ts.name, ts.uri, ts.attrs_json, "
-        "(SELECT COUNT(*) FROM edges pc "
-        " WHERE pc.src = ts.id AND pc.kind='physically_contains') AS fc "
-        "FROM edges t "
-        "JOIN nodes ts ON t.src = ts.id "
-        "JOIN nodes p ON t.dst = p.id "
-        "WHERE t.kind='tests' AND ts.kind='test_suite' "
-        "AND p.kind='package' AND p.name = ? "
-        "ORDER BY ts.name",
-        (name,),
-    ).fetchall()
+    suite_rows = []
+    if package_filter_value is not None:
+        suite_rows = conn.execute(
+            "SELECT ts.name, ts.uri, ts.attrs_json, "
+            "(SELECT COUNT(*) FROM edges pc "
+            " WHERE pc.src = ts.id AND pc.kind='physically_contains') AS fc "
+            "FROM edges t "
+            "JOIN nodes ts ON t.src = ts.id "
+            "JOIN nodes p ON t.dst = p.id "
+            "WHERE t.kind='tests' AND ts.kind='test_suite' "
+            f"AND p.kind='package' AND {package_filter} "
+            "ORDER BY ts.name",
+            (package_filter_value,),
+        ).fetchall()
     test_suites = [_load_suite_description(r) for r in suite_rows]
 
     return AppDescription(
@@ -1145,15 +1241,26 @@ def resolve_entry_point(conn: sqlite3.Connection, raw: str) -> tuple[EntryPointD
     return describe_entry_point(conn, package_name=rows[0][0], entry_name=raw), []
 
 
-def describe_test_suite(conn: sqlite3.Connection, *, suite_name: str) -> SuiteDescription | None:
+def describe_test_suite(
+    conn: sqlite3.Connection,
+    *,
+    suite_name: str,
+    uri: str | None = None,
+) -> SuiteDescription | None:
     """Return the named TestSuite description, or None.
 
     `conn` must be a `sqlite3.Connection` opened with `mode=ro`.
     """
-    row = conn.execute(
-        "SELECT id, name, uri, attrs_json FROM nodes WHERE kind='test_suite' AND name = ?",
-        (suite_name,),
-    ).fetchone()
+    if uri is None:
+        row = conn.execute(
+            "SELECT id, name, uri, attrs_json FROM nodes WHERE kind='test_suite' AND name = ?",
+            (suite_name,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id, name, uri, attrs_json FROM nodes WHERE kind='test_suite' AND name = ? AND uri = ?",
+            (suite_name, uri),
+        ).fetchone()
     if not row:
         return None
     suite_id, name, uri, attrs_json = row
@@ -1200,6 +1307,15 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
         (dep_id,),
     ).fetchall()
     used_by = [r[0] for r in used_by_rows]
+    implemented_by_rows = conn.execute(
+        "SELECT DISTINCT pkg.uri FROM edges e "
+        "JOIN nodes pkg ON e.dst = pkg.id "
+        "WHERE e.kind='implemented_by' AND e.src = ? AND pkg.kind='package' "
+        "AND pkg.uri IS NOT NULL "
+        "ORDER BY pkg.uri",
+        (dep_id,),
+    ).fetchall()
+    implemented_by = [r[0] for r in implemented_by_rows]
     versions = attrs.get("versions_in_use") or []
     if not isinstance(versions, list):
         versions = []
@@ -1209,6 +1325,7 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
         uri=uri or "",
         versions_in_use=list(versions),
         used_by=used_by,
+        implemented_by=implemented_by,
     )
 
 
@@ -1248,18 +1365,29 @@ def describe_builtin(conn: sqlite3.Connection, *, language: str, module_name: st
     )
 
 
-def describe_agent_plugin(conn: sqlite3.Connection, *, name: str) -> AgentPluginDescription | None:
+def describe_agent_plugin(
+    conn: sqlite3.Connection,
+    *,
+    name: str,
+    uri: str | None = None,
+) -> AgentPluginDescription | None:
     """Return the description of an agent_plugin node, or None.
 
     `conn` must be opened read-only.
     """
-    row = conn.execute(
-        "SELECT name, attrs_json, uri FROM nodes WHERE kind='agent_plugin' AND name = ?",
-        (name,),
-    ).fetchone()
+    if uri is None:
+        row = conn.execute(
+            "SELECT id, name, attrs_json, uri FROM nodes WHERE kind='agent_plugin' AND name = ?",
+            (name,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT id, name, attrs_json, uri FROM nodes WHERE kind='agent_plugin' AND name = ? AND uri = ?",
+            (name, uri),
+        ).fetchone()
     if not row:
         return None
-    plugin_name, attrs_json, uri = row
+    plugin_id, plugin_name, attrs_json, plugin_uri = row
     attrs = json.loads(attrs_json) if attrs_json else {}
     comp = attrs.get("components") or {}
     # Sibling Package node under the facet model (Package --facet_of-->
@@ -1272,14 +1400,14 @@ def describe_agent_plugin(conn: sqlite3.Connection, *, name: str) -> AgentPlugin
     pkg_row = conn.execute(
         "SELECT p.name FROM edges e JOIN nodes p ON e.src = p.id "
         "JOIN nodes a ON e.dst = a.id "
-        "WHERE e.kind='facet_of' AND p.kind='package' AND a.kind='agent_plugin' AND a.name = ? "
+        "WHERE e.kind='facet_of' AND p.kind='package' AND a.kind='agent_plugin' AND a.id = ? "
         "ORDER BY p.name LIMIT 1",
-        (name,),
+        (plugin_id,),
     ).fetchone()
     package_name = pkg_row[0] if pkg_row else None
     return AgentPluginDescription(
         name=plugin_name,
-        uri=uri or "",
+        uri=plugin_uri or "",
         ecosystem=attrs.get("ecosystem", ""),
         version=attrs.get("version", ""),
         description=attrs.get("description", ""),
@@ -1480,6 +1608,100 @@ def exports(conn: sqlite3.Connection, *, path: str) -> list[ExportRecord]:
         (path,),
     ).fetchall()
     return [ExportRecord(name=r[0], kind=r[1], line=r[2]) for r in rows]
+
+
+def describe_file(conn: sqlite3.Connection, *, uri: str) -> FileDescription | None:
+    """Describe the exact File node identified by its repository-scoped URI."""
+    file_row = conn.execute(
+        "SELECT id, path, attrs_json, repo, uri FROM nodes WHERE kind='file' AND uri = ? LIMIT 1",
+        (uri,),
+    ).fetchone()
+    if file_row is None:
+        return None
+    file_id, path, attrs_json, repository, stored_uri = file_row
+    if path is None:
+        return None
+    attrs = json.loads(attrs_json) if attrs_json else {}
+
+    children_rows = conn.execute(
+        f"""
+        SELECT dst.kind, dst.name, dst.path, dst.line, dst.attrs_json
+        FROM edges e JOIN nodes dst ON dst.id = e.dst
+        WHERE e.src = ? AND e.kind='contains' AND {_RESOLVED_FILTER}
+        ORDER BY dst.line, dst.name
+        """,
+        (file_id,),
+    ).fetchall()
+    import_rows = conn.execute(
+        f"""
+        SELECT dst.name, dst.path
+        FROM edges e JOIN nodes dst ON dst.id = e.dst
+        WHERE e.src = ? AND e.kind='imports' AND dst.path IS NOT NULL
+          AND {_RESOLVED_FILTER}
+        ORDER BY dst.path, dst.name
+        """,
+        (file_id,),
+    ).fetchall()
+    export_rows = conn.execute(
+        f"""
+        SELECT dst.name, dst.kind, dst.line
+        FROM edges e JOIN nodes dst ON dst.id = e.dst
+        WHERE e.src = ? AND e.kind='exports' AND {_RESOLVED_FILTER}
+        ORDER BY dst.line, dst.name
+        """,
+        (file_id,),
+    ).fetchall()
+    package_row = conn.execute(
+        "SELECT owner.name, owner.uri FROM edges e "
+        "JOIN nodes owner ON owner.id = e.src "
+        "WHERE e.dst = ? AND e.kind='contains' AND owner.kind='package' "
+        "ORDER BY owner.uri LIMIT 1",
+        (file_id,),
+    ).fetchone()
+    importer_rows = conn.execute(
+        f"""
+        SELECT src.path, dst.name
+        FROM edges e
+        JOIN nodes src ON src.id = e.src
+        JOIN nodes dst ON dst.id = e.dst
+        WHERE e.kind='imports'
+          AND (dst.id = ? OR (dst.path = ? AND dst.repo IS ?))
+          AND src.repo IS ? AND src.path IS NOT NULL
+          AND {_RESOLVED_FILTER}
+        ORDER BY src.path, dst.name
+        """,
+        (file_id, path, repository, repository),
+    ).fetchall()
+    importer_symbols: dict[str, list[str]] = {}
+    for importer_path, symbol in importer_rows:
+        importer_symbols.setdefault(importer_path, []).append(symbol)
+
+    role_flags = {
+        "is_importable": bool(attrs.get("is_importable", False)),
+        "has_main": bool(attrs.get("has_main", False)),
+        "is_test": bool(attrs.get("is_test", False)),
+        "is_config": bool(attrs.get("is_config", False)),
+        "is_generated": bool(attrs.get("is_generated", False)),
+        "is_type_only": bool(attrs.get("is_type_only", False)),
+        "is_executable": bool(attrs.get("is_executable", False)),
+    }
+    package = None
+    if package_row is not None and package_row[1]:
+        package = (str(package_row[0]), str(package_row[1]))
+    return FileDescription(
+        uri=str(stored_uri),
+        path=str(path),
+        children=[_row_to_node(row) for row in children_rows],
+        imports=[ImportRecord(name=str(row[0]), path=str(row[1])) for row in import_rows],
+        imported_by=[
+            ImporterRecord(path=importer_path, symbols=tuple(sorted(symbols)), depth=1)
+            for importer_path, symbols in sorted(importer_symbols.items())
+        ],
+        package=package,
+        role_flags=role_flags,
+        token_count=attrs.get("token_count"),
+        exports=[ExportRecord(name=row[0], kind=row[1], line=row[2]) for row in export_rows],
+    )
 
 
 def exported_by(conn: sqlite3.Connection, *, name: str) -> list[ExporterRecord]:

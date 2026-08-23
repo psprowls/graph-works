@@ -115,6 +115,57 @@ def test_imports_returns_resolved_only(conn: sqlite3.Connection) -> None:
     assert [r.path for r in rows] == ["b.py"]
 
 
+def test_describe_file_scopes_same_relative_path_by_uri(conn: sqlite3.Connection) -> None:
+    for repo, package, symbol in (
+        ("repo:acme/alpha", "alpha-pkg", "alpha_symbol"),
+        ("repo:acme/beta", "beta-pkg", "beta_symbol"),
+    ):
+        upsert.set_current_repo(conn, repo)
+        repo_payload = repo.removeprefix("repo:")
+        upsert.upsert_records(
+            conn,
+            GraphRecords(
+                nodes=[
+                    GraphNode(
+                        kind="package",
+                        name=package,
+                        path=None,
+                        line=None,
+                        attrs={"uri": f"pkg:{repo_payload}/{package}"},
+                    ),
+                    GraphNode(
+                        kind="file",
+                        name="src/shared.py",
+                        path="src/shared.py",
+                        line=None,
+                        attrs={"uri": f"file:{repo_payload}/src/shared.py", "is_importable": True},
+                    ),
+                    GraphNode(kind="function", name=symbol, path="src/shared.py", line=1, attrs={}),
+                ],
+                edges=[
+                    GraphEdge(
+                        src=("package", package, None),
+                        dst=("file", "src/shared.py", "src/shared.py"),
+                        kind="contains",
+                        attrs={},
+                    ),
+                    GraphEdge(
+                        src=("file", "src/shared.py", "src/shared.py"),
+                        dst=("function", symbol, "src/shared.py"),
+                        kind="contains",
+                        attrs={},
+                    ),
+                ],
+            ),
+        )
+
+    description = queries.describe_file(conn, uri="file:acme/beta/src/shared.py")
+
+    assert description is not None
+    assert description.package == ("beta-pkg", "pkg:acme/beta/beta-pkg")
+    assert [child.name for child in description.children] == ["beta_symbol"]
+
+
 def test_describe_package(conn: sqlite3.Connection) -> None:
     upsert.upsert_records(
         conn,
@@ -152,6 +203,143 @@ def test_describe_package(conn: sqlite3.Connection) -> None:
     assert desc.version == "0.1.1"
     assert "alpha/a.py" in desc.files
     assert desc.counts["function"] == 1
+
+
+def test_entity_descriptions_can_scope_duplicate_names_by_uri(conn: sqlite3.Connection) -> None:
+    for repo, marker in (("one", "first"), ("two", "second")):
+        repo_uri = f"repo:acme/{repo}"
+        upsert.set_current_repo(conn, repo_uri)
+        upsert.upsert_records(
+            conn,
+            GraphRecords(
+                nodes=[
+                    GraphNode(
+                        kind="package",
+                        name="shared",
+                        path="shared/pyproject.toml",
+                        line=None,
+                        attrs={"uri": f"pkg:acme/{repo}/shared", "version": marker},
+                    ),
+                    GraphNode(
+                        kind="file",
+                        name="src/shared.py",
+                        path="src/shared.py",
+                        line=None,
+                        attrs={"uri": f"file:acme/{repo}/src/shared.py"},
+                    ),
+                    GraphNode(kind="function", name=marker, path="src/shared.py", line=1, attrs={}),
+                    GraphNode(
+                        kind="package",
+                        name="shared-app",
+                        path="shared-app/package.json",
+                        line=None,
+                        attrs={"uri": f"pkg:acme/{repo}/shared-app"},
+                    ),
+                    GraphNode(
+                        kind="app",
+                        name="shared-app",
+                        path="shared-app/app",
+                        line=None,
+                        attrs={
+                            "uri": f"app:acme/{repo}/shared-app",
+                            "version": marker,
+                            "app_signals": [marker],
+                        },
+                    ),
+                    GraphNode(
+                        kind="file",
+                        name="src/app.ts",
+                        path="src/app.ts",
+                        line=None,
+                        attrs={"uri": f"file:acme/{repo}/src/app.ts"},
+                    ),
+                    GraphNode(kind="function", name=f"{marker}_app", path="src/app.ts", line=1, attrs={}),
+                    GraphNode(
+                        kind="test_suite",
+                        name="shared-tests",
+                        path="tests",
+                        line=None,
+                        attrs={
+                            "uri": f"test_suite:acme/{repo}/shared-tests",
+                            "suite_kind": marker,
+                        },
+                    ),
+                    GraphNode(
+                        kind="file",
+                        name="tests/shared.py",
+                        path="tests/shared.py",
+                        line=None,
+                        attrs={"uri": f"file:acme/{repo}/tests/shared.py"},
+                    ),
+                    GraphNode(
+                        kind="agent_plugin",
+                        name="shared-plugin",
+                        path=".claude-plugin",
+                        line=None,
+                        attrs={
+                            "uri": f"agent_plugin:acme/{repo}/shared-plugin",
+                            "version": marker,
+                            "components": {"commands": [{"name": marker}]},
+                        },
+                    ),
+                ],
+                edges=[
+                    GraphEdge(
+                        src=("package", "shared", "shared/pyproject.toml"),
+                        dst=("file", "src/shared.py", "src/shared.py"),
+                        kind="contains",
+                        attrs={},
+                    ),
+                    GraphEdge(
+                        src=("package", "shared-app", "shared-app/package.json"),
+                        dst=("app", "shared-app", "shared-app/app"),
+                        kind="facet_of",
+                        attrs={},
+                    ),
+                    GraphEdge(
+                        src=("package", "shared-app", "shared-app/package.json"),
+                        dst=("file", "src/app.ts", "src/app.ts"),
+                        kind="contains",
+                        attrs={},
+                    ),
+                    GraphEdge(
+                        src=("test_suite", "shared-tests", "tests"),
+                        dst=("file", "tests/shared.py", "tests/shared.py"),
+                        kind="physically_contains",
+                        attrs={},
+                    ),
+                ],
+            ),
+        )
+    upsert.set_current_repo(conn, None)
+
+    package = queries.describe_package(conn, name="shared", uri="pkg:acme/two/shared")
+    app = queries.describe_app(conn, name="shared-app", uri="app:acme/two/shared-app")
+    suite = queries.describe_test_suite(
+        conn,
+        suite_name="shared-tests",
+        uri="test_suite:acme/two/shared-tests",
+    )
+    plugin = queries.describe_agent_plugin(
+        conn,
+        name="shared-plugin",
+        uri="agent_plugin:acme/two/shared-plugin",
+    )
+
+    assert package is not None
+    assert package.version == "second"
+    assert package.counts == {"function": 1}
+    assert app is not None
+    assert app.version == "second"
+    assert app.app_signals == ["second"]
+    assert app.counts == {"function": 1}
+    assert suite is not None
+    assert suite.kind == "second"
+    assert suite.file_count == 1
+    assert plugin is not None
+    assert plugin.version == "second"
+    assert plugin.commands == [{"name": "second"}]
+    assert queries.describe_package(conn, name="shared", uri="pkg:acme/missing/shared") is None
 
 
 def test_describe_package_internal_deps_and_dependents(
@@ -995,6 +1183,112 @@ def test_describe_dependency_returns_dependency_description(conn: sqlite3.Connec
     assert d.uri == "dependency:pypi/boto3"
     assert d.versions_in_use == ["boto3>=1.38", "boto3==1.39.0"]
     assert d.used_by == ["my-pkg"]
+    assert d.implemented_by == []
+    assert d.ambiguous is False
+
+
+def test_describe_dependency_retains_sorted_deduplicated_implementations(conn: sqlite3.Connection) -> None:
+    """The dependency read model exposes every distinct Package URI in URI order."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="dependency",
+                    name="shared",
+                    path=None,
+                    line=None,
+                    attrs={"ecosystem": "pypi", "name": "shared", "uri": "dependency:pypi/shared"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="second",
+                    path="packages/second",
+                    line=None,
+                    attrs={"uri": "pkg:acme/two/shared"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="first",
+                    path="packages/first",
+                    line=None,
+                    attrs={"uri": "pkg:acme/one/shared"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="duplicate-first",
+                    path="packages/duplicate-first",
+                    line=None,
+                    attrs={"uri": "pkg:acme/one/shared"},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("dependency", "shared", None),
+                    dst=("package", "second", "packages/second"),
+                    kind="implemented_by",
+                    attrs={},
+                ),
+                GraphEdge(
+                    src=("dependency", "shared", None),
+                    dst=("package", "first", "packages/first"),
+                    kind="implemented_by",
+                    attrs={},
+                ),
+                GraphEdge(
+                    src=("dependency", "shared", None),
+                    dst=("package", "duplicate-first", "packages/duplicate-first"),
+                    kind="implemented_by",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+
+    description = queries.describe_dependency(conn, ecosystem="pypi", name="shared")
+
+    assert description is not None
+    assert description.implemented_by == ["pkg:acme/one/shared", "pkg:acme/two/shared"]
+    assert description.ambiguous is True
+
+
+def test_describe_dependency_with_one_implementation_is_not_ambiguous(conn: sqlite3.Connection) -> None:
+    """One implementation remains a resolvable dependency."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="dependency",
+                    name="solo",
+                    path=None,
+                    line=None,
+                    attrs={"ecosystem": "pypi", "name": "solo", "uri": "dependency:pypi/solo"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="solo-package",
+                    path="packages/solo",
+                    line=None,
+                    attrs={"uri": "pkg:acme/one/solo"},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("dependency", "solo", None),
+                    dst=("package", "solo-package", "packages/solo"),
+                    kind="implemented_by",
+                    attrs={},
+                ),
+            ],
+        ),
+    )
+
+    description = queries.describe_dependency(conn, ecosystem="pypi", name="solo")
+
+    assert description is not None
+    assert description.implemented_by == ["pkg:acme/one/solo"]
+    assert description.ambiguous is False
 
 
 def test_describe_dependency_returns_none_when_missing(conn: sqlite3.Connection) -> None:
@@ -1643,7 +1937,9 @@ def test_describe_app_sources_files_and_entry_points_from_sibling_package(
     )
     _seed_file_node(conn, "myapp/src/myapp/__init__.py")
     ctx = RepoContext(org="t", repo="r")
-    packages.refresh(conn, repo_root=tmp_path, ctx=ctx)
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=ctx, manifests=packages.discover_manifest_packages(tmp_path, ctx=ctx)
+    )
     entry_points.emit(conn, repo_root=tmp_path, ctx=ctx, skip_dirs=frozenset())
 
     app_desc = queries.describe_app(conn, name="myapp")

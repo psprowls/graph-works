@@ -241,8 +241,10 @@ def test_cross_repo_depends_on_package(tmp_path):
     update.run_workspace([a, b], graph_dir=graph_dir(ws), full=True)
 
     conn = store.read_only_connect(graph_dir(ws) / "code.db")
-    ext = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='alpha'").fetchone()[0]
-    assert ext == 0
+    ext = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND uri='dependency:pypi/alpha'").fetchone()[
+        0
+    ]
+    assert ext == 1
     rows = conn.execute(
         """
         SELECT s.name, d.name FROM edges e
@@ -251,3 +253,34 @@ def test_cross_repo_depends_on_package(tmp_path):
         """
     ).fetchall()
     assert ("beta", "alpha") in rows
+
+
+def test_two_workspace_implementations_share_a_dependency_facet(tmp_path):
+    """A consumer links to every repository implementation of its dependency."""
+    root = tmp_path / "mono"
+    root.mkdir()
+    ws = root / "workspace"
+    ws.mkdir()
+    (ws / ".agent-workspace.yaml").write_text("version: 2\nmulti-repo: true\n")
+    a = _mk_py_repo(root, "alpha", "shared")
+    b = _mk_py_repo(root, "beta", "shared")
+    c = _mk_py_repo(root, "consumer", "consumer", dep="shared")
+
+    update.run_workspace([a, b, c], graph_dir=graph_dir(ws), full=True)
+
+    conn = store.read_only_connect(graph_dir(ws) / "code.db")
+    try:
+        deps = conn.execute("SELECT uri FROM nodes WHERE kind='dependency' AND uri='dependency:pypi/shared'").fetchall()
+        implementations = conn.execute(
+            "SELECT dst.uri FROM edges JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
+            "WHERE src.uri='dependency:pypi/shared' AND edges.kind='implemented_by' ORDER BY dst.uri"
+        ).fetchall()
+        direct = conn.execute(
+            "SELECT dst.uri FROM edges JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
+            "WHERE src.name='consumer' AND edges.kind='depends_on_package' ORDER BY dst.uri"
+        ).fetchall()
+        assert deps == [("dependency:pypi/shared",)]
+        assert implementations == [("pkg:local/alpha/shared",), ("pkg:local/beta/shared",)]
+        assert direct == [("pkg:local/alpha/shared",), ("pkg:local/beta/shared",)]
+    finally:
+        conn.close()

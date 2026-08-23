@@ -14,7 +14,7 @@ _TODAY = date(2026, 1, 1)
 _EXPECTED_OWNED = {
     "Package": ("language", "version", "depends_on", "test_suites", "entry_points"),
     "App": ("package",),
-    "Dependency": ("ecosystem", "used_by", "versions_in_use"),
+    "Dependency": ("ecosystem", "implemented_by", "used_by", "versions_in_use"),
     "TestSuite": ("tested_packages", "suite_kind", "file_count"),
     "Repository": ("package_count",),
     "AgentPlugin": ("ecosystem", "version", "package"),
@@ -121,15 +121,29 @@ def test_every_generated_section_is_required() -> None:
     assert total == 14
 
 
-def test_the_seed_declares_the_root_repositories_section() -> None:
-    """The root catalog's declaration lives in an underscore-prefixed file so
-    the two sibling tier-3 packages sharing this bundle can each declare their
-    own root section without arbitrating one shared file."""
+def test_the_seed_declares_all_invariant_catalog_sections() -> None:
+    """Every invariant global catalog path has a generated declaration."""
     section_set = _seed_sections()
-    assert tuple(section_set.indexes) == ("",)
-    (spec,) = section_set.indexes[""].sections
-    assert (spec.heading, spec.ownership, spec.required) == ("Repositories", "generated", True)
-    assert "not yet generated" in spec.placeholder
+    assert tuple(section_set.indexes) == (
+        "",
+        "agent-plugins",
+        "apps",
+        "dependencies",
+        "packages",
+        "repositories",
+        "test-suites",
+    )
+    assert tuple(spec.heading for spec in section_set.indexes[""].sections) == (
+        "Repositories",
+        "Packages",
+        "Apps",
+        "Agent Plugins",
+        "Test Suites",
+        "Dependencies",
+    )
+    for declaration in section_set.indexes.values():
+        assert all(spec.ownership == "generated" and spec.required for spec in declaration.sections)
+        assert all("not yet generated" in spec.placeholder for spec in declaration.sections)
     # A `_`-prefixed file claims no type.
     assert set(section_set.type_names) == set(_EXPECTED_OWNED)
 

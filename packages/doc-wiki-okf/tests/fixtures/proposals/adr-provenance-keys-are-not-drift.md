@@ -12,7 +12,7 @@ origins:
   - okf_ext.generators.frontmatter.key_edits compares owned keys by literal equality, so a freshly stamped generated.at is never equal to disk and every page reads as content-stale.
   - entities/sync.py defines _PROVENANCE_KEYS for exactly this failure mode but wired it only into plan_entities' read-only preview, not into sync_entities' write path — every one of the live bundle's 52 entity pages was rewritten on every run.
   - mirror.plan._render_matches_disk already carried its own independent copy of the same exclusion; two of three call sites were right, which is the argument for one owner.
-  - work/2026-08-08-bug-entities-generated-at-not-idempotent's own plan table asked for 'an ADR or explicit decision recording which layer owns this' and the item resolved without one.
+  - work/_archive/bug-entities-generated-at-not-idempotent's own plan table asked for 'an ADR or explicit decision recording which layer owns this' and the item resolved without one.
 ---
 <!-- Body regenerated from origins[] while status: proposed. Do not edit here;
      approve via `gw wiki proposal approve adr-provenance-keys-are-not-drift`. -->
@@ -26,7 +26,7 @@ Create new adr page `adrs/provenance-keys-are-not-drift.md`.
 - okf_ext.generators.frontmatter.key_edits compares owned keys by literal equality, so a freshly stamped generated.at is never equal to disk and every page reads as content-stale.
 - entities/sync.py defines _PROVENANCE_KEYS for exactly this failure mode but wired it only into plan_entities' read-only preview, not into sync_entities' write path — every one of the live bundle's 52 entity pages was rewritten on every run.
 - mirror.plan._render_matches_disk already carried its own independent copy of the same exclusion; two of three call sites were right, which is the argument for one owner.
-- work/2026-08-08-bug-entities-generated-at-not-idempotent's own plan table asked for 'an ADR or explicit decision recording which layer owns this' and the item resolved without one.
+- work/_archive/bug-entities-generated-at-not-idempotent's own plan table asked for 'an ADR or explicit decision recording which layer owns this' and the item resolved without one.
 
 ## Existing Pages Considered
 

@@ -1,7 +1,6 @@
-"""The per-epic decisions ledger — parse, render, query, and locked mutation of
-`work/<epic-slug>/references/00-decisions.md`.
+"""Parent-owned decision ledgers: parse, render, query, and locked mutation.
 
-The ledger records questions surfaced during an epic's design fan-out:
+The ledger records questions surfaced during a parent item's design fan-out:
 `answered` (human-decided, authoritative), `assumed` (worker-decided to keep
 moving, carrying an `**If wrong:**` blast-radius line), `open` (surfaced,
 unanswered), and `superseded` (replaced by a later entry, never deleted).
@@ -12,10 +11,9 @@ and `apply_plan` enforces each snapshot under the same lock as the replacement
 write.
 
     text (pure)    parse / render / prose helpers — never raises on bad input
-    mutation       plan_* (write-free) / apply_plan (stale-safe); legacy direct
-                   mutators remain compatibility wrappers
-    file           exclusive flock on a sibling dotfile, then temp file +
-                   `Path.replace`
+    mutation       plan_* (write-free) / apply_plan (stale-safe)
+    file           exclusive flock at the caller-provided cache path, then a
+                   temp file + `Path.replace`
     query (pure)   query / counts over already-parsed entries
 
 `parse` is deliberately tolerant, which is the package rule ("nothing on the
@@ -29,8 +27,8 @@ superseded. That is the door `paths.source_id_for` already opened, and the same
 category: arguments a caller composed, not text a vault contained.
 
 It imports `work_tracker_okf.paths` and nothing else from the package. The
-module never discovers a path: every file function takes a resolved `Path`, and
-the caller composes it as `decisions_ledger(slug).path(root)`.
+module never discovers a workspace root: every file function takes a resolved
+ledger `Path` and an explicit cache lock `Path`.
 """
 
 from __future__ import annotations
@@ -45,7 +43,7 @@ from datetime import date
 from pathlib import Path
 from typing import Literal
 
-from work_tracker_okf.paths import LEDGER_FILENAME
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref
 
 VALID_STATUSES = frozenset({"answered", "assumed", "open", "superseded"})
 
@@ -58,9 +56,11 @@ DecisionRefusal = Literal[
     "superseded-decision",
 ]
 
-#: Derived from the ledger's own filename rather than re-typed, so renaming the
-#: ledger cannot orphan its lock.
-_LOCK_FILENAME = f".{Path(LEDGER_FILENAME).stem}.lock"
+
+def ledger_ref(owner_path: str) -> ArtifactRef:
+    """The canonical decision ledger owned by a Release, Epic, or Feature."""
+    return artifact_ref(owner_path, MANAGED_ARTIFACTS["decisions"])
+
 
 #: Recognized keys, in canonical render order. Anything else round-trips through
 #: `Decision.extra_keys` rather than being dropped.
@@ -475,18 +475,17 @@ def load(ledger: Path) -> LedgerParse:
 
 
 @contextmanager
-def _locked(ledger: Path) -> Iterator[None]:
+def _locked(lock: Path) -> Iterator[None]:
     """Serialize a read -> mutate -> render -> write cycle across processes.
 
-    The lock is a sibling dotfile, not the ledger itself, for two reasons: the
-    ledger may not exist on the first append (nothing to flock), and each write
-    replaces the file, so two writers flocking the ledger directly could hold
-    locks on different inodes and both proceed. It is created on demand and
-    never unlinked, because unlinking races the next writer's open. POSIX-only,
+    The caller supplies a stable path below ``.gw/cache`` rather than locking
+    the ledger itself: the ledger may not exist on the first append, and each
+    write replaces it, so two writers locking the ledger directly could hold
+    different inodes and both proceed. The cache lock is created on demand and
+    never unlinked because unlinking races the next writer's open. POSIX-only,
     like the rest of the stack.
     """
-    ledger.parent.mkdir(parents=True, exist_ok=True)
-    lock = ledger.parent / _LOCK_FILENAME
+    lock.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
     try:
         fcntl.flock(descriptor, fcntl.LOCK_EX)
@@ -753,39 +752,40 @@ def _apply_plan_locked(plan: DecisionPlan) -> DecisionApplication:
     return DecisionApplication(entries=plan.after, written=True)
 
 
-def apply_plan(plan: DecisionPlan) -> DecisionApplication:
+def apply_plan(plan: DecisionPlan, *, lock: Path) -> DecisionApplication:
     """Apply a non-refused plan only when its snapshot is still current."""
     if plan.refusal is not None:
         return DecisionApplication()
-    with _locked(plan.ledger):
+    with _locked(lock):
         return _apply_plan_locked(plan)
 
 
-def _apply_compatibly(planner: Callable[[], DecisionPlan]) -> DecisionPlan:
-    """Apply a legacy direct mutator, re-planning after concurrent writes."""
+def _apply_until_current(planner: Callable[[], DecisionPlan], *, lock: Path) -> DecisionPlan:
+    """Apply a direct mutation, re-planning after concurrent writes."""
     while True:
         plan = planner()
-        application = apply_plan(plan)
+        application = apply_plan(plan, lock=lock)
         if application.stale:
             continue
         if not application.written:
-            raise AssertionError("compatibility mutation unexpectedly refused")
+            raise AssertionError("decision mutation unexpectedly refused")
         return plan
 
 
-def _apply_compatibly_under_lock(planner: Callable[[], DecisionPlan], ledger: Path) -> DecisionPlan:
+def _apply_under_lock(planner: Callable[[], DecisionPlan], *, lock: Path) -> DecisionPlan:
     """Plan and apply once under one lock for callback-dependent mutations."""
-    with _locked(ledger):
+    with _locked(lock):
         plan = planner()
         application = _apply_plan_locked(plan)
     if not application.written:
-        raise AssertionError("lock-held compatibility mutation unexpectedly went stale")
+        raise AssertionError("lock-held decision mutation unexpectedly went stale")
     return plan
 
 
 def append(
     ledger: Path,
     *,
+    lock: Path,
     question: str,
     status: str,
     affects: Sequence[str] = (),
@@ -828,7 +828,7 @@ def append(
             detail=f"append {entry.id}",
         )
 
-    applied = _apply_compatibly(plan)
+    applied = _apply_until_current(plan, lock=lock)
     assert applied.primary is not None
     return applied.primary
 
@@ -837,6 +837,7 @@ def set_fields(
     ledger: Path,
     decision_id: str,
     *,
+    lock: Path,
     question: str | Unset = UNSET,
     status: str | Unset = UNSET,
     affects: Sequence[str] | Unset = UNSET,
@@ -911,7 +912,7 @@ def set_fields(
             detail=f"update {updated.id}",
         )
 
-    applied = _apply_compatibly_under_lock(plan, ledger) if prose_merge is not None else _apply_compatibly(plan)
+    applied = _apply_under_lock(plan, lock=lock) if prose_merge is not None else _apply_until_current(plan, lock=lock)
     assert applied.primary is not None
     return applied.primary
 
@@ -920,6 +921,7 @@ def supersede(
     ledger: Path,
     old_id: str,
     *,
+    lock: Path,
     question: str,
     prose: str,
     decided: str | None = None,
@@ -967,7 +969,7 @@ def supersede(
             detail=f"supersede {retired.id} with {replacement.id}",
         )
 
-    applied = _apply_compatibly(plan)
+    applied = _apply_until_current(plan, lock=lock)
     assert applied.superseded is not None and applied.primary is not None
     return applied.superseded, applied.primary
 
@@ -1042,6 +1044,7 @@ __all__ = [
     "decided_stamp",
     "extract_cited_decisions",
     "id_number",
+    "ledger_ref",
     "load",
     "merge_prose",
     "parse",

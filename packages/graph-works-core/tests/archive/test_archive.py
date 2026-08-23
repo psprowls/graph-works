@@ -1,252 +1,160 @@
-"""The archive vertical: plan, apply, clear the pointer, log it once.
-
-`provenance.clear_active_work` was implemented, tested and never called --
-which is the stale-pointer failure its own docstring names. This module is the
-caller, and these are its acceptance properties.
-"""
+"""Canonical work archive composition with work-before-wiki ordering."""
 
 from __future__ import annotations
 
-import json
 from datetime import date
+from pathlib import Path
+from types import SimpleNamespace
 
+import graph_works_core
 from graph_works_core import apply_init, plan_init
 from graph_works_core.archive import commands as archive
 from graph_works_core.workspace import provenance
+from okf_ext.moves import Stranded
 
-TODAY = date(2026, 8, 15)
-
-_DONE = "2026-08-01-epic-feature-finished-thing"
-_OPEN = "2026-08-02-epic-feature-ongoing-thing"
-
-_ITEM = """---
-type: Feature
-title: {slug}
-description: d
-status: stable
-workflow_status: {workflow_status}
-phase: {phase}
-effort: medium
-opened: 2026-08-01
-updated: 2026-08-01
-affects:
-- packages/a
----
-
-## Summary
-d
-
-## Plan
-
-| Action | Done when | Rationale |
-| --- | --- | --- |
-"""
+TODAY = date(2026, 8, 23)
+DONE = "work/feature-done"
+OPEN = "work/feature-open"
 
 
-def _workspace(tmp_path):
-    """A workspace built the way a caller builds one, with two items in it."""
+def _layout(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
+    (repo / "packages/a").mkdir(parents=True)
     layout = apply_init(plan_init(repo / ".works", today=TODAY, topic="Archive")).layout
-    work = layout.bundle_dir / "work"
-    work.mkdir(parents=True, exist_ok=True)
-    (work / f"{_DONE}.md").write_text(
-        _ITEM.format(slug=_DONE, workflow_status="resolved", phase="done"), encoding="utf-8"
-    )
-    (work / f"{_OPEN}.md").write_text(
-        _ITEM.format(slug=_OPEN, workflow_status="open", phase="execute"), encoding="utf-8"
-    )
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     return layout
 
 
-def _pointer(layout):
-    return layout.cache_dir / provenance.ACTIVE_WORK_FILENAME
-
-
-def _page(layout, slug, *, archived=False):
-    lane = "work/_archive" if archived else "work"
-    return layout.bundle_dir / lane / f"{slug}.md"
-
-
-def _wiki_page(layout, token, *, archived=False):
-    lane, slug = token.split("/", 1)
-    dirname = f"{lane}/_archive" if archived else lane
-    return layout.bundle_dir / dirname / f"{slug}.md"
-
-
-def _write_wiki_page(layout, token, title):
-    path = _wiki_page(layout, token)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"---\ntitle: {title}\ndescription: d\n---\n\n## Summary\nd\n", encoding="utf-8")
-
-
-def test_a_dry_run_moves_nothing_clears_nothing_and_logs_nothing(tmp_path):
-    layout = _workspace(tmp_path)
-    provenance.write_active_work(layout, _DONE, "execute", updated="2026-08-01")
-    before = (layout.bundle_dir / "log.md").read_text(encoding="utf-8")
-
-    run = archive.run_archive(layout, today=TODAY)
-
-    assert run.plan.slugs == (_DONE,)
-    assert run.result is None
-    assert run.pointer_cleared is False
-    assert run.logged is None
-    assert _page(layout, _DONE).is_file()
-    assert not _page(layout, _DONE, archived=True).exists()
-    assert _pointer(layout).is_file()
-    assert (layout.bundle_dir / "log.md").read_text(encoding="utf-8") == before
-
-
-def test_an_applied_archive_moves_the_item_and_clears_its_pointer(tmp_path):
-    layout = _workspace(tmp_path)
-    provenance.write_active_work(layout, _DONE, "execute", updated="2026-08-01")
-
-    run = archive.run_archive(layout, today=TODAY, dry_run=False)
-
-    assert run.result is not None
-    assert run.result.archived == (_DONE,)
-    assert not _page(layout, _DONE).exists()
-    assert _page(layout, _DONE, archived=True).is_file()
-    assert run.pointer_cleared is True
-    assert not _pointer(layout).exists()
-
-
-def test_a_pointer_naming_another_slug_survives(tmp_path):
-    layout = _workspace(tmp_path)
-    provenance.write_active_work(layout, _OPEN, "execute", updated="2026-08-01")
-
-    run = archive.run_archive(layout, today=TODAY, dry_run=False)
-
-    assert run.result is not None and run.result.archived == (_DONE,)
-    assert run.pointer_cleared is False
-    assert json.loads(_pointer(layout).read_text(encoding="utf-8"))["slug"] == _OPEN
-
-
-def test_a_skipped_slug_clears_nothing(tmp_path):
-    # The pointer is cleared from `result.archived` -- what actually moved --
-    # not from the requested slugs. A refused slug must not clear a live one.
-    layout = _workspace(tmp_path)
-    provenance.write_active_work(layout, _OPEN, "execute", updated="2026-08-01")
-
-    run = archive.run_archive(layout, [_OPEN], today=TODAY, dry_run=False)
-
-    assert run.result is not None
-    assert run.result.archived == ()
-    assert [(s.slug, s.reason) for s in run.result.skipped] == [(_OPEN, "not-terminal")]
-    assert run.pointer_cleared is False
-    assert run.logged is None
-    assert _pointer(layout).is_file()
-
-
-def test_the_lane_log_records_the_archive_once(tmp_path):
-    layout = _workspace(tmp_path)
-
-    run = archive.run_archive(layout, today=TODAY, dry_run=False)
-
-    assert run.logged is not None and _DONE in run.logged
-    text = (layout.bundle_dir / "log.md").read_text(encoding="utf-8")
-    assert text.count(f"archived {_DONE}") == 1
-
-
-def test_the_wide_lens_is_used_so_the_plan_is_not_half_done(tmp_path):
-    # `okf_ext.moves` never reads `bundle.ignored`, so under `IGNORE` the
-    # per-item artifacts are invisible and the plan reports `ok` while covering
-    # only the item page. This asserts the artifact moves with its item.
-    layout = _workspace(tmp_path)
-    working = layout.bundle_dir / "work" / _DONE
-    working.mkdir(parents=True, exist_ok=True)
-    (working / "01-design-spec.md").write_text("# spec\n\nbody\n", encoding="utf-8")
-
-    run = archive.run_archive(layout, today=TODAY, dry_run=False)
-
-    assert run.result is not None and run.result.archived == (_DONE,)
-    assert (layout.bundle_dir / "work" / "_archive" / _DONE / "01-design-spec.md").is_file()
-    assert not working.exists()
-
-
-def test_the_vertical_is_reachable_from_the_front_door():
-    import graph_works_core
-
-    assert graph_works_core.run_archive is archive.run_archive
-    assert graph_works_core.ArchiveRun is archive.ArchiveRun
-
-
-def test_wiki_slugs_defaults_to_no_wiki_involvement(tmp_path):
-    layout = _workspace(tmp_path)
-    _write_wiki_page(layout, "adrs/2026-08-01-example", "Example")
-
-    run = archive.run_archive(layout, today=TODAY, dry_run=False)
-
-    assert run.wiki_plan.tokens == ()
-    assert run.wiki is not None and run.wiki.archived == ()
-    assert _wiki_page(layout, "adrs/2026-08-01-example").is_file()
-
-
-def test_a_targeted_wiki_archive_moves_the_page_unconditionally(tmp_path):
-    layout = _workspace(tmp_path)
-    _write_wiki_page(layout, "adrs/2026-08-01-example", "Example")
-
-    run = archive.run_archive(layout, slugs=(), wiki_slugs=["adrs/2026-08-01-example"], today=TODAY, dry_run=False)
-
-    assert run.wiki is not None and run.wiki.archived == ("adrs/2026-08-01-example",)
-    assert not _wiki_page(layout, "adrs/2026-08-01-example").exists()
-    assert _wiki_page(layout, "adrs/2026-08-01-example", archived=True).is_file()
-    assert run.pointer_cleared is False
-    assert run.result is not None and run.result.archived == ()
-
-
-def test_a_joint_archive_logs_both_lanes_in_one_message(tmp_path):
-    layout = _workspace(tmp_path)
-    _write_wiki_page(layout, "adrs/2026-08-01-example", "Example")
-
-    run = archive.run_archive(layout, wiki_slugs=["adrs/2026-08-01-example"], today=TODAY, dry_run=False)
-
-    assert run.result is not None and run.result.archived == (_DONE,)
-    assert run.wiki is not None and run.wiki.archived == ("adrs/2026-08-01-example",)
-    assert run.logged == f"archived {_DONE}; archived wiki adrs/2026-08-01-example"
-
-
-def test_a_cross_lane_touch_conflict_blocks_both_and_moves_neither(tmp_path):
-    # The ADR references the work item, so the work-item lane's plan rewrites
-    # the ADR's body (a referrer edit) -- but the wiki lane's own plan also
-    # moves that same ADR. Applying both sequentially against one stale bundle
-    # snapshot would have the wiki apply move the ADR using its pre-rewrite
-    # content, discarding the work-item apply's already-written link fix.
-    layout = _workspace(tmp_path)
-    token = "adrs/2026-08-01-example"
-    path = _wiki_page(layout, token)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        f"---\ntitle: Example\ndescription: d\n---\n\n## Summary\nSee [the item](../work/{_DONE}.md).\n",
+def _write(layout, path: str, *, work_status: str, phase: str) -> None:
+    page = layout.bundle_dir / f"{path}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        f"---\ntype: Feature\ntitle: {path}\ndescription: d\nstatus: stable\n"
+        f"work_status: {work_status}\nphase: {phase}\neffort: medium\nopened: 2026-08-01\n"
+        "updated: 2026-08-01\naffects:\n- packages/a\n---\n\n## Summary\nd\n\n## Plan\n\n"
+        "| Action | Done when | Rationale |\n| --- | --- | --- |\n",
         encoding="utf-8",
     )
 
-    run = archive.run_archive(layout, wiki_slugs=[token], today=TODAY, dry_run=False)
 
-    assert run.ok is False
-    assert run.conflict != ()
-    assert run.result is None
-    assert run.wiki is None
-    assert _page(layout, _DONE).is_file()
-    assert not _page(layout, _DONE, archived=True).exists()
-    assert _wiki_page(layout, token).is_file()
-    assert not _wiki_page(layout, token, archived=True).exists()
+def _workspace(tmp_path: Path):
+    layout = _layout(tmp_path)
+    _write(layout, DONE, work_status="resolved", phase="done")
+    _write(layout, OPEN, work_status="open", phase="execute")
+    return layout
 
 
-def test_a_refusal_on_either_lane_blocks_both(tmp_path):
+def _snapshot(root: Path) -> dict[str, bytes]:
+    return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def test_dry_run_plans_full_canonical_path_mapping(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
-    # A dest-exists conflict on the work-item side: `_DONE`'s archive
-    # destination is already occupied by a stray file.
-    conflict_dir = layout.bundle_dir / "work" / "_archive"
-    conflict_dir.mkdir(parents=True, exist_ok=True)
-    (conflict_dir / f"{_DONE}.md").write_text("---\ntitle: stray\n---\n\nstray\n", encoding="utf-8")
-    _write_wiki_page(layout, "adrs/2026-08-01-example", "Example")
+    provenance.write_active_work(layout, DONE, "finish", updated=TODAY.isoformat())
+    before_bundle = _snapshot(layout.bundle_dir)
+    before_pointer = (layout.cache_dir / provenance.ACTIVE_WORK_FILENAME).read_bytes()
+    result = archive.run_archive(layout, today=TODAY)
+    assert result.plan.path_mapping == {DONE: "work/_archive/feature-done"}
+    assert result.result is None
+    assert result.logged is None
+    assert _snapshot(layout.bundle_dir) == before_bundle
+    assert (layout.cache_dir / provenance.ACTIVE_WORK_FILENAME).read_bytes() == before_pointer
 
-    run = archive.run_archive(layout, wiki_slugs=["adrs/2026-08-01-example"], today=TODAY, dry_run=False)
 
-    assert run.ok is False
-    assert run.result is None
-    assert run.wiki is None
-    assert _page(layout, _DONE).is_file()
-    assert _wiki_page(layout, "adrs/2026-08-01-example").is_file()
-    assert not _wiki_page(layout, "adrs/2026-08-01-example", archived=True).exists()
+def test_live_work_archive_goes_through_journal_and_clears_path_pointer(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    provenance.write_active_work(layout, DONE, "finish", updated=TODAY.isoformat())
+    result = archive.run_archive(layout, today=TODAY, dry_run=False)
+    assert result.result is not None and result.result.ok
+    assert result.result.journal.is_file()
+    assert (layout.bundle_dir / "work/_archive/feature-done.md").is_file()
+    assert result.pointer_cleared is True
+    assert result.logged == f"archived {DONE}"
+
+
+def test_archive_wide_lens_moves_item_owned_reference_bytes(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    attachment = layout.bundle_dir / f"{DONE}/references/evidence.txt"
+    attachment.parent.mkdir(parents=True, exist_ok=True)
+    attachment.write_bytes(b"opaque evidence\x00")
+    preview = archive.run_archive(layout, paths=(DONE,), today=TODAY)
+    assert any(move.source == f"{DONE}/references/evidence.txt" for move in preview.plan.moves)
+    result = archive.run_archive(layout, paths=(DONE,), today=TODAY, dry_run=False)
+    assert result.result is not None and result.result.ok
+    assert (
+        layout.bundle_dir / "work/_archive/feature-done/references/evidence.txt"
+    ).read_bytes() == b"opaque evidence\x00"
+
+
+def test_refused_work_preflight_blocks_wiki_apply(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    wiki = layout.bundle_dir / "adrs/example.md"
+    wiki.parent.mkdir(parents=True)
+    wiki.write_text("---\ntitle: Example\ndescription: d\nstatus: stable\n---\n", encoding="utf-8")
+    result = archive.run_archive(
+        layout,
+        paths=(OPEN,),
+        wiki_slugs=("adrs/example",),
+        today=TODAY,
+        dry_run=False,
+    )
+    assert not result.plan.ok
+    assert result.result is None and result.wiki is None
+    assert wiki.is_file()
+
+
+def test_wiki_archive_starts_only_after_successful_work_transaction(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    wiki = layout.bundle_dir / "adrs/example.md"
+    wiki.parent.mkdir(parents=True)
+    wiki.write_text("---\ntitle: Example\ndescription: d\nstatus: stable\n---\n", encoding="utf-8")
+    result = archive.run_archive(
+        layout,
+        paths=(DONE,),
+        wiki_slugs=("adrs/example",),
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.result is not None and result.result.ok
+    assert result.wiki is not None and result.wiki.archived == ("adrs/example",)
+    assert (layout.bundle_dir / "adrs/_archive/example.md").is_file()
+
+
+def test_cross_lane_touched_member_conflict_blocks_both_plans(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    wiki = layout.bundle_dir / "adrs/example.md"
+    wiki.parent.mkdir(parents=True)
+    wiki.write_text(
+        "---\ntitle: Example\ndescription: d\nstatus: stable\n---\n\nSee [the item](../work/feature-done.md).\n",
+        encoding="utf-8",
+    )
+    result = archive.run_archive(
+        layout,
+        paths=(DONE,),
+        wiki_slugs=("adrs/example",),
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.conflict == ("adrs/example.md",)
+    assert result.result is None and result.wiki is None
+    assert (layout.bundle_dir / f"{DONE}.md").is_file()
+    assert wiki.is_file()
+
+
+def test_archive_remains_hoisted_at_package_root() -> None:
+    assert graph_works_core.run_archive is archive.run_archive
+
+
+def test_archive_stranded_warnings_are_projected_by_core() -> None:
+    work = Stranded(member="work/citing.md", target="work/a.md", line=3)
+    wiki = Stranded(member="tutorials/citing.md", target="tutorials/b.md", line=5)
+    run = SimpleNamespace(
+        plan=SimpleNamespace(move_plan=SimpleNamespace(stranded=(work,))),
+        wiki_plan=SimpleNamespace(moves=SimpleNamespace(stranded=(wiki,))),
+    )
+
+    warnings = archive.stranded_warnings(run)
+    assert len(warnings) == 2
+    assert warnings[0].startswith("work items: ! 1 inbound [[wikilink]] reference(s)")
+    assert warnings[1].startswith("wiki pages: ! 1 inbound [[wikilink]] reference(s)")

@@ -34,12 +34,15 @@ every capability load every other.
 
 from __future__ import annotations
 
-from okf_ext.moves.apply import apply
+from okf_ext.moves.apply import apply, materialize
 from okf_ext.moves.model import (
+    FrontmatterPath,
     Move,
+    MoveMaterialization,
     MovePlan,
     MoveResult,
     RefEdit,
+    ReferenceField,
     Refusal,
     RefusalKind,
     RefWhere,
@@ -88,17 +91,21 @@ __all__ = [
     "REFERENCE_KEYS",
     "SOURCES_KEY",
     "FailureKind",
+    "FrontmatterPath",
     "Move",
+    "MoveMaterialization",
     "MovePlan",
     "MoveResult",
     "RefEdit",
     "RefWhere",
+    "ReferenceField",
     "Refusal",
     "RefusalKind",
     "Stranded",
     "Unrebased",
     "WriteFailure",
     "apply",
+    "materialize",
     "plan_move",
     "plan_move_dir",
     "plan_move_many",

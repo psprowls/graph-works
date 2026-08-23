@@ -10,24 +10,30 @@ from work_tracker_okf import IGNORE, load_items
 from work_tracker_okf._rules import TOPICS
 from work_tracker_okf.rules import lane_rules
 
-_EPIC = "2026-03-01-epic-conformant-vault"
-_FEATURE = "2026-03-02-epic-feature-filing-writer"
-_ARCHIVED = "2026-03-07-epic-feature-archived-child"
+_RELEASE = "work/release-path-native-cutover"
+_EPIC = f"{_RELEASE}/children/epic-conformant-vault"
+_FEATURE = f"{_EPIC}/children/feature-epic-feature-filing-writer"
+_LEAF = f"{_FEATURE}/children/test-gap-cover-the-upsert"
+_SPIKE = f"{_EPIC}/children/spike-path-layout-questions"
+_ARCHIVED = f"{_EPIC}/children/_archive/feature-epic-feature-archived-child"
 
 _ACTIVE = (
+    _RELEASE,
     _EPIC,
     _FEATURE,
-    "2026-03-03-spike-path-layout-questions",
-    "2026-03-04-bug-slug-prefix-mismatch",
-    "2026-03-05-tech-debt-retire-the-sidecar",
-    "2026-03-06-test-gap-cover-the-upsert",
+    _LEAF,
+    _SPIKE,
+    "work/bug-path-prefix-mismatch",
+    "work/tech-debt-retire-the-sidecar",
 )
 
 _ARTIFACTS = (
-    f"work/{_FEATURE}/references/01-design-spec.md",
-    f"work/{_FEATURE}/references/02-plan-plan.md",
-    f"work/{_FEATURE}/references/03-execute-transcript.jsonl",
-    f"work/_archive/{_ARCHIVED}/references/01-design-spec.md",
+    f"{_FEATURE}/references/01-design.md",
+    f"{_FEATURE}/references/02-plan.md",
+    f"{_FEATURE}/references/03-execute-transcript.jsonl",
+    f"{_FEATURE}/references/evidence/decision.md",
+    f"{_FEATURE}/references/nested/raw-notes.txt",
+    f"{_ARCHIVED}/references/01-design.md",
 )
 
 _PLAN_SPEC = TableSpec(columns=(Column("action"), Column("done when"), Column("rationale")))
@@ -35,7 +41,7 @@ _PLAN_SPEC = TableSpec(columns=(Column("action"), Column("done when"), Column("r
 
 def test_the_item_pages_are_the_only_concepts(conformant_root: Path) -> None:
     bundle = load_bundle(conformant_root, ignore=IGNORE)
-    expected = {f"work/{slug}" for slug in _ACTIVE} | {f"work/_archive/{_ARCHIVED}"}
+    expected = set(_ACTIVE) | {_ARCHIVED}
     assert set(bundle.concepts) == expected
 
 
@@ -52,10 +58,10 @@ def test_every_source_resource_is_root_absolute_and_resolves(conformant_root: Pa
     for item in load_items(bundle):
         for source in item.sources:
             assert source.resource is not None
-            assert source.resource.startswith("/"), (item.slug, source.id)
-            assert bundle.has_member(source.resource[1:]), (item.slug, source.id)
+            assert source.resource.startswith("/"), (item.path, source.id)
+            assert bundle.has_member(source.resource[1:]), (item.path, source.id)
             seen += 1
-    assert seen == 4
+    assert seen == 5
 
 
 def test_the_vault_validates_with_zero_errors(conformant_root: Path) -> None:
@@ -84,37 +90,44 @@ def test_the_vault_carries_only_the_ok_and_empty_plan_table_states(conformant_ro
         for concept_id, document in bundle.concepts.items()
     }
     assert set(states.values()) == {"ok", "empty"}, states
-    assert states[f"work/{_FEATURE}"] == "ok"
-    assert states[f"work/{_EPIC}"] == "empty"
+    assert states[_FEATURE] == "ok"
+    assert states[_EPIC] == "empty"
 
 
 def test_the_archived_child_still_belongs_to_its_active_parent(conformant_root: Path) -> None:
     items = load_items(load_bundle(conformant_root, ignore=IGNORE))
-    epic = next(item for item in items if item.slug == _EPIC)
-    assert _ARCHIVED in epic.children
+    epic = next(item for item in items if item.path == _EPIC)
+    assert _ARCHIVED in epic.archived_child_paths
     assert epic.archived is False
 
 
 def test_the_archived_item_is_the_symmetric_shape(conformant_root: Path) -> None:
-    assert (conformant_root / "work" / "_archive" / f"{_ARCHIVED}.md").is_file()
-    assert (conformant_root / "work" / "_archive" / _ARCHIVED / "references").is_dir()
+    assert (conformant_root / f"{_ARCHIVED}.md").is_file()
+    assert (conformant_root / _ARCHIVED / "references").is_dir()
 
 
 def test_both_index_files_are_present_and_carry_no_frontmatter(conformant_root: Path) -> None:
     """P-3: `reserved.index-frontmatter` is an **error** for a non-root index, so
     a `title:` on either of these would sink the zero-errors property."""
     bundle = load_bundle(conformant_root, ignore=IGNORE)
-    assert set(bundle.indexes) >= {"", "work", "work/_archive"}
+    assert set(bundle.indexes) >= {
+        "",
+        "work",
+        "work/_archive",
+        f"{_RELEASE}/children",
+        f"{_EPIC}/children",
+        f"{_EPIC}/children/_archive",
+        f"{_FEATURE}/children",
+    }
     assert bundle.indexes["work"].has_frontmatter is False
     assert bundle.indexes["work/_archive"].has_frontmatter is False
 
 
-def test_the_index_files_name_every_item_in_their_directory(conformant_root: Path) -> None:
-    work_index = (conformant_root / "work" / "index.md").read_text(encoding="utf-8")
-    for slug in _ACTIVE:
-        assert f"({slug}.md)" in work_index, slug
-    archive_index = (conformant_root / "work" / "_archive" / "index.md").read_text(encoding="utf-8")
-    assert f"({_ARCHIVED}.md)" in archive_index
+def test_the_index_files_name_every_direct_item_in_their_lane(conformant_root: Path) -> None:
+    for item in load_items(load_bundle(conformant_root, ignore=IGNORE)):
+        lane = Path(item.page_path).parent
+        index = (conformant_root / lane / "index.md").read_text(encoding="utf-8")
+        assert f"({Path(item.page_path).name})" in index, item.path
 
 
 def test_no_page_uses_wikilink_form() -> None:
@@ -132,7 +145,7 @@ def test_the_vault_ships_no_declarations_of_its_own() -> None:
     assert not (CONFORMANT_ROOT / "sections").exists()
 
 
-def test_all_six_types_appear(conformant_root: Path) -> None:
+def test_all_seven_types_appear(conformant_root: Path) -> None:
     from work_tracker_okf.vocabulary import TYPES
 
     items = load_items(load_bundle(conformant_root, ignore=IGNORE))
@@ -163,8 +176,8 @@ def test_the_lane_warns_on_the_conformant_vault_are_exactly_the_three_expected(c
 
     - `state.resolved-without-ref` on the resolved `Spike`, which has no `resolved_in`
     - `state.archive-eligible` on that same `Spike` — terminal, still under `work/`
-    - `graph.children-stale` on the `Epic`, which authors no `children:` key while
-      three items name it as `parent`
+    - `decisions.ledger-missing` on the executing `Feature`, whose fixture omits
+      a second decision ledger intentionally
 
     Staleness fires on nothing: `CONFORMANT_TODAY` is well inside both thresholds
     for every item in the vault. If this set ever grows, re-read the fixture
@@ -173,11 +186,11 @@ def test_the_lane_warns_on_the_conformant_vault_are_exactly_the_three_expected(c
     bundle = load_bundle(conformant_root, ignore=IGNORE)
     report = validate(bundle, today=CONFORMANT_TODAY, extra_rules=lane_rules(repo_root=None))
     lane = {(f.code, f.path) for f in report.findings if f.code.split(".")[0] in TOPICS}
-    spike = "work/2026-03-03-spike-path-layout-questions.md"
+    spike = f"{_SPIKE}.md"
     assert lane == {
         ("state.resolved-without-ref", spike),
         ("state.archive-eligible", spike),
-        ("graph.children-stale", f"work/{_EPIC}.md"),
+        ("decisions.ledger-missing", f"{_FEATURE}.md"),
     }
 
 
@@ -185,8 +198,8 @@ def test_the_in_progress_item_names_an_owner(conformant_root: Path) -> None:
     """The recorded edit, asserted from the projection rather than from the
     text, so a re-authored fixture cannot satisfy it by accident."""
     items = load_items(load_bundle(conformant_root, ignore=IGNORE))
-    feature = next(item for item in items if item.slug == _FEATURE)
-    assert feature.workflow_status == "in-progress"
+    feature = next(item for item in items if item.path == _FEATURE)
+    assert feature.work_status == "in-progress"
     assert feature.owner
 
 
@@ -194,10 +207,10 @@ def test_the_epics_ledger_is_a_member_but_not_a_concept(conformant_root: Path) -
     """§3.1: the ledger lives under `references/`, so `IGNORE`'s existing
     `*/references/*` already covers it — it is present without being schema- or
     section-checked."""
-    from work_tracker_okf.paths import decisions_ledger
+    from work_tracker_okf.decisions import ledger_ref
 
     bundle = load_bundle(conformant_root, ignore=IGNORE)
-    ref = decisions_ledger(_EPIC)
+    ref = ledger_ref(_EPIC)
     assert bundle.has_member(ref.rel)
     assert ref.rel.removesuffix(".md") not in bundle.concepts
 
@@ -205,10 +218,9 @@ def test_the_epics_ledger_is_a_member_but_not_a_concept(conformant_root: Path) -
 def test_the_epics_ledger_parses_clean(conformant_root: Path) -> None:
     """The other half of the zero-errors property: a well-formed ledger present,
     not merely absent."""
-    from work_tracker_okf.decisions import counts, load
-    from work_tracker_okf.paths import decisions_ledger
+    from work_tracker_okf.decisions import counts, ledger_ref, load
 
-    parsed = load(decisions_ledger(_EPIC).path(conformant_root))
+    parsed = load(ledger_ref(_EPIC).path(conformant_root))
     assert parsed.warnings == []
     assert counts(parsed.entries) == {
         "answered": 1,

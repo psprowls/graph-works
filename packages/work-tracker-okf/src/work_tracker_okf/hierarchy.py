@@ -1,190 +1,167 @@
-"""The hierarchy graph: rollups, the dependency gates, and the descend walk.
-
-Ported from `work_io.hierarchy` over `WorkItem` instead of `dict`, with
-`children_map` deleted (C3-G: `load_items` already derives it) and the two
-dependency queries renamed after what they return (C3-H).
-
-Every function takes the **whole** item set, archived included: a reference to
-an archived item is valid, and an archived child still belongs to its parent's
-rollup. `work-io` needed a second loader for that; one walk retires it.
-"""
+"""Direct-child rollups and iterative hierarchy traversal."""
 
 from __future__ import annotations
 
-import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 
-from work_tracker_okf._selection import active_preferred_slug_index
+from work_tracker_okf._selection import path_index
 from work_tracker_okf.dependencies import DependencyEdge, entry_phase, resolve_facts, unmet
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
-_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
-
-#: How deep `descend` walks before giving up. Catches a cycle the visited set
-#: cannot -- one formed by items appearing and disappearing from candidacy.
-WALK_DEPTH_CAP = 32
-
-#: Descend candidates, best first. A mapping rather than a membership test:
-#: `mitigated` is non-terminal, so it holds a gate open, but it is absent here
-#: and is therefore never a descend target.
 PICK_ORDER: dict[str, int] = {"in-progress": 0, "accepted": 1, "open": 2}
 
 
 @dataclass(frozen=True, slots=True)
 class ChildRollup:
-    """A parent's children, counted. `open_slugs` is what the gate messages name."""
-
     total: int
     terminal: int
-    open_slugs: tuple[str, ...]
+    open_paths: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
 class DescendResult:
-    """Where a `--descend` walk landed. `path` is inclusive of both ends."""
-
     path: tuple[str, ...]
     leaf: str | None
     blocked_at: str | None = None
     reason: str | None = None
 
 
-def child_rollup(items: Sequence[WorkItem], parent_slug: str) -> ChildRollup:
-    """Roll up the children of *parent_slug* -- items whose `parent` is it."""
-    children = [item for item in items if item.parent == parent_slug]
-    terminal = sum(1 for item in children if item.workflow_status in TERMINAL_STATUSES)
-    open_slugs = tuple(sorted(item.slug for item in children if item.workflow_status not in TERMINAL_STATUSES))
-    return ChildRollup(total=len(children), terminal=terminal, open_slugs=open_slugs)
+def _direct_children(items: Sequence[WorkItem], parent_path: str) -> tuple[WorkItem, ...]:
+    index = path_index(items)
+    parent = index.get(parent_path)
+    if parent is None:
+        return ()
+    return tuple(index[path] for path in (*parent.active_child_paths, *parent.archived_child_paths) if path in index)
 
 
-def unknown_depends_on(items: Sequence[WorkItem], depends_on: Sequence[DependencyEdge]) -> dict[str, str | None]:
-    """Values naming no item at all, mapped to a same-title hint or `None`.
+def child_rollup(items: Sequence[WorkItem], parent_path: str) -> ChildRollup:
+    children = _direct_children(items, parent_path)
+    terminal = sum(item.work_status in TERMINAL_STATUSES for item in children)
+    open_paths = tuple(sorted(item.path for item in children if item.work_status not in TERMINAL_STATUSES))
+    return ChildRollup(len(children), terminal, open_paths)
 
-    The hint fires only on an unambiguous match: exactly one known slug equal
-    to the value once its `YYYY-MM-DD-` prefix is stripped.
-    """
-    known = {item.slug for item in items}
-    unknown: dict[str, str | None] = {}
-    for edge in depends_on:
-        if edge.slug in known:
+
+def active_nonterminal_descendants(items: Sequence[WorkItem], parent_path: str) -> tuple[str, ...]:
+    """Every active nonterminal descendant of *parent_path*, at any depth."""
+    index = path_index(items)
+    parent = index.get(parent_path)
+    if parent is None:
+        return ()
+    found: list[str] = []
+    pending = list(reversed(parent.active_child_paths))
+    seen = {parent_path}
+    while pending:
+        path = pending.pop()
+        if path in seen:
             continue
-        matches = sorted(slug for slug in known if _DATE_PREFIX_RE.sub("", slug) == edge.slug)
-        unknown[edge.slug] = matches[0] if len(matches) == 1 else None
-    return unknown
+        seen.add(path)
+        item = index.get(path)
+        if item is None or item.archived:
+            continue
+        if item.work_status not in TERMINAL_STATUSES:
+            found.append(item.path)
+        pending.extend(reversed(item.active_child_paths))
+    return tuple(sorted(found))
 
 
-def child_gated_node(item: WorkItem, children: Sequence[WorkItem]) -> bool:
-    """Whether *item* is a node `descend` walks **through** rather than lands on.
+def nearest_parent(items: Sequence[WorkItem], path: str) -> str | None:
+    """Nearest Release, Epic, or Feature containing (or equal to) *path*."""
+    from work_tracker_okf.vocabulary import PARENT_TYPES
 
-    An `Epic` is gated only at `execute` and a `Feature` at `execute` or
-    `finish`. An epic still at design or plan is its own actionable leaf: it
-    dispatches to the decomposition stage, and the children gate has not
-    engaged yet. That clause must agree with `workflow._epic_execute_gate` --
-    otherwise `--descend` and `next` disagree about the same item.
-    """
-    if not any(child.workflow_status not in TERMINAL_STATUSES for child in children):
-        return False
-    if item.type == "Epic":
-        return item.phase == "execute"
-    return item.type == "Feature" and item.phase in ("execute", "finish")
-
-
-def nearest_epic(items: Sequence[WorkItem], slug: str) -> str | None:
-    """The nearest ancestor of *slug* whose `type` is `Epic`, or `None`.
-
-    *slug* itself counts: an epic is its own nearest epic. Cycle-safe and
-    bounded by `WALK_DEPTH_CAP`, the same cap `descend` walks this tree downward
-    under — a `parent` chain that closes on itself is `graph.parent-cycle`'s
-    finding, and this walk must return rather than diagnose it.
-
-    It lands here rather than in either consumer because it has two:
-    `_rules/decisions.citations` and the auto-drive shell. Writing it twice
-    means two walks that can disagree about cycles and depth.
-    """
-    by_slug = active_preferred_slug_index(items)
+    index = path_index(items)
     seen: set[str] = set()
-    current: str | None = slug
-    for _ in range(WALK_DEPTH_CAP):
-        if current is None or current in seen:
-            return None
-        item = by_slug.get(current)
+    current: str | None = path
+    while current is not None and current not in seen:
+        item = index.get(current)
         if item is None:
             return None
-        if item.type == "Epic":
-            return item.slug
+        if item.type in PARENT_TYPES:
+            return item.path
         seen.add(current)
-        current = item.parent
+        current = item.parent_path
     return None
 
 
-def _child_dependency_blocked(items: Sequence[WorkItem], child: WorkItem) -> bool:
-    phase = child.phase or entry_phase(child.type, child.effort)
-    if phase is None:
+def unknown_depends_on(items: Sequence[WorkItem], edges: Sequence[DependencyEdge]) -> dict[str, None]:
+    known = path_index(items)
+    return {edge.path: None for edge in edges if edge.path not in known}
+
+
+def child_gated_node(item: WorkItem, children: Sequence[WorkItem]) -> bool:
+    if not any(child.work_status not in TERMINAL_STATUSES for child in children):
         return False
-    return bool(unmet(child.depends_on, resolve_facts(items, child.depends_on), phase))
+    if item.type in {"Release", "Epic"}:
+        return item.phase == "execute"
+    return item.type == "Feature" and item.phase in {"execute", "finish"}
 
 
-def descend(items: Sequence[WorkItem], slug: str) -> DescendResult:
-    """The next actionable leaf at or below *slug*. Cycle-safe and depth-capped.
+def nearest_epic(items: Sequence[WorkItem], path: str) -> str | None:
+    index = path_index(items)
+    seen: set[str] = set()
+    current: str | None = path
+    while current is not None and current not in seen:
+        item = index.get(current)
+        if item is None:
+            return None
+        if item.type == "Epic":
+            return item.path
+        seen.add(current)
+        current = item.parent_path
+    return None
 
-    At each level the candidates are children whose `workflow_status` is in
-    `PICK_ORDER` and whose own next-phase dependency gates are satisfied,
-    ordered by that rank then `(opened, slug)`.
-    """
-    by_slug = active_preferred_slug_index(items)
-    selected_items = tuple(by_slug.values())
-    node = by_slug.get(slug)
+
+def _dependency_blocked(items: Sequence[WorkItem], child: WorkItem) -> bool:
+    phase = child.phase or entry_phase(child.type, child.effort)
+    return phase is not None and bool(
+        unmet(child.dependency_edges, resolve_facts(items, child.dependency_edges), phase)
+    )
+
+
+def descend(items: Sequence[WorkItem], path: str) -> DescendResult:
+    index = path_index(items)
+    node = index.get(path)
     if node is None:
-        return DescendResult(path=(slug,), leaf=None, blocked_at=slug, reason=f"unknown slug {slug!r}")
-    path = [slug]
-    visited = {slug}
+        return DescendResult((path,), None, path, f"unknown path {path!r}")
+    walked = [path]
+    visited = {path}
     while True:
-        children = [item for item in selected_items if item.parent == node.slug]
+        children = _direct_children(items, node.path)
         if not child_gated_node(node, children):
-            return DescendResult(path=tuple(path), leaf=node.slug)
+            return DescendResult(tuple(walked), node.path)
         candidates = [
             child
             for child in children
-            if child.workflow_status in PICK_ORDER and not _child_dependency_blocked(selected_items, child)
+            if not child.archived and child.work_status in PICK_ORDER and not _dependency_blocked(items, child)
         ]
         if not candidates:
             return DescendResult(
-                path=tuple(path),
-                leaf=None,
-                blocked_at=node.slug,
-                reason="no dep-ready child: open children are blocked on dependencies or not dispatchable",
+                tuple(walked),
+                None,
+                node.path,
+                "no dep-ready child: open children are blocked on dependencies or not dispatchable",
             )
-        candidates.sort(key=lambda child: (PICK_ORDER[child.workflow_status], child.opened, child.slug))
+        candidates.sort(key=lambda child: (PICK_ORDER[child.work_status], child.opened, child.path))
         chosen = candidates[0]
-        if chosen.slug in visited:
+        if chosen.path in visited:
             return DescendResult(
-                path=tuple(path),
-                leaf=None,
-                blocked_at=node.slug,
-                reason="parent cycle detected: " + " -> ".join([*path, chosen.slug]),
+                tuple(walked), None, node.path, "parent cycle detected: " + " -> ".join([*walked, chosen.path])
             )
-        if len(path) >= WALK_DEPTH_CAP:
-            return DescendResult(
-                path=tuple(path),
-                leaf=None,
-                blocked_at=node.slug,
-                reason=f"descend depth cap ({WALK_DEPTH_CAP}) reached: " + " -> ".join([*path, chosen.slug]),
-            )
-        path.append(chosen.slug)
-        visited.add(chosen.slug)
+        walked.append(chosen.path)
+        visited.add(chosen.path)
         node = chosen
 
 
 __all__ = [
     "PICK_ORDER",
-    "WALK_DEPTH_CAP",
     "ChildRollup",
     "DescendResult",
+    "active_nonterminal_descendants",
     "child_gated_node",
     "child_rollup",
     "descend",
     "nearest_epic",
+    "nearest_parent",
     "unknown_depends_on",
 ]

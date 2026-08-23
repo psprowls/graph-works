@@ -3,7 +3,7 @@ import itertools
 import pytest
 from work_tracker_okf.dependencies import DependencyEdge, DependencyFact, DependencyIssue
 from work_tracker_okf.hierarchy import ChildRollup
-from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORKFLOW_STATUSES
+from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORK_STATUSES
 from work_tracker_okf.workflow import (
     PLAN_OR_EXECUTE,
     Dispatch,
@@ -25,7 +25,7 @@ EIGHT_PAIRS = {
 
 
 def _state(**overrides) -> RouteState:
-    base = {"type": "Feature", "workflow_status": "open"}
+    base = {"type": "Feature", "work_status": "open"}
     return RouteState(**{**base, **overrides})
 
 
@@ -34,7 +34,7 @@ def state_with_edge(
     phase: str | None,
     type: str = "Feature",
     effort: str | None = "medium",
-    workflow_status: str = "open",
+    work_status: str = "open",
     blocks: str,
     needs: str = "resolved",
     dependency_phase: str | None = "design",
@@ -49,7 +49,7 @@ def state_with_edge(
     )
     return RouteState(
         type=type,
-        workflow_status=workflow_status,
+        work_status=work_status,
         phase=phase,
         effort=effort,
         dependency_edges=(edge,),
@@ -58,16 +58,16 @@ def state_with_edge(
 
 
 def _sweep():
-    """Every (type, workflow_status, phase, effort) combination, plus the
+    """Every (type, work_status, phase, effort) combination, plus the
     None-valued phase and effort the enums do not carry."""
     phases = [None, *sorted(PHASES)]
     efforts = [None, *sorted(EFFORTS)]
-    return itertools.product(sorted(TYPES), sorted(WORKFLOW_STATUSES), phases, efforts)
+    return itertools.product(sorted(TYPES), sorted(WORK_STATUSES), phases, efforts)
 
 
 def test_route_never_raises_and_always_answers():
     for type_, status, phase, effort in _sweep():
-        result = route(_state(type=type_, workflow_status=status, phase=phase, effort=effort))
+        result = route(_state(type=type_, work_status=status, phase=phase, effort=effort))
         assert result.dispatch is not None or result.blockers or result.on_complete is not None, (
             type_,
             status,
@@ -84,7 +84,7 @@ def test_the_table_produces_exactly_eight_distinct_pairs():
                 result = route(
                     _state(
                         type=type_,
-                        workflow_status=status,
+                        work_status=status,
                         phase=phase,
                         effort=effort,
                         has_plan_doc=has_plan,
@@ -140,7 +140,7 @@ def test_dependency_issues_block_routing_before_any_phase_dispatch() -> None:
 
 
 def test_an_invalid_field_blocks_and_names_itself():
-    result = route(_state(type="Widget", workflow_status="nope", phase="nowhere", effort="huge"))
+    result = route(_state(type="Widget", work_status="nope", phase="nowhere", effort="huge"))
     assert result.dispatch is None
     assert len(result.blockers) == 4
     assert any("Widget" in blocker for blocker in result.blockers)
@@ -161,7 +161,7 @@ def test_a_done_item_has_nothing_to_dispatch():
 
 def test_a_terminal_status_never_dispatches():
     for status in ("resolved", "wontfix", "superseded", "mitigated"):
-        result = route(_state(workflow_status=status, phase="execute"))
+        result = route(_state(work_status=status, phase="execute"))
         assert result.dispatch is None, status
         assert "never dispatches" in result.blockers[0]
 
@@ -169,15 +169,18 @@ def test_a_terminal_status_never_dispatches():
 def test_the_dependency_gate_runs_after_the_terminal_checks():
     """A resolved item blocked on an unfinished dep reports 'resolved', not
     'blocked on dependencies'."""
-    result = route(state_with_edge(phase="execute", workflow_status="resolved", blocks="execute", needs="resolved"))
+    result = route(state_with_edge(phase="execute", work_status="resolved", blocks="execute", needs="resolved"))
     assert "never dispatches" in result.blockers[0]
 
 
 def test_unmet_dependencies_block_and_are_named():
-    edges = (DependencyEdge("dep-a", blocks="plan"), DependencyEdge("dep-b", blocks="plan"))
+    edges = (
+        DependencyEdge("work/dep-a", blocks="plan", needs="resolved"),
+        DependencyEdge("work/dep-b", blocks="plan", needs="resolved"),
+    )
     facts = (
-        DependencyFact("dep-a", known=False, terminal=False),
-        DependencyFact("dep-b", known=False, terminal=False),
+        DependencyFact("work/dep-a", known=False, terminal=False),
+        DependencyFact("work/dep-b", known=False, terminal=False),
     )
     result = route(_state(phase="plan", dependency_edges=edges, dependency_facts=facts))
     assert result.dispatch is None
@@ -186,7 +189,7 @@ def test_unmet_dependencies_block_and_are_named():
 
 
 def test_entry_with_a_non_open_status_is_a_human_decision():
-    result = route(_state(workflow_status="accepted", phase=None))
+    result = route(_state(work_status="accepted", phase=None))
     assert result.dispatch is None
     assert result.blockers
 
@@ -257,7 +260,7 @@ def test_a_small_test_gap_at_entry_skips_straight_to_execute():
     assert result.dispatch == Dispatch("execute", "unplanned")
     assert result.on_dispatch is not None
     assert result.on_dispatch.phase == "execute"
-    assert result.on_dispatch.workflow_status == "in-progress"
+    assert result.on_dispatch.work_status == "in-progress"
     assert result.on_dispatch.requires == ("owner",)
     assert result.on_dispatch.document_status == "stable"
     assert result.on_complete is not None
@@ -303,7 +306,7 @@ def test_every_design_complete_transition_stamps_the_spec_and_stabilises():
     for type_, effort in (("Bug", None), ("Bug", "small"), ("Feature", "large")):
         transition = route(_state(type=type_, phase="design", effort=effort)).on_complete
         assert transition is not None
-        assert transition.stamp_source == "design-spec", (type_, effort)
+        assert transition.stamp_source == "design", (type_, effort)
         assert transition.document_status == "stable", (type_, effort)
 
 
@@ -328,11 +331,11 @@ def test_execute_dispatches_planned_or_unplanned_on_the_plan_doc():
 
 
 def test_execute_claims_an_owner_only_when_not_already_in_progress():
-    fresh = route(_state(phase="execute", workflow_status="accepted"))
+    fresh = route(_state(phase="execute", work_status="accepted"))
     assert fresh.on_dispatch is not None
-    assert fresh.on_dispatch.workflow_status == "in-progress"
+    assert fresh.on_dispatch.work_status == "in-progress"
     assert fresh.on_dispatch.requires == ("owner",)
-    running = route(_state(phase="execute", workflow_status="in-progress"))
+    running = route(_state(phase="execute", work_status="in-progress"))
     assert running.on_dispatch is None
 
 
@@ -345,7 +348,7 @@ def test_an_epic_at_execute_with_no_children_says_to_decompose_it():
 def test_the_epic_gate_withholds_the_dispatch_while_the_feature_gate_rides_requires():
     """The asymmetry is the whole point: one type cannot act while its children
     are open, the other can act but cannot finish."""
-    rollup = ChildRollup(total=2, terminal=1, open_slugs=("kid",))
+    rollup = ChildRollup(total=2, terminal=1, open_paths=("work/kid",))
     epic = route(_state(type="Epic", phase="execute", child_rollup=rollup))
     assert epic.dispatch is None
     assert "1/2 terminal" in epic.blockers[0]
@@ -379,7 +382,7 @@ def test_an_epic_at_finish_is_a_satisfied_gate_to_done():
     assert result.dispatch is None
     assert result.blockers == ()
     assert result.on_complete is not None
-    assert (result.on_complete.phase, result.on_complete.workflow_status) == ("done", "resolved")
+    assert (result.on_complete.phase, result.on_complete.work_status) == ("done", "resolved")
 
 
 def test_anything_else_at_finish_dispatches_the_branch_and_needs_a_ref():
@@ -390,7 +393,7 @@ def test_anything_else_at_finish_dispatches_the_branch_and_needs_a_ref():
 
 
 def test_the_finish_gate_stacks_resolved_in_and_the_children_requirement():
-    rollup = ChildRollup(total=1, terminal=0, open_slugs=("kid",))
+    rollup = ChildRollup(total=1, terminal=0, open_paths=("work/kid",))
     result = route(_state(type="Feature", phase="finish", child_rollup=rollup))
     assert result.on_complete is not None
     assert result.on_complete.requires == ("resolved_in", "children-terminal")

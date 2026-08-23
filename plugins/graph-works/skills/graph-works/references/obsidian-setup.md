@@ -2,7 +2,7 @@
 
 > **Substrate ownership.** This document describes behavior that the graph-works rebuild is
 > re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`2026-08-13-epic-feature-workspace-manifest-layout-resolution`](/work/2026-08-13-epic-feature-workspace-manifest-layout-resolution.md) and is re-authored there, not here.
+> the behavioral truth is owned by [`feature-epic-feature-workspace-manifest-layout-resolution`](/work/_archive/epic-graph-works-core/children/_archive/feature-epic-feature-workspace-manifest-layout-resolution.md) and is re-authored there, not here.
 > Treat a disagreement between this page and that item as this page being stale.
 
 Recommended Obsidian configuration for a Code Wiki. None of this is strictly required — the wiki is just markdown files — but these settings remove friction.

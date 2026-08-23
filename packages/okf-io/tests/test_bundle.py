@@ -205,6 +205,185 @@ def test_directory_symlinks_are_not_followed(tmp_path):
     assert set(loaded.concepts) == {"real/a"}
 
 
+def test_bundle_walk_is_iterative_beyond_the_python_recursion_limit(tmp_path):
+    cursor = tmp_path
+    parts: list[str] = []
+    for _ in range(300):
+        part = "d"
+        parts.append(part)
+        cursor /= part
+        cursor.mkdir()
+    (cursor / "leaf.md").write_text(CONCEPT, encoding="utf-8")
+    previous_limit = sys.getrecursionlimit()
+    try:
+        sys.setrecursionlimit(250)
+        loaded = bundle.load(tmp_path)
+    finally:
+        sys.setrecursionlimit(previous_limit)
+
+    assert "/".join((*parts, "leaf")) in loaded.concepts
+
+
+def test_descriptor_rooted_load_matches_path_load_and_leaves_caller_fd_open(tmp_path):
+    write(tmp_path, "concept.md", CONCEPT)
+    write(tmp_path, "nested/index.md", "# Nested\n")
+    write(tmp_path, "nested/asset.bin", "asset")
+    write(tmp_path, "nested/.kept.md", CONCEPT)
+    write(tmp_path, "ignored/skip.md", CONCEPT)
+    write(tmp_path, ".root-hidden.md", CONCEPT)
+    (tmp_path / "invalid.md").write_bytes(b"\xff\xfe")
+    (tmp_path / "linked.md").symlink_to("concept.md")
+    (tmp_path / "directory-link").symlink_to("nested", target_is_directory=True)
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        expected = bundle.load(tmp_path, ignore=("ignored/*",))
+        actual = bundle._load_at(tmp_path, descriptor, ignore=("ignored/*",))
+        os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+
+    assert actual.root == expected.root
+    assert actual.assets == expected.assets
+    assert actual.ignored == expected.ignored
+    assert actual.unreadable == expected.unreadable
+    assert tuple(actual.concepts) == tuple(expected.concepts)
+    assert tuple(actual.indexes) == tuple(expected.indexes)
+    assert tuple(actual.logs) == tuple(expected.logs)
+    assert {member: (document.raw_text, document.path) for member, document in actual.concepts.items()} == {
+        member: (document.raw_text, document.path) for member, document in expected.concepts.items()
+    }
+
+
+def test_descriptor_rooted_load_rejects_a_non_directory_without_closing_it(tmp_path):
+    file_path = tmp_path / "not-a-directory"
+    file_path.write_bytes(b"file")
+    descriptor = os.open(file_path, os.O_RDONLY)
+    try:
+        with pytest.raises(NotADirectoryError, match="not a directory"):
+            bundle._load_at(tmp_path, descriptor)
+        os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def test_descriptor_rooted_per_entry_lstat_failure_matches_path_classification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write(tmp_path, "good.md", CONCEPT)
+    transient = write(tmp_path, "nested/transient.md", CONCEPT)
+    real_stat = bundle.os.stat
+
+    def fail_path_stat(path: os.PathLike[str] | str | bytes, *args: object, **kwargs: object):
+        if Path(path) == transient and kwargs.get("follow_symlinks") is False:
+            raise OSError("injected per-entry stat failure")
+        return real_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as path_patch:
+        path_patch.setattr(bundle.os, "stat", fail_path_stat)
+        with pytest.raises(OSError, match="injected per-entry stat failure"):
+            bundle.load(tmp_path)
+
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+
+    def fail_one_lstat(
+        path: int | str | bytes,
+        *args: object,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+        **kwargs: object,
+    ):
+        if path == "transient.md" and dir_fd is not None and not follow_symlinks:
+            raise OSError("injected per-entry stat failure")
+        return real_stat(path, *args, dir_fd=dir_fd, follow_symlinks=follow_symlinks, **kwargs)
+
+    monkeypatch.setattr(bundle.os, "stat", fail_one_lstat)
+    try:
+        with pytest.raises(OSError, match="injected per-entry stat failure"):
+            bundle._load_at(tmp_path, descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def test_descriptor_rooted_follow_stat_failure_matches_path_symlink_classification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write(tmp_path, "real.md", CONCEPT)
+    linked = tmp_path / "linked.md"
+    linked.symlink_to("real.md")
+    real_stat = bundle.os.stat
+
+    def fail_path_follow_stat(path: os.PathLike[str] | str | bytes, *args: object, **kwargs: object):
+        if Path(path) == linked and kwargs.get("follow_symlinks") is not False:
+            raise OSError("injected follow-stat failure")
+        return real_stat(path, *args, **kwargs)
+
+    with monkeypatch.context() as path_patch:
+        path_patch.setattr(bundle.os, "stat", fail_path_follow_stat)
+        with pytest.raises(OSError, match="injected follow-stat failure"):
+            bundle.load(tmp_path)
+
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+
+    def fail_one_follow_stat(
+        path: int | str | bytes,
+        *args: object,
+        dir_fd: int | None = None,
+        follow_symlinks: bool = True,
+        **kwargs: object,
+    ):
+        if path == "linked.md" and dir_fd is not None and follow_symlinks:
+            raise OSError("injected follow-stat failure")
+        return real_stat(path, *args, dir_fd=dir_fd, follow_symlinks=follow_symlinks, **kwargs)
+
+    monkeypatch.setattr(bundle.os, "stat", fail_one_follow_stat)
+    try:
+        with pytest.raises(OSError, match="injected follow-stat failure"):
+            bundle._load_at(tmp_path, descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def test_descriptor_rooted_file_open_failure_matches_path_unreadable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    write(tmp_path, "good.md", CONCEPT)
+    bad = write(tmp_path, "bad.md", CONCEPT)
+    real_read_bytes = Path.read_bytes
+
+    def fail_path_read(path: Path) -> bytes:
+        if path == bad:
+            raise OSError("injected file open failure")
+        return real_read_bytes(path)
+
+    with monkeypatch.context() as path_patch:
+        path_patch.setattr(Path, "read_bytes", fail_path_read)
+        expected = bundle.load(tmp_path)
+
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    real_open = bundle.os.open
+
+    def fail_descriptor_read(
+        path: int | str | bytes,
+        flags: int,
+        mode: int = 0o777,
+        *,
+        dir_fd: int | None = None,
+    ) -> int:
+        if path == "bad.md" and dir_fd is not None and not flags & os.O_DIRECTORY:
+            raise OSError("injected file open failure")
+        return real_open(path, flags, mode, dir_fd=dir_fd)
+
+    monkeypatch.setattr(bundle.os, "open", fail_descriptor_read)
+    try:
+        actual = bundle._load_at(tmp_path, descriptor)
+    finally:
+        os.close(descriptor)
+
+    assert tuple(actual.concepts) == tuple(expected.concepts)
+    assert actual.assets == expected.assets
+    assert actual.unreadable == expected.unreadable
+
+
 def test_ignore_excludes_concepts_but_leaves_them_resolvable(tmp_path):
     write(tmp_path, "a.md", CONCEPT)
     write(tmp_path, "schema/kinds.md", CONCEPT)

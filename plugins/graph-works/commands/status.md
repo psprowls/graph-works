@@ -1,11 +1,11 @@
 ---
 name: status
-description: Show a one-screen work item rollup — counts by status/kind, in-flight items, stuck items. Hints to run regen-index when the sidecar is missing or stale. Invokes `gw work status`. Usage /graph-works:status
+description: Show a one-screen path-native work item rollup — counts by work status/type plus the canonical path worth resuming. Invokes `gw work status`. Usage /graph-works:status
 ---
 
 # /graph-works:status
 
-One-screen work item rollup from the `work-index.json` sidecar.
+One-screen work item rollup from the live OKF work tree.
 
 ## Usage
 
@@ -16,14 +16,9 @@ One-screen work item rollup from the `work-index.json` sidecar.
 ## What happens
 
 1. Run `gw work status --json`.
-2. If the sidecar is missing, suggest running `/graph-works:regen-index` first.
-3. Present:
-   - Counts by status, kind, severity, blast-radius.
-   - In-flight items (status: in-progress) with titles.
-   - Stuck items (open >30d or accepted >60d) with age.
-   - A staleness hint if the sidecar is out of date.
+2. Present `total`, `by_work_status`, `by_type`, `by_phase`, and the `resume.primary.path` plus alternatives.
 
 ## Skill Reference
 
 → `graph-works/SKILL.md`
-→ `graph-works/references/sidecar-schema.md`
+→ `graph-works/references/wiki-schema.md`

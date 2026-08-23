@@ -100,7 +100,8 @@ def test_enable_transcript_uses_the_real_default_script(tmp_path: Path) -> None:
     settings_path = repo / ".claude" / "settings.local.json"
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     command = settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
-    assert command.endswith('/plugins/graph-works/hooks/examples/session-end-transcript-capture.sh"')
+    assert "GRAPH_WORKS_PYTHON=" in command
+    assert command.endswith("/plugins/graph-works/hooks/examples/session-end-transcript-capture.sh")
 
 
 def test_malformed_settings_prints_error_and_uses_schema_mismatch_exit(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""Rules for the per-epic decisions ledger.
+"""Rules for Release, Epic, and Feature decision ledgers.
 
 The fifth topic. Its prefix had to clear eighteen taken names — okf-io's eight
 (`computation`, `frontmatter`, `legacy`, `lifecycle`, `links`, `provenance`,
@@ -11,13 +11,13 @@ is a bundle member rather than a repo path: `repo_root` injection exists because
 the *code repo* is unknown to a bundle, not because a rule may not do I/O
 (`targets.affects-missing` is an `.exists()` call). So this topic injects
 nothing. `ledger-missing` does no I/O at all — `ctx.bundle.has_member` sees
-`ignored` members, which is how `targets.artifact-missing` already resolves a
-`sources[].resource` under `references/` — and the four content rules read
+ignored members under `references/` — and the four content rules read
 `ctx.bundle.root / ref.rel`.
 
-`_SPEC` cites this module rather than a spec section: an epic whose ledger has a
-gap is a perfectly conformant OKF v0.2 document, and inventing a section number
-for a lane invariant would be a false citation that outlives whoever wrote it.
+`_SPEC` cites this module rather than a spec section: a parent whose ledger has
+a gap is a perfectly conformant OKF v0.2 document, and inventing a section
+number for a lane invariant would be a false citation that outlives whoever
+wrote it.
 """
 
 from __future__ import annotations
@@ -29,10 +29,10 @@ from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, active, items
 from work_tracker_okf.decisions import VALID_STATUSES, LedgerParse, id_number, load
-from work_tracker_okf.hierarchy import nearest_epic
+from work_tracker_okf.hierarchy import nearest_parent
 from work_tracker_okf.items import WorkItem
-from work_tracker_okf.paths import decisions_ledger
-from work_tracker_okf.vocabulary import SPEC_SOURCE_ID
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref
+from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID
 
 CODES: tuple[str, ...] = (
     "decisions.ledger-missing",
@@ -44,8 +44,7 @@ CODES: tuple[str, ...] = (
 
 _SPEC = "work_tracker_okf._rules.decisions"
 
-#: The phases by which an epic that has moved past design is expected to have a
-#: ledger. work-io's rule-32 gate, unchanged.
+#: The phases by which a parent that has moved past design has a ledger.
 _LEDGER_PHASES = frozenset({"plan", "execute", "finish", "done"})
 
 #: A `D-nnn` citation anywhere in a design spec. Deliberately bare: a matcher
@@ -65,7 +64,11 @@ def _finding(code: str, severity: Severity, item: WorkItem, message: str) -> Fin
     """Every code in this module reports the epic's (or the citing item's) page:
     the ledger has no page of its own, and a finding against a member nothing
     links to is a finding nobody would find."""
-    return Finding(code=code, severity=severity, message=message, spec=_SPEC, path=item.path, line=None)
+    return Finding(code=code, severity=severity, message=message, spec=_SPEC, path=item.page_path, line=None)
+
+
+def _ledger_ref(item_path: str) -> ArtifactRef:
+    return artifact_ref(item_path, MANAGED_ARTIFACTS["decisions"])
 
 
 def _entry_findings(item: WorkItem, parsed: LedgerParse) -> Iterator[Finding]:
@@ -157,15 +160,16 @@ def ledger(ctx: RuleContext) -> Iterable[Finding]:
     anyone its ledger has a gap asks them to do nothing.
     """
     for item in active(ctx):
-        if item.type != "Epic":
+        if item.type not in PARENT_TYPES:
             continue
-        ref = decisions_ledger(item.slug)
+        ref = _ledger_ref(item.path)
         if item.phase in _LEDGER_PHASES and not ctx.bundle.has_member(ref.rel):
+            subject = "`type: Epic`" if item.type == "Epic" else f"`type: {item.type}`"
             yield _finding(
                 "decisions.ledger-missing",
                 "warn",
                 item,
-                f"`type: Epic` at `phase: {item.phase}` has no decisions ledger at `{ref.rel}`",
+                f"{subject} at `phase: {item.phase}` has no decisions ledger at `{ref.rel}`",
             )
         parsed = load(ref.path(ctx.bundle.root))
         yield from _entry_findings(item, parsed)
@@ -181,15 +185,20 @@ def ledger(ctx: RuleContext) -> Iterable[Finding]:
 
 
 def _spec_text(ctx: RuleContext, item: WorkItem) -> str | None:
-    """The item's `design-spec` artifact as text, or `None` when there is none to
+    """The item's `design` artifact as text, or `None` when there is none to
     read. Never raises: an unreadable spec is simply not citation-checked, the
     same as an absent or unstamped one."""
     for source in item.sources:
         if source.id != SPEC_SOURCE_ID or not source.resource:
             continue
         path = ctx.bundle.root / source.resource.removeprefix("/")
+        root = ctx.bundle.root.resolve()
+        owner = (root / item.path).resolve()
         try:
-            return path.read_text(encoding="utf-8")
+            resolved = path.resolve(strict=True)
+            if not resolved.is_relative_to(root) or not resolved.is_relative_to(owner):
+                return None
+            return resolved.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError, ValueError):
             return None
     return None
@@ -209,7 +218,7 @@ def citations(ctx: RuleContext) -> Iterable[Finding]:
     instead of reporting a phantom missing citation.
     """
     everything = items(ctx)
-    by_slug = {item.slug: item for item in everything}
+    by_path = {item.path: item for item in everything}
     known: dict[str, frozenset[int]] = {}
     for item in everything:
         if item.archived:
@@ -217,25 +226,25 @@ def citations(ctx: RuleContext) -> Iterable[Finding]:
         text = _spec_text(ctx, item)
         if text is None:
             continue
-        epic_slug = nearest_epic(everything, item.slug)
-        if epic_slug is None:
+        owner_path = nearest_parent(everything, item.path)
+        if owner_path is None:
             continue
-        if epic_slug not in known:
-            epic = by_slug[epic_slug]
-            ref = decisions_ledger(epic.slug, archived=epic.archived)
-            known[epic_slug] = frozenset(entry.number for entry in load(ref.path(ctx.bundle.root)).entries)
+        if owner_path not in known:
+            owner = by_path[owner_path]
+            ref = _ledger_ref(owner.path)
+            known[owner_path] = frozenset(entry.number for entry in load(ref.path(ctx.bundle.root)).entries)
         for cite in sorted({match.group(0) for match in _ID_RE.finditer(text)}):
             try:
                 number = id_number(cite)
             except ValueError:
                 continue
-            if number in known[epic_slug]:
+            if number in known[owner_path]:
                 continue
             yield _finding(
                 "decisions.cite-missing",
                 "error",
                 item,
-                f"design spec cites {cite!r}, which is not in epic {epic_slug!r}'s ledger",
+                f"design spec cites {cite!r}, which is not in owner {owner_path!r}'s ledger",
             )
 
 

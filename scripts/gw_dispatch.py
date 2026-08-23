@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Background stage dispatcher for the graph-wiki work pipeline.
+"""Background stage dispatcher for the graph-works work pipeline.
 
 Watches every work item in the vault, and for each one whose next pipeline
 stage is automatable, dispatches a **fresh** background Claude Code session
-(`claude --bg`) running `/graph-wiki:next <slug>`.
+(`claude --bg`) running `/graph-works:next <work-path>`.
 
 This mechanizes the invariant already stated in
-`plugins/graph-wiki/skills/workflow/SKILL.md`: *"One stage per invocation, by
+`plugins/graph-works/skills/workflow/SKILL.md`: *"One stage per invocation, by
 design. Never chain stages in a session -- each stage gets a fresh context
 window. The work item plus raw/ artifacts are the durable state between
 sessions; nothing depends on conversation memory."*
@@ -23,7 +23,7 @@ Design notes
   `claude attach <id>`, answer, and let the stage continue.
 * **`state: "done"` is not trusted as success.** A session can exit having
   accomplished nothing. Completion is confirmed against the durable wiki state
-  by re-running `gw work next <slug> --json` and checking the phase actually
+  by re-running `gw work next <path> --json` and checking the phase actually
   advanced.
 * **`claude logs` is deliberately never parsed.** Background sessions run in a
   pty; the log is raw ANSI terminal capture, not a data feed.
@@ -33,7 +33,7 @@ Usage
     scripts/gw_dispatch.py --once --dry-run      # see what would be dispatched
     scripts/gw_dispatch.py                       # watch loop
     scripts/gw_dispatch.py --status              # ledger + live session rollup
-    scripts/gw_dispatch.py --reset <slug>        # clear a stalled/failed entry
+    scripts/gw_dispatch.py --reset <work-path>    # clear a stalled/failed entry
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ DEFAULT_PHASES = ("plan", "execute")
 # for these, so skip them before spending a subprocess.
 TERMINAL_STATUSES = frozenset({"resolved", "wontfix", "superseded"})
 
-# Ledger states that occupy a slug (no re-dispatch while in one of these).
+# Ledger states that occupy a canonical path (no re-dispatch while in one of these).
 ACTIVE_STATES = frozenset({"running", "blocked"})
 
 # Ledger states that require an explicit `--reset` before retrying, so a
@@ -116,8 +116,8 @@ def resolve_gw_bin(explicit: str | None) -> list[str]:
         return [cand]
     # Fall back to the uv workspace entry point documented in CLAUDE.md.
     if shutil.which("uv"):
-        return ["uv", "run", "--package", "graph-wiki-cli", "gw"]
-    sys.exit("error: could not find `gw` (try --gw-bin, or install graph-wiki-cli)")
+        return ["uv", "run", "--package", "graph-works-cli", "gw"]
+    sys.exit("error: could not find `gw` (try --gw-bin, or install graph-works-cli)")
 
 
 # --------------------------------------------------------------------------
@@ -146,8 +146,8 @@ class Ledger:
         tmp.write_text(json.dumps({"updated_at": now_iso(), "runs": self.runs}, indent=2) + "\n")
         tmp.replace(self.path)
 
-    def state_of(self, slug: str) -> str | None:
-        entry = self.runs.get(slug)
+    def state_of(self, path: str) -> str | None:
+        entry = self.runs.get(path)
         return entry.get("state") if entry else None
 
 
@@ -158,8 +158,8 @@ class EventLog:
         self.path = path
         self.notify = notify
 
-    def emit(self, kind: str, slug: str, **fields: Any) -> None:  # noqa: ANN401
-        rec = {"at": now_iso(), "event": kind, "slug": slug, **fields}
+    def emit(self, kind: str, path: str, **fields: Any) -> None:  # noqa: ANN401
+        rec = {"at": now_iso(), "event": kind, "path": path, **fields}
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             with self.path.open("a") as fh:
@@ -169,20 +169,20 @@ class EventLog:
 
         marker = {"blocked": "!!", "failed": "XX", "stalled": "??"}.get(kind, "--")
         print(
-            f"[{rec['at']}] {marker} {kind:<10} {slug}"
+            f"[{rec['at']}] {marker} {kind:<10} {path}"
             + ("  " + " ".join(f"{k}={v}" for k, v in fields.items()) if fields else "")
         )
 
         if self.notify and kind in ("blocked", "failed", "stalled"):
-            self._banner(kind, slug, fields)
+            self._banner(kind, path, fields)
 
-    def _banner(self, kind: str, slug: str, fields: dict[str, Any]) -> None:
+    def _banner(self, kind: str, path: str, fields: dict[str, Any]) -> None:
         if sys.platform != "darwin" or not shutil.which("osascript"):
             return
         sub = f"attach: claude attach {fields['id']}" if fields.get("id") else kind
         # Quote-strip so the AppleScript string literal cannot be broken out of.
         title = f"gw-dispatch: {kind}".replace('"', "")
-        body = f"{slug}\n{sub}".replace('"', "")
+        body = f"{path}\n{sub}".replace('"', "")
         run(["osascript", "-e", f'display notification "{body}" with title "{title}"'], timeout=10)
 
 
@@ -194,9 +194,9 @@ class EventLog:
 UNATTENDED_PROMPT = """\
 UNATTENDED BACKGROUND RUN (dispatched by scripts/gw_dispatch.py).
 
-You are a single pipeline stage of the graph-wiki work workflow, running in a
+You are a single pipeline stage of the graph-works work workflow, running in a
 fresh background session with no human watching the terminal. Follow the
-graph-wiki:workflow skill exactly as written, with these standing answers so
+graph-works:workflow skill exactly as written, with these standing answers so
 you do not stall on routine questions:
 
 - Default work item owner is `{owner}`. If a dispatch transition requires
@@ -221,43 +221,78 @@ class Dispatcher:
         self.gw = resolve_gw_bin(args.gw_bin)
         self.workspace = Path(args.workspace).expanduser().resolve()
         self.repo = Path(args.repo).expanduser().resolve()
-        state_dir = self.workspace / ".graph-wiki" / "dispatch"
+        self.bundle_root = self._bundle_root()
+        state_dir = self.workspace / ".gw" / "dispatch"
         self.ledger = Ledger.load(state_dir / "ledger.json")
         self.events = EventLog(state_dir / "events.jsonl", notify=args.notify)
         self.phases = tuple(p.strip() for p in args.phases.split(",") if p.strip())
 
+    def _bundle_root(self) -> Path:
+        """Resolve the projected bundle directory, falling back to ``okf``."""
+        relative = "okf"
+        projection = self.workspace / ".gw" / "cache" / "config.json"
+        try:
+            data = json.loads(projection.read_text(encoding="utf-8"))
+            projected = data.get("layout", {}).get("bundle_dir")
+            if isinstance(projected, str) and projected:
+                relative = projected
+        except (OSError, json.JSONDecodeError, AttributeError):
+            pass
+        candidate = (self.workspace / relative).resolve()
+        if not candidate.is_relative_to(self.workspace):
+            sys.exit(f"error: projected bundle_dir escapes workspace: {relative!r}")
+        return candidate
+
     # -- data sources ------------------------------------------------------
 
-    def gw_next(self, slug: str) -> dict[str, Any] | None:
-        """Read the dispatch record for a slug.
+    def gw_next(self, path: str) -> dict[str, Any] | None:
+        """Read the dispatch record for a canonical work-item path.
 
         `gw work next` exits **rc=1 whenever blockers are present** while still
         writing a complete JSON document to stdout. Parse status, not exit
         status -- gating on rc would silently hide every blocked item.
         """
-        rc, out, err = run([*self.gw, "work", "next", slug, "--json"], cwd=self.repo)
+        rc, out, err = run(
+            [*self.gw, "work", "next", path, "--workspace", str(self.workspace), "--json"],
+            cwd=self.repo,
+        )
         try:
             return json.loads(out)
         except json.JSONDecodeError:
             detail = (err or out).strip()[:200]
-            print(f"warn: gw work next {slug} gave no JSON (rc={rc}): {detail}", file=sys.stderr)
+            print(f"warn: gw work next {path} gave no JSON (rc={rc}): {detail}", file=sys.stderr)
             return None
 
     def work_items(self) -> list[dict[str, Any]]:
-        """Slugs from the work index, falling back to a glob of wiki/work/."""
-        index = self.workspace / "wiki" / "work-index.json"
-        if index.exists():
-            try:
-                items = json.loads(index.read_text()).get("items", [])
-                return [i for i in items if i.get("slug")]
-            except (OSError, json.JSONDecodeError) as exc:
-                print(f"warn: unreadable {index} ({exc}); falling back to glob", file=sys.stderr)
-        work_dir = self.workspace / "wiki" / "work"
-        return [
-            {"slug": p.stem, "status": None}
-            for p in sorted(work_dir.glob("*.md"))
-            if p.stem != "index"  # wiki/work/index.md is not a work item
-        ]
+        """Discover canonical paths from the path-native work filesystem."""
+        work_dir = self.bundle_root / "work"
+        found: list[dict[str, Any]] = []
+        if not work_dir.is_dir():
+            return found
+        for page in sorted(work_dir.rglob("*.md")):
+            relative = page.relative_to(self.bundle_root).with_suffix("")
+            parts = relative.parts
+            if page.name == "index.md" or "references" in parts:
+                continue
+            if parts[0] != "work":
+                continue
+            tail = parts[1:]
+            if tail[:1] == ("_archive",):
+                valid = len(tail) == 2
+            else:
+                valid = bool(tail) and tail[0] not in {"children", "_archive"}
+                cursor = 1
+                while valid and cursor < len(tail):
+                    valid = tail[cursor] == "children" and cursor + 1 < len(tail)
+                    cursor += 1
+                    if valid and tail[cursor] == "_archive":
+                        valid = cursor + 1 == len(tail) - 1
+                        cursor += 2
+                    else:
+                        cursor += 1
+            if valid:
+                found.append({"path": relative.as_posix()})
+        return sorted(found, key=lambda item: str(item["path"]))
 
     def live_sessions(self) -> dict[str, dict[str, Any]]:
         """Background sessions keyed by short id. Empty dict on failure."""
@@ -275,14 +310,14 @@ class Dispatcher:
     def reconcile(self) -> None:
         """Update ledger entries against live session state + durable wiki state."""
         live = self.live_sessions()
-        for slug, entry in list(self.ledger.runs.items()):
+        for path, entry in list(self.ledger.runs.items()):
             if entry.get("state") not in ACTIVE_STATES:
                 continue
             sess = live.get(entry.get("id", ""))
 
             if sess is None:
                 # Session is gone from the agents list entirely.
-                self._settle(slug, entry, reason="session disappeared")
+                self._settle(path, entry, reason="session disappeared")
                 continue
 
             state = sess.get("state")
@@ -292,7 +327,7 @@ class Dispatcher:
                     entry["blocked_at"] = now_iso()
                     self.events.emit(
                         "blocked",
-                        slug,
+                        path,
                         id=entry["id"],
                         hint=f"claude attach {entry['id']}",
                     )
@@ -300,36 +335,38 @@ class Dispatcher:
             if state == "failed":
                 entry["state"] = "failed"
                 entry["finished_at"] = now_iso()
-                self.events.emit("failed", slug, id=entry["id"])
+                self.events.emit("failed", path, id=entry["id"])
                 continue
             if state == "done":
-                self._settle(slug, entry, reason="session done")
+                self._settle(path, entry, reason="session done")
                 continue
             # still working -- if it had been blocked, a human answered it
             if entry.get("state") == "blocked":
                 entry["state"] = "running"
-                self.events.emit("unblocked", slug, id=entry["id"])
+                self.events.emit("unblocked", path, id=entry["id"])
         self.ledger.save()
 
-    def _settle(self, slug: str, entry: dict[str, Any], reason: str) -> None:
+    def _settle(self, path: str, entry: dict[str, Any], reason: str) -> None:
         """Confirm a finished run against durable wiki state, not session state."""
         entry["finished_at"] = now_iso()
-        info = self.gw_next(slug)
+        info = self.gw_next(path)
         if info is None:
             entry["state"] = "lost"
-            self.events.emit("lost", slug, id=entry.get("id"), reason=reason)
+            self.events.emit("lost", path, id=entry.get("id"), reason=reason)
             return
 
-        phase, status = info.get("phase"), info.get("status")
+        phase, work_status = info.get("phase"), info.get("work_status")
         expected = entry.get("expect_phase")
-        advanced = (expected and phase == expected) or phase != entry.get("from_phase") or status in TERMINAL_STATUSES
+        advanced = (
+            (expected and phase == expected) or phase != entry.get("from_phase") or work_status in TERMINAL_STATUSES
+        )
         entry["end_phase"] = phase
-        entry["end_status"] = status
+        entry["end_work_status"] = work_status
         if advanced:
             entry["state"] = "completed"
             self.events.emit(
                 "completed",
-                slug,
+                path,
                 id=entry.get("id"),
                 phase=f"{entry.get('from_phase')}->{phase}",
             )
@@ -337,7 +374,7 @@ class Dispatcher:
             entry["state"] = "stalled"
             self.events.emit(
                 "stalled",
-                slug,
+                path,
                 id=entry.get("id"),
                 phase=phase,
                 reason=f"{reason}; phase did not advance",
@@ -346,34 +383,32 @@ class Dispatcher:
     # -- readiness ---------------------------------------------------------
 
     def ready(self) -> tuple[list[dict[str, Any]], list[tuple[str, str]]]:
-        """Return (dispatchable, waiting) where waiting is (slug, reason)."""
+        """Return (dispatchable, waiting) where waiting is (path, reason)."""
         dispatchable: list[dict[str, Any]] = []
         waiting: list[tuple[str, str]] = []
 
         for item in self.work_items():
-            slug = item["slug"]
-            if item.get("status") in TERMINAL_STATUSES:
-                continue
-            led = self.ledger.state_of(slug)
+            path = item["path"]
+            led = self.ledger.state_of(path)
             if led in ACTIVE_STATES:
                 continue
             if led in STICKY_STATES:
-                waiting.append((slug, f"{led} -- clear with --reset {slug}"))
+                waiting.append((path, f"{led} -- clear with --reset {path}"))
                 continue
 
-            info = self.gw_next(slug)
+            info = self.gw_next(path)
             if info is None:
                 continue
-            if info.get("status") in TERMINAL_STATUSES or info.get("phase") == "done":
+            if info.get("work_status") in TERMINAL_STATUSES or info.get("phase") == "done":
                 continue
 
             blockers = info.get("blockers") or []
             if blockers:
                 # Epics gated on open children are not a problem -- their
-                # children are separate slugs and get picked up on their own.
+                # children are separate paths and get picked up on their own.
                 text = " ".join(str(b) for b in blockers)
                 if "waiting on children" not in text:
-                    waiting.append((slug, self._blocker_summary(blockers)))
+                    waiting.append((path, self._blocker_summary(blockers)))
                 continue
 
             phase = info.get("phase")
@@ -398,10 +433,10 @@ class Dispatcher:
     # -- dispatch ----------------------------------------------------------
 
     def dispatch(self, info: dict[str, Any]) -> bool:
-        slug = info["slug"]
+        path = info["selected_path"]
         phase = info.get("phase") or "?"
         skill = (info.get("action") or {}).get("skill")
-        name = f"gw-{phase}-{slug}"[:64]
+        name = f"gw-{phase}-{path.replace('/', '-')}"[:64]
 
         argv = [
             self.claude,
@@ -414,13 +449,13 @@ class Dispatcher:
             str(self.workspace),
             "--append-system-prompt",
             UNATTENDED_PROMPT.format(owner=self.args.owner),
-            f"/graph-wiki:next {slug}",
+            f"/graph-works:next {path}",
         ]
         if self.args.model:
             argv[1:1] = ["--model", self.args.model]
 
         if self.args.dry_run:
-            print(f"DRY-RUN would dispatch {slug} (phase={phase} skill={skill})")
+            print(f"DRY-RUN would dispatch {path} (phase={phase} skill={skill})")
             print("        " + " ".join([*argv[:1], "...", *argv[-1:]]))
             return False
 
@@ -434,26 +469,26 @@ class Dispatcher:
                 "  Accept the disclaimer, quit, then restart this dispatcher.\n"
             )
         if rc != 0:
-            self.events.emit("dispatch-error", slug, rc=rc, err=err.strip()[:200])
+            self.events.emit("dispatch-error", path, rc=rc, err=err.strip()[:200])
             return False
 
         sid = self._extract_id(blob, name)
         if not sid:
-            self.events.emit("dispatch-error", slug, rc=rc, err="could not determine session id")
+            self.events.emit("dispatch-error", path, rc=rc, err="could not determine session id")
             return False
 
-        self.ledger.runs[slug] = {
+        self.ledger.runs[path] = {
             "id": sid,
             "name": name,
             "state": "running",
             "skill": skill,
             "from_phase": phase,
-            "from_status": info.get("status"),
+            "from_work_status": info.get("work_status"),
             "expect_phase": (info.get("on_complete") or {}).get("phase"),
             "dispatched_at": now_iso(),
         }
         self.ledger.save()
-        self.events.emit("dispatched", slug, id=sid, phase=phase, skill=skill)
+        self.events.emit("dispatched", path, id=sid, phase=phase, skill=skill)
         return True
 
     def _extract_id(self, blob: str, name: str) -> str | None:
@@ -480,40 +515,40 @@ class Dispatcher:
             self.dispatch(info)
 
         if len(dispatchable) > slots and not self.args.dry_run:
-            held = [i["slug"] for i in dispatchable[slots:]]
+            held = [i["selected_path"] for i in dispatchable[slots:]]
             print(f"       .. {len(held)} ready, held by --max-parallel {self.args.max_parallel}: " + ", ".join(held))
-        for slug, reason in waiting:
-            print(f"       .. waiting  {slug}: {reason}")
+        for path, reason in waiting:
+            print(f"       .. waiting  {path}: {reason}")
 
     def status(self) -> None:
         live = self.live_sessions()
         if not self.ledger.runs:
             print("ledger empty")
-        for slug, e in sorted(self.ledger.runs.items()):
+        for path, e in sorted(self.ledger.runs.items()):
             sess = live.get(e.get("id", ""))
             tail = f" live={sess.get('state')}" if sess else ""
             print(
-                f"{e.get('state', '?'):<10} {e.get('id', '--'):<10} {slug}"
+                f"{e.get('state', '?'):<10} {e.get('id', '--'):<10} {path}"
                 f"  [{e.get('from_phase')} -> {e.get('end_phase') or e.get('expect_phase')}]{tail}"
             )
             if e.get("state") == "blocked":
                 print(f"           needs input: claude attach {e.get('id')}")
 
-    def reset(self, slugs: list[str]) -> None:
-        for slug in slugs:
-            if self.ledger.runs.pop(slug, None) is not None:
-                print(f"reset {slug}")
+    def reset(self, paths: list[str]) -> None:
+        for path in paths:
+            if self.ledger.runs.pop(path, None) is not None:
+                print(f"reset {path}")
             else:
-                print(f"no ledger entry for {slug}")
+                print(f"no ledger entry for {path}")
         self.ledger.save()
 
 
 def main() -> None:
-    default_ws = os.environ.get("GRAPH_WIKI_WORKSPACE", "")
+    default_ws = os.environ.get("GRAPH_WORKS_DIR", "")
     ap = argparse.ArgumentParser(
-        description="Dispatch graph-wiki pipeline stages into fresh background Claude sessions.",
+        description="Dispatch graph-works pipeline stages into fresh background Claude sessions.",
     )
-    ap.add_argument("--workspace", default=default_ws, help="graph-wiki workspace (default: $GRAPH_WIKI_WORKSPACE)")
+    ap.add_argument("--workspace", default=default_ws, help="graph-works workspace (default: $GRAPH_WORKS_DIR)")
     ap.add_argument(
         "--repo", default=str(Path.cwd()), help="repo checkout used as cwd for dispatched sessions (default: cwd)"
     )
@@ -539,13 +574,13 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="report dispatches without making them")
     ap.add_argument("--notify", action="store_true", help="macOS banner on blocked/failed/stalled")
     ap.add_argument("--status", action="store_true", help="print ledger rollup and exit")
-    ap.add_argument("--reset", nargs="+", metavar="SLUG", help="clear ledger entries and exit")
+    ap.add_argument("--reset", nargs="+", metavar="WORK_PATH", help="clear ledger entries and exit")
     ap.add_argument("--claude-bin", default=None)
     ap.add_argument("--gw-bin", default=None)
     args = ap.parse_args()
 
     if not args.workspace:
-        sys.exit("error: no workspace. Pass --workspace or set GRAPH_WIKI_WORKSPACE.")
+        sys.exit("error: no workspace. Pass --workspace or set GRAPH_WORKS_DIR.")
 
     d = Dispatcher(args)
 

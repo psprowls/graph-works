@@ -20,26 +20,25 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
-from typing import Any, Never
+from typing import Any, Never, Protocol, cast
 
 import typer
 from graph_works_core.archive.commands import ArchiveRun
 from graph_works_core.orchestrate.commands import OrchestrateResult, StageAdvance
 from graph_works_core.work.commands import (
-    AdoptChildSpecsResult,
     ChildRollup,
     Decision,
     DecisionCommandResult,
-    FilingOutcome,
+    FilingRun,
+    MigrationLayoutResult,
     NextResult,
     OverturnResult,
+    PathMutationResult,
+    RegenIndexesResult,
     StatusReport,
     Transition,
 )
 from graph_works_core.work.reconcile import ReconcileContext
-from okf_io import IndexUpdate
-from okf_io.validate import Finding, Report
-from subagents_io.dispatch import WorktreeAction
 
 from graph_works_cli import exit_codes
 
@@ -99,7 +98,7 @@ def _transition(transition: Transition | None) -> dict[str, Any] | None:
         return None
     return {
         "phase": transition.phase,
-        "status": transition.workflow_status,
+        "work_status": transition.work_status,
         "document_status": transition.document_status,
         "requires": list(transition.requires),
         "sync_plan_table": transition.sync_plan_table,
@@ -113,11 +112,25 @@ def _rollup(rollup: ChildRollup | None) -> dict[str, Any] | None:
     return {
         "total": rollup.total,
         "terminal": rollup.terminal,
-        "open_slugs": list(rollup.open_slugs),
+        "open_paths": list(rollup.open_paths),
     }
 
 
-def _finding(finding: Finding) -> dict[str, Any]:
+class _FindingView(Protocol):
+    code: str
+    severity: str
+    message: str
+    spec: str
+    path: str | None
+    line: int | None
+
+
+class _ReportView(Protocol):
+    ok: bool
+    findings: tuple[_FindingView, ...]
+
+
+def _finding(finding: _FindingView) -> dict[str, Any]:
     return {
         "code": finding.code,
         "severity": finding.severity,
@@ -141,14 +154,62 @@ def _decision(entry: Decision) -> dict[str, Any]:
     }
 
 
+class _RefusalView(Protocol):
+    path: str
+    kind: str
+    detail: str
+
+
+class _ApplicationView(Protocol):
+    rolled_back: bool
+    failures: tuple[str, ...]
+
+
+class _WorktreeView(Protocol):
+    action: str
+    path: str
+    branch: str
+    base_branch: str | None
+    exists: bool | None
+
+
+class _MigrationEntryView(Protocol):
+    old_path: str
+    new_path: str
+    type: str
+
+
+class _MigrationDetailView(Protocol):
+    manifest: tuple[_MigrationEntryView, ...]
+    frontmatter_edits: tuple[str, ...]
+    opaque_warnings: tuple[str, ...]
+
+
+def _refusal(value: object) -> dict[str, str]:
+    refusal = cast(_RefusalView, value)
+    return {
+        "path": str(refusal.path),
+        "kind": str(refusal.kind),
+        "detail": str(refusal.detail),
+    }
+
+
+def _application(application: object | None) -> dict[str, Any]:
+    viewed = None if application is None else cast(_ApplicationView, application)
+    return {
+        "applied": viewed is not None,
+        "rolled_back": False if viewed is None else viewed.rolled_back,
+        "failures": [] if viewed is None else list(viewed.failures),
+    }
+
+
 # ---------------------------------------------------------------------------
 # next
 # ---------------------------------------------------------------------------
 
 
-def normalized_payload(result: NextResult) -> dict[str, str] | None:
-    """`{"spec_doc": <rel>}` for the selected item, plus `ancestor_spec_doc`
-    when a `--descend` walk healed the requested item's pointer too.
+def normalized_payload(result: NextResult) -> list[dict[str, str]] | None:
+    """Persisted managed-source repairs, each identified by canonical path.
 
     Keyed off `application.normalized` -- what actually persisted -- not off
     `normalizations`, which is the plan. A dry-run preview reports nothing
@@ -157,12 +218,17 @@ def normalized_payload(result: NextResult) -> dict[str, str] | None:
     persisted = set(result.application.normalized)
     if not persisted:
         return None
-    payload: dict[str, str] = {}
+    payload: list[dict[str, str]] = []
     for change in result.normalizations:
-        if change.slug not in persisted:
+        if change.path not in persisted:
             continue
-        key = "spec_doc" if change.slug == result.selected_slug else "ancestor_spec_doc"
-        payload[key] = change.ref.rel
+        payload.append(
+            {
+                "path": change.path,
+                "source_id": str(change.ref.source_id),
+                "resource": change.ref.resource,
+            }
+        )
     return payload or None
 
 
@@ -170,7 +236,7 @@ def descent_payload(result: NextResult) -> dict[str, Any] | None:
     if result.descent is None:
         return None
     return {
-        "from": result.requested_slug,
+        "from": result.requested_path,
         "path": list(result.descent.path),
         "leaf": result.descent.leaf,
         "blocked_at": result.descent.blocked_at,
@@ -199,8 +265,9 @@ def next_payload(result: NextResult, *, bundle_root: Path, skill: str | None) ->
     `gw next` (C6) wraps."""
     dispatch = result.route.dispatch
     return {
-        "slug": result.selected_slug,
-        "status": result.state.workflow_status,
+        "requested_path": result.requested_path,
+        "selected_path": result.selected_path,
+        "work_status": result.state.work_status,
         "kind": result.state.type,
         "phase": result.state.phase,
         "effort": result.state.effort,
@@ -218,9 +285,12 @@ def next_payload(result: NextResult, *, bundle_root: Path, skill: str | None) ->
 def render_next(result: NextResult, payload: dict[str, Any]) -> None:
     normalized = payload["normalized"]
     if normalized:
-        for key, value in normalized.items():
-            typer.echo(f"[fix] stamped {key}: {value}")
-    typer.echo(f"{payload['slug']}: kind={payload['kind']} status={payload['status']} phase={payload['phase']}")
+        for source in normalized:
+            typer.echo(f"[fix] stamped {source['source_id']} for {source['path']}: {source['resource']}")
+    typer.echo(
+        f"{payload['selected_path']}: kind={payload['kind']} "
+        f"work_status={payload['work_status']} phase={payload['phase']}"
+    )
     if payload["descent"]:
         typer.echo(f"  descent: {' -> '.join(payload['descent']['path'])}")
     if payload["action"]:
@@ -245,7 +315,7 @@ def _json_safe(value: object) -> object:
     return value.isoformat() if isinstance(value, date) else value
 
 
-def advance_payload(result: StageAdvance, slug: str) -> dict[str, Any]:
+def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
     """The `gw work advance` contract: phase, status, blockers, on_complete."""
     plan = result.outcome.plan
     applied = {change.key: [_json_safe(change.before), _json_safe(change.after)] for change in plan.changes}
@@ -254,17 +324,22 @@ def advance_payload(result: StageAdvance, slug: str) -> dict[str, Any]:
         assert result.outcome.stamped.source_id is not None
         stamped[result.outcome.stamped.source_id] = result.outcome.stamped.resource
     phase = plan.transition.phase if plan.transition is not None else None
-    status = plan.transition.workflow_status if plan.transition is not None else None
+    status = plan.transition.work_status if plan.transition is not None else None
+    application = result.application
     return {
-        "slug": slug,
+        "path": path,
         "phase": phase,
-        "status": status,
+        "work_status": status,
         "blockers": list(plan.route.blockers),
         "on_complete": _transition(plan.route.on_complete),
-        "applied": applied,
+        "changes": applied,
         "stamped": stamped,
         "plan_row": result.outcome.plan_row,
         "changed": result.outcome.changed,
+        "applied": application is not None,
+        "rolled_back": False if application is None else application.rolled_back,
+        "failures": [] if application is None else list(application.failures),
+        "warnings": [] if application is None else list(application.warnings),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "results_path": None if result.results_path is None else str(result.results_path),
         "pointer_path": None if result.pointer_path is None else str(result.pointer_path),
@@ -273,8 +348,8 @@ def advance_payload(result: StageAdvance, slug: str) -> dict[str, Any]:
 
 
 def render_advance(payload: dict[str, Any]) -> None:
-    typer.echo(f"[ok] {payload['slug']}: phase={payload['phase']} status={payload['status']}")
-    for key, change in payload["applied"].items():
+    typer.echo(f"[ok] {payload['path']}: phase={payload['phase']} work_status={payload['work_status']}")
+    for key, change in payload["changes"].items():
         typer.echo(f"  {key}: {change[0]!r} -> {change[1]!r}")
     for key, value in payload["stamped"].items():
         typer.echo(f"  stamped {key}: {value}")
@@ -291,17 +366,20 @@ def render_advance(payload: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def file_payload(outcome: FilingOutcome) -> dict[str, Any]:
+def file_payload(outcome: FilingRun) -> dict[str, Any]:
     plan = outcome.plan
+    application = outcome.application
     return {
-        "slug": plan.filing.slug,
+        "path": plan.filing.path,
         "page_path": str(plan.filing.target),
-        "work_directory": str(plan.filing.work_directory),
         "refusal": plan.refusal,
         "detail": plan.filing.detail,
-        "indexes": [update.path for update in outcome.application.indexes if update.changed],
-        "logged": None if outcome.application.log is None else outcome.application.log.entry,
-        "warnings": list(plan.warnings),
+        "indexes": [str(update.path) for update in plan.indexes if update.changed],
+        "logged": None if plan.log is None else plan.log.entry,
+        "warnings": [*plan.warnings, *(() if application is None else application.warnings)],
+        "applied": application is not None,
+        "rolled_back": False if application is None else application.rolled_back,
+        "failures": [] if application is None else list(application.failures),
     }
 
 
@@ -314,15 +392,15 @@ def status_payload(report: StatusReport) -> dict[str, Any]:
     resume = report.resume
     return {
         "total": report.rollup.total,
-        "by_workflow_status": dict(report.rollup.by_workflow_status),
+        "by_work_status": dict(report.rollup.by_work_status),
         "by_type": dict(report.rollup.by_type),
         "by_phase": dict(report.rollup.by_phase),
-        "children": {slug: _rollup(rolled) for slug, rolled in report.rollup.children.items()},
+        "children": {path: _rollup(rolled) for path, rolled in report.rollup.children.items()},
         "resume": None
         if resume is None
         else {
-            "primary": {"slug": resume.primary.slug, "title": resume.primary.title},
-            "alternatives": [{"slug": item.slug, "title": item.title} for item in resume.alternatives],
+            "primary": {"path": resume.primary.path, "title": resume.primary.title},
+            "alternatives": [{"path": item.path, "title": item.title} for item in resume.alternatives],
         },
     }
 
@@ -330,41 +408,44 @@ def status_payload(report: StatusReport) -> dict[str, Any]:
 def render_status(payload: dict[str, Any]) -> None:
     typer.echo(f"{payload['total']} item(s) under work/")
     for label, key in (
-        ("workflow_status", "by_workflow_status"),
+        ("work_status", "by_work_status"),
         ("type", "by_type"),
         ("phase", "by_phase"),
     ):
         rendered = ", ".join(f"{name} {count}" for name, count in payload[key].items())
         typer.echo(f"  by {label}: {rendered or '-'}")
-    for slug, rolled in payload["children"].items():
-        typer.echo(f"  children {slug}: {rolled['terminal']}/{rolled['total']} terminal")
+    for path, rolled in payload["children"].items():
+        typer.echo(f"  children {path}: {rolled['terminal']}/{rolled['total']} terminal")
     resume = payload["resume"]
     if resume is not None:
-        typer.echo(f"  resume: {resume['primary']['slug']} — {resume['primary']['title']}")
+        typer.echo(f"  resume: {resume['primary']['path']} — {resume['primary']['title']}")
         for alternative in resume["alternatives"]:
-            typer.echo(f"    alt: {alternative['slug']} — {alternative['title']}")
+            typer.echo(f"    alt: {alternative['path']} — {alternative['title']}")
 
 
-def lint_payload(report: Report) -> dict[str, Any]:
-    return {"ok": report.ok, "findings": [_finding(finding) for finding in report.findings]}
+def lint_payload(report: object) -> dict[str, Any]:
+    view = cast(_ReportView, report)
+    return {"ok": view.ok, "findings": [_finding(finding) for finding in view.findings]}
 
 
-def render_lint(report: Report) -> None:
+def render_lint(report: object) -> None:
     """Errors to stderr, warnings to stdout -- so a piped lint carries only
     what the reader asked for."""
-    for finding in report.findings:
+    view = cast(_ReportView, report)
+    for finding in view.findings:
         line = f"{finding.severity:<6} {finding.code}: {finding.message}"
         typer.echo(line, err=finding.severity == "error")
 
 
-def regen_index_payload(update: IndexUpdate) -> dict[str, Any]:
+def regen_index_payload(result: RegenIndexesResult) -> dict[str, Any]:
+    application = result.application
     return {
-        "path": update.path,
-        "changed": update.changed,
-        "created": update.created,
-        "added": [change.target for change in update.changes if change.kind == "add"],
-        "removed": [change.target for change in update.changes if change.kind == "remove"],
-        "drift": [drift.target for drift in update.drift],
+        "indexes": [str(plan.path) for plan in result.plans if plan.changed],
+        "warnings": [*result.mutation.warnings, *(() if application is None else application.warnings)],
+        "refusals": [_refusal(item) for item in result.mutation.refusals],
+        "applied": application is not None,
+        "rolled_back": False if application is None else application.rolled_back,
+        "failures": [] if application is None else list(application.failures),
     }
 
 
@@ -378,46 +459,54 @@ def archive_payload(run: ArchiveRun, *, dry_run: bool) -> dict[str, Any]:
     return {
         "dry_run": dry_run,
         "ok": run.ok,
-        "planned": list(run.plan.slugs),
         "conflict": list(run.conflict),
-        "archived": [] if result is None else list(result.archived),
-        "pruned": [] if result is None else list(result.pruned),
-        "skipped": [
-            {"slug": skip.slug, "reason": skip.reason, "detail": skip.detail}
-            for skip in (run.plan.skipped if result is None else result.skipped)
-        ],
-        "indexes": [] if result is None else [update.path for update in result.indexes if update.changed],
+        "path_mapping": dict(run.plan.path_mapping),
+        "indexes": [] if result is None else [path for path in result.written if path.endswith("index.md")],
+        "warnings": [*run.plan.warnings, *(() if result is None else result.warnings)],
+        "refusals": [_refusal(refusal) for refusal in run.plan.refusals],
+        **_application(result),
         "pointer_cleared": run.pointer_cleared,
         "logged": run.logged,
     }
 
 
-# ---------------------------------------------------------------------------
-# adopt-child-specs
-# ---------------------------------------------------------------------------
-
-
-def adopt_payload(result: AdoptChildSpecsResult) -> dict[str, Any]:
-    plan = result.plan
+def path_mutation_payload(result: PathMutationResult) -> dict[str, Any]:
     return {
-        "epic_slug": plan.epic_slug,
-        "refusal": plan.refusal,
-        "adopted": [
+        "path_mapping": dict(result.plan.path_mapping),
+        "indexes": [write.member for write in result.plan.writes if write.member.endswith("index.md")],
+        "warnings": [*result.plan.warnings, *(() if result.application is None else result.application.warnings)],
+        "refusals": [_refusal(refusal) for refusal in result.plan.refusals],
+        **_application(result.application),
+    }
+
+
+def migration_payload(result: MigrationLayoutResult) -> dict[str, Any]:
+    plan = result.plan
+    details = cast(_MigrationDetailView, plan)
+    mutation = plan.mutation
+    move_plan = mutation.move_plan
+    managed_edits = () if move_plan is None else move_plan.edits
+    return {
+        "moves": [{"from": entry.old_path, "to": entry.new_path, "type": entry.type} for entry in details.manifest],
+        "path_mapping": dict(mutation.path_mapping),
+        "frontmatter_edits": list(details.frontmatter_edits),
+        "managed_markdown_edits": [
             {
-                "child": move.child_slug,
-                "from": None if move.draft is None else str(move.draft),
-                "spec_doc": move.source_ref.rel,
+                "member": edit.member,
+                "where": edit.where,
+                "target": edit.target,
+                "old": edit.old,
+                "new": edit.new,
+                "line": edit.line,
+                "column": edit.column,
+                "key": edit.key,
             }
-            for move in plan.adopted
+            for edit in managed_edits
         ],
-        "orphaned_drafts": [str(path) for path in plan.orphaned],
-        "unseeded_children": list(plan.unseeded),
-        "ambiguous": [
-            {"stem": str(entry.draft), "candidates": list(entry.candidate_slugs)} for entry in plan.ambiguous
-        ],
-        "moved": [str(path) for path in result.application.moved],
-        "registered": list(result.application.registered),
-        "warnings": [*plan.warnings, *result.application.warnings],
+        "indexes": [write.member for write in mutation.writes if write.member.endswith("index.md")],
+        "opaque_warnings": list(details.opaque_warnings),
+        "refusals": [_refusal(refusal) for refusal in mutation.refusals],
+        **_application(result.application),
     }
 
 
@@ -428,15 +517,15 @@ def adopt_payload(result: AdoptChildSpecsResult) -> dict[str, Any]:
 
 def decision_payload(result: DecisionCommandResult) -> dict[str, Any]:
     plan = result.plan
+    application = result.application
     return {
-        "epic_slug": result.owner.epic_slug,
-        "resolved_from": result.owner.redirected_from,
+        "owner_path": result.owner.owner_path,
+        "requested_path": result.owner.redirected_from or result.owner.owner_path,
         "ledger_path": str(result.owner.ledger),
         "entry": None if plan is None or plan.primary is None else _decision(plan.primary),
         "superseded": None if plan is None or plan.superseded is None else plan.superseded.id,
         "refusal": None if plan is None else plan.refusal,
-        "written": result.application.written,
-        "stale": result.application.stale,
+        **_application(application),
         "entries": [_decision(entry) for entry in result.entries],
         "counts": dict(result.counts),
         "warnings": list(result.warnings),
@@ -446,44 +535,40 @@ def decision_payload(result: DecisionCommandResult) -> dict[str, Any]:
 def overturn_payload(result: OverturnResult) -> dict[str, Any]:
     decision = result.plan.decision
     filing = result.plan.filing
+    application = None if result.application is None else result.application.mutation
     return {
-        "epic_slug": result.owner.epic_slug,
-        "resolved_from": result.owner.redirected_from,
+        "owner_path": result.owner.owner_path,
+        "requested_path": result.owner.redirected_from or result.owner.owner_path,
         "ledger_path": str(result.owner.ledger),
         "entry": None if decision.primary is None else _decision(decision.primary),
         "superseded": None if decision.superseded is None else decision.superseded.id,
         "refusal": result.plan.refusal,
-        "written": result.application.decision.written,
-        "stale": result.application.decision.stale,
-        "follow_up": {"slug": filing.filing.slug, "page_path": str(filing.filing.target)},
-        "follow_up_filed": bool(result.application.filing.indexes) or result.application.decision.written,
+        **_application(application),
+        "follow_up": {"path": filing.filing.path, "page_path": str(filing.filing.target)},
+        "follow_up_filed": application is not None and application.ok,
         "warnings": list(result.warnings),
     }
 
 
 def render_decision_write(payload: dict[str, Any], verb: str) -> None:
-    resolved = f" (resolved from {payload['resolved_from']})" if payload["resolved_from"] else ""
-    typer.echo(f"[ok] ledger: {payload['epic_slug']}{resolved}")
+    resolved = f" (requested {payload['requested_path']})" if payload["requested_path"] != payload["owner_path"] else ""
+    typer.echo(f"[ok] ledger: {payload['owner_path']}{resolved}")
     if payload["entry"]:
         typer.echo(f"[ok] {verb} {payload['entry']['id']}  status={payload['entry']['status']}")
     if payload["superseded"]:
         typer.echo(f"[ok] superseded {payload['superseded']}")
     follow_up = payload.get("follow_up")
     if follow_up:
-        typer.echo(f"[ok] follow-up {follow_up['slug']}: {follow_up['page_path']}")
-    for warning in payload["warnings"]:
-        warn(warning)
+        typer.echo(f"[ok] follow-up {follow_up['path']}: {follow_up['page_path']}")
 
 
 def render_decision_list(payload: dict[str, Any]) -> None:
-    resolved = f" (resolved from {payload['resolved_from']})" if payload["resolved_from"] else ""
-    typer.echo(f"[ok] ledger: {payload['epic_slug']}{resolved}  {payload['ledger_path']}")
+    resolved = f" (requested {payload['requested_path']})" if payload["requested_path"] != payload["owner_path"] else ""
+    typer.echo(f"[ok] ledger: {payload['owner_path']}{resolved}  {payload['ledger_path']}")
     for entry in payload["entries"]:
         question = f" — {entry['question']}" if entry["question"] else ""
         typer.echo(f"  {entry['id']}  {entry['status'] or '(no status)'}{question}")
     typer.echo("  counts: " + ", ".join(f"{key}={value}" for key, value in payload["counts"].items()))
-    for warning in payload["warnings"]:
-        warn(warning)
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +576,8 @@ def render_decision_list(payload: dict[str, Any]) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _worktree(action: WorktreeAction) -> dict[str, Any]:
+def _worktree(value: object) -> dict[str, Any]:
+    action = cast(_WorktreeView, value)
     return {
         "action": action.action,
         "path": action.path,
@@ -503,7 +589,7 @@ def _worktree(action: WorktreeAction) -> dict[str, Any]:
 
 def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
     return {
-        "slug": result.slug,
+        "path": result.path,
         "terminal": result.terminal,
         "max_parallel": result.max_parallel,
         "slots_free": result.slots_free,
@@ -512,7 +598,7 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         "dispatches": [
             {
                 "key": dispatch.key,
-                "slug": dispatch.slug,
+                "path": dispatch.slug,
                 "phase": dispatch.phase,
                 "kind": dispatch.kind,
                 "effort": dispatch.effort,
@@ -527,12 +613,12 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
             for dispatch in result.dispatches
         ],
         "advances": [
-            {"slug": advance.slug, "reason": advance.reason, "worktree": advance.worktree, "branch": advance.branch}
+            {"path": advance.path, "reason": advance.reason, "worktree": advance.worktree, "branch": advance.branch}
             for advance in result.advances
         ],
-        "blocked": [{"slug": item.slug, "kind": item.kind, "reason": item.reason} for item in result.blocked],
+        "blocked": [{"path": item.path, "kind": item.kind, "reason": item.reason} for item in result.blocked],
         "decisions": {
-            "epic_slug": result.decisions_epic_slug,
+            "owner_path": result.decisions_owner_path,
             "ledger_path": result.decisions_ledger_path,
             "open": [_decision(entry) for entry in result.open_decisions],
             "assumed": [_decision(entry) for entry in result.assumed_decisions],
@@ -545,16 +631,16 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
 def render_orchestrate(payload: dict[str, Any]) -> None:
     free = payload["slots_free"]
     max_p = payload["max_parallel"]
-    typer.echo(f"{payload['slug']}: terminal={payload['terminal']} slots_free={free}/{max_p}")
+    typer.echo(f"{payload['path']}: terminal={payload['terminal']} slots_free={free}/{max_p}")
     for dispatch in payload["dispatches"]:
         typer.echo(
             f"  dispatch {dispatch['key']}: {dispatch['skill']} mode={dispatch['mode']} "
             f"model={dispatch['model']} worktree={dispatch['worktree']['action']}"
         )
     for advance in payload["advances"]:
-        typer.echo(f"  advance {advance['slug']}: {advance['reason']}")
+        typer.echo(f"  advance {advance['path']}: {advance['reason']}")
     for blocked in payload["blocked"]:
-        echo_wrapped(f"  blocked {blocked['slug']} ({blocked['kind']}): ", blocked["reason"])
+        echo_wrapped(f"  blocked {blocked['path']} ({blocked['kind']}): ", blocked["reason"])
     for entry in payload["decisions"]["open"]:
         typer.echo(f"  open decision {entry['id']}: {entry['question']}")
     for warning in payload["warnings"]:
@@ -569,14 +655,14 @@ def render_orchestrate(payload: dict[str, Any]) -> None:
 def reconcile_payload(context: ReconcileContext) -> dict[str, Any]:
     """All fourteen donor fields, at their donor names and nesting."""
     return {
-        "epic_slug": context.epic_slug,
-        "slug": context.slug,
+        "owner_path": context.owner_path,
+        "path": context.path,
         "spec_path": context.spec_path,
         "spec_anchor_commit": context.spec_anchor_commit,
         "anchor_source": context.anchor_source,
         "commit_range": context.commit_range,
         "landed_siblings": [
-            {"slug": sibling.slug, "resolved_in": sibling.resolved_in, "affects": list(sibling.affects)}
+            {"path": sibling.path, "resolved_in": sibling.resolved_in, "affects": list(sibling.affects)}
             for sibling in context.landed_siblings
         ],
         "touched_paths": list(context.touched_paths),
@@ -594,13 +680,13 @@ def reconcile_payload(context: ReconcileContext) -> dict[str, Any]:
 
 
 def render_reconcile(payload: dict[str, Any]) -> None:
-    typer.echo(f"{payload['slug']}: epic={payload['epic_slug'] or '-'}")
+    typer.echo(f"{payload['path']}: owner={payload['owner_path'] or '-'}")
     typer.echo(f"  spec: {payload['spec_path']}")
     typer.echo(f"  anchor: {payload['spec_anchor_commit'] or '-'} ({payload['anchor_source']})")
     typer.echo(f"  range: {payload['commit_range'] or '-'}")
     typer.echo(f"  touched: {', '.join(payload['touched_paths']) or '-'}")
     for sibling in payload["landed_siblings"]:
-        typer.echo(f"  landed: {sibling['slug']} resolved_in {sibling['resolved_in']}")
+        typer.echo(f"  landed: {sibling['path']} resolved_in {sibling['resolved_in']}")
     for commit in payload["commits_since"]:
         typer.echo(f"  commit: {commit['sha'][:8]} {commit['subject']}")
     for cited in payload["cited_decisions"]:

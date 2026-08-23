@@ -1,9 +1,10 @@
-"""The `gw work` surface: fifteen verbs, one forbidden import, three guarded verbs."""
+"""The frozen path-native `gw work` surface and its layering boundary."""
 
 from __future__ import annotations
 
 import ast
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -23,9 +24,11 @@ VERBS = [
     ["work", "lint"],
     ["work", "archive"],
     ["work", "regen-index"],
+    ["work", "reparent"],
+    ["work", "adopt"],
+    ["work", "migrate-layout"],
     ["work", "orchestrate"],
     ["work", "reconcile-context"],
-    ["work", "adopt-child-specs"],
     ["work", "decision", "add"],
     ["work", "decision", "answer"],
     ["work", "decision", "list"],
@@ -34,8 +37,8 @@ VERBS = [
 ]
 
 
-def test_the_surface_is_exactly_fifteen_verbs() -> None:
-    assert len(VERBS) == 15
+def test_the_surface_is_exactly_seventeen_verbs() -> None:
+    assert len(VERBS) == 17
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))
@@ -52,7 +55,30 @@ def test_next_declares_descend_and_json() -> None:
     assert {"--descend", "--json", "--workspace"} <= opts
 
 
-def test_file_declares_every_donor_flag() -> None:
+@pytest.mark.parametrize(
+    "verb",
+    [
+        ["work", "next"],
+        ["work", "advance"],
+        ["work", "archive"],
+        ["work", "reparent"],
+        ["work", "adopt"],
+        ["work", "orchestrate"],
+        ["work", "reconcile-context"],
+        ["work", "decision", "add"],
+        ["work", "decision", "answer"],
+        ["work", "decision", "list"],
+        ["work", "decision", "supersede"],
+        ["work", "decision", "overturn"],
+    ],
+    ids=lambda verb: " ".join(verb),
+)
+def test_every_positional_work_identifier_is_named_path(verb: list[str]) -> None:
+    payload = json.loads(runner.invoke(app, ["help", *verb, "--json"]).stdout)
+    assert payload["arguments"][0]["name"] == "path"
+
+
+def test_file_declares_only_the_path_native_identity_and_dependency_flags() -> None:
     payload = json.loads(runner.invoke(app, ["help", "work", "file", "--json"]).stdout)
     opts = {opt for option in payload["options"] for opt in option["opts"]}
     assert {
@@ -61,23 +87,33 @@ def test_file_declares_every_donor_flag() -> None:
         "--summary",
         "--affects",
         "--effort",
-        "--slug-words",
-        "--parent",
-        "--depends-on",
+        "--name",
+        "--parent-path",
         "--dep",
         "--blast-radius",
-        "--target",
+        "--version",
+        "--target-date",
         "--owner",
         "--tags",
         "--json",
         "--workspace",
     } <= opts
+    assert "--slug" + "-words" not in opts
+    assert "--depends" + "-on" not in opts
+    assert "--parent" not in opts
 
 
 def test_advance_declares_the_donor_provenance_pair() -> None:
     payload = json.loads(runner.invoke(app, ["help", "work", "advance", "--json"]).stdout)
     opts = {opt for option in payload["options"] for opt in option["opts"]}
-    assert {"--owner", "--effort", "--resolved-in", "--worktree", "--branch"} <= opts
+    assert {"--owner", "--effort", "--resolved-in", "--released-at", "--worktree", "--branch"} <= opts
+
+
+def test_migrate_layout_requires_an_explicit_apply_switch_without_a_compatibility_alias() -> None:
+    payload = json.loads(runner.invoke(app, ["help", "work", "migrate-layout", "--json"]).stdout)
+    opts = {opt for option in payload["options"] for opt in option["opts"]}
+    assert "--apply" in opts
+    assert "--dry-run" not in opts
 
 
 def _imported_roots(path: Path) -> set[str]:
@@ -91,13 +127,20 @@ def _imported_roots(path: Path) -> set[str]:
     return roots
 
 
-def test_no_cli_module_imports_work_tracker_okf() -> None:
-    """ADR-0013's boundary, asserted rather than reviewed. The CLI reaches work
-    domain types only through `graph_works_core.work.commands`' re-exports."""
-    offenders = sorted(
-        str(path.relative_to(SRC)) for path in SRC.rglob("*.py") if "work_tracker_okf" in _imported_roots(path)
-    )
-    assert offenders == []
+def test_work_cli_imports_domain_behavior_only_through_graph_works_core() -> None:
+    """ADR-0013's boundary, asserted rather than reviewed.
+
+    The work CLI may depend on its own interface package, Typer, and the Python
+    standard library. Every domain/config/schema dependency must arrive through
+    ``graph_works_core`` rather than a lower-level sibling package.
+    """
+    allowed = {*sys.stdlib_module_names, "graph_works_cli", "graph_works_core", "typer"}
+    offenders = {
+        str(path.relative_to(SRC)): sorted(_imported_roots(path) - allowed)
+        for path in WORK_CLI.rglob("*.py")
+        if _imported_roots(path) - allowed
+    }
+    assert offenders == {}
 
 
 def test_exactly_three_verbs_guard_against_stale_routing() -> None:

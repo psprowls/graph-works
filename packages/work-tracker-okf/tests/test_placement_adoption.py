@@ -167,60 +167,38 @@ def test_the_composed_rule_set_reports_a_stray_page_as_an_error(conformant_root:
     assert [finding.code for finding in report.errors if finding.code.startswith(f"{TOPIC}.")] == [CODES[0]]
 
 
-# --- B. the writer -----------------------------------------------------------
+# --- B. the path-native writer ----------------------------------------------
 
 
-def test_the_path_composers_default_to_the_hardcoded_lane() -> None:
-    """`lane_dir=None` is what leaves ~40 existing call sites untouched."""
-    assert paths.item_page("s").rel == "work/s.md"
-    assert paths.item_page("s", archived=True).rel == "work/_archive/s.md"
-    assert paths.references_dir("s").rel == "work/s/references"
-    assert paths.decisions_ledger("s").rel == "work/s/references/00-decisions.md"
-    assert paths.artifact_path("s", "design", "spec").rel == "work/s/references/01-design-spec.md"
+def test_the_path_composers_require_complete_canonical_paths() -> None:
+    item = "work/epic-parent/children/feature-child"
+    assert paths.item_page(item).rel == f"{item}.md"
+    assert paths.references_dir(item).rel == f"{item}/references"
+    assert paths.child_lane(item).endswith("/children")
+    assert paths.child_lane(item, archived=True).endswith("/children/_archive")
+    assert paths.artifact_ref(item, paths.MANAGED_ARTIFACTS["design"]).rel == f"{item}/references/01-design.md"
 
 
-def test_the_path_composers_honour_a_declared_lane_dir() -> None:
-    assert paths.item_page("s", lane_dir="tickets").rel == "tickets/s.md"
-    assert paths.references_dir("s", lane_dir="tickets").rel == "tickets/s/references"
-    assert paths.decisions_ledger("s", lane_dir="tickets").rel == "tickets/s/references/00-decisions.md"
-    assert paths.artifact_path("s", "design", "spec", lane_dir="tickets").rel == (
-        "tickets/s/references/01-design-spec.md"
-    )
-
-
-def test_the_archived_twin_nests_under_the_declared_lane_dir() -> None:
-    """`_archive` stays a literal: nothing declares `work/_archive/`."""
-    assert paths.item_page("s", archived=True, lane_dir="tickets").rel == "tickets/_archive/s.md"
-    assert paths.artifact_path("s", "plan", "plan", archived=True, lane_dir="tickets").rel == (
-        "tickets/_archive/s/references/02-plan-plan.md"
-    )
-
-
-def test_plan_filing_places_the_page_in_the_declared_lane(tmp_path: Path, section_set) -> None:
+def test_plan_filing_places_the_page_in_the_canonical_work_lane(tmp_path: Path, section_set) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
     seed = FilingSeed(type="Bug", title="A declared bug", description="D", on=_TODAY)
 
-    plan = plan_filing(root, (), seed, section_set, lane_dir="tickets")
+    plan = plan_filing(root, (), seed, section_set)
 
     assert plan.refusal is None, plan.detail
-    assert plan.target == root / "tickets" / f"{plan.slug}.md"
-    assert plan.work_directory == root / "tickets" / plan.slug
+    assert plan.path == "work/bug-a-declared-bug"
+    assert plan.target == root / "work" / "bug-a-declared-bug.md"
+    assert plan.owned_directory == root / "work" / "bug-a-declared-bug"
 
 
-def test_the_file_command_places_the_page_where_the_bundle_declares(tmp_path: Path) -> None:
-    """The writer half, end to end: `cli.file` loads the bundle's own
-    `SchemaSet` and files into the directory the seed's type declares."""
+def test_the_file_command_places_the_page_in_the_canonical_work_lane(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    schema = root / "schema" / "Bug.schema.json"
-    schema.write_text(schema.read_text(encoding="utf-8").replace('"work/"', '"tickets/"'), encoding="utf-8")
-
     argv = ["file", str(root), "--type", "Bug", "--title", "A declared bug"]
+
     result = runner.invoke(app, [*argv, "--description", "D", "--today", "2026-01-01"])
 
     assert result.exit_code == 0, result.output
-    slug = "2026-01-01-bug-a-declared-bug"
-    assert (root / "tickets" / f"{slug}.md").is_file()
-    assert not (root / "work" / f"{slug}.md").exists()
-    assert (root / "tickets" / "index.md").is_file()
+    assert (root / "work" / "bug-a-declared-bug.md").is_file()
+    assert (root / "work" / "index.md").is_file()

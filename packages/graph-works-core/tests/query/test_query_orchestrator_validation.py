@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from graph_works_core.query import query_orchestrator as qo
@@ -190,3 +191,103 @@ def test_a_degraded_status_is_stale():
 def test_no_signal_is_unknown():
     doc = _doc("---\ntitle: Auth\n---\n\n" + "Real narrative content here. " * 4)
     assert qo.classify_wiki_freshness(doc, repo_head=None).freshness == "unknown"
+
+
+def test_json_projection_and_tolerant_loader_cover_paths_dicts_and_decoy_braces():
+    assert qo._jsonable({"path": Path("a/b"), "items": (Path("c"),)}) == {
+        "path": "a/b",
+        "items": ["c"],
+    }
+    assert qo.parse_orchestrator_output(_payload()).confidence == "high"
+    with pytest.raises(qo.OrchestratorValidationError, match="JSON object"):
+        qo.parse_orchestrator_output("[]")
+    with pytest.raises(qo.OrchestratorValidationError, match="Invalid JSON"):
+        qo.parse_orchestrator_output("preamble {decoy} " + json.dumps(_payload()))
+
+
+def test_nested_degraded_status_values_are_detected():
+    assert qo._status_value_is_stale({"nested": ["stable", "degraded"]})
+    assert not qo._status_value_is_stale([None, "stable"])
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("answer_markdown", " ", "answer_markdown"),
+        ("citations", "not-list", "list of strings"),
+        ("citations", [7], "list of strings"),
+        ("worker_plan", "not-list", "list of objects"),
+        ("worker_results", [7], "list of objects"),
+        ("evidence", "not-list", "evidence must be a list"),
+        ("evidence", [7], "evidence rows must be objects"),
+        ("answer_evidence_map", "not-list", "must be a list"),
+        ("answer_evidence_map", [7], "rows must be objects"),
+        ("answer_evidence_map", [{"claim": "c"}], "include evidence_ids"),
+        ("answer_evidence_map", [{"claim": "c", "evidence_ids": []}], "must be non-empty"),
+        ("gaps", "not-list", "gaps must be a list"),
+        ("gaps", [7], "gaps rows must be objects"),
+    ],
+)
+def test_structured_parser_rejects_every_container_shape(field, value, message):
+    payload = _payload()
+    payload[field] = value
+    with pytest.raises(qo.OrchestratorValidationError, match=message):
+        qo.parse_orchestrator_output(payload)
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("id", " ", "id"),
+        ("path", " ", "path"),
+        ("excerpt", " ", "excerpt"),
+        ("staleness_reason", " ", "staleness_reason"),
+    ],
+)
+def test_evidence_rows_reject_empty_semantic_fields(key, value, message):
+    payload = _payload()
+    payload["evidence"][0][key] = value
+    with pytest.raises(qo.OrchestratorValidationError, match=message):
+        qo.parse_orchestrator_output(payload)
+
+
+def test_optional_evidence_reason_claim_and_nested_worker_payload_validation():
+    payload = _payload()
+    del payload["evidence"][0]["staleness_reason"]
+    with pytest.raises(qo.OrchestratorValidationError, match="must be present"):
+        qo.parse_orchestrator_output(payload)
+
+    payload = _payload(answer_evidence_map=[{"claim": " ", "evidence_ids": ["e1"]}])
+    with pytest.raises(qo.OrchestratorValidationError, match="claim"):
+        qo.parse_orchestrator_output(payload)
+
+    parsed = qo.parse_orchestrator_output(_payload(worker_plan=[{"nested": {"items": [1, {"ok": True}]}}]))
+    assert parsed.worker_plan[0]["nested"]["items"] == (1, {"ok": True})
+
+
+def test_direct_validator_rejects_empty_evidence_id_and_answer():
+    output = qo.parse_orchestrator_output(_payload())
+    with pytest.raises(qo.OrchestratorValidationError, match="answer_markdown"):
+        qo.validate_orchestrator_output(
+            qo.OrchestratorOutput(
+                answer_markdown=" ",
+                citations=output.citations,
+                evidence=output.evidence,
+                answer_evidence_map=output.answer_evidence_map,
+                worker_plan=output.worker_plan,
+                worker_results=output.worker_results,
+                gaps=output.gaps,
+                confidence=output.confidence,
+            )
+        )
+    invalid = qo.OrchestratorEvidence(
+        id=" ",
+        source_type="wiki",
+        path="p",
+        freshness="fresh",
+        staleness_reason=None,
+        excerpt="e",
+        line_refs=[],
+    )
+    with pytest.raises(qo.OrchestratorValidationError, match="evidence id"):
+        qo.validate_orchestrator_output(qo.OrchestratorOutput("answer", [], [invalid], [], (), (), [], "high"))

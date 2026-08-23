@@ -27,15 +27,15 @@ artifacts including a `.jsonl`, and both lane index files.
   state its reconciled state, so an archive assertion is about the archive
   rather than about one unrelated addition. Pinned by
   `test_archive.py::test_the_conformant_vault_is_already_index_reconciled`.
-- **`work/2026-03-02-epic-feature-filing-writer.md` gained an `owner:`**
+- **`work/release-path-native-cutover/children/epic-conformant-vault/children/feature-epic-feature-filing-writer.md` gained an `owner:`**
   (child 5, the lane rules). The vault was authored before anything checked the
   work-lifecycle axis, and `state.in-progress-without-owner` is an **error** —
   so the zero-errors property child 6's gate is built on did not hold the moment
   the lane rules were added. The item genuinely should name an owner; the vault
   is not wrong so much as older than the rule. Pinned by
   `test_conformant_vault.py::test_the_vault_validates_with_zero_errors_with_the_lane_rules`.
-- **`work/2026-03-06-test-gap-cover-the-upsert.md`'s `phase` moved from `plan`
-  to `execute`** (child 5, the lane rules). `workflow_status: accepted` paired
+- **`work/release-path-native-cutover/children/epic-conformant-vault/children/feature-epic-feature-filing-writer/children/test-gap-cover-the-upsert.md`'s `phase` moved from `plan`
+  to `execute`** (child 5, the lane rules). `work_status: accepted` paired
   with `phase: plan` is a pairing `workflow.route()` never produces — every
   transition that lands on `accepted` sets `phase` to one of `execute`,
   `finish` or `done` in the same step — so the pairing could only have arisen

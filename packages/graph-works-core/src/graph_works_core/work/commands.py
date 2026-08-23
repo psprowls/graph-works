@@ -1,5 +1,5 @@
 """Composed commands for the work-tracking vertical: `file`, `next`, `status`,
-`lint`, `regen-index`, child-spec adoption, and decision-ledger operations --
+`lint`, `regen-indexes`, subtree relocation, and decision-ledger operations --
 what `work_tracker_okf` ships as primitives plus `work_tracker_okf.compose`,
 composed through a `WorkspaceLayout` the way the archive vertical already does
 for `plan_archive`/`apply_archive`. `advance`, `archive`, and `sync-children`
@@ -22,9 +22,9 @@ results stub; `graph_works_core.archive.commands.run_archive` already composes
 left as a gap for a future item. Neither does `work_tracker_okf.cli`'s own
 `init`, which this item does not touch.
 
-Eight names are re-exported rather than defined here -- `DependencyEdge`,
-`DependencyIssue`, `DependencyParse`, `parse_dependencies`, `FilingOutcome`,
-`Decision`, `ChildRollup` and `Transition`. `graph-works-cli` is forbidden to
+Seven names are re-exported rather than defined here -- `DependencyEdge`,
+`DependencyIssue`, `DependencyParse`, `parse_dependencies`, `Decision`,
+`ChildRollup` and `Transition`. `graph-works-cli` is forbidden to
 import `work_tracker_okf` at all (its own boundary test asserts it): `run_file`
 takes typed dependency edges, and the CLI's renderers destructure decisions,
 child rollups and routing transitions out of `NextResult`/`DecisionCommandResult`
@@ -46,33 +46,32 @@ everywhere else in this package and in `work-tracker-okf`.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field, replace
+import fcntl
+import hashlib
+import os
+from collections.abc import Iterator, Mapping, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal
+from typing import Literal, Protocol
 
 from code_wiki_okf.config import Config
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import load_sections
-from okf_io import Bundle, IndexUpdate, load, load_bundle, update_index
+from okf_io import Bundle, load_bundle, parse
 from okf_io import validate as okf_validate
 from okf_io.validate import Report
 from work_tracker_okf import decisions as _decisions
-from work_tracker_okf._selection import active_preferred_slug_index
-from work_tracker_okf.adoption import AdoptionApplication, AdoptionPlan, apply_adoption, plan_adoption
+from work_tracker_okf._selection import path_index
 from work_tracker_okf.compose import (
-    FilingApplication,
-    FilingApplyError,
     FilingCompositionPlan,
-    FilingOutcome,
-    apply_file_and_reconcile,
     plan_file_and_reconcile,
     rule_set,
     stamp_for,
 )
-from work_tracker_okf.decisions import Decision, DecisionApplication, DecisionPlan
+from work_tracker_okf.decisions import Decision, DecisionPlan, ledger_ref
 from work_tracker_okf.dependencies import (
     DependencyEdge,
     DependencyIssue,
@@ -80,15 +79,119 @@ from work_tracker_okf.dependencies import (
     parse_dependencies,
 )
 from work_tracker_okf.filing import FilingSeed
-from work_tracker_okf.hierarchy import ChildRollup, DescendResult, nearest_epic
+from work_tracker_okf.hierarchy import ChildRollup, DescendResult, nearest_parent
 from work_tracker_okf.hierarchy import descend as descend_to_leaf
+from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
 from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items
-from work_tracker_okf.paths import ArtifactRef, decisions_ledger
+from work_tracker_okf.mutation import (
+    DirectoryPrecondition,
+    PlannedWrite,
+    WorkMutationPlan,
+)
+from work_tracker_okf.paths import ArtifactRef, child_lane, item_page
 from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
+from work_tracker_okf.reparent import plan_release_adoption, plan_reparent
 from work_tracker_okf.sources import upsert
+from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
+
+
+def _digest(content: bytes) -> str:
+    return hashlib.sha256(content).hexdigest()
+
+
+def _materialize(value: object) -> object:
+    if isinstance(value, Mapping):
+        return {key: _materialize(nested) for key, nested in value.items()}
+    if isinstance(value, tuple):
+        return [_materialize(nested) for nested in value]
+    return value
+
+
+def _planned_write(
+    member: str,
+    before: bytes | None,
+    after: bytes,
+    *,
+    source_member: str | None = None,
+) -> PlannedWrite:
+    """Retain the planner's preimage instead of resnapshotting live state."""
+    return PlannedWrite(member, _digest(before) if before is not None else None, after, source_member)
+
+
+def _write_plan(
+    root: Path,
+    operation: Literal["file", "indexes"],
+    writes: Sequence[PlannedWrite],
+    *,
+    mkdirs: Sequence[str] = (),
+    validate_paths: Sequence[str] = (),
+    warnings: Sequence[str] = (),
+    directory_preconditions: Sequence[DirectoryPrecondition] = (),
+) -> WorkMutationPlan:
+    planned = tuple(sorted(writes, key=lambda write: write.member))
+    directories = tuple(
+        sorted(set(mkdirs) | {Path(write.member).parent.as_posix() for write in planned if "/" in write.member})
+    )
+    return WorkMutationPlan(
+        root=root,
+        operation=operation,
+        path_mapping=MappingProxyType({}),
+        move_plan=None,
+        moves=(),
+        writes=planned,
+        deletes=(),
+        mkdirs=directories,
+        warnings=tuple(warnings),
+        refusals=(),
+        validate_paths=tuple(sorted(set(validate_paths))),
+        directory_preconditions=tuple(sorted(directory_preconditions, key=lambda condition: condition.member)),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FilingRun:
+    """A path-native filing plan and its optional journaled application."""
+
+    plan: FilingCompositionPlan
+    application: MutationApplication | None = None
+
+
+def _filing_mutation(bundle: Bundle, plan: FilingCompositionPlan) -> WorkMutationPlan:
+    filing = plan.filing
+    document = parse("", path=filing.target)
+    for key, value in filing.frontmatter.items():
+        document.set(key, _materialize(value))
+    document.set_body(filing.body)
+    writes = [
+        _planned_write(f"{filing.path}.md", None, document.serialize().encode("utf-8")),
+        *(
+            _planned_write(
+                index.path.relative_to(bundle.root).as_posix(),
+                index.before.encode("utf-8") if index.before is not None else None,
+                index.after.encode("utf-8"),
+            )
+            for index in plan.indexes
+        ),
+    ]
+    if plan.log is not None:
+        log_path = Path(plan.log.path) if plan.log.path is not None else bundle.root / "log.md"
+        log_member = log_path.relative_to(bundle.root).as_posix() if log_path.is_absolute() else log_path.as_posix()
+        writes.append(_planned_write(log_member, plan.log.before.encode("utf-8"), plan.log.after.encode("utf-8")))
+    writes.append(_planned_write(f"{filing.path}/references/.gitkeep", None, b""))
+    owned_member = filing.owned_directory.relative_to(bundle.root).as_posix()
+    return _write_plan(
+        bundle.root,
+        "file",
+        writes,
+        mkdirs=filing.required_directories,
+        validate_paths=(filing.path,),
+        warnings=plan.warnings,
+        directory_preconditions=(DirectoryPrecondition(owned_member, None),),
+    )
 
 
 def run_file(
@@ -99,17 +202,18 @@ def run_file(
     title: str,
     description: str,
     on: date,
-    words: str | None = None,
+    name: str | None = None,
     effort: str | None = None,
     blast_radius: str | None = None,
-    target: str | None = None,
+    version: str | None = None,
+    target_date: date | None = None,
     owner: str | None = None,
-    parent: str | None = None,
+    parent_path: str | None = None,
     depends_on: Sequence[DependencyEdge] = (),
     affects: Sequence[str] = (),
     tags: Sequence[str] = (),
     dry_run: bool = True,
-) -> FilingOutcome:
+) -> FilingRun:
     """Plan one graph-aware page/index/log filing and optionally apply it."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     seed = FilingSeed(
@@ -117,12 +221,13 @@ def run_file(
         title=title,
         description=description,
         on=on,
-        words=words,
+        name=name,
         effort=effort,
         blast_radius=blast_radius,
-        target=target,
+        version=version,
+        target_date=target_date,
         owner=owner,
-        parent=parent,
+        parent_path=parent_path,
         depends_on=tuple(depends_on),
         affects=tuple(affects),
         tags=tuple(tags),
@@ -134,8 +239,9 @@ def run_file(
         load_sections(config.declarations_dir / SECTIONS_DIRNAME),
     )
     if dry_run or outcome.plan.refusal is not None:
-        return outcome
-    return FilingOutcome(plan=outcome.plan, application=apply_file_and_reconcile(outcome.plan))
+        return FilingRun(plan=outcome.plan)
+
+    return FilingRun(plan=outcome.plan, application=apply_mutation(layout, _filing_mutation(bundle, outcome.plan)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -155,9 +261,9 @@ def run_status(layout: WorkspaceLayout) -> StatusReport:
 
 @dataclass(frozen=True, slots=True)
 class SourceNormalization:
-    """One missing canonical design-spec source to stamp on an item page."""
+    """One missing canonical design source to stamp on an item page."""
 
-    slug: str
+    path: str
     page: Path
     ref: ArtifactRef
     title: str
@@ -174,8 +280,8 @@ class NextApplication:
 class NextResult:
     """The requested and selected routing state, preview, and application."""
 
-    requested_slug: str
-    selected_slug: str
+    requested_path: str
+    selected_path: str
     state: RouteState
     route: RouteResult
     child_rollup: ChildRollup | None
@@ -186,47 +292,58 @@ class NextResult:
     warnings: tuple[str, ...] = ()
 
 
-def _has_open_decision(items: Sequence[WorkItem], bundle_root: Path, slug: str) -> bool:
-    """Whether an OPEN decision in *slug*'s owning epic's ledger names *slug*
-    in its `affects` — the same owning-epic resolution used by
-    `graph_works_core.orchestrate.commands`, scoped here to one slug.
-    """
-    epic = nearest_epic(items, slug)
-    if epic is None:
+def _has_open_decision(items: Sequence[WorkItem], bundle_root: Path, path: str) -> bool:
+    """Whether an OPEN decision in *path*'s nearest owner ledger names *path*."""
+    owner = nearest_parent(items, path)
+    if owner is None:
         return False
-    archived = next((item.archived for item in items if item.slug == epic), False)
-    ledger = decisions_ledger(epic, archived=archived).path(bundle_root)
+    ledger = ledger_ref(owner).path(bundle_root)
     entries = _decisions.load(ledger).entries
-    return bool(_decisions.query(entries, status="open", affects=slug))
+    return bool(_decisions.query(entries, status="open", affects=path))
 
 
 def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNormalization | None:
-    """Plan the canonical design-spec stamp when the artifact exists and no
+    """Plan the canonical design stamp when the artifact exists and no
     authored source already owns that id.
     """
-    if item.has_spec_doc:
+    if item.has_design_artifact:
         return None
-    ref, title = stamp_for(bundle_root, item, "design-spec")
+    ref, title = stamp_for(bundle_root, item, SPEC_SOURCE_ID)
     if not ref.path(bundle_root).exists():
         return None
-    return SourceNormalization(slug=item.slug, page=bundle_root / item.path, ref=ref, title=title)
+    return SourceNormalization(path=item.path, page=bundle_root / item.page_path, ref=ref, title=title)
 
 
 def _apply_normalizations(
+    layout: WorkspaceLayout,
     changes: Sequence[SourceNormalization],
 ) -> tuple[NextApplication, tuple[str, ...]]:
     normalized: list[str] = []
     warnings: list[str] = []
     for change in changes:
         try:
-            document = load(change.page)
+            before = change.page.read_bytes()
+            document = parse(before.decode("utf-8"), path=change.page)
             if any(source.id == change.ref.source_id for source in document.fm.sources):
                 continue
             if upsert(document, change.ref, title=change.title):
-                document.save()
-                normalized.append(change.slug)
+                member = change.page.relative_to(layout.bundle_dir).as_posix()
+                mutation = _write_plan(
+                    layout.bundle_dir,
+                    "file",
+                    (_planned_write(member, before, document.serialize().encode("utf-8")),),
+                    validate_paths=(change.path,),
+                )
+                application = apply_mutation(layout, mutation)
+                if application.ok:
+                    normalized.append(change.path)
+                else:
+                    warnings.extend(
+                        f"{change.path}: design source normalization failed: {failure}"
+                        for failure in application.failures
+                    )
         except OSError as exc:
-            warnings.append(f"{change.slug}: design-spec source normalization failed: {exc}")
+            warnings.append(f"{change.path}: design source normalization failed: {exc}")
     return NextApplication(normalized=tuple(normalized)), tuple(warnings)
 
 
@@ -247,50 +364,52 @@ def _stage_artifact(bundle_root: Path, item: WorkItem, result: RouteResult) -> A
 
 def run_next(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     descend: bool = False,
     dry_run: bool = True,
 ) -> NextResult:
-    """Plan what to dispatch for *slug* and optionally descend to its leaf.
+    """Plan what to dispatch for *path* and optionally descend to its leaf.
 
-    Resolves `has_open_decision` for *this slug* specifically, not just "the
-    epic has some open decision" — the behavioral improvement over the
+    Resolves `has_open_decision` for *this path* specifically, not just "the
+    owner has some open decision" — the behavioral improvement over the
     standalone `work_tracker_okf.cli`, which does not resolve decision holds
     from a real ledger.
 
     Dry-run is the default. An `effort=` override is not exposed here or by the
     standalone CLI.
 
-    The single write is the design-spec pointer repair and nothing else;
+    The single write is the canonical design-source repair and nothing else;
     `test_run_next.py`'s confinement tests pin that.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    requested = next((item for item in items if item.slug == slug), None)
+    requested = next((item for item in items if item.path == path), None)
     if requested is None:
-        raise ValueError(f"unknown work item {slug!r}")
+        raise ValueError(f"unknown work item {path!r}")
 
-    descent_result = descend_to_leaf(items, slug) if descend else None
-    selected_slug = descent_result.leaf if descent_result is not None and descent_result.leaf is not None else slug
-    selected = next(item for item in items if item.slug == selected_slug)
+    descent_result = descend_to_leaf(items, path) if descend else None
+    selected_path = descent_result.leaf if descent_result is not None and descent_result.leaf is not None else path
+    selected = next(item for item in items if item.path == selected_path)
 
-    normalization_items = (requested,) if requested.slug == selected.slug else (requested, selected)
+    normalization_items = (requested,) if requested.path == selected.path else (requested, selected)
     normalizations = tuple(
         change for item in normalization_items if (change := _plan_source_normalization(bundle.root, item)) is not None
     )
-    normalized_slugs = {change.slug for change in normalizations}
-    planned_items = tuple(replace(item, has_spec_doc=True) if item.slug in normalized_slugs else item for item in items)
+    normalized_paths = {change.path for change in normalizations}
+    planned_items = tuple(
+        replace(item, has_design_artifact=True) if item.path in normalized_paths else item for item in items
+    )
     state = state_for(
         planned_items,
-        selected_slug,
-        has_open_decision=_has_open_decision(planned_items, bundle.root, selected_slug),
+        selected_path,
+        has_open_decision=_has_open_decision(planned_items, bundle.root, selected_path),
     )
     assert state is not None
     computed = route(state)
     preview = NextResult(
-        requested_slug=slug,
-        selected_slug=selected_slug,
+        requested_path=path,
+        selected_path=selected_path,
         state=state,
         route=computed,
         child_rollup=state.child_rollup,
@@ -301,16 +420,16 @@ def run_next(
     if dry_run:
         return preview
 
-    application, warnings = _apply_normalizations(normalizations)
+    application, warnings = _apply_normalizations(layout, normalizations)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     persisted_items = load_items(persisted_bundle)
     persisted_state = state_for(
         persisted_items,
-        selected_slug,
+        selected_path,
         has_open_decision=_has_open_decision(
             persisted_items,
             persisted_bundle.root,
-            selected_slug,
+            selected_path,
         ),
     )
     assert persisted_state is not None
@@ -377,59 +496,127 @@ def _work_only_ignore(layout: WorkspaceLayout) -> tuple[str, ...]:
     return (*siblings, *IGNORE)
 
 
-def run_regen_index(layout: WorkspaceLayout, *, dry_run: bool = True) -> IndexUpdate:
-    """Rebuild `work/index.md` from what's on disk. Never touches `log.md` —
-    this changes derived index content, not what the vault contains, the same
-    rule `sync-children` follows.
+@dataclass(frozen=True, slots=True)
+class RegenIndexesResult:
+    """Every required lane index plan plus an optional journaled application."""
 
-    `create_missing=True`: a vault whose first act is `file` already gets one
-    through `work_tracker_okf.compose.plan_file_and_reconcile`, but a bundle
-    that predates this command would otherwise never get one.
+    plans: tuple[LaneIndexPlan, ...]
+    mutation: WorkMutationPlan
+    application: MutationApplication | None = None
 
-    `update_index` always returns one `IndexUpdate` per requested directory;
-    exactly one is requested here, so the tuple is unwrapped rather than
-    handed back — a length-1 tuple would be dead API surface at every call
-    site.
-    """
-    updates = update_index(
-        load_bundle(layout.bundle_dir, ignore=IGNORE),
-        directories=[WORK_DIR],
-        create_missing=True,
-        dry_run=dry_run,
+
+def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> Mapping[str, DirectoryPrecondition]:
+    """Retain ownership of lanes absent before the domain planner reads them."""
+    lanes = {"work", "work/_archive"}
+    for item in items:
+        if not item.archived and item.type in PARENT_TYPES:
+            lanes.add(child_lane(item.path))
+            lanes.add(child_lane(item.path, archived=True))
+    conditions = {lane: DirectoryPrecondition(lane, None) for lane in sorted(lanes) if not os.path.lexists(root / lane)}
+    return MappingProxyType(conditions)
+
+
+def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> RegenIndexesResult:
+    """Reconcile every required root and parent-owned work lane."""
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    items = load_items(bundle)
+    lane_preconditions = _absent_index_lane_preconditions(bundle.root, items)
+    plans = plan_indexes(bundle.root, items)
+    changed_lanes = {plan.lane for plan in plans if plan.changed}
+    mutation = _write_plan(
+        bundle.root,
+        "indexes",
+        tuple(
+            _planned_write(
+                plan.path.relative_to(bundle.root).as_posix(),
+                plan.before.encode("utf-8") if plan.before is not None else None,
+                plan.after.encode("utf-8"),
+            )
+            for plan in plans
+            if plan.changed
+        ),
+        directory_preconditions=tuple(
+            condition for lane, condition in lane_preconditions.items() if lane in changed_lanes
+        ),
     )
-    return updates[0]
+    application = None if dry_run else apply_mutation(layout, mutation)
+    return RegenIndexesResult(plans=plans, mutation=mutation, application=application)
 
 
 @dataclass(frozen=True, slots=True)
-class AdoptChildSpecsResult:
-    """The planned child-spec adoptions and any persisted changes."""
+class PathMutationResult:
+    """A canonical subtree mutation and its optional journaled application."""
 
-    plan: AdoptionPlan
-    application: AdoptionApplication = field(default_factory=AdoptionApplication)
+    plan: WorkMutationPlan
+    application: MutationApplication | None = None
 
 
-def run_adopt_child_specs(
+class MigrationPlanView(Protocol):
+    """The path-native migration surface, without importing legacy parsing."""
+
+    @property
+    def mutation(self) -> WorkMutationPlan: ...
+
+    @property
+    def ok(self) -> bool: ...
+
+    def diff(self) -> str: ...
+
+
+@dataclass(frozen=True, slots=True)
+class MigrationLayoutResult:
+    """An explicitly requested migration preview and optional application."""
+
+    plan: MigrationPlanView
+    application: MutationApplication | None = None
+
+
+def run_migrate_layout(
     layout: WorkspaceLayout,
-    epic_slug: str,
+    *,
+    apply: bool = False,
+) -> MigrationLayoutResult:
+    """Plan the isolated legacy conversion; apply only on explicit request.
+
+    The local import is intentional. Ordinary work-command imports stay wholly
+    path-native and never load the one-time legacy parser.
+    """
+    from work_tracker_okf.migration import LEGACY_IGNORE, plan_migration
+
+    plan = plan_migration(load_bundle(layout.bundle_dir, ignore=LEGACY_IGNORE))
+    application = apply_mutation(layout, plan.mutation) if apply and plan.ok else None
+    return MigrationLayoutResult(plan, application)
+
+
+def run_reparent(
+    layout: WorkspaceLayout,
+    source_path: str,
+    parent_path: str,
     *,
     dry_run: bool = True,
-) -> AdoptChildSpecsResult:
-    """Plan migrated child-spec adoption and optionally apply it."""
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    items = load_items(bundle)
-    if not any(item.slug == epic_slug for item in items):
-        raise ValueError(f"unknown work item {epic_slug!r}")
-    plan = plan_adoption(bundle, items, epic_slug)
-    if dry_run or plan.refusal is not None:
-        return AdoptChildSpecsResult(plan=plan)
-    return AdoptChildSpecsResult(plan=plan, application=apply_adoption(plan))
+) -> PathMutationResult:
+    bundle = load_bundle(layout.bundle_dir, ignore=())
+    plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
+    return PathMutationResult(plan, None if dry_run or not plan.ok else apply_mutation(layout, plan))
+
+
+def run_release_adoption(
+    layout: WorkspaceLayout,
+    source_path: str,
+    release_path: str,
+    *,
+    dry_run: bool = True,
+) -> PathMutationResult:
+    bundle = load_bundle(layout.bundle_dir, ignore=())
+    plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
+    return PathMutationResult(plan, None if dry_run or not plan.ok else apply_mutation(layout, plan))
 
 
 @dataclass(frozen=True, slots=True)
 class DecisionOwner:
-    """The epic-owned ledger selected for a requested work item."""
+    """The nearest Release/Epic/Feature ledger owner for a requested path."""
 
-    epic_slug: str
+    owner_path: str
     redirected_from: str | None
     ledger: Path
 
@@ -443,12 +630,12 @@ class DecisionCommandResult:
     counts: Mapping[str, int]
     warnings: tuple[str, ...]
     plan: DecisionPlan | None = None
-    application: DecisionApplication = field(default_factory=DecisionApplication)
+    application: MutationApplication | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class DecisionContext:
-    """One bundle projection and the resolved epic ownership for a command."""
+    """One bundle projection and its nearest decision owner for a command."""
 
     owner: DecisionOwner
     bundle: Bundle
@@ -466,10 +653,9 @@ class OverturnPlan:
 
 @dataclass(frozen=True, slots=True)
 class OverturnApplication:
-    """Effects completed while applying a preflighted overturn."""
+    """The single journaled application of both overturn effects."""
 
-    decision: DecisionApplication = field(default_factory=DecisionApplication)
-    filing: FilingApplication = field(default_factory=FilingApplication)
+    mutation: MutationApplication | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -483,35 +669,127 @@ class OverturnResult:
 
 
 class OverturnApplyError(OSError):
-    """An overturn whose ordered apply failed after observable partial effects."""
-
-    def __init__(self, message: str, application: OverturnApplication) -> None:
-        super().__init__(message)
-        self.application = application
+    """Retained result error type for callers that choose to reject a failed journal."""
 
 
-def _decision_context(layout: WorkspaceLayout, slug: str) -> DecisionContext:
+def _decision_lock_path(layout: WorkspaceLayout, owner_path: str) -> Path:
+    digest = hashlib.sha256(owner_path.encode("utf-8")).hexdigest()
+    return layout.cache_dir / "decisions" / f"{digest}.lock"
+
+
+@contextmanager
+def _decision_lock(layout: WorkspaceLayout, owner_path: str) -> Iterator[None]:
+    """Serialize decision composition on caller-owned, replace-stable cache state."""
+    lock = _decision_lock_path(layout, owner_path)
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(descriptor, fcntl.LOCK_UN)
+        os.close(descriptor)
+
+
+def _decision_context(layout: WorkspaceLayout, path: str) -> DecisionContext:
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    selected = active_preferred_slug_index(items)
-    requested = selected.get(slug)
+    selected = path_index(items)
+    requested = selected.get(path)
     if requested is None:
-        raise ValueError(f"unknown work item {slug!r}")
-    epic_slug = nearest_epic(tuple(selected.values()), slug)
-    if epic_slug is None:
-        raise ValueError(f"{slug!r} has no epic ancestor; decisions ledgers are epic-owned")
-    epic = selected[epic_slug]
-    ledger = decisions_ledger(epic_slug, archived=epic.archived).path(bundle.root)
+        raise ValueError(f"unknown work item {path!r}")
+    owner_path = nearest_parent(tuple(selected.values()), path)
+    if owner_path is None:
+        raise ValueError(f"{path!r} has no Release, Epic, or Feature decision owner")
+    ledger = ledger_ref(owner_path).path(bundle.root)
     return DecisionContext(
-        owner=DecisionOwner(epic_slug, None if slug == epic_slug else slug, ledger),
+        owner=DecisionOwner(owner_path, None if path == owner_path else path, ledger),
         bundle=bundle,
         items=items,
     )
 
 
+@contextmanager
+def _locked_decision_context(layout: WorkspaceLayout, path: str) -> Iterator[DecisionContext]:
+    """Lock a candidate owner, then retain only a matching fresh projection."""
+    while True:
+        candidate = _decision_context(layout, path)
+        candidate_owner = candidate.owner.owner_path
+        with _decision_lock(layout, candidate_owner):
+            current = _decision_context(layout, path)
+            if current.owner.owner_path != candidate_owner:
+                continue
+            yield current
+            return
+
+
+def _optional_bytes(path: Path) -> bytes | None:
+    try:
+        return path.read_bytes()
+    except FileNotFoundError:
+        return None
+
+
+def _decision_mutation(
+    context: DecisionContext,
+    plan: DecisionPlan,
+    ledger_before: bytes | None,
+) -> WorkMutationPlan:
+    owner_path = context.owner.owner_path
+    owner_page = item_page(owner_path).path(context.bundle.root)
+    owner_before = owner_page.read_bytes()
+    owner_document = parse(owner_before.decode("utf-8"), path=owner_page)
+    upsert(owner_document, ledger_ref(owner_path), title="Decisions")
+    ledger_member = context.owner.ledger.relative_to(context.bundle.root).as_posix()
+    owner_member = item_page(owner_path).rel
+    ledger_text = _decisions.render(_decisions.parse(plan.snapshot.text).preamble, plan.after)
+    return _write_plan(
+        context.bundle.root,
+        "file",
+        (
+            _planned_write(ledger_member, ledger_before, ledger_text.encode("utf-8")),
+            _planned_write(owner_member, owner_before, owner_document.serialize().encode("utf-8")),
+        ),
+        validate_paths=(owner_path,),
+        warnings=plan.warnings,
+    )
+
+
+def _apply_decision(
+    layout: WorkspaceLayout,
+    context: DecisionContext,
+    plan: DecisionPlan,
+    ledger_before: bytes | None,
+) -> MutationApplication | None:
+    if plan.refusal is not None:
+        return None
+    return apply_mutation(layout, _decision_mutation(context, plan, ledger_before))
+
+
+def _decision_result(
+    context: DecisionContext,
+    plan: DecisionPlan,
+    application: MutationApplication | None,
+) -> DecisionCommandResult:
+    entries = plan.after
+    warnings = plan.warnings
+    if application is not None and not application.ok:
+        persisted = _decisions.load(context.owner.ledger)
+        entries = tuple(persisted.entries)
+        warnings = (*warnings, *application.failures, *persisted.warnings)
+    return DecisionCommandResult(
+        owner=context.owner,
+        entries=entries,
+        counts=MappingProxyType(_decisions.counts(entries)),
+        warnings=warnings,
+        plan=plan,
+        application=application,
+    )
+
+
 def run_decision_add(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     question: str,
     status: str = "open",
@@ -523,33 +801,36 @@ def run_decision_add(
     decided_by: str,
     dry_run: bool = True,
 ) -> DecisionCommandResult:
-    """Plan an append in *slug*'s epic-owned ledger and optionally apply it."""
-    context = _decision_context(layout, slug)
-    plan = _decisions.plan_append(
-        context.owner.ledger,
-        question=question,
-        status=status,
-        answer=answer,
-        rationale=rationale,
-        if_wrong=if_wrong,
-        affects=affects,
-        on=on,
-        decided_by=decided_by,
-    )
-    application = DecisionApplication() if dry_run else _decisions.apply_plan(plan)
-    return DecisionCommandResult(
-        owner=context.owner,
-        entries=plan.after,
-        counts=MappingProxyType(_decisions.counts(plan.after)),
-        warnings=plan.warnings,
-        plan=plan,
-        application=application,
-    )
+    """Plan an append in *path*'s nearest owner ledger and optionally apply it."""
+
+    def planned(context: DecisionContext) -> DecisionPlan:
+        return _decisions.plan_append(
+            context.owner.ledger,
+            question=question,
+            status=status,
+            answer=answer,
+            rationale=rationale,
+            if_wrong=if_wrong,
+            affects=affects,
+            on=on,
+            decided_by=decided_by,
+        )
+
+    if dry_run:
+        context = _decision_context(layout, path)
+        plan = planned(context)
+        application = None
+    else:
+        with _locked_decision_context(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan = planned(context)
+            application = _apply_decision(layout, context, plan, ledger_before)
+    return _decision_result(context, plan, application)
 
 
 def run_decision_answer(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     decision_id: str,
     *,
     answer: str,
@@ -558,37 +839,40 @@ def run_decision_answer(
     decided_by: str,
     dry_run: bool = True,
 ) -> DecisionCommandResult:
-    """Plan an answer in *slug*'s epic-owned ledger and optionally apply it."""
-    context = _decision_context(layout, slug)
-    plan = _decisions.plan_update(
-        context.owner.ledger,
-        decision_id,
-        answer=answer,
-        rationale=rationale,
-        on=on,
-        decided_by=decided_by,
-    )
-    application = DecisionApplication() if dry_run else _decisions.apply_plan(plan)
-    return DecisionCommandResult(
-        owner=context.owner,
-        entries=plan.after,
-        counts=MappingProxyType(_decisions.counts(plan.after)),
-        warnings=plan.warnings,
-        plan=plan,
-        application=application,
-    )
+    """Plan an answer in *path*'s nearest-owner ledger and optionally apply it."""
+
+    def planned(context: DecisionContext) -> DecisionPlan:
+        return _decisions.plan_update(
+            context.owner.ledger,
+            decision_id,
+            answer=answer,
+            rationale=rationale,
+            on=on,
+            decided_by=decided_by,
+        )
+
+    if dry_run:
+        context = _decision_context(layout, path)
+        plan = planned(context)
+        application = None
+    else:
+        with _locked_decision_context(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan = planned(context)
+            application = _apply_decision(layout, context, plan, ledger_before)
+    return _decision_result(context, plan, application)
 
 
 def run_decision_list(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     status: str | None = None,
     affects: str | None = None,
     cites: str | None = None,
 ) -> DecisionCommandResult:
-    """Read and filter *slug*'s epic-owned ledger without writing."""
-    context = _decision_context(layout, slug)
+    """Read and filter *path*'s nearest-owner ledger without writing."""
+    context = _decision_context(layout, path)
     parsed = _decisions.load(context.owner.ledger)
     selected = tuple(_decisions.query(parsed.entries, status=status, affects=affects, cites=cites))
     return DecisionCommandResult(
@@ -601,7 +885,7 @@ def run_decision_list(
 
 def run_decision_supersede(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     decision_id: str,
     *,
     question: str,
@@ -612,57 +896,54 @@ def run_decision_supersede(
     decided_by: str,
     dry_run: bool = True,
 ) -> DecisionCommandResult:
-    """Plan a supersession in *slug*'s epic-owned ledger and optionally apply it."""
-    context = _decision_context(layout, slug)
-    plan = _decisions.plan_supersede(
-        context.owner.ledger,
-        decision_id,
-        question=question,
-        answer=answer,
-        rationale=rationale,
-        affects=affects,
-        on=on,
-        decided_by=decided_by,
-    )
-    application = DecisionApplication() if dry_run else _decisions.apply_plan(plan)
-    return DecisionCommandResult(
-        owner=context.owner,
-        entries=plan.after,
-        counts=MappingProxyType(_decisions.counts(plan.after)),
-        warnings=plan.warnings,
-        plan=plan,
-        application=application,
-    )
+    """Plan a supersession in *path*'s nearest-owner ledger and optionally apply it."""
 
-
-def _apply_overturn(owner: DecisionOwner, plan: OverturnPlan) -> OverturnResult:
-    decision_application = _decisions.apply_plan(plan.decision)
-    partial = OverturnApplication(decision=decision_application)
-    if decision_application.stale:
-        return OverturnResult(
-            owner=owner,
-            plan=plan,
-            application=partial,
-            warnings=("stale-decision-plan: ledger changed after preflight; follow-up was not filed",),
+    def planned(context: DecisionContext) -> DecisionPlan:
+        return _decisions.plan_supersede(
+            context.owner.ledger,
+            decision_id,
+            question=question,
+            answer=answer,
+            rationale=rationale,
+            affects=affects,
+            on=on,
+            decided_by=decided_by,
         )
-    if not decision_application.written:
-        return OverturnResult(owner=owner, plan=plan, application=partial)
-    try:
-        filing_application = apply_file_and_reconcile(plan.filing)
-    except FilingApplyError as exc:
-        application = OverturnApplication(decision=decision_application, filing=exc.application)
-        raise OverturnApplyError(str(exc), application) from exc
-    return OverturnResult(
-        owner=owner,
-        plan=plan,
-        application=OverturnApplication(decision=decision_application, filing=filing_application),
+
+    if dry_run:
+        context = _decision_context(layout, path)
+        plan = planned(context)
+        application = None
+    else:
+        with _locked_decision_context(layout, path) as context:
+            ledger_before = _optional_bytes(context.owner.ledger)
+            plan = planned(context)
+            application = _apply_decision(layout, context, plan, ledger_before)
+    return _decision_result(context, plan, application)
+
+
+def _merge_write_mutations(root: Path, *plans: WorkMutationPlan) -> WorkMutationPlan:
+    writes: dict[str, PlannedWrite] = {}
+    for plan in plans:
+        for write in plan.writes:
+            if write.member in writes and writes[write.member] != write:
+                raise ValueError(f"conflicting planned writes for {write.member}")
+            writes[write.member] = write
+    return _write_plan(
+        root,
+        "file",
+        tuple(writes.values()),
+        mkdirs=tuple(directory for plan in plans for directory in plan.mkdirs),
+        validate_paths=tuple(path for plan in plans for path in plan.validate_paths),
+        warnings=tuple(warning for plan in plans for warning in plan.warnings),
+        directory_preconditions=tuple(condition for plan in plans for condition in plan.directory_preconditions),
     )
 
 
 def run_decision_overturn(
     layout: WorkspaceLayout,
     config: Config,
-    slug: str,
+    path: str,
     decision_id: str,
     *,
     answer: str,
@@ -675,47 +956,66 @@ def run_decision_overturn(
     dry_run: bool = True,
 ) -> OverturnResult:
     """Preflight a decision supersession and peer follow-up before either write."""
-    context = _decision_context(layout, slug)
-    decision = _decisions.plan_supersede(
-        context.owner.ledger,
-        decision_id,
-        question=follow_up_title,
-        answer=answer,
-        rationale=rationale,
-        affects=None,
-        on=on,
-        decided_by=decided_by,
-    )
-    replacement_id = decision.primary.id if decision.primary is not None else "unallocated"
-    filing_outcome = plan_file_and_reconcile(
-        context.bundle,
-        context.items,
-        FilingSeed(
-            type=follow_up_type,
-            title=follow_up_title,
-            description=f"Follow-up from overturned decision {replacement_id} — see the epic's decisions ledger",
+
+    def planned(context: DecisionContext) -> OverturnPlan:
+        decision = _decisions.plan_supersede(
+            context.owner.ledger,
+            decision_id,
+            question=follow_up_title,
+            answer=answer,
+            rationale=rationale,
+            affects=None,
             on=on,
-            parent=None,
-            depends_on=(),
-            affects=tuple(follow_up_affects),
-        ),
-        load_sections(config.declarations_dir / SECTIONS_DIRNAME),
-    )
-    refusal: Literal["decision-refused", "follow-up-refused"] | None = (
-        "decision-refused"
-        if decision.refusal is not None
-        else "follow-up-refused"
-        if filing_outcome.plan.refusal is not None
-        else None
-    )
-    combined = OverturnPlan(decision=decision, filing=filing_outcome.plan, refusal=refusal)
-    if dry_run or refusal is not None:
+            decided_by=decided_by,
+        )
+        replacement_id = decision.primary.id if decision.primary is not None else "unallocated"
+        filing_outcome = plan_file_and_reconcile(
+            context.bundle,
+            context.items,
+            FilingSeed(
+                type=follow_up_type,
+                title=follow_up_title,
+                description=f"Follow-up from overturned decision {replacement_id} — see the owner's decisions ledger",
+                on=on,
+                parent_path=None,
+                depends_on=(),
+                affects=tuple(follow_up_affects),
+            ),
+            load_sections(config.declarations_dir / SECTIONS_DIRNAME),
+        )
+        refusal: Literal["decision-refused", "follow-up-refused"] | None = (
+            "decision-refused"
+            if decision.refusal is not None
+            else "follow-up-refused"
+            if filing_outcome.plan.refusal is not None
+            else None
+        )
+        return OverturnPlan(decision=decision, filing=filing_outcome.plan, refusal=refusal)
+
+    if dry_run:
+        context = _decision_context(layout, path)
+        combined = planned(context)
         return OverturnResult(owner=context.owner, plan=combined)
-    return _apply_overturn(context.owner, combined)
+    with _locked_decision_context(layout, path) as context:
+        ledger_before = _optional_bytes(context.owner.ledger)
+        combined = planned(context)
+        if combined.refusal is not None:
+            return OverturnResult(owner=context.owner, plan=combined)
+        mutation = _merge_write_mutations(
+            context.bundle.root,
+            _decision_mutation(context, combined.decision, ledger_before),
+            _filing_mutation(context.bundle, combined.filing),
+        )
+        application = apply_mutation(layout, mutation)
+    return OverturnResult(
+        owner=context.owner,
+        plan=combined,
+        application=OverturnApplication(mutation=application),
+        warnings=application.failures,
+    )
 
 
 __all__ = [
-    "AdoptChildSpecsResult",
     "ChildRollup",
     "Decision",
     "DecisionCommandResult",
@@ -723,18 +1023,21 @@ __all__ = [
     "DependencyEdge",
     "DependencyIssue",
     "DependencyParse",
-    "FilingOutcome",
+    "FilingRun",
+    "MigrationLayoutResult",
+    "MigrationPlanView",
     "NextApplication",
     "NextResult",
     "OverturnApplication",
     "OverturnApplyError",
     "OverturnPlan",
     "OverturnResult",
+    "PathMutationResult",
+    "RegenIndexesResult",
     "SourceNormalization",
     "StatusReport",
     "Transition",
     "parse_dependencies",
-    "run_adopt_child_specs",
     "run_decision_add",
     "run_decision_answer",
     "run_decision_list",
@@ -742,7 +1045,10 @@ __all__ = [
     "run_decision_supersede",
     "run_file",
     "run_lint",
+    "run_migrate_layout",
     "run_next",
-    "run_regen_index",
+    "run_regen_indexes",
+    "run_release_adoption",
+    "run_reparent",
     "run_status",
 ]

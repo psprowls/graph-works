@@ -30,11 +30,11 @@ _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2"),
     "langchain-core": ("1.4.0",),
     "models-io": ("0.2.0",),
-    "okf-ext": ("0.1.0", "0.4.5", "0.4.6", "0.4.7", "0.4.8", "0.4.9", "0.4.10"),
-    "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3"),
+    "okf-ext": ("0.1.0", "0.4.5", "0.4.6", "0.4.7", "0.4.8", "0.4.9", "0.4.10", "0.4.11"),
+    "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4"),
     "subagents-io": ("0.2.0", "0.2.1"),
     "typer": ("0.12.0",),
-    "work-tracker-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1"),
+    "work-tracker-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.4.0"),
 }
 
 
@@ -142,6 +142,14 @@ def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path
     cli_requirements = _metadata_requirements(cli_wheel)
     core_requirements = _metadata_requirements(core_wheel)
     assert "models-io" in {canonicalize_name(requirement.name) for requirement in cli_requirements}
+    cli_okf_io = next(
+        requirement for requirement in cli_requirements if canonicalize_name(requirement.name) == "okf-io"
+    )
+    core_okf_io = next(
+        requirement for requirement in core_requirements if canonicalize_name(requirement.name) == "okf-io"
+    )
+    assert str(cli_okf_io.specifier) == "<0.3,>=0.2.4"
+    assert str(core_okf_io.specifier) == "<0.3,>=0.2.4"
 
     extras_by_name: dict[str, set[str]] = {}
     for requirement in (*cli_requirements, *core_requirements):

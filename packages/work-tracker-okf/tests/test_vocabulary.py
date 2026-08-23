@@ -16,7 +16,7 @@ def test_the_schema_enums_and_the_python_frozensets_agree() -> None:
     `okf_io.tests.test_catalog` makes for the rule catalog."""
     properties = _base_schema()["properties"]
     assert frozenset(properties["status"]["enum"]) == vocabulary.DOCUMENT_STATUSES
-    assert frozenset(properties["workflow_status"]["enum"]) == vocabulary.WORKFLOW_STATUSES
+    assert frozenset(properties["work_status"]["enum"]) == vocabulary.WORK_STATUSES
     assert frozenset(properties["phase"]["enum"]) == vocabulary.PHASES
     assert frozenset(properties["effort"]["enum"]) == vocabulary.EFFORTS
     assert frozenset(properties["blast_radius"]["enum"]) == vocabulary.BLAST_RADII
@@ -27,7 +27,7 @@ def test_the_schema_pattern_is_this_modules_pattern_character_for_character() ->
     assert pattern == vocabulary.SOURCE_ID_PATTERN
 
 
-def test_the_six_schema_files_are_exactly_TYPES() -> None:
+def test_the_schema_files_are_exactly_TYPES() -> None:
     directory = importlib.resources.files("work_tracker_okf") / "assets" / "schema"
     stems = {entry.name[: -len(".schema.json")] for entry in directory.iterdir() if entry.name.endswith(".json")}
     assert stems - {"_base"} == vocabulary.TYPES
@@ -36,19 +36,13 @@ def test_the_six_schema_files_are_exactly_TYPES() -> None:
 @pytest.mark.parametrize(
     "value",
     [
-        "design-spec",
+        "design",
         "plan",
-        "guidance-design",
-        "guidance-plan",
-        "guidance-execute",
-        "guidance-finish",
-        "results-execute",
-        "results-finish",
-        "results-design",
-        "transcript-plan",
-        "transcript-plan-subagent-1",
-        "results-finish-2",
-        "transcript-execute-reviewer-code-quality",
+        "execute-results",
+        "execute-transcript",
+        "finish-results",
+        "release-notes",
+        "design-spec-extra",
     ],
 )
 def test_is_source_id_accepts(value: str) -> None:
@@ -61,24 +55,21 @@ def test_is_source_id_accepts(value: str) -> None:
         "",
         "design_spec",
         "Plan",
-        "guidance",
-        "transcript-review",
-        "transcript-",
-        "transcript-plan-",
-        "transcript-plan-Subagent",
-        "transcript-plan--1",
+        "two--words",
+        "two-",
+        "-two",
         "plan\n",
         " plan",
-        "design-spec-extra",
     ],
 )
 def test_is_source_id_refuses(value: str) -> None:
     assert vocabulary.is_source_id(value) is False
 
 
-def test_the_two_load_bearing_ids_are_themselves_valid() -> None:
-    assert vocabulary.is_source_id(vocabulary.SPEC_SOURCE_ID)
-    assert vocabulary.is_source_id(vocabulary.PLAN_SOURCE_ID)
+def test_release_and_parent_capabilities_are_explicit() -> None:
+    assert frozenset({"Release", "Epic", "Feature", "Bug", "TechDebt", "TestGap", "Spike"}) == vocabulary.TYPES
+    assert frozenset({"Release", "Epic", "Feature"}) == vocabulary.PARENT_TYPES
+    assert frozenset({"Release"}) == vocabulary.ROOT_ONLY_TYPES
 
 
 def test_the_w_k_shrink_landed() -> None:
@@ -89,21 +80,9 @@ def test_the_w_k_shrink_landed() -> None:
     assert vocabulary.PARENT_TYPES <= vocabulary.TYPES
 
 
-def test_artifact_phases_drop_done_and_carry_no_synthetic_open() -> None:
-    assert vocabulary.ARTIFACT_PHASES == ("design", "plan", "execute", "finish")
-    assert "done" not in vocabulary.ARTIFACT_PHASES
-    assert "open" not in vocabulary.ARTIFACT_PHASES
-    assert set(vocabulary.ARTIFACT_PHASES) < vocabulary.PHASES
-
-
 def test_terminal_and_small_sets_are_subsets_of_their_axes() -> None:
-    assert vocabulary.TERMINAL_STATUSES <= vocabulary.WORKFLOW_STATUSES
+    assert vocabulary.TERMINAL_STATUSES <= vocabulary.WORK_STATUSES
     assert vocabulary.SMALL_EFFORTS <= vocabulary.EFFORTS
-
-
-def test_artifact_kinds_gained_transcript() -> None:
-    """C2-D: work-io had four because transcripts had no home in the vault."""
-    assert frozenset({"spec", "plan", "guidance", "results", "transcript"}) == vocabulary.ARTIFACT_KINDS
 
 
 def test_slug_prefixes_cover_exactly_TYPES() -> None:

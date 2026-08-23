@@ -16,7 +16,7 @@ terminal.
 choice → Settle the item and report.
 
 **Announce at start:** "I'm using the finishing-relay skill to relay the
-merge/PR/hold/discard decision for `<slug>`."
+merge/PR/hold/discard decision for `<work-path>`."
 
 **Detection is the caller's job, not this skill's.** This skill is
 dispatched only when the `graph-works:workflow` skill (or `/graph-works:next`)
@@ -98,7 +98,7 @@ Send exactly one `orca orchestration ask`, using this session's own
 ```
 orca orchestration ask --from <this session's --from> \
   --dispatch-capability <this session's --dispatch-capability> \
-  --question "Finish stage for <slug> on branch <current branch> ready to settle. <N> commit(s): <one-line summary>. Tests: <pass/fail summary>. Merge target: <merge target>. How should this be handled?" \
+  --question "Finish stage for <work-path> on branch <current branch> ready to settle. <N> commit(s): <one-line summary>. Tests: <pass/fail summary>. Merge target: <merge target>. How should this be handled?" \
   --options "<merge,pr,hold,discard — or pr,hold,discard on detached HEAD>" \
   --timeout-ms 600000
 ```
@@ -138,7 +138,7 @@ reply in the R5 report — don't guess at unrecognized intent.
 
 ```bash
 git push -u origin <this worker's branch>
-gh pr create --title "<slug title>" --body "$(cat <<'EOF'
+gh pr create --title "<path title>" --body "$(cat <<'EOF'
 ## Summary
 <2-3 bullets of what changed>
 
@@ -148,7 +148,7 @@ EOF
 )"
 ```
 
-`<slug title>` is the work item's frontmatter `title:` field. Reuses
+`<path title>` is the work item's frontmatter `title:` field. Reuses
 `finishing-a-development-branch`'s Option 2 body template verbatim. Continue
 to R5 with the PR URL.
 
@@ -163,7 +163,7 @@ Send a second, option-less `ask` asking for exact confirmation:
 ```
 orca orchestration ask --from <this session's --from> \
   --dispatch-capability <this session's --dispatch-capability> \
-  --question "Confirm discard of <slug> branch <branch> (<N> commits: <list>). Reply exactly 'discard' to confirm, anything else cancels." \
+  --question "Confirm discard of <work-path> branch <branch> (<N> commits: <list>). Reply exactly 'discard' to confirm, anything else cancels." \
   --timeout-ms 600000
 ```
 
@@ -178,7 +178,7 @@ orca orchestration ask --from <this session's --from> \
 
 - **`merge`:**
   ```bash
-  gw work advance <slug> --resolved-in <resolved_in from R4>
+  gw work advance <work-path> --resolved-in <resolved_in from R4>
   ```
   Then send `worker_done --outcome succeeded` (this session's own dispatch
   preamble command, `--task-id`/`--dispatch-id` filled in from it) with a

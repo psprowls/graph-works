@@ -1,10 +1,10 @@
-"""The lane rule catalog: 30 codes, five topic modules, fourteen rule functions.
+"""The lane rule catalog: 37 codes, six topic modules, sixteen rule functions.
 
 **The module name is the code prefix**, asserted mechanically in
 `test_lane_catalog.py` exactly as okf-io's `test_catalog.py` asserts its own
 eight.
 
-The five prefixes had to clear eighteen taken names -- okf-io's eight
+The six prefixes had to clear eighteen taken names -- okf-io's eight
 (`computation`, `frontmatter`, `legacy`, `lifecycle`, `links`, `provenance`,
 `reserved`, `trust`), okf-ext's six (`health`, `placement`, `render`, `schemas`,
 `sections`, `tags`) and, for `decisions`, this lane's own four. Only the first
@@ -30,7 +30,7 @@ from types import MappingProxyType
 
 from okf_io import Rule
 
-from work_tracker_okf._rules import decisions, graph, plan, state, targets
+from work_tracker_okf._rules import decisions, graph, plan, state, structure, targets
 from work_tracker_okf._rules._common import LaneConfig
 
 RULES_BY_TOPIC: Mapping[str, Callable[[LaneConfig], tuple[Rule, ...]]] = MappingProxyType(
@@ -39,6 +39,7 @@ RULES_BY_TOPIC: Mapping[str, Callable[[LaneConfig], tuple[Rule, ...]]] = Mapping
         "graph": graph.rules,
         "plan": plan.rules,
         "state": state.rules,
+        "structure": structure.rules,
         "targets": targets.rules,
     }
 )
@@ -49,6 +50,7 @@ CODES_BY_TOPIC: Mapping[str, tuple[str, ...]] = MappingProxyType(
         "graph": graph.CODES,
         "plan": plan.CODES,
         "state": state.CODES,
+        "structure": structure.CODES,
         "targets": targets.CODES,
     }
 )

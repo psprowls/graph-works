@@ -123,11 +123,11 @@ def test_the_references_lane_does_not_collide_with_a_nested_work_artifact(tmp_pa
         tmp_path / "bundle",
         {
             "references/cli-flags": lane_page,
-            "work/2026-01-01-feature-x/references/01-design-spec": artifact,
+            "work/feature-x/references/01-design": artifact,
         },
     )
     assert "references/cli-flags" in bundle.concepts
-    assert "work/2026-01-01-feature-x/references/01-design-spec" in bundle.concepts
+    assert "work/feature-x/references/01-design" in bundle.concepts
 
     report = validate_with(bundle, declaration_rules())
     # The artifact carries no `type`, so `section_rule` and `schema_rule` both

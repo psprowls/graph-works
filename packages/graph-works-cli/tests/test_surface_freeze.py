@@ -80,4 +80,25 @@ def test_the_golden_pins_every_verb_this_item_shipped() -> None:
         ("util", "log"),
         ("util", "tokens"),
         ("util", "trace"),
+        ("work", "adopt"),
+        ("work", "reparent"),
     } <= paths
+
+
+def test_the_one_time_migration_verb_is_registered_but_excluded_from_the_freeze() -> None:
+    """`gw work migrate-layout` is deliberately outside the frozen surface.
+
+    The freeze declares a stable contract, and this verb retires with the
+    dialect it migrates -- freezing it in would mean unfreezing a surface one
+    change after declaring it stable. Two halves, both worth pinning: it is
+    still a real registered command, and it is absent from the golden. Without
+    the first half, deleting the command outright would pass.
+    """
+    root = cast(TyperCommand, typer.main.get_command(app))
+    work_group = cast(TyperCommand, cast(typer.core.TyperGroup, root).commands["work"])
+    migrate = cast(typer.core.TyperGroup, work_group).commands["migrate-layout"]
+
+    assert migrate.hidden is True
+
+    golden_paths = {tuple(entry["path"]) for entry in json.loads(GOLDEN.read_text(encoding="utf-8"))["commands"]}
+    assert ("work", "migrate-layout") not in golden_paths

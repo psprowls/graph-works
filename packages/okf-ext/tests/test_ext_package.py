@@ -59,7 +59,7 @@ def test_version_is_static_and_pinned():
 
     `0.5.0` is still not free: the README promises the `okf_ext.sections`
     re-export shim, and now the `placement` alias too, come out there."""
-    assert okf_ext.__version__ == "0.4.10"
+    assert okf_ext.__version__ == "0.4.11"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

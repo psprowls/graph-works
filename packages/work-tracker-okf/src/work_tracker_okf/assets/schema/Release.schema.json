@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "_base.schema.json",
+  "properties": {
+    "type": { "const": "Release" },
+    "version": { "type": "string", "minLength": 1 },
+    "target_date": { "type": "string", "format": "date" },
+    "released_at": { "type": "string", "format": "date" }
+  },
+  "x-okf-directory": "work/"
+}

@@ -8,7 +8,7 @@ from urllib.parse import unquote
 import ext_helpers
 import pytest
 from okf_ext.moves import plan as plan_module
-from okf_ext.moves.model import Move
+from okf_ext.moves.model import Move, ReferenceField
 from okf_ext.moves.plan import plan_move, plan_move_dir, plan_move_many, plan_repair
 from okf_io import load_bundle
 from okf_io.bundle import canonical_id
@@ -81,6 +81,25 @@ def test_a_directory_move_rebases_a_reference_between_two_moved_members(linked):
     # one: it repoints at beta's new location regardless of who else moved.
     absolute = edit_for(plan, "concepts/alpha.md", "/concepts/beta.md")
     assert absolute.new == "/pages/beta.md"
+
+
+def test_extra_list_mapping_path_repairs_by_resolved_identity(tmp_path):
+    (tmp_path / "index.md").write_text("---\nokf_version: 0.2\n---\n# T\n", encoding="utf-8")
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "feature-old.md").write_text("---\ntitle: Old\ndescription: D\ntype: Feature\n---\n", encoding="utf-8")
+    (work / "feature-referrer.md").write_text(
+        "---\ntitle: R\ndescription: D\ntype: Feature\n"
+        "depends_on:\n  - path: work/feature-old\n    blocks: execute\n    needs: resolved\n---\n",
+        encoding="utf-8",
+    )
+    bundle = load_bundle(tmp_path)
+    plan = plan_move_many(
+        bundle,
+        {"work/feature-old.md": "work/feature-new.md"},
+        extra_reference_fields=(ReferenceField(("depends_on", "*", "path"), target="concept"),),
+    )
+    assert any(edit.key == "depends_on.0.path" and edit.new == "work/feature-new" for edit in plan.edits)
 
 
 # --- validation refusals ---

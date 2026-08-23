@@ -18,6 +18,7 @@ import zipfile
 from pathlib import Path
 
 import pytest
+from graph_works_core import hooks
 from graph_works_core.hooks import HooksError, HookWiring, apply
 
 
@@ -44,6 +45,41 @@ def _seed_settings(repo_root: Path, data: object) -> None:
     path = _settings_file(repo_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_hook_internal_type_and_default_script_helpers_cover_runtime_variants(tmp_path: Path) -> None:
+    assert hooks._default_scripts_dir().is_dir()
+    assert [hooks._json_type(value) for value in (True, "s", 1.5, object())] == [
+        "boolean",
+        "string",
+        "number",
+        "object",
+    ]
+    assert hooks._validate_settings(tmp_path / "settings.json", {"hooks": {"Stop": [{}]}}) == {"hooks": {"Stop": [{}]}}
+
+
+def test_enable_uses_packaged_default_script_directory(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    result = apply("enable", "transcript", repo_root)
+    assert result.added == ("session-end-transcript-capture.sh",)
+
+
+def test_settings_read_oserror_is_wrapped(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    target = _settings_file(repo_root)
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    real_read = Path.read_text
+
+    def fail_read(path: Path, *args, **kwargs):
+        if path == target:
+            raise OSError("unreadable")
+        return real_read(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", fail_read)
+    with pytest.raises(HooksError, match="could not read settings"):
+        apply("disable", "transcript", repo_root)
 
 
 def test_enable_registers_the_feature_hook_under_its_event(tmp_path):
@@ -351,9 +387,13 @@ def _assert_wheel_enables_every_hook(wheel: Path, tmp_path: Path) -> None:
     repo_root.mkdir()
     smoke = """
 import json
+import os
+import subprocess
 import sys
+from datetime import date
 from pathlib import Path
 
+from graph_works_core import apply_init, plan_init
 from graph_works_core.hooks import apply
 
 repo_root = Path(sys.argv[1])
@@ -368,7 +408,35 @@ commands = [
 assert transcript.added == ("session-end-transcript-capture.sh",)
 assert len(commands) == 1
 assert all("graph_works_core/_hook_scripts/" in command for command in commands)
-assert all(Path(command.removeprefix('bash "').removesuffix('"')).is_file() for command in commands)
+assert all("GRAPH_WORKS_PYTHON=" in command for command in commands)
+
+layout = apply_init(plan_init(repo_root / ".works", today=date(2026, 8, 23), topic="Hook test")).layout
+work_path = "work/feature-installed-hook"
+page = layout.bundle_dir / f"{work_path}.md"
+page.parent.mkdir(parents=True, exist_ok=True)
+page.write_text("---\\ntype: Feature\\n---\\n", encoding="utf-8")
+layout.cache_dir.mkdir(parents=True, exist_ok=True)
+(layout.cache_dir / "active-work.json").write_text(
+    json.dumps({"path": work_path, "phase": "execute"}) + "\\n",
+    encoding="utf-8",
+)
+source = repo_root / "session.jsonl"
+source.write_text('{"event":"installed"}\\n', encoding="utf-8")
+environment = os.environ.copy()
+environment["GRAPH_WORKS_DIR"] = str(layout.root)
+environment["GRAPH_WORKS_TRANSCRIPT_CAPTURE_TRACE_LOG"] = str(repo_root / "trace.log")
+completed = subprocess.run(
+    commands[0],
+    shell=True,
+    cwd=repo_root,
+    env=environment,
+    input=json.dumps({"session_id": "installed-wheel", "transcript_path": str(source)}),
+    capture_output=True,
+    text=True,
+)
+assert completed.returncode == 0, completed.stderr
+destination = layout.bundle_dir / work_path / "references" / "03-execute-transcript.jsonl"
+assert destination.read_text(encoding="utf-8") == source.read_text(encoding="utf-8")
 """
     environ = os.environ.copy()
     environ["PYTHONPATH"] = str(site_packages)

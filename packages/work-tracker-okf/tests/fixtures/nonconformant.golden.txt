@@ -1,37 +1,42 @@
-error	graph.depends-on-invalid	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`depends_on` has invalid blocks: blocks 'build' is invalid
-error	graph.depends-on-missing	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`depends_on` '2026-06-05-bug-no-such-item' names no work item
-warn	graph.depends-on-not-sibling	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`depends_on` '2026-07-06-test-gap-wontfix' has `parent` None, not this item's '2026-07-03-spike-wrong-parent-type'
-error	graph.parent-type-invalid	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`parent` '2026-07-03-spike-wrong-parent-type' resolves but its `type` is 'Spike', not one of ['Epic', 'Feature']
-error	plan.accepted-without-plan	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.plan	`workflow_status: accepted` but the `## Plan` table is missing
-warn	state.phase-status-incoherent	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.state	`workflow_status` 'accepted' expects `phase` in ['done', 'execute', 'finish'], got 'design'
-warn	state.stuck-accepted	work/2026-06-02-feature-accepted-no-plan.md	work_tracker_okf._rules.state	`workflow_status: accepted` with no update in 124 days (over 60)
-warn	decisions.ledger-missing	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.decisions	`type: Epic` at `phase: execute` has no decisions ledger at `work/2026-07-01-epic-stalled-decomposition/references/00-decisions.md`
-warn	graph.epic-without-children	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.graph	`type: Epic` at `phase: execute` has no children
-warn	plan.table-malformed	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.plan	`## Plan` is present but carries no table matching its declared columns
-warn	state.stuck-open	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.state	`workflow_status: open` with no update in 94 days (over 30)
-error	targets.affects-missing	work/2026-07-01-epic-stalled-decomposition.md	work_tracker_okf._rules.targets	`affects` entry 'packages/does-not-exist' does not exist under the repo root
-warn	graph.children-stale	work/2026-07-03-spike-wrong-parent-type.md	work_tracker_okf._rules.graph	authored `children` [] disagrees with the derived ['2026-06-02-feature-accepted-no-plan']; run the children sync
-warn	state.archive-eligible	work/2026-07-03-spike-wrong-parent-type.md	work_tracker_okf._rules.state	`workflow_status: resolved` is terminal; the item is still under `work/`
-warn	state.resolved-without-ref	work/2026-07-03-spike-wrong-parent-type.md	work_tracker_okf._rules.state	`workflow_status: resolved` with no `resolved_in`
-error	graph.parent-missing	work/2026-07-04-bug-superseded-orphan.md	work_tracker_okf._rules.graph	`parent` '2026-07-09-no-such-epic' names no work item
-error	plan.action-target-missing	work/2026-07-04-bug-superseded-orphan.md	work_tracker_okf._rules.plan	plan action names `packages/example/gone.py`, which does not exist under the repo root
-warn	plan.done-when-missing	work/2026-07-04-bug-superseded-orphan.md	work_tracker_okf._rules.plan	`type: Feature` plan has rows with an empty `Done when` cell
-warn	state.archive-eligible	work/2026-07-04-bug-superseded-orphan.md	work_tracker_okf._rules.state	`workflow_status: superseded` is terminal; the item is still under `work/`
-warn	state.slug-type-mismatch	work/2026-07-04-bug-superseded-orphan.md	work_tracker_okf._rules.state	slug carries no `feature` segment, which `type: Feature` implies
-error	state.superseded-without-link	work/2026-07-04-bug-superseded-orphan.md	work_tracker_okf._rules.state	`workflow_status: superseded` with no `superseded_by`
-error	state.mitigated-without-mitigation	work/2026-07-05-tech-debt-mitigated.md	work_tracker_okf._rules.state	`workflow_status: mitigated` with no `mitigation`
-warn	targets.artifact-missing	work/2026-07-05-tech-debt-mitigated.md	§5.1	`sources[1].resource` '/work/2026-07-05-tech-debt-mitigated/references/02-plan-guidance.md' is not a bundle member
-warn	targets.source-id-mismatch	work/2026-07-05-tech-debt-mitigated.md	§5.1	`sources[0].id` 'plan' disagrees with its filename, which implies 'design-spec'
-warn	state.archive-eligible	work/2026-07-06-test-gap-wontfix.md	work_tracker_okf._rules.state	`workflow_status: wontfix` is terminal; the item is still under `work/`
-warn	state.wontfix-without-rationale	work/2026-07-06-test-gap-wontfix.md	work_tracker_okf._rules.state	`workflow_status: wontfix` with no `rationale`
-error	graph.depends-on-cycle	work/2026-07-07-bug-cycle-a.md	work_tracker_okf._rules.graph	`depends_on` participates in a cycle
-error	graph.depends-on-cycle	work/2026-07-08-bug-cycle-b.md	work_tracker_okf._rules.graph	`depends_on` participates in a cycle
-error	graph.parent-cycle	work/2026-07-09-feature-parent-cycle-a.md	work_tracker_okf._rules.graph	`parent` chain participates in a cycle
-error	graph.parent-cycle	work/2026-07-10-feature-parent-cycle-b.md	work_tracker_okf._rules.graph	`parent` chain participates in a cycle
-error	state.in-progress-without-owner	work/2026-07-12-tech-debt-in-progress.md	work_tracker_okf._rules.state	`workflow_status: in-progress` with no `owner`
-error	decisions.entry-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-002: invalid status 'maybe'; expected one of ['answered', 'assumed', 'open', 'superseded']
-error	decisions.entry-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id 'D-002' is duplicated in the ledger
-error	decisions.entry-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id sequence has a gap: [3] missing between D-001 and D-004
-error	decisions.open-at-finish	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	`phase: finish` with 1 open decision(s): D-002
-error	decisions.supersedes-invalid	work/2026-07-13-epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-004 supersedes 'D-009', which does not exist in the ledger
-error	decisions.cite-missing	work/2026-07-14-epic-feature-ledger-citation.md	work_tracker_okf._rules.decisions	design spec cites 'D-011', which is not in epic '2026-07-13-epic-ledger-at-finish''s ledger
+error	graph.depends-on-cycle	work/bug-cycle-a.md	work_tracker_okf._rules.graph	`depends_on` participates in a cycle
+error	graph.depends-on-cycle	work/bug-cycle-b.md	work_tracker_okf._rules.graph	`depends_on` participates in a cycle
+error	plan.action-target-missing	work/bug-superseded-orphan.md	work_tracker_okf._rules.plan	plan action names `packages/example/gone.py`, which does not exist under the repo root
+warn	plan.done-when-missing	work/bug-superseded-orphan.md	work_tracker_okf._rules.plan	`type: Feature` plan has rows with an empty `Done when` cell
+warn	state.archive-eligible	work/bug-superseded-orphan.md	work_tracker_okf._rules.state	`work_status: superseded` is terminal; the item is still under `work/`
+error	state.superseded-without-link	work/bug-superseded-orphan.md	work_tracker_okf._rules.state	`work_status: superseded` with no `superseded_by`
+error	structure.owned-directory-missing	work/bug-superseded-orphan.md	work_tracker_okf._rules.structure	parent-capable item has no owned directory at `work/bug-superseded-orphan`
+warn	structure.prefix-type-mismatch	work/bug-superseded-orphan.md	work_tracker_okf._rules.structure	basename carries no `feature` prefix, which `type: Feature` implies
+error	decisions.entry-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-002: invalid status 'maybe'; expected one of ['answered', 'assumed', 'open', 'superseded']
+error	decisions.entry-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id 'D-002' is duplicated in the ledger
+error	decisions.entry-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id sequence has a gap: [3] missing between D-001 and D-004
+error	decisions.open-at-finish	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	`phase: finish` with 1 open decision(s): D-002
+error	decisions.supersedes-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-004 supersedes 'D-009', which does not exist in the ledger
+error	decisions.cite-missing	work/epic-ledger-at-finish/children/feature-ledger-citation.md	work_tracker_okf._rules.decisions	design spec cites 'D-011', which is not in owner 'work/epic-ledger-at-finish/children/feature-ledger-citation''s ledger
+warn	decisions.ledger-missing	work/epic-stalled-decomposition.md	work_tracker_okf._rules.decisions	`type: Epic` at `phase: execute` has no decisions ledger at `work/epic-stalled-decomposition/references/00-decisions.md`
+warn	graph.epic-without-children	work/epic-stalled-decomposition.md	work_tracker_okf._rules.graph	`type: Epic` at `phase: execute` has no children
+warn	plan.table-malformed	work/epic-stalled-decomposition.md	work_tracker_okf._rules.plan	`## Plan` is present but carries no table matching its declared columns
+warn	state.stuck-open	work/epic-stalled-decomposition.md	work_tracker_okf._rules.state	`work_status: open` with no update in 94 days (over 30)
+error	targets.affects-missing	work/epic-stalled-decomposition.md	work_tracker_okf._rules.targets	`affects` entry 'packages/does-not-exist' does not exist under the repo root
+error	structure.release-nested	work/feature-parent-cycle-a/children/release-nested.md	work_tracker_okf._rules.structure	`type: Release` is root-only but this item has parent 'work/feature-parent-cycle-a'
+warn	structure.index-entry-duplicate	work/index.md	work_tracker_okf._rules.structure	generated index region lists `work/bug-cycle-a.md` 2 times
+warn	structure.index-entry-missing	work/index.md	work_tracker_okf._rules.structure	generated index region does not list direct item `work/tech-debt-in-progress.md`
+warn	structure.index-entry-non-direct	work/index.md	work_tracker_okf._rules.structure	generated index entry `work/spike-wrong-parent-type/children/feature-accepted-no-plan.md` is not a direct descendant of this lane
+warn	structure.index-entry-stale	work/index.md	work_tracker_okf._rules.structure	generated index entry `work/gone.md` names no work item
+warn	state.archive-eligible	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` is terminal; the item is still under `work/`
+warn	state.resolved-without-ref	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` with no `resolved_in`
+error	structure.children-on-leaf	work/spike-wrong-parent-type.md	work_tracker_okf._rules.structure	`type: Spike` may not own the child lane `work/spike-wrong-parent-type/children`
+error	graph.depends-on-invalid	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`depends_on` has invalid blocks: blocks 'build' is invalid
+error	graph.depends-on-missing	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`depends_on` 'work/bug-no-such-item' names no work item
+warn	graph.depends-on-not-sibling	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`depends_on` 'work/test-gap-wontfix' has parent None, not 'work/spike-wrong-parent-type'
+error	plan.accepted-without-plan	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.plan	`work_status: accepted` but the `## Plan` table is missing
+warn	state.phase-status-incoherent	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.state	`work_status` 'accepted' expects `phase` in ['done', 'execute', 'finish'], got 'design'
+warn	state.stuck-accepted	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.state	`work_status: accepted` with no update in 124 days (over 60)
+error	state.in-progress-without-owner	work/tech-debt-in-progress.md	work_tracker_okf._rules.state	`work_status: in-progress` with no `owner`
+error	state.mitigated-without-mitigation	work/tech-debt-mitigated.md	work_tracker_okf._rules.state	`work_status: mitigated` with no `mitigation`
+error	structure.source-escape	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[2].resource` '/work/test-gap-wontfix.md' escapes its owner or bundle
+error	structure.source-id-duplicate	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[].id` 'plan' is duplicated within this item
+warn	structure.source-missing	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[1].resource` '/work/tech-debt-mitigated/references/02-plan-guidance.md' is not a bundle member
+warn	targets.source-id-mismatch	work/tech-debt-mitigated.md	§5.1	`sources[0].id` 'plan' disagrees with its filename, which implies 'design'
+error	structure.illegal-lane	work/tech-debt-mitigated/feature-skips-children.md	work_tracker_okf._rules.structure	work-item page is outside a root, `children`, or `_archive` lane
+warn	state.archive-eligible	work/test-gap-wontfix.md	work_tracker_okf._rules.state	`work_status: wontfix` is terminal; the item is still under `work/`
+warn	state.wontfix-without-rationale	work/test-gap-wontfix.md	work_tracker_okf._rules.state	`work_status: wontfix` with no `rationale`

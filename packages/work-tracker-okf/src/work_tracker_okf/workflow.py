@@ -38,7 +38,7 @@ from work_tracker_okf.vocabulary import (
     SPEC_SOURCE_ID,
     TERMINAL_STATUSES,
     TYPES,
-    WORKFLOW_STATUSES,
+    WORK_STATUSES,
 )
 
 #: The phase **reported** when the design-complete fork cannot be decided
@@ -62,7 +62,7 @@ class RouteState:
     or the filesystem itself."""
 
     type: str
-    workflow_status: str
+    work_status: str
     phase: str | None = None
     effort: str | None = None
     has_plan_doc: bool = False
@@ -79,7 +79,7 @@ class Transition:
     """One frontmatter mutation. `None` fields are left unchanged."""
 
     phase: str | None = None
-    workflow_status: str | None = None
+    work_status: str | None = None
     document_status: str | None = None
     requires: tuple[str, ...] = ()
     sync_plan_table: bool = False
@@ -116,13 +116,12 @@ def route(state: RouteState) -> RouteResult:
             reason="pipeline complete",
             blockers=("phase=done: nothing to dispatch; archive once the item ages out",),
         )
-    if state.workflow_status in TERMINAL_STATUSES or state.workflow_status == "mitigated":
+    if state.work_status in TERMINAL_STATUSES or state.work_status == "mitigated":
         return RouteResult(
             dispatch=None,
             reason="disposition is human-owned",
             blockers=(
-                f"workflow_status {state.workflow_status!r} never dispatches; "
-                "set it to 'open' to re-enter the pipeline",
+                f"work_status {state.work_status!r} never dispatches; set it to 'open' to re-enter the pipeline",
             ),
         )
     if state.phase is None:
@@ -140,8 +139,8 @@ def _validate(state: RouteState) -> list[str]:
     blockers = []
     if state.type not in TYPES:
         blockers.append(f"type {state.type!r} not in {sorted(TYPES)}")
-    if state.workflow_status not in WORKFLOW_STATUSES:
-        blockers.append(f"workflow_status {state.workflow_status!r} not in {sorted(WORKFLOW_STATUSES)}")
+    if state.work_status not in WORK_STATUSES:
+        blockers.append(f"work_status {state.work_status!r} not in {sorted(WORK_STATUSES)}")
     if state.phase is not None and state.phase not in PHASES:
         blockers.append(f"phase {state.phase!r} not in {sorted(PHASES)}")
     if state.effort is not None and state.effort not in EFFORTS:
@@ -164,12 +163,12 @@ def _dependency_blocker(state: RouteState, phase: str) -> RouteResult | None:
 
 def _entry(state: RouteState) -> RouteResult:
     """First dispatch: no phase. Sets the entry phase via `on_dispatch`."""
-    if state.workflow_status != "open":
+    if state.work_status != "open":
         return RouteResult(
             dispatch=None,
             reason="invalid entry",
             blockers=(
-                f"no phase and workflow_status {state.workflow_status!r}; set it to 'open' to enter at design, "
+                f"no phase and work_status {state.work_status!r}; set it to 'open' to enter at design, "
                 "or hand-set phase (e.g. phase: execute for an accepted item with a plan) "
                 "to adopt an in-flight item mid-pipeline",
             ),
@@ -198,7 +197,7 @@ def _entry(state: RouteState) -> RouteResult:
                 dispatch=Dispatch("execute", "unplanned"),
                 reason=f"TestGap with effort {state.effort}: skip design and plan",
                 on_dispatch=Transition(
-                    phase="execute", workflow_status="in-progress", document_status="stable", requires=("owner",)
+                    phase="execute", work_status="in-progress", document_status="stable", requires=("owner",)
                 ),
                 on_complete=Transition(phase="finish"),
             )
@@ -207,7 +206,7 @@ def _entry(state: RouteState) -> RouteResult:
             reason=f"TestGap with effort {state.effort}: skip design, plan first",
             on_dispatch=Transition(phase="plan", document_status="stable"),
             on_complete=Transition(
-                phase="execute", workflow_status="accepted", sync_plan_table=True, stamp_source=PLAN_SOURCE_ID
+                phase="execute", work_status="accepted", sync_plan_table=True, stamp_source=PLAN_SOURCE_ID
             ),
         )
     reason = (
@@ -264,7 +263,7 @@ def _design(state: RouteState) -> RouteResult:
             reason="design blocked: open decision needs a human answer",
             blockers=(
                 "open decision(s) block re-dispatch: answer via "
-                "`gw work decision answer <slug> D-nnn --answer ...`, then re-run",
+                "`gw work decision answer <path> D-nnn --answer ...`, then re-run",
             ),
         )
     reason = (
@@ -283,49 +282,52 @@ def _plan(state: RouteState) -> RouteResult:
     blocker = _dependency_blocker(state, "plan")
     if blocker is not None:
         return blocker
-    if state.type == "Epic":
-        # An epic decomposes into children and has no implementation row to
+    if state.type in {"Release", "Epic"}:
+        # A release or epic decomposes into children and has no implementation row to
         # add, so no plan table to sync.
         return RouteResult(
             dispatch=Dispatch("plan", "decompose"),
-            reason="Epic at plan stage",
-            on_complete=Transition(phase="execute", workflow_status="accepted", stamp_source=PLAN_SOURCE_ID),
+            reason=f"{state.type} at plan stage",
+            on_complete=Transition(phase="execute", work_status="accepted", stamp_source=PLAN_SOURCE_ID),
         )
     return RouteResult(
         dispatch=Dispatch("plan", "single"),
         reason=f"{state.type} at plan stage",
         on_complete=Transition(
-            phase="execute", workflow_status="accepted", sync_plan_table=True, stamp_source=PLAN_SOURCE_ID
+            phase="execute", work_status="accepted", sync_plan_table=True, stamp_source=PLAN_SOURCE_ID
         ),
     )
 
 
-def _epic_execute_gate(state: RouteState) -> RouteResult:
-    """The epic gate: it blocks the **dispatch**, because an epic at execute
-    has no work of its own -- its work is its children."""
+def _parent_execute_gate(state: RouteState) -> RouteResult:
+    """The Release/Epic gate blocks dispatch while child work remains."""
     rollup = state.child_rollup
     if rollup is None or rollup.total == 0:
         return RouteResult(
             dispatch=None,
-            reason="epic execute: no children",
-            blockers=("epic has no children; run the plan stage to decompose it",),
+            reason=f"{state.type.lower()} execute: no children",
+            blockers=(f"{state.type.lower()} has no children; run the plan stage to decompose it",),
         )
     if rollup.terminal < rollup.total:
         return RouteResult(
             dispatch=None,
-            reason="epic execute: waiting on children",
+            reason=f"{state.type.lower()} execute: waiting on children",
             blockers=(
-                f"waiting on children: {rollup.terminal}/{rollup.total} terminal; open: {', '.join(rollup.open_slugs)}",
+                f"waiting on children: {rollup.terminal}/{rollup.total} terminal; open: {', '.join(rollup.open_paths)}",
             ),
         )
-    return RouteResult(dispatch=None, reason="epic children complete", on_complete=Transition(phase="finish"))
+    return RouteResult(
+        dispatch=None,
+        reason=f"{state.type.lower()} children complete",
+        on_complete=Transition(phase="finish"),
+    )
 
 
 def _feature_children_requires(state: RouteState) -> tuple[str, ...]:
     """The feature gate: it rides `Transition.requires`, because a feature has
     work of its own to dispatch. It can act; it cannot finish."""
     rollup = state.child_rollup
-    if state.type == "Feature" and rollup is not None and rollup.open_slugs:
+    if state.type == "Feature" and rollup is not None and rollup.open_paths:
         return ("children-terminal",)
     return ()
 
@@ -334,8 +336,8 @@ def _execute(state: RouteState) -> RouteResult:
     blocker = _dependency_blocker(state, "execute")
     if blocker is not None:
         return blocker
-    if state.type == "Epic":
-        return _epic_execute_gate(state)
+    if state.type in {"Release", "Epic"}:
+        return _parent_execute_gate(state)
     if state.has_plan_doc:
         variant: Variant = "planned"
         reason = "execute stage with a written plan"
@@ -343,8 +345,8 @@ def _execute(state: RouteState) -> RouteResult:
         variant = "unplanned"
         reason = "execute stage via the test-driven path (no plan)"
     on_dispatch = None
-    if state.workflow_status != "in-progress":
-        on_dispatch = Transition(workflow_status="in-progress", requires=("owner",))
+    if state.work_status != "in-progress":
+        on_dispatch = Transition(work_status="in-progress", requires=("owner",))
     return RouteResult(
         dispatch=Dispatch("execute", variant),
         reason=reason,
@@ -357,35 +359,35 @@ def _finish(state: RouteState) -> RouteResult:
     blocker = _dependency_blocker(state, "finish")
     if blocker is not None:
         return blocker
-    if state.type == "Epic":
-        # An epic owns no branch -- its children carry `resolved_in`.
+    if state.type in {"Release", "Epic"}:
+        # Releases and epics own no branch -- their descendants carry `resolved_in`.
         return RouteResult(
             dispatch=None,
-            reason="epic at finish stage",
-            on_complete=Transition(phase="done", workflow_status="resolved"),
+            reason=f"{state.type.lower()} at finish stage",
+            on_complete=Transition(phase="done", work_status="resolved"),
         )
     return RouteResult(
         dispatch=Dispatch("finish", "branch"),
         reason=f"{state.type} at finish stage",
         on_complete=Transition(
             phase="done",
-            workflow_status="resolved",
+            work_status="resolved",
             requires=("resolved_in", *_feature_children_requires(state)),
         ),
     )
 
 
 def state_for(
-    items: Sequence[WorkItem], slug: str, *, effort: str | None = None, has_open_decision: bool = False
+    items: Sequence[WorkItem], path: str, *, effort: str | None = None, has_open_decision: bool = False
 ) -> RouteState | None:
-    """The `RouteState` for *slug*, or `None` when no item has that slug.
+    """The `RouteState` for *path*, or `None` when no item has that path.
 
     Two rules a rewrite drops by not knowing about them:
 
     - **The childless-feature rule.** A rollup is attached only for a
-      `PARENT_TYPES` item, and then only for an `Epic` or a non-empty rollup.
-      A childless `Feature` carries `None`, so no gate fires; an `Epic` keeps
-      its zero-count rollup, because its no-children blocker is phrased from it.
+      `PARENT_TYPES` item, and then only for a Release/Epic or a non-empty rollup.
+      A childless `Feature` carries `None`, so no gate fires; a Release or Epic
+      keeps its zero-count rollup, because its no-children blocker uses it.
     - **Archived items participate.** Dependency facts and the rollup are
       computed over the whole projection. One walk retires `work-io`'s second
       loader and the bug it fixed -- a resolved-and-archived dependency reading
@@ -399,29 +401,29 @@ def state_for(
     is correct for every caller that has no ledger to consult (a lone item, or
     `advance`/`cli.next_stage`, neither of which currently resolves one).
     """
-    item = next((candidate for candidate in items if candidate.slug == slug), None)
+    item = next((candidate for candidate in items if candidate.path == path), None)
     if item is None:
         return None
     rollup: ChildRollup | None = None
     if item.type in PARENT_TYPES:
-        rollup = child_rollup(items, slug)
-        if item.type != "Epic" and rollup.total == 0:
+        rollup = child_rollup(items, path)
+        if item.type not in {"Release", "Epic"} and rollup.total == 0:
             rollup = None
     structural_issues = tuple(
         issue
-        for issue in validate_dependencies(item.depends_on, parent=item.parent, self_slug=item.slug)
+        for issue in validate_dependencies(item.dependency_edges, parent_path=item.parent_path, self_path=item.path)
         if issue.code in {"targets-parent", "targets-self"}
     )
     return RouteState(
         type=item.type,
-        workflow_status=item.workflow_status,
+        work_status=item.work_status,
         phase=item.phase,
         effort=effort or item.effort,
-        has_plan_doc=item.has_plan_doc,
-        has_spec_doc=item.has_spec_doc,
+        has_plan_doc=item.has_plan_artifact,
+        has_spec_doc=item.has_design_artifact,
         has_open_decision=has_open_decision,
-        dependency_edges=item.depends_on,
-        dependency_facts=resolve_facts(items, item.depends_on),
+        dependency_edges=item.dependency_edges,
+        dependency_facts=resolve_facts(items, item.dependency_edges),
         dependency_issues=(*item.dependency_issues, *structural_issues),
         child_rollup=rollup,
     )

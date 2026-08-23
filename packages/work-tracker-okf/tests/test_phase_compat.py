@@ -7,7 +7,7 @@ work (C5-I). It is a bond, not a derivation: neither reads the other, and a
 change to either that makes them disagree fails here.
 
 **The precondition matters.** The property is not "no pair `route()` can produce
-is incoherent" -- an item hand-edited to `workflow_status: accepted` at
+is incoherent" -- an item hand-edited to `work_status: accepted` at
 `phase: design` is *already* incoherent, and `state.phase-status-incoherent`
 reports it before any transition applies. The claim is the useful one: the
 router never *introduces* incoherence into a state that was coherent going in.
@@ -21,11 +21,11 @@ from itertools import product
 
 from work_tracker_okf._rules.state import _PHASE_COMPAT
 from work_tracker_okf.hierarchy import ChildRollup
-from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORKFLOW_STATUSES
+from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORK_STATUSES
 from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteState, Transition, route
 
 _TYPES = sorted(TYPES)
-_STATUSES = sorted(WORKFLOW_STATUSES)
+_STATUSES = sorted(WORK_STATUSES)
 _PHASES: list[str | None] = [None, *sorted(PHASES)]
 _EFFORTS: list[str | None] = [None, *sorted(EFFORTS)]
 
@@ -35,8 +35,8 @@ _EFFORTS: list[str | None] = [None, *sorted(EFFORTS)]
 #: looks.
 _ROLLUPS: list[ChildRollup | None] = [
     None,
-    ChildRollup(total=2, terminal=2, open_slugs=()),
-    ChildRollup(total=2, terminal=1, open_slugs=("2026-01-01-bug-open",)),
+    ChildRollup(total=2, terminal=2, open_paths=()),
+    ChildRollup(total=2, terminal=1, open_paths=("work/release/children/bug-open",)),
 ]
 
 
@@ -51,7 +51,7 @@ def _states() -> list[RouteState]:
     return [
         RouteState(
             type=type_name,
-            workflow_status=status,
+            work_status=status,
             phase=phase,
             effort=effort,
             child_rollup=rollup,
@@ -61,12 +61,12 @@ def _states() -> list[RouteState]:
 
 
 def _coherent_states() -> list[RouteState]:
-    return [state for state in _states() if _coherent(state.workflow_status, state.phase)]
+    return [state for state in _states() if _coherent(state.work_status, state.phase)]
 
 
 def _apply(pair: tuple[str, str | None], transition: Transition) -> tuple[str, str | None]:
     """A `None` field on a `Transition` means *unchanged*."""
-    return (transition.workflow_status or pair[0], transition.phase or pair[1])
+    return (transition.work_status or pair[0], transition.phase or pair[1])
 
 
 def test_no_transition_the_router_emits_lands_on_an_incoherent_pair() -> None:
@@ -75,7 +75,7 @@ def test_no_transition_the_router_emits_lands_on_an_incoherent_pair() -> None:
         for transition in (result.on_dispatch, result.on_complete):
             if transition is None:
                 continue
-            landed = _apply((state.workflow_status, state.phase), transition)
+            landed = _apply((state.work_status, state.phase), transition)
             assert _coherent(*landed), (state, transition, landed)
 
 
@@ -85,7 +85,7 @@ def test_the_dispatch_then_complete_sequence_also_lands_coherent() -> None:
     setting `in-progress` changes what `on_complete`'s bare `phase=` means."""
     for state in _coherent_states():
         result = route(state)
-        pair: tuple[str, str | None] = (state.workflow_status, state.phase)
+        pair: tuple[str, str | None] = (state.work_status, state.phase)
         for transition in (result.on_dispatch, result.on_complete):
             if transition is None:
                 continue
@@ -115,9 +115,9 @@ def test_the_gate_that_only_a_satisfied_rollup_opens_is_reached() -> None:
     terminal. Without `_ROLLUPS`' middle entry that row is unreachable."""
     state = RouteState(
         type="Epic",
-        workflow_status="accepted",
+        work_status="accepted",
         phase="execute",
-        child_rollup=ChildRollup(total=2, terminal=2, open_slugs=()),
+        child_rollup=ChildRollup(total=2, terminal=2, open_paths=()),
     )
     result = route(state)
     assert result.on_complete is not None
@@ -127,7 +127,7 @@ def test_the_gate_that_only_a_satisfied_rollup_opens_is_reached() -> None:
 def test_the_compat_map_keys_and_values_are_drawn_from_the_vocabulary() -> None:
     """A typo'd status silently constrains nothing, which is the failure mode a
     2-D map has and a 1-D enum does not."""
-    assert set(_PHASE_COMPAT) <= WORKFLOW_STATUSES
+    assert set(_PHASE_COMPAT) <= WORK_STATUSES
     for status, phases in _PHASE_COMPAT.items():
         assert phases <= PHASES, status
 

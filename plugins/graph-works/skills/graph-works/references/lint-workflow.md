@@ -2,7 +2,7 @@
 
 > **Substrate ownership.** This document describes behavior that the graph-works rebuild is
 > re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`2026-08-13-epic-feature-lint-drift-propagation-vertical`](/work/2026-08-13-epic-feature-lint-drift-propagation-vertical.md) and is re-authored there, not here.
+> the behavioral truth is owned by [`feature-epic-feature-lint-drift-propagation-vertical`](/work/_archive/epic-graph-works-core/children/_archive/feature-epic-feature-lint-drift-propagation-vertical.md) and is re-authored there, not here.
 > Treat a disagreement between this page and that item as this page being stale.
 
 Periodic health check the LLM runs when the user runs `/graph-works:lint` or dispatches the `graph-works:linter` sub-agent. Run weekly, after batch ingests, and always after a repo scan.
@@ -36,7 +36,7 @@ Default report:
 - **`file_map` drift** (`lint/file_map.py`) — `## File map` entries that no longer exist on disk.
 - **Obsidian render** (`lint/obsidian_render.py`, JSON key `obsidian_render_findings`) — markdown that breaks Obsidian's renderer: bare angle-bracket placeholders, malformed callouts, malformed wikilinks/embeds, unescaped table pipes. Covers `index.md` files too.
 - **Guidance frontmatter** (`guidance_io.lint`, JSON key `guidance_lint_findings`) — invalid frontmatter, non-allowlisted tags, keyword shape, and topic placement for pages under `wiki/guidance/`.
-- **Work lifecycle** (`work_io.lifecycle_lint`, JSON key `work_lifecycle` = `{total_items, findings}`) — all 32 lifecycle rules over every `wiki/work/*.md` item, same rule set as `gw work lint`.
+- **Work lifecycle** (`gw work lint`) — the current state, plan, graph, structure, target, and decision catalogs over every path-native item beneath the configured OKF bundle's `work/` tree.
 - **Scanner heading drift** (`lint/scanner_heading.py`, JSON key `scanner_heading_drift`) — entity pages missing an expected deterministic section for their kind (e.g. a human renamed `## Referenced in wiki`).
 - **Source path drift** (JSON key `source_path_drift`) — `sources/` pages whose workspace-relative `raw/` `source_path` no longer exists on disk (the file was archived).
 
@@ -103,7 +103,7 @@ Present findings to the user as a single markdown report:
 - ⚠️ 4 packages drifted since last sync: `common-aws-node-ts` (12 files), …
 - ⚠️ 2 packages on disk missing wiki pages: `timeline-native-ts`, `timeline-data-node-ts`
 - ⚠️ 1 dep-stub-detail-page: `entities/dep_lodash` has 3 body lines — flesh out or delete
-- ⚠️ Work lifecycle: 2 findings across 14 items (1 error, 1 warn): `<slug>: [status-not-in-enum] …`
+- ⚠️ Work lifecycle: 2 findings across 14 items (1 error, 1 warn): `<work-path>: [<rule-id>] …`
 - ⚠️ 1 Obsidian render finding: `<page>: [obsidian-render-angle-bracket] …`
 - ⚠️ 1 guidance lint finding: `<topic>/<page>: [guidance-invalid-frontmatter] …`
 - 3 orphan wiki pages

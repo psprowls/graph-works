@@ -69,7 +69,7 @@ def _seed_both_lanes(workspace):
         "---\ntype: Explanation\ntitle: Byte fidelity\n---\n\nBody.\n", encoding="utf-8"
     )
     (bundle_dir / "work").mkdir(exist_ok=True)
-    (bundle_dir / "work" / "2026-08-13-bug-example.md").write_text(
+    (bundle_dir / "work" / "bug-example.md").write_text(
         "---\ntype: Bug\ntitle: Example\nstatus: accepted\n---\n\nSee [byte fidelity](/concepts/byte-fidelity.md).\n",
         encoding="utf-8",
     )
@@ -84,7 +84,7 @@ def test_each_lane_names_its_own_members_and_no_others(workspace):
     members = {lane.name: set(load_bundle(lane.root, ignore=lane.ignore).concepts) for lane in (wiki, work)}
     assert members["wiki"] & members["work"] == set()
     assert "concepts/byte-fidelity" in members["wiki"]
-    assert "work/2026-08-13-bug-example" in members["work"]
+    assert "work/bug-example" in members["work"]
 
 
 def test_each_lane_names_the_other_lane_rather_than_its_own_contents(workspace):
@@ -209,7 +209,7 @@ def test_absent_wiki_declarations_are_a_fact_but_the_work_lane_now_requires_them
 def test_the_work_lane_now_validates_schema_and_section_conformance(workspace):
     bundle_dir = workspace.layout.bundle_dir
     (bundle_dir / "work").mkdir(exist_ok=True)
-    (bundle_dir / "work" / "2026-08-13-bug-bad-type.md").write_text(
+    (bundle_dir / "work" / "bug-bad-type.md").write_text(
         "---\ntype: NotAType\ntitle: Bad\nstatus: accepted\n---\n\nBody.\n", encoding="utf-8"
     )
     _wiki, work = _compose(workspace).lanes

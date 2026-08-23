@@ -1,4 +1,4 @@
-"""Rules for the work-lifecycle axis: `workflow_status`, `phase`, and the key
+"""Rules for the work-lifecycle axis: `work_status`, `phase`, and the key
 each state must be accompanied by.
 
 **The module name is the code prefix**, asserted mechanically in
@@ -10,14 +10,13 @@ turned a rename of `work_io.lifecycle_lint` into a split.
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable
 
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, active, days_since, text_key, with_documents
 from work_tracker_okf.items import WorkItem
-from work_tracker_okf.vocabulary import SLUG_PREFIXES, TERMINAL_STATUSES
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 CODES: tuple[str, ...] = (
     "state.phase-status-incoherent",
@@ -29,18 +28,17 @@ CODES: tuple[str, ...] = (
     "state.stuck-open",
     "state.stuck-accepted",
     "state.archive-eligible",
-    "state.slug-type-mismatch",
 )
 
-#: `Finding.spec` is "the thing that says so". None of these ten cites an OKF
-#: section: an item whose `workflow_status` is `superseded` with no
+#: `Finding.spec` is "the thing that says so". None of these nine cites an OKF
+#: section: an item whose `work_status` is `superseded` with no
 #: `superseded_by` is a perfectly conformant OKF v0.2 document. They cite the
 #: module that defines them -- what `okf_ext.health` does with its own `_SPEC`,
 #: for the same reason. Inventing a section number for a lane invariant would be
 #: a false citation that outlives the person who wrote it.
 _SPEC = "work_tracker_okf._rules.state"
 
-#: Which phases each constrained `workflow_status` admits. Statuses absent from
+#: Which phases each constrained `work_status` admits. Statuses absent from
 #: the map -- `open`, `mitigated`, `wontfix`, `superseded` -- are unconstrained.
 #:
 #: Module-private with one consumer, exactly as `okf_io._rules.lifecycle` keeps
@@ -59,39 +57,34 @@ _PHASE_COMPAT: dict[str, frozenset[str]] = {
 _STUCK_OPEN_DAYS = 30
 _STUCK_ACCEPTED_DAYS = 60
 
-#: The `YYYY-MM-DD-` slug prefix `filing.compose_slug` writes. Optional on read:
-#: a page predating the convention is judged on the rest of its slug rather than
-#: silently exempted.
-_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
-
 
 def _finding(code: str, severity: Severity, item: WorkItem, message: str) -> Finding:
     """Every code in this module reports the item page and no line: the facts are
     about the item, not about one key's position in it."""
-    return Finding(code=code, severity=severity, message=message, spec=_SPEC, path=item.path, line=None)
+    return Finding(code=code, severity=severity, message=message, spec=_SPEC, path=item.page_path, line=None)
 
 
 def coherence(ctx: RuleContext) -> Iterable[Finding]:
-    """22: a `phase` its `workflow_status` does not admit.
+    """22: a `phase` its `work_status` does not admit.
 
-    `warn`, not `error`: humans hand-edit `workflow_status`, and the pair is a
+    `warn`, not `error`: humans hand-edit `work_status`, and the pair is a
     statement about where the item is rather than about whether its page
     conforms.
     """
     for item in active(ctx):
-        allowed = _PHASE_COMPAT.get(item.workflow_status)
+        allowed = _PHASE_COMPAT.get(item.work_status)
         if item.phase is None or allowed is None or item.phase in allowed:
             continue
         yield _finding(
             "state.phase-status-incoherent",
             "warn",
             item,
-            f"`workflow_status` {item.workflow_status!r} expects `phase` in {sorted(allowed)}, got {item.phase!r}",
+            f"`work_status` {item.work_status!r} expects `phase` in {sorted(allowed)}, got {item.phase!r}",
         )
 
 
 def companions(ctx: RuleContext) -> Iterable[Finding]:
-    """5-9: the key each of five `workflow_status` values must be accompanied by.
+    """5-9: the key each of five `work_status` values must be accompanied by.
 
     One function for five codes because it is one question asked of five values
     -- which key must accompany this state -- and answering it once per item is
@@ -110,26 +103,24 @@ def companions(ctx: RuleContext) -> Iterable[Finding]:
       projection does not carry them.
     """
     for item, document in with_documents(ctx):
-        status = item.workflow_status
+        status = item.work_status
         if status == "in-progress" and not item.owner:
             yield _finding(
-                "state.in-progress-without-owner", "error", item, "`workflow_status: in-progress` with no `owner`"
+                "state.in-progress-without-owner", "error", item, "`work_status: in-progress` with no `owner`"
             )
         if status == "resolved" and item.type != "Epic" and not item.resolved_in:
-            yield _finding(
-                "state.resolved-without-ref", "warn", item, "`workflow_status: resolved` with no `resolved_in`"
-            )
+            yield _finding("state.resolved-without-ref", "warn", item, "`work_status: resolved` with no `resolved_in`")
         if status == "superseded" and not item.superseded_by:
             yield _finding(
-                "state.superseded-without-link", "error", item, "`workflow_status: superseded` with no `superseded_by`"
+                "state.superseded-without-link", "error", item, "`work_status: superseded` with no `superseded_by`"
             )
         if status == "mitigated" and not text_key(document, "mitigation"):
             yield _finding(
-                "state.mitigated-without-mitigation", "error", item, "`workflow_status: mitigated` with no `mitigation`"
+                "state.mitigated-without-mitigation", "error", item, "`work_status: mitigated` with no `mitigation`"
             )
         if status == "wontfix" and not text_key(document, "rationale"):
             yield _finding(
-                "state.wontfix-without-rationale", "warn", item, "`workflow_status: wontfix` with no `rationale`"
+                "state.wontfix-without-rationale", "warn", item, "`work_status: wontfix` with no `rationale`"
             )
 
 
@@ -137,19 +128,19 @@ def staleness(ctx: RuleContext) -> Iterable[Finding]:
     """12, 13: an item that has not moved. `ctx.today` is the only clock."""
     for item in active(ctx):
         age = days_since(item.updated, ctx.today)
-        if item.workflow_status == "open" and age > _STUCK_OPEN_DAYS:
+        if item.work_status == "open" and age > _STUCK_OPEN_DAYS:
             yield _finding(
                 "state.stuck-open",
                 "warn",
                 item,
-                f"`workflow_status: open` with no update in {age} days (over {_STUCK_OPEN_DAYS})",
+                f"`work_status: open` with no update in {age} days (over {_STUCK_OPEN_DAYS})",
             )
-        if item.workflow_status == "accepted" and age > _STUCK_ACCEPTED_DAYS:
+        if item.work_status == "accepted" and age > _STUCK_ACCEPTED_DAYS:
             yield _finding(
                 "state.stuck-accepted",
                 "warn",
                 item,
-                f"`workflow_status: accepted` with no update in {age} days (over {_STUCK_ACCEPTED_DAYS})",
+                f"`work_status: accepted` with no update in {age} days (over {_STUCK_ACCEPTED_DAYS})",
             )
 
 
@@ -162,50 +153,13 @@ def terminal(ctx: RuleContext) -> Iterable[Finding]:
     archived items, which is what makes "still under `work/`" the claim.
     """
     for item in active(ctx):
-        if item.workflow_status in TERMINAL_STATUSES:
+        if item.work_status in TERMINAL_STATUSES:
             yield _finding(
                 "state.archive-eligible",
                 "warn",
                 item,
-                f"`workflow_status: {item.workflow_status}` is terminal; the item is still under `work/`",
+                f"`work_status: {item.work_status}` is terminal; the item is still under `work/`",
             )
-
-
-def slug(ctx: RuleContext) -> Iterable[Finding]:
-    """New: the slug's kebab segment disagrees with `type`.
-
-    `filing.compose_slug` guarantees agreement at birth from
-    `vocabulary.SLUG_PREFIXES`; a hand-edited `type` or a renamed file breaks it
-    silently, and every human, every glob and every `ls` then reads the wrong
-    thing.
-
-    **Warn, not error.** Nothing mechanical breaks: `route()` reads `type` off
-    frontmatter and `resolve()` reads the slug, and neither consults the other.
-    The disagreement misleads people, not code.
-
-    Two slug forms are accepted, because `compose_slug` emits both:
-    `<date>-<prefix>-<words>` and `<date>-epic-<prefix>-<words>` for an epic's
-    child. A consequence worth naming: an `Epic` whose slug is
-    `<date>-epic-feature-x` passes on the bare-`epic` branch. Tightening it would
-    mean this rule deciding whether a page is an epic or an epic's child from its
-    slug, which is the thing `parent` already says.
-
-    A `type` outside `SLUG_PREFIXES` is **silent**: the schema `enum` already
-    reports it, and there is no expected prefix to compare against.
-    """
-    for item in active(ctx):
-        expected = SLUG_PREFIXES.get(item.type)
-        if expected is None:
-            continue
-        remainder = _DATE_PREFIX_RE.sub("", item.slug)
-        if any(remainder == form or remainder.startswith(f"{form}-") for form in (expected, f"epic-{expected}")):
-            continue
-        yield _finding(
-            "state.slug-type-mismatch",
-            "warn",
-            item,
-            f"slug carries no `{expected}` segment, which `type: {item.type}` implies",
-        )
 
 
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
@@ -214,4 +168,4 @@ def rules(config: LaneConfig) -> tuple[Rule, ...]:
     the catalog-completeness test special-case half its own subjects, and that
     test is the whole reason the shape is worth constraining."""
     del config  # this topic injects nothing
-    return (coherence, companions, staleness, terminal, slug)
+    return (coherence, companions, staleness, terminal)

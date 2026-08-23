@@ -4,6 +4,7 @@ from okf_ext.sections import render_skeleton
 from okf_ext.shape import load_sections
 
 _EXPECTED_HEADINGS = {
+    "Release": ("Goal", "Release criteria", "Plan", "Notes / log"),
     "Epic": ("Goal", "Plan", "Notes / log"),
     "Feature": ("Options considered", "Plan", "Notes / log"),
     "Bug": ("Steps to reproduce", "Expected vs actual", "Plan", "Notes / log"),
@@ -20,7 +21,7 @@ def _section_set():
     return load_sections(str(assets))
 
 
-def test_seed_sections_load_as_exactly_the_six_types() -> None:
+def test_seed_sections_load_as_exactly_the_declared_types() -> None:
     section_set = _section_set()
     assert set(section_set.type_names) == set(_EXPECTED_HEADINGS)
     assert "_fragments" not in section_set.types

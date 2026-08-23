@@ -47,6 +47,17 @@ RefusalKind = Literal[
 #: frontmatter edit names a dotted key path and is position-free.
 RefWhere = Literal["body", "frontmatter"]
 
+#: A path through frontmatter. ``"*"`` visits every element of a sequence.
+FrontmatterPath = tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class ReferenceField:
+    """A frontmatter path whose scalar value references a bundle member or concept."""
+
+    path: FrontmatterPath
+    target: Literal["member", "concept"] = "member"
+
 
 @dataclass(frozen=True, slots=True)
 class Move:
@@ -55,6 +66,7 @@ class Move:
     source: str
     dest: str
     is_asset: bool  # a non-`.md` member: content is never edited, so it renames directly
+    opaque: bool = False  # preserve bytes and rename directly even when the member ends in `.md`
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,12 +194,21 @@ class MovePlan:
         would not match either lookup. A referrer's member is unaffected by
         the move and simply keeps its one path.
 
-        A moved *asset* is excluded: its content is never edited -- it only
-        renames -- so nothing about it is written here.
+        A moved *asset* or opaque member is excluded: its content is never
+        edited -- it only renames -- so nothing about it is written here.
         """
         touched = {edit.member for edit in self.edits}
-        touched.update(move.source for move in self.moves if not move.is_asset)
+        touched.update(move.source for move in self.moves if not move.is_asset and not move.opaque)
         return tuple(sorted(touched))
+
+
+@dataclass(frozen=True, slots=True)
+class MoveMaterialization:
+    """The filesystem effects of a valid move plan, built without writing."""
+
+    writes: Mapping[str, bytes]
+    renames: tuple[Move, ...]
+    deletes: tuple[str, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -221,11 +242,14 @@ class MoveResult:
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords, then lowercase
 #: functions, each group alphabetical -- `RUF022` enforces exactly this.
 __all__ = [
+    "FrontmatterPath",
     "Move",
+    "MoveMaterialization",
     "MovePlan",
     "MoveResult",
     "RefEdit",
     "RefWhere",
+    "ReferenceField",
     "Refusal",
     "RefusalKind",
     "Stranded",

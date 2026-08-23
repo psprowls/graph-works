@@ -10,8 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import typer
-from graph_works_core.archive.commands import run_archive
-from okf_ext.moves import stranded_warning
+from graph_works_core.archive.commands import run_archive, stranded_warnings
 
 from graph_works_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
@@ -28,13 +27,18 @@ def archive(
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
-    for label, entries in (("work items", run.plan.moves.stranded), ("wiki pages", run.wiki_plan.moves.stranded)):
-        warning = stranded_warning(entries)
-        if warning is not None:
-            typer.echo(f"{label}: {warning}", err=True)
+    for warning in stranded_warnings(run):
+        typer.echo(warning, err=True)
 
     if run.conflict or not run.ok or dry_run:
-        typer.echo(run.plan.diff())
+        typer.echo(
+            "\n".join(
+                [
+                    *(f"{source} -> {destination}" for source, destination in run.plan.path_mapping.items()),
+                    *(f"! {item.path}: {item.kind} -- {item.detail}" for item in run.plan.refusals),
+                ]
+            )
+        )
         typer.echo(run.wiki_plan.diff())
     if run.conflict:
         exit_error(f"archive refused: the two lanes both touch {', '.join(run.conflict)}")
@@ -42,9 +46,17 @@ def archive(
         exit_error("archive plan was refused")
     if dry_run:
         return
+    if run.result is not None and not run.result.ok:
+        exit_error("archive apply was incomplete: " + "; ".join(run.result.failures))
+    if run.wiki is not None and not run.wiki.ok:
+        details = [
+            *(f"{item.path}: {item.kind} -- {item.detail}" for item in run.wiki.refusals),
+            *(f"{item.path}: {item.kind} -- {item.error}" for item in run.wiki.move.failed),
+        ]
+        exit_error("wiki archive apply was incomplete: " + "; ".join(details))
 
     archived = [
-        *(run.result.archived if run.result is not None else ()),
+        *(run.plan.path_mapping.values() if run.result is not None else ()),
         *(run.wiki.archived if run.wiki is not None else ()),
     ]
     if archived:

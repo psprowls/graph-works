@@ -5,11 +5,9 @@ best-effort and degrades to `None` (or a silent no-op): provenance capture is a
 nice-to-have on the advance path, and an advance that failed because a `git`
 subprocess timed out would be a worse outcome than one that stamped nothing.
 
-The one exception is `write_active_work`'s `phase="done"` guard, which raises.
-That is a caller bug, not a git failure: `done` is not an `ARTIFACT_PHASES`
-member and `work_tracker_okf.paths.artifact_path` raises on it, so a `done`
-pointer would crash the *next* transcript-capture hook rather than this one --
-and a silent no-op there would hide the bug until it did.
+The exceptions are `write_active_work`'s canonical-path and dispatch-phase
+guards, which raise. Those are caller bugs, not git failures: a coordination
+pointer must identify exactly one path-native work item and an active phase.
 
 No clock. `write_active_work` takes `updated=` as an already-formatted string,
 matching `work-tracker-okf`'s `today=` convention: the caller that knows what
@@ -23,8 +21,9 @@ import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
+from work_tracker_okf.paths import parse_item_path
 from work_tracker_okf.results import ResultsFacts
-from work_tracker_okf.vocabulary import ARTIFACT_PHASES
+from work_tracker_okf.vocabulary import PHASES
 
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -32,6 +31,7 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 #: item. It lands in `layout.cache_dir` -- gitignored machine state, which is
 #: what the cache directory is for -- not in the committed config directory.
 ACTIVE_WORK_FILENAME = "active-work.json"
+ACTIVE_WORK_PHASES = PHASES - {"done"}
 
 #: Every git call is capped. A hung `git` on the advance path is the failure
 #: this exists to make impossible.
@@ -226,18 +226,20 @@ def _start_predates_opened(repo: Path, start_sha: str, opened: str) -> bool:
     return committer_date[:10] < opened
 
 
-def write_active_work(layout: WorkspaceLayout, slug: str, phase: str, *, updated: str) -> Path | None:
+def write_active_work(layout: WorkspaceLayout, path: str, phase: str, *, updated: str) -> Path | None:
     """Stamp the active-work pointer; the path written, or `None` on `OSError`.
 
     Raises:
-        ValueError: for a phase outside `ARTIFACT_PHASES` -- `done` most of all.
+        ValueError: for a noncanonical path or inactive phase -- `done` most of all.
     """
-    if phase not in ARTIFACT_PHASES:
+    if parse_item_path(path) is None:
+        raise ValueError(f"expected a canonical work-item path, got {path!r}")
+    if phase not in ACTIVE_WORK_PHASES:
         raise ValueError(
             f"phase {phase!r} produces no artifact, so it is not an active-work phase; "
-            f"expected one of {list(ARTIFACT_PHASES)}"
+            f"expected one of {sorted(ACTIVE_WORK_PHASES)}"
         )
-    pointer = {"slug": slug, "phase": phase, "updated": updated}
+    pointer = {"path": path, "phase": phase, "updated": updated}
     target = layout.cache_dir / ACTIVE_WORK_FILENAME
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -247,8 +249,8 @@ def write_active_work(layout: WorkspaceLayout, slug: str, phase: str, *, updated
     return target
 
 
-def clear_active_work(layout: WorkspaceLayout, slugs: set[str]) -> bool:
-    """Delete the pointer when it names one of *slugs*; whether it was deleted.
+def clear_active_work(layout: WorkspaceLayout, paths: set[str]) -> bool:
+    """Delete the pointer when it names one of *paths*; whether it was deleted.
 
     Otherwise a later capture hook resurrects a working directory for an item
     that has moved to the archive. Fail-open on a missing, unreadable,
@@ -259,7 +261,18 @@ def clear_active_work(layout: WorkspaceLayout, slugs: set[str]) -> bool:
         pointer = json.loads(target.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return False
-    if not isinstance(pointer, dict) or pointer.get("slug") not in slugs:
+    if not isinstance(pointer, dict):
+        return False
+    # Coordination cache is disposable. Pre-path-native records are invalid,
+    # not aliases, and are removed instead of being interpreted as identity.
+    path = pointer.get("path")
+    if not isinstance(path, str) or parse_item_path(path) is None:
+        try:
+            target.unlink()
+        except OSError:
+            return False
+        return True
+    if path not in paths:
         return False
     try:
         target.unlink()

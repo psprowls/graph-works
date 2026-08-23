@@ -14,8 +14,10 @@ def test_version_is_static():
     it selected the directory itself; the files it no longer writes were
     orphans `_subdirectories_of` would never link. `0.2.3` adds `value_shape`
     to the surface, so a consumer naming a raw value's shape does not have to
-    reach for `type(...).__name__` and leak ruamel. All patches (ADR-0007)."""
-    assert okf_io.__version__ == "0.2.3"
+    reach for `type(...).__name__` and leak ruamel. `0.2.4` publishes the
+    private descriptor loader required by graph-works-core's synchronized
+    transaction boundary. All patches (ADR-0007)."""
+    assert okf_io.__version__ == "0.2.4"
 
 
 def test_version_matches_package_metadata():

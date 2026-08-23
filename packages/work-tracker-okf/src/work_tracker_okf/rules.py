@@ -11,7 +11,7 @@
     )
 
 A **factory per capability** rather than okf-io's module-level `RULES` tuple:
-`RuleContext` deliberately carries no filesystem, and two of the 31 codes are
+`RuleContext` deliberately carries no filesystem, and two of the 37 codes are
 questions about a repository. okf-ext's `schema_rule` / `section_rule` /
 `health_rule` are the precedent this follows.
 

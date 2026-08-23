@@ -4,7 +4,7 @@ Use this template when dispatching a spec document reviewer subagent.
 
 **Purpose:** Verify the spec is complete, consistent, and ready for implementation planning.
 
-**Dispatch after:** Spec document is written — <workspace>/wiki/work/<slug>/01-design-spec.md in pipeline/auto-file mode, or <workspace>/raw/specs/YYYY-MM-DD-<topic>-design.md in the untracked legacy flow.
+**Dispatch after:** Spec document is written at `<workspace>/okf/<work-path>/references/01-design.md` in pipeline/auto-file mode, or `<workspace>/raw/specs/YYYY-MM-DD-<topic>-design.md` in the untracked flow.
 
 ```
 Subagent (general-purpose):

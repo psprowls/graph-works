@@ -1,16 +1,16 @@
 # gw-dispatch — background stage automation
 
-Runs the `plan` and `execute` phases of the graph-wiki work pipeline in fresh
+Runs the `plan` and `execute` phases of the graph-works work pipeline in fresh
 background Claude Code sessions, so you can keep designing new work items in the
 foreground while filed items advance on their own.
 
 `scripts/gw_dispatch.py` watches every work item in the vault. When an item's
 next stage is automatable, it dispatches a background session running
-`/graph-wiki:next <slug>`, then tracks that session to completion.
+`/graph-works:next <path>`, then tracks that session to completion.
 
 ## Why background sessions and not subagents
 
-`plugins/graph-wiki/skills/workflow/SKILL.md` states the constraint this
+`plugins/graph-works/skills/workflow/SKILL.md` states the constraint this
 mechanizes:
 
 > One stage per invocation, by design. Never chain stages in a session — each
@@ -39,7 +39,7 @@ condition and exits with the same instruction rather than failing obscurely.
 
 ### Workspace
 
-The dispatcher needs `GRAPH_WIKI_WORKSPACE` (or `--workspace`). For this repo it
+The dispatcher needs `GRAPH_WORKS_DIR` (or `--workspace`). For this repo it
 is already pinned in `.claude/settings.local.json`.
 
 ## Use
@@ -55,7 +55,7 @@ scripts/gw_dispatch.py --notify
 scripts/gw_dispatch.py --status
 
 # Clear a stalled/failed entry so it can be retried
-scripts/gw_dispatch.py --reset <slug>
+scripts/gw_dispatch.py --reset <path>
 ```
 
 Ctrl-C stops the watcher only. Background sessions it started keep running —
@@ -86,7 +86,7 @@ Ctrl-C stops the watcher only. Background sessions it started keep running —
   requires a typed `discard` confirmation. Those should block on a human.
 
 **Skipped silently:** epics blocked *waiting on children*. Their children are
-separate slugs and get picked up on their own, so descending is unnecessary.
+separate paths and get picked up on their own, so descending is unnecessary.
 
 ## The two questions that otherwise stall every run
 
@@ -99,14 +99,14 @@ pre-answered:
   yourself"*, and the dispatcher does not override that. An item missing effort
   surfaces as `waiting` and is never dispatched. Set it during design;
   `brainstorming/SKILL.md:73` already instructs the design stage to do so
-  precisely so `/graph-wiki:next` is not blocked later.
+  precisely so `/graph-works:next` is not blocked later.
 
 ## How completion is judged
 
 **Not** by session exit state. A session can exit having accomplished nothing,
 so `state: "done"` is treated as "finished running", not "succeeded".
 
-When a run finishes, the dispatcher re-reads `gw work next <slug> --json` and
+When a run finishes, the dispatcher re-reads `gw work next <path> --json` and
 confirms the phase actually advanced. Outcomes:
 
 | Ledger state | Meaning |
@@ -117,11 +117,11 @@ confirms the phase actually advanced. Outcomes:
 | `failed` | session reported failure |
 | `lost` | session vanished and `gw work next` was unreadable |
 
-`stalled`, `failed`, and `lost` are **sticky**: the slug is not re-dispatched
+`stalled`, `failed`, and `lost` are **sticky**: the path is not re-dispatched
 until you `--reset` it. This prevents a systematically failing item from
 burning tokens in a redispatch loop.
 
-The durable wiki state is the source of truth — which is what the pipeline's
+The durable workspace state is the source of truth — which is what the pipeline's
 "nothing depends on conversation memory" design already assumes.
 
 ## Answering a blocked stage
@@ -142,9 +142,9 @@ would require a custom question-serialization protocol.
 
 ## State files
 
-Under `<workspace>/.graph-wiki/dispatch/`:
+Under `<workspace>/.gw/dispatch/`:
 
-- `ledger.json` — one entry per slug: session id, phases, state
+- `ledger.json` — one entry per path: session id, phases, state
 - `events.jsonl` — append-only lifecycle record
 - `notifications.jsonl` — only if the optional hook below is installed
 
@@ -155,7 +155,7 @@ moment they fire, rather than up to `--interval` seconds later. Polling already
 works, so this is purely a latency improvement.
 
 Install it in your **user** settings (`~/.claude/settings.json`) — *not* in the
-graph-wiki plugin, where it would fire for every session of every user of the
+graph-works plugin, where it would fire for every session of every user of the
 plugin:
 
 ```json

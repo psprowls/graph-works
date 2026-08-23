@@ -7,12 +7,15 @@ takes a ``Bundle`` rather than a path.
 
 from __future__ import annotations
 
+import os
+import stat
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
+from typing import Literal
 
 from okf_io.derive import effective_status
 from okf_io.document import Document
@@ -184,16 +187,21 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
     continues past it, exactly as an unreadable file does a few lines below.
     """
 
-    def walk(directory: Path, *, guarded: bool, depth: int) -> Iterator[Path]:
+    pending: list[tuple[Literal["directory", "file"], Path, bool, int]] = [("directory", root, False, 0)]
+    while pending:
+        kind, path, guarded, depth = pending.pop()
+        if kind == "file":
+            yield path
+            continue
         if guarded:
             try:
-                entries = sorted(directory.iterdir())
+                entries = sorted(path.iterdir(), reverse=True)
             except OSError as exc:
-                relative = directory.relative_to(root).as_posix()
+                relative = path.relative_to(root).as_posix()
                 unreadable[relative] = f"could not be read: {exc}"
-                return
+                continue
         else:
-            entries = sorted(directory.iterdir())
+            entries = sorted(path.iterdir(), reverse=True)
         for entry in entries:
             if entry.name == GIT_DIR_NAME:
                 continue
@@ -202,11 +210,86 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
             if entry.is_symlink() and entry.is_dir():
                 continue
             if entry.is_dir():
-                yield from walk(entry, guarded=True, depth=depth + 1)
+                pending.append(("directory", entry, True, depth + 1))
             else:
-                yield entry
+                pending.append(("file", entry, True, depth))
 
-    yield from walk(root, guarded=False, depth=0)
+
+def _open_relative_directory(root_fd: int, relative: str) -> int:
+    descriptor = os.dup(root_fd)
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        for part in PurePosixPath(relative).parts if relative else ():
+            child = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = child
+    except Exception:
+        os.close(descriptor)
+        raise
+    return descriptor
+
+
+def _files_at(root_fd: int, *, unreadable: dict[str, str]) -> Iterator[str]:
+    """Descriptor-rooted equivalent of :func:`_files` with identical ordering."""
+    pending: list[tuple[Literal["directory", "file"], str, bool, int]] = [("directory", "", False, 0)]
+    while pending:
+        kind, relative, guarded, depth = pending.pop()
+        if kind == "file":
+            yield relative
+            continue
+        try:
+            directory_fd = _open_relative_directory(root_fd, relative)
+            try:
+                names = sorted(os.listdir(directory_fd), key=os.fsencode, reverse=True)  # noqa: PTH208
+            except Exception:
+                os.close(directory_fd)
+                raise
+        except OSError as exc:
+            if not guarded:
+                raise
+            unreadable[relative] = f"could not be read: {exc}"
+            continue
+        try:
+            entries: list[tuple[str, bool]] = []
+            for name in names:
+                if name == GIT_DIR_NAME:
+                    continue
+                if depth == 0 and name.startswith("."):
+                    continue
+                info = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode):
+                    followed = os.stat(name, dir_fd=directory_fd, follow_symlinks=True)
+                    is_directory = stat.S_ISDIR(followed.st_mode)
+                    if is_directory:
+                        continue
+                else:
+                    is_directory = stat.S_ISDIR(info.st_mode)
+                child = name if not relative else f"{relative}/{name}"
+                entries.append((child, is_directory))
+        finally:
+            os.close(directory_fd)
+        for child, is_directory in entries:
+            pending.append(("directory" if is_directory else "file", child, True, depth + 1))
+
+
+def _read_bytes_at(root_fd: int, relative: str) -> bytes:
+    pure = PurePosixPath(relative)
+    parent = pure.parent.as_posix()
+    parent_fd = _open_relative_directory(root_fd, "" if parent == "." else parent)
+    flags = os.O_RDONLY
+    try:
+        descriptor = os.open(pure.name, flags, dir_fd=parent_fd)
+        try:
+            chunks: list[bytes] = []
+            while chunk := os.read(descriptor, 1024 * 1024):
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            os.close(descriptor)
+    finally:
+        os.close(parent_fd)
 
 
 def _directory_id(relative: str) -> str:
@@ -214,7 +297,7 @@ def _directory_id(relative: str) -> str:
     return "" if parent == "." else parent
 
 
-def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
+def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
     """Walk *root* once and load every member.
 
     *ignore* patterns are ``fnmatch`` globs matched case-sensitively against
@@ -240,8 +323,12 @@ def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
     unreadable: dict[str, str] = {}
     canonical: dict[str, str] = {}
 
-    for path in _files(root, unreadable=unreadable):
-        relative = path.relative_to(root).as_posix()
+    members = (
+        ((path.relative_to(root).as_posix(), path) for path in _files(root, unreadable=unreadable))
+        if root_fd is None
+        else ((relative, root / relative) for relative in _files_at(root_fd, unreadable=unreadable))
+    )
+    for relative, path in members:
         if any(fnmatchcase(relative, pattern) for pattern in ignore):
             ignored.add(relative)
             if not relative.isascii():
@@ -253,7 +340,11 @@ def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
                 canonical[canonical_id(relative)] = relative
             continue
         try:
-            document = Document.load(path)
+            document = (
+                Document.load(path)
+                if root_fd is None
+                else Document.parse(_read_bytes_at(root_fd, relative).decode("utf-8"), path=path)
+            )
         except UnicodeDecodeError as exc:
             unreadable[relative] = f"not valid UTF-8: {exc}"
             continue
@@ -279,3 +370,15 @@ def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
         unreadable=MappingProxyType(dict(sorted(unreadable.items()))),
         _canonical=MappingProxyType(dict(sorted(canonical.items()))),
     )
+
+
+def load(root: Path, *, ignore: Sequence[str] = ()) -> Bundle:
+    """Walk *root* once and load every member through its configured path."""
+    return _load(root, ignore=ignore, root_fd=None)
+
+
+def _load_at(root: Path, root_fd: int, *, ignore: Sequence[str] = ()) -> Bundle:
+    """Load *root* through caller-owned *root_fd* while retaining semantic paths."""
+    if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
+        raise NotADirectoryError(f"bundle root descriptor is not a directory: {root_fd}")
+    return _load(root, ignore=ignore, root_fd=root_fd)

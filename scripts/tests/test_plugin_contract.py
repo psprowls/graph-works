@@ -9,7 +9,7 @@ and asserts on the printed report plus the exit code. Nothing here stubs the mod
 own parsing: the parsing *is* the thing under test.
 
 Each case is a finding from
-`work/2026-08-20-bug-plugin-contract-drifted-from-cli`'s design stage, named in its
+`work/bug-plugin-contract-drifted-from-cli`'s design stage, named in its
 docstring. A checker with no test is a ledger nobody can trust.
 """
 

@@ -3,7 +3,7 @@ type: TechDebt
 title: Delta debt
 description: A draft item, so exempt from effort and affects until design settles them.
 status: draft
-workflow_status: open
+work_status: open
 opened: '2026-02-03'
 updated: '2026-02-03'
 tags:

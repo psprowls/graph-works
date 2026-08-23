@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "commands": [
     {
       "name": "gw archive",
@@ -799,15 +799,15 @@
     },
     {
       "name": "gw next",
-      "help": "Compute what to dispatch for SLUG, and what advancing would change.\n\nIts one permitted write is the design-spec pointer repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
-      "short_help": "Compute what to dispatch for SLUG, and what advancing would change.",
+      "help": "Compute what to dispatch for PATH, and what advancing would change.\n\nIts one permitted write is the canonical design-source repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
+      "short_help": "Compute what to dispatch for PATH, and what advancing would change.",
       "usage": [
         "[OPTIONS]",
-        "{slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
@@ -1014,8 +1014,8 @@
     },
     {
       "name": "gw util describe-surface",
-      "help": "Describe every command in the gw tree \u2014 the machine-readable surface freeze.",
-      "short_help": "Describe every command in the gw tree \u2014 the machine-readable surface freeze.",
+      "help": "Describe every command in the gw tree — the machine-readable surface freeze.",
+      "short_help": "Describe every command in the gw tree — the machine-readable surface freeze.",
       "usage": [
         "[OPTIONS]"
       ],
@@ -1632,7 +1632,7 @@
       "arguments": [],
       "options": [],
       "commands": [
-        "adopt-child-specs",
+        "adopt",
         "advance",
         "archive",
         "decision",
@@ -1642,6 +1642,7 @@
         "orchestrate",
         "reconcile-context",
         "regen-index",
+        "reparent",
         "status"
       ],
       "path": [
@@ -1649,28 +1650,39 @@
       ]
     },
     {
-      "name": "gw work adopt-child-specs",
-      "help": "Adopt pre-written child-spec drafts into EPIC_SLUG's filed children.\n\nMechanical: a draft whose suffix identifies more than one direct child is\nreported as ambiguous and skipped, never guessed at.",
-      "short_help": "Adopt pre-written child-spec drafts into EPIC_SLUG's filed children.",
+      "name": "gw work adopt",
+      "help": "Adopt an active root subtree beneath a Release.",
+      "short_help": "Adopt an active root subtree beneath a Release.",
       "usage": [
         "[OPTIONS]",
-        "{epic_slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "epic_slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
       ],
       "options": [
         {
+          "name": "release_path",
+          "opts": [
+            "--release"
+          ],
+          "secondary_opts": [],
+          "help": "Canonical destination Release path.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
           "name": "dry_run",
           "opts": [
             "--dry-run"
           ],
           "secondary_opts": [],
-          "help": "Print the plan instead of moving.",
+          "help": "Print the plan instead of writing.",
           "required": false,
           "default": false,
           "is_flag": true
@@ -1692,7 +1704,7 @@
             "--json"
           ],
           "secondary_opts": [],
-          "help": "Emit the adoption as JSON.",
+          "help": "Emit the mutation as JSON.",
           "required": false,
           "default": false,
           "is_flag": true
@@ -1701,20 +1713,20 @@
       "commands": [],
       "path": [
         "work",
-        "adopt-child-specs"
+        "adopt"
       ]
     },
     {
       "name": "gw work advance",
-      "help": "Apply the routing table's next transition for SLUG.\n\nThe pipeline's single mutation point. An explicit `--worktree`/`--branch`\npair is applied unconditionally -- it is the caller's own resolved\ndecision, which is what lets an item be evicted out of a shared main\ncheckout; without the pair, provenance falls back to cwd inference.",
-      "short_help": "Apply the routing table's next transition for SLUG.",
+      "help": "Apply the routing table's next transition for PATH.\n\nThe pipeline's single mutation point. An explicit `--worktree`/`--branch`\npair is applied unconditionally -- it is the caller's own resolved\ndecision, which is what lets an item be evicted out of a shared main\ncheckout; without the pair, provenance falls back to cwd inference.",
+      "short_help": "Apply the routing table's next transition for PATH.",
       "usage": [
         "[OPTIONS]",
-        "{slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
@@ -1749,6 +1761,17 @@
           ],
           "secondary_opts": [],
           "help": "PR or commit ref.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "released_at",
+          "opts": [
+            "--released-at"
+          ],
+          "secondary_opts": [],
+          "help": "Release date (YYYY-MM-DD).",
           "required": false,
           "default": "",
           "is_flag": false
@@ -1817,15 +1840,15 @@
     },
     {
       "name": "gw work archive",
-      "help": "Relocate terminal work items to `work/_archive/`, repairing the OKF\nmarkdown references that pointed at them.\n\n`[[wikilink]]` forms are not an OKF link form, are never rewritten, and\nare reported to stderr as stranded instead -- per lane, never merged.\n\nSweep mode reports no skips -- a sweep's non-candidates were never\ncandidates. Targeted mode reports one per named slug that did not move,\nand exits non-zero, because there the caller named the slug and is owed\nan answer. The wiki lane is never involved.",
+      "help": "Relocate terminal work items to `work/_archive/`, repairing the OKF\nmarkdown references that pointed at them.\n\n`[[wikilink]]` forms are not an OKF link form, are never rewritten, and\nare reported to stderr as stranded instead -- per lane, never merged.\n\nSweep mode reports no skips -- a sweep's non-candidates were never\ncandidates. Targeted mode reports one per named path that did not move,\nand exits non-zero, because there the caller named the path and is owed\nan answer. The wiki lane is never involved.",
       "short_help": "Relocate terminal work items to `work/_archive/`, repairing the OKF markdown references that pointed at them.",
       "usage": [
         "[OPTIONS]",
-        "[slugs]..."
+        "[path]..."
       ],
       "arguments": [
         {
-          "name": "slugs",
+          "name": "path",
           "required": false,
           "nargs": -1
         }
@@ -1899,11 +1922,11 @@
       "short_help": "Append a decision to the owning epic's ledger.",
       "usage": [
         "[OPTIONS]",
-        "{slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
@@ -2033,12 +2056,12 @@
       "short_help": "Flip an open or assumed decision to answered.",
       "usage": [
         "[OPTIONS]",
-        "{slug}",
+        "{path}",
         "{DECISION_ID}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         },
@@ -2129,11 +2152,11 @@
       "short_help": "List the owning epic's decisions.",
       "usage": [
         "[OPTIONS]",
-        "{slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
@@ -2156,7 +2179,7 @@
             "--affects"
           ],
           "secondary_opts": [],
-          "help": "Filter: entries whose affects contain this slug.",
+          "help": "Filter: entries whose affects contain this work path.",
           "required": false,
           "default": "",
           "is_flag": false
@@ -2208,12 +2231,12 @@
       "short_help": "Supersede a decision and file a follow-up against what already landed.",
       "usage": [
         "[OPTIONS]",
-        "{slug}",
+        "{path}",
         "{DECISION_ID}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         },
@@ -2337,12 +2360,12 @@
       "short_help": "Retire one decision and append its canonical replacement, under one lock.",
       "usage": [
         "[OPTIONS]",
-        "{slug}",
+        "{path}",
         "{DECISION_ID}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         },
@@ -2451,7 +2474,7 @@
     },
     {
       "name": "gw work file",
-      "help": "File one work item, reconcile `work/index.md`, and log its arrival.\n\n`--parent` and `--depends-on`/`--dep` are mutually exclusive on one call:\na child's dependency edges are expressed relative to its siblings, not to\nits epic. Core enforces that; this command only reports the refusal.",
+      "help": "File one work item, reconcile `work/index.md`, and log its arrival.\n\nPaths are extensionless and bundle-relative. Dependencies are complete,\npath-keyed mappings; no legacy slug shorthand is accepted.",
       "short_help": "File one work item, reconcile `work/index.md`, and log its arrival.",
       "usage": [
         "[OPTIONS]"
@@ -2475,7 +2498,7 @@
             "--kind"
           ],
           "secondary_opts": [],
-          "help": "Epic | Feature | Bug | TechDebt | TestGap | Spike.",
+          "help": "Release | Epic | Feature | Bug | TechDebt | TestGap | Spike.",
           "required": true,
           "default": null,
           "is_flag": false
@@ -2514,34 +2537,23 @@
           "is_flag": false
         },
         {
-          "name": "slug_words",
+          "name": "name",
           "opts": [
-            "--slug-words"
+            "--name"
           ],
           "secondary_opts": [],
-          "help": "1-4 words for the slug. Defaults to the title.",
+          "help": "Stable basename words. Defaults to the title.",
           "required": false,
           "default": "",
           "is_flag": false
         },
         {
-          "name": "parent",
+          "name": "parent_path",
           "opts": [
-            "--parent"
+            "--parent-path"
           ],
           "secondary_opts": [],
-          "help": "Parent slug; this item becomes its child.",
-          "required": false,
-          "default": "",
-          "is_flag": false
-        },
-        {
-          "name": "depends_on",
-          "opts": [
-            "--depends-on"
-          ],
-          "secondary_opts": [],
-          "help": "Comma-separated sibling slugs that must finish first.",
+          "help": "Canonical parent item path.",
           "required": false,
           "default": "",
           "is_flag": false
@@ -2552,7 +2564,7 @@
             "--dep"
           ],
           "secondary_opts": [],
-          "help": "Repeatable phase-granular edge: slug=<slug>[,blocks=design|plan|execute|finish][,needs=design|plan|execute|resolved].",
+          "help": "Repeatable edge: path=<canonical>,blocks=<phase>,needs=<phase|resolved>.",
           "required": false,
           "default": [],
           "is_flag": false
@@ -2569,12 +2581,23 @@
           "is_flag": false
         },
         {
-          "name": "target",
+          "name": "version",
           "opts": [
-            "--target"
+            "--version"
           ],
           "secondary_opts": [],
-          "help": "YYYY-QN or YYYY-MM.",
+          "help": "Version or release train identifier.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "target_date",
+          "opts": [
+            "--target-date"
+          ],
+          "secondary_opts": [],
+          "help": "Target date (YYYY-MM-DD).",
           "required": false,
           "default": "",
           "is_flag": false
@@ -2692,15 +2715,15 @@
     },
     {
       "name": "gw work next",
-      "help": "Compute what to dispatch for SLUG, and what advancing would change.\n\nIts one permitted write is the design-spec pointer repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
-      "short_help": "Compute what to dispatch for SLUG, and what advancing would change.",
+      "help": "Compute what to dispatch for PATH, and what advancing would change.\n\nIts one permitted write is the canonical design-source repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
+      "short_help": "Compute what to dispatch for PATH, and what advancing would change.",
       "usage": [
         "[OPTIONS]",
-        "{slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
@@ -2748,15 +2771,15 @@
     },
     {
       "name": "gw work orchestrate",
-      "help": "Compute the auto-drive dispatch plan for SLUG's subtree. Read-only.\n\nA planner, not an executor: it never launches a dispatch, mutates an item,\nprovisions a worktree, or edits the manifest.",
-      "short_help": "Compute the auto-drive dispatch plan for SLUG's subtree.",
+      "help": "Compute the auto-drive dispatch plan for PATH's subtree. Read-only.\n\nA planner, not an executor: it never launches a dispatch, mutates an item,\nprovisions a worktree, or edits the manifest.",
+      "short_help": "Compute the auto-drive dispatch plan for PATH's subtree.",
       "usage": [
         "[OPTIONS]",
-        "{slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
@@ -2768,7 +2791,7 @@
             "--live"
           ],
           "secondary_opts": [],
-          "help": "Comma-separated running dispatch keys (<slug>#<phase>).",
+          "help": "Comma-separated running dispatch keys (<path>#<phase>).",
           "required": false,
           "default": "",
           "is_flag": false
@@ -2808,11 +2831,11 @@
       "short_help": "Assemble everything `reconciling-spec` needs for one work item.",
       "usage": [
         "[OPTIONS]",
-        "{slug}"
+        "{path}"
       ],
       "arguments": [
         {
-          "name": "slug",
+          "name": "path",
           "required": true,
           "nargs": 1
         }
@@ -2916,6 +2939,73 @@
       "path": [
         "work",
         "regen-index"
+      ]
+    },
+    {
+      "name": "gw work reparent",
+      "help": "Move a complete work subtree beneath PARENT_PATH.",
+      "short_help": "Move a complete work subtree beneath PARENT_PATH.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "parent_path",
+          "opts": [
+            "--parent"
+          ],
+          "secondary_opts": [],
+          "help": "Canonical destination parent path.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the mutation as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "reparent"
       ]
     },
     {

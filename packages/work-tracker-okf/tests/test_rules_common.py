@@ -29,25 +29,28 @@ def test_lane_config_is_frozen() -> None:
         config.repo_root = Path("/other")  # type: ignore[misc]
 
 
-def test_active_skips_archived_and_yields_in_slug_order(tmp_path: Path) -> None:
-    write_item(tmp_path, "2026-01-02-bug-beta", "type: Bug\n")
-    write_item(tmp_path, "2026-01-01-bug-alpha", "type: Bug\n")
-    archived = tmp_path / "work" / "_archive" / "2026-01-03-bug-gamma.md"
+def test_active_skips_archived_and_yields_in_path_order(tmp_path: Path) -> None:
+    write_item(tmp_path, "bug-beta", "type: Bug\n")
+    write_item(tmp_path, "bug-alpha", "type: Bug\n")
+    archived = tmp_path / "work" / "_archive" / "bug-gamma.md"
     archived.parent.mkdir(parents=True, exist_ok=True)
     archived.write_text("---\ntitle: T\ndescription: D\ntype: Bug\n---\n", encoding="utf-8")
 
     ctx = context_for(tmp_path)
-    assert [item.slug for item in _common.active(ctx)] == ["2026-01-01-bug-alpha", "2026-01-02-bug-beta"]
-    assert "2026-01-03-bug-gamma" in {item.slug for item in _common.items(ctx)}
+    assert [item.path for item in _common.active(ctx)] == [
+        "work/bug-alpha",
+        "work/bug-beta",
+    ]
+    assert "work/_archive/bug-gamma" in {item.path for item in _common.items(ctx)}
 
 
 def test_with_documents_skips_an_unparseable_page(tmp_path: Path) -> None:
-    write_item(tmp_path, "2026-01-01-bug-fine", "type: Bug\n")
-    broken = tmp_path / "work" / "2026-01-02-bug-broken.md"
+    write_item(tmp_path, "bug-fine", "type: Bug\n")
+    broken = tmp_path / "work" / "bug-broken.md"
     broken.write_text('---\ntype: "unterminated\n---\n\n## Plan\n', encoding="utf-8")
 
     ctx = context_for(tmp_path)
-    assert [item.slug for item, _ in _common.with_documents(ctx)] == ["2026-01-01-bug-fine"]
+    assert [item.path for item, _ in _common.with_documents(ctx)] == ["work/bug-fine"]
 
 
 @pytest.mark.parametrize(
@@ -60,7 +63,7 @@ def test_with_documents_skips_an_unparseable_page(tmp_path: Path) -> None:
     ],
 )
 def test_text_key_reads_only_a_non_blank_string(tmp_path: Path, frontmatter: str, expected: str) -> None:
-    write_item(tmp_path, "2026-01-01-bug-x", frontmatter)
+    write_item(tmp_path, "bug-x", frontmatter)
     _, document = next(iter(_common.with_documents(context_for(tmp_path))))
     assert _common.text_key(document, "mitigation") == expected
 

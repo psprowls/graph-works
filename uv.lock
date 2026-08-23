@@ -417,7 +417,7 @@ requires-dist = [
 
 [[package]]
 name = "graph-works-cli"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/graph-works-cli" }
 dependencies = [
     { name = "click" },
@@ -450,7 +450,7 @@ requires-dist = [
 
 [[package]]
 name = "graph-works-core"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/graph-works-core" }
 dependencies = [
     { name = "code-graph-io" },
@@ -1107,7 +1107,7 @@ wheels = [
 
 [[package]]
 name = "okf-ext"
-version = "0.4.10"
+version = "0.4.11"
 source = { editable = "packages/okf-ext" }
 dependencies = [
     { name = "markdown-it-py" },
@@ -1131,7 +1131,7 @@ provides-extras = ["schemas"]
 
 [[package]]
 name = "okf-io"
-version = "0.2.3"
+version = "0.2.4"
 source = { editable = "packages/okf-io" }
 dependencies = [
     { name = "markdown-it-py" },
@@ -2127,7 +2127,7 @@ wheels = [
 
 [[package]]
 name = "work-tracker-okf"
-version = "0.3.1"
+version = "0.4.0"
 source = { editable = "packages/work-tracker-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },

@@ -31,7 +31,7 @@ from typing import Any, Literal
 PROPOSAL_TYPE = "Proposal"
 
 #: The state of the page being argued for -- **not** OKF `status`, which
-#: describes the document carrying it, and not `workflow_status`, which would
+#: describes the document carrying it, and not `work_status`, which would
 #: collide with the work lane's key. A fixed, closed vocabulary: a caller
 #: wanting different states wants a different capability.
 PageStatus = Literal["proposed", "approved", "rejected", "created"]

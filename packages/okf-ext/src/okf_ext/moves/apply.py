@@ -35,7 +35,7 @@ from okf_io.bundle import INDEX_NAME, LOG_NAME
 from ruamel.yaml.error import YAMLError
 
 from okf_ext.body import split_lines
-from okf_ext.moves.model import MovePlan, MoveResult, RefEdit
+from okf_ext.moves.model import MoveMaterialization, MovePlan, MoveResult, RefEdit
 from okf_ext.writing import ApplyResult, PendingWrite, WriteFailure, body_digest, write_all
 
 
@@ -227,6 +227,74 @@ def _prune(root: Path, directories: Sequence[str]) -> tuple[str, ...]:
     return tuple(pruned)
 
 
+def _validate_plan(bundle: Bundle, plan: MovePlan) -> None:
+    """Reject a plan whose spans cannot safely apply to *bundle*."""
+    if Path(plan.root).resolve() != Path(bundle.root).resolve():
+        raise ValueError(
+            f"Plan was built against a different bundle ({plan.root}), not {bundle.root}. "
+            f"A plan's spans mean nothing outside the bundle it was planned against."
+        )
+    if not plan.ok:
+        raise ValueError(
+            f"Plan carries {len(plan.refusals)} refusal(s) and will not be applied; "
+            f"fix the mapping and re-plan. First: {plan.refusals[0].kind} on {plan.refusals[0].path}"
+        )
+
+
+def _materialize(
+    bundle: Bundle, plan: MovePlan
+) -> tuple[MoveMaterialization | None, dict[str, str], list[WriteFailure]]:
+    """Build a plan's effects and rendered text without touching the filesystem."""
+    members = _members(bundle)
+    relocations = plan.moves if plan.relocate else ()
+    destination_of = {move.source: move.dest for move in relocations}
+    by_member: dict[str, list[RefEdit]] = {}
+    for edit in plan.edits:
+        by_member.setdefault(edit.member, []).append(edit)
+
+    contents: dict[str, str] = {}
+    problems: list[WriteFailure] = []
+    touched = sorted(set(by_member) | {move.source for move in relocations if not move.is_asset and not move.opaque})
+    for member in touched:
+        document = members.get(member)
+        if document is None or document.path is None:
+            problems.append(WriteFailure(path=member, kind="not-a-member", error="not a member of this bundle"))
+            continue
+        rendered, failure = _build(member, document, by_member.get(member, ()), plan.digests.get(member))
+        if failure is not None:
+            problems.append(failure)
+            continue
+        assert rendered is not None
+        contents[member] = rendered
+    if problems:
+        return None, contents, problems
+
+    writes = {destination_of.get(member, member): rendered.encode("utf-8") for member, rendered in contents.items()}
+    materialized = MoveMaterialization(
+        writes=writes,
+        renames=tuple(move for move in relocations if move.is_asset or move.opaque),
+        deletes=tuple(move.source for move in relocations if not move.is_asset and not move.opaque),
+    )
+    return materialized, contents, []
+
+
+def materialize(bundle: Bundle, plan: MovePlan) -> MoveMaterialization:
+    """Return every final file effect for *plan* without writing to disk.
+
+    Stale documents and serialization errors make it impossible to produce a
+    complete effect set, so they are reported as ``ValueError``. ``apply``
+    preserves its established ``MoveResult`` failure contract for those same
+    conditions through the shared private build phase.
+    """
+    _validate_plan(bundle, plan)
+    result, _contents, problems = _materialize(bundle, plan)
+    if problems:
+        first = problems[0]
+        raise ValueError(f"Cannot materialize `{first.path}`: {first.error}")
+    assert result is not None
+    return result
+
+
 def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
     """Write *plan* against *bundle*. Four regimes, in this order.
 
@@ -295,16 +363,7 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
     bundle (its spans mean nothing anywhere else), and for a plan whose `ok`
     is `False` (the plan already said so).
     """
-    if Path(plan.root).resolve() != Path(bundle.root).resolve():
-        raise ValueError(
-            f"Plan was built against a different bundle ({plan.root}), not {bundle.root}. "
-            f"A plan's spans mean nothing outside the bundle it was planned against."
-        )
-    if not plan.ok:
-        raise ValueError(
-            f"Plan carries {len(plan.refusals)} refusal(s) and will not be applied; "
-            f"fix the mapping and re-plan. First: {plan.refusals[0].kind} on {plan.refusals[0].path}"
-        )
+    _validate_plan(bundle, plan)
 
     root = Path(bundle.root)
     members = _members(bundle)
@@ -317,36 +376,31 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
     relocations = plan.moves if plan.relocate else ()
     destination_of = {move.source: move.dest for move in relocations}
 
+    try:
+        materialized = materialize(bundle, plan)
+    except ValueError:
+        # `materialize` reports a stale document or serialization failure as
+        # a ValueError because it cannot return a complete effect set. `apply`
+        # keeps its established result-based failure contract for those same
+        # plan-time failures.
+        _materialized, _contents, materialize_problems = _materialize(bundle, plan)
+        if materialize_problems:
+            return _abort(materialize_problems)
+        raise
+    problems: list[WriteFailure] = []
     by_member: dict[str, list[RefEdit]] = {}
     for edit in plan.edits:
         by_member.setdefault(edit.member, []).append(edit)
 
-    # --- regime 1: build every document's content, all-or-nothing ---
-    contents: dict[str, str] = {}
-    problems: list[WriteFailure] = []
-    touched = sorted(set(by_member) | {source for source in destination_of if source.endswith(".md")})
-    for member in touched:
-        document = members.get(member)
-        if document is None or document.path is None:
-            problems.append(WriteFailure(path=member, kind="not-a-member", error="not a member of this bundle"))
-            continue
-        rendered, failure = _build(member, document, by_member.get(member, ()), plan.digests.get(member))
-        if failure is not None:
-            problems.append(failure)
-            continue
-        assert rendered is not None
-        contents[member] = rendered
-
-    if problems:
-        return _abort(problems)
-
     # --- regime 2: mkdir, probe, stage. No live file is touched. ---
-    for move in relocations:
-        parent = (root / move.dest).parent
+    destination_paths = {move.dest for move in relocations}
+    destination_paths.update(move.dest for move in materialized.renames)
+    for destination in destination_paths:
+        parent = (root / destination).parent
         try:
             parent.mkdir(parents=True, exist_ok=True)
         except OSError as exc:
-            problems.append(WriteFailure(path=move.dest, kind="mkdir-error", error=str(exc)))
+            problems.append(WriteFailure(path=destination, kind="mkdir-error", error=str(exc)))
     if problems:
         return _abort(problems)
 
@@ -367,12 +421,12 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
     staged: list[tuple[str, str, Path, Path]] = []  # (source, dest, tmp, live)
     stage_failed = False
     for move in relocations:
-        if move.is_asset:
+        if move.dest not in materialized.writes:
             continue
         live = root / move.dest
         tmp = live.with_name(f".{live.name}.{uuid.uuid4().hex}.tmp")
         try:
-            tmp.write_bytes(contents[move.source].encode("utf-8"))
+            tmp.write_bytes(materialized.writes[move.dest])
         except OSError as exc:
             # `write_bytes` truncates before it can fail, so a partial temp
             # file can survive the raise -- clean up the one that just failed
@@ -402,7 +456,7 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
             continue
         moved.append((source, dest))
 
-    for move in relocations:
+    for move in materialized.renames:
         if problems:
             # **Gated on the markdown commit loop above, not only on earlier
             # assets.** An asset rename consumes its source the instant it
@@ -413,8 +467,6 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
             # every image in the same batch, which is the ordinary shape of a
             # `plan_move_dir` over a directory holding both.
             break
-        if not move.is_asset:
-            continue
         try:
             (root / move.source).replace(root / move.dest)
         except OSError as exc:
@@ -433,7 +485,7 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
         PendingWrite(
             member=member,
             path=_require_path(members[member]),
-            rendered=contents[member],
+            rendered=materialized.writes[member].decode("utf-8"),
             on_written=lambda: None,
         )
         for member in referrers
@@ -450,9 +502,11 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
         referrers_of.setdefault(edit.target, set()).add(edit.member)
 
     removed_dirs: list[str] = []
-    for source, dest in moved:
-        if not source.endswith(".md"):
-            continue  # an asset moved by rename; there is no source left to remove
+    landed_moves = {source for source, _dest in moved}
+    for source in materialized.deletes:
+        if source not in landed_moves:
+            continue
+        dest = destination_of[source]
         outstanding = sorted(referrers_of.get(source, set()) - landed)
         if outstanding:
             problems.append(
@@ -496,4 +550,4 @@ def apply(bundle: Bundle, plan: MovePlan) -> MoveResult:
 
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords, then lowercase
 #: functions, each group alphabetical -- `RUF022` enforces exactly this.
-__all__ = ["apply"]
+__all__ = ["apply", "materialize"]

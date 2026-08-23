@@ -119,6 +119,17 @@ addopts = "-q"
 branch = true
 source = ["okf_io", "okf_ext"]
 
+# Compare the *precise* total against `--cov-fail-under`, not a rounded one.
+#
+# `coverage.results.should_fail_under` passes when `round(total, precision)`
+# clears the floor, and `precision` defaults to 0 — so 94.88% rounds to 95 and a
+# `--cov-fail-under=95` run prints "FAIL Required test coverage of 95% not
+# reached" and still exits 0. Every package in the 94.50–95.00 band was passing
+# the gate while reporting failure. This applies to every package: each `just
+# cov` line runs from the repo root, so coverage reads this file.
+[tool.coverage.report]
+precision = 2
+
 # The tier-2 internal boundary (okf-ext README, "Boundaries"). The shared
 # layer never imports a capability; capabilities may import the shared layer.
 #

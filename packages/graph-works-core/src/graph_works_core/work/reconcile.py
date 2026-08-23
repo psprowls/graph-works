@@ -19,7 +19,7 @@ claims a different concern, and appending would push it past 550 lines.
 every entry point in `work/commands.py` is sync, and an async function with no
 await is a promise a caller has to unwrap for no gain.
 
-One hard error, `ValueError` on an unknown slug — the same door
+One hard error, `ValueError` on an unknown path — the same door
 `commands.py:run_next` and `commands.py:_decision_context` open for a caller
 mistake. Everything else degrades to partial evidence plus a warning: a
 `ReconcileContext` carrying warnings and empty groups is a success, not a
@@ -36,9 +36,10 @@ from pathlib import Path
 from okf_io import load_bundle
 from work_tracker_okf import anchors
 from work_tracker_okf import decisions as _decisions
-from work_tracker_okf.hierarchy import nearest_epic
+from work_tracker_okf.decisions import ledger_ref
+from work_tracker_okf.hierarchy import nearest_parent
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
-from work_tracker_okf.paths import artifact_path, decisions_ledger, item_page
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.vocabulary import SPEC_SOURCE_ID, TERMINAL_STATUSES
 
 from graph_works_core.workspace import provenance
@@ -50,7 +51,7 @@ from graph_works_core.workspace.repos import resolve_repo
 class LandedSibling:
     """One item that has both gone terminal and left a ref behind."""
 
-    slug: str
+    path: str
     resolved_in: str | None
     affects: tuple[str, ...]
 
@@ -66,7 +67,7 @@ class CommitRef:
 
 @dataclass(frozen=True, slots=True)
 class CitedDecision:
-    """A `D-nnn` the spec cites, resolved against the epic's ledger.
+    """A `D-nnn` the spec cites, resolved against the nearest owner's ledger.
 
     `status` is `"missing"` when nothing in the ledger carries that number —
     a real outcome, not an error: a spec can cite an id that never reached the
@@ -91,8 +92,8 @@ class ReconcileContext:
     the public JSON contract, so the internal shape is free to be typed.
     """
 
-    epic_slug: str
-    slug: str
+    owner_path: str
+    path: str
     spec_path: str
     spec_anchor_commit: str | None
     anchor_source: str
@@ -111,45 +112,40 @@ def _has_landed(item: WorkItem) -> bool:
     """Terminal AND carrying a ref. Terminal alone is not enough: a `wontfix`
     sibling changed no code and cannot have invalidated anything.
 
-    Checks `workflow_status`, not `status`: `TERMINAL_STATUSES` is the
+    Checks `work_status`, not `status`: `TERMINAL_STATUSES` is the
     work-lifecycle vocabulary (`resolved`/`wontfix`/`superseded`), while
     `WorkItem.status` is OKF's own document status (`draft`/`stable`/
     `deprecated`, `DOCUMENT_STATUSES`) -- a different axis entirely. Every
     other terminality check in this codebase (`hierarchy.py`,
     `dependencies.py`, `filing.py`, `workflow.py`, `_rules/state.py`,
-    `_rules/graph.py`, `orchestrate/commands.py`) reads `workflow_status` for
+    `_rules/graph.py`, `orchestrate/commands.py`) reads `work_status` for
     the same reason.
     """
-    return item.workflow_status in TERMINAL_STATUSES and bool(item.resolved_in)
+    return item.work_status in TERMINAL_STATUSES and bool(item.resolved_in)
 
 
-def _landed_siblings(items: Sequence[WorkItem], item: WorkItem, epic_slug: str | None) -> tuple[LandedSibling, ...]:
-    """`depends_on` union (landed items sharing *item*'s nearest epic whose
-    `affects` intersect its own).
+def _landed_siblings(items: Sequence[WorkItem], item: WorkItem) -> tuple[LandedSibling, ...]:
+    """`depends_on` union landed structural siblings whose `affects` overlap.
 
     The declared arm is the coupling the author wrote down. The overlap arm
     catches undeclared coupling — two children editing the same files — while
     staying fully mechanical: a path-set intersection makes no judgment about
     which sibling "seems relevant", which is exactly what makes widening the
-    scope safe. Epic membership comes from `hierarchy.nearest_epic`, so an item
-    in a different epic never enters the overlap arm.
+    scope safe. Structural containment, not decision-ledger ownership, defines
+    this arm, so an item under a different parent never enters it.
 
-    Union by slug, so an item matching both arms appears once. Order follows
+    Union by canonical path, so an item matching both arms appears once. Order follows
     *items*, which `load_items` returns sorted — the result is deterministic.
     """
     own_affects = set(item.affects)
-    declared = {edge.slug for edge in item.depends_on}
+    declared = {edge.path for edge in item.dependency_edges}
     selected: dict[str, LandedSibling] = {}
     for other in items:
-        if other.slug == item.slug or not _has_landed(other):
+        if other.path == item.path or not _has_landed(other):
             continue
-        overlaps = (
-            epic_slug is not None
-            and nearest_epic(items, other.slug) == epic_slug
-            and bool(own_affects & set(other.affects))
-        )
-        if other.slug in declared or overlaps:
-            selected[other.slug] = LandedSibling(slug=other.slug, resolved_in=other.resolved_in, affects=other.affects)
+        overlaps = other.parent_path == item.parent_path and bool(own_affects & set(other.affects))
+        if other.path in declared or overlaps:
+            selected[other.path] = LandedSibling(path=other.path, resolved_in=other.resolved_in, affects=other.affects)
     return tuple(selected.values())
 
 
@@ -165,7 +161,7 @@ def _spec_ref(item: WorkItem) -> str:
     for source in item.sources:
         if source.id == SPEC_SOURCE_ID and source.resource:
             return source.resource.lstrip("/")
-    return artifact_path(item.slug, "design", "spec", archived=item.archived).rel
+    return artifact_ref(item.path, MANAGED_ARTIFACTS[SPEC_SOURCE_ID]).rel
 
 
 def _resolve_anchor(repo: Path | None, spec_path: Path, spec_text: str) -> tuple[str | None, str]:
@@ -198,7 +194,7 @@ def _resolve_anchor(repo: Path | None, spec_path: Path, spec_text: str) -> tuple
 
 def run_reconcile_context(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     repo_name: str | None = None,
     repo: Path | None = None,
@@ -212,16 +208,16 @@ def run_reconcile_context(
     that function's closed contract, not a degrade this module invents around.
 
     Raises:
-        ValueError: for a slug naming no work item. §3.2 of the consuming spec
+        ValueError: for a path naming no work item. §3.2 of the consuming spec
             calls it a hard caller error, and it is the same door
             `commands.py:run_next` and `commands.py:_decision_context` already
             open.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    item = next((candidate for candidate in items if candidate.slug == slug), None)
+    item = next((candidate for candidate in items if candidate.path == path), None)
     if item is None:
-        raise ValueError(f"unknown slug {slug!r}: no work item at {item_page(slug).path(bundle.root)}")
+        raise ValueError(f"unknown path {path!r}: no work item at {item_page(path).path(bundle.root)}")
 
     warnings: list[str] = []
     if repo is None:
@@ -231,9 +227,9 @@ def run_reconcile_context(
     if repo is None:
         warnings.append("no repo resolved; code drift unavailable")
 
-    epic_slug = nearest_epic(items, slug)
-    if epic_slug is None:
-        warnings.append(f"no owning epic for {slug!r}; ledger drift unavailable")
+    owner_path = nearest_parent(items, path)
+    if owner_path is None:
+        warnings.append(f"no decision owner for {path!r}; ledger drift unavailable")
 
     spec_path = bundle.root / _spec_ref(item)
     spec_text = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
@@ -248,7 +244,7 @@ def run_reconcile_context(
         )
     commit_range = f"{anchor}..HEAD" if anchor else None
 
-    landed_siblings = _landed_siblings(items, item, epic_slug)
+    landed_siblings = _landed_siblings(items, item)
     touched_paths = tuple(sorted({*item.affects, *(path for sibling in landed_siblings for path in sibling.affects)}))
     commits_since: tuple[CommitRef, ...] = ()
     diff_command: str | None = None
@@ -264,11 +260,10 @@ def run_reconcile_context(
     # inconsistency `OrchestrateResult`'s docstring records for the orchestrate
     # path. Having the parse in hand makes reuse free and a re-read pure
     # downside.
-    if epic_slug is None:
+    if owner_path is None:
         parsed = _decisions.LedgerParse()
     else:
-        epic_archived = next((candidate.archived for candidate in items if candidate.slug == epic_slug), False)
-        parsed = _decisions.load(decisions_ledger(epic_slug, archived=epic_archived).path(bundle.root))
+        parsed = _decisions.load(ledger_ref(owner_path).path(bundle.root))
     entries = parsed.entries
     warnings.extend(parsed.warnings)
 
@@ -286,8 +281,8 @@ def run_reconcile_context(
     cited_decisions = tuple(cited)
 
     return ReconcileContext(
-        epic_slug=epic_slug or "",
-        slug=slug,
+        owner_path=owner_path or "",
+        path=path,
         spec_path=str(spec_path),
         spec_anchor_commit=anchor,
         anchor_source=anchor_source,
@@ -297,7 +292,7 @@ def run_reconcile_context(
         commits_since=commits_since,
         cited_decisions=cited_decisions,
         contradictions=tuple(entry for entry in cited_decisions if entry.status == "superseded"),
-        has_open_decision=bool(_decisions.query(entries, status="open", affects=slug)),
+        has_open_decision=bool(_decisions.query(entries, status="open", affects=path)),
         diff_command=diff_command,
         warnings=tuple(warnings),
     )

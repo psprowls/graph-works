@@ -75,7 +75,7 @@ The report MUST be structured as:
 - ⚠️ <N> packages on disk missing vault pages: <names>
 - ⚠️ <N> vault package pages for non-existent packages: <names>
 - ⚠️ <N> contradictions vault↔code
-- ⚠️ Work lifecycle: <N> findings across <M> items (<E> error / <W> warn): <slug>: [<rule_id>] …
+- ⚠️ Work lifecycle: <N> findings across <M> items (<E> error / <W> warn): <work-path>: [<rule_id>] …
 - ⚠️ <N> Obsidian render findings: <page>: [<rule_id>] …
 - ⚠️ <N> guidance lint findings: <slug>: [<rule_id>] …
 - ⚠️ <N> scanner heading drift: <page> missing '<heading>'
@@ -90,7 +90,7 @@ The report MUST be structured as:
 1. Run `/graph-works:scan` to stub <package> and <package>
 2. Re-run `/graph-works:scan` — it deletes the entity page for `<old-pkg>` automatically when its graph node is gone
 3. Re-run `/graph-works:scan` to refresh `entities/pkg_<pkg>.md` graph-derived frontmatter from current code
-4. Revise `target:` on `[[work/<slug>]]` or update its `status`
+4. Revise the affected canonical `<work-path>` or update its `work_status`
 5. Create concept pages for: <names>
 6. Fix broken link in `[[<page>]]`
 

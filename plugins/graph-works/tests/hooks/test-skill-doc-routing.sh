@@ -258,10 +258,10 @@ ws_default="$(make_workspace ws_default)"
 out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
     CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_default")"
 assert_output \
-    "marked workspace, no projection: context names <ws>/okf/work/<slug>/" \
+    "marked workspace, no projection: context names <ws>/okf/<work-path>/references/" \
     "nested" "required" \
-    "$ws_default/okf/work/<slug>/" \
-    "wiki/work/<slug>/${US}raw/" \
+    "$ws_default/okf/<work-path>/references/" \
+    "wiki/<work-path>/references/${US}raw/" \
     "absent" "" \
     "$out"
 
@@ -271,9 +271,9 @@ write_projection "$ws_custom" "$(sha256_of "$ws_custom/workspace.yaml")" custom
 out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
     CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_custom")"
 assert_output \
-    "projection layout.bundle_dir: context names <ws>/custom/work/<slug>/" \
+    "projection layout.bundle_dir: context names <ws>/custom/<work-path>/references/" \
     "nested" "required" \
-    "$ws_custom/custom/work/<slug>/" \
+    "$ws_custom/custom/<work-path>/references/" \
     "/okf/work/" \
     "absent" "" \
     "$out"
@@ -311,7 +311,7 @@ out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
 assert_output \
     "stale projection: staleness notice names gw config sync, context still injected" \
     "nested" "required" \
-    "$ws_stale/okf/work/<slug>/" "" \
+    "$ws_stale/okf/<work-path>/references/" "" \
     "present" \
     "graph-works-config-stale${US}gw config sync${US}workspace.yaml" \
     "$out"
@@ -324,7 +324,7 @@ out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
 assert_output \
     "fresh projection: no staleness notice" \
     "nested" "required" \
-    "$ws_fresh/okf/work/<slug>/" "" \
+    "$ws_fresh/okf/<work-path>/references/" "" \
     "absent" "" \
     "$out"
 
@@ -337,7 +337,7 @@ out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
 assert_output \
     "null source_sha256: no staleness notice, context still injected" \
     "nested" "required" \
-    "$ws_nullsha/okf/work/<slug>/" "" \
+    "$ws_nullsha/okf/<work-path>/references/" "" \
     "absent" "" \
     "$out"
 

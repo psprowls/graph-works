@@ -18,6 +18,10 @@ class WorkspaceNotFound(WorkspaceError):
     """No `workspace.yaml` at the resolved root, so there is no workspace here."""
 
 
+class WorkspaceConfigError(WorkspaceError):
+    """The workspace declarations cannot be loaded as the supported schema."""
+
+
 class InitError(WorkspaceError):
     """An init refused for a reason that is not bundle content.
 
@@ -45,4 +49,11 @@ class QueryError(WorkspaceError):
     """
 
 
-__all__ = ["InitError", "QueryError", "ScanError", "WorkspaceError", "WorkspaceNotFound"]
+__all__ = [
+    "InitError",
+    "QueryError",
+    "ScanError",
+    "WorkspaceConfigError",
+    "WorkspaceError",
+    "WorkspaceNotFound",
+]

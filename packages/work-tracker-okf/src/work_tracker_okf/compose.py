@@ -36,38 +36,29 @@ from okf_ext.tables import TextSplice, splice_text
 from okf_io import (
     Bundle,
     Document,
-    IndexUpdate,
     LogAppend,
     Rule,
     append_log_entry,
     load,
-    load_bundle,
     parse,
-    update_index,
 )
 
 from work_tracker_okf.advance import AdvancePlan, advance
 from work_tracker_okf.advance import apply as apply_advance
+from work_tracker_okf.decisions import DecisionApplication, DecisionPlan, apply_plan, ledger_ref
 from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, _materialize_frontmatter, plan_filing
 from work_tracker_okf.filing import apply as apply_filing
-from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items, placement_directories
-from work_tracker_okf.paths import ArtifactRef, artifact_path
+from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
+from work_tracker_okf.items import WorkItem, load_items, placement_directories
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref, item_page, parse_item_path
 from work_tracker_okf.rules import PLAN_TABLE_SPEC, lane_rules
 from work_tracker_okf.sources import upsert
-from work_tracker_okf.vocabulary import PLAN_SOURCE_ID, SPEC_SOURCE_ID
+from work_tracker_okf.vocabulary import PARENT_TYPES, PLAN_SOURCE_ID, SPEC_SOURCE_ID
 
 #: The heading `_rules/plan.py` reads and all six `sections/` declarations
 #: require. Named here rather than imported: `_rules` is private, and one
 #: string is cheaper than widening a private module's surface.
 PLAN_HEADING = "Plan"
-
-#: `Transition.stamp_source` -> the `(phase, kind)` pair `artifact_path`
-#: composes from. The inverse of `paths._LITERAL_IDS`, typed out rather than
-#: derived from it: two entries beat reaching into a private map.
-_STAMP_SLOTS: dict[str, tuple[str, str]] = {
-    SPEC_SOURCE_ID: ("design", "spec"),
-    PLAN_SOURCE_ID: ("plan", "plan"),
-}
 
 #: The label each stamp falls back to when its artifact carries no H1.
 _STAMP_LABELS: dict[str, str] = {SPEC_SOURCE_ID: "Design spec", PLAN_SOURCE_ID: "Plan"}
@@ -106,9 +97,9 @@ def rule_set(
     stay unaffected.
 
     **`placement_rule` is raised to `error` too, and takes no `depth` map.**
-    All six types declare `work/`, so a plain prefix comparison passes both
-    `work/<slug>.md` and `work/_archive/<slug>.md`; `depth="exact"` would flag
-    every archived item, whose remainder still carries a `/`. The severity is
+    All seven types declare `work/`, so a plain prefix comparison passes root,
+    nested child, and local archive item paths; `depth="exact"` would flag
+    every nested item, whose remainder still carries a `/`. The severity is
     the same argument the two house rules already make, in this lane's terms: a
     work page outside `work/` is invisible to `load_items`, so it gets no
     routing, no rollup, no archive eligibility, and every lane rule silently
@@ -172,11 +163,8 @@ def _title_for(target: Path, fallback: str) -> str:
 def stamp_for(root: Path, item: WorkItem, source_id: str) -> tuple[ArtifactRef, str]:
     """The `ArtifactRef` *source_id* names for *item*, and the title to stamp.
 
-    Inverts `Transition.stamp_source` -- a bare id, `design-spec` or `plan` --
-    back to the `(phase, kind)` pair `paths.artifact_path` composes from. That
-    is the seam child 3 left open when it deleted `artifact_slot` on the
-    promise that the destination is derivable from `stamp_source` plus the
-    in-flight phase.
+    Resolves `Transition.stamp_source` through the managed-artifact registry,
+    keeping artifact names and locations centralized.
 
     **The title is the artifact's own H1 when the file has one** (C6-F), and
     `"<label> — <item title>"` otherwise. The conformant fixture authors
@@ -188,9 +176,30 @@ def stamp_for(root: Path, item: WorkItem, source_id: str) -> tuple[ArtifactRef, 
     Raises `KeyError` for an id outside the two `Transition.stamp_source` can
     carry. Caller error: nothing else is stamped by this path.
     """
-    phase, kind = _STAMP_SLOTS[source_id]
-    ref = artifact_path(item.slug, phase, kind, archived=item.archived)
+    if source_id not in {SPEC_SOURCE_ID, PLAN_SOURCE_ID}:
+        raise KeyError(source_id)
+    ref = artifact_ref(item.path, MANAGED_ARTIFACTS[source_id])
     return ref, _title_for(ref.path(root), f"{_STAMP_LABELS[source_id]} — {item.title}")
+
+
+def apply_decision_and_register(
+    root: Path,
+    owner_path: str,
+    plan: DecisionPlan,
+    *,
+    lock: Path,
+) -> DecisionApplication:
+    """Apply a parent-owned decision plan and register its durable ledger."""
+    ref = ledger_ref(owner_path)
+    if plan.ledger != ref.path(root):
+        raise ValueError(f"decision plan ledger {plan.ledger} does not belong to {owner_path!r}")
+    document = load(item_page(owner_path).path(root))
+    if document.fm_data().get("type") not in PARENT_TYPES:
+        raise ValueError(f"{owner_path!r} is not a parent-capable decision owner")
+    application = apply_plan(plan, lock=lock)
+    if application.written and upsert(document, ref, title="Decisions"):
+        document.save()
+    return application
 
 
 def plan_row_splice(document: Document, ref: ArtifactRef) -> TextSplice:
@@ -270,17 +279,18 @@ class AdvanceOutcome:
 
 def advance_and_stamp(
     bundle: Bundle,
-    slug: str,
+    path: str,
     *,
     today: date,
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
+    released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
     dry_run: bool = True,
 ) -> AdvanceOutcome:
-    """Advance *slug*, stamp its artifact, ensure its plan row -- in **one save**.
+    """Advance *path*, stamp its artifact, ensure its plan row -- in **one save**.
 
     `advance.apply` sets the frontmatter, `sources.upsert` merges the stamp,
     `ensure_plan_row` hands the spliced body to `Document.set_body`, then a
@@ -310,18 +320,19 @@ def advance_and_stamp(
     items = load_items(bundle)
     plan = advance(
         items,
-        slug,
+        path,
         today=today,
         effort=effort,
         owner=owner,
         resolved_in=resolved_in,
+        released_at=released_at,
         worktree=worktree,
         branch=branch,
     )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)
 
-    item = next(candidate for candidate in items if candidate.slug == slug)
+    item = next(candidate for candidate in items if candidate.path == path)
     # Direct indexing: the item came out of `bundle.concepts`, so the key is
     # there by construction. A `KeyError` here would be a bug, not content.
     document = bundle.concepts[item.path.removesuffix(".md")]
@@ -349,7 +360,7 @@ def advance_and_stamp(
 @dataclass(frozen=True, slots=True)
 class FilingApplication:
     page: Path | None = None
-    indexes: tuple[IndexUpdate, ...] = ()
+    indexes: tuple[LaneIndexPlan, ...] = ()
     log: LogAppend | None = None
     written: bool = False
 
@@ -360,7 +371,7 @@ FilingCompositionRefusal = FilingRefusal | Literal["index-refused", "log-refused
 @dataclass(frozen=True, slots=True)
 class FilingCompositionPlan:
     filing: FilingPlan
-    index: IndexUpdate
+    indexes: tuple[LaneIndexPlan, ...]
     log: LogAppend | None
     refusal: FilingCompositionRefusal | None = None
     warnings: tuple[str, ...] = ()
@@ -402,17 +413,16 @@ def _planned_document(filing: FilingPlan) -> Document:
     return document
 
 
-def _unchanged_work_index(bundle: Bundle, lane: str = WORK_DIR) -> IndexUpdate:
-    document = bundle.indexes.get(lane)
-    before = "" if document is None else document.raw_text
-    return IndexUpdate(
-        path=f"{lane}/index.md",
-        before=before,
-        after=before,
-        changes=(),
-        drift=(),
-        created=document is None,
-    )
+def _filing_lanes(filing: FilingPlan) -> tuple[str, ...]:
+    location = parse_item_path(filing.path)
+    if location is None:
+        return ()
+    owned = (Path(path).parent.as_posix() for path in filing.required_indexes)
+    return tuple(sorted({location.lane, *owned}))
+
+
+def _unchanged_indexes(root: Path, items: Sequence[WorkItem], lanes: Sequence[str] = ()) -> tuple[LaneIndexPlan, ...]:
+    return tuple(replace(plan, after=plan.before or "") for plan in plan_indexes(root, items, lanes=lanes))
 
 
 def plan_file_and_reconcile(
@@ -420,8 +430,6 @@ def plan_file_and_reconcile(
     items: Sequence[WorkItem],
     seed: FilingSeed,
     section_set: SectionSet,
-    *,
-    lane_dir: str | None = None,
 ) -> FilingOutcome:
     """Plan the page, lane index, and root log without writing any of them.
 
@@ -431,13 +439,12 @@ def plan_file_and_reconcile(
     live under. `None` keeps `WORK_DIR` on both, which is every caller holding
     no `SchemaSet`.
     """
-    lane = WORK_DIR if lane_dir is None else lane_dir
-    filing = plan_filing(bundle.root, items, seed, section_set, lane_dir=lane_dir)
+    filing = plan_filing(bundle.root, items, seed, section_set)
     if filing.refusal is not None:
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                index=_unchanged_work_index(bundle, lane),
+                indexes=(),
                 log=None,
                 refusal=filing.refusal,
                 warnings=filing.warnings,
@@ -445,23 +452,19 @@ def plan_file_and_reconcile(
         )
 
     document = _planned_document(filing)
-    planned_id = filing.target.relative_to(bundle.root).with_suffix("").as_posix()
+    planned_id = filing.path
+    lanes = _filing_lanes(filing)
     synthetic = replace(
         bundle,
         concepts=MappingProxyType({**bundle.concepts, planned_id: document}),
     )
     try:
-        (index,) = update_index(
-            synthetic,
-            directories=[lane],
-            create_missing=True,
-            dry_run=True,
-        )
+        indexes = plan_indexes(bundle.root, load_items(synthetic), lanes=lanes)
     except ValueError as exc:
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                index=_unchanged_work_index(bundle, lane),
+                indexes=_unchanged_indexes(bundle.root, items, lanes),
                 log=None,
                 refusal="index-refused",
                 warnings=(*filing.warnings, str(exc)),
@@ -474,7 +477,7 @@ def plan_file_and_reconcile(
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                index=index,
+                indexes=indexes,
                 log=None,
                 refusal="log-refused",
                 warnings=(*filing.warnings, detail),
@@ -483,7 +486,7 @@ def plan_file_and_reconcile(
     try:
         log = append_log_entry(
             log_document,
-            f"filed {filing.slug} ({seed.type})",
+            f"filed {filing.path} ({seed.type})",
             on=seed.on,
             dry_run=True,
         )
@@ -491,7 +494,7 @@ def plan_file_and_reconcile(
         return FilingOutcome(
             plan=FilingCompositionPlan(
                 filing=filing,
-                index=index,
+                indexes=indexes,
                 log=None,
                 refusal="log-refused",
                 warnings=(*filing.warnings, str(exc)),
@@ -500,7 +503,7 @@ def plan_file_and_reconcile(
     return FilingOutcome(
         plan=FilingCompositionPlan(
             filing=filing,
-            index=index,
+            indexes=indexes,
             log=log,
             warnings=filing.warnings,
         )
@@ -511,31 +514,29 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
     """Apply a fully preflighted filing composition.
 
     The lane comes off `plan.filing.target` rather than from a second argument
-    -- `<root>/<lane>/<slug>.md`, the same two segments `root` has always been
-    derived from, so the index written here is the one `plan_file_and_reconcile`
-    planned even when the declaration moved the page.
+    -- the canonical item page under `<root>/<lane>`, so the indexes written
+    here are exactly those `plan_file_and_reconcile` planned at every depth.
     """
     if plan.refusal is not None:
         return FilingApplication()
 
     application = FilingApplication()
-    root = plan.filing.target.parent.parent
-    lane = plan.filing.target.parent.name
+    root = plan.filing.target
+    for _ in Path(plan.filing.path).parts:
+        root = root.parent
     try:
         if plan.filing.target.exists():
             raise FileExistsError(f"{plan.filing.target}: a page already exists here")
-        if plan.filing.work_directory.exists():
-            raise FileExistsError(f"{plan.filing.work_directory}: a working directory already exists here")
+        if plan.filing.owned_directory.exists():
+            raise FileExistsError(f"{plan.filing.owned_directory}: an owned directory already exists here")
 
         page = apply_filing(plan.filing)
         application = FilingApplication(page=page)
 
-        indexes = update_index(
-            load_bundle(root, ignore=IGNORE),
-            directories=[lane],
-            create_missing=True,
-            dry_run=False,
-        )
+        for index in plan.indexes:
+            index.path.parent.mkdir(parents=True, exist_ok=True)
+            index.path.write_text(index.after, encoding="utf-8")
+        indexes = plan.indexes
         application = FilingApplication(page=page, indexes=indexes)
 
         if plan.log is not None:
@@ -579,7 +580,7 @@ def append_lane_log(root: Path, entry: str, *, on: date) -> str | None:
     **The log rule** (C6-I): a command that changes *what the vault contains*
     appends one line -- `init` (already does, inside `install_bundle`), `file`,
     `archive`. A command that changes an existing page's fields does not --
-    `advance`, `sync-children`. One rule, so neither half needs remembering.
+    `advance`. One rule, so neither half needs remembering.
 
     `None` when the bundle carries no root `log.md`, when it will not parse, or
     when the append is refused. Refusals are reported by returning nothing
@@ -601,6 +602,7 @@ __all__ = [
     "FilingPlanStaleError",
     "advance_and_stamp",
     "append_lane_log",
+    "apply_decision_and_register",
     "apply_file_and_reconcile",
     "ensure_plan_row",
     "plan_file_and_reconcile",

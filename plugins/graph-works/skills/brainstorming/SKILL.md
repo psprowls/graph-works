@@ -72,165 +72,22 @@ artifact, never the approval.
 | "It grew, but I'm almost done — no need to re-classify" | Hidden complexity upgrades the path mid-task. Stop and say so. |
 | "They approved the spike, so the follow-up change is approved too" | Each task gets its own classification and its own approval. |
 
-## Epic-mode note (kind: epic)
+## Epic-mode note (kind: Epic)
 
-When the dispatch brief's work-item block says `kind: epic`, the design you
-produce runs through four passes instead of a single design pass: a shared
-interactive session that also seeds a decisions ledger, a parallel per-child
-fan-out that writes full draft specs, a synthesis pass that reconciles the
-drafts, and a batched interactive round that clears every question the
-fan-out couldn't answer on its own — one human touchpoint instead of N. Still
-file nothing here — design produces prose only (`planning-epics`, not this
-skill, files the children, at the plan stage).
+At design time, design the owning Epic itself. Its design artifact may include a
+thin index of anticipated children (title, type, summary, affects, and dependency
+rationale), but do not file children or pre-write child design artifacts here.
+`planning-epics` files children during the plan stage, records the canonical
+`path` returned for each, and writes the dependency graph. This keeps every
+child design at its owned `<child-path>/references/01-design.md` location and
+avoids a pathless draft/adoption phase.
 
-This applies to both flows below — most often the `design` stage dispatched by
-`graph-works:workflow` for an epic — so it sits above the mode split.
+Record settled decisions against the canonical owner path:
 
-### Pass 1 — shared session (Checklist steps 0-8)
-
-Run Checklist steps 0-8 as normal, with two epic-mode changes:
-
-- **Record decisions as you make them.** Every decision settled during steps
-  3-5 (clarifying questions, approaches, design sections) goes to the ledger
-  immediately, not batched to the end:
-  `gw work decision add <epic-slug> --question "..." --status answered --answer "..." --rationale "..."`.
-- **Per-child sections become a thin index, not medium detail.** Step 6
-  ("write design doc") still writes `01-design-spec.md`, but each anticipated
-  child gets a short index entry instead of a medium-detail section:
-
-  ```markdown
-  ### C3 — Epic design fan-out with batched questions
-  **kind:** feature · **effort:** large · **depends on:** C2
-  **slug words:** epic design fanout questions
-  **affects:** `plugins/graph-works/skills/brainstorming`
-
-  One-paragraph summary of what this child builds and why it's separate from
-  its siblings. Cites any `D-nnn` decisions from pass 1 that bound this child
-  specifically.
-  ```
-
-  The **`slug words` line is load-bearing**: it addresses which fan-out
-  subagent writes which file (below) and is the literal value `planning-epics`
-  passes to `gw work file --slug-words` when it later files the child, so the
-  `child-specs/` filename and the eventual permanent slug share the same four
-  words by construction. Sanity-check word uniqueness across all anticipated
-  children before dispatching fan-out — a collision silently overwrites one
-  draft with another.
-
-Step 8 (user reviews the written spec) is unchanged — it reviews the *shared*
-design, not any child's internals.
-
-### Passes 2-4 (after step 8's approval, before step 9's hand-off)
-
-Once the user approves the shared spec, run:
-
+```bash
+gw work decision add <work-path> --question "..." --status answered \
+  --answer "..." --rationale "..."
 ```
-8a. Fan-out — dispatch one subagent per thin-index entry.
-8b. Synthesis — reconcile the drafts.
-8c. Batched question round — clear every `assumed`/`open` decision with the human.
-8d. Fold-in fan-out — apply each answer to the specs it touches.
-9.  Terminal hand-off — unchanged: STOP, do not invoke writing-plans.
-```
-
-Epic mode never reaches step 9's `writing-plans` branch regardless — an
-epic's terminal state is always the pipeline hand-off, since `planning-epics`
-is what turns children into work items, not `writing-plans`.
-
-**Pass 2 — fan-out.** One subagent per thin-index entry, dispatched via the
-`Agent` tool the same way `graph-works:dispatching-parallel-agents` does —
-multiple `Agent` tool-use blocks in a single message, so they run
-concurrently. No cap on how many children dispatch in one wave. Give each
-subagent a fully self-contained prompt (it inherits none of this session's
-history):
-
-1. The complete text of the just-written `01-design-spec.md` (shared design +
-   full thin index — a subagent sees its siblings' one-liners, not their
-   internals).
-2. The complete text of `00-decisions.md` as of fan-out start.
-3. Its own thin-index entry, called out explicitly (title, kind, slug words,
-   affects).
-4. The epic's baseline commit and repo root.
-5. Write `<epic-dir>/child-specs/<w1>-<w2>-<w3>-<w4>.md`, using the same four
-   slug words as its thin-index entry, lowercase and hyphen-joined, no
-   `epic-<kind>-` prefix. Structure it like a real design spec an engineer
-   could implement from — goal, concrete architecture, testing, out of scope,
-   related. Cite `D-nnn` ids inline wherever the draft depends on a ledger
-   decision.
-6. The "cannot decide" contract, below.
-7. Do not read sibling `child-specs/*.md` files — the fan-out is parallel and
-   unordered, and reading them would create an ordering dependency pass 3
-   exists to avoid needing. Do not edit `01-design-spec.md`. Do not file a
-   work item — that's `planning-epics`' job, later. During fan-out, any
-   `affects` entry a decision needs cites the child's slug-words stem (e.g.
-   `epic-design-fanout-questions`) — no real slug exists yet.
-
-**"Cannot decide something," operationally:** a subagent hits this when a
-question (a) is not already resolved by `01-design-spec.md` or an
-`answered`/`superseded` ledger entry, and (b) cannot be resolved by reading
-the repo within the scope of writing this one spec. When that happens:
-
-1. Pick a best guess and write the draft as if that guess were settled — not
-   hedged, not a TBD.
-2. Record the question:
-   `gw work decision add <epic-slug> --question "..." --status assumed --affects <its-own-slug-words> --answer "<the best guess>" --if-wrong "<blast radius if the guess is wrong>" --rationale "why this guess"`.
-   Status is `assumed`, not `open` — `open` is reserved for the rare case
-   where the subagent has no defensible guess whatsoever.
-3. Continue. Never block, never ask the human directly, never wait for
-   another subagent.
-
-**Pass 3 — synthesis.** Run this pass yourself, in the orchestrating session
-— not a dispatched subagent, since you already hold the shared design and
-full ledger in context.
-
-1. Read every `child-specs/*.md` file pass 2 produced.
-2. Read `gw work decision list <epic-slug> --status assumed` (and `--status
-   open`, for the rare no-guess case).
-3. Resolve overlaps and contradictions between sibling drafts by editing the
-   `child-specs/*.md` files directly (e.g. two children both claim ownership
-   of the same module — narrow one).
-4. Normalize boundaries — make sure "out of scope" in one draft names the
-   sibling that actually owns the thing, using the real thin-index titles now
-   that all drafts exist.
-5. Group duplicate questions — when two or more subagents independently
-   raised the same or overlapping question, group those `D-nnn` ids and pick
-   one as canonical. **Do not call `answer` or `supersede` yourself** —
-   synthesis doesn't decide anything, and `supersede` always stamps its
-   replacement `status: answered`, which would mark a decision
-   "human-decided" before a human has seen it. Hand the grouping (a list of
-   `{canonical: D-nnn, duplicates: [D-nnn, ...]}`) forward to pass 4 as plain
-   context instead.
-
-**Pass 4 — batched question round.** List every `assumed`/`open` entry (`gw
-work decision list <epic-slug> --status assumed`, plus `--status open`),
-merge in pass 3's duplicate groupings so each group is presented once, then
-present them via structured question prompts, four at a time (`AskUserQuestion`
-where available, looping for groups beyond the first four; a numbered list
-plus one free-text reply otherwise). Each prompt shows the question, the
-affected children, and — for `assumed` entries — the subagent's guess and its
-`**If wrong:**` blast radius, so the human confirms or corrects rather than
-deciding cold.
-
-Record each answer depending on the entry's prior status:
-
-- **`assumed`, confirmed or corrected:**
-  `gw work decision supersede <epic-slug> D-nnn --question "..." --answer "..." --rationale "..." --decided-by user`.
-- **`open` (no prior guess):**
-  `gw work decision answer <epic-slug> D-nnn --answer "..." --rationale "..." --decided-by user`.
-- **A duplicate group:** resolve the canonical entry first (by whichever rule
-  above matches its status), note the **new** id `supersede`/`answer`
-  returns, then retire every other entry in the group with
-  `gw work decision supersede <epic-slug> D-dup --question "<D-dup's own question>" --answer "<the same agreed answer>" --rationale "duplicate of <canonical's new id>" --decided-by user`.
-
-**Fold-in fan-out.** Bounded by the union of `affects` across every decision
-resolved in this round (usually much smaller than pass 2's fan-out). One
-subagent per affected child, given its current `child-specs/<stem>.md` draft
-and the full text of every newly-resolved decision whose `affects` includes
-its stem. Its only job is to edit the draft so it reflects the answer
-(replace the guessed language, remove the hedge, keep the `D-nnn` citation).
-No new decisions open during fold-in — a genuinely new question surfaced here
-is a future reconcile cycle's job, not this pass's.
-
-After fold-in, proceed to the existing step 9 terminal hand-off unchanged.
 
 ## Auto-file Mode (standalone invocations)
 
@@ -247,40 +104,40 @@ Decide the mode purely from your dispatch brief — a doc check, no new tooling:
 
 ### Step 2a — Early stub + one quick confirm (auto-file mode only)
 
-After "Explore project context" (Checklist step 1) and before asking clarifying questions, derive a proposed **title / kind / summary / 4 slug words** from the opening request and present them in a single confirm:
+After "Explore project context" (Checklist step 1) and before asking clarifying questions, derive a proposed **title / type / summary / stable name / affects / effort** from the opening request and present them in a single confirm:
 
-> "I'll track this as a work item — **title** / **kind** / **summary** / slug words: **w1 w2 w3 w4**. Good, or adjust? (or say 'don't file')"
+> "I'll track this as a work item — **title** / **type** / **summary** / name: **stable words** / affects / effort. Good, or adjust? (or say 'don't file')"
 
 This one confirm does two things:
 
-- **Locks the title and slug words**, from which `gw work file` derives the **permanent slug** (`<kind>-<w1>-<w2>-<w3>-<w4>`, or `epic-<kind>-...` for epic children). Slugs never change when the title is edited later, so both are confirmed here — where they're decided — not at finalize.
+- **Locks the stable basename**, from which `gw work file` derives the permanent canonical path. Identity is the returned extensionless bundle path, not a page stem.
 - **Is the opt-out.** If the user says "don't file", skip auto-file and run the legacy standalone flow (chain into `writing-plans` at the end; nothing tracked).
 
-On confirm, file the item and capture the slug from the JSON result:
+On confirm, file the item and capture `path` from the JSON result:
 
 ```bash
-gw work file --json --title "<title>" --kind <kind> --summary "<summary>" --slug-words "<w1> <w2> <w3> <w4>"
+gw work file --json --title "<title>" --kind <Type> --summary "<summary>" \
+  --name "<stable words>" --affects "<paths or packages>" --effort <effort>
 ```
 
-Read the `slug` field from the JSON. Announce: *"Auto-filed as `<slug>`."* Then continue the normal brainstorming flow (clarifying questions → approaches → design) unchanged.
+Read the `path` field from the JSON. Announce: *"Auto-filed as `<work-path>`."* Then continue the normal brainstorming flow (clarifying questions → approaches → design) unchanged.
 
-**Error fallback:** if `gw work file` fails (e.g. duplicate slug, validation error), report the error and fall back to plain brainstorming with no work item. Do not block the session.
+**Error fallback:** if `gw work file` fails (e.g. a duplicate path or validation error), report the error and fall back to plain brainstorming with no work item. Do not block the session.
 
 ### Step 3a — Finalize at spec time (auto-file mode only)
 
 When the design is approved and you are about to write the spec (Checklist step 6), **before** writing it:
 
-1. **Refine the item's frontmatter** from the now-complete design — `summary`, `affects`, and `effort`. `gw` has no `work edit` verb: edit `<workspace>/wiki/work/<slug>.md` directly. Derive the values and announce them — no second confirm. Set `effort` here so `/graph-works:next` is not later blocked waiting for it.
-2. **Write the spec to the item's path:** `<workspace>/wiki/work/<slug>/01-design-spec.md` (the working directory already exists — `gw work file` created it at filing time), so the stamped `spec_doc` pointer and the ingestor line up.
-3. **Advance the item:** `gw work advance <slug>`. This is the same design-complete transition the `workflow` skill applies — it stamps `spec_doc` and moves the phase `design → plan`.
+1. **Write the design artifact:** `<workspace>/okf/<work-path>/references/01-design.md` (the owned directory already exists because `gw work file` created it).
+2. **Advance the item:** `gw work advance <work-path> --effort <confirmed-effort>`. This is the same design-complete transition the `workflow` skill applies; it stamps the canonical `design` source and advances the phase.
 
-**Error fallback:** if `gw work advance` fails, report it. The spec is already at `wiki/work/<slug>/01-design-spec.md`, so the user can recover with `/graph-works:next <slug>`.
+**Error fallback:** if `gw work advance` fails, report it. The design is already at the canonical path, so the user can recover with `/graph-works:next <work-path>`.
 
 ### Step 4a — Terminal behavior (auto-file mode only)
 
 Once auto-filed, brainstorming follows pipeline rules: **STOP after the spec — do not invoke `writing-plans`.** End with the pipeline hand-off line:
 
-> "Phase advanced to `plan`. Clear context (`/clear`) and run `/graph-works:next <slug>` to continue."
+> "Phase advanced. Clear context (`/clear`) and run `/graph-works:next <work-path>` to continue."
 
 ## Checklist
 
@@ -312,7 +169,7 @@ your path and complete them in order.
 4. **Propose 2-3 approaches** — with trade-offs and your recommendation
 5. **Present design** — in sections scaled to their complexity, get user approval after each section
 6. **Write design doc** — save to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md` and commit
-   - **(auto-file mode only)** instead refine the item's frontmatter, write the spec to `<workspace>/wiki/work/<slug>/01-design-spec.md`, and run `gw work advance <slug>` (Auto-file Mode → Step 3a)
+   - **(auto-file mode only)** instead write the design to `<workspace>/okf/<work-path>/references/01-design.md`, and run `gw work advance <work-path> --effort <confirmed-effort>` (Auto-file Mode → Step 3a)
 7. **Spec self-review** — quick inline check for placeholders, contradictions, ambiguity, scope (see below)
 8. **User reviews written spec** — ask user to review the spec file before proceeding
 9. **Transition to implementation** — invoke writing-plans skill to create implementation plan

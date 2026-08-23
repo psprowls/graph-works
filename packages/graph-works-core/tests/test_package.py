@@ -3,13 +3,23 @@ what it says it exports."""
 
 from __future__ import annotations
 
+import tomllib
+from pathlib import Path
+
 import graph_works_core
 import pytest
 from graph_works_core.workspace.errors import InitError, WorkspaceError, WorkspaceNotFound
 
 
 def test_version_is_static_and_matches_the_distribution():
-    assert graph_works_core.__version__ == "0.3.1"
+    assert graph_works_core.__version__ == "0.4.0"
+
+
+def test_private_descriptor_loader_has_a_synchronized_okf_io_floor():
+    manifest = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    with manifest.open("rb") as handle:
+        dependencies = tomllib.load(handle)["project"]["dependencies"]
+    assert "okf-io>=0.2.4,<0.3" in dependencies
 
 
 def test_all_is_sorted_and_every_name_is_bound():

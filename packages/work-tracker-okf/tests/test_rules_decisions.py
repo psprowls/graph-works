@@ -3,11 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from work_helpers import lane_report, write_item
-from work_tracker_okf.paths import decisions_ledger
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
 
-_EPIC = "2026-07-01-epic-ledger-owner"
-_CHILD = "2026-07-02-epic-feature-ledger-child"
-_CHILD2 = "2026-07-03-epic-feature-ledger-child-two"
+_EPIC = "work/epic-ledger-owner"
+_CHILD = f"{_EPIC}/children/feature-ledger-child"
+_CHILD2 = f"{_EPIC}/children/feature-ledger-child-two"
 
 
 def _codes(root: Path, code: str) -> list[str]:
@@ -15,16 +15,17 @@ def _codes(root: Path, code: str) -> list[str]:
 
 
 def _epic(root: Path, *, phase: str = "execute", children: str = "") -> None:
+    del children
     write_item(
         root,
         _EPIC,
-        f"type: Epic\nstatus: stable\nworkflow_status: in-progress\nowner: fixture\n"
-        f"phase: {phase}\neffort: large\nopened: 2026-07-01\nupdated: 2026-08-01\n{children}",
+        f"type: Epic\nstatus: stable\nwork_status: in-progress\nowner: fixture\n"
+        f"phase: {phase}\neffort: large\nopened: 2026-07-01\nupdated: 2026-08-01\n",
     )
 
 
-def _ledger(root: Path, text: str, *, slug: str = _EPIC) -> None:
-    path = decisions_ledger(slug).path(root)
+def _ledger(root: Path, text: str, *, owner: str = _EPIC) -> None:
+    path = artifact_ref(owner, MANAGED_ARTIFACTS["decisions"]).path(root)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(text, encoding="utf-8")
 
@@ -52,10 +53,25 @@ def test_a_non_epic_is_never_asked_for_a_ledger(tmp_path: Path) -> None:
     write_item(
         tmp_path,
         "2026-07-03-bug-no-ledger",
-        "type: Bug\nstatus: stable\nworkflow_status: open\nphase: execute\n"
+        "type: Bug\nstatus: stable\nwork_status: open\nphase: execute\n"
         "effort: small\nopened: 2026-07-03\nupdated: 2026-08-01\n",
     )
     assert _codes(tmp_path, "decisions.ledger-missing") == []
+
+
+def test_release_epic_and_feature_are_all_ledger_owners(tmp_path: Path) -> None:
+    for path, type_name in (
+        ("work/release-r1", "Release"),
+        ("work/epic-e1", "Epic"),
+        ("work/feature-f1", "Feature"),
+    ):
+        write_item(
+            tmp_path,
+            path,
+            f"type: {type_name}\nstatus: stable\nwork_status: in-progress\nphase: execute\n"
+            "effort: medium\nopened: 2026-07-03\nupdated: 2026-08-01\n",
+        )
+    assert len(_codes(tmp_path, "decisions.ledger-missing")) == 3
 
 
 def test_an_unrecognized_status_is_an_error(tmp_path: Path) -> None:
@@ -158,15 +174,14 @@ def _child_with_spec(root: Path, body: str, *, slug: str = _CHILD, opened: str =
     write_item(
         root,
         slug,
-        "type: Feature\nstatus: stable\nworkflow_status: open\nphase: design\n"
+        "type: Feature\nstatus: stable\nwork_status: open\nphase: design\n"
         f"effort: medium\nopened: {opened}\nupdated: 2026-08-01\n"
-        f"parent: {_EPIC}\n"
         "sources:\n"
-        "  - id: design-spec\n"
-        f"    resource: /work/{slug}/references/01-design-spec.md\n"
+        "  - id: design\n"
+        f"    resource: /{slug}/references/01-design.md\n"
         "    title: Design spec\n",
     )
-    spec = root / "work" / slug / "references" / "01-design-spec.md"
+    spec = root / slug / "references" / "01-design.md"
     spec.parent.mkdir(parents=True, exist_ok=True)
     spec.write_text(body, encoding="utf-8")
 
@@ -175,14 +190,14 @@ def test_a_child_spec_citing_an_absent_id_is_an_error(tmp_path: Path) -> None:
     """The rule runs over any item with a resolvable epic ancestor, not only
     epics — a child's spec is what cites the parent's decisions."""
     _epic(tmp_path, children=f"children:\n  - {_CHILD}\n")
-    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n", owner=_CHILD)
     _child_with_spec(tmp_path, "# Spec\n\nFollows from D-009.\n")
     assert any("D-009" in message for message in _codes(tmp_path, "decisions.cite-missing"))
 
 
 def test_a_child_spec_citing_a_present_id_is_silent(tmp_path: Path) -> None:
     _epic(tmp_path, children=f"children:\n  - {_CHILD}\n")
-    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n", owner=_CHILD)
     _child_with_spec(tmp_path, "# Spec\n\nFollows from D-001.\n")
     assert _codes(tmp_path, "decisions.cite-missing") == []
 
@@ -192,23 +207,23 @@ def test_an_unpadded_citation_still_resolves_against_the_padded_ledger_entry(tmp
     hand-typed `D-1` in a design spec must resolve against the ledger's
     zero-padded `D-001`, not report a phantom missing citation."""
     _epic(tmp_path, children=f"children:\n  - {_CHILD}\n")
-    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n", owner=_CHILD)
     _child_with_spec(tmp_path, "# Spec\n\nFollows from D-1.\n")
     assert _codes(tmp_path, "decisions.cite-missing") == []
 
 
-def test_an_item_with_no_epic_ancestor_is_not_citation_checked(tmp_path: Path) -> None:
+def test_a_parent_capable_item_with_no_ancestor_uses_its_own_ledger(tmp_path: Path) -> None:
     _child_with_spec(tmp_path, "# Spec\n\nFollows from D-009.\n")
-    assert _codes(tmp_path, "decisions.cite-missing") == []
+    assert any("D-009" in message for message in _codes(tmp_path, "decisions.cite-missing"))
 
 
 def test_an_absent_spec_file_is_not_citation_checked(tmp_path: Path) -> None:
     """Tolerant on the read: an unreadable or absent spec is simply not checked,
     same as an unstamped one."""
     _epic(tmp_path, children=f"children:\n  - {_CHILD}\n")
-    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
+    _ledger(tmp_path, "## D-001 — q\nstatus: answered\n", owner=_CHILD)
     _child_with_spec(tmp_path, "# Spec\n\nFollows from D-009.\n")
-    (tmp_path / "work" / _CHILD / "references" / "01-design-spec.md").unlink()
+    (tmp_path / _CHILD / "references" / "01-design.md").unlink()
     assert _codes(tmp_path, "decisions.cite-missing") == []
 
 
@@ -218,8 +233,8 @@ def test_an_item_with_no_design_spec_source_is_not_citation_checked(tmp_path: Pa
     write_item(
         tmp_path,
         _CHILD,
-        "type: Feature\nstatus: stable\nworkflow_status: open\nphase: design\n"
-        f"effort: medium\nopened: 2026-07-02\nupdated: 2026-08-01\nparent: {_EPIC}\n",
+        "type: Feature\nstatus: stable\nwork_status: open\nphase: design\n"
+        "effort: medium\nopened: 2026-07-02\nupdated: 2026-08-01\n",
     )
     assert _codes(tmp_path, "decisions.cite-missing") == []
 
@@ -229,12 +244,27 @@ def test_a_second_child_under_the_same_epic_reuses_the_cached_ledger(tmp_path: P
     a second child sharing the same epic must see the same (correct) id set,
     not a stale or empty one, whether the id it cites is present or absent."""
     _epic(tmp_path, children=f"children:\n  - {_CHILD}\n  - {_CHILD2}\n")
-    _ledger(tmp_path, "## D-001 — a\nstatus: answered\n\n## D-002 — b\nstatus: answered\n")
+    _ledger(tmp_path, "## D-001 — a\nstatus: answered\n", owner=_CHILD)
+    _ledger(tmp_path, "## D-002 — b\nstatus: answered\n", owner=_CHILD2)
     _child_with_spec(tmp_path, "# Spec\n\nFollows from D-001.\n")
     _child_with_spec(tmp_path, "# Spec\n\nFollows from D-002 and D-009.\n", slug=_CHILD2, opened="2026-07-03")
     messages = _codes(tmp_path, "decisions.cite-missing")
     assert len(messages) == 1
     assert "D-009" in messages[0]
+
+
+def test_same_named_attachment_under_a_leaf_is_opaque(tmp_path: Path) -> None:
+    leaf = "work/bug-leaf"
+    write_item(
+        tmp_path,
+        leaf,
+        "type: Bug\nstatus: stable\nwork_status: in-progress\nphase: execute\n"
+        "effort: small\nopened: 2026-07-03\nupdated: 2026-08-01\n",
+    )
+    attachment = artifact_ref(leaf, MANAGED_ARTIFACTS["decisions"]).path(tmp_path)
+    attachment.parent.mkdir(parents=True)
+    attachment.write_text("## D-001 — q\nstatus: maybe\n", encoding="utf-8")
+    assert _codes(tmp_path, "decisions.entry-invalid") == []
 
 
 def test_an_epic_citing_its_own_ledger_is_checked_too(tmp_path: Path) -> None:
@@ -243,14 +273,14 @@ def test_an_epic_citing_its_own_ledger_is_checked_too(tmp_path: Path) -> None:
     write_item(
         tmp_path,
         _EPIC,
-        "type: Epic\nstatus: stable\nworkflow_status: in-progress\nowner: fixture\n"
+        "type: Epic\nstatus: stable\nwork_status: in-progress\nowner: fixture\n"
         "phase: execute\neffort: large\nopened: 2026-07-01\nupdated: 2026-08-01\n"
         "sources:\n"
-        "  - id: design-spec\n"
-        f"    resource: /work/{_EPIC}/references/01-design-spec.md\n"
+        "  - id: design\n"
+        f"    resource: /{_EPIC}/references/01-design.md\n"
         "    title: Design spec\n",
     )
     _ledger(tmp_path, "## D-001 — q\nstatus: answered\n")
-    spec = tmp_path / "work" / _EPIC / "references" / "01-design-spec.md"
+    spec = tmp_path / _EPIC / "references" / "01-design.md"
     spec.write_text("# Spec\n\nSee D-009.\n", encoding="utf-8")
     assert any("D-009" in message for message in _codes(tmp_path, "decisions.cite-missing"))

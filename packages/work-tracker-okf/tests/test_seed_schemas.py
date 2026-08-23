@@ -7,7 +7,7 @@ from okf_ext.schemas import load_schemas, schema_rule
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
 
-_TYPES = ("Bug", "Epic", "Feature", "Spike", "TechDebt", "TestGap")
+_TYPES = ("Bug", "Epic", "Feature", "Release", "Spike", "TechDebt", "TestGap")
 
 
 def _schema_set():
@@ -15,7 +15,7 @@ def _schema_set():
     return load_schemas(str(assets))
 
 
-def test_seed_schemas_load_as_exactly_the_six_types() -> None:
+def test_seed_schemas_load_as_exactly_the_declared_types() -> None:
     schema_set = _schema_set()
     assert tuple(sorted(schema_set.schemas)) == _TYPES
 
@@ -58,7 +58,7 @@ _COMPLETE = (
     "type: Feature\n"
     "title: A feature\n"
     "description: A feature.\n"
-    "workflow_status: open\n"
+    "work_status: open\n"
     "opened: '2026-01-05'\n"
     "updated: '2026-02-02'\n"
 )
@@ -81,9 +81,45 @@ def test_base_schema_accepts_structured_edges_and_filing_metadata(tmp_path: Path
         tmp_path,
         _COMPLETE
         + "status: draft\nblast_radius: package\ntarget: 2026-Q4\n"
-        + "depends_on:\n  - slug: a\n    blocks: plan\n    needs: design\n",
+        + "depends_on:\n  - path: work/release-cutover\n    blocks: plan\n    needs: finish\n",
     )
     assert messages == []
+
+
+@pytest.mark.parametrize("path", ["work/release-cutover", "work/_archive/release-cutover"])
+def test_base_schema_accepts_active_and_root_archived_dependency_paths(tmp_path: Path, path: str) -> None:
+    edge = f"depends_on:\n  - path: {path}\n    blocks: plan\n    needs: finish\n"
+    assert _findings(tmp_path, _COMPLETE + "status: draft\n" + edge) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "work/_archive/release-cutover/children/epic-migration",
+        "work/_archive/release-cutover/children/_archive/epic-migration",
+        "work/release-cutover/children/_archive/epic-migration/children/_archive/feature-import",
+    ],
+)
+def test_base_schema_accepts_dependency_paths_inside_an_archived_subtree(tmp_path: Path, path: str) -> None:
+    """Archiving keeps a family intact and addressable, so an edge may name a
+    target inside an archived subtree. The pattern has to reach it or every such
+    edge becomes unrepresentable the moment its target's ancestor is archived."""
+    edge = f"depends_on:\n  - path: {path}\n    blocks: plan\n    needs: finish\n"
+    assert _findings(tmp_path, _COMPLETE + "status: draft\n" + edge) == []
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "work/_archive",
+        "work/release-cutover/children",
+        "work/release-cutover/children/epic-migration/children",
+        "work/Release-Cutover",
+    ],
+)
+def test_base_schema_still_refuses_dependency_paths_that_name_no_item(tmp_path: Path, path: str) -> None:
+    edge = f"depends_on:\n  - path: {path}\n    blocks: plan\n    needs: finish\n"
+    assert any("does not match" in message for message in _findings(tmp_path, _COMPLETE + "status: draft\n" + edge))
 
 
 @pytest.mark.parametrize("target", ["Q4-2026", "2026-Q5", "2026-13", "2026"])
@@ -92,18 +128,42 @@ def test_base_schema_rejects_bad_targets(tmp_path: Path, target: str) -> None:
 
 
 def test_the_base_enums_reach_the_wrapper_through_the_ref(tmp_path: Path) -> None:
-    messages = _findings(tmp_path, _COMPLETE.replace("workflow_status: open", "workflow_status: nope"))
+    messages = _findings(tmp_path, _COMPLETE.replace("work_status: open", "work_status: nope"))
     assert any("'nope' is not one of" in m for m in messages)
 
 
-def test_a_mistyped_source_id_is_refused_and_a_suffixed_one_is_not(tmp_path: Path) -> None:
+def test_a_mistyped_source_id_is_refused_and_a_kebab_one_is_not(tmp_path: Path) -> None:
     good = _COMPLETE + (
         "status: draft\n"
         "sources:\n"
-        "  - id: transcript-plan-subagent-1\n"
+        "  - id: execute-transcript\n"
         "    resource: /work/item/references/03-plan-transcript.txt\n"
     )
     assert _findings(tmp_path, good) == []
 
-    bad = good.replace("transcript-plan-subagent-1", "design_spec")
+    bad = good.replace("execute-transcript", "design_spec")
     assert any("does not match" in m for m in _findings(tmp_path, bad))
+
+
+def test_dependency_edges_require_path_blocks_and_needs(tmp_path: Path) -> None:
+    edge = "depends_on:\n  - path: work/release-cutover\n    blocks: plan\n    needs: finish\n"
+    assert _findings(tmp_path, _COMPLETE + "status: draft\n" + edge) == []
+    missing_edges = {
+        "path": "depends_on:\n  - blocks: plan\n    needs: finish\n",
+        "blocks": "depends_on:\n  - path: work/release-cutover\n    needs: finish\n",
+        "needs": "depends_on:\n  - path: work/release-cutover\n    blocks: plan\n",
+    }
+    for key, missing in missing_edges.items():
+        messages = _findings(tmp_path, _COMPLETE + "status: draft\n" + missing)
+        assert any(f"'{key}' is a required property" in message for message in messages)
+
+
+def test_release_fields_are_optional(tmp_path: Path) -> None:
+    release = _COMPLETE.replace("type: Feature", "type: Release")
+    assert _findings(tmp_path, release + "status: draft\n") == []
+    assert (
+        _findings(
+            tmp_path, release + "status: draft\nversion: 1.2.3\ntarget_date: '2026-03-01'\nreleased_at: '2026-03-02'\n"
+        )
+        == []
+    )

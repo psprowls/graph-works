@@ -9,16 +9,20 @@ from work_tracker_okf import IGNORE, load_items
 from work_tracker_okf.filing import FilingPlan, FilingSeed, apply, plan_filing
 
 _ON = date(2026, 3, 10)
+_RELEASE = "work/release-path-native-cutover"
+_EPIC = f"{_RELEASE}/children/epic-conformant-vault"
+_FEATURE = f"{_EPIC}/children/feature-epic-feature-filing-writer"
 
-#: One vault page per type, by slug. The round trip compares a freshly filed page
+#: One vault page per type, by canonical path. The round trip compares a freshly filed page
 #: of each type against the vault's own.
 _EXEMPLARS = {
-    "Epic": "2026-03-01-epic-conformant-vault",
-    "Feature": "2026-03-02-epic-feature-filing-writer",
-    "Spike": "2026-03-03-spike-path-layout-questions",
-    "Bug": "2026-03-04-bug-slug-prefix-mismatch",
-    "TechDebt": "2026-03-05-tech-debt-retire-the-sidecar",
-    "TestGap": "2026-03-06-test-gap-cover-the-upsert",
+    "Release": _RELEASE,
+    "Epic": _EPIC,
+    "Feature": _FEATURE,
+    "Spike": f"{_EPIC}/children/spike-path-layout-questions",
+    "Bug": "work/bug-path-prefix-mismatch",
+    "TechDebt": "work/tech-debt-retire-the-sidecar",
+    "TestGap": f"{_FEATURE}/children/test-gap-cover-the-upsert",
 }
 
 
@@ -26,8 +30,8 @@ def _headings(text: str) -> list[str]:
     return [section.heading.strip() for section in body_sections(parse(text).body)]
 
 
-def _vault_page(root: Path, slug: str) -> str:
-    return (root / "work" / f"{slug}.md").read_text(encoding="utf-8")
+def _vault_page(root: Path, path: str) -> str:
+    return (root / f"{path}.md").read_text(encoding="utf-8")
 
 
 def _plan(root: Path, section_set, type_name: str) -> FilingPlan:
@@ -40,7 +44,7 @@ def _plan(root: Path, section_set, type_name: str) -> FilingPlan:
             title="A freshly filed item",
             description="Filed by the writer, into a copy of the vault.",
             on=_ON,
-            words="freshly filed item",
+            name="freshly-filed-item",
             affects=("packages/work-tracker-okf",),
             tags=("fixture",),
         ),
@@ -81,8 +85,8 @@ def test_the_filed_page_joins_the_vaults_own_items(conformant_root: Path, sectio
     plan = _plan(conformant_root, section_set, "Feature")
     apply(plan)
     items = load_items(load_bundle(conformant_root, ignore=IGNORE))
-    assert plan.slug in {item.slug for item in items}
-    assert plan.slug == f"{_ON.isoformat()}-feature-freshly-filed-item"
+    assert plan.path in {item.path for item in items}
+    assert plan.path == "work/feature-freshly-filed-item"
 
 
 def test_the_vault_today_is_not_the_filing_day() -> None:

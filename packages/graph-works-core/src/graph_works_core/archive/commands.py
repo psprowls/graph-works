@@ -25,8 +25,9 @@ guard against that.
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 from doc_wiki_okf.archive import ARCHIVE_IGNORE as WIKI_ARCHIVE_IGNORE
@@ -34,14 +35,15 @@ from doc_wiki_okf.archive import ArchivePlan as WikiArchivePlan
 from doc_wiki_okf.archive import ArchiveResult as WikiArchiveResult
 from doc_wiki_okf.archive import apply_archive as apply_wiki_archive
 from doc_wiki_okf.archive import plan_archive as plan_wiki_archive
-from okf_ext.moves import MovePlan
-from okf_io import load_bundle
-from work_tracker_okf.archive import ArchivePlan, ArchiveResult, apply_archive, plan_archive
-from work_tracker_okf.compose import append_lane_log
-from work_tracker_okf.items import ARCHIVE_IGNORE
+from okf_ext.moves import MovePlan, stranded_warning
+from okf_io import append_log_entry, load, load_bundle
+from work_tracker_okf.archive import plan_archive
+from work_tracker_okf.items import ARCHIVE_IGNORE, load_items
+from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
 def _touched_members(plan: MovePlan) -> frozenset[str]:
@@ -66,10 +68,10 @@ class ArchiveRun:
     three cases where nothing was applied, so there is nothing to report but
     the plans themselves."""
 
-    plan: ArchivePlan
+    plan: WorkMutationPlan
     wiki_plan: WikiArchivePlan
     conflict: tuple[str, ...] = ()
-    result: ArchiveResult | None = None
+    result: MutationApplication | None = None
     wiki: WikiArchiveResult | None = None
     pointer_cleared: bool = False
     logged: str | None = None
@@ -84,15 +86,26 @@ class ArchiveRun:
         return self.plan.ok and self.wiki_plan.ok and not self.conflict
 
 
+def stranded_warnings(run: ArchiveRun) -> tuple[str, ...]:
+    """Project lane-labelled opaque wikilink diagnostics for an archive run."""
+    work_entries = () if run.plan.move_plan is None else run.plan.move_plan.stranded
+    warnings: list[str] = []
+    for label, entries in (("work items", work_entries), ("wiki pages", run.wiki_plan.moves.stranded)):
+        warning = stranded_warning(entries)
+        if warning is not None:
+            warnings.append(f"{label}: {warning}")
+    return tuple(warnings)
+
+
 def run_archive(
     layout: WorkspaceLayout,
-    slugs: Sequence[str] | None = None,
+    paths: Sequence[str] | str | None = None,
     wiki_slugs: Sequence[str] | None = (),
     *,
     today: date,
     dry_run: bool = True,
 ) -> ArchiveRun:
-    """Archive *slugs* (work items), or every eligible item when `None`; and
+    """Archive canonical work-item *paths*, or every eligible item when `None`.
     *wiki_slugs* (path-qualified wiki page tokens, e.g. `"adrs/2026-08-12-foo"`),
     or every eligible proposal when `None`.
 
@@ -126,22 +139,51 @@ def run_archive(
     takes it.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=(*ARCHIVE_IGNORE, *WIKI_ARCHIVE_IGNORE))
-    plan = plan_archive(bundle, slugs)
+    plan = plan_archive(bundle, load_items(bundle), paths)
     wiki_plan = plan_wiki_archive(bundle, wiki_slugs)
-    conflict = tuple(sorted(_touched_members(plan.moves) & _touched_members(wiki_plan.moves)))
+    work_touched = {
+        *(move.source for move in plan.moves),
+        *(move.dest for move in plan.moves),
+        *(write.member for write in plan.writes),
+        *plan.deletes,
+    }
+    conflict = tuple(sorted(work_touched & _touched_members(wiki_plan.moves)))
     if dry_run or not plan.ok or not wiki_plan.ok or conflict:
         return ArchiveRun(plan=plan, wiki_plan=wiki_plan, conflict=conflict)
 
-    result = apply_archive(bundle, plan)
-    wiki_result = apply_wiki_archive(bundle, wiki_plan)
-    cleared = provenance.clear_active_work(layout, set(result.archived))
+    work_roots = tuple(
+        source
+        for source in plan.path_mapping
+        if not any(source.startswith(f"{other}/children/") for other in plan.path_mapping if other != source)
+    )
+    messages = [f"archived {', '.join(work_roots)}"] if work_roots else []
+    if wiki_plan.tokens:
+        messages.append(f"archived wiki {', '.join(wiki_plan.tokens)}")
+    logged = "; ".join(messages) or None
+    if logged is not None:
+        log = append_log_entry(load(bundle.root / "log.md"), logged, on=today, dry_run=True)
+        before = log.before.encode("utf-8")
+        plan = replace(
+            plan,
+            writes=tuple(
+                sorted(
+                    (
+                        *plan.writes,
+                        PlannedWrite("log.md", hashlib.sha256(before).hexdigest(), log.after.encode("utf-8")),
+                    ),
+                    key=lambda write: write.member,
+                )
+            ),
+        )
+    result = apply_mutation(layout, plan)
+    if not result.ok:
+        return ArchiveRun(plan=plan, wiki_plan=wiki_plan, result=result, logged=logged)
 
-    messages: list[str] = []
-    if result.archived:
-        messages.append(f"archived {', '.join(result.archived)}")
-    if wiki_result.archived:
-        messages.append(f"archived wiki {', '.join(wiki_result.archived)}")
-    logged = append_lane_log(layout.bundle_dir, "; ".join(messages), on=today) if messages else None
+    # The work journal is complete before wiki mutation begins. A wiki preflight
+    # refusal above therefore blocks both sides; a failed work transaction never
+    # reaches this call.
+    wiki_result = apply_wiki_archive(bundle, wiki_plan)
+    cleared = provenance.clear_active_work(layout, set(work_roots))
 
     return ArchiveRun(
         plan=plan,
@@ -153,4 +195,4 @@ def run_archive(
     )
 
 
-__all__ = ["ArchiveRun", "run_archive"]
+__all__ = ["ArchiveRun", "run_archive", "stranded_warnings"]

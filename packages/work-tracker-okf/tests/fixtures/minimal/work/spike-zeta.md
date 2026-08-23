@@ -3,7 +3,7 @@ type: Spike
 title: Zeta spike
 description: A resolved spike that feature-beta depends on.
 status: stable
-workflow_status: resolved
+work_status: resolved
 phase: done
 effort: small
 opened: '2026-01-03'

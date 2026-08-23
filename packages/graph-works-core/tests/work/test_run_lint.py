@@ -8,7 +8,9 @@ from datetime import date
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
-from okf_io import load
+from okf_io import load, load_bundle
+from work_tracker_okf.indexes import plan_indexes
+from work_tracker_okf.items import IGNORE, load_items
 
 TODAY = date(2026, 8, 17)
 
@@ -17,7 +19,7 @@ type: Feature
 title: {slug}
 description: d
 status: stable
-workflow_status: open
+work_status: open
 phase: execute
 effort: medium
 opened: 2026-08-01
@@ -43,7 +45,7 @@ type: Epic
 title: {slug}
 description: d
 status: stable
-workflow_status: open
+work_status: open
 phase: execute
 effort: medium
 opened: 2026-08-01
@@ -81,11 +83,19 @@ def _config(layout):
 
 def _write(layout, slug, template):
     (layout.bundle_dir / "work" / f"{slug}.md").write_text(template.format(slug=slug), encoding="utf-8")
+    if "type: Feature" in template:
+        ledger = layout.bundle_dir / "work" / slug / "references" / "00-decisions.md"
+        ledger.parent.mkdir(parents=True, exist_ok=True)
+        ledger.write_text("# Decisions\n", encoding="utf-8")
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    for plan in plan_indexes(bundle.root, load_items(bundle)):
+        plan.path.parent.mkdir(parents=True, exist_ok=True)
+        plan.path.write_text(plan.after, encoding="utf-8")
 
 
 def test_a_conformant_bundle_reports_no_errors(tmp_path):
     layout = _workspace(tmp_path)
-    _write(layout, "2026-08-01-feature-a", _FEATURE)
+    _write(layout, "feature-a", _FEATURE)
     report = work.run_lint(layout, _config(layout), today=TODAY)
     assert report.ok
     assert report.findings == ()
@@ -93,7 +103,7 @@ def test_a_conformant_bundle_reports_no_errors(tmp_path):
 
 def test_a_bad_type_is_reported_as_a_schema_finding(tmp_path):
     layout = _workspace(tmp_path)
-    (layout.bundle_dir / "work" / "2026-08-17-bug-bad.md").write_text(
+    (layout.bundle_dir / "work" / "bug-bad.md").write_text(
         "---\ntype: NotAType\ntitle: Bad\nstatus: accepted\n---\n\nBody.\n", encoding="utf-8"
     )
     report = work.run_lint(layout, _config(layout), today=TODAY)
@@ -105,7 +115,7 @@ def test_strict_promotes_a_warning_to_a_failure(tmp_path):
     layout = _workspace(tmp_path)
     # An epic at `phase: execute` with no children is `graph.epic-without-children`
     # -- warn by default, so this bundle is `ok` until `strict=True` promotes it.
-    _write(layout, "2026-08-01-epic-x", _EPIC)
+    _write(layout, "epic-x", _EPIC)
 
     lax = work.run_lint(layout, _config(layout), today=TODAY)
     assert lax.ok
@@ -123,7 +133,7 @@ def test_wiki_side_content_is_out_of_scope(tmp_path):
     # about. A broken link and an unrecognized `type` in `concepts/` must
     # not fail a "does the work lane conform" check.
     layout = _workspace(tmp_path)
-    _write(layout, "2026-08-01-feature-a", _FEATURE)
+    _write(layout, "feature-a", _FEATURE)
     concepts = layout.bundle_dir / "concepts"
     concepts.mkdir(exist_ok=True)
     (concepts / "broken.md").write_text(
@@ -140,7 +150,7 @@ def test_repo_root_none_skips_the_affects_check_but_a_real_root_enforces_it(tmp_
     # `affects: [packages/a]` names a path that exists under neither the repo
     # nor (trivially) nowhere -- `targets.affects-missing` only fires once a
     # repo root is given to check it against.
-    _write(layout, "2026-08-01-feature-a", _FEATURE)
+    _write(layout, "feature-a", _FEATURE)
     repo = layout.repo_root
 
     without_root = work.run_lint(layout, _config(layout), today=TODAY, repo_root=None)
@@ -153,9 +163,9 @@ def test_repo_root_none_skips_the_affects_check_but_a_real_root_enforces_it(tmp_
 
 def test_lint_reports_bad_edge_without_crashing(tmp_path) -> None:
     layout = _workspace(tmp_path)
-    _write(layout, "2026-08-01-feature-a", _FEATURE)
-    document = load(layout.bundle_dir / "work/2026-08-01-feature-a.md")
-    document.set("depends_on", [{"slug": "missing", "blocks": "build"}])
+    _write(layout, "feature-a", _FEATURE)
+    document = load(layout.bundle_dir / "work/feature-a.md")
+    document.set("depends_on", [{"path": "missing", "blocks": "build"}])
     document.save()
     report = work.run_lint(layout, _config(layout), today=TODAY)
     assert any(finding.code == "graph.depends-on-invalid" for finding in report.findings)

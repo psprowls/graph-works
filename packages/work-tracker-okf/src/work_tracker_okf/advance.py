@@ -19,17 +19,20 @@ from typing import Literal
 
 from okf_io import Document
 
+from work_tracker_okf.hierarchy import active_nonterminal_descendants
 from work_tracker_okf.items import WorkItem
+from work_tracker_okf.vocabulary import PARENT_TYPES
 from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition, route, state_for
 
 RefusalReason = Literal[
-    "unknown-slug",
+    "unknown-path",
     "blocked",
     "nothing-to-advance",
     "effort-required",
     "owner-required",
     "resolved-in-required",
     "children-open",
+    "released-at-required",
 ]
 
 
@@ -42,7 +45,7 @@ class FieldChange:
 
 @dataclass(frozen=True, slots=True)
 class AdvancePlan:
-    """What advancing *slug* would change, and what it declines to change.
+    """What advancing a canonical item path would change or decline to change.
 
     `stamp_source` and `sync_plan_table` are **unresolved requests** (C3-K):
     turning the first into a `Source` needs child 2's path and upsert
@@ -50,7 +53,7 @@ class AdvancePlan:
     plan artifact. Child 3 imports neither; child 6 composes them.
     """
 
-    slug: str
+    path: str
     route: RouteResult
     transition: Transition | None
     changes: tuple[FieldChange, ...]
@@ -66,73 +69,83 @@ class AdvancePlan:
     def diff(self) -> str:
         """Render the plan. Writes nothing."""
         if self.refusal is not None:
-            return f"{self.slug}: refused ({self.refusal}) -- {self.detail}"
+            return f"{self.path}: refused ({self.refusal}) -- {self.detail}"
         if not self.changes:
-            return f"{self.slug}: no change"
-        lines = [f"{self.slug}:"]
+            return f"{self.path}: no change"
+        lines = [f"{self.path}:"]
         lines.extend(f"  {change.key}: {change.before!r} -> {change.after!r}" for change in self.changes)
         return "\n".join(lines)
 
 
 def advance(
     items: Sequence[WorkItem],
-    slug: str,
+    path: str,
     *,
     today: date,
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
+    released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
 ) -> AdvancePlan:
-    """Plan the next transition for *slug*. Mutates nothing, reads no clock.
+    """Plan the next transition for *path*. Mutates nothing, reads no clock.
 
-    Takes `(items, slug)` rather than a pre-routed transition because routing,
+    Takes `(items, path)` rather than a pre-routed transition because routing,
     picking `on_dispatch or on_complete`, and refusing an unmet requirement are
     one decision -- splitting them across a CLI is how `work-io` ended up with
     the gate messages living away from the table that produces them.
     """
-    item = next((candidate for candidate in items if candidate.slug == slug), None)
-    state = state_for(items, slug, effort=effort)
+    item = next((candidate for candidate in items if candidate.path == path), None)
+    state = state_for(items, path, effort=effort)
     if item is None or state is None:
-        return _refused(slug, None, None, "unknown-slug", f"unknown slug {slug!r}")
+        return _refused(path, None, None, "unknown-path", f"unknown path {path!r}")
     result = route(state)
     if result.blockers:
-        return _refused(slug, result, None, "blocked", "; ".join(result.blockers))
+        return _refused(path, result, None, "blocked", "; ".join(result.blockers))
     transition = result.on_dispatch or result.on_complete
     if transition is None:
-        return _refused(slug, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
+        return _refused(path, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
     # Two independent guards on the sentinel, because a leak writes an invalid
     # enum value into a real page.
     if "effort" in transition.requires or transition.phase == PLAN_OR_EXECUTE:
         return _refused(
-            slug,
+            path,
             result,
             transition,
             "effort-required",
             "effort required to advance: pass effort=xtra-small|small|medium|large|xtra-large",
         )
-    if "children-terminal" in transition.requires:
-        open_slugs = ", ".join(state.child_rollup.open_slugs) if state.child_rollup else ""
+    if state.type in PARENT_TYPES and transition.work_status == "resolved":
+        open_descendants = active_nonterminal_descendants(items, item.path)
+        if open_descendants:
+            return _refused(
+                path,
+                result,
+                transition,
+                "children-open",
+                "waiting on descendants: " + ", ".join(open_descendants),
+            )
+    if state.type == "Release" and transition.work_status == "resolved" and not (released_at or item.released_at):
         return _refused(
-            slug,
+            path,
             result,
             transition,
-            "children-open",
-            f"waiting on children: {open_slugs}; finish them or detach (delete the child's parent key)",
+            "released-at-required",
+            "released_at required to resolve a Release",
         )
     if "owner" in transition.requires and not (owner or item.owner):
-        return _refused(slug, result, transition, "owner-required", "owner required to advance: pass owner=<handle>")
+        return _refused(path, result, transition, "owner-required", "owner required to advance: pass owner=<handle>")
     if "resolved_in" in transition.requires and not (resolved_in or item.resolved_in):
         return _refused(
-            slug,
+            path,
             result,
             transition,
             "resolved-in-required",
             "resolved_in required to advance: pass resolved_in=<pr or commit>",
         )
     return AdvancePlan(
-        slug=slug,
+        path=path,
         route=result,
         transition=transition,
         changes=_changes(
@@ -142,6 +155,7 @@ def advance(
             effort=effort,
             owner=owner,
             resolved_in=resolved_in,
+            released_at=released_at,
             worktree=worktree,
             branch=branch,
         ),
@@ -153,7 +167,7 @@ def advance(
 
 
 def _refused(
-    slug: str,
+    path: str,
     result: RouteResult | None,
     transition: Transition | None,
     reason: RefusalReason,
@@ -162,7 +176,7 @@ def _refused(
     """A refusal carries **empty changes** -- which is what makes `apply` safe
     with no guard of its own."""
     return AdvancePlan(
-        slug=slug,
+        path=path,
         route=result if result is not None else RouteResult(dispatch=None, reason=detail),
         transition=transition,
         changes=(),
@@ -181,6 +195,7 @@ def _changes(
     effort: str | None,
     owner: str | None,
     resolved_in: str | None,
+    released_at: date | None,
     worktree: str | None = None,
     branch: str | None = None,
 ) -> tuple[FieldChange, ...]:
@@ -188,11 +203,12 @@ def _changes(
     order they append in on a page that lacks them."""
     candidates: tuple[tuple[str, object | None, object | None], ...] = (
         ("phase", item.phase, transition.phase),
-        ("workflow_status", item.workflow_status, transition.workflow_status),
+        ("work_status", item.work_status, transition.work_status),
         ("status", item.status, transition.document_status),
         ("effort", item.effort, effort),
         ("owner", item.owner, owner),
         ("resolved_in", item.resolved_in, resolved_in),
+        ("released_at", item.released_at, released_at),
         ("worktree", item.worktree, worktree),
         ("branch", item.branch, branch),
     )

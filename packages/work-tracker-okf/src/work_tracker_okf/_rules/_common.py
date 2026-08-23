@@ -24,7 +24,7 @@ from work_tracker_okf.items import WorkItem, load_items
 class LaneConfig:
     """What a lane rule may be handed that `RuleContext` cannot carry.
 
-    `RuleContext` deliberately touches no filesystem, and two of the 30 codes
+    `RuleContext` deliberately touches no filesystem, and two of the 37 codes
     (`targets.affects-missing`, `plan.action-target-missing`) are questions about
     a repository. `repo_root=None` **skips** both rather than reporting them:
     not knowing where the repo is says nothing about whether the paths are good.
@@ -37,18 +37,18 @@ def items(ctx: RuleContext) -> tuple[WorkItem, ...]:
     """Every item in the bundle, archived included.
 
     Called once per rule function rather than memoized (C5-K): measured at 93 us
-    for 7 items, so about 30 ms across all fourteen functions on a 100-item vault.
-    Fourteen independent passes, no shared state, and no cache whose invalidation
+    for 7 items, so about 30 ms across the rule bundle on a 100-item vault.
+    Independent passes, no shared state, and no cache whose invalidation
     nobody can see.
     """
     return load_items(ctx.bundle)
 
 
 def active(ctx: RuleContext) -> Iterator[WorkItem]:
-    """The items every per-item rule runs over: the unarchived ones, in slug order.
+    """The items every per-item rule runs over: the unarchived ones, in path order.
 
     An archived page is frozen. Reporting that it is archive-eligible, or that
-    its slug disagrees with its `type`, asks nobody to do anything. Cross-item
+    its basename disagrees with its `type`, asks nobody to do anything. Cross-item
     *resolution* still runs over the whole set -- see `graph.references`.
     """
     for item in items(ctx):

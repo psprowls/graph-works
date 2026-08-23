@@ -2,7 +2,7 @@
 
 > **Substrate ownership.** This document describes behavior that the graph-works rebuild is
 > re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`2026-08-11-epic-graph-works-core`](/work/2026-08-11-epic-graph-works-core.md) and is re-authored there, not here.
+> the behavioral truth is owned by [`epic-graph-works-core`](/work/_archive/epic-graph-works-core.md) and is re-authored there, not here.
 > Treat a disagreement between this page and that item as this page being stale.
 
 > **Maintained documentation for a source code repository — single package, monorepo, or hybrid.**
@@ -109,7 +109,7 @@ Only the schema loader file changes per tool. The scripts run identically everyw
     └── AGENTS.md              # wiki-local schema (others)
 ```
 
-**Iron rule:** the code is the source of truth. The LLM never edits file contents under `<workspace>/raw/` (ingested sources are moved to `raw/_archive/`); all wiki writes go under `<workspace>/wiki/`. Work items live at `<workspace>/work/` and are referenced from wiki pages via wikilinks (e.g. `[[../work/2026-04-21-flaky-healthkit-tests]]`).
+**Iron rule:** the code is the source of truth. The LLM never edits file contents under `<workspace>/raw/` (ingested sources are moved to `raw/_archive/`); all wiki writes go under `<workspace>/wiki/`. Work items live at `<workspace>/work/` and are referenced from wiki pages via wikilinks (e.g. `[[../work/release-healthkit/children/epic-reliability/children/bug-flaky-healthkit-tests]]`).
 
 ## Four operations
 

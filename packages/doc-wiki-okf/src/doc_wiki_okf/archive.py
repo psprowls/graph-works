@@ -199,7 +199,7 @@ def _sweep(bundle: Bundle) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
     Eligible means a *coerced* `page_status` other than `"proposed"` -- a
     malformed proposal (`page_status is None`) has no status signal to sweep
     against and is left alone, matching `_select`'s own treatment of an
-    uncoercible `workflow_status`.
+    uncoercible proposal page status.
     """
     chosen = sorted(
         proposal.member[:-3]  # strip ".md": member is already bundle-relative posix

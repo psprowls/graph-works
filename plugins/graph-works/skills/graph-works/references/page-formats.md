@@ -2,7 +2,7 @@
 
 > **Substrate ownership.** This document describes behavior that the graph-works rebuild is
 > re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`2026-08-11-epic-wiki-io-format-layer`](/work/2026-08-11-epic-wiki-io-format-layer.md) and is re-authored there, not here.
+> the behavioral truth is owned by [`epic-wiki-io-format-layer`](/work/_archive/epic-wiki-io-format-layer.md) and is re-authored there, not here.
 > Treat a disagreement between this page and that item as this page being stale.
 
 Every wiki page has the same skeleton: YAML frontmatter + a section structure that matches its category. Below are the canonical formats. Templates live in `assets/page-templates/`. The full enum and per-category frontmatter spec lives in `wiki-schema.md`.
@@ -455,7 +455,7 @@ One paragraph: what this library does, why we use it, which surfaces.
 - `use client` directive boundaries — see [[concepts/nextjs-client-boundary]].
 
 ## Gotchas / workarounds
-- ⚠️ React 19 `useEffect` runs twice in dev (Strict Mode) — see [[work/2026-02-08-double-mount-in-dev]].
+- ⚠️ React 19 `useEffect` runs twice in dev (Strict Mode) — see [[work/release-web-platform/children/epic-react-19/children/bug-double-mount-in-dev]].
 - Expo pins React 18; can't bump until RN catches up.
 
 ## Upgrade history
@@ -473,86 +473,51 @@ One paragraph: what this library does, why we use it, which surfaces.
 
 ## 8. Work page
 
-Unified namespace for everything "to do, doing, or done" — bugs, tech debt, test gaps, security/perf items, features, initiatives, spikes. `kind:` discriminates; a single 7-state lifecycle covers all. The committed plan lives in a `## Plan` markdown table. Slugs are `<YYYY-MM-DD>-<kind>-<w1>-<w2>-<w3>-<w4>.md`, where the 4 words are filer-supplied via `gw work file --slug-words` (falling back to the first 4 words of the title when omitted); children filed under a parent epic get `epic-<kind>` instead of `<kind>`. No migration — pre-existing pages keep their old `<YYYY-MM-DD>-<short-slug>.md` filenames.
-
-`graph-works` owns the schema, template, folder, lifecycle lint, and `<workspace>/wiki/work-index.json` sidecar.
-
-Bug-shaped example (`kind: bug`):
+Work pages use PascalCase `type`, independent document `status`, and
+`work_status` for the work lifecycle. Their extensionless bundle path is their
+identity. Physical nesting under `children/` defines ownership.
 
 ```markdown
 ---
-title: MONGO_DATABASE hardcoded to dev-pat-location in CDK
-category: work
-kind: bug
-summary: cdk/location-service.ts:50 sets MONGO_DATABASE to a literal "dev-pat-location" — any prod deploy lands on the dev database.
-status: open
-severity: medium
-effort: s
+type: Feature
+title: Path-native filing
+description: File work beneath its owning Epic.
+status: stable
+work_status: accepted
+phase: execute
+effort: medium
 blast_radius: package
 affects:
-  - packages/location-aws-node-ts
-opened: 2026-04-21
-updated: 2026-05-03
-tags: [location, infrastructure, configuration, mongodb]
----
-
-# MONGO_DATABASE hardcoded to dev-pat-location in CDK
-
-## Summary
-The CDK deploy script for `location-aws-node-ts` sets `MONGO_DATABASE` to the literal string `dev-pat-location`. Any prod deploy lands on the dev database.
-
-## Options considered
-- Stage-prefix the database name from the existing `STAGE` variable in the same block.
-- Move the DB name into env-vars-per-stage in `cdk.json` (overkill; one variable).
-
-## Plan
-
-| Action | Done when | Rationale |
-|---|---|---|
-| Stage-prefix the database name in CDK | `location-service.ts` has no literal `dev-pat-location` | Matches `STAGE` already in the same block |
-| Drop the legacy adapter fallback | `legacyContextAdapter.ts` no longer falls back | Dead code once env var always set |
-
-## Notes / log
-- **2026-04-21** — filed; reproduced on dev deploy.
-```
-
-Feature-shaped example (`kind: feature`):
-
-```markdown
----
-title: Cloud LLM provider via AWS Bedrock
-category: work
-kind: feature
-summary: Add Bedrock as a third provider behind getChatModel() so the agent can run against open-weight cloud-hosted models.
-status: accepted
-effort: l
-blast_radius: system
-target: 2026-Q2
+  - packages/work-tracker-okf
+depends_on:
+  - path: work/release-cutover/children/epic-migration/children/feature-parser
+    blocks: execute
+    needs: resolved
+opened: 2026-08-23
+updated: 2026-08-23
 owner: pat
-affects:
-  - src/llm/provider.ts
-  - src/llm/bedrock.ts
-  - src/config.ts
-opened: 2026-05-02
-updated: 2026-05-03
-tags: [roadmap, llm, cloud, aws, bedrock]
+sources:
+  - id: design
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/01-design.md
+  - id: plan
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/02-plan.md
 ---
 
-# Cloud LLM provider via AWS Bedrock
+# Path-native filing
 
 ## Summary
-Add Bedrock to the provider seam so the agent can run against open-weight cloud-hosted models alongside the existing local and OpenAI providers.
+
+File and route every item by permanent canonical path.
 
 ## Plan
 
 | Action | Done when | Rationale |
 |---|---|---|
-| Add `bedrock.ts` adapter to the provider seam | `getChatModel("bedrock-…")` returns a working client | Plug-in shape mirrors existing providers |
-| Wire stage config | `BEDROCK_REGION` and `BEDROCK_MODEL` honored | Matches existing `OPENAI_*` shape |
-| End-to-end smoke test against a small Bedrock model | One round-trip query returns a non-error completion | Catches IAM/credentials misconfig early |
-
-## Notes / log
-- **2026-05-03** — accepted after spike on IAM permissions.
+| File beneath the owner | The page and owned directory share one canonical path | Physical placement is ownership |
 ```
 
-Severity is allowed for `bug | security | perf | tech-debt | test-gap` and disallowed for `feature | epic | spike`. State-conditional fields (`resolved_in`, `mitigation`, `superseded_by`, `rationale`) are populated only in their corresponding state. See `wiki-schema.md` for the full taxonomy and lifecycle.
+The page lives at `<workspace>/okf/<work-path>.md`. Managed artifacts live at
+`<workspace>/okf/<work-path>/references/`. `Release` is root-only; only
+`Release`, `Epic`, and `Feature` may own child lanes. Every lane and local
+archive carries its own Markdown `index.md`. There is no hierarchy frontmatter
+or JSON index sidecar.

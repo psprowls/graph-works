@@ -2,7 +2,7 @@
 
 > **Substrate ownership.** This document describes behavior that the graph-works rebuild is
 > re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`2026-08-13-epic-feature-query-vertical-adapter-registry`](/work/2026-08-13-epic-feature-query-vertical-adapter-registry.md) and is re-authored there, not here.
+> the behavioral truth is owned by [`feature-epic-feature-query-vertical-adapter-registry`](/work/_archive/epic-graph-works-core/children/_archive/feature-epic-feature-query-vertical-adapter-registry.md) and is re-authored there, not here.
 > Treat a disagreement between this page and that item as this page being stale.
 
 The flow the LLM follows when the user runs `/graph-works:query <question>` or dispatches the `graph-works:librarian` sub-agent.

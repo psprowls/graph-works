@@ -2,17 +2,20 @@
 
 > **Substrate ownership.** This document describes behavior that the graph-works rebuild is
 > re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`2026-08-11-epic-wiki-io-format-layer`](/work/2026-08-11-epic-wiki-io-format-layer.md) and is re-authored there, not here.
+> the behavioral truth is owned by [`epic-wiki-io-format-layer`](/work/_archive/epic-wiki-io-format-layer.md) and is re-authored there, not here.
 > Treat a disagreement between this page and that item as this page being stale.
 
 The wiki sits inside a graph-works workspace alongside other workspace-level directories. The LLM must respect the boundaries.
 
 ## Layout
 
-The wiki lives at `<workspace>/wiki/`. The workspace is resolved via `gw`, which prefers the `GRAPH_WORKS_DIR` env var — the supported way to point at a workspace, normally injected via the `env` block of the `.claude/settings.local.json` belonging to whichever directory the session runs from. There is no workspace-path key inside `workspace.yaml` itself. Without the env var, resolution falls back to `<repo>/graph-works/` — a `.git` walk-up plus the default name, never a search for `workspace.yaml` — so a workspace kept anywhere else is reachable only via the env var or an explicit `--workspace`. The Obsidian vault opens at `<workspace>/`, so `raw/` (source inbox; ingested sources move to `raw/_archive/`) sits at the workspace root as a sibling of `wiki/`, owned by `gw`. `work/` (work tracker) lives at `<workspace>/wiki/work/` — nested under `wiki/`, not a workspace-root sibling — so `[[work/foo]]` wikilinks resolve the same way as `[[concepts/foo]]`; schema owned by `gw`, lifecycle owned by this plugin.
+The OKF bundle lives at `<workspace>/okf/`. Workspace resolution prefers an
+explicit `--workspace`, then `GRAPH_WORKS_DIR`, then a `.git` walk-up to
+`<repo>/.works`. `raw/` is the source inbox and `.gw/` is the control plane.
+The Obsidian vault opens at `<workspace>/okf/`.
 
 ```
-<repo>/graph-works/               # workspace; Obsidian vault opens here
+<repo>/.works/                    # workspace
 ├── workspace.yaml                # workspace manifest (owned by gw)
 ├── CLAUDE.md                    # workspace-level schema (owned by gw)
 ├── raw/                         # source inbox; ingested sources move to _archive/
@@ -23,7 +26,7 @@ The wiki lives at `<workspace>/wiki/`. The workspace is resolved via `gw`, which
 │   ├── transcripts/*.md         # meeting and design-session notes
 │   └── assets/                  # images referenced by sources
 ├── knowledge/                   # other plugin-managed knowledge stores
-└── wiki/                        # this plugin's curated knowledge base
+└── okf/                         # curated OKF bundle; Obsidian vault root
     ├── index.md                 # content catalog — updated every ingest/scan
     ├── log.md                   # append-only timeline
     ├── work/                    # unified bugs, tech debt, features, initiatives, spikes
@@ -45,7 +48,7 @@ The wiki lives at `<workspace>/wiki/`. The workspace is resolved via `gw`, which
 
 1. **The code is the source of truth.** If the wiki disagrees with the code, update the wiki — never the other way around.
 2. **`<workspace>/raw/` contents are read-only.** The LLM never edits, renames within, or deletes staged sources — the single permitted operation is moving a successfully-ingested source to `raw/_archive/<same relative path>`.
-3. **All wiki writes go under `<workspace>/wiki/`.** Work items go to `<workspace>/wiki/work/` (schema owned by `gw`; nested under `wiki/`, not the workspace root). No exceptions.
+3. **All curated writes go under `<workspace>/okf/`.** Work items use canonical paths below `<workspace>/okf/work/`. No exceptions.
 4. **Every scan or ingest updates ≥3 files:** the touched page(s), `index.md`, `log.md`. A typical ingest touches 5-15.
 5. **Every wiki page carries YAML frontmatter.** Without frontmatter, index maintenance and `lint_wiki.py` can't see it.
 
@@ -68,7 +71,7 @@ Allowed `category` values: `app`, `package`, `concept`, `dependency`, `work`, `s
 
 ### Entity pages
 
-Entity pages live under `<workspace>/wiki/entities/` — one page per graph-derived entity, regardless of kind. All entity frontmatter is split into two sets:
+Entity pages live under `<workspace>/okf/entities/` — one page per graph-derived entity, regardless of kind. All entity frontmatter is split into two sets:
 
 **Scanner-owned keys** (replaced every scan — do not hand-edit these):
 
@@ -180,86 +183,63 @@ Field divergences:
 
 ### Work pages
 
-Unified namespace replacing `issues/` + `roadmap/`. `category: work`. `kind:` discriminates between bug-shaped and feature-shaped items; a single status lifecycle covers both. Slugs follow `<YYYY-MM-DD>-<kind>-<w1>-<w2>-<w3>-<w4>.md`, where the 4 words are filer-supplied via `gw work file --slug-words` (falling back to the first 4 words of the title when omitted); children filed under a parent epic get `epic-<kind>` instead of `<kind>`. No migration — pre-existing pages keep their old `<YYYY-MM-DD>-<short-slug>.md` filenames; both formats coexist since every consumer reads slugs from file stems.
+Work items are path-native OKF concepts. A permanent identity is an extensionless
+bundle-relative path, not a page stem:
 
-```yaml
----
-title: <Title>
-category: work
-kind: bug                       # bug | tech-debt | test-gap | security | perf | feature | epic | spike
-summary: <one-line>
-status: open                    # open | accepted | in-progress | mitigated | resolved | wontfix | superseded
-severity: medium                # bug | security | perf — leave blank for feature/epic/spike
-effort: small                   # xtra-small | small | medium | large | xtra-large
-blast_radius: package           # file | package | domain | system
-affects:
-  - packages/location-aws-node-ts
-parent: 2026-07-01-epic-big-thing   # child side: owning epic/feature slug (source of truth)
-depends_on: []                      # dependency edges — see the table below
-children: []                        # DERIVED — tool-refreshed from children's parent keys; do not hand-edit
-target: 2026-Q2                 # feature | epic — optional otherwise
-owner: pat                      # populate when in-progress
-opened: 2026-04-21
-updated: 2026-05-03
-related_tickets: []
-related_prs: []
-resolved_in: ""                 # required when resolved
-superseded_by: ""               # required when superseded
-mitigation: ""                  # required when mitigated
-rationale: ""                   # required when wontfix
-tags: [location, infrastructure]
----
+```text
+work/<release>
+work/<release>/children/<epic>
+work/<release>/children/<epic>/children/<feature>
 ```
 
-Each `depends_on` entry is an **edge**. A bare slug string is accepted as legacy
-shorthand for the defaults, but pages are rewritten to the mapping form on the
-next write:
+`Release` is root-only. `Release`, `Epic`, and `Feature` may own a `children/`
+lane; `Bug`, `TechDebt`, `TestGap`, and `Spike` are leaves. Every item owns the
+directory beside its page. Managed artifacts live under its `references/`
+directory: `00-decisions.md`, `01-design.md`, `02-plan.md`,
+`03-execute-results.md`, `03-execute-transcript.jsonl`, and
+`04-finish-results.md`. Each lane has its own `index.md` and may have a local
+`_archive/`. Physical placement defines ancestry; no `parent` or `children`
+frontmatter aliases exist.
 
 ```yaml
+---
+type: Feature
+title: Path-native filing
+description: File and route by permanent path.
+status: stable
+work_status: accepted
+phase: execute
+effort: medium
+blast_radius: package
+affects:
+  - packages/work-tracker-okf
 depends_on:
-  - slug: 2026-08-11-epic-feature-phase-granular-dependency-gating
+  - path: work/release-cutover/children/epic-migration/children/feature-parser
     blocks: execute
     needs: resolved
-  - slug: 2026-08-11-epic-feature-reconciling-spec-mode-routing
-    blocks: execute
-    needs: plan          # build against its written plan, not its merge
+opened: 2026-08-23
+updated: 2026-08-23
+owner: pat
+sources:
+  - id: design
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/01-design.md
+  - id: plan
+    resource: /work/release-cutover/children/epic-filing/children/feature-path-native/references/02-plan.md
+---
 ```
 
-| Key | Values | Default | Meaning |
-|---|---|---|---|
-| `slug` | any work-item slug, active or archived | required | the dependency |
-| `blocks` | `design` \| `plan` \| `execute` \| `finish` | `execute` | gates this phase **and every later one** |
-| `needs` | `design` \| `plan` \| `execute` \| `resolved` | `resolved` | this phase of the dependency must be **complete** |
+Every `depends_on` entry is a complete mapping. `path` names any active or
+archived canonical item; `blocks` is `design | plan | execute | finish`; `needs`
+is `design | plan | execute | finish | resolved`. The CLI form is equally
+explicit: `--dep path=<canonical>,blocks=<phase>,needs=<phase>`.
 
-`needs` means *complete*, not *entered*. `phase` is stamped at dispatch, so an
-item reading `phase: plan` is currently being planned and its `plan_doc` does
-not exist yet — `needs: plan` is satisfied at `phase: execute`. Every blocker
-message names both the required state and the observed one, so the rule never
-has to be recalled from memory. There is no `needs: finish`: that state is
-`phase: done, status: resolved`, which `resolved` already names.
+The plan is the `## Plan` body table. `sources[]` registers owned artifacts by
+filename-derived id; `resource` is root-absolute within the OKF bundle.
 
-`children` is a derived, tool-refreshed projection maintained by `gw work regen-index` (which every filing/advance/archive runs): it lists this item's children — active *and* archived, sorted by `(opened, slug)` — and is omitted when empty. Hand-edits are overwritten; to detach a child, delete the *child's* `parent:` key and regen. Parents may be epics or features; feature children keep plain `<kind>-…` slugs (the `epic-<kind>-` prefix stays epic-only).
-
-The committed plan does **not** live in frontmatter — it's a markdown table under `## Plan` in the body. See [Body-table conventions](#body-table-conventions) below.
-
-The lifecycle lint rules (`accepted-without-plan`, `stuck-open`, `done-when-missing`, etc.) and the `<workspace>/wiki/work-index.json` sidecar generator live in **`graph-works`** (work_layer group). `gw` creates the `work/` directory (nested under `wiki/`). See `references/lint-workflow.md` for what lives where.
-
-#### The `work/_archive/` sub-namespace
-
-Items that have reached a terminal status (`resolved`, `wontfix`,
-`superseded`) may be moved to
-`<workspace>/work/_archive/<slug>.md`. They retain their full schema —
-same frontmatter, same body convention, same wiki-page semantics —
-but are excluded from:
-
-- base structural lint (`/graph-works:lint`)
-- the work-tracker sidecar (`<workspace>/wiki/work-index.json`)
-- consumer commands that read the sidecar
-
-Items under `_archive/` must already be in a terminal status; the
-archive command (`/graph-works:archive`) enforces this on entry.
-Restoring is a `git mv` from `_archive/` back to `work/` plus
-`/graph-works:regen-index`.
+Archive commands move an item to the `_archive/` lane owned by its current
+parent (or `work/_archive/` for roots), preserving its owned directory and
+repairing path references. Indexes are Markdown filesystem projections
+reconciled by `gw work regen-index`; there is no JSON sidecar.
 
 ### Source pages
 
@@ -336,42 +316,36 @@ updated: 2026-04-20
 - **ADRs:** `adrs/<NNNN>-<slug>.md` — e.g. `adrs/0012-move-to-esm.md`. Zero-padded ID, monotonically increasing.
 - **Architecture syntheses:** `concepts/<topic>.md` with `kind: architecture` — e.g. `concepts/request-flow.md`
 - **Dependencies:** `entities/dep_<package-name>.md` — use the registry name (`dep_react.md`, `dep_react-native-maps.md`). For scoped npm packages, replace `/` with `__` (`dep_@tanstack__react-query.md`). Service pages use a slug derived from the service name (`dep_mongodb-atlas.md`).
-- **Work:** `work/<YYYY-MM-DD>-<kind>-<w1>-<w2>-<w3>-<w4>.md` (`epic-<kind>` prefix for epic children) — e.g. `work/2026-07-11-feature-shorten-work-item-slugs.md`.
+- **Work:** `<work-path>.md`, where `<work-path>` is an extensionless canonical
+  path such as `work/release-cutover/children/epic-migration/children/feature-parser`.
+  Each basename is stable kebab-case; dates are lifecycle metadata, not identity.
 
 ## Taxonomies
 
 The categorical vocabularies that frontmatter fields draw from. These apply across multiple categories (mainly `work`); per-category enums (e.g. ADR `status`, dependency `kind`) live with the category above.
 
-### `kind` (work)
+### `type` (work)
 
-Eight values, two origins:
+Seven PascalCase values define placement and workflow behavior:
 
-| Kind | Origin | Typical shape |
+| Type | Placement | Typical shape |
 |---|---|---|
-| `bug` | discovered | symptom + root cause + fix |
-| `tech-debt` | discovered | suboptimal pattern + refactor target |
-| `test-gap` | discovered | missing coverage + test plan |
-| `security` | discovered | exposure + remediation |
-| `perf` | discovered or measured | regression + budget + fix |
-| `feature` | intended | user-driven capability + scope |
-| `epic` | intended | multi-feature effort spanning weeks/quarters |
-| `spike` | intended | time-boxed exploration with a question |
+| `Release` | root only; may own children | a dated delivery boundary containing Epics |
+| `Epic` | root or child; may own children | a multi-feature effort |
+| `Feature` | root or child; may own children | a user-driven capability |
+| `Bug` | leaf | symptom, diagnosis, and fix |
+| `TechDebt` | leaf | suboptimal pattern and refactor target |
+| `TestGap` | leaf | missing coverage and test plan |
+| `Spike` | leaf | time-boxed exploration with a question |
 
-Schema/structure problems are `kind: bug` + `tag: data-model`. Wiki↔code drift filed by lint is `kind: tech-debt` + `tag: doc-drift`. Lifecycle and required fields are identical to the underlying kind; the discriminating live in tags rather than spawning new kinds.
+Security and performance are contributed tags (`security`, `perf`) on the
+appropriate work type, not additional types. Schema/structure problems are
+normally `type: Bug` plus a `data-model` tag; wiki-to-code drift is normally
+`type: TechDebt` plus a `doc-drift` tag.
 
 ### `kind` (dependency)
 
 Two values: `package | service`. Frontmatter shape diverges per kind — see [Dependency pages](#dependency-pages) above.
-
-### Severity (work)
-
-Values: `low | medium | high | critical`.
-
-| Bucket | Kinds | Lint |
-|---|---|---|
-| Common | `bug`, `security`, `perf` | severity expected, not enforced |
-| Possible | `tech-debt`, `test-gap` | severity allowed when known |
-| Disallowed | `feature`, `epic`, `spike` | `severity-on-non-bug` (info) |
 
 ### Effort (work)
 
@@ -389,15 +363,16 @@ Anchors are advisory. Missing field = unknown; no `unknown` value.
 
 Blast-radius values: `file | package | domain | system`. **Practical impact, not source-code locality** — a one-line change to a shared library used by every domain is `system` even though the source is in one package.
 
-### Per-kind field applicability (work)
+### Per-type field applicability (work)
 
 | Field | Required for | Allowed for | Disallowed for |
 |---|---|---|---|
-| `severity` | none | `bug`, `security`, `perf`, `tech-debt`, `test-gap` | `feature`, `epic`, `spike` |
-| `target` | none | all kinds — only meaningful for `feature`, `epic` | — |
-| `owner` | none | all kinds — populated when `in-progress` | — |
-| `effort` | none | all kinds | — |
-| `blast_radius` | none | all kinds | — |
+| `target` | none | all types — usually meaningful for `Release`, `Epic`, and `Feature` | — |
+| `target_date` | none | `Release` | every other type |
+| `version` | none | `Release` | every other type |
+| `owner` | every `in-progress` item | all types | — |
+| `effort` | every stable document | all types | — |
+| `blast_radius` | none | all types | — |
 
 State-conditional fields (`resolved_in`, `mitigation`, `superseded_by`, `rationale`) are populated only in their corresponding state. Lint enforces.
 
@@ -409,9 +384,9 @@ Seven states. Replaces the two pre-existing enums (`open|investigating|mitigated
 |---|---|---|
 | `open` | filed; no committed plan | — |
 | `accepted` | plan committed; `## Plan` table populated; ready to start | `## Plan` non-empty |
-| `in-progress` | someone is implementing | `pr` or `branch` reference |
-| `mitigated` | symptom hidden, root cause persists (mostly bug/security/perf) | `mitigation` |
-| `resolved` | done | `resolved_in` |
+| `in-progress` | someone is implementing | `owner` |
+| `mitigated` | symptom hidden, root cause persists | `mitigation` |
+| `resolved` | done | `resolved_in` except for an Epic resolved by its children gate |
 | `wontfix` | closed without action | `rationale` |
 | `superseded` | replaced by another work item | `superseded_by` |
 
@@ -433,7 +408,7 @@ Three categories use markdown tables in the body for structured rows. Header row
 
 - Header row exact: `| Action | Done when | Rationale |`.
 - One row per step. Order is significant.
-- `Done when` is required (lint `warn`) for `kind: feature` and `kind: epic`; optional otherwise.
+- `Done when` is required (lint `warn`) for `type: Feature` and `type: Epic`; optional otherwise.
 - Pipes inside cell content escape as `\|`.
 - File paths and `path:line` references in the `Action` cell are checked for existence by lint; line numbers are advisory.
 
@@ -465,13 +440,13 @@ See `packages/common-aws-node-ts/src/handlers/baseApiHandler.ts:42`
 
 ## Index discipline
 
-`<workspace>/wiki/index.md` is regenerated by command-layer scan/ingest flows. For manual plugin edits, update the relevant section inline.
+`<workspace>/okf/index.md` is regenerated by command-layer scan/ingest flows. For manual plugin edits, update the relevant section inline.
 
 The index groups pages by category, alphabetized by title. Each entry is one line with a wikilink, summary, and optional metadata.
 
 ## Log discipline
 
-`<workspace>/wiki/log.md` is append-only. Every entry starts with a standardized header so `grep "^## \[" log.md | tail -5` returns the last 5 entries.
+`<workspace>/okf/log.md` is append-only. Every entry starts with a standardized header so `grep "^## \[" log.md | tail -5` returns the last 5 entries.
 
 ```
 ## [2026-04-20] scan | detected 3 new packages

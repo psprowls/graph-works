@@ -33,10 +33,15 @@ Code comments go stale. README files rot. Architecture diagrams drift from reali
 
 ## Architecture
 
-The wiki lives inside the graph-works workspace at `<workspace>/wiki/`. `gw` resolves the workspace from the `GRAPH_WORKS_DIR` env var — the supported pointer, normally injected via the `env` block of the `.claude/settings.local.json` belonging to whichever directory the session runs from; there is no workspace-path key inside `workspace.yaml` itself. Without it, resolution falls back to `<repo>/graph-works/` via a `.git` walk-up (it never searches for a `workspace.yaml`), so a workspace kept anywhere else needs the env var or an explicit `--workspace`. The Obsidian vault opens at `<workspace>/`, so `raw/` (external-source inbox — articles, specs, PRs, tickets dropped in for ingest; ingested sources move to `raw/_archive/`) is a sibling of `wiki/`, owned by `gw`. `work/` (unified work tracker — each item's page plus a per-item `work/<slug>/` working directory collecting its spec, plan, guidance bundles, and transcripts as it moves through the pipeline) lives at `<workspace>/wiki/work/` — nested under `wiki/`, not a workspace-root sibling, so `[[work/foo]]` wikilinks resolve against the same vault-relative base as `[[concepts/foo]]`; schema owned by `gw`, lifecycle owned by this plugin.
+The OKF bundle lives at `<workspace>/okf/`. `gw` resolves the workspace from an
+explicit `--workspace`, then `GRAPH_WORKS_DIR`, then a `.git` walk-up to the
+default `<repo>/.works`. `raw/` is the source inbox and `.gw/` holds the
+control plane. Work identity is a canonical extensionless path under
+`okf/work/`; every item owns the directory beside its page, and managed
+artifacts live under that directory’s `references/` child.
 
 ```
-<repo>/graph-works/              # workspace; Obsidian vault opens here
+<repo>/.works/                   # workspace; Obsidian vault opens at okf/
 ├── workspace.yaml               # workspace manifest
 ├── CLAUDE.md                   # workspace-level schema (owned by gw)
 ├── raw/                        # source inbox; ingested sources move to _archive/
@@ -47,14 +52,13 @@ The wiki lives inside the graph-works workspace at `<workspace>/wiki/`. `gw` res
 │   ├── transcripts/            # meeting / design-session notes
 │   └── assets/                 # images, diagrams referenced by sources
 ├── knowledge/                  # other plugin-managed knowledge stores
-└── wiki/                       # this plugin's curated knowledge base
+└── okf/                        # this plugin's curated OKF bundle
     ├── index.md                # Content catalog (LLM updates every ingest/scan)
     ├── log.md                  # Append-only timeline
-    ├── work-index.json         # work-tracker sidecar (regenerated; never hand-edit)
-    ├── work/                   # unified work tracker (owned by gw)
-    │   ├── <slug>.md           # the work-item page (flat)
-    │   └── <slug>/             # per-item working dir: 01-design-spec.md, 02-plan-plan.md,
-    │                           # NN-<phase>-guidance.md, transcripts, result stubs
+    ├── work/                   # path-native work tree (owned by gw)
+    │   ├── <release>.md
+    │   └── <release>/children/<epic>/children/<feature>.md
+    │       # every item has a sibling owned directory with references/
     ├── entities/               # One graph-derived page per admitted entity (pkg_*, app_*, dep_*, repo_*, agent-plugin_*, *_tests_*)
     ├── concepts/               # Cross-cutting technical concepts; optional kind: concept | pattern | architecture
     ├── sources/                # One summary page per ingested source (cites files in <workspace>/raw/)
@@ -105,11 +109,11 @@ Every workspace package and app — plus the repository, external dependencies, 
 | `/graph-works:scan` | Build the code graph; create/update/delete one `entities/` page per admitted entity |
 | `/graph-works:ingest <path>` | Read a source from `raw/`, discuss, update vault, log it |
 | `/graph-works:query <question>` | Search vault, synthesize answer with citations, offer to file back |
-| `/graph-works:lint` | Health check — orphans, broken links, stale claims, **code drift**, and 32 work-layer lint rules |
+| `/graph-works:lint` | Health check — orphans, broken links, stale claims, **code drift**, and the work-layer catalog |
 | `/graph-works:log` | Show recent log entries (uses unix tools on `log.md`) |
 | `/graph-works:file` | Interactively file a new work item (`gw work file`) |
 | `/graph-works:archive` | Archive terminal-status work items (`gw work archive`) |
-| `/graph-works:regen-index` | Rebuild `wiki/work-index.json` from `wiki/work/*.md` |
+| `/graph-works:regen-index` | Reconcile Markdown indexes throughout the path-native work tree |
 | `/graph-works:status` | One-screen work item rollup (`gw work status`) |
 | `/graph-works:next` | Drive a work item to its next pipeline stage (`gw work next`/`advance`) |
 | `/graph-works:proposals` | Review/accept/reject/supersede curated-page proposals |
@@ -128,7 +132,7 @@ Every workspace package and app — plus the repository, external dependencies, 
 
 Every substrate operation goes through the `gw` CLI — one boundary, no in-process imports. Run `gw <verb> --help` for flags. The full set of verbs this skill and its commands depend on is the CLI contract at `wiki/concepts/graph-works-plugin-cli-contract.md`.
 
-Schema lives in `<workspace>/wiki/CLAUDE.md` (Claude Code) or `<workspace>/wiki/AGENTS.md` (Codex/Cursor/Antigravity/OpenCode). The plugin ships both. The `gw` CLI runs identically everywhere. See `references/cross-tool-setup.md`.
+Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AGENTS.md` (Codex/Cursor/Antigravity/OpenCode). The plugin ships both. The `gw` CLI runs identically everywhere. See `references/cross-tool-setup.md`.
 
 **Note:** your repo's root `CLAUDE.md` is separate from the wiki's `CLAUDE.md`. The root file defines the repo's build/style conventions; the wiki file defines how the vault is structured. Both are active simultaneously when working from the repo root.
 
@@ -136,12 +140,12 @@ Schema lives in `<workspace>/wiki/CLAUDE.md` (Claude Code) or `<workspace>/wiki/
 
 | Category | What it documents | Directory |
 |---|---|---|
-| `app` | One application workspace (web, mobile, CLI) — platform, entry points, deployment | `<workspace>/wiki/entities/app_<name>.md` |
-| `package` | One library/service workspace — what it exports, who depends on it, key patterns | `<workspace>/wiki/entities/pkg_<name>.md` |
-| `concept` | Cross-cutting technical idea, pattern, or architecture synthesis. Optional `kind:` frontmatter — `concept` (default), `pattern`, or `architecture` — selects the page template. Comparisons (`<a>-vs-<b>.md`) live here too. | `<workspace>/wiki/concepts/` |
-| `dependency` | An external package or service the monorepo depends on — `kind:` discriminates | `<workspace>/wiki/entities/dep_<name>.md` |
-| `source` | Summary of an ingested spec, PR, article, transcript, etc. | `<workspace>/wiki/sources/` |
-| `adr` | Architecture Decision Record — a dated, citable decision with context + consequences | `<workspace>/wiki/adrs/` |
+| `app` | One application workspace (web, mobile, CLI) — platform, entry points, deployment | `<workspace>/okf/entities/app_<name>.md` |
+| `package` | One library/service workspace — what it exports, who depends on it, key patterns | `<workspace>/okf/entities/pkg_<name>.md` |
+| `concept` | Cross-cutting technical idea, pattern, or architecture synthesis. Optional `kind:` frontmatter — `concept` (default), `pattern`, or `architecture` — selects the page template. Comparisons (`<a>-vs-<b>.md`) live here too. | `<workspace>/okf/concepts/` |
+| `dependency` | An external package or service the monorepo depends on — `kind:` discriminates | `<workspace>/okf/entities/dep_<name>.md` |
+| `source` | Summary of an ingested spec, PR, article, transcript, etc. | `<workspace>/okf/sources/` |
+| `adr` | Architecture Decision Record — a dated, citable decision with context + consequences | `<workspace>/okf/adrs/` |
 
 ## Why this works (vs. just READMEs or generic docs)
 
@@ -171,8 +175,7 @@ Schema lives in `<workspace>/wiki/CLAUDE.md` (Claude Code) or `<workspace>/wiki/
 - `references/obsidian-setup.md` — Obsidian plugins, hotkeys, vault config
 - `references/cross-tool-setup.md` — per-tool setup (Codex, Cursor, Antigravity, etc.)
 - `references/monorepo-principles.md` — why this pattern works for code, how it differs from the generic LLM Wiki
-- `references/lifecycle-rules.md` — the 32 work-layer lint rules with severities and remediation, run by `/graph-works:lint` and `gw work lint`
-- `references/sidecar-schema.md` — `work-index.json` schema and stability guarantees
+- `references/lifecycle-rules.md` — the work-layer lint catalog with severities and remediation, run by `/graph-works:lint` and `gw work lint`
 
 ## Templates (`assets/`)
 
@@ -184,7 +187,7 @@ Schema lives in `<workspace>/wiki/CLAUDE.md` (Claude Code) or `<workspace>/wiki/
 
 1. **The code is the source of truth.** If the vault contradicts the code, the code wins — update the vault.
 2. **The LLM never edits file contents in `raw/`.** The only permitted `raw/` write is the post-ingest move to `raw/_archive/<same relative path>`.
-3. **All LLM writes for the wiki go under `<workspace>/wiki/`.** Work items go to `<workspace>/wiki/work/` (owned by `gw`); ingested sources are archived under `<workspace>/raw/_archive/`.
+3. **All curated concept writes go under `<workspace>/okf/`.** Work items use canonical paths under `<workspace>/okf/work/`; managed work artifacts go only in the item’s owned `references/` directory. Ingested sources archive under `<workspace>/raw/_archive/`.
 4. **Every vault page has YAML frontmatter.** Curated pages (concept/source/adr/dependency/work) carry `title`, `category`, `summary`, `updated`; concept pages may also carry `kind: concept | pattern | architecture`; graph-derived `entities/` pages carry `uri`, `kind`, `graph_name`, `last_scan_at` plus per-kind edge/attr keys (the scanner owns their frontmatter) — `title`/`updated` are intentionally absent; the H1 carries the entity name and `last_scan_at` is the freshness signal.
 5. **Every ingest or scan touches ≥3 files:** the changed/new page(s), `index.md`, `log.md`.
 6. **Every claim on a package page cites** either a source page (`[[sources/xxx]]`) or a code path (`packages/foo/src/bar.ts`).

@@ -8,7 +8,6 @@ import pytest
 from okf_ext.bundle import SCAFFOLD_MEMBERS
 from okf_ext.tags import load_vocabulary, vocabulary_rule
 from okf_io import load_bundle, validate
-from work_tracker_okf.compose import rule_set
 from work_tracker_okf.init import BundleInstall, InitError, install_bundle, plan_install
 from work_tracker_okf.items import IGNORE
 from work_tracker_okf.resources import SEED_RELATIVE_PATHS, seed_files
@@ -21,10 +20,10 @@ _INSTALL_FILES = set(SEED_RELATIVE_PATHS)
 _ALL_FILES = _SCAFFOLD_FILES | _INSTALL_FILES
 
 
-def test_the_package_owns_exactly_fourteen_files() -> None:
-    """C1-I: the epic's count of thirteen missed `sections/_fragments.work_tracker.yaml`."""
-    assert len(SEED_RELATIVE_PATHS) == 14
-    assert len(set(SEED_RELATIVE_PATHS)) == 14
+def test_the_package_owns_exactly_sixteen_files() -> None:
+    """Release adds its schema and section to the fourteen prior package assets."""
+    assert len(SEED_RELATIVE_PATHS) == 16
+    assert len(set(SEED_RELATIVE_PATHS)) == 16
     assert "sections/_fragments.work_tracker.yaml" in SEED_RELATIVE_PATHS
 
 
@@ -381,6 +380,7 @@ def test_two_lanes_share_one_bundle_and_the_merged_vocabulary_validates_clean(tm
     the three-dependency boundary this package is held to."""
     pytest.importorskip("code_wiki_okf", reason="sibling tier-3 package, not a dependency of this one")
     from code_wiki_okf.init import install_bundle as install_code_wiki
+    from work_tracker_okf.compose import rule_set
 
     root = tmp_path / "bundle"
     install_code_wiki(root, today=_TODAY, dry_run=False)

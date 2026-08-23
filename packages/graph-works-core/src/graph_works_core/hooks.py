@@ -12,6 +12,8 @@ module never resolves a workspace itself.
 from __future__ import annotations
 
 import json
+import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -88,6 +90,11 @@ def _default_scripts_dir() -> Path:
 
 def _settings_path(repo_root: Path) -> Path:
     return repo_root / ".claude" / "settings.local.json"
+
+
+def _hook_command(script_path: Path) -> str:
+    """Bind a configured hook to the interpreter that installed graph-works."""
+    return f"GRAPH_WORKS_PYTHON={shlex.quote(sys.executable)} bash {shlex.quote(str(script_path))}"
 
 
 def _json_type(value: object) -> str:
@@ -232,7 +239,7 @@ def apply(
             arr.append(
                 {
                     "matcher": wiring.matcher,
-                    "hooks": [{"type": "command", "command": f'bash "{script_path}"'}],
+                    "hooks": [{"type": "command", "command": _hook_command(script_path)}],
                 }
             )
             added.append(wiring.script)

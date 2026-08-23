@@ -33,7 +33,7 @@ from okf_io.links import is_external, parse_destination, resolve_path, resolve_r
 
 from okf_ext.body import wikilinks as body_wikilinks
 from okf_ext.moves import locate
-from okf_ext.moves.model import Move, MovePlan, RefEdit, Refusal, Stranded, Unrebased
+from okf_ext.moves.model import FrontmatterPath, Move, MovePlan, RefEdit, ReferenceField, Refusal, Stranded, Unrebased
 from okf_ext.writing import body_digest
 
 #: The §6.2 path-valued frontmatter keys, as dotted paths. A fixed, documented
@@ -50,6 +50,11 @@ REFERENCE_KEYS = ("resource", "computation", "executor.resource", "attester.reso
 
 #: The list-valued key whose every element carries a `resource`.
 SOURCES_KEY = "sources"
+
+_REFERENCE_FIELDS = (
+    *(ReferenceField(tuple(key.split("."))) for key in REFERENCE_KEYS),
+    ReferenceField((SOURCES_KEY, "*", "resource")),
+)
 
 
 def _normalize(path: str) -> str | None:
@@ -122,7 +127,9 @@ def _rewrite_path(old: str, new_target: str, new_base: str, *, encode: bool) -> 
     return encoded + separator + fragment
 
 
-def _validate(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -> tuple[list[Move], list[Refusal]]:
+def _validate(
+    bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool, opaque_members: frozenset[str]
+) -> tuple[list[Move], list[Refusal]]:
     """Turn a raw mapping into moves plus every refusal the mapping itself earns."""
     moves: list[Move] = []
     refusals: list[Refusal] = []
@@ -221,7 +228,14 @@ def _validate(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -> 
             )
             continue
         claimed[clean_dest] = clean_source
-        moves.append(Move(source=raw_source, dest=clean_dest, is_asset=not raw_source.endswith(".md")))
+        moves.append(
+            Move(
+                source=raw_source,
+                dest=clean_dest,
+                is_asset=not raw_source.endswith(".md"),
+                opaque=raw_source in opaque_members or clean_source in opaque_members,
+            )
+        )
 
     return moves, refusals
 
@@ -388,19 +402,35 @@ def _read_key(raw: object, key: str) -> object:
     return current
 
 
-def _reference_key_paths(document: Document) -> tuple[str, ...]:
-    """Every dotted key path in *document* that may hold a §6.2 path value.
+def _reference_key_paths(
+    document: Document, reference_fields: Sequence[ReferenceField]
+) -> tuple[tuple[str, ReferenceField], ...]:
+    """Every declared path present in *document*, expanding ``"*"`` lists.
 
-    The fixed set, plus one `sources.<n>.resource` per element actually
-    present. Enumerating from the document rather than guessing an upper bound
-    is what keeps the walk exact on a bundle whose `sources` lists differ in
-    length.
+    A missing path or a value whose shape does not fit a selector is simply not
+    a reference. This makes callers free to declare optional schemas without
+    coupling the generic move engine to them.
     """
-    paths = list(REFERENCE_KEYS)
-    sources = document.fm_raw.get(SOURCES_KEY)
-    if isinstance(sources, Sequence) and not isinstance(sources, (str, bytes)):
-        paths.extend(f"{SOURCES_KEY}.{index}.resource" for index in range(len(sources)))
-    return tuple(paths)
+    found: list[tuple[str, ReferenceField]] = []
+
+    def visit(current: object, parts: FrontmatterPath, prefix: tuple[str, ...], field: ReferenceField) -> None:
+        if not parts:
+            found.append((".".join(prefix), field))
+            return
+        segment, *rest = parts
+        if segment == "*":
+            if not isinstance(current, Sequence) or isinstance(current, (str, bytes)):
+                return
+            for index, value in enumerate(current):
+                visit(value, tuple(rest), (*prefix, str(index)), field)
+            return
+        if not isinstance(current, Mapping) or segment not in current:
+            return
+        visit(current[segment], tuple(rest), (*prefix, segment), field)
+
+    for field in reference_fields:
+        visit(document.fm_raw, field.path, (), field)
+    return tuple(found)
 
 
 def _frontmatter_edits(
@@ -411,6 +441,7 @@ def _frontmatter_edits(
     new_base: str,
     rebase: bool,
     bundle: Bundle,
+    reference_fields: Sequence[ReferenceField],
 ) -> tuple[list[RefEdit], list[Unrebased]]:
     """Every §6.2 path-valued frontmatter key in *member* that must change.
 
@@ -433,7 +464,7 @@ def _frontmatter_edits(
     """
     edits: list[RefEdit] = []
     unrebased: list[Unrebased] = []
-    for key in _reference_key_paths(document):
+    for key, field in _reference_key_paths(document, reference_fields):
         value = _read_key(document.fm_raw, key)
         if not isinstance(value, str) or not value.strip():
             continue
@@ -449,7 +480,11 @@ def _frontmatter_edits(
         # report it as.
         if not destination:
             continue
-        target = resolve_reference(value, source_id=member)
+        if field.target == "concept":
+            concept = _normalize(destination[1:] if destination.startswith("/") else destination)
+            target = f"{concept}.md" if concept is not None and not concept.endswith(".md") else concept
+        else:
+            target = resolve_reference(value, source_id=member)
         if target is None:
             if rebase and not destination.startswith("/"):
                 unrebased.append(Unrebased(member=member, raw=value, detail="resolves outside the bundle root"))
@@ -459,13 +494,25 @@ def _frontmatter_edits(
         if moved_to is None:
             moved_to = destination_of.get(target)
         if moved_to is not None:
-            new_value = _rewrite_path(stripped, moved_to, new_base, encode=False)
+            if field.target == "concept":
+                new_value = moved_to[: -len(".md")] if moved_to.endswith(".md") else moved_to
+                if stripped.startswith("/"):
+                    new_value = "/" + new_value
+                new_value += stripped.partition("#")[1] + stripped.partition("#")[2]
+            else:
+                new_value = _rewrite_path(stripped, moved_to, new_base, encode=False)
         elif rebase:
             if raw_target is None:
                 if not destination.startswith("/"):
                     unrebased.append(Unrebased(member=member, raw=value, detail="target is not a bundle member"))
                 continue
-            new_value = _rewrite_path(stripped, raw_target, new_base, encode=False)
+            if field.target == "concept":
+                new_value = raw_target[: -len(".md")] if raw_target.endswith(".md") else raw_target
+                if stripped.startswith("/"):
+                    new_value = "/" + new_value
+                new_value += stripped.partition("#")[1] + stripped.partition("#")[2]
+            else:
+                new_value = _rewrite_path(stripped, raw_target, new_base, encode=False)
         else:
             continue
         if new_value == stripped:
@@ -509,7 +556,9 @@ def _stranded_candidate(target: str, keys: Mapping[str, str]) -> str | None:
     return None
 
 
-def stranded(bundle: Bundle, mapping: Mapping[str, str]) -> tuple[Stranded, ...]:
+def stranded(
+    bundle: Bundle, mapping: Mapping[str, str], *, opaque_members: frozenset[str] = frozenset()
+) -> tuple[Stranded, ...]:
     """Inbound `[[wikilink]]` references into *mapping*'s source set.
 
     Reports; never rewrites. `okf_ext.moves` repairs OKF markdown links only,
@@ -529,6 +578,8 @@ def stranded(bundle: Bundle, mapping: Mapping[str, str]) -> tuple[Stranded, ...]
     keys = {canonical_id(key): key for key in mapping}
     found: list[Stranded] = []
     for member, document in sorted(_members(bundle).items()):
+        if member in opaque_members:
+            continue
         if document.parse_error is not None or not document.body:
             continue
         offset = document.body_line_offset
@@ -566,15 +617,24 @@ def stranded_warning(stranded_entries: Sequence[Stranded]) -> str | None:
     )
 
 
-def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -> MovePlan:
+def _plan_moves(
+    bundle: Bundle,
+    mapping: Mapping[str, str],
+    *,
+    relocate: bool,
+    extra_reference_fields: Sequence[ReferenceField] = (),
+    opaque_members: frozenset[str] = frozenset(),
+) -> MovePlan:
     """The one engine behind all four planners.
 
     *mapping* is old -> new, bundle-relative posix. Every planner is sugar
     that builds one, exactly as `_plan_mapping` backs all four tag planners.
     """
-    moves, refusals = _validate(bundle, mapping, relocate=relocate)
+    moves, refusals = _validate(bundle, mapping, relocate=relocate, opaque_members=opaque_members)
     destination_of = {move.source: move.dest for move in moves}
-    moved_markdown = {move.source for move in moves if not move.is_asset}
+    moved_markdown = {move.source for move in moves if not move.is_asset and not move.opaque}
+    opaque_sources = {move.source for move in moves if move.opaque}
+    reference_fields = (*_REFERENCE_FIELDS, *extra_reference_fields)
 
     edits: list[RefEdit] = []
     unrebased: list[Unrebased] = []
@@ -584,6 +644,8 @@ def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -
     moved_set = set(destination_of)
 
     for member, document in sorted(_members(bundle).items()):
+        if member in opaque_sources:
+            continue
         rebase = relocate and member in moved_markdown
         new_base = _parent(destination_of[member]) if rebase else _parent(member)
 
@@ -596,7 +658,13 @@ def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -
             bundle=bundle,
         )
         fm_edits, fm_unrebased = _frontmatter_edits(
-            member, document, destination_of=destination_of, new_base=new_base, rebase=rebase, bundle=bundle
+            member,
+            document,
+            destination_of=destination_of,
+            new_base=new_base,
+            rebase=rebase,
+            bundle=bundle,
+            reference_fields=reference_fields,
         )
         member_edits.extend(fm_edits)
         member_unrebased.extend(fm_unrebased)
@@ -694,7 +762,7 @@ def _plan_moves(bundle: Bundle, mapping: Mapping[str, str], *, relocate: bool) -
         unrebased=tuple(unrebased),
         digests=digests,
         relocate=relocate,
-        stranded=stranded(bundle, mapping),
+        stranded=stranded(bundle, mapping, opaque_members=frozenset(opaque_sources)),
     )
 
 
@@ -746,9 +814,21 @@ def plan_move_dir(bundle: Bundle, source: str, dest: str) -> MovePlan:
     return plan_move_many(bundle, mapping)
 
 
-def plan_move_many(bundle: Bundle, mapping: Mapping[str, str]) -> MovePlan:
+def plan_move_many(
+    bundle: Bundle,
+    mapping: Mapping[str, str],
+    *,
+    extra_reference_fields: Sequence[ReferenceField] = (),
+    opaque_members: frozenset[str] = frozenset(),
+) -> MovePlan:
     """Move every member in *mapping*, old -> new, in one pass."""
-    return _plan_moves(bundle, mapping, relocate=True)
+    return _plan_moves(
+        bundle,
+        mapping,
+        relocate=True,
+        extra_reference_fields=extra_reference_fields,
+        opaque_members=opaque_members,
+    )
 
 
 def plan_repair(bundle: Bundle, mapping: Mapping[str, str]) -> MovePlan:

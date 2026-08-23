@@ -1,4 +1,0 @@
-Plan-stage subagent transcript.
-
-A non-markdown member of the references tree. It is why `Bundle.assets` exists
-and why `ignore=` means "not a concept", not "not there".

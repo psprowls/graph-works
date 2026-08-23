@@ -12,20 +12,35 @@ from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition
 TODAY = date(2026, 8, 10)
 
 
-def _plan_for(items, slug, **kwargs) -> AdvancePlan:
-    return advance(items, slug, today=TODAY, **kwargs)
+def _plan_for(items, path, **kwargs) -> AdvancePlan:
+    return advance(items, path if path.startswith("work/") else f"work/{path}", today=TODAY, **kwargs)
 
 
 def _keys(plan: AdvancePlan) -> list[str]:
     return [change.key for change in plan.changes]
 
 
+def test_release_finish_requires_released_at():
+    item = make_item("work/release-cutover", type="Release", phase="finish", work_status="in-progress")
+    plan = advance((item,), item.path, today=TODAY)
+    assert plan.refusal == "released-at-required"
+
+
+def test_release_finish_records_released_at_and_resolves():
+    item = make_item("work/release-cutover", type="Release", phase="finish", work_status="in-progress")
+    released_at = date(2026, 8, 9)
+    plan = advance((item,), item.path, today=TODAY, released_at=released_at)
+    assert plan.refusal is None
+    assert FieldChange("work_status", "in-progress", "resolved") in plan.changes
+    assert FieldChange("released_at", None, released_at) in plan.changes
+
+
 # --- refusals -------------------------------------------------------------
 
 
-def test_an_unknown_slug_is_refused():
+def test_an_unknown_path_is_refused():
     plan = _plan_for([make_item("a")], "b")
-    assert plan.refusal == "unknown-slug"
+    assert plan.refusal == "unknown-path"
     assert plan.changes == ()
 
 
@@ -36,20 +51,26 @@ def test_a_blocked_route_is_refused_with_the_blockers_as_detail():
 
 
 def test_advance_only_blocks_at_the_dependency_edge_phase() -> None:
-    dependency = make_item("dep", phase="design", workflow_status="in-progress")
-    edge = DependencyEdge("dep", blocks="execute", needs="resolved")
-    before_gate = _plan_for([make_item("feature", phase="plan", depends_on=(edge,)), dependency], "feature")
-    at_gate = _plan_for([make_item("feature", phase="execute", depends_on=(edge,)), dependency], "feature")
+    dependency = make_item("dep", phase="design", work_status="in-progress")
+    edge = DependencyEdge("work/dep", blocks="execute", needs="resolved")
+    before_gate = _plan_for([make_item("feature", phase="plan", dependency_edges=(edge,)), dependency], "feature")
+    at_gate = _plan_for([make_item("feature", phase="execute", dependency_edges=(edge,)), dependency], "feature")
     assert before_gate.refusal is None
     assert at_gate.refusal == "blocked"
 
 
 def test_advance_refuses_a_satisfied_but_invalid_parent_dependency() -> None:
     items = [
-        make_item("parent", type="Epic", workflow_status="resolved"),
-        make_item("child", parent="parent", phase="execute", depends_on=(DependencyEdge("parent"),)),
+        make_item("parent", type="Epic", work_status="resolved"),
+        make_item(
+            "parent/children/child",
+            parent_path="work/parent",
+            ancestor_paths=("work/parent",),
+            phase="execute",
+            dependency_edges=(DependencyEdge("work/parent", "execute", "resolved"),),
+        ),
     ]
-    plan = _plan_for(items, "child")
+    plan = _plan_for(items, "work/parent/children/child")
     assert plan.refusal == "blocked"
     assert "targets-parent" in plan.detail
 
@@ -58,8 +79,19 @@ def test_a_satisfied_gate_with_nothing_to_advance_is_still_advanceable():
     """An epic whose children are all terminal has an on_complete: it is a
     satisfied gate, not a refusal."""
     items = [
-        make_item("epic", type="Epic", phase="execute", workflow_status="accepted"),
-        make_item("kid", parent="epic", workflow_status="resolved"),
+        make_item(
+            "epic",
+            type="Epic",
+            phase="execute",
+            work_status="accepted",
+            active_child_paths=("work/epic/children/kid",),
+        ),
+        make_item(
+            "epic/children/kid",
+            parent_path="work/epic",
+            ancestor_paths=("work/epic",),
+            work_status="resolved",
+        ),
     ]
     plan = _plan_for(items, "epic")
     assert plan.refusal is None
@@ -113,29 +145,70 @@ def test_a_route_with_no_transition_at_all_refuses_nothing_to_advance(monkeypatc
 
 
 def test_an_owner_is_required_to_start_execution():
-    plan = _plan_for([make_item("feat", phase="execute", workflow_status="accepted")], "feat")
+    plan = _plan_for([make_item("feat", phase="execute", work_status="accepted")], "feat")
     assert plan.refusal == "owner-required"
     assert plan.changes == ()
 
 
 def test_an_owner_already_on_the_page_satisfies_the_requirement():
-    items = [make_item("feat", phase="execute", workflow_status="accepted", owner="human:pat")]
+    items = [make_item("feat", phase="execute", work_status="accepted", owner="human:pat")]
     assert _plan_for(items, "feat").refusal is None
 
 
 def test_resolved_in_is_required_to_finish():
-    plan = _plan_for([make_item("feat", phase="finish", workflow_status="in-progress")], "feat")
+    plan = _plan_for([make_item("feat", phase="finish", work_status="in-progress")], "feat")
     assert plan.refusal == "resolved-in-required"
 
 
 def test_open_children_refuse_a_feature_finishing():
     items = [
-        make_item("feat", type="Feature", phase="execute", workflow_status="in-progress"),
-        make_item("kid", parent="feat", workflow_status="open"),
+        make_item(
+            "feat",
+            type="Feature",
+            phase="finish",
+            work_status="in-progress",
+            active_child_paths=("work/feat/children/kid",),
+        ),
+        make_item(
+            "feat/children/kid",
+            parent_path="work/feat",
+            ancestor_paths=("work/feat",),
+            work_status="open",
+        ),
     ]
     plan = _plan_for(items, "feat")
     assert plan.refusal == "children-open"
     assert "kid" in plan.detail
+    assert plan.changes == ()
+
+
+def test_open_grandchildren_refuse_a_parent_finishing():
+    items = [
+        make_item(
+            "feat",
+            type="Feature",
+            phase="finish",
+            work_status="in-progress",
+            active_child_paths=("work/feat/children/child",),
+        ),
+        make_item(
+            "feat/children/child",
+            type="Feature",
+            parent_path="work/feat",
+            ancestor_paths=("work/feat",),
+            work_status="resolved",
+            active_child_paths=("work/feat/children/child/children/grandchild",),
+        ),
+        make_item(
+            "feat/children/child/children/grandchild",
+            parent_path="work/feat/children/child",
+            ancestor_paths=("work/feat", "work/feat/children/child"),
+            work_status="open",
+        ),
+    ]
+    plan = _plan_for(items, "feat")
+    assert plan.refusal == "children-open"
+    assert "grandchild" in plan.detail
     assert plan.changes == ()
 
 
@@ -145,12 +218,12 @@ def test_every_refusal_carries_an_empty_change_list():
         ([make_item("a")], "b"),
         ([make_item("a", type="Widget")], "a"),
         ([make_item("bug", type="Bug", phase="design")], "bug"),
-        ([make_item("feat", phase="execute", workflow_status="accepted")], "feat"),
-        ([make_item("feat", phase="finish", workflow_status="in-progress")], "feat"),
+        ([make_item("feat", phase="execute", work_status="accepted")], "feat"),
+        ([make_item("feat", phase="finish", work_status="in-progress")], "feat"),
     ]
-    for items, slug in cases:
-        plan = _plan_for(items, slug)
-        assert plan.refusal is not None, slug
+    for items, path in cases:
+        plan = _plan_for(items, path)
+        assert plan.refusal is not None, path
         assert plan.changes == ()
         assert plan.changed is False
         assert plan.diff()
@@ -170,7 +243,7 @@ def test_entry_plans_the_dispatch_transition_and_stamps_updated():
 def test_the_flags_are_planned_in_the_documented_key_order():
     items = [make_item("gap", type="TestGap", status="draft", updated="2026-01-01")]
     plan = _plan_for(items, "gap", effort="small", owner="human:pat")
-    assert _keys(plan) == ["phase", "workflow_status", "status", "effort", "owner", "updated"]
+    assert _keys(plan) == ["phase", "work_status", "status", "effort", "owner", "updated"]
 
 
 def test_a_value_already_at_its_target_is_not_a_change():
@@ -227,8 +300,8 @@ def test_apply_touches_only_the_keys_the_transition_names(minimal_bundle: Bundle
     """The acceptance property, asserted against the whole serialized diff --
     a weaker assertion would let a ruamel dialect quirk rewrite a neighbouring
     key on every advance and never be noticed."""
-    items = load_items(minimal_bundle)
-    document = _document(minimal_bundle, "work/tech-debt-delta")
+    items = [make_item("tech-debt-delta", type="TechDebt", updated="2026-01-01")]
+    document = parse("---\ntype: TechDebt\nwork_status: open\nupdated: 2026-01-01\n---\n\nbody\n")
     before = document.serialize()
     plan = _plan_for(items, "tech-debt-delta")
     assert plan.refusal is None
@@ -240,8 +313,8 @@ def test_apply_touches_only_the_keys_the_transition_names(minimal_bundle: Bundle
 def test_updated_is_written_bare_not_quoted(minimal_bundle: Bundle):
     """A `str` that would re-parse as a date comes back quoted; a `date` does
     not, and every authored page in this lane is bare."""
-    items = load_items(minimal_bundle)
-    document = _document(minimal_bundle, "work/tech-debt-delta")
+    items = [make_item("tech-debt-delta", type="TechDebt", updated="2026-01-01")]
+    document = parse("---\ntype: TechDebt\nwork_status: open\nupdated: 2026-01-01\n---\n\nbody\n")
     apply(document, _plan_for(items, "tech-debt-delta"))
     assert "updated: 2026-08-10" in document.serialize()
     assert "updated: '2026-08-10'" not in document.serialize()
@@ -249,11 +322,8 @@ def test_updated_is_written_bare_not_quoted(minimal_bundle: Bundle):
 
 def test_status_is_inserted_after_tags_while_phase_appends(minimal_bundle: Bundle):
     """`status` is in okf-io's PREFERRED_KEY_ORDER; `phase` is not."""
-    items = load_items(minimal_bundle)
-    document = _document(minimal_bundle, "work/test-gap-epsilon")
-    # Strip both keys first so the insertion positions are observable.
-    document.delete("status")
-    document.delete("phase")
+    items = [make_item("test-gap-epsilon", type="TestGap", effort="small", status="draft")]
+    document = parse("---\ntype: TestGap\ntags: [fixture]\nwork_status: open\n---\n\nbody\n")
     plan = _plan_for(items, "test-gap-epsilon", owner="human:pat")
     apply(document, plan)
     lines = [line.split(":")[0] for line in document.serialize().splitlines() if ":" in line]
@@ -272,10 +342,10 @@ def test_a_design_skipping_test_gap_reaches_stable(minimal_bundle: Bundle):
 
 
 def test_a_page_that_fails_validation_never_reaches_document_set(minimal_bundle: Bundle):
-    """`broken-eta` projects with type='' and workflow_status='', which fails
+    """`bug-broken-eta` projects with type='' and work_status='', which fails
     validation row 1. The refusal is data; the raise is unreachable."""
     items = load_items(minimal_bundle)
-    plan = _plan_for(items, "broken-eta")
+    plan = _plan_for(items, "bug-broken-eta")
     assert plan.refusal == "blocked"
     assert plan.changes == ()
 
@@ -285,13 +355,13 @@ def test_apply_raises_nothing_of_its_own_on_an_unparseable_document():
     raise anywhere on this path. A refused plan never gets there."""
     document = parse("---\n: :\nbroken\n---\n\nbody\n")
     plan = _plan_for([make_item("a")], "b")
-    assert plan.refusal == "unknown-slug"
+    assert plan.refusal == "unknown-path"
     with pytest.raises(AssertionError):
         apply(document, plan)
 
 
 def test_advance_stamps_worktree_and_branch_when_supplied() -> None:
-    items = (make_item("x", type="Feature", workflow_status="open", phase="design"),)
+    items = (make_item("x", type="Feature", work_status="open", phase="design"),)
     plan = _plan_for(items, "x", worktree="/tmp/wt/x", branch="feature/x")
     assert plan.refusal is None
     changed = {change.key: change.after for change in plan.changes}
@@ -300,11 +370,11 @@ def test_advance_stamps_worktree_and_branch_when_supplied() -> None:
 
 
 def test_advance_without_provenance_keywords_changes_nothing_extra() -> None:
-    items = (make_item("x", type="Feature", workflow_status="open", phase="design"),)
+    items = (make_item("x", type="Feature", work_status="open", phase="design"),)
     assert "worktree" not in _keys(_plan_for(items, "x"))
     assert "branch" not in _keys(_plan_for(items, "x"))
 
 
 def test_advance_does_not_rewrite_an_unchanged_worktree() -> None:
-    items = (make_item("x", type="Feature", workflow_status="open", phase="design", worktree="/tmp/wt/x"),)
+    items = (make_item("x", type="Feature", work_status="open", phase="design", worktree="/tmp/wt/x"),)
     assert "worktree" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x"))

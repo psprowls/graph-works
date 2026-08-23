@@ -6,8 +6,8 @@ fragment file makes the asset set slightly more than a flat list of templates.
 
 The name is reused from `code-wiki-okf/resources.py` for a different job. That
 module is a find-by-resource index: the entity lane looks pages up by the code
-path they describe. The work lane looks items up by slug, so there is no such
-index here.
+path they describe. The work lane addresses items by canonical path, so there
+is no such index here.
 """
 
 from __future__ import annotations
@@ -17,13 +17,14 @@ from importlib.resources.abc import Traversable
 
 #: Every file this package owns, bundle-relative posix, in write order.
 #:
-#: Fourteen, not thirteen (C1-I): `sections/_fragments.work_tracker.yaml` is a
+#: Sixteen, not thirteen: `sections/_fragments.work_tracker.yaml` is a
 #: member like any other, and an installed `sections/` without it cannot
 #: resolve a single `placeholder_ref`. `index.md`, `log.md` and `tags.yaml`
 #: are absent because they belong to `okf_ext.bundle`'s scaffold, which any of
 #: the three tier-3 packages sharing a bundle may be the first to run.
 SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "schema/_base.schema.json",
+    "schema/Release.schema.json",
     "schema/Epic.schema.json",
     "schema/Feature.schema.json",
     "schema/Bug.schema.json",
@@ -31,6 +32,7 @@ SEED_RELATIVE_PATHS: tuple[str, ...] = (
     "schema/TestGap.schema.json",
     "schema/Spike.schema.json",
     "sections/_fragments.work_tracker.yaml",
+    "sections/Release.yaml",
     "sections/Epic.yaml",
     "sections/Feature.yaml",
     "sections/Bug.yaml",

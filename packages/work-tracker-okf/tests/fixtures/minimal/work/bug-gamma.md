@@ -3,7 +3,7 @@ type: Bug
 title: Gamma bug
 description: A resolved bug carrying the security tag W-K substituted for the type.
 status: stable
-workflow_status: resolved
+work_status: resolved
 phase: done
 effort: small
 opened: '2026-01-02'

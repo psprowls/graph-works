@@ -149,9 +149,7 @@ if [ -f "$PROJECTION" ]; then
     fi
 fi
 
-WORK_DIR="$WORKSPACE/$BUNDLE_DIR/work"
-
-context="GRAPH-WORKS WORKSPACE ROUTING: graph-works workflow artifacts (specs, plans, guidance bundles) belong under $WORK_DIR/<slug>/ — created by \`gw work file\` at filing time. If you were pipeline-dispatched, your brief states the exact path (\`artifact.path\`). If this is a standalone/auto-file invocation, derive it yourself once the slug is known (e.g. spec -> $WORK_DIR/<slug>/01-design-spec.md, plan -> $WORK_DIR/<slug>/02-plan-plan.md)."
+context="GRAPH-WORKS WORKSPACE ROUTING: graph-works workflow artifacts belong beneath each canonical work item's owned references directory. \`gw work file\` creates the owned directory. If pipeline-dispatched, use the exact \`artifact.path\` from the brief. In standalone auto-file mode, read \`path\` from \`gw work file --json\` and write design -> $WORKSPACE/$BUNDLE_DIR/<work-path>/references/01-design.md or plan -> $WORKSPACE/$BUNDLE_DIR/<work-path>/references/02-plan.md."
 
 emit "$context" "$STALE_NOTICE"
 exit 0

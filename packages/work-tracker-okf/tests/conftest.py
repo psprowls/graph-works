@@ -9,6 +9,7 @@ from work_tracker_okf.init import install_bundle
 from work_tracker_okf.resources import assets_root
 
 FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "minimal"
+PATH_NATIVE_ROOT = Path(__file__).parent / "fixtures" / "path_native"
 
 
 @pytest.fixture
@@ -24,6 +25,20 @@ def minimal_bundle() -> Bundle:
     `references/` pages too and can prove they are not items on their own
     terms rather than because they were filtered out first."""
     return load_bundle(FIXTURE_ROOT)
+
+
+@pytest.fixture
+def path_native_root(tmp_path: Path) -> Path:
+    """A writable copy of the representative nested release tree."""
+    root = tmp_path / "path-native"
+    shutil.copytree(PATH_NATIVE_ROOT, root)
+    return root
+
+
+@pytest.fixture
+def path_native_bundle() -> Bundle:
+    """The path-native vault without ignore rules so layout tests see every member."""
+    return load_bundle(PATH_NATIVE_ROOT)
 
 
 @pytest.fixture

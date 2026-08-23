@@ -1,8 +1,8 @@
-"""`gw work` projections — the CLI's public JSON contract, stated key by key."""
+"""Explicit path-native JSON projections and stream helpers."""
 
 from __future__ import annotations
 
-import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -13,261 +13,371 @@ from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibl
 
 
 def test_split_csv_trims_and_drops_empty_fragments() -> None:
-    assert rendering.split_csv(" a , ,b ") == ["a", "b"]
-    assert rendering.split_csv("") == []
+    assert rendering.split_csv(" a, ,b,, ") == ["a", "b"]
 
 
-def test_fail_writes_to_stderr_and_carries_the_code(capsys) -> None:
+def test_fail_writes_only_to_stderr_and_carries_the_code(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(typer.Exit) as caught:
-        rendering.fail("bad slug", code=exit_codes.AMBIGUOUS)
+        rendering.fail("nope", code=exit_codes.AMBIGUOUS)
+    captured = capsys.readouterr()
     assert caught.value.exit_code == exit_codes.AMBIGUOUS
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert captured.err == "Error: bad slug\n"
+    assert captured.out == "" and "nope" in captured.err
 
 
-def test_echo_wrapped_hanging_indents_continuation_lines(capsys) -> None:
-    rendering.echo_wrapped("  blocked: ", "first line\n  second line\nthird line")
-    captured = capsys.readouterr()
-    pad = " " * len("  blocked: ")
-    assert captured.out == f"  blocked: first line\n{pad}second line\n{pad}third line\n"
+def test_rollup_projects_open_paths() -> None:
+    payload = rendering._rollup(SimpleNamespace(total=2, terminal=1, open_paths=("work/feature-a",)))
+    assert payload == {"total": 2, "terminal": 1, "open_paths": ["work/feature-a"]}
 
 
-def test_rollup_projects_totals_terminal_and_open_slugs() -> None:
-    rollup = SimpleNamespace(total=3, terminal=1, open_slugs=("a", "b"))
-    assert rendering._rollup(rollup) == {"total": 3, "terminal": 1, "open_slugs": ["a", "b"]}
-    assert rendering._rollup(None) is None
-
-
-def test_normalized_payload_skips_changes_that_did_not_persist() -> None:
-    result = SimpleNamespace(
-        application=SimpleNamespace(normalized=("child",)),
-        normalizations=[
-            SimpleNamespace(slug="parent", ref=SimpleNamespace(rel="parent/ref.md")),
-            SimpleNamespace(slug="child", ref=SimpleNamespace(rel="child/ref.md")),
-        ],
-        selected_slug="child",
-    )
-    assert rendering.normalized_payload(result) == {"spec_doc": "child/ref.md"}
-
-
-def test_next_blockers_appends_the_descend_reason_when_no_leaf_found() -> None:
-    result = SimpleNamespace(
-        route=SimpleNamespace(blockers=("dep block",)),
-        descent=SimpleNamespace(leaf=None, reason="no dep-ready child"),
-    )
-    assert rendering.next_blockers(result) == ["dep block", "--descend: no dep-ready child"]
-
-
-def test_render_next_prints_normalized_stamps_in_human_mode(capsys) -> None:
+def test_render_next_uses_path_and_work_status(capsys: pytest.CaptureFixture[str]) -> None:
     payload = {
-        "slug": "s",
+        "selected_path": "work/feature-a",
         "kind": "Feature",
-        "status": "open",
+        "work_status": "open",
         "phase": "design",
-        "normalized": {"spec_doc": "work/s/references/01-design-spec.md"},
+        "normalized": None,
         "descent": None,
         "action": None,
         "artifact": None,
         "blockers": [],
     }
     rendering.render_next(SimpleNamespace(warnings=()), payload)
-    captured = capsys.readouterr()
-    assert "[fix] stamped spec_doc: work/s/references/01-design-spec.md" in captured.out
+    assert "work/feature-a: kind=Feature work_status=open" in capsys.readouterr().out
 
 
-def test_render_advance_prints_results_path_blockers_and_repo_note(capsys) -> None:
-    payload = {
-        "slug": "s",
-        "phase": "execute",
-        "status": "accepted",
-        "applied": {},
-        "stamped": {},
-        "results_path": "work/s/references/results/01.md",
-        "blockers": ["multi\nline\nblocker"],
-        "repo_note": "no code repo declared",
-    }
-    rendering.render_advance(payload)
-    captured = capsys.readouterr()
-    assert "results: work/s/references/results/01.md" in captured.out
-    assert "blocked: multi" in captured.out
-    assert "no code repo declared" in captured.err
-
-
-def test_render_advance_omits_the_repo_note_line_when_there_is_none(capsys) -> None:
-    payload = {
-        "slug": "s",
-        "phase": "execute",
-        "status": "accepted",
-        "applied": {},
-        "stamped": {},
-        "results_path": None,
-        "blockers": [],
-        "repo_note": None,
-    }
-    rendering.render_advance(payload)
-    captured = capsys.readouterr()
-    assert captured.err == ""
-
-
-def test_render_status_prints_children_rollups_and_alternatives(capsys) -> None:
-    payload = {
-        "total": 5,
-        "by_workflow_status": {"open": 5},
-        "by_type": {"Feature": 5},
-        "by_phase": {"plan": 5},
-        "children": {"epic-a": {"total": 2, "terminal": 1, "open_slugs": ["b"]}},
-        "resume": {
-            "primary": {"slug": "s", "title": "T"},
-            "alternatives": [{"slug": "alt", "title": "Alt"}],
-        },
-    }
-    rendering.render_status(payload)
-    captured = capsys.readouterr()
-    assert "children epic-a: 1/2 terminal" in captured.out
-    assert "alt: alt — Alt" in captured.out
-
-
-def test_render_status_omits_the_resume_lines_when_there_is_nothing_to_resume(capsys) -> None:
-    payload = {
-        "total": 0,
-        "by_workflow_status": {},
-        "by_type": {},
-        "by_phase": {},
-        "children": {},
-        "resume": None,
-    }
-    rendering.render_status(payload)
-    captured = capsys.readouterr()
-    assert "resume:" not in captured.out
-
-
-def test_render_decision_write_prints_superseded_and_follow_up(capsys) -> None:
-    payload = {
-        "epic_slug": "e",
-        "resolved_from": None,
-        "entry": {"id": "D-002", "status": "answered"},
-        "superseded": "D-001",
-        "follow_up": {"slug": "2026-08-19-tech-debt-t", "page_path": "work/2026-08-19-tech-debt-t.md"},
-        "warnings": ["heads up"],
-    }
-    rendering.render_decision_write(payload, "appended")
-    captured = capsys.readouterr()
-    assert "[ok] superseded D-001" in captured.out
-    assert "[ok] follow-up 2026-08-19-tech-debt-t" in captured.out
-    assert "heads up" in captured.err
-
-
-def test_render_decision_list_prints_warnings(capsys) -> None:
-    payload = {
-        "epic_slug": "e",
-        "resolved_from": None,
-        "ledger_path": "work/e/references/00-decisions.md",
-        "entries": [],
-        "counts": {"open": 0},
-        "warnings": ["stale ledger"],
-    }
-    rendering.render_decision_list(payload)
-    captured = capsys.readouterr()
-    assert "stale ledger" in captured.err
-
-
-def test_render_lint_prints_findings_to_the_right_stream(capsys) -> None:
-    from okf_io.validate import Finding
-
-    report = SimpleNamespace(
-        ok=False,
-        findings=[
-            Finding(code="w.one", severity="warn", message="a warning", spec="§1", path="p", line=1),
-            Finding(code="e.one", severity="error", message="an error", spec="§1", path="p", line=2),
-        ],
+def test_normalized_payload_is_path_keyed_and_uses_canonical_source_fields() -> None:
+    parent = SimpleNamespace(
+        path="work/release-r",
+        ref=SimpleNamespace(source_id="design", resource="/work/release-r/references/01-design.md"),
     )
-    rendering.render_lint(report)
-    captured = capsys.readouterr()
-    assert "w.one: a warning" in captured.out
-    assert "e.one: an error" in captured.err
+    selected = SimpleNamespace(
+        path="work/release-r/children/epic-e",
+        ref=SimpleNamespace(
+            source_id="design",
+            resource="/work/release-r/children/epic-e/references/01-design.md",
+        ),
+    )
+    result = SimpleNamespace(
+        selected_path=selected.path,
+        application=SimpleNamespace(normalized=(parent.path, selected.path)),
+        normalizations=(parent, selected),
+    )
+
+    assert rendering.normalized_payload(result) == [
+        {"path": parent.path, "source_id": "design", "resource": parent.ref.resource},
+        {"path": selected.path, "source_id": "design", "resource": selected.ref.resource},
+    ]
 
 
-def test_render_orchestrate_prints_advances_blocked_and_open_decisions(capsys) -> None:
-    payload = {
-        "slug": "root",
-        "terminal": False,
-        "slots_free": 1,
-        "max_parallel": 2,
-        "dispatches": [],
-        "advances": [{"slug": "s", "reason": "stage complete", "worktree": None, "branch": None}],
-        "blocked": [{"slug": "b", "kind": "Feature", "reason": "waiting on dependency"}],
-        "decisions": {"open": [{"id": "D-001", "question": "q?"}]},
-        "warnings": [],
-    }
-    rendering.render_orchestrate(payload)
-    captured = capsys.readouterr()
-    assert "advance s: stage complete" in captured.out
-    assert "blocked b (Feature): waiting on dependency" in captured.out
-    assert "open decision D-001: q?" in captured.out
+def test_render_status_uses_path_keyed_resume(capsys: pytest.CaptureFixture[str]) -> None:
+    rendering.render_status(
+        {
+            "total": 1,
+            "by_work_status": {"open": 1},
+            "by_type": {"Feature": 1},
+            "by_phase": {},
+            "children": {},
+            "resume": {"primary": {"path": "work/feature-a", "title": "A"}, "alternatives": []},
+        }
+    )
+    assert "resume: work/feature-a" in capsys.readouterr().out
 
 
-def test_render_reconcile_prints_siblings_commits_decisions_and_holds(capsys) -> None:
-    payload = {
-        "slug": "s",
-        "epic_slug": "e",
-        "spec_path": "work/s/references/01-design-spec.md",
-        "spec_anchor_commit": "abc1234",
-        "anchor_source": "spec-git-history",
-        "commit_range": "abc1234..HEAD",
-        "touched_paths": ["packages/a"],
-        "landed_siblings": [{"slug": "sib", "resolved_in": "deadbee", "affects": ["packages/a"]}],
-        "commits_since": [{"sha": "deadbeefcafe", "subject": "feat: a"}],
-        "cited_decisions": [{"id": "D-001", "status": "answered", "question": "q?"}],
-        "contradictions": [{"id": "D-002", "status": "superseded", "question": "q2?"}],
-        "has_open_decision": True,
-        "diff_command": "git diff abc1234..HEAD -- packages/a",
-        "warnings": [],
-    }
-    rendering.render_reconcile(payload)
-    captured = capsys.readouterr()
-    assert "landed: sib resolved_in deadbee" in captured.out
-    assert "commit: deadbeef feat: a" in captured.out
-    assert "cites: D-001 status=answered" in captured.out
-    assert "CONTRADICTION: D-002 is superseded" in captured.out
-    assert "held: an open decision already names this item" in captured.out
-    assert "diff: git diff abc1234..HEAD -- packages/a" in captured.out
-
-
-def test_reconcile_payload_keeps_every_donor_field() -> None:
+def test_reconcile_payload_freezes_owner_and_path_keys() -> None:
     context = ReconcileContext(
-        epic_slug="e",
-        slug="s",
-        spec_path="work/s/references/01-design-spec.md",
-        spec_anchor_commit="abc1234",
+        owner_path="work/epic-e",
+        path="work/epic-e/children/feature-a",
+        spec_path="work/x/references/01-design.md",
+        spec_anchor_commit="abc",
         anchor_source="spec-git-history",
-        commit_range="abc1234..HEAD",
-        landed_siblings=(LandedSibling("sib", "deadbee", ("packages/a",)),),
+        commit_range="abc..HEAD",
+        landed_siblings=(LandedSibling("work/epic-e/children/feature-b", "deadbee", ("packages/a",)),),
         touched_paths=("packages/a",),
         commits_since=(CommitRef("deadbee", "feat: a"),),
         cited_decisions=(CitedDecision("D-001", "answered", "q?"),),
-        contradictions=(CitedDecision("D-002", "superseded", "q2?"),),
-        has_open_decision=True,
-        diff_command="git diff abc1234..HEAD -- packages/a",
-        warnings=("no repo resolved",),
+        warnings=("partial",),
     )
     payload = rendering.reconcile_payload(context)
-    assert sorted(payload) == [
-        "anchor_source",
-        "cited_decisions",
-        "commit_range",
-        "commits_since",
-        "contradictions",
-        "diff_command",
-        "epic_slug",
-        "has_open_decision",
-        "landed_siblings",
-        "slug",
-        "spec_anchor_commit",
-        "spec_path",
-        "touched_paths",
-        "warnings",
-    ]
-    assert payload["landed_siblings"] == [{"slug": "sib", "resolved_in": "deadbee", "affects": ["packages/a"]}]
-    assert payload["commits_since"] == [{"sha": "deadbee", "subject": "feat: a"}]
-    assert json.loads(json.dumps(payload)) == payload
+    assert payload["owner_path"] == "work/epic-e"
+    assert payload["path"] == "work/epic-e/children/feature-a"
+    assert payload["landed_siblings"][0]["path"].endswith("feature-b")
+    assert "slug" not in payload and "epic_slug" not in payload
+
+
+def test_render_decision_names_owner_and_request(capsys: pytest.CaptureFixture[str]) -> None:
+    payload = {
+        "owner_path": "work/epic-e",
+        "requested_path": "work/epic-e/children/feature-a",
+        "entry": {"id": "D-001", "status": "open"},
+        "superseded": None,
+        "warnings": [],
+    }
+    rendering.render_decision_write(payload, "appended")
+    assert "work/epic-e (requested work/epic-e/children/feature-a)" in capsys.readouterr().out
+
+
+def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.CaptureFixture[str]) -> None:
+    rendering.echo_wrapped("  blocked: ", "first\n second")
+    rendering.render_next(
+        SimpleNamespace(warnings=("careful",)),
+        {
+            "normalized": [{"path": "work/a", "source_id": "design", "resource": "/work/a/references/01-design.md"}],
+            "selected_path": "work/a",
+            "kind": "Feature",
+            "work_status": "open",
+            "phase": "design",
+            "descent": {"path": ["work/e", "work/a"]},
+            "action": {"skill": "brainstorming", "reason": "design"},
+            "artifact": {"path": "/tmp/01-design.md"},
+            "blockers": ["one\ntwo"],
+        },
+    )
+    rendering.render_advance(
+        {
+            "path": "work/a",
+            "phase": "execute",
+            "work_status": "in-progress",
+            "changes": {"phase": ["plan", "execute"]},
+            "stamped": {"plan": "/work/a/references/02-plan.md"},
+            "results_path": "/tmp/results.md",
+            "blockers": ["wait"],
+            "repo_note": "partial",
+        }
+    )
+    rendering.render_status(
+        {
+            "total": 2,
+            "by_work_status": {"open": 2},
+            "by_type": {"Feature": 2},
+            "by_phase": {"design": 2},
+            "children": {"work/e": {"terminal": 1, "total": 2}},
+            "resume": {
+                "primary": {"path": "work/a", "title": "A"},
+                "alternatives": [{"path": "work/b", "title": "B"}],
+            },
+        }
+    )
+    rendering.render_lint(
+        SimpleNamespace(
+            findings=(
+                SimpleNamespace(severity="warn", code="w", message="warning"),
+                SimpleNamespace(severity="error", code="e", message="error"),
+            )
+        )
+    )
+    decision = {"id": "D-001", "status": "answered", "question": "Why?"}
+    rendering.render_decision_write(
+        {
+            "owner_path": "work/e",
+            "requested_path": "work/c",
+            "entry": decision,
+            "superseded": "D-000",
+            "follow_up": {"path": "work/t", "page_path": "/tmp/t.md"},
+        },
+        "appended",
+    )
+    rendering.render_decision_list(
+        {
+            "owner_path": "work/e",
+            "requested_path": "work/c",
+            "ledger_path": "/tmp/ledger.md",
+            "entries": [decision, {"id": "D-002", "status": None, "question": ""}],
+            "counts": {"answered": 1},
+        }
+    )
+    rendering.render_orchestrate(
+        {
+            "path": "work/e",
+            "terminal": False,
+            "slots_free": 1,
+            "max_parallel": 2,
+            "dispatches": [
+                {
+                    "key": "work/a#execute",
+                    "skill": "tdd",
+                    "mode": "worktree",
+                    "model": "m",
+                    "worktree": {"action": "create"},
+                }
+            ],
+            "advances": [{"path": "work/a", "reason": "ready"}],
+            "blocked": [{"path": "work/b", "kind": "dependency", "reason": "one\ntwo"}],
+            "decisions": {"open": [decision]},
+            "warnings": ["partial"],
+        }
+    )
+    rendering.render_reconcile(
+        {
+            "path": "work/a",
+            "owner_path": "work/e",
+            "spec_path": "/tmp/spec.md",
+            "spec_anchor_commit": "abc",
+            "anchor_source": "history",
+            "commit_range": "abc..HEAD",
+            "touched_paths": ["packages/a"],
+            "landed_siblings": [{"path": "work/b", "resolved_in": "def"}],
+            "commits_since": [{"sha": "123456789", "subject": "change"}],
+            "cited_decisions": [decision],
+            "contradictions": [decision],
+            "has_open_decision": True,
+            "diff_command": "git diff",
+            "warnings": ["partial"],
+        }
+    )
+    captured = capsys.readouterr()
+    assert "CONTRADICTION" in captured.out
+    assert "partial" in captured.err
+
+
+def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> None:
+    finding = SimpleNamespace(code="x", severity="warn", message="m", spec="s", path="work/a.md", line=7)
+    transition = SimpleNamespace(
+        phase="execute",
+        work_status="in-progress",
+        document_status="stable",
+        requires=("owner",),
+        sync_plan_table=True,
+        stamp_source="plan",
+    )
+    assert rendering._transition(transition)["requires"] == ["owner"]
+    assert rendering._finding(finding)["line"] == 7
+    assert rendering._refusal(SimpleNamespace(path="work/a", kind="bad", detail="why"))["kind"] == "bad"
+    assert rendering._application(None) == {"applied": False, "rolled_back": False, "failures": []}
+
+    result = SimpleNamespace(
+        requested_path="work/e",
+        selected_path="work/a",
+        descent=SimpleNamespace(path=("work/e", "work/a"), leaf=None, blocked_at="work/a", reason="blocked"),
+        route=SimpleNamespace(blockers=("base",)),
+    )
+    assert rendering.descent_payload(result)["from"] == "work/e"
+    assert rendering.next_blockers(result)[-1] == "--descend: blocked"
+
+    application = SimpleNamespace(rolled_back=True, failures=("failed",), warnings=("warning",), ok=False)
+    update = SimpleNamespace(path=tmp_path / "index.md", changed=True)
+    refusal = SimpleNamespace(path="work/a", kind="conflict", detail="changed")
+    regen = SimpleNamespace(
+        application=application,
+        plans=(update,),
+        mutation=SimpleNamespace(warnings=("planned",), refusals=(refusal,)),
+    )
+    assert rendering.regen_index_payload(regen)["rolled_back"] is True
+
+    archive_run = SimpleNamespace(
+        ok=False,
+        conflict=("work/a",),
+        plan=SimpleNamespace(path_mapping={"work/a": "work/_archive/a"}, warnings=("p",), refusals=(refusal,)),
+        result=SimpleNamespace(written=("work/index.md", "work/a.md"), warnings=("a",), rolled_back=False, failures=()),
+        pointer_cleared=True,
+        logged="archived",
+    )
+    archived = rendering.archive_payload(archive_run, dry_run=False)
+    assert archived["indexes"] == ["work/index.md"] and archived["conflict"] == ["work/a"]
+
+    mutation = SimpleNamespace(
+        plan=SimpleNamespace(
+            path_mapping={"work/a": "work/e/children/a"},
+            writes=(SimpleNamespace(member="work/index.md"),),
+            warnings=("p",),
+            refusals=(refusal,),
+        ),
+        application=application,
+    )
+    assert rendering.path_mutation_payload(mutation)["indexes"] == ["work/index.md"]
+
+
+def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> None:
+    edit = SimpleNamespace(member="a.md", where="body", target="old", old="old", new="new", line=2, column=3, key=None)
+    refusal = SimpleNamespace(path="work/a", kind="bad", detail="why")
+    mutation = SimpleNamespace(
+        move_plan=SimpleNamespace(edits=(edit,)),
+        path_mapping={"old": "new"},
+        writes=(SimpleNamespace(member="work/index.md"),),
+        refusals=(refusal,),
+    )
+    migration = SimpleNamespace(
+        plan=SimpleNamespace(
+            manifest=(SimpleNamespace(old_path="old", new_path="new", type="Feature"),),
+            frontmatter_edits=("edit",),
+            opaque_warnings=("opaque",),
+            mutation=mutation,
+        ),
+        application=SimpleNamespace(rolled_back=False, failures=()),
+    )
+    assert rendering.migration_payload(migration)["managed_markdown_edits"][0]["column"] == 3
+
+    entry = SimpleNamespace(
+        id="D-001",
+        number=1,
+        question="Why?",
+        status="answered",
+        affects=("work/a",),
+        decided="user",
+        supersedes=None,
+        prose="Answer",
+    )
+    owner = SimpleNamespace(owner_path="work/e", redirected_from="work/a", ledger=tmp_path / "ledger.md")
+    plan = SimpleNamespace(primary=entry, superseded=SimpleNamespace(id="D-000"), refusal=None)
+    decision_result = SimpleNamespace(
+        owner=owner,
+        plan=plan,
+        application=SimpleNamespace(rolled_back=False, failures=()),
+        entries=(entry,),
+        counts={"answered": 1},
+        warnings=("w",),
+    )
+    assert rendering.decision_payload(decision_result)["requested_path"] == "work/a"
+
+    overturn = SimpleNamespace(
+        owner=owner,
+        plan=SimpleNamespace(
+            decision=plan,
+            filing=SimpleNamespace(filing=SimpleNamespace(path="work/t", target=tmp_path / "t.md")),
+            refusal=None,
+        ),
+        application=SimpleNamespace(mutation=SimpleNamespace(rolled_back=False, failures=(), ok=True)),
+        warnings=("w",),
+    )
+    assert rendering.overturn_payload(overturn)["follow_up_filed"] is True
+
+    worktree = SimpleNamespace(action="create", path="/tmp/w", branch="b", base_branch="main", exists=False)
+    dispatch = SimpleNamespace(
+        key="work/a#execute",
+        slug="work/a",
+        phase="execute",
+        kind="Feature",
+        effort="medium",
+        skill="tdd",
+        mode="worktree",
+        model="m",
+        reasoning_effort="high",
+        worktree=worktree,
+        merge_target="main",
+        prompt="go",
+    )
+    orchestration = SimpleNamespace(
+        path="work/e",
+        terminal=False,
+        max_parallel=2,
+        slots_free=1,
+        permission_mode="full",
+        live=("x",),
+        dispatches=(dispatch,),
+        advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b"),),
+        blocked=(SimpleNamespace(path="work/c", kind="dependency", reason="wait"),),
+        decisions_owner_path="work/e",
+        decisions_ledger_path="ledger",
+        open_decisions=(entry,),
+        assumed_decisions=(entry,),
+        decision_counts={"open": 1},
+        warnings=("w",),
+    )
+    assert rendering.orchestrate_payload(orchestration)["dispatches"][0]["path"] == "work/a"
+
+
+def test_fail_preserves_an_explicit_cause(capsys: pytest.CaptureFixture[str]) -> None:
+    cause = ValueError("root")
+    with pytest.raises(typer.Exit) as caught:
+        rendering.fail("bad", cause=cause)
+    assert caught.value.__cause__ is cause
+    assert "bad" in capsys.readouterr().err

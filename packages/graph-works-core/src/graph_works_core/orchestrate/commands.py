@@ -19,11 +19,11 @@ vendor-neutral; the one place a vendor command may appear is a variant's
 
 from __future__ import annotations
 
-import re
+import hashlib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any
 
@@ -32,11 +32,14 @@ from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from subagents_io.routing import resolve_model, validate_rules
 from work_tracker_okf import decisions as _decisions
-from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp
-from work_tracker_okf.hierarchy import PICK_ORDER, WALK_DEPTH_CAP, child_gated_node, nearest_epic
+from work_tracker_okf.advance import apply as apply_advance
+from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
+from work_tracker_okf.hierarchy import PICK_ORDER, child_gated_node, nearest_parent
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
-from work_tracker_okf.paths import decisions_ledger
-from work_tracker_okf.results import write_results
+from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
+from work_tracker_okf.results import render as render_results
+from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import (
     EFFORTS,
     PHASES,
@@ -53,8 +56,9 @@ from graph_works_core.workspace.manifest import checked_int, checked_str
 from graph_works_core.workspace.pipeline import PipelineEntry, pipeline_table
 from graph_works_core.workspace.provenance import run_git
 from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
-_DATE_PREFIX_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-")
+WALK_DEPTH_CAP = 10_000
 
 #: The branch path segment for an item whose `type` is unrecognized. Reachable
 #: only through the root's fallback branch name: a candidate with a bad `type`
@@ -105,7 +109,7 @@ class PlannedAdvance:
     """A node with nothing to dispatch but a satisfied completion transition --
     an epic whose children are all terminal. The coordinator applies it itself."""
 
-    slug: str
+    path: str
     reason: str
     worktree: str | None = None
     branch: str | None = None
@@ -113,14 +117,14 @@ class PlannedAdvance:
 
 @dataclass(frozen=True, slots=True)
 class BlockedItem:
-    slug: str
+    path: str
     kind: str  # one of BLOCKED_KINDS
     reason: str
 
 
 @dataclass(frozen=True, slots=True)
 class OrchestratePlan:
-    slug: str
+    path: str
     terminal: bool
     max_parallel: int
     permission_mode: str
@@ -132,25 +136,27 @@ class OrchestratePlan:
     warnings: tuple[str, ...]
 
 
-def branch_name(slug: str, type_: str) -> str:
-    """Slug to branch, deterministically.
+def branch_name(path: str, type_: str) -> str:
+    """Canonical path to a readable, collision-safe branch name.
 
-    Strips the `YYYY-MM-DD-` prefix and, for an epic's non-epic child, the
-    `epic-` filing marker; the type's slug segment becomes the path segment.
+    Uses the path-native basename and strips its type prefix into the branch
+    segment. Legacy filename interpretation belongs only to the migration.
 
-        2026-08-11-epic-graph-works-core          (Epic)    -> epic/graph-works-core
-        2026-08-13-epic-feature-work-pipeline-x   (Feature) -> feature/work-pipeline-x
+        epic-graph-works-core    (Epic)    -> epic/graph-works-core
+        feature-work-pipeline-x (Feature) -> feature/work-pipeline-x
     """
     segment = SLUG_PREFIXES.get(type_) or _UNKNOWN_TYPE_SEGMENT
-    stripped = _DATE_PREFIX_RE.sub("", slug)
+    basename = PurePosixPath(path).name
+    stripped = basename
     if segment != "epic" and stripped.startswith("epic-"):
         stripped = stripped[len("epic-") :]
     if stripped.startswith(f"{segment}-"):
         stripped = stripped[len(segment) + 1 :]
-    return f"{segment}/{stripped}"
+    suffix = hashlib.sha256(path.encode("utf-8")).hexdigest()[:8]
+    return f"{segment}/{stripped}-{suffix}"
 
 
-def _fork_branch(slug: str, type_: str, *, base: str, phase: str) -> str:
+def _fork_branch(path: str, type_: str, *, base: str, phase: str) -> str:
     """A fork target distinct from *base*.
 
     Suffixed with the phase rather than given a new path segment: git refuses
@@ -158,7 +164,7 @@ def _fork_branch(slug: str, type_: str, *, base: str, phase: str) -> str:
     name that still equalled its base would be `<derived>-<phase>` == `<derived>`,
     which cannot happen, so there is no loop here.
     """
-    derived = branch_name(slug, type_)
+    derived = branch_name(path, type_)
     return f"{derived}-{phase}" if derived == base else derived
 
 
@@ -177,8 +183,8 @@ def _classify(reason: str) -> str:
 def _children_of(items: Sequence[WorkItem]) -> dict[str, list[WorkItem]]:
     grouped: dict[str, list[WorkItem]] = {}
     for item in items:
-        if item.parent:
-            grouped.setdefault(item.parent, []).append(item)
+        if item.parent_path:
+            grouped.setdefault(item.parent_path, []).append(item)
     return grouped
 
 
@@ -191,9 +197,9 @@ def _frontier(
     routes every non-gated node it lands on. A terminal child is skipped
     silently: a resolved child is a satisfied input, not a blocked item.
     """
-    by_slug = {item.slug: item for item in items}
-    if root not in by_slug:
-        return [], [], [BlockedItem(slug=root, kind="invalid", reason=f"unknown slug {root!r}")]
+    by_path = {item.path: item for item in items}
+    if root not in by_path:
+        return [], [], [BlockedItem(path=root, kind="invalid", reason=f"unknown path {root!r}")]
 
     children_of = _children_of(items)
     candidates: list[tuple[WorkItem, RouteResult]] = []
@@ -203,56 +209,56 @@ def _frontier(
     stack: list[tuple[str, int]] = [(root, 0)]
     visited = {root}
     while stack:
-        slug, depth = stack.pop()
-        node = by_slug.get(slug)
-        if node is None:  # pragma: no cover -- every pushed slug is `root` (checked above) or
-            # drawn from `children_of`, which groups the same `items` `by_slug` was built from
-            blocked.append(BlockedItem(slug=slug, kind="invalid", reason=f"unknown slug {slug!r}"))
+        path, depth = stack.pop()
+        node = by_path.get(path)
+        if node is None:  # pragma: no cover -- every pushed path is `root` (checked above) or
+            # drawn from `children_of`, which groups the same `items` `by_path` was built from
+            blocked.append(BlockedItem(path=path, kind="invalid", reason=f"unknown path {path!r}"))
             continue
         if depth >= WALK_DEPTH_CAP:
             blocked.append(
                 BlockedItem(
-                    slug=slug,
+                    path=path,
                     kind="invalid",
                     reason=f"frontier walk depth cap ({WALK_DEPTH_CAP}) reached",
                 )
             )
             continue
-        children = children_of.get(slug, [])
+        children = children_of.get(path, [])
         if child_gated_node(node, children):
             for child in children:
-                if child.workflow_status in TERMINAL_STATUSES:
+                if child.work_status in TERMINAL_STATUSES:
                     continue
-                if child.slug in visited:
+                if child.path in visited:
                     blocked.append(
                         BlockedItem(
-                            slug=slug,
+                            path=path,
                             kind="invalid",
-                            reason=f"parent cycle detected at {child.slug!r}",
+                            reason=f"parent cycle detected at {child.path!r}",
                         )
                     )
                     continue
-                visited.add(child.slug)
-                stack.append((child.slug, depth + 1))
+                visited.add(child.path)
+                stack.append((child.path, depth + 1))
             continue
-        state = state_for(items, slug, has_open_decision=slug in held_decisions)
-        if state is None:  # pragma: no cover -- `slug` came out of `by_slug`
+        state = state_for(items, path, has_open_decision=path in held_decisions)
+        if state is None:  # pragma: no cover -- `path` came out of `by_path`
             continue
         result = route(state)
         if result.dispatch is not None and not result.blockers:
             candidates.append((node, result))
         elif result.on_complete is not None and not result.blockers:
-            advances.append(PlannedAdvance(slug=slug, reason=result.reason))
+            advances.append(PlannedAdvance(path=path, reason=result.reason))
         else:
             reason = result.blockers[0] if result.blockers else result.reason
-            blocked.append(BlockedItem(slug=slug, kind=_classify(reason), reason=reason))
+            blocked.append(BlockedItem(path=path, kind=_classify(reason), reason=reason))
     return candidates, advances, blocked
 
 
 def _sorted(candidates: list[tuple[WorkItem, RouteResult]]) -> list[tuple[WorkItem, RouteResult]]:
     return sorted(
         candidates,
-        key=lambda pair: (PICK_ORDER.get(pair[0].workflow_status, 99), pair[0].opened, pair[0].slug),
+        key=lambda pair: (PICK_ORDER.get(pair[0].work_status, 99), pair[0].opened, pair[0].path),
     )
 
 
@@ -266,11 +272,11 @@ def _descendants(items: Sequence[WorkItem], root: str) -> list[WorkItem]:
     seen = {root}
     while stack:
         node = stack.pop()
-        if node.slug in seen:
+        if node.path in seen:
             continue
-        seen.add(node.slug)
+        seen.add(node.path)
         out.append(node)
-        stack.extend(children_of.get(node.slug, []))
+        stack.extend(children_of.get(node.path, []))
     return out
 
 
@@ -282,10 +288,10 @@ def _epic_stamp(items: Sequence[WorkItem], root_item: WorkItem) -> tuple[str, st
     here."""
     if root_item.worktree and root_item.branch:
         return root_item.worktree, root_item.branch
-    stamped = [item for item in _descendants(items, root_item.slug) if item.worktree and item.branch]
+    stamped = [item for item in _descendants(items, root_item.path) if item.worktree and item.branch]
     if not stamped:
         return None
-    stamped.sort(key=lambda item: (PICK_ORDER.get(item.workflow_status, 99), item.opened, item.slug))
+    stamped.sort(key=lambda item: (PICK_ORDER.get(item.work_status, 99), item.opened, item.path))
     chosen = stamped[0]
     assert chosen.worktree is not None and chosen.branch is not None
     return chosen.worktree, chosen.branch
@@ -330,7 +336,7 @@ def _resolve_worktree(
         # while genuinely still live -- many on_dispatch transitions are no-ops
         # between a dispatch and its own advance. Its own stamp must never read
         # as "held by someone else", or it forks off itself.
-        return bool(live_worktree_owners.get(path, set()) - {item.slug}) or path in accepted_worktrees
+        return bool(live_worktree_owners.get(path, set()) - {item.path}) or path in accepted_worktrees
 
     if item.worktree and item.branch:
         if repo_path is not None and item.worktree == repo_path:
@@ -352,7 +358,7 @@ def _resolve_worktree(
                 WorktreeAction(
                     action="fork-child",
                     path=None,
-                    branch=_fork_branch(item.slug, item.type, base=default_base, phase=phase),
+                    branch=_fork_branch(item.path, item.type, base=default_base, phase=phase),
                     base_branch=default_base,
                     exists=None,
                 ),
@@ -379,7 +385,7 @@ def _resolve_worktree(
             WorktreeAction(
                 action="fork-child",
                 path=None,
-                branch=_fork_branch(item.slug, item.type, base=item.branch, phase=phase),
+                branch=_fork_branch(item.path, item.type, base=item.branch, phase=phase),
                 base_branch=item.branch,
                 exists=None,
             ),
@@ -405,7 +411,7 @@ def _resolve_worktree(
             WorktreeAction(
                 action="fork-child",
                 path=None,
-                branch=_fork_branch(item.slug, item.type, base=epic_branch, phase=phase),
+                branch=_fork_branch(item.path, item.type, base=epic_branch, phase=phase),
                 base_branch=epic_branch,
                 exists=None,
             ),
@@ -442,7 +448,7 @@ def _resolve_worktree(
 
 def _prompt(
     *,
-    slug: str,
+    path: str,
     key: str,
     phase: str,
     workspace: str,
@@ -471,14 +477,14 @@ def _prompt(
     package ships none.
     """
     lines = [
-        f"Run {DISPATCH_COMMAND} {slug}.",
+        f"Run {DISPATCH_COMMAND} {path}.",
         f"{WORKSPACE_VAR}={workspace}",
         f"Dispatch key: {key}",
         "Send worker_done when the stage artifact is written and the item advanced.",
     ]
     if tail:
         for placeholder, value in (
-            ("{slug}", slug),
+            ("{path}", path),
             ("{key}", key),
             ("{phase}", phase),
             ("{workspace}", workspace),
@@ -513,8 +519,8 @@ def plan(
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
-    `held_decisions` is the set of slugs currently named in an *open* decision
-    (resolved by `run_orchestrate` from the owning epic's ledger, since a
+    `held_decisions` is the set of canonical paths currently named in an
+    *open* decision (resolved by `run_orchestrate` from the nearest owner's ledger, since a
     ledger read is IO and this function stays pure) -- a design-stage item in
     that set is blocked rather than redispatched, which is what stops a
     reconciling-spec pass from looping on a question only a human can answer.
@@ -536,13 +542,13 @@ def plan(
     exactly, so no existing caller changes until it opts in.
     """
     exists = worktree_exists or {}
-    by_slug = {item.slug: item for item in items}
-    warnings = [f"live key {key!r} matches no known item" for key in live if key.split("#", 1)[0] not in by_slug]
+    by_path = {item.path: item for item in items}
+    warnings = [f"live key {key!r} matches no known item" for key in live if key.split("#", 1)[0] not in by_path]
 
-    root_item = by_slug.get(root)
-    if root_item is not None and (root_item.workflow_status in TERMINAL_STATUSES or root_item.phase == "done"):
+    root_item = by_path.get(root)
+    if root_item is not None and (root_item.work_status in TERMINAL_STATUSES or root_item.phase == "done"):
         return OrchestratePlan(
-            slug=root,
+            path=root,
             terminal=True,
             max_parallel=max_parallel,
             permission_mode=permission_mode,
@@ -571,12 +577,12 @@ def plan(
     live_affects: set[str] = set()
     live_worktree_owners: dict[str, set[str]] = {}
     for key in live:
-        item = by_slug.get(key.split("#", 1)[0])
+        item = by_path.get(key.split("#", 1)[0])
         if item is None:
             continue
         live_affects.update(item.affects)
         if item.worktree:
-            live_worktree_owners.setdefault(item.worktree, set()).add(item.slug)
+            live_worktree_owners.setdefault(item.worktree, set()).add(item.path)
 
     stamp = _epic_stamp(items, root_item) if root_item is not None else None
     epic_worktree_path = stamp[0] if stamp else None
@@ -598,7 +604,7 @@ def plan(
         if not affects:
             blocked.append(
                 BlockedItem(
-                    slug=item.slug,
+                    path=item.path,
                     kind="affects-overlap",
                     reason="declare affects to allow parallel dispatch",
                 )
@@ -608,7 +614,7 @@ def plan(
         if overlap:
             blocked.append(
                 BlockedItem(
-                    slug=item.slug,
+                    path=item.path,
                     kind="affects-overlap",
                     reason=("affects overlap with a live or already-planned dispatch: " + ", ".join(sorted(overlap))),
                 )
@@ -623,7 +629,7 @@ def plan(
     dispatches: list[PlannedDispatch] = []
     for item, result in survivors:
         if len(dispatches) >= slots_free:
-            blocked.append(BlockedItem(slug=item.slug, kind="capacity", reason="ready, but no worker slot free"))
+            blocked.append(BlockedItem(path=item.path, kind="capacity", reason="ready, but no worker slot free"))
             continue
         assert result.dispatch is not None, "every survivor carries a dispatch (see _frontier)"
         on_dispatch_phase = result.on_dispatch.phase if result.on_dispatch else None
@@ -640,7 +646,7 @@ def plan(
         if entry.mode == "relay" and not (entry.prompt_tail or "").strip():
             blocked.append(
                 BlockedItem(
-                    slug=item.slug,
+                    path=item.path,
                     kind="relay-untailed",
                     reason=(
                         f"variant {variant!r} dispatches in relay mode with no prompt tail, so a "
@@ -666,7 +672,7 @@ def plan(
         if action is None:
             blocked.append(
                 BlockedItem(
-                    slug=item.slug,
+                    path=item.path,
                     kind="worktree-pending",
                     reason="epic worktree is being created by another dispatch in this plan",
                 )
@@ -675,7 +681,7 @@ def plan(
         if action.path is None and not provisions_worktrees:
             blocked.append(
                 BlockedItem(
-                    slug=item.slug,
+                    path=item.path,
                     kind="worktree-unsupported",
                     reason=(
                         f"{action.action} needs a backend that provisions its own worktrees; "
@@ -688,17 +694,17 @@ def plan(
         if action.path:
             accepted_worktrees.add(action.path)
 
-        merge_target = epic_branch if item.slug != root else default_base
+        merge_target = epic_branch if item.path != root else default_base
         resolution = resolve_model(
             auto_drive,
             {"phase": phase, "kind": item.type, "effort": item.effort},
             default_key="phase",
         )
-        key = f"{item.slug}#{phase}"
+        key = f"{item.path}#{phase}"
         dispatches.append(
             PlannedDispatch(
                 key=key,
-                slug=item.slug,
+                slug=item.path,
                 phase=phase,
                 kind=item.type,
                 effort=item.effort,
@@ -709,7 +715,7 @@ def plan(
                 worktree=action,
                 merge_target=merge_target,
                 prompt=_prompt(
-                    slug=item.slug,
+                    path=item.path,
                     key=key,
                     phase=phase,
                     workspace=workspace,
@@ -721,7 +727,7 @@ def plan(
         )
 
     return OrchestratePlan(
-        slug=root,
+        path=root,
         terminal=False,
         max_parallel=max_parallel,
         permission_mode=permission_mode,
@@ -747,9 +753,9 @@ FALLBACK_BASE = "main"
 
 @dataclass(frozen=True, slots=True)
 class OrchestrateResult:
-    """The plan, plus the owning epic's open questions.
+    """The plan, plus the nearest decision owner's open questions.
 
-    The decision fields are empty for an item with no epic ancestor -- the
+    The decision fields are empty for an item with no parent-capable owner -- the
     lone-item case -- which is a shape, not an error.
 
     **The ledger is read twice per plan**: once by whatever consults it for the
@@ -760,7 +766,7 @@ class OrchestrateResult:
     """
 
     plan: OrchestratePlan
-    decisions_epic_slug: str | None = None
+    decisions_owner_path: str | None = None
     decisions_ledger_path: str | None = None
     open_decisions: tuple[_decisions.Decision, ...] = ()
     assumed_decisions: tuple[_decisions.Decision, ...] = ()
@@ -768,8 +774,8 @@ class OrchestrateResult:
     warnings: tuple[str, ...] = ()
 
     @property
-    def slug(self) -> str:
-        return self.plan.slug
+    def path(self) -> str:
+        return self.plan.path
 
     @property
     def terminal(self) -> bool:
@@ -870,11 +876,11 @@ def _stat_worktrees(items: Sequence[WorkItem], repo_path: str | None = None) -> 
 
 @dataclass(frozen=True, slots=True)
 class _Decisions:
-    """The owning epic's ledger, resolved. A type rather than a six-tuple: six
+    """The nearest decision owner's ledger, resolved. A type rather than a six-tuple: six
     same-shaped positional returns at a call site is a transposition waiting to
     happen, which is the reason `ResultsFacts` is a type too."""
 
-    epic_slug: str | None = None
+    owner_path: str | None = None
     ledger_path: str | None = None
     open_: tuple[_decisions.Decision, ...] = ()
     assumed: tuple[_decisions.Decision, ...] = ()
@@ -882,24 +888,19 @@ class _Decisions:
     warnings: tuple[str, ...] = ()
 
 
-def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, slug: str) -> _Decisions:
-    """The owning epic's ledger: open and assumed entries plus the whole-epic
-    counts.
+def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, path: str) -> _Decisions:
+    """The nearest parent-capable owner's open and assumed decisions.
 
-    Empty throughout when *slug* has no epic ancestor -- auto-drive's lone-item
-    case, a shape rather than an error. `nearest_epic` counts *slug* itself, so
-    an epic resolves to its own ledger, and it is cycle-safe and depth-capped
-    because a `parent` chain that closes on itself is a lint finding, not this
-    walk's problem to diagnose.
+    Empty throughout when *path* has no parent-capable owner -- a shape rather
+    than an error. Release, Epic, and Feature items own their own ledgers.
     """
-    epic = nearest_epic(items, slug)
-    if epic is None:
+    owner = nearest_parent(items, path)
+    if owner is None:
         return _Decisions()
-    archived = next((item.archived for item in items if item.slug == epic), False)
-    ledger = decisions_ledger(epic, archived=archived).path(bundle_root)
+    ledger = _decisions.ledger_ref(owner).path(bundle_root)
     parsed = _decisions.load(ledger)  # an absent file reads as empty, never raises
     return _Decisions(
-        epic_slug=epic,
+        owner_path=owner,
         ledger_path=str(ledger),
         open_=tuple(_decisions.query(parsed.entries, status="open")),
         assumed=tuple(_decisions.query(parsed.entries, status="assumed")),
@@ -909,31 +910,30 @@ def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, slug: str) 
 
 
 def _held_decisions(items: Sequence[WorkItem], bundle_root: Path) -> frozenset[str]:
-    """Every slug currently named in an *open* decision's `affects`, across the
+    """Every canonical path currently named in an *open* decision's `affects`, across the
     whole item set -- what `plan()`'s `held_decisions` gates re-dispatch on.
 
-    One ledger read per distinct epic, not per item: every item under the same
-    epic shares the same ledger, and `_resolve_decisions` already pays this
-    same one-read-per-epic cost for the root alone.
+    One ledger read per distinct owner, not per item: every leaf under the same
+    owner shares the same ledger, and `_resolve_decisions` already pays this
+    same one-read-per-owner cost for the root alone.
     """
-    entries_by_epic: dict[str, tuple[_decisions.Decision, ...]] = {}
+    entries_by_owner: dict[str, tuple[_decisions.Decision, ...]] = {}
     held: set[str] = set()
     for item in items:
-        epic = nearest_epic(items, item.slug)
-        if epic is None:
+        owner = nearest_parent(items, item.path)
+        if owner is None:
             continue
-        if epic not in entries_by_epic:
-            archived = next((candidate.archived for candidate in items if candidate.slug == epic), False)
-            ledger = decisions_ledger(epic, archived=archived).path(bundle_root)
-            entries_by_epic[epic] = tuple(_decisions.load(ledger).entries)
-        if _decisions.query(entries_by_epic[epic], status="open", affects=item.slug):
-            held.add(item.slug)
+        if owner not in entries_by_owner:
+            ledger = _decisions.ledger_ref(owner).path(bundle_root)
+            entries_by_owner[owner] = tuple(_decisions.load(ledger).entries)
+        if _decisions.query(entries_by_owner[owner], status="open", affects=item.path):
+            held.add(item.path)
     return frozenset(held)
 
 
 def run_orchestrate(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     live: tuple[str, ...] = (),
     repo: Path | None = None,
@@ -941,7 +941,7 @@ def run_orchestrate(
     pipeline: Mapping[str, PipelineEntry] | None = None,
     provisions_worktrees: bool = True,
 ) -> OrchestrateResult:
-    """Compute the dispatch plan for *slug*'s subtree. Read-only throughout.
+    """Compute the dispatch plan for *path*'s subtree. Read-only throughout.
 
     Never mutates a work item, a worktree or the manifest.
 
@@ -977,7 +977,7 @@ def run_orchestrate(
 
     computed = plan(
         items,
-        slug,
+        path,
         pipeline=pipeline if pipeline is not None else pipeline_table(layout=layout),
         auto_drive=rules,
         max_parallel=max_parallel,
@@ -991,10 +991,10 @@ def run_orchestrate(
         repo_path=repo_path,
     )
 
-    decisions = _resolve_decisions(items, bundle.root, slug)
+    decisions = _resolve_decisions(items, bundle.root, path)
     return OrchestrateResult(
         plan=computed,
-        decisions_epic_slug=decisions.epic_slug,
+        decisions_owner_path=decisions.owner_path,
         decisions_ledger_path=decisions.ledger_path,
         open_decisions=decisions.open_,
         assumed_decisions=decisions.assumed,
@@ -1029,6 +1029,7 @@ class StageAdvance:
     results_path: Path | None = None
     pointer_path: Path | None = None
     repo_note: str | None = None
+    application: MutationApplication | None = None
 
     @property
     def changed(self) -> bool:
@@ -1037,12 +1038,13 @@ class StageAdvance:
 
 def run_stage_advance(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     today: date,
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
+    released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
     cwd: Path | None = None,
@@ -1086,7 +1088,7 @@ def run_stage_advance(
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    item = next((candidate for candidate in items if candidate.slug == slug), None)
+    item = next((candidate for candidate in items if candidate.path == path), None)
     old_phase = item.phase if item is not None else None
     repo_note: str | None = None
     resolved_repo = repo
@@ -1106,21 +1108,32 @@ def run_stage_advance(
 
     outcome = advance_and_stamp(
         bundle,
-        slug,
+        path,
         today=today,
         effort=effort,
         owner=owner,
         resolved_in=resolved_in,
+        released_at=released_at,
         worktree=stamped_worktree,
         branch=stamped_branch,
-        dry_run=dry_run,
+        dry_run=True,
     )
     if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
         return StageAdvance(outcome=outcome, repo_note=repo_note)
 
     new_phase = outcome.plan.transition.phase or old_phase
 
+    assert item is not None
+    document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
+    apply_advance(document, outcome.plan)
+    if outcome.stamped is not None and outcome.stamp_title is not None:
+        upsert(document, outcome.stamped, title=outcome.stamp_title)
+        if outcome.plan.sync_plan_table:
+            ensure_plan_row(document, outcome.stamped)
+
     results_path: Path | None = None
+    result_member: str | None = None
+    result_bytes: bytes | None = None
     facts_root = _facts_root(item, stamped_worktree, resolved_repo)
     if (
         facts_root is not None
@@ -1133,12 +1146,64 @@ def run_stage_advance(
             facts_root, phase=old_phase, start_sha=start_sha, paths=item.affects, opened=item.opened
         )
         if facts is not None:
-            results_path = write_results(bundle.root, slug, facts, archived=item.archived if item else False)
+            key = f"{facts.phase}-results"
+            ref = artifact_ref(path, MANAGED_ARTIFACTS[key])
+            result_member = ref.rel
+            result_bytes = render_results(facts).encode("utf-8")
+            upsert(document, ref, title=f"{facts.phase.capitalize()} results")
+
+    page_member = item_page(path).rel
+    page_before = (bundle.root / page_member).read_bytes()
+    writes = [PlannedWrite(page_member, hashlib.sha256(page_before).hexdigest(), document.serialize().encode("utf-8"))]
+    mkdirs: tuple[str, ...] = ()
+    conditions: tuple[DirectoryPrecondition, ...] = ()
+    if result_member is not None and result_bytes is not None:
+        result_path = bundle.root / result_member
+        try:
+            result_before = result_path.read_bytes()
+        except FileNotFoundError:
+            result_before = None
+        writes.append(
+            PlannedWrite(
+                result_member,
+                hashlib.sha256(result_before).hexdigest() if result_before is not None else None,
+                result_bytes,
+            )
+        )
+        parent = Path(result_member).parent.as_posix()
+        mkdirs = (parent,)
+        if not (bundle.root / parent).exists():
+            conditions = (DirectoryPrecondition(parent, None),)
+    mutation = WorkMutationPlan(
+        root=bundle.root,
+        operation="file",
+        path_mapping=MappingProxyType({}),
+        move_plan=None,
+        moves=(),
+        writes=tuple(writes),
+        deletes=(),
+        mkdirs=mkdirs,
+        warnings=(),
+        refusals=(),
+        validate_paths=(path,),
+        directory_preconditions=conditions,
+    )
+    application = apply_mutation(layout, mutation)
+    if application.ok:
+        outcome = replace(outcome, written=True)
+        if result_member is not None:
+            results_path = bundle.root / result_member
 
     pointer_path: Path | None = None
-    if new_phase is not None and new_phase != "done":
-        pointer_path = provenance.write_active_work(layout, slug, new_phase, updated=today.isoformat())
-    return StageAdvance(outcome=outcome, results_path=results_path, pointer_path=pointer_path, repo_note=repo_note)
+    if application.ok and new_phase is not None and new_phase != "done":
+        pointer_path = provenance.write_active_work(layout, path, new_phase, updated=today.isoformat())
+    return StageAdvance(
+        outcome=outcome,
+        results_path=results_path,
+        pointer_path=pointer_path,
+        repo_note=repo_note,
+        application=application,
+    )
 
 
 def _facts_root(item: WorkItem | None, worktree: str | None, repo: Path | None) -> Path | None:

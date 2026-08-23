@@ -44,7 +44,7 @@ _PATH_RE = re.compile(r"[\w][\w.\-]*/[\w.\-/]+")
 
 
 def _finding(code: str, severity: Severity, item: WorkItem, message: str) -> Finding:
-    return Finding(code=code, severity=severity, message=message, spec=_SPEC, path=item.path, line=None)
+    return Finding(code=code, severity=severity, message=message, spec=_SPEC, path=item.page_path, line=None)
 
 
 def table(ctx: RuleContext) -> Iterable[Finding]:
@@ -67,12 +67,12 @@ def table(ctx: RuleContext) -> Iterable[Finding]:
     """
     for item, document in with_documents(ctx):
         read = read_section(document.body, _HEADING, PLAN_TABLE_SPEC)
-        if item.workflow_status == "accepted" and read.state not in ("ok", "empty"):
+        if item.work_status == "accepted" and read.state not in ("ok", "empty"):
             yield _finding(
                 "plan.accepted-without-plan",
                 "error",
                 item,
-                f"`workflow_status: accepted` but the `## {_HEADING}` table is {read.state}",
+                f"`work_status: accepted` but the `## {_HEADING}` table is {read.state}",
             )
         if read.state == "malformed":
             yield _finding(

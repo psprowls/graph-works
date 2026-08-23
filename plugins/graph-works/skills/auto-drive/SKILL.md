@@ -12,7 +12,7 @@ and the full worker prompt) — this skill only relays: it never picks a
 worktree, a model, or a stage on its own.
 
 **Announce at start:** "I'm using the auto-drive skill to run the coordinator
-loop for `<slug>`."
+loop for `<work-path>`."
 
 This session **is** the coordinator — a human-attended session, not itself a
 dispatched worker. Wherever this skill says "ask the user," that means the
@@ -55,15 +55,15 @@ that rule is about *Run/task* state, not static repo identity.
 
 ## 1. Run bind
 
-The Run's objective string is the stable join key for this slug:
-`auto-drive:<slug>`. Nothing else maps slug → Run — this lookup **is** the
-entire resume mechanism. Re-running `/graph-works:auto-drive <slug>` always
+The Run's objective string is the stable join key for this path:
+`auto-drive:<work-path>`. Nothing else maps path → Run — this lookup **is** the
+entire resume mechanism. Re-running `/graph-works:auto-drive <work-path>` always
 re-derives the Run this way; there is no separate `--resume` flag.
 
 1. `orca orchestration run-list --json` and scan for an entry whose
-   `objective` exactly equals `auto-drive:<slug>`.
+   `objective` exactly equals `auto-drive:<work-path>`.
 2. Found → `orca orchestration run-use --id <run_id>`.
-3. Not found → `orca orchestration run-create --objective "auto-drive:<slug>"`
+3. Not found → `orca orchestration run-create --objective "auto-drive:<work-path>"`
    (this also binds this terminal to the new Run).
 
 Every command in the rest of this skill passes `--run <run_id>` explicitly —
@@ -79,7 +79,7 @@ crash/compaction resume the same code path as a normal cycle.
 ### 2.1 Derive live keys
 
 1. `orca orchestration task-list --run <run_id> --json`. Every task's
-   `--task-title` was set to a dispatch key (`<slug>#<phase>`) at creation
+   `--task-title` was set to a dispatch key (`<work-path>#<phase>`) at creation
    (§3) — this task mirror is the dedupe ledger for the whole loop and the
    §2.6 dispatch-diff source.
 2. `orca orchestration worker-list --run <run_id> --json` — one call for the
@@ -108,39 +108,37 @@ crash/compaction resume the same code path as a normal cycle.
 
 ### 2.2 Plan
 
-`gw work orchestrate <slug> --live <key,...> --json` (workspace resolves via
+`gw work orchestrate <work-path> --live <key,...> --json` (workspace resolves via
 `GRAPH_WORKS_DIR`; omit `--live` on the very first plan call of a fresh
 Run — there's nothing live yet). The result:
 
 - `terminal` (bool), `max_parallel` / `slots_free` (ints), `permission_mode`
   (str, default `bypassPermissions`), `live` (the echoed input list).
-- `dispatches[]` — each entry: `key` (`<slug>#<phase>`), `slug`, `phase`,
+- `dispatches[]` — each entry: `key` (`<work-path>#<phase>`), `path`, `phase`,
   `kind`, `effort`, `skill`, `mode` (`autonomous` | `attend` | `relay`),
   `model` (`null` = inherit, omit `--model`), `reasoning_effort`,
   `worktree` (`action`: `reuse` | `fork-child` | `create-top-level`, `path`,
   `branch`, `base_branch`, `exists`), `merge_target`, `prompt`.
-- `advances[]` — each: `slug`, `reason`, `worktree`/`branch` (the epic's
+- `advances[]` — each: `path`, `reason`, `worktree`/`branch` (the epic's
   already-known worktree, when one exists — `null` otherwise, e.g. before any
   worker has ever been dispatched for this epic).
-- `blocked[]` — each: `slug`, `kind` (one of exactly `deps`, `capacity`,
+- `blocked[]` — each: `path`, `kind` (one of exactly `deps`, `capacity`,
   `affects-overlap`, `effort-required`, `decisions`, `human`,
   `worktree-pending`, `invalid`), `reason`.
 - `warnings[]` — plain strings (e.g. a stale `--live` key matching nothing, or
   a malformed decisions-ledger entry). Print these as notes; they are not
   blockers.
-- Decisions, read from the ledger owned by the epic above `<slug>`:
-  `decisions_epic_slug` (str or `null` — `null` for a lone item with no epic
-  ancestor, in which case every field below is empty), `decisions_resolved_from`
-  (the slug you passed, when it differed from the epic), `decisions_ledger_path`
-  (absolute path, may not exist yet), `open_decisions[]` / `assumed_decisions[]`
+- `decisions` — the ledger resolved from the nearest owning parent:
+  `owner_path` (str or `null`), `ledger_path` (absolute path or `null`),
+  `open[]` / `assumed[]`
   (each entry: `id` (the full `D-nnn` string used below), `number` (its bare
   integer), `question`, `status`, `affects[]`, `decided`, `supersedes`,
-  `prose`, `extra_keys[]`), and `decision_counts` (whole-ledger
+  `prose`), and `counts` (whole-ledger
   rollup by status plus `invalid` and `total`). Scope is the **whole owning
-  epic's ledger**, not just the subtree you asked to plan. `decision_counts`
-  is `{}` — an empty dict with no keys — when `decisions_epic_slug` is `null`,
+  ledger**, not just the subtree you asked to plan. `counts`
+  is `{}` — an empty dict with no keys — when `decisions.owner_path` is `null`,
   but a fully-zeroed six-key dict when the epic exists and only its ledger
-  file is missing. Read it with `.get()`; indexing `decision_counts["open"]`
+  file is missing. Read it with `.get()`; indexing `counts["open"]`
   directly will fail in the first case.
 
 ### 2.3 Terminal?
@@ -150,7 +148,7 @@ cycle runs.
 
 ### 2.4 Advances
 
-For every entry in `advances[]`: `gw work advance <slug from entry>`, adding
+For every entry in `advances[]`: `gw work advance <path from entry>`, adding
 `--worktree <entry.worktree> --branch <entry.branch>` whenever the entry
 carries them (non-`null`). **This is applied from the coordinator's own
 checkout, not from inside any worktree** — without the explicit flags, the
@@ -167,10 +165,10 @@ you know is out of date).
 - **`effort-required`**: ask the user — via `AskUserQuestion`, this is the
   coordinator's own human, not a worker relay — to size the item
   (xtra-small / small / medium / large / xtra-large). Run
-  `gw work advance <slug> --effort <value>`, then restart the cycle at §2.1.
+  `gw work advance <work-path> --effort <value>`, then restart the cycle at §2.1.
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
   `human`, `worktree-pending`, `invalid`): print one line each
-  (`blocked <slug> (<kind>): <reason>`) and take no action. `capacity` and
+  (`blocked <work-path> (<kind>): <reason>`) and take no action. `capacity` and
   `worktree-pending` resolve themselves next cycle as slots/worktrees free
   up; `deps`, `affects-overlap`, `human`, and `invalid` need a human decision
   outside this loop; `decisions` is a third case — it neither self-resolves
@@ -190,8 +188,8 @@ you know is out of date).
   §2.2's plan JSON already in hand, no extra `gw` call:
 
   ```
-  decision D-nnn (open, affects: <slug,...>) <question> — needs a human answer
-  decision D-nnn (assumed, affects: <slug,...>) <question> — if wrong: <text>
+  decision D-nnn (open, affects: <path,...>) <question> — needs a human answer
+  decision D-nnn (assumed, affects: <path,...>) <question> — if wrong: <text>
   ```
 
   Render `affects: (none)` when the entry's `affects[]` is empty (permitted
@@ -207,7 +205,7 @@ you know is out of date).
   in a long-running epic.
 
   Print nothing at all when both lists are empty, and note that
-  `decisions_epic_slug: null` (a lone item with no epic ancestor) is normal,
+  `decisions.owner_path: null` (a lone item with no owning parent) is normal,
   not a fault — ledgers are epic-owned.
 
 ### 2.5.1 Decision confirm / overturn (human-initiated)
@@ -234,20 +232,20 @@ coordinator executing the command directly. `attend`/`relay` modes exist for
 it. Collect any missing fields free-form, as §4.4 already does for
 escalations — not as a forced multiple-choice prompt.
 
-`<epic-slug>` below is `decisions_epic_slug` from §2.2's plan JSON; you
+`<owner-path>` below is `decisions.owner_path` from §2.2's plan JSON; you
 already have it, so never re-resolve it.
 
 **Confirm:**
 
 ```
-gw work decision answer <epic-slug> D-nnn --answer "<the answer text>" \
+gw work decision answer <owner-path> D-nnn --answer "<the answer text>" \
     [--rationale "..."] --json
 ```
 
 **Overturn:**
 
 ```
-gw work decision overturn <epic-slug> D-nnn --answer "<the new answer>" \
+gw work decision overturn <owner-path> D-nnn --answer "<the new answer>" \
     --follow-up-title "<the follow-up's title>" \
     [--follow-up-affects a,b] [--follow-up-kind tech-debt] --json
 ```
@@ -263,18 +261,18 @@ After either call:
 
 1. Summarize the JSON result instead of quoting an `[ok]` line — `--json`
    prints raw JSON, and the `[ok]` lines exist only in the CLI's non-JSON
-   branch. Name the fields that are actually there: `epic_slug`, the
+   branch. Name the fields that are actually there: `owner_path`, `requested_path`, the
    entry's `id` and `status`, `superseded`, and — for overturn —
-   `follow_up.slug` and `follow_up.page_path`. If the result carries
+   `follow_up.path` and `follow_up.page_path`. If the result carries
    `warnings[]`, print them — overturn deliberately keeps the ledger edit
    even when filing the follow-up fails, and the warning names the id that
    still needs one.
 2. **For overturn, say plainly that the follow-up is not part of this Run.**
-   It is filed with `parent` and `depends_on` unset — a peer of the epic, not
+   It is filed without a parent or dependencies — a root peer, not
    one of its children — so it will never appear in this root's `dispatches[]`
-   or `blocked[]`. Say so: "filed `<follow-up-slug>` — it's a peer item, not
+   or `blocked[]`. Say so: "filed `<follow-up-path>` — it's a peer item, not
    wired into this run; drive it separately, e.g. a fresh
-   `/graph-works:auto-drive <follow-up-slug>`." Otherwise it reads as having
+   `/graph-works:auto-drive <follow-up-path>`." Otherwise it reads as having
    silently vanished.
 3. **Restart the cycle at §2.1** — the same rule §2.4 applies after
    `advances[]`. The ledger just changed, and the routing layer recomputes its
@@ -341,7 +339,7 @@ For each planned-but-undispatched entry from §2.6:
 1. ```
    orca orchestration task-create --run <run_id> \
      --spec "<dispatches[].prompt, verbatim>" \
-     --task-title "<key>" --display-name "<slug> · <phase>" --json
+     --task-title "<key>" --display-name "<work-path> · <phase>" --json
    ```
    Capture `task_id` from the result. The `prompt` is exactly what
    `gw work orchestrate` assembled — never edit, wrap, or re-word it; it
@@ -451,7 +449,7 @@ For each planned-but-undispatched entry from §2.6:
 
 4. **Attend dispatches only** (`mode: attend` — the design stage), after a
    successful start:
-   - `orca worktree set --worktree <same worktree selector used above> --workspace-status in-review --comment "auto-drive: <slug> design stage waiting for you — join <agent_terminal_handle>"`.
+   - `orca worktree set --worktree <same worktree selector used above> --workspace-status in-review --comment "auto-drive: <work-path> design stage waiting for you — join <agent_terminal_handle>"`.
    - Print the same join instruction directly in this session — the human
      is already here, no orca call needed for that half.
    - Remember this dispatch's key as attend-pending for this Run, so its
@@ -544,7 +542,7 @@ orca orchestration send --to dispatch:<dispatch_id> --type status \
 ```
 
 The escalation's envelope carries no dispatch id directly — get one from
-this coordinator's own slug → dispatch mapping (§2.1's live-derivation),
+this coordinator's own path → dispatch mapping (§2.1's live-derivation),
 joined on the escalation's sender terminal handle.
 
 Otherwise just note it and continue — an escalation doesn't have to block
@@ -556,7 +554,7 @@ wait-timeout.
 
 ## 5. Resume & wrap-up
 
-**Resume** is just re-running `/graph-works:auto-drive <slug>` (§1 re-binds
+**Resume** is just re-running `/graph-works:auto-drive <work-path>` (§1 re-binds
 the same Run by objective). Cycle 1's live-derivation (§2.1) classifies
 every existing task — live, settled, or dead — before anything else
 happens; dead dispatches enter the failure flow immediately. Nothing is
@@ -598,7 +596,7 @@ before exiting — same mechanics as the failure question's Stop branch
   merge/PR/hold/discard options mean and sending the `ask` — child 5's
   scope. This skill only mirrors the `question` it receives (§4.3).
 - A vault-wide watcher or scheduled sweep mode. Orca automations may invoke
-  this skill later; today it drives exactly one slug per invocation.
+  this skill later; today it drives exactly one path per invocation.
 - Auto-retry of failed stages, and automatic merge-conflict resolution for
   parallel forks — both explicit policy (see the failure question and the
   `affects`-disjoint rule), not gaps.

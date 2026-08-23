@@ -6,9 +6,8 @@ already show — the split earns its keep when the *destination* or the *existin
 content* is what a caller wants to inspect, and here neither is in question.
 
 It lives here rather than in a composing CLI because the destination *is* this
-package's layout contract: putting the write upstream means re-deriving
-`artifact_path(..., kind="results")` there, which is the drift the carrier exists
-to prevent.
+package's layout contract: putting the write upstream means re-deriving the
+managed-artifact mapping there, which is the drift the carrier prevents.
 
 Git is out of scope: `ResultsFacts` takes its facts, it never gathers them.
 """
@@ -18,7 +17,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from work_tracker_okf.paths import artifact_path
+from okf_io import load
+
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
+from work_tracker_okf.sources import upsert
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,15 +68,22 @@ def render(facts: ResultsFacts) -> str:
     return "\n".join(lines) + "\n"
 
 
-def write_results(root: Path, slug: str, facts: ResultsFacts, *, archived: bool = False) -> Path:
-    """Write *facts* to the results slot for *slug*, and return where it landed.
+def write_results(root: Path, item_path: str, facts: ResultsFacts) -> Path:
+    """Write and register *facts* in the canonical results slot for *item_path*.
 
-    `artifact_path` validates the phase first, so an unknown one raises before a
-    directory is created.
+    The managed-artifact lookup validates the phase first, so an unknown one
+    raises before a directory is created.
     """
-    target = artifact_path(slug, facts.phase, "results", archived=archived).path(root)
+    key = f"{facts.phase}-results"
+    if key not in MANAGED_ARTIFACTS:
+        raise ValueError(f"results are supported only for execute/finish, got {facts.phase!r}")
+    ref = artifact_ref(item_path, MANAGED_ARTIFACTS[key])
+    document = load(item_page(item_path).path(root))
+    target = ref.path(root)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(render(facts), encoding="utf-8")
+    upsert(document, ref, title=f"{facts.phase.capitalize()} results")
+    document.save()
     return target
 
 

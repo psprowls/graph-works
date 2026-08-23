@@ -5,11 +5,12 @@ from __future__ import annotations
 import importlib
 import re
 import unicodedata
+from dataclasses import replace
 from urllib.parse import unquote
 
 import ext_helpers
 import pytest
-from okf_ext.moves.apply import _apply_body_edits, _set_key, apply
+from okf_ext.moves.apply import _apply_body_edits, _set_key, apply, materialize
 from okf_ext.moves.model import RefEdit
 from okf_ext.moves.plan import plan_move, plan_move_dir, plan_move_many, plan_repair
 from okf_io import Document, build_link_graph, load_bundle
@@ -54,6 +55,60 @@ def test_a_non_ok_plan_raises(live):
     with pytest.raises(ValueError, match="refusal"):
         apply(bundle, plan)
     assert (root / "concepts" / "alpha.md").exists()
+
+
+def test_opaque_markdown_moves_without_body_or_frontmatter_edits(tmp_path):
+    before = b"[old](../../feature-old.md)\n"
+    (tmp_path / "index.md").write_text("---\nokf_version: 0.2\n---\n# T\n", encoding="utf-8")
+    refs = tmp_path / "work/feature-old/references"
+    refs.mkdir(parents=True)
+    (tmp_path / "work/feature-old.md").write_text(
+        "---\ntitle: Old\ndescription: D\ntype: Feature\n---\n", encoding="utf-8"
+    )
+    (refs / "notes.md").write_bytes(before)
+    bundle = load_bundle(tmp_path)
+    mapping = {
+        "work/feature-old.md": "work/feature-new.md",
+        "work/feature-old/references/notes.md": "work/feature-new/references/notes.md",
+    }
+    plan = plan_move_many(bundle, mapping, opaque_members={"work/feature-old/references/notes.md"})
+    result = apply(bundle, plan)
+    assert result.ok
+    assert (tmp_path / "work/feature-new/references/notes.md").read_bytes() == before
+
+
+def test_materialized_effects_match_apply(live):
+    root, bundle = live
+    plan = plan_move_many(bundle, {"concepts/beta.md": "pages/beta.md"})
+    materialized = materialize(bundle, plan)
+    result = apply(bundle, plan)
+    assert result.ok
+    assert (root / "pages/beta.md").read_bytes() == materialized.writes["pages/beta.md"]
+
+
+def test_apply_commits_the_declared_materialized_rename_and_delete_effects(live, monkeypatch):
+    root, bundle = live
+    plan = plan_move_many(
+        bundle,
+        {
+            "assets/diagram.png": "img/diagram.png",
+            "concepts/beta.md": "pages/beta.md",
+        },
+    )
+    effects = materialize(bundle, plan)
+    monkeypatch.setattr(
+        apply_module,
+        "materialize",
+        lambda _bundle, _plan: replace(effects, renames=(), deletes=()),
+    )
+
+    result = apply(bundle, plan)
+
+    assert result.ok
+    assert (root / "assets/diagram.png").exists()
+    assert not (root / "img/diagram.png").exists()
+    assert (root / "concepts/beta.md").exists()
+    assert (root / "pages/beta.md").exists()
 
 
 # --- regime 1: content build, all-or-nothing ---

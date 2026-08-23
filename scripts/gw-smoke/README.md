@@ -414,13 +414,13 @@ $GW graph export --out "$TEST_WS/../graph.graphml" --workspace "$TEST_WS"  # ~12
 ```bash
 $GW work file --title "smoke test item" --kind Spike \
   --summary "exercise gw work file" --affects "packages/graph-works-cli" \
-  --effort small --slug-words "gw smoke test item" \
+  --effort small --name "smoke-test-item" \
   --workspace "$TEST_WS" --dry-run
 $GW work status --workspace "$TEST_WS"
 $GW work lint --workspace "$TEST_WS"
 ```
 
-Filed items land at `okf/work/<slug>.md` (not `wiki/work/`, same `okf/` root as everything
+Filed items land at `okf/work/<typed-basename>.md` (not `wiki/work/`, same `okf/` root as everything
 else). Drop `--dry-run` to actually file one.
 
 ## 10. Config

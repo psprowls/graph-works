@@ -25,28 +25,29 @@ bare names.
 
 The layout and writer surface is six more, on the same rule:
 
-    paths -> {filing, sources, results, archive, decisions}
+    paths -> {filing, sources, results, mutation, reparent, archive, decisions}
 
-    from work_tracker_okf.paths import artifact_path, item_page
+    from work_tracker_okf.paths import artifact_ref, item_page
     from work_tracker_okf.filing import plan_filing
     from work_tracker_okf.sources import upsert
-    from work_tracker_okf.archive import apply_archive, plan_archive
+    from work_tracker_okf.reparent import plan_reparent
+    from work_tracker_okf.archive import plan_archive
 
-`paths.artifact_path` returns one frozen `ArtifactRef` carrying the bundle-relative
+`paths.artifact_ref` returns one frozen `ArtifactRef` carrying the bundle-relative
 form, the root-absolute `sources[].resource` form, the filesystem form and the
 matching `sources[].id` — so a caller cannot obtain a resource without its id.
 They stay submodules for the same reason the decision layer does: `filing.apply`
 and `advance.apply` are different things, and the module name is what says which.
 
-`archive` takes a bundle loaded through `ARCHIVE_IGNORE` rather than `IGNORE`:
-`okf_ext.moves` never reads `bundle.ignored`, so the narrow recipe would plan a
-move covering only the item page. It is the one path that wants the wider lens.
+Path mutations treat `Bundle.ignored` files beneath an owned subtree as members:
+unregistered `references/` content stays opaque while registered and canonical
+Markdown is promoted for repair. `mutation.WorkMutationPlan` is the single
+immutable effect vocabulary for reparenting, Release adoption, and local
+archival.
 
-Decision and adoption mutations use immutable plan/apply pairs. Planning
-captures every expected refusal without writing; decision apply rechecks its
-ledger snapshot under the existing exclusive lock, and adoption apply never
-discovers a workspace or invokes Git. The modules remain qualified because
-their generic `apply` names need the module owner to stay legible.
+Decision mutations use an immutable plan/apply pair. Path mutation planning
+captures every expected refusal without writing or applying filesystem effects;
+decision apply rechecks its ledger snapshot under the existing exclusive lock.
 
 `vocabulary` stays a submodule rather than being flattened into this namespace:
 its fourteen constants are read as `vocabulary.TERMINAL_STATUSES`, where the
@@ -56,7 +57,7 @@ module name says which vocabulary is meant, and hoisting them would make
 
 from __future__ import annotations
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from work_tracker_okf.init import BundleInstall, InitError, install_bundle, plan_install
 from work_tracker_okf.items import ARCHIVE_DIR, ARCHIVE_IGNORE, IGNORE, WORK_DIR, WorkItem, load_items

@@ -1,9 +1,9 @@
 # doc-wiki-okf
 
 The documentation-wiki lane over OKF v0.2 — see
-`wiki/work/2026-08-11-epic-doc-ingestion-layer/01-design-spec.md` in the
+`.works/okf/work/_archive/epic-doc-ingestion-layer/references/01-design.md` in the
 graph-wiki workspace for the full architecture, and
-`wiki/work/2026-08-11-epic-feature-scaffold-package-reading-core/01-design-spec.md`
+`.works/okf/work/_archive/epic-doc-ingestion-layer/children/_archive/feature-epic-feature-scaffold-package-reading-core/references/01-design.md`
 for what this first slice ships.
 
 ## What is here today

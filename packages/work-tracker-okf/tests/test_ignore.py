@@ -17,9 +17,9 @@ _EXPECTED = (
 )
 
 _ARTIFACTS = (
-    "work/feature-beta/references/01-design-spec.md",
-    "work/feature-beta/references/02-plan-plan.md",
-    "work/feature-beta/references/03-plan-transcript.txt",
+    "work/epic-alpha/children/feature-beta/references/01-design.md",
+    "work/epic-alpha/children/feature-beta/references/02-plan.md",
+    "work/epic-alpha/children/feature-beta/references/03-execute-transcript.jsonl",
 )
 
 
@@ -32,7 +32,7 @@ def test_references_pages_are_concepts_without_the_recipe(minimal_root: Path) ->
     pages *are* concepts, so the assertion that they are not is about the
     pattern rather than about the fixture."""
     bundle = load_bundle(minimal_root)
-    assert "work/feature-beta/references/01-design-spec" in bundle.concepts
+    assert "work/epic-alpha/children/feature-beta/references/01-design" in bundle.concepts
 
 
 def test_the_recipe_drops_every_artifact_from_concepts(minimal_root: Path) -> None:
@@ -76,15 +76,15 @@ def test_a_nested_ds_store_is_ignored_by_the_read_lens_but_still_a_member(tmp_pa
 
 def test_the_recipe_leaves_the_item_pages_alone(minimal_root: Path) -> None:
     bundle = load_bundle(minimal_root, ignore=IGNORE)
-    assert {item.slug for item in load_items(bundle)} == {
-        "broken-eta",
-        "bug-gamma",
-        "bug-theta",
-        "epic-alpha",
-        "feature-beta",
-        "spike-zeta",
-        "tech-debt-delta",
-        "test-gap-epsilon",
+    assert {item.path for item in load_items(bundle)} == {
+        "work/bug-broken-eta",
+        "work/bug-gamma",
+        "work/epic-alpha",
+        "work/epic-alpha/children/_archive/bug-theta",
+        "work/epic-alpha/children/feature-beta",
+        "work/spike-zeta",
+        "work/tech-debt-delta",
+        "work/test-gap-epsilon",
     }
 
 
@@ -139,8 +139,8 @@ def test_the_archive_recipe_makes_artifacts_visible_to_moves(minimal_root: Path)
     """The property the whole archive path rests on: `moves` builds its mapping
     from concepts, assets, indexes and logs -- never from `bundle.ignored`."""
     bundle = load_bundle(minimal_root, ignore=ARCHIVE_IGNORE)
-    assert "work/feature-beta/references/01-design-spec" in bundle.concepts
-    assert "work/feature-beta/references/03-plan-transcript.txt" in bundle.assets
+    assert "work/epic-alpha/children/feature-beta/references/01-design" in bundle.concepts
+    assert "work/epic-alpha/children/feature-beta/references/03-execute-transcript.jsonl" in bundle.assets
 
 
 def test_load_items_is_lens_independent(minimal_root: Path) -> None:
@@ -156,9 +156,9 @@ def test_load_items_is_lens_independent(minimal_root: Path) -> None:
 def test_the_ledger_is_ignored_by_the_reader_recipe(conformant_root: Path) -> None:
     """§3.1: the ledger lives inside `references/`, so `*/references/*` already
     covers it. No new pattern, and no `IGNORE` / `ARCHIVE_IGNORE` delta churn."""
-    from work_tracker_okf.paths import decisions_ledger
+    from work_tracker_okf.decisions import ledger_ref
 
-    ref = decisions_ledger("2026-03-01-epic-conformant-vault")
+    ref = ledger_ref("work/release-path-native-cutover/children/epic-conformant-vault")
     bundle = load_bundle(conformant_root, ignore=IGNORE)
     assert ref.rel in bundle.ignored
     assert bundle.has_member(ref.rel)
@@ -168,17 +168,17 @@ def test_the_ledger_is_visible_to_the_archive_recipe(conformant_root: Path) -> N
     """The other half: `ARCHIVE_IGNORE` is `IGNORE` minus `*/references/*`, so
     `okf_ext.moves` — which never reads `bundle.ignored` — sees the ledger and
     the archive carries it along."""
-    from work_tracker_okf.paths import decisions_ledger
+    from work_tracker_okf.decisions import ledger_ref
 
-    ref = decisions_ledger("2026-03-01-epic-conformant-vault")
+    ref = ledger_ref("work/release-path-native-cutover/children/epic-conformant-vault")
     bundle = load_bundle(conformant_root, ignore=ARCHIVE_IGNORE)
     assert ref.rel.removesuffix(".md") in bundle.concepts
 
 
 def test_adding_the_ledger_grew_no_ignore_pattern() -> None:
     """The claim §3.1 buys: `_EXPECTED` above is unchanged by this port."""
-    from work_tracker_okf.paths import LEDGER_FILENAME
+    from work_tracker_okf.paths import MANAGED_ARTIFACTS
 
-    stem = LEDGER_FILENAME.removesuffix(".md")
+    stem = MANAGED_ARTIFACTS["decisions"].removesuffix(".md")
     assert stem not in " ".join(IGNORE)
     assert stem not in " ".join(ARCHIVE_IGNORE)

@@ -8,6 +8,8 @@ import pytest
 from okf_io import load_bundle, validate
 from okf_io.validate import Report
 from work_helpers import (
+    CONFORMANT_ROOT,
+    CONFORMANT_TODAY,
     NONCONFORMANT_GOLDEN,
     NONCONFORMANT_REPO,
     NONCONFORMANT_ROOT,
@@ -26,17 +28,20 @@ ERROR_CODES = frozenset(
         "state.mitigated-without-mitigation",
         "plan.accepted-without-plan",
         "plan.action-target-missing",
-        "graph.parent-missing",
-        "graph.parent-type-invalid",
         "graph.depends-on-missing",
         "graph.depends-on-invalid",
-        "graph.parent-cycle",
         "graph.depends-on-cycle",
         "targets.affects-missing",
         "decisions.entry-invalid",
         "decisions.cite-missing",
         "decisions.open-at-finish",
         "decisions.supersedes-invalid",
+        "structure.illegal-lane",
+        "structure.release-nested",
+        "structure.children-on-leaf",
+        "structure.owned-directory-missing",
+        "structure.source-id-duplicate",
+        "structure.source-escape",
     }
 )
 
@@ -61,26 +66,27 @@ def test_every_declared_code_carries_its_module_prefix() -> None:
             assert code.startswith(f"{topic}."), (topic, code)
 
 
-def test_the_catalog_is_thirty_one_codes_across_five_topics() -> None:
-    assert len(_rules.CATALOG) == 31
-    assert len(_rules.TOPICS) == 5
-    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 31
+def test_the_catalog_is_thirty_seven_codes_across_six_topics() -> None:
+    assert len(_rules.CATALOG) == 37
+    assert len(_rules.TOPICS) == 6
+    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 37
 
 
 def test_the_per_topic_counts_match_the_design_spec() -> None:
     assert {topic: len(codes) for topic, codes in _rules.CODES_BY_TOPIC.items()} == {
-        "state": 10,
+        "state": 9,
         "plan": 4,
-        "graph": 9,
-        "targets": 3,
+        "graph": 5,
+        "structure": 12,
+        "targets": 2,
         "decisions": 5,
     }
 
 
-def test_the_severity_split_is_sixteen_errors_and_fifteen_warns() -> None:
-    assert len(ERROR_CODES) == 16
+def test_the_severity_split_is_nineteen_errors_and_eighteen_warns() -> None:
+    assert len(ERROR_CODES) == 19
     assert ERROR_CODES < _rules.CATALOG
-    assert len(_rules.CATALOG - ERROR_CODES) == 15
+    assert len(_rules.CATALOG - ERROR_CODES) == 18
 
 
 def test_no_lane_topic_collides_with_a_built_in_or_an_okf_ext_prefix() -> None:
@@ -96,12 +102,12 @@ def test_the_registry_is_homogeneous() -> None:
     assert set(_rules.RULES_BY_TOPIC) == set(_rules.CODES_BY_TOPIC)
 
 
-def test_lane_rules_is_fourteen_functions_with_a_repo_root(tmp_path: Path) -> None:
-    assert len(lane_rules(repo_root=tmp_path)) == 14
+def test_lane_rules_is_sixteen_functions_with_a_repo_root(tmp_path: Path) -> None:
+    assert len(lane_rules(repo_root=tmp_path)) == 16
 
 
 def test_lane_rules_drops_the_two_repo_rules_without_one() -> None:
-    assert len(lane_rules()) == 12
+    assert len(lane_rules()) == 14
 
 
 def test_lane_rules_is_stable_across_calls(tmp_path: Path) -> None:
@@ -147,7 +153,7 @@ def golden_report() -> Report:
 
 
 def test_the_vault_triggers_every_catalog_code(golden_report: Report) -> None:
-    """One walk, all 31. This is what catches a rule that stops firing."""
+    """One walk, all 37. This is what catches a rule that stops firing."""
     assert {f.code for f in _lane_findings(golden_report)} == _rules.CATALOG
 
 
@@ -155,7 +161,7 @@ def test_no_rule_emits_an_undeclared_code(golden_report: Report) -> None:
     assert {f.code for f in _lane_findings(golden_report)} <= _rules.CATALOG
 
 
-def test_the_error_codes_are_exactly_the_sixteen(golden_report: Report) -> None:
+def test_the_error_codes_are_exactly_the_nineteen(golden_report: Report) -> None:
     lane = _lane_findings(golden_report)
     assert {f.code for f in lane if f.severity == "error"} == ERROR_CODES
 
@@ -163,6 +169,23 @@ def test_the_error_codes_are_exactly_the_sixteen(golden_report: Report) -> None:
 def test_the_warn_codes_are_the_catalog_remainder(golden_report: Report) -> None:
     lane = _lane_findings(golden_report)
     assert {f.code for f in lane if f.severity == "warn"} == _rules.CATALOG - ERROR_CODES
+
+
+def test_each_new_structure_code_fires_once(golden_report: Report) -> None:
+    counts = {code: 0 for code in _rules.CODES_BY_TOPIC["structure"]}
+    for finding in _lane_findings(golden_report):
+        if finding.code in counts:
+            counts[finding.code] += 1
+    assert set(counts.values()) == {1}
+
+
+def test_the_conformant_fixture_has_zero_lane_errors() -> None:
+    report = validate(
+        load_bundle(CONFORMANT_ROOT, ignore=IGNORE),
+        today=CONFORMANT_TODAY,
+        extra_rules=lane_rules(repo_root=Path.cwd()),
+    )
+    assert [finding for finding in _lane_findings(report) if finding.severity == "error"] == []
 
 
 def test_the_report_matches_the_reviewed_golden_file(golden_report: Report) -> None:

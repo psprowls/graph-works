@@ -3,7 +3,7 @@ type: Epic
 title: Alpha epic
 description: The epic every other fixture item hangs off.
 status: stable
-workflow_status: accepted
+work_status: accepted
 phase: execute
 effort: large
 opened: 2026-01-01

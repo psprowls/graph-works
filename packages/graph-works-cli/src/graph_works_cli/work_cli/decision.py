@@ -1,8 +1,7 @@
 """`gw work decision` — the epic-owned decisions ledger, nested under `gw work`.
 
-Every verb accepts **any** slug inside an epic's subtree: core walks up to the
-owning epic and reports the redirect as `resolved_from`, so a fan-out subagent
-can pass its own slug without knowing its epic.
+Every verb accepts any canonical path and core resolves its nearest
+Release/Epic/Feature decision owner, so a fan-out worker need not know it.
 
 `overturn` is one logical operation, not two commands: it retires the old
 decision, records its replacement, and files the follow-up work item
@@ -15,9 +14,9 @@ from __future__ import annotations
 from datetime import UTC, date, datetime
 
 import typer
-from code_wiki_okf.config import Config, ConfigError, load_config
 from graph_works_core.work import commands as work
-from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
+from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 from graph_works_cli import exit_codes
@@ -31,39 +30,40 @@ def _today() -> date:
     return datetime.now(UTC).date()
 
 
-def _config(layout: WorkspaceLayout) -> Config:
+def _config(layout: WorkspaceLayout) -> WorkspaceConfig:
     try:
-        return load_config(
-            layout.bundle_dir,
-            config_path=layout.manifest_path,
-            graph_dir=layout.cache_dir,
-            declarations_dir=layout.config_dir,
-        )
-    except ConfigError as exc:
+        return load_workspace_config(layout)
+    except WorkspaceConfigError as exc:
         rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), cause=exc)
 
 
 def _unknown_target(exc: ValueError) -> typer.Exit:
-    """`run_decision_*` raises `ValueError` for both an unknown slug and a slug
-    with no epic ancestor. Both are unresolved targets, so both land on
+    """`run_decision_*` raises `ValueError` for an unknown path or one
+    with no decision owner. Both are unresolved targets, so both land on
     `AMBIGUOUS` -- the message distinguishes them, the exit code does not."""
     rendering.fail(str(exc), code=exit_codes.AMBIGUOUS, cause=exc)
 
 
 def _emit(payload: dict[str, object], *, verb: str, json_output: bool) -> None:
+    warnings = payload["warnings"]
+    assert isinstance(warnings, list)
+    for warning in warnings:
+        rendering.warn(str(warning))
+    if payload["refusal"] is not None:
+        rendering.fail(f"refused ({payload['refusal']}); nothing was applied")
+    if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
+        rendering.fail("decision apply was incomplete")
     if json_output:
         rendering.emit(payload)
     else:
         rendering.render_decision_write(payload, verb)
-    if payload["refusal"] is not None:
-        rendering.fail(f"refused ({payload['refusal']})")
 
 
 @decision_app.command()
 def add(
-    slug: str = typer.Argument(..., help="Any slug in the epic's subtree; resolves to the owning epic."),
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
     question: str = typer.Option(..., "--question", help="The question this decision settles."),
     status: str = typer.Option("open", "--status", help="answered|assumed|open|superseded."),
     answer: str = typer.Option("", "--answer", help="Renders as an **Answer:** block."),
@@ -80,7 +80,7 @@ def add(
     try:
         result = work.run_decision_add(
             layout,
-            slug,
+            path,
             question=question,
             status=status,
             answer=answer or None,
@@ -100,9 +100,9 @@ def add(
 
 @decision_app.command(name="list")
 def list_cmd(
-    slug: str = typer.Argument(..., help="Any slug in the epic's subtree."),
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
     status: str = typer.Option("", "--status", help="Filter: answered|assumed|open|superseded."),
-    affects: str = typer.Option("", "--affects", help="Filter: entries whose affects contain this slug."),
+    affects: str = typer.Option("", "--affects", help="Filter: entries whose affects contain this work path."),
     cites: str = typer.Option("", "--cites", help="Filter: entries referencing this id, e.g. D-014."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = typer.Option(False, "--json"),
@@ -115,7 +115,7 @@ def list_cmd(
     layout = resolve_workspace(workspace)
     try:
         result = work.run_decision_list(
-            layout, slug, status=status or None, affects=affects or None, cites=cites or None
+            layout, path, status=status or None, affects=affects or None, cites=cites or None
         )
     except ValueError as exc:
         _unknown_target(exc)
@@ -123,6 +123,8 @@ def list_cmd(
         rendering.fail(str(exc), cause=exc)
 
     payload = rendering.decision_payload(result)
+    for warning in payload["warnings"]:
+        rendering.warn(warning)
     if json_output:
         rendering.emit(payload)
     else:
@@ -131,7 +133,7 @@ def list_cmd(
 
 @decision_app.command()
 def answer(
-    slug: str = typer.Argument(..., help="Any slug in the epic's subtree."),
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
     decision_id: str = typer.Argument(..., metavar="DECISION_ID", help="e.g. D-014."),
     answer_text: str = typer.Option(..., "--answer", help="Renders as an **Answer:** block."),
     rationale: str = typer.Option("", "--rationale", help="Renders as a **Rationale:** block."),
@@ -145,7 +147,7 @@ def answer(
     try:
         result = work.run_decision_answer(
             layout,
-            slug,
+            path,
             decision_id,
             answer=answer_text,
             rationale=rationale or None,
@@ -162,7 +164,7 @@ def answer(
 
 @decision_app.command()
 def supersede(
-    slug: str = typer.Argument(..., help="Any slug in the epic's subtree."),
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
     decision_id: str = typer.Argument(..., metavar="DECISION_ID", help="The id being retired, e.g. D-014."),
     question: str = typer.Option(..., "--question", help="The replacement entry's question."),
     answer_text: str = typer.Option(..., "--answer", help="Renders as an **Answer:** block."),
@@ -179,7 +181,7 @@ def supersede(
     try:
         result = work.run_decision_supersede(
             layout,
-            slug,
+            path,
             decision_id,
             question=question,
             answer=answer_text,
@@ -198,7 +200,7 @@ def supersede(
 
 @decision_app.command()
 def overturn(
-    slug: str = typer.Argument(..., help="Any slug in the epic's subtree."),
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
     decision_id: str = typer.Argument(..., metavar="DECISION_ID", help="The id being overturned, e.g. D-014."),
     answer_text: str = typer.Option(..., "--answer", help="The new decision; renders as an **Answer:** block."),
     follow_up_title: str = typer.Option(..., "--follow-up-title", help="Title of the follow-up work item."),
@@ -221,7 +223,7 @@ def overturn(
         result = work.run_decision_overturn(
             layout,
             config,
-            slug,
+            path,
             decision_id,
             answer=answer_text,
             rationale=rationale or None,
@@ -246,9 +248,13 @@ def overturn(
         rendering.fail(str(exc), cause=exc)
 
     payload = rendering.overturn_payload(result)
+    for warning in payload["warnings"]:
+        rendering.warn(warning)
+    if payload["refusal"] is not None:
+        rendering.fail(f"refused ({payload['refusal']}); neither the ledger nor the work lane was written")
+    if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
+        rendering.fail("overturn apply rolled back; no partial JSON emitted")
     if json_output:
         rendering.emit(payload)
     else:
         rendering.render_decision_write(payload, "appended")
-    if payload["refusal"] is not None:
-        rendering.fail(f"refused ({payload['refusal']}); neither the ledger nor the work lane was written")

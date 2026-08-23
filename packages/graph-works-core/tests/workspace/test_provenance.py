@@ -151,10 +151,10 @@ def test_results_facts_does_not_flag_a_start_at_or_after_the_item(repo):
 
 def test_the_active_work_pointer_lands_in_the_cache_dir(tmp_path):
     layout = layout_for(tmp_path)
-    written = provenance.write_active_work(layout, "slug-x", "execute", updated="2026-08-14")
+    written = provenance.write_active_work(layout, "work/feature-x", "execute", updated="2026-08-14")
     assert written == layout.cache_dir / provenance.ACTIVE_WORK_FILENAME
     assert json.loads(written.read_text(encoding="utf-8")) == {
-        "slug": "slug-x",
+        "path": "work/feature-x",
         "phase": "execute",
         "updated": "2026-08-14",
     }
@@ -164,7 +164,12 @@ def test_a_done_pointer_is_refused(tmp_path):
     # `done` is not an ARTIFACT_PHASES member and `artifact_path` raises on it,
     # so a done pointer would crash the *next* hook rather than this one.
     with pytest.raises(ValueError):
-        provenance.write_active_work(layout_for(tmp_path), "slug-x", "done", updated="2026-08-14")
+        provenance.write_active_work(layout_for(tmp_path), "work/feature-x", "done", updated="2026-08-14")
+
+
+def test_a_noncanonical_active_work_path_is_refused(tmp_path):
+    with pytest.raises(ValueError, match="canonical work-item path"):
+        provenance.write_active_work(layout_for(tmp_path), "feature-x", "execute", updated="2026-08-14")
 
 
 def test_writing_the_pointer_degrades_on_oserror(tmp_path, monkeypatch):
@@ -174,20 +179,20 @@ def test_writing_the_pointer_degrades_on_oserror(tmp_path, monkeypatch):
         raise OSError("nope")
 
     monkeypatch.setattr(Path, "write_text", _boom)
-    assert provenance.write_active_work(layout, "slug-x", "execute", updated="2026-08-14") is None
+    assert provenance.write_active_work(layout, "work/feature-x", "execute", updated="2026-08-14") is None
 
 
-def test_clearing_removes_a_pointer_at_an_archived_slug(tmp_path):
+def test_clearing_removes_a_pointer_at_an_archived_path(tmp_path):
     layout = layout_for(tmp_path)
-    provenance.write_active_work(layout, "slug-x", "execute", updated="2026-08-14")
-    assert provenance.clear_active_work(layout, {"slug-x"}) is True
+    provenance.write_active_work(layout, "work/feature-x", "execute", updated="2026-08-14")
+    assert provenance.clear_active_work(layout, {"work/feature-x"}) is True
     assert not (layout.cache_dir / provenance.ACTIVE_WORK_FILENAME).exists()
 
 
-def test_clearing_leaves_a_pointer_at_a_different_slug(tmp_path):
+def test_clearing_leaves_a_pointer_at_a_different_path(tmp_path):
     layout = layout_for(tmp_path)
-    provenance.write_active_work(layout, "slug-x", "execute", updated="2026-08-14")
-    assert provenance.clear_active_work(layout, {"slug-y"}) is False
+    provenance.write_active_work(layout, "work/feature-x", "execute", updated="2026-08-14")
+    assert provenance.clear_active_work(layout, {"work/feature-y"}) is False
     assert (layout.cache_dir / provenance.ACTIVE_WORK_FILENAME).exists()
 
 
@@ -196,11 +201,29 @@ def test_clearing_fails_open_on_a_broken_pointer(tmp_path, body):
     layout = layout_for(tmp_path)
     layout.cache_dir.mkdir(parents=True, exist_ok=True)
     (layout.cache_dir / provenance.ACTIVE_WORK_FILENAME).write_text(body, encoding="utf-8")
-    assert provenance.clear_active_work(layout, {"slug-x"}) is False
+    assert provenance.clear_active_work(layout, {"work/feature-x"}) is False
 
 
 def test_clearing_a_missing_pointer_is_a_no_op(tmp_path):
-    assert provenance.clear_active_work(layout_for(tmp_path), {"slug-x"}) is False
+    assert provenance.clear_active_work(layout_for(tmp_path), {"work/feature-x"}) is False
+
+
+def test_old_slug_pointer_is_discarded_as_invalid_coordination_state(tmp_path):
+    layout = layout_for(tmp_path)
+    layout.cache_dir.mkdir(parents=True, exist_ok=True)
+    target = layout.cache_dir / provenance.ACTIVE_WORK_FILENAME
+    target.write_text('{"slug":"feature-x","phase":"execute"}\n', encoding="utf-8")
+    assert provenance.clear_active_work(layout, {"work/feature-x"}) is True
+    assert not target.exists()
+
+
+def test_noncanonical_path_pointer_is_discarded_as_invalid_coordination_state(tmp_path):
+    layout = layout_for(tmp_path)
+    layout.cache_dir.mkdir(parents=True, exist_ok=True)
+    target = layout.cache_dir / provenance.ACTIVE_WORK_FILENAME
+    target.write_text('{"path":"feature-x","phase":"execute"}\n', encoding="utf-8")
+    assert provenance.clear_active_work(layout, {"work/feature-x"}) is True
+    assert not target.exists()
 
 
 def test_a_sibling_worktree_stamps_when_repo_is_itself_a_worktree(repo, tmp_path):

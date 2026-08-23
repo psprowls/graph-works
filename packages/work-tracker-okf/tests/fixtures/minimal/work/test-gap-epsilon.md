@@ -3,7 +3,7 @@ type: TestGap
 title: Epsilon gap
 description: An open test gap at the design phase.
 status: draft
-workflow_status: open
+work_status: open
 phase: design
 effort: xtra-small
 opened: '2026-02-04'

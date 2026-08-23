@@ -17,41 +17,30 @@ from graph_works_cli.util_cli import main as util_main
 from graph_works_cli.util_cli import tokens as tokens_module
 from graph_works_cli.util_cli import trace as trace_module
 from graph_works_cli.work_cli.main import work_app
-from graph_works_cli.workspace_resolution import resolve_workspace
 from typer.testing import CliRunner
 
 runner = CliRunner()
 
-ITEM = """---
-type: Feature
-title: {slug}
-description: d
-status: stable
-workflow_status: open
-phase: {phase}
-effort: medium
-opened: 2026-08-01
-updated: 2026-08-01
-affects:
-- packages/a
----
 
-## Summary
-d
-
-## Plan
-
-| Action | Done when | Rationale |
-| --- | --- | --- |
-"""
-
-
-def write_item(workspace: Path, slug: str, *, phase: str = "plan", template: str = ITEM) -> Path:
-    layout = resolve_workspace(str(workspace))
-    target = layout.bundle_dir / "work" / f"{slug}.md"
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(template.format(slug=slug, phase=phase), encoding="utf-8")
-    return target
+def write_item(workspace: Path) -> str:
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Alpha",
+            "--kind",
+            "Feature",
+            "--summary",
+            "d",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    return str(json.loads(result.stdout)["path"])
 
 
 def test_next_is_the_same_callback_as_work_next() -> None:
@@ -76,10 +65,9 @@ def test_next_emits_no_guidance_keys(tmp_path: Path) -> None:
     workspace = tmp_path / "works"
     bootstrap = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(workspace)])
     assert bootstrap.exit_code == 0, bootstrap.output
-    slug = "2026-08-01-feature-a"
-    write_item(workspace, slug, phase="plan")
+    path = write_item(workspace)
 
-    result = runner.invoke(app, ["next", slug, "--workspace", str(workspace), "--json"])
+    result = runner.invoke(app, ["next", path, "--workspace", str(workspace), "--json"])
 
     assert result.exit_code == exit_codes.SUCCESS, result.output
     payload = json.loads(result.stdout)
@@ -93,11 +81,10 @@ def test_next_and_work_next_produce_identical_json(tmp_path: Path) -> None:
     workspace = tmp_path / "works"
     bootstrap = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(workspace)])
     assert bootstrap.exit_code == 0, bootstrap.output
-    slug = "2026-08-01-feature-a"
-    write_item(workspace, slug, phase="plan")
+    path = write_item(workspace)
 
-    via_alias = runner.invoke(app, ["next", slug, "--workspace", str(workspace), "--json"])
-    via_work = runner.invoke(app, ["work", "next", slug, "--workspace", str(workspace), "--json"])
+    via_alias = runner.invoke(app, ["next", path, "--workspace", str(workspace), "--json"])
+    via_work = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace), "--json"])
 
     assert via_alias.exit_code == via_work.exit_code
     assert via_alias.stdout == via_work.stdout

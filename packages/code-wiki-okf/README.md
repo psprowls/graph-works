@@ -1,7 +1,7 @@
 # code-wiki-okf
 
 Generates and updates a standalone OKF v0.2 bundle from the shared code
-graph — see `wiki/work/2026-08-07-epic-code-wiki-okf-package/01-design-spec.md`
+graph — see `.works/okf/work/_archive/epic-code-wiki-okf-package/references/01-design.md`
 in the graph-wiki workspace for the full architecture.
 
 ## Usage

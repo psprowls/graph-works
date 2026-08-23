@@ -1,186 +1,54 @@
-# packages/work-tracker-okf
+# work-tracker-okf contributor guide
 
-Python ≥3.12 (the workspace floor). Tests are pytest.
+## Ownership
 
-## Layout
+This package owns the path-native work domain. Keep workspace discovery,
+configuration, process execution, and transactional journaling in
+`graph-works-core`; keep CLI parsing and rendering in the CLI packages.
 
-- `work_tracker_okf` — library plus the `cli`/`__main__` entry point. The
-  dependency and routing layers are `dependencies` → `items` → `hierarchy` →
-  `workflow` → `advance` / `children` / `projection`, importing strictly
-  downward and never the reverse.
-- `work_tracker_okf.compose` — what a composing CLI does that no single
-  writer owns: the shared rule set, the `sources[]` stamp, the `## Plan` row,
-  the one-save advance, and filing's index/log reconcile. Library rather than
-  CLI because tier 4 drives this lane through the Python API, so anything in a
-  Typer callback is something tier 4 has to reimplement.
-- `work_tracker_okf._rules` — the lane rule catalog: five topic modules
-  (`state`, `plan`, `graph`, `targets`, `decisions`) plus `_common` and the
-  registry. Exported as one `extra_rules=` bundle through `rules`'s
-  `lane_rules()`.
-- `work_tracker_okf.decisions` — the per-epic decisions ledger: pure text
-  (`parse`/`render`/`prose_block`), immutable snapshot planners
-  (`plan_append`/`plan_update`/`plan_supersede`), stale-safe locked apply
-  (`apply_plan`), and pure query (`query`/`counts`). Legacy direct mutators are
-  compatibility wrappers, not the interface new callers should compose. The
-  module imports `paths` and nothing else from the package.
-- `work_tracker_okf.adoption` — domain-only classification and apply for
-  migrated child specs. It consumes an already-loaded bundle and item
-  projection; it never discovers a workspace or invokes Git.
-- `work_tracker_okf.assets` — package-data seed files copied byte-for-byte
-  by `plan_install()`: seven `schema/` documents and seven `sections/`
-  declarations
-- The pytest suite includes the `minimal` fixture vault.
+The canonical identity is the complete extensionless bundle-relative path.
+Never add basename lookup, date-prefixed aliases, hierarchy frontmatter, or a
+fallback from a path to another item.
 
-## Conventions
+## Invariants
 
-- Never reads the clock: `today=` is an argument everywhere except `cli`,
-  the one module allowed to call it.
-- Never discovers paths: the bundle root is always explicit.
-- Nothing on the content path raises. `InitError` is for caller error (a root
-  that is not a directory) and nothing else; a malformed work item still
-  projects to a `WorkItem` with its uncoercible fields at their empty value.
-- Tier 3 per ADR-0005: its domain runtime depends on `okf-io` and
-  `okf-ext[schemas]`. Workspace-aware layers may depend on this package; this
-  package never imports those layers back.
-- The module name is the vocabulary's home: `vocabulary` holds every closed
-  set, and the base schema's `enum` arrays are reconciled against it by
-  the `test_vocabulary` test module rather than generated from it.
-- Writers plan, then apply. `advance()` returns an `AdvancePlan` and mutates
-  nothing; `apply(document, plan)` writes it. `children` splits the same way,
-  and `apply_children_sync` defaults to `dry_run=True`. Filing uses
-  `filing.plan_filing`/`filing.apply`, ledger mutations use the three
-  `decisions.plan_*` functions/`decisions.apply_plan`, and migrated specs use
-  `adoption.plan_adoption`/`adoption.apply_adoption`.
-- Refusals are data. `AdvancePlan.refusal` is a closed `RefusalReason`
-  vocabulary, not an exception — the one raise on this path
-  (`Document.set` on a document that failed to parse) is unreachable through
-  the public API, and the `test_advance` module pins that.
-- Two `ignore=` recipes, deliberately. `IGNORE` is what every reader and
-  validator uses; `ARCHIVE_IGNORE` (it minus `*/references/*` and
-  `*/.DS_Store`) is what the archive path plans moves through, because
-  `okf_ext.moves` never reads `bundle.ignored` — anything hidden from that
-  lens is left behind by the move, half-archiving an item in the first case
-  and stranding a file that blocks the emptied directory's prune in the
-  second. The `test_ignore` module asserts both literally *and*
-  asserts their delta, because two constants drifting apart silently is the
-  failure mode. `ARCHIVE_IGNORE` must never reach `validate()` or
-  `update_index`.
-- The decisions ledger lives at `work/<slug>/references/00-decisions.md` and the
-  epic page does **not** point at it. Inside `references/`, so `IGNORE`'s
-  existing `*/references/*` covers it with no new pattern and it rides along on
-  archive for free; unstamped, so `SOURCE_ID_PATTERN` and `_base.schema.json`
-  are untouched — there is no `decisions` id, and adding one is a schema change.
-  `decisions.ledger-missing` is what replaces the `targets.artifact-missing`
-  the missing stamp would otherwise have bought, and it asks the sharper
-  question: not "is this stamped resource present" but "does an epic that has
-  moved past design have a ledger at all."
+- Item pages occupy root, `children`, or local `_archive` lanes beneath `work/`.
+- `Release` is root-only; `Release`, `Epic`, and `Feature` may own children.
+- Hierarchy and archived state come from the physical path.
+- Lifecycle state is `work_status`.
+- Dependency entries contain `path`, `blocks`, and `needs`.
+- Managed artifacts live under the owner's `references/` directory and use the
+  filenames in `paths.MANAGED_ARTIFACTS`.
+- Decision ledgers belong to the nearest parent-capable item.
+- Path mutations cover a complete owned subtree, opaque attachments included.
+- Planners are write-free and return refusals as data.
 
-## Artifact roots and compatibility boundaries
+`IGNORE` is the ordinary read and validation lens. `ARCHIVE_IGNORE` exists only
+so a move planner can see reference-tree members that must move with an item.
 
-There are exactly two supported design-spec roots:
+## Compatibility boundary
 
-- `references/01-design-spec.md` is an item's canonical design artifact.
-- `references/child-specs/` is the migrated donor directory under an epic's
-  references directory; adoption moves matched donors to each child's
-  canonical artifact.
-
-Reject every legacy shortcut rather than carrying it forward: no `spec_doc`
-frontmatter, no direct `child-specs/` directory beside an epic page, no Git
-subprocess or workspace discovery in domain modules, no clock reads below the
-CLI, and no `force` argument on a planner or apply function. Callers resolve
-paths, dates, and repository state before entering this package.
-
-## Three things about `work_tracker_okf.compose`
-
-- **`advance` writes the page once.** `ensure_plan_row` uses
-  `okf_ext.tables.splice_text` + `Document.set_body`, never
-  `tables.plan_row` / `tables.apply`. The bundle-level pair plans and writes
-  against a `Bundle` independently, so pairing it with `advance.apply` would
-  write the same page twice — two writes, two chances to half-apply, and
-  okf-io's byte-fidelity splice running over a file that already moved
-  underneath it.
-- **The plan row's action cell names the root-absolute `resource`.** Its
-  leading slash is load-bearing: the plan target rule recognizes a relative
-  whitespace-free token, and a token starting with `/` cannot match, so
-  `plan.action-target-missing` correctly skips a bundle path. Writing the
-  bundle-relative form would make every advanced item report an error under
-  `--repo-root`.
-- **The log rule.** A command that changes *what the vault contains* appends one
-  `log.md` line — `init`, `file`, `archive`. A command that changes an existing
-  page's fields does not — `advance`, `sync-children`. One rule, so neither half
-  needs remembering.
-
-## The rule catalog
-
-31 codes, 5 topics, 14 rule functions. **The module name is the code prefix**,
-asserted mechanically in the `test_lane_catalog` module — the same move
-`okf_io`'s `test_catalog` module makes for its own eight. Adding a code means
-adding it to its topic module's `CODES` *and* to the rule that emits it; a new
-topic means a new module plus an entry in `_rules`' two registry mappings.
-
-The five prefixes had to clear eighteen taken names: okf-io's eight (which make
-`validate()` **raise**), okf-ext's six — `health`, `placement`, `render`,
-`schemas`, `sections`, `tags` — (which do not raise and would still be wrong,
-because the conformant vault runs `schema_rule` and `section_rule` in the same
-report), and, for `decisions`, this lane's own four. `lifecycle` is among
-okf-io's eight, which is why the module that was literally called
-`lifecycle_lint` could not keep its name.
-
-An earlier revision of this file undercounted the taken-name total, crediting
-okf-ext with one fewer module than it ships. The correct figure for that earlier
-state was fourteen. Nothing collided either way; the count was simply wrong.
-
-**The registry is a factory per topic, not a `RULES` tuple.** `RuleContext`
-deliberately carries no filesystem, and two codes (`targets.affects-missing`,
-`plan.action-target-missing`) are questions about a repository — so every topic
-exports `rules(config: LaneConfig)` and `lane_rules(repo_root=…)` composes them.
-`repo_root=None` **skips** those two rather than reporting them: not knowing
-where the repo is says nothing about whether the paths are good. Every topic
-exports the factory, including the two that inject nothing — a heterogeneous
-registry would make the catalog-completeness test special-case half its own
-subjects.
-
-**No caching of the projection.** Each rule function calls
-`load_items(ctx.bundle)` itself: measured at 93 µs for 7 items, about 30 ms
-across all fourteen on a 100-item vault. Fourteen independent passes, no shared
-state, and no cache whose invalidation nobody can see.
-
-`Finding.spec` cites the **module that defines the rule** for every lane
-invariant — an item whose `workflow_status` is `superseded` with no
-`superseded_by` is a perfectly conformant OKF v0.2 document — and `§5.1` only
-for the two `targets` codes about `sources[]`. Inventing a section number for a
-lane invariant would be a false citation that outlives whoever wrote it.
-
-The internal phase-compatibility map is **bonded to `workflow.route()` by a
-test**, not by derivation: the `test_phase_compat` module enumerates every
-`RouteState` over the closed sets and asserts the router never turns a coherent
-`(workflow_status, phase)` pair into one the map condemns. That bond is what
-makes the argument for keeping the routing table at tier 3 worth anything.
-
-### One thing okf-io does not do
-
-Nothing in okf-io or okf-ext validates a `sources[].resource` **target**.
-`links.build()` reads body prose only and never frontmatter, and
-`provenance.source-resource-missing` asserts only that the `resource` key is
-present. `targets.artifact-missing` exists because of that gap — a tier-2 gap,
-not a defect here. If okf-io ever grows the check, retire this code rather than
-leaving it to double-report.
+The retired dialect belongs only in `migration.py`, its legacy fixture, and its
+tests. Production readers, rules, filing, archiving, reparenting, and indexing
+must stay path-native. Any new compatibility behavior must be implemented as an
+explicit migration, never as a read-time fallback.
 
 ## Testing
 
-`uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests -v`
-from the repo root.
+The committed fixtures are contracts:
 
-The `nonconformant` fixture is the whole-catalog vault: one walk triggers every
-one of the 31 lane codes, and `nonconformant.golden.txt` is its reviewed output.
-Regenerating the golden alone proves nothing — what holds it honest is the
-hand-written `ERROR_CODES` set in the `test_lane_catalog` module and the
-conformant vault's zero-errors property. The sibling `nonconformant_repo`
-fixture is the synthetic repo `repo_root` points at; putting it inside the vault
-would force `IGNORE` to grow a pattern, which is the contract these tests exist
-to exercise.
+- `fixtures/minimal` is a small nested path-native tree with one intentionally
+  malformed page.
+- `fixtures/conformant` contains a root Release, nested Epic and Feature, leaf,
+  local archive, every lane index, cross-tree dependency, and nested registered
+  and opaque attachments.
+- `fixtures/nonconformant` triggers every lane catalog code without legacy
+  hierarchy fields.
+- `fixtures/legacy_graph_wiki` is migration-only and must remain isolated.
 
-`uv run --package work-tracker-okf mypy --strict packages/work-tracker-okf/src`
-is this package's type gate. The repository-level `just check` must also pass;
-do not dismiss a shared Ruff, strict-mypy, import-contract, test, or coverage
-failure as somebody else's gate.
+Run:
+
+```bash
+uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests \
+  --cov=work_tracker_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
+```

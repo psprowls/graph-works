@@ -124,12 +124,12 @@ work.run_file(
     title: str,
     description: str,
     on: date,
-    words: str | None = None,
+    name: str | None = None,
     effort: str | None = None,
     blast_radius: str | None = None,
     target: str | None = None,
     owner: str | None = None,
-    parent: str | None = None,
+    parent_path: str | None = None,
     depends_on: Sequence[DependencyEdge] = (),
     affects: Sequence[str] = (),
     tags: Sequence[str] = (),
@@ -138,7 +138,7 @@ work.run_file(
 
 work.run_next(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     descend: bool = False,
     dry_run: bool = True,
@@ -146,7 +146,7 @@ work.run_next(
 
 work.run_decision_add(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     question: str,
     status: str = "open",
@@ -161,7 +161,7 @@ work.run_decision_add(
 
 work.run_decision_answer(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     decision_id: str,
     *,
     answer: str,
@@ -173,7 +173,7 @@ work.run_decision_answer(
 
 work.run_decision_list(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     *,
     status: str | None = None,
     affects: str | None = None,
@@ -182,7 +182,7 @@ work.run_decision_list(
 
 work.run_decision_supersede(
     layout: WorkspaceLayout,
-    slug: str,
+    path: str,
     decision_id: str,
     *,
     question: str,
@@ -194,17 +194,10 @@ work.run_decision_supersede(
     dry_run: bool = True,
 ) -> DecisionCommandResult
 
-work.run_adopt_child_specs(
-    layout: WorkspaceLayout,
-    epic_slug: str,
-    *,
-    dry_run: bool = True,
-) -> AdoptChildSpecsResult
-
 work.run_decision_overturn(
     layout: WorkspaceLayout,
     config: Config,
-    slug: str,
+    path: str,
     decision_id: str,
     *,
     answer: str,
@@ -232,7 +225,7 @@ append before any write. `result.plan.refusal` prevents every effect.
 unexpected I/O failure preserves partial effects in the raised
 `work_tracker_okf.compose.FilingApplyError.application`.
 
-Pass typed edges, including distinct gates for the same slug when needed:
+Pass typed edges, including distinct gates for the same path when needed:
 
 ```python
 from datetime import date
@@ -248,7 +241,7 @@ result = work.run_file(
     on=date(2026, 8, 18),
     depends_on=(
         DependencyEdge(
-            "2026-08-18-feature-design-input",
+            "work/feature-design-input",
             blocks="plan",
             needs="design",
         ),
@@ -256,22 +249,22 @@ result = work.run_file(
 )
 ```
 
-`DependencyEdge(slug)` means `blocks="execute", needs="resolved"`. A
+`DependencyEdge(path)` means `blocks="execute", needs="resolved"`. A
 dependency satisfies a phase requirement only after moving past that phase;
 terminal items satisfy every edge. Unknown dependencies and malformed gates
 fail closed. Exact duplicate triples are invalid, while distinct triples for
-one slug are allowed.
+one path are allowed.
 
 ### Next and canonical source normalization
 
-`run_next` returns both `requested_slug` and `selected_slug`; `descend=True`
+`run_next` returns both `requested_path` and `selected_path`; `descend=True`
 walks a gated parent to its next actionable leaf. If a canonical
-`references/01-design-spec.md` exists but the item lacks its `design-spec`
+`references/01-design.md` exists but the item lacks its `design`
 source, the dry run includes a `SourceNormalization` and routes against that
 planned state without writing.
 
 With `dry_run=False`, normalization is best-effort. Each page is reloaded
-before saving, so an authored `design-spec` source introduced after planning
+before saving, so an authored `design` source introduced after planning
 wins and does not prevent later normalizations from running. The command then
 reloads the bundle and recomputes the selected route from persisted state;
 save failures appear in `NextResult.warnings` rather than producing a route
@@ -296,19 +289,6 @@ stale, no follow-up is filed. If filing fails after partial effects, the raised
 `OverturnApplyError` preserves both the completed decision application and the
 partial filing application, with the original `FilingApplyError` as its
 `__cause__`; this is observable partial-effect reporting, not rollback.
-
-### Migrated child-spec adoption
-
-`run_adopt_child_specs` loads one workspace bundle and delegates to
-`work_tracker_okf.adoption`. Its only donor root is
-`work/<epic>/references/child-specs/`; each matched direct child lands at
-`work/<child>/references/01-design-spec.md` and receives the canonical
-`/work/<child>/references/01-design-spec.md` source resource.
-
-The default dry run is byte-identical. Apply creates destinations without
-overwrite, removes a donor only after its destination is written, preserves
-authored noncanonical sources, and is idempotent. The domain planner never
-discovers a workspace or invokes Git, and neither layer exposes `force`.
 
 ## The graph surface
 

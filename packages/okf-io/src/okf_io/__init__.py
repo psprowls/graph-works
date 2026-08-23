@@ -88,7 +88,7 @@ from okf_io.models import (
 )
 from okf_io.validate import Finding, Report, Rule, RuleContext, Severity, validate
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 __all__ = [
     "Actor",

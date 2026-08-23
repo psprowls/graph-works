@@ -7,7 +7,7 @@ or decides whether reconciliation is complete.
 
 Incomplete evidence is a success. A missing repo, ledger, or usable anchor
 degrades to partial groups plus `warnings` and exits `SUCCESS`; only an
-unresolved slug and a `--repo` that is not a Git repository are failures.
+unresolved path and a `--repo` that is not a Git repository are failures.
 """
 
 from __future__ import annotations
@@ -40,7 +40,7 @@ def _repo_override(repo: str) -> Path | None:
 
 
 def reconcile_context(
-    slug: str = typer.Argument(..., help="Work item slug (file stem under work/)."),
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
     repo: str = typer.Option("", "--repo", help="Code repository path; overrides the declared resolution."),
     repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
@@ -50,7 +50,7 @@ def reconcile_context(
     layout = resolve_workspace(workspace)
     override = _repo_override(repo)
     try:
-        context = run_reconcile_context(layout, slug, repo=override, repo_name=repo_name or None)
+        context = run_reconcile_context(layout, path, repo=override, repo_name=repo_name or None)
     except WorkspaceError as exc:
         rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:

@@ -1,9 +1,10 @@
-"""High-level decision commands resolving every item to its epic-owned ledger."""
+"""Path-owned decisions are planned and committed as one work mutation."""
 
 from __future__ import annotations
 
-import operator
-from dataclasses import FrozenInstanceError
+import fcntl
+import hashlib
+import os
 from datetime import date
 from pathlib import Path
 
@@ -11,110 +12,42 @@ import pytest
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
-from graph_works_core.work.commands import OverturnApplication
-from graph_works_core.workspace.layout import WorkspaceLayout
-from work_tracker_okf.compose import FilingApplication, FilingApplyError
-from work_tracker_okf.filing import compose_slug
+from okf_io import load
 
-TODAY = date(2026, 8, 17)
-EPIC = "2026-08-01-epic-x"
-CHILD = "2026-08-02-feature-a"
-
-_ITEM = """---
-type: {type}
-title: {slug}
-description: d
-status: stable
-workflow_status: open
-phase: {phase}
-effort: medium
-opened: 2026-08-01
-updated: 2026-08-01
-affects:
-- packages/a
-{extra}---
-
-## Summary
-d
-
-## Plan
-
-| Action | Done when | Rationale |
-| --- | --- | --- |
-"""
+TODAY = date(2026, 8, 23)
+OWNER = "work/release-v1/children/epic-a/children/feature-a"
+LEAF = f"{OWNER}/children/bug-a"
 
 
-def _workspace(tmp_path):
+def _layout(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
-    layout = apply_init(plan_init(repo / ".works", today=TODAY, topic="Work")).layout
-    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
+    (repo / "packages/a").mkdir(parents=True)
+    return apply_init(plan_init(repo / ".works", today=TODAY, topic="Decisions")).layout
+
+
+def _write(layout, path: str, type: str) -> None:
+    page = layout.bundle_dir / f"{path}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        f"---\ntype: {type}\ntitle: {path}\ndescription: d\nstatus: stable\nwork_status: open\n"
+        "phase: design\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\naffects:\n"
+        "- packages/a\n---\n\n## Summary\nd\n\n## Plan\n\n| Action | Done when | Rationale |\n"
+        "| --- | --- | --- |\n",
+        encoding="utf-8",
+    )
+
+
+def _workspace(tmp_path: Path):
+    layout = _layout(tmp_path)
+    _write(layout, "work/release-v1", "Release")
+    _write(layout, "work/release-v1/children/epic-a", "Epic")
+    _write(layout, OWNER, "Feature")
+    _write(layout, LEAF, "Bug")
     return layout
 
 
-def _write_item(layout, slug, *, type="Feature", phase="design", extra="", archived=False):
-    directory = layout.bundle_dir / "work" / "_archive" if archived else layout.bundle_dir / "work"
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{slug}.md").write_text(
-        _ITEM.format(type=type, slug=slug, phase=phase, extra=extra), encoding="utf-8"
-    )
-
-
-def _seeded(tmp_path):
-    layout = _workspace(tmp_path)
-    _write_item(layout, EPIC, type="Epic", phase="execute")
-    _write_item(layout, CHILD, extra=f"parent: {EPIC}\n")
-    return layout
-
-
-def snapshot_bytes(root: Path) -> dict[str, bytes]:
-    return {path.relative_to(root).as_posix(): path.read_bytes() for path in sorted(root.rglob("*")) if path.is_file()}
-
-
-def seeded_decisions(tmp_path):
-    layout = _seeded(tmp_path)
-    work.run_decision_add(
-        layout,
-        CHILD,
-        question="q1",
-        status="open",
-        affects=(CHILD,),
-        on=TODAY,
-        decided_by="pat",
-        dry_run=False,
-    )
-    work.run_decision_add(
-        layout,
-        CHILD,
-        question="q2",
-        status="assumed",
-        answer="guess",
-        if_wrong="re-plan",
-        on=TODAY,
-        decided_by="pat",
-        dry_run=False,
-    )
-    return layout
-
-
-def overturn_workspace(tmp_path: Path) -> tuple[WorkspaceLayout, Config, Path]:
-    layout = _seeded(tmp_path)
-    config = _config(layout)
-    work.run_decision_add(
-        layout,
-        EPIC,
-        question="Which layout?",
-        status="answered",
-        answer="Original",
-        on=TODAY,
-        decided_by="pat",
-        dry_run=False,
-    )
-    ledger = layout.bundle_dir / "work" / EPIC / "references/00-decisions.md"
-    return layout, config, ledger
-
-
-def _config(layout: WorkspaceLayout) -> Config:
+def _config(layout) -> Config:
     return Config(
         graph_dir=layout.cache_dir / "graph",
         declarations_dir=layout.config_dir,
@@ -123,409 +56,484 @@ def _config(layout: WorkspaceLayout) -> Config:
     )
 
 
-def create_follow_up_collision(layout: WorkspaceLayout, *, title: str, on: date) -> None:
-    slug, _warnings = compose_slug("TechDebt", title, on=on)
-    page = layout.bundle_dir / "work" / f"{slug}.md"
-    page.write_text("authored collision\n", encoding="utf-8")
-
-
-def test_add_dry_run_returns_the_same_plan_real_apply_uses(tmp_path):
-    layout = _seeded(tmp_path)
-    before = snapshot_bytes(layout.bundle_dir)
-    dry = work.run_decision_add(
-        layout,
-        CHILD,
-        question="Which store?",
-        status="assumed",
-        answer="SQLite",
-        rationale="single writer",
-        if_wrong="re-plan storage",
-        affects=(CHILD,),
-        on=TODAY,
-        decided_by="pat",
-    )
-    assert dry.owner.epic_slug == EPIC
-    assert dry.owner.redirected_from == CHILD
-    assert dry.application.written is False
-    with pytest.raises(FrozenInstanceError):
-        dry.owner.epic_slug = "different"
-    with pytest.raises(TypeError):
-        operator.setitem(dry.counts, "total", 99)
-    assert snapshot_bytes(layout.bundle_dir) == before
-
-    real = work.run_decision_add(
-        layout,
-        CHILD,
-        question="Which store?",
-        status="assumed",
-        answer="SQLite",
-        rationale="single writer",
-        if_wrong="re-plan storage",
-        affects=(CHILD,),
-        on=TODAY,
-        decided_by="pat",
-        dry_run=False,
-    )
-    assert real.plan == dry.plan
-    assert real.application.written is True
-
-
-def test_add_with_no_epic_ancestor_raises(tmp_path):
+def test_leaf_decision_redirects_to_nearest_feature_owner(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
-    _write_item(layout, "2026-08-01-feature-lone")
-    with pytest.raises(ValueError, match="no epic ancestor") as excinfo:
-        work.run_decision_add(
-            layout,
-            "2026-08-01-feature-lone",
-            question="q",
-            status="open",
-            on=TODAY,
-            decided_by="pat",
-        )
-    assert "2026-08-01-feature-lone" in str(excinfo.value)
-
-
-def test_unknown_target_is_distinct_from_a_known_item_with_no_epic(tmp_path):
-    layout = _seeded(tmp_path)
-    with pytest.raises(ValueError, match="unknown work item") as excinfo:
-        work.run_decision_list(layout, "2026-08-09-feature-missing")
-    assert "2026-08-09-feature-missing" in str(excinfo.value)
-
-
-@pytest.mark.parametrize("epic_archived", [False, True])
-def test_archived_child_resolves_its_epics_active_or_archived_ledger(tmp_path, epic_archived):
-    layout = _workspace(tmp_path)
-    _write_item(layout, EPIC, type="Epic", phase="execute", archived=epic_archived)
-    _write_item(layout, CHILD, extra=f"parent: {EPIC}\n", archived=True)
-
-    result = work.run_decision_list(layout, CHILD)
-
-    prefix = layout.bundle_dir / "work" / ("_archive" if epic_archived else "")
-    assert result.owner.epic_slug == EPIC
-    assert result.owner.redirected_from == CHILD
-    assert result.owner.ledger == prefix / EPIC / "references" / "00-decisions.md"
-
-
-def test_active_child_wins_over_same_slug_archived_twin_with_a_historical_parent(tmp_path):
-    historical_epic = "2026-07-01-epic-historical"
-    layout = _workspace(tmp_path)
-    _write_item(layout, EPIC, type="Epic", phase="execute")
-    _write_item(layout, historical_epic, type="Epic", phase="execute", archived=True)
-    _write_item(layout, CHILD, extra=f"parent: {EPIC}\n")
-    _write_item(layout, CHILD, extra=f"parent: {historical_epic}\n", archived=True)
-
     result = work.run_decision_add(
         layout,
-        CHILD,
-        question="Which owner?",
+        LEAF,
+        question="Ship it?",
+        affects=(LEAF,),
+        on=TODAY,
+        decided_by="pat",
+    )
+    assert result.owner.owner_path == OWNER
+    assert result.owner.redirected_from == LEAF
+    assert result.owner.ledger == layout.bundle_dir / f"{OWNER}/references/00-decisions.md"
+    assert result.application is None
+
+
+def test_live_decision_is_journaled_and_registers_ledger(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    result = work.run_decision_add(
+        layout,
+        LEAF,
+        question="Ship it?",
+        affects=(LEAF,),
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
-
-    expected = layout.bundle_dir / "work" / EPIC / "references" / "00-decisions.md"
-    historical = layout.bundle_dir / "work" / "_archive" / historical_epic / "references" / "00-decisions.md"
-    assert result.owner.epic_slug == EPIC
-    assert result.owner.ledger == expected
-    assert expected.is_file()
-    assert not historical.exists()
-
-
-def test_epic_target_is_not_reported_as_redirected(tmp_path):
-    layout = _seeded(tmp_path)
-    result = work.run_decision_list(layout, EPIC)
-    assert result.owner.redirected_from is None
+    assert result.application is not None and result.application.ok
+    assert result.application.journal.is_file()
+    assert result.owner.ledger.is_file()
+    sources = load(layout.bundle_dir / f"{OWNER}.md").fm.sources
+    assert [source.id for source in sources] == ["decisions"]
+    lock = layout.cache_dir / "decisions" / f"{hashlib.sha256(OWNER.encode()).hexdigest()}.lock"
+    assert lock.is_file()
+    assert not result.owner.ledger.with_suffix(".lock").exists()
 
 
-def test_answer_dry_run_previews_the_exact_update_real_apply_uses(tmp_path):
-    layout = _seeded(tmp_path)
+def test_answer_and_list_use_the_same_canonical_owner(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
     work.run_decision_add(
-        layout, CHILD, question="Which store?", status="open", on=TODAY, decided_by="pat", dry_run=False
-    )
-    before = snapshot_bytes(layout.bundle_dir)
-    dry = work.run_decision_answer(
         layout,
-        CHILD,
-        "D-001",
-        answer="SQLite",
-        rationale="confirmed",
-        on=TODAY,
-        decided_by="pat",
-    )
-    assert dry.application.written is False
-    assert dry.plan is not None
-    assert dry.plan.primary is not None
-    assert dry.plan.primary.question == "Which store?"
-    assert dry.plan.primary.status == "answered"
-    assert dry.plan.primary.decided == "2026-08-17 by pat"
-    assert snapshot_bytes(layout.bundle_dir) == before
-
-    real = work.run_decision_answer(
-        layout,
-        CHILD,
-        "D-001",
-        answer="SQLite",
-        rationale="confirmed",
+        LEAF,
+        question="Ship it?",
+        affects=(LEAF,),
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
-    assert real.plan == dry.plan
-    assert real.application.written is True
-    assert [entry.status for entry in real.entries] == ["answered"]
+    answered = work.run_decision_answer(
+        layout,
+        LEAF,
+        "D-001",
+        answer="yes",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    listed = work.run_decision_list(layout, OWNER, status="answered")
+    assert answered.application is not None and answered.application.ok
+    assert [entry.id for entry in listed.entries] == ["D-001"]
 
 
-def test_list_filters_entries_but_counts_the_whole_ledger(tmp_path):
-    layout = seeded_decisions(tmp_path)
-    before = snapshot_bytes(layout.bundle_dir)
-    result = work.run_decision_list(layout, CHILD, status="open", affects=CHILD, cites=None)
+def test_list_filters_entries_but_counts_the_entire_owner_ledger(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    work.run_decision_add(
+        layout,
+        LEAF,
+        question="Open question",
+        affects=(LEAF,),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    work.run_decision_add(
+        layout,
+        LEAF,
+        question="Settled question",
+        status="answered",
+        answer="yes",
+        affects=(OWNER,),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    result = work.run_decision_list(layout, LEAF, status="open", affects=LEAF)
     assert [entry.id for entry in result.entries] == ["D-001"]
     assert result.counts["total"] == 2
-    assert result.plan is None
-    assert result.application.written is False
-    assert snapshot_bytes(layout.bundle_dir) == before
+    assert result.plan is None and result.application is None
 
 
-def test_list_forwards_cites_and_combines_it_with_other_filters(tmp_path):
-    layout = seeded_decisions(tmp_path)
-    work.run_decision_supersede(
+def test_list_combines_cites_with_status_filter(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    work.run_decision_add(
         layout,
-        CHILD,
-        "D-001",
-        question="q1 revised",
-        answer="settled",
+        LEAF,
+        question="Original",
+        status="answered",
+        answer="yes",
+        affects=(LEAF,),
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
-
-    result = work.run_decision_list(layout, CHILD, status="answered", cites="D-001")
-
-    assert [entry.id for entry in result.entries] == ["D-003"]
-    assert result.counts["total"] == 3
-
-
-def test_refused_mutation_reports_the_plan_without_writing(tmp_path):
-    layout = _seeded(tmp_path)
-    before = snapshot_bytes(layout.bundle_dir)
-
-    result = work.run_decision_add(
+    work.run_decision_supersede(
         layout,
-        CHILD,
-        question="q",
+        LEAF,
+        "D-001",
+        question="Revised",
+        answer="no",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    result = work.run_decision_list(layout, LEAF, status="answered", cites="D-001")
+    assert [entry.id for entry in result.entries] == ["D-002"]
+    assert result.counts["total"] == 2
+
+
+def test_add_dry_run_matches_live_plan_and_refusal_writes_nothing(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    before = {
+        path.relative_to(layout.bundle_dir): path.read_bytes()
+        for path in layout.bundle_dir.rglob("*")
+        if path.is_file()
+    }
+    dry = work.run_decision_add(
+        layout,
+        LEAF,
+        question="Which store?",
+        status="assumed",
+        answer="SQLite",
+        if_wrong="re-plan storage",
+        affects=(LEAF,),
+        on=TODAY,
+        decided_by="pat",
+    )
+    assert dry.application is None
+    assert {
+        path.relative_to(layout.bundle_dir): path.read_bytes()
+        for path in layout.bundle_dir.rglob("*")
+        if path.is_file()
+    } == before
+    real = work.run_decision_add(
+        layout,
+        LEAF,
+        question="Which store?",
+        status="assumed",
+        answer="SQLite",
+        if_wrong="re-plan storage",
+        affects=(LEAF,),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert real.plan == dry.plan
+    assert real.application is not None and real.application.ok
+
+    before_refusal = layout.bundle_dir.joinpath(f"{OWNER}/references/00-decisions.md").read_bytes()
+    refused = work.run_decision_add(
+        layout,
+        LEAF,
+        question="Missing answer",
         status="assumed",
         if_wrong="re-plan",
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
-
-    assert result.plan is not None
-    assert result.plan.refusal == "answer-required"
-    assert result.entries == ()
-    assert result.application.written is False
-    assert snapshot_bytes(layout.bundle_dir) == before
+    assert refused.plan is not None and refused.plan.refusal == "answer-required"
+    assert refused.application is None
+    assert layout.bundle_dir.joinpath(f"{OWNER}/references/00-decisions.md").read_bytes() == before_refusal
 
 
-def test_stale_application_is_reported_without_claiming_entries_landed(tmp_path, monkeypatch):
-    from work_tracker_okf import decisions
+def test_archived_parent_capable_item_owns_its_canonical_ledger(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    archived_owner = "work/_archive/epic-a"
+    _write(layout, archived_owner, "Epic")
+    result = work.run_decision_list(layout, archived_owner)
+    assert result.owner.owner_path == archived_owner
+    assert result.owner.redirected_from is None
+    assert result.owner.ledger == layout.bundle_dir / f"{archived_owner}/references/00-decisions.md"
 
-    layout = _seeded(tmp_path)
-    apply_plan = decisions.apply_plan
 
-    def apply_after_external_edit(plan):
+def test_concurrent_ledger_change_after_allocation_is_never_overwritten(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    original = work._decisions.plan_append
+    concurrent = f"# Decisions\n\n## D-900 — Concurrent\nstatus: open\naffects: [{LEAF}]\n"
+
+    def inject_after_planning(*args, **kwargs):
+        plan = original(*args, **kwargs)
         plan.ledger.parent.mkdir(parents=True, exist_ok=True)
-        plan.ledger.write_text("# external edit\n", encoding="utf-8")
-        return apply_plan(plan)
+        plan.ledger.write_text(concurrent, encoding="utf-8")
+        return plan
 
-    monkeypatch.setattr(decisions, "apply_plan", apply_after_external_edit)
-
+    monkeypatch.setattr(work._decisions, "plan_append", inject_after_planning)
     result = work.run_decision_add(
         layout,
-        CHILD,
-        question="q",
+        LEAF,
+        question="Ship it?",
+        affects=(LEAF,),
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
+    assert result.application is not None and not result.application.ok
+    assert result.owner.ledger.read_text(encoding="utf-8") == concurrent
+    assert [entry.id for entry in result.entries] == ["D-900"]
+    assert result.counts["total"] == 1
 
-    assert result.application.stale is True
-    assert result.application.written is False
-    assert result.application.entries == ()
-    assert result.owner.ledger.read_text(encoding="utf-8") == "# external edit\n"
+
+def test_concurrent_empty_ledger_does_not_replace_planned_absence(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    original = work._decisions.plan_append
+
+    def inject_after_planning(*args, **kwargs):
+        plan = original(*args, **kwargs)
+        plan.ledger.parent.mkdir(parents=True, exist_ok=True)
+        plan.ledger.write_bytes(b"")
+        return plan
+
+    monkeypatch.setattr(work._decisions, "plan_append", inject_after_planning)
+    result = work.run_decision_add(
+        layout,
+        LEAF,
+        question="Ship it?",
+        affects=(LEAF,),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert result.application is not None and not result.application.ok
+    assert result.owner.ledger.read_bytes() == b""
+    assert result.entries == ()
 
 
-def test_supersede_dry_run_previews_both_entries_real_apply_uses(tmp_path):
-    layout = _seeded(tmp_path)
+def test_live_decision_allocation_occurs_while_owner_lock_is_held(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    lock = layout.cache_dir / "decisions" / f"{hashlib.sha256(OWNER.encode()).hexdigest()}.lock"
+    original = work._decisions.plan_append
+    observed = False
+
+    def assert_lock_held(*args, **kwargs):
+        nonlocal observed
+        descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
+        try:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            observed = True
+        finally:
+            os.close(descriptor)
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(work._decisions, "plan_append", assert_lock_held)
+    result = work.run_decision_add(
+        layout,
+        LEAF,
+        question="Ship it?",
+        affects=(LEAF,),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert observed is True
+    assert result.application is not None and result.application.ok
+
+
+def test_live_decision_revalidates_owner_selection_after_acquiring_the_lock(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    new_owner = "work/release-v1/children/epic-a/children/feature-b"
+    new_leaf = f"{new_owner}/children/bug-a"
+    _write(layout, new_owner, "Feature")
+    original = work.fcntl.flock
+    moved = False
+
+    def move_before_lock(descriptor, operation):
+        nonlocal moved
+        if operation == fcntl.LOCK_EX and not moved:
+            destination = layout.bundle_dir / f"{new_leaf}.md"
+            destination.parent.mkdir(parents=True)
+            (layout.bundle_dir / f"{LEAF}.md").rename(destination)
+            moved = True
+        return original(descriptor, operation)
+
+    monkeypatch.setattr(work.fcntl, "flock", move_before_lock)
+    with pytest.raises(ValueError, match="unknown work item"):
+        work.run_decision_add(
+            layout,
+            LEAF,
+            question="Ship it?",
+            affects=(LEAF,),
+            on=TODAY,
+            decided_by="pat",
+            dry_run=False,
+        )
+    assert not (layout.bundle_dir / f"{OWNER}/references/00-decisions.md").exists()
+    assert not (layout.bundle_dir / f"{new_owner}/references/00-decisions.md").exists()
+
+
+def test_decision_refuses_an_owner_page_changed_after_its_snapshot(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    owner_page = layout.bundle_dir / f"{OWNER}.md"
+    external = owner_page.read_bytes() + b"\nExternal owner edit.\n"
+    original = work.upsert
+    injected = False
+
+    def inject_after_snapshot(*args, **kwargs):
+        nonlocal injected
+        if not injected:
+            owner_page.write_bytes(external)
+            injected = True
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(work, "upsert", inject_after_snapshot)
+    result = work.run_decision_add(
+        layout,
+        LEAF,
+        question="Ship it?",
+        affects=(LEAF,),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert result.application is not None and not result.application.ok
+    assert owner_page.read_bytes() == external
+    assert not result.owner.ledger.exists()
+
+
+def test_unknown_path_is_a_caller_error(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="unknown work item"):
+        work.run_decision_list(_workspace(tmp_path), "work/missing")
+
+
+def test_overturn_refusal_keeps_the_ledger_byte_identical(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
     work.run_decision_add(
         layout,
-        CHILD,
-        question="Which store?",
-        status="open",
-        affects=(CHILD,),
+        LEAF,
+        question="Original?",
+        status="answered",
+        answer="yes",
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
-    before = snapshot_bytes(layout.bundle_dir)
-    dry = work.run_decision_supersede(
-        layout,
-        CHILD,
-        "D-001",
-        question="Which store, revised?",
-        answer="SQLite",
-        rationale="confirmed",
-        on=TODAY,
-        decided_by="pat",
-    )
-    assert dry.plan is not None
-    assert dry.plan.superseded is not None
-    assert dry.plan.primary is not None
-    assert dry.plan.superseded.status == "superseded"
-    assert dry.plan.primary.supersedes == "D-001"
-    assert dry.plan.primary.status == "answered"
-    assert dry.plan.primary.affects == (CHILD,)
-    assert dry.application.written is False
-    assert snapshot_bytes(layout.bundle_dir) == before
-
-    real = work.run_decision_supersede(
-        layout,
-        CHILD,
-        "D-001",
-        question="Which store, revised?",
-        answer="SQLite",
-        rationale="confirmed",
-        on=TODAY,
-        decided_by="pat",
-        dry_run=False,
-    )
-    assert real.plan == dry.plan
-    assert real.application.written is True
-    assert [entry.status for entry in real.entries] == ["superseded", "answered"]
-
-
-def test_overturn_filing_refusal_leaves_ledger_byte_identical(tmp_path) -> None:
-    layout, config, ledger = overturn_workspace(tmp_path)
-    create_follow_up_collision(layout, title="Rework layout", on=TODAY)
-    before = ledger.read_bytes()
+    before = (layout.bundle_dir / f"{OWNER}/references/00-decisions.md").read_bytes()
     result = work.run_decision_overturn(
         layout,
-        config,
-        EPIC,
+        _config(layout),
+        LEAF,
         "D-001",
-        answer="Use the other layout",
-        rationale="production evidence",
-        follow_up_title="Rework layout",
-        follow_up_type="TechDebt",
-        follow_up_affects=("packages/work-tracker-okf",),
+        answer="no",
+        rationale=None,
+        follow_up_title="Invalid follow up",
+        follow_up_type="NotAType",
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
     assert result.plan.refusal == "follow-up-refused"
-    assert result.application == OverturnApplication()
-    assert ledger.read_bytes() == before
+    assert result.application.mutation is None
+    assert (layout.bundle_dir / f"{OWNER}/references/00-decisions.md").read_bytes() == before
 
 
-def test_overturn_supersedes_then_files_a_peer_follow_up(tmp_path) -> None:
-    layout, config, _ledger = overturn_workspace(tmp_path)
-    result = work.run_decision_overturn(
+def test_overturn_applies_decision_and_follow_up_in_one_journal(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    work.run_decision_add(
         layout,
-        config,
-        CHILD,
-        "D-001",
-        answer="Use the other layout",
-        rationale=None,
-        follow_up_title="Rework layout",
-        follow_up_type="Bug",
-        follow_up_affects=("packages/work-tracker-okf",),
+        LEAF,
+        question="Original?",
+        status="answered",
+        answer="yes",
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
-    assert result.application.decision.written is True
-    assert result.application.filing.written is True
-    assert result.plan.filing.filing.seed.parent is None
-    assert result.plan.filing.filing.seed.depends_on == ()
-    assert "D-002" in result.plan.filing.filing.seed.description
-
-
-def test_overturn_dry_run_previews_both_resources_byte_identically(tmp_path) -> None:
-    layout, config, ledger = overturn_workspace(tmp_path)
-    before = snapshot_bytes(layout.bundle_dir)
     result = work.run_decision_overturn(
         layout,
-        config,
-        EPIC,
+        _config(layout),
+        LEAF,
         "D-001",
-        answer="Other layout",
-        rationale=None,
-        follow_up_title="Rework layout",
-        on=TODAY,
-        decided_by="pat",
-    )
-    assert result.plan.decision.refusal is None
-    assert result.plan.filing.refusal is None
-    assert result.application == OverturnApplication()
-    assert ledger.read_bytes() == before[f"work/{EPIC}/references/00-decisions.md"]
-    assert snapshot_bytes(layout.bundle_dir) == before
-
-
-def test_overturn_stale_decision_application_never_files_follow_up(tmp_path, monkeypatch) -> None:
-    from work_tracker_okf import decisions
-
-    layout, config, ledger = overturn_workspace(tmp_path)
-    follow_up_slug, _warnings = compose_slug("TechDebt", "Rework stale layout", on=TODAY)
-    follow_up = layout.bundle_dir / "work" / f"{follow_up_slug}.md"
-    apply_plan = decisions.apply_plan
-
-    def apply_after_external_edit(plan):
-        ledger.write_text("# external edit\n", encoding="utf-8")
-        return apply_plan(plan)
-
-    monkeypatch.setattr(decisions, "apply_plan", apply_after_external_edit)
-    result = work.run_decision_overturn(
-        layout,
-        config,
-        EPIC,
-        "D-001",
-        answer="Other layout",
-        rationale=None,
-        follow_up_title="Rework stale layout",
+        answer="no",
+        rationale="new evidence",
+        follow_up_title="Repair original choice",
+        follow_up_affects=("packages/a",),
         on=TODAY,
         decided_by="pat",
         dry_run=False,
     )
+    assert result.application.mutation is not None and result.application.mutation.ok
+    assert result.application.mutation.journal.is_file()
+    assert (layout.bundle_dir / "work/tech-debt-repair-original-choice.md").is_file()
+    assert [entry.status for entry in work.run_decision_list(layout, OWNER).entries] == ["superseded", "answered"]
 
-    assert result.application.decision.stale is True
-    assert result.application.filing == FilingApplication()
-    assert result.warnings == ("stale-decision-plan: ledger changed after preflight; follow-up was not filed",)
-    assert not follow_up.exists()
+
+def test_overturn_refuses_a_follow_up_target_created_after_planning(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    work.run_decision_add(
+        layout,
+        LEAF,
+        question="Original?",
+        status="answered",
+        answer="yes",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    ledger = layout.bundle_dir / f"{OWNER}/references/00-decisions.md"
+    ledger_before = ledger.read_bytes()
+    original = work.plan_file_and_reconcile
+    external = b"external follow-up owner\n"
+
+    def inject_after_planning(*args, **kwargs):
+        outcome = original(*args, **kwargs)
+        outcome.plan.filing.target.parent.mkdir(parents=True, exist_ok=True)
+        outcome.plan.filing.target.write_bytes(external)
+        return outcome
+
+    monkeypatch.setattr(work, "plan_file_and_reconcile", inject_after_planning)
+    result = work.run_decision_overturn(
+        layout,
+        _config(layout),
+        LEAF,
+        "D-001",
+        answer="no",
+        rationale=None,
+        follow_up_title="Raced follow up",
+        follow_up_affects=("packages/a",),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert result.application.mutation is not None and not result.application.mutation.ok
+    assert result.plan.filing.filing.target.read_bytes() == external
+    assert ledger.read_bytes() == ledger_before
 
 
-def test_overturn_partial_filing_failure_preserves_application_and_cause(tmp_path, monkeypatch) -> None:
-    layout, config, _ledger = overturn_workspace(tmp_path)
-    partial = FilingApplication(page=layout.bundle_dir / "work/partial.md")
-    filing_error = FilingApplyError("disk full", partial)
+def test_overturn_revalidates_owner_selection_after_acquiring_the_lock(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    work.run_decision_add(
+        layout,
+        LEAF,
+        question="Original?",
+        status="answered",
+        answer="yes",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    ledger = layout.bundle_dir / f"{OWNER}/references/00-decisions.md"
+    before = ledger.read_bytes()
+    new_owner = "work/release-v1/children/epic-a/children/feature-b"
+    new_leaf = f"{new_owner}/children/bug-a"
+    _write(layout, new_owner, "Feature")
+    original = work.fcntl.flock
+    moved = False
 
-    def fail_filing(_plan):
-        raise filing_error
+    def move_before_lock(descriptor, operation):
+        nonlocal moved
+        if operation == fcntl.LOCK_EX and not moved:
+            destination = layout.bundle_dir / f"{new_leaf}.md"
+            destination.parent.mkdir(parents=True)
+            (layout.bundle_dir / f"{LEAF}.md").rename(destination)
+            moved = True
+        return original(descriptor, operation)
 
-    monkeypatch.setattr(work, "apply_file_and_reconcile", fail_filing)
-    with pytest.raises(work.OverturnApplyError) as raised:
+    monkeypatch.setattr(work.fcntl, "flock", move_before_lock)
+    with pytest.raises(ValueError, match="unknown work item"):
         work.run_decision_overturn(
             layout,
-            config,
-            EPIC,
+            _config(layout),
+            LEAF,
             "D-001",
-            answer="Other layout",
+            answer="no",
             rationale=None,
-            follow_up_title="Rework partial layout",
+            follow_up_title="Must not file",
             on=TODAY,
             decided_by="pat",
             dry_run=False,
         )
-
-    assert raised.value.application.decision.written is True
-    assert raised.value.application.filing == partial
-    assert raised.value.__cause__ is filing_error
+    assert ledger.read_bytes() == before
+    assert not (layout.bundle_dir / "work/tech-debt-must-not-file.md").exists()

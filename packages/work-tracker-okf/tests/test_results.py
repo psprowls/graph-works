@@ -2,10 +2,12 @@ from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from work_tracker_okf.paths import artifact_path
+from okf_io import load
+from work_helpers import write_item
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
 from work_tracker_okf.results import ResultsFacts, render, write_results
 
-_SLUG = "2026-03-02-epic-feature-filing-writer"
+_PATH = "work/release-r1/children/epic-migration/children/feature-filing-writer"
 
 _FACTS = ResultsFacts(
     phase="execute",
@@ -83,24 +85,29 @@ def test_the_plural_switches_on_the_commit_count(commits, expected) -> None:
 
 
 def test_write_results_lands_exactly_at_the_artifact_path(tmp_path: Path) -> None:
-    target = write_results(tmp_path, _SLUG, _FACTS)
-    assert target == artifact_path(_SLUG, "execute", "results").path(tmp_path)
+    write_item(tmp_path, _PATH, "type: Feature\nwork_status: in-progress\n")
+    target = write_results(tmp_path, _PATH, _FACTS)
+    assert target == artifact_ref(_PATH, MANAGED_ARTIFACTS["execute-results"]).path(tmp_path)
     assert target.read_text(encoding="utf-8") == render(_FACTS)
+    sources = load(tmp_path / f"{_PATH}.md").fm_data()["sources"]
+    assert sources[0]["resource"] == f"/{_PATH}/references/03-execute-results.md"
 
 
 def test_write_results_creates_the_references_directory(tmp_path: Path) -> None:
-    assert not (tmp_path / "work").exists()
-    target = write_results(tmp_path, _SLUG, _FACTS)
-    assert target.parent == tmp_path / "work" / _SLUG / "references"
+    write_item(tmp_path, _PATH, "type: Feature\nwork_status: in-progress\n")
+    target = write_results(tmp_path, _PATH, _FACTS)
+    assert target.parent == tmp_path / _PATH / "references"
 
 
-def test_write_results_honours_archived(tmp_path: Path) -> None:
-    target = write_results(tmp_path, _SLUG, _FACTS, archived=True)
-    assert target == artifact_path(_SLUG, "execute", "results", archived=True).path(tmp_path)
-    assert "_archive" in target.parts
+def test_write_results_preserves_archive_segments_in_identity(tmp_path: Path) -> None:
+    path = "work/release-r1/children/epic-migration/children/_archive/bug-fixed"
+    write_item(tmp_path, path, "type: Bug\nwork_status: resolved\n")
+    target = write_results(tmp_path, path, _FACTS)
+    assert target == artifact_ref(path, MANAGED_ARTIFACTS["execute-results"]).path(tmp_path)
 
 
 def test_an_unknown_phase_raises_before_anything_is_written(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="unknown phase"):
-        write_results(tmp_path, _SLUG, replace(_FACTS, phase="done"))
-    assert list(tmp_path.iterdir()) == []
+    write_item(tmp_path, _PATH, "type: Feature\nwork_status: in-progress\n")
+    with pytest.raises(ValueError, match="execute/finish"):
+        write_results(tmp_path, _PATH, replace(_FACTS, phase="done"))
+    assert not (tmp_path / _PATH / "references").exists()

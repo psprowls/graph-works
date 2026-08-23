@@ -16,7 +16,7 @@ type: Feature
 title: {slug}
 description: d
 status: stable
-workflow_status: open
+work_status: open
 phase: execute
 effort: medium
 opened: 2026-08-01
@@ -49,8 +49,8 @@ def _write_item(layout, slug, *, updated="2026-08-01"):
 
 def test_the_rollup_counts_active_items(tmp_path):
     layout = _workspace(tmp_path)
-    _write_item(layout, "2026-08-01-feature-a")
-    _write_item(layout, "2026-08-02-feature-b")
+    _write_item(layout, "feature-a")
+    _write_item(layout, "feature-b")
     report = work.run_status(layout)
     assert report.rollup.total == 2
     assert dict(report.rollup.by_type) == {"Feature": 2}
@@ -58,21 +58,21 @@ def test_the_rollup_counts_active_items(tmp_path):
 
 def test_resume_picks_the_most_recently_updated_item(tmp_path):
     layout = _workspace(tmp_path)
-    _write_item(layout, "2026-08-01-feature-a", updated="2026-08-01")
-    _write_item(layout, "2026-08-02-feature-b", updated="2026-08-10")
+    _write_item(layout, "feature-a", updated="2026-08-01")
+    _write_item(layout, "feature-b", updated="2026-08-10")
     report = work.run_status(layout)
     assert report.resume is not None
-    assert report.resume.primary.slug == "2026-08-02-feature-b"
+    assert report.resume.primary.path == "work/feature-b"
 
 
 def test_status_rollup_accepts_structured_dependency_items(tmp_path) -> None:
     layout = _workspace(tmp_path)
-    _write_item(layout, "2026-08-01-feature-a")
-    _write_item(layout, "2026-08-02-feature-b")
-    document = load(layout.bundle_dir / "work/2026-08-02-feature-b.md")
+    _write_item(layout, "feature-a")
+    _write_item(layout, "feature-b")
+    document = load(layout.bundle_dir / "work/feature-b.md")
     document.set(
         "depends_on",
-        [{"slug": "2026-08-01-feature-a", "blocks": "plan", "needs": "design"}],
+        [{"path": "feature-a", "blocks": "plan", "needs": "design"}],
     )
     document.save()
     assert work.run_status(layout).rollup.total == 2

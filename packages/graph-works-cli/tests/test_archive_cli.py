@@ -26,6 +26,11 @@ class _Plan:
         self.ok = ok
         self._diff = diff
         self.moves = _Moves(stranded=stranded)
+        self.move_plan = self.moves
+        self.path_mapping: dict[str, str] = {}
+        self.refusals = (
+            () if ok else (SimpleNamespace(path="work/refused", kind="refused", detail="archive plan was refused"),)
+        )
 
     def diff(self) -> str:
         return self._diff
@@ -41,12 +46,25 @@ class _Run:
         archived: tuple[str, ...] = (),
         wiki_archived: tuple[str, ...] = (),
         applied: bool = False,
+        wiki_ok: bool = True,
+        wiki_refusals: tuple[object, ...] = (),
+        wiki_failures: tuple[object, ...] = (),
     ) -> None:
         self.plan = plan
         self.wiki_plan = wiki_plan
         self.conflict = conflict
-        self.result = SimpleNamespace(archived=archived) if applied else None
-        self.wiki = SimpleNamespace(archived=wiki_archived) if applied else None
+        plan.path_mapping.update({path: path for path in archived})
+        self.result = SimpleNamespace(ok=True, failures=()) if applied else None
+        self.wiki = (
+            SimpleNamespace(
+                archived=wiki_archived,
+                ok=wiki_ok,
+                refusals=wiki_refusals,
+                move=SimpleNamespace(failed=wiki_failures),
+            )
+            if applied
+            else None
+        )
 
     @property
     def ok(self) -> bool:
@@ -95,13 +113,15 @@ def test_both_lanes_sweep_everything_and_dry_run_is_opt_in(calls: _CallsBox, ini
 
 
 def test_dry_run_renders_both_plans_and_writes_nothing(calls: _CallsBox, initialized_workspace: Path) -> None:
-    calls.box["run"] = _Run(plan=_Plan(diff="work: a -> archive/a"), wiki_plan=_Plan(diff="wiki: b -> archive/b"))
+    work_plan = _Plan()
+    work_plan.path_mapping = {"work/a": "work/_archive/a"}
+    calls.box["run"] = _Run(plan=work_plan, wiki_plan=_Plan(diff="wiki: b -> archive/b"))
 
     result = runner.invoke(app, ["archive", "--dry-run", "--workspace", str(initialized_workspace)])
 
     assert result.exit_code == 0
     assert calls[0]["dry_run"] is True
-    assert "work: a -> archive/a" in result.stdout
+    assert "work/a -> work/_archive/a" in result.stdout
     assert "wiki: b -> archive/b" in result.stdout
 
 
@@ -111,7 +131,7 @@ def test_a_refused_plan_renders_both_diffs_and_exits_non_zero(calls: _CallsBox, 
     result = runner.invoke(app, ["archive", "--workspace", str(initialized_workspace)])
 
     assert result.exit_code != 0
-    assert "! refused" in result.stdout
+    assert "! work/refused: refused" in result.stdout
     assert "wiki plan" in result.stdout
     assert "archive plan was refused" in result.stderr
 
@@ -143,6 +163,45 @@ def test_nothing_to_do_is_a_success(calls: _CallsBox, initialized_workspace: Pat
 
     assert result.exit_code == 0
     assert result.stdout.strip() == "nothing to do"
+
+
+@pytest.mark.parametrize(
+    ("wiki_refusals", "wiki_failures", "diagnostic"),
+    [
+        (
+            (SimpleNamespace(path="concepts/a.md", kind="stale", detail="page changed after planning"),),
+            (),
+            "concepts/a.md: stale -- page changed after planning",
+        ),
+        (
+            (),
+            (SimpleNamespace(path="concepts/a.md", kind="commit-error", error="disk full"),),
+            "concepts/a.md: commit-error -- disk full",
+        ),
+    ],
+)
+def test_a_failed_wiki_apply_exits_nonzero_with_diagnostic(
+    calls: _CallsBox,
+    initialized_workspace: Path,
+    wiki_refusals: tuple[object, ...],
+    wiki_failures: tuple[object, ...],
+    diagnostic: str,
+) -> None:
+    calls.box["run"] = _Run(
+        plan=_Plan(),
+        wiki_plan=_Plan(),
+        applied=True,
+        wiki_ok=False,
+        wiki_refusals=wiki_refusals,
+        wiki_failures=wiki_failures,
+    )
+
+    result = runner.invoke(app, ["archive", "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code != 0
+    assert "wiki archive apply was incomplete" in result.stderr
+    assert diagnostic in result.stderr
+    assert "nothing to do" not in result.stdout
 
 
 def test_reports_both_lanes_stranded_counts_separately_and_labelled(

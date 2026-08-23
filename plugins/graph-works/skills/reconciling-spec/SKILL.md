@@ -10,14 +10,14 @@ This skill decides which, mechanically where it can and by judgment where it
 must, and it runs unattended — so the one thing it must never do is advance past
 a contradiction it could not resolve.
 
-**Announce at start:** "Using reconciling-spec to update `<slug>`'s spec against what has landed."
+**Announce at start:** "Using reconciling-spec to update `<work-path>`'s spec against what has landed."
 
 ## Checklist
 
 1. **Gather the facts — one call, no hand-derivation.**
 
    ```bash
-   gw work reconcile-context <slug> --json
+   gw work reconcile-context <work-path> --json
    ```
 
    Read `spec_path`, `commit_range`, `anchor_source`, `touched_paths`,
@@ -26,7 +26,7 @@ a contradiction it could not resolve.
    by hand — it is mechanical precisely so your judgment goes elsewhere.
 
    If the `reconcile-context` call itself errors (non-zero exit — an unknown
-   slug, a missing workspace), report the error verbatim and stop: do not
+   path, a missing workspace), report the error verbatim and stop: do not
    retry and do not fall back to hand-deriving the context. If `diff_command`
    errors when you run it in Step 2, treat that the same as `anchor_source:
    none` below — report it and lean toward holding.
@@ -80,11 +80,11 @@ a contradiction it could not resolve.
    - Record anything you had to guess:
 
      ```bash
-     gw work decision add <slug> --question "..." --status assumed \
-         --affects <slug> --answer "..." --if-wrong "..." --json
+     gw work decision add <work-path> --question "..." --status assumed \
+         --affects <work-path> --answer "..." --if-wrong "..." --json
      ```
 
-     Pass your OWN slug — the CLI walks up to the owning epic's ledger.
+     Pass your OWN path — the CLI walks up to the owning epic's ledger.
 
    Stop here. This skill never calls `gw work advance` itself — the workflow
    skill that dispatched it does that in its own Step 5, uniformly, after
@@ -99,21 +99,21 @@ a contradiction it could not resolve.
      means "the worker is comfortable proceeding":
 
      ```bash
-     gw work decision add <slug> --question "..." --status open \
-         --affects <slug> --if-wrong "..." --json
+     gw work decision add <work-path> --question "..." --status open \
+         --affects <work-path> --if-wrong "..." --json
      ```
 
    - **Never try to force the advance through.** You don't call `gw work
      advance` here — you never do, in either path of this skill. What keeps a
      hold from silently advancing is not that this skill withholds the call:
      the workflow skill that dispatched you still runs `gw work advance
-     <slug>` unconditionally once you return. What actually blocks it is the
+     <work-path>` unconditionally once you return. What actually blocks it is the
      `open` decision you just filed — the routing table's design-stage gate
      refuses to advance an item with an open decision, so that call fails with
      ``open decision(s) block re-dispatch: answer via `gw work decision answer
-     <slug> D-nnn --answer ...`, then re-run`` instead of stamping `plan`. The
+     <work-path> D-nnn --answer ...`, then re-run`` instead of stamping `plan`. The
      item stays at `phase: design` until a human answers it
-     (`gw work decision answer <slug> D-nnn --answer ...`), so a hold costs one
+     (`gw work decision answer <work-path> D-nnn --answer ...`), so a hold costs one
      human touch, not a burned worker slot every auto-drive cycle.
 
 ## Appended section template
@@ -122,7 +122,7 @@ a contradiction it could not resolve.
 ## Reconciled <date> (<short-anchor>..<short-head>)
 
 **Landed since this spec was written:**
-- [[work/<sibling-slug>]] resolved_in `<sha>` — what it changed, and whether the spec cared.
+- [[work/<sibling-path>]] resolved_in `<sha>` — what it changed, and whether the spec cared.
 
 **Decisions reconciled:**
 - D-nnn (assumed → answered): ...
@@ -172,7 +172,7 @@ digraph reconcile {
 
 This skill never chains into another skill, and it never calls `gw work
 advance` itself, in either path. The workflow skill that dispatched it runs
-`gw work advance <slug>` unconditionally in its own Step 5: for the
+`gw work advance <work-path>` unconditionally in its own Step 5: for the
 ordinary-update path (4a) that call lands the item at `phase: plan`; for a
 hold (4b), the `open` decision just filed makes that same call fail, leaving
 the item at `phase: design`. `writing-plans` is dispatched on the NEXT `gw

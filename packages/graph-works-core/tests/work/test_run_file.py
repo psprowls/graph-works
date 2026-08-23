@@ -10,8 +10,8 @@ from graph_works_core.work import commands as work
 from work_tracker_okf.dependencies import DependencyEdge
 
 TODAY = date(2026, 8, 17)
-EPIC = "2026-08-01-epic-parent"
-SIBLING = "2026-08-02-feature-sibling"
+EPIC = "work/epic-parent"
+SIBLING = f"{EPIC}/children/feature-sibling"
 
 
 def _workspace(tmp_path):
@@ -33,14 +33,16 @@ def seeded_workspace(tmp_path):
     layout = _workspace(tmp_path)
     work_dir = layout.bundle_dir / "work"
     work_dir.mkdir(exist_ok=True)
-    (work_dir / f"{EPIC}.md").write_text(
+    (layout.bundle_dir / f"{EPIC}.md").write_text(
         "---\ntype: Epic\ntitle: Epic\ndescription: d\nstatus: draft\n"
-        "workflow_status: open\nopened: 2026-08-01\nupdated: 2026-08-01\n---\n",
+        "work_status: open\nopened: 2026-08-01\nupdated: 2026-08-01\n---\n",
         encoding="utf-8",
     )
-    (work_dir / f"{SIBLING}.md").write_text(
+    sibling_page = layout.bundle_dir / f"{SIBLING}.md"
+    sibling_page.parent.mkdir(parents=True, exist_ok=True)
+    sibling_page.write_text(
         "---\ntype: Feature\ntitle: Sibling\ndescription: d\nstatus: draft\n"
-        f"workflow_status: open\nparent: {EPIC}\nopened: 2026-08-02\nupdated: 2026-08-02\n---\n",
+        "work_status: open\nopened: 2026-08-02\nupdated: 2026-08-02\n---\n",
         encoding="utf-8",
     )
     return layout, _config(layout)
@@ -57,15 +59,18 @@ def test_run_file_accepts_typed_edges_and_all_metadata(tmp_path) -> None:
         on=TODAY,
         effort="medium",
         blast_radius="package",
-        target="2026-Q4",
+        version="1.2.0",
+        target_date=date(2026, 12, 1),
         owner="pat",
-        parent=EPIC,
+        parent_path=EPIC,
         depends_on=(DependencyEdge(SIBLING, blocks="plan", needs="design"),),
         affects=("packages/graph-works-core",),
         tags=("compat",),
     )
     assert result.plan.filing.frontmatter["owner"] == "pat"
-    assert result.application.written is False
+    assert result.plan.filing.frontmatter["version"] == "1.2.0"
+    assert result.plan.filing.frontmatter["target_date"] == date(2026, 12, 1)
+    assert result.application is None
 
 
 def test_a_dry_run_writes_nothing(tmp_path):
@@ -78,7 +83,7 @@ def test_a_dry_run_writes_nothing(tmp_path):
         description="d",
         on=TODAY,
     )
-    assert outcome.application.written is False
+    assert outcome.application is None
     assert outcome.plan.filing.refusal is None
     assert not outcome.plan.filing.target.exists()
 
@@ -89,8 +94,61 @@ def test_run_file_apply_matches_its_plan(tmp_path) -> None:
     dry = work.run_file(layout, config, type="Feature", title="Child", description="d", on=TODAY)
     real = work.run_file(layout, config, type="Feature", title="Child", description="d", on=TODAY, dry_run=False)
     assert real.plan == dry.plan
-    assert real.application.page == real.plan.filing.target
-    assert real.application.written is True
+    assert real.application is not None and real.application.ok
+    assert real.plan.filing.target.is_file()
+
+
+def test_run_file_refuses_a_target_created_after_domain_planning(tmp_path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    config = _config(layout)
+    original = work.plan_file_and_reconcile
+    external = b"external owner\n"
+
+    def inject_after_planning(*args, **kwargs):
+        outcome = original(*args, **kwargs)
+        outcome.plan.filing.target.parent.mkdir(parents=True, exist_ok=True)
+        outcome.plan.filing.target.write_bytes(external)
+        return outcome
+
+    monkeypatch.setattr(work, "plan_file_and_reconcile", inject_after_planning)
+    result = work.run_file(
+        layout,
+        config,
+        type="Feature",
+        title="Raced target",
+        description="d",
+        on=TODAY,
+        dry_run=False,
+    )
+    assert result.application is not None and not result.application.ok
+    assert result.plan.filing.target.read_bytes() == external
+
+
+def test_run_file_refuses_a_log_changed_after_domain_planning(tmp_path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    config = _config(layout)
+    original = work.plan_file_and_reconcile
+    log_path = layout.bundle_dir / "log.md"
+    external = log_path.read_bytes() + b"\nexternal log owner\n"
+
+    def inject_after_planning(*args, **kwargs):
+        outcome = original(*args, **kwargs)
+        log_path.write_bytes(external)
+        return outcome
+
+    monkeypatch.setattr(work, "plan_file_and_reconcile", inject_after_planning)
+    result = work.run_file(
+        layout,
+        config,
+        type="Feature",
+        title="Raced log",
+        description="d",
+        on=TODAY,
+        dry_run=False,
+    )
+    assert result.application is not None and not result.application.ok
+    assert log_path.read_bytes() == external
+    assert not result.plan.filing.target.exists()
 
 
 def test_the_vertical_is_not_hoisted_to_the_front_door():

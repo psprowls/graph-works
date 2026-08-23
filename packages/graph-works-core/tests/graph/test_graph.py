@@ -149,7 +149,7 @@ def test_graph_target_reads_repo_ignore_into_member_ignore(tmp_path):
     layout = _layout_with_config(
         tmp_path,
         """
-        graph_dir: ../_cache/graph
+        graph_dir: ../.gw/cache/graph
         ignore:
           - "**/global-skip/**"
         repositories:
@@ -192,7 +192,7 @@ def test_ignore_pattern_reaches_the_built_graph(tmp_path):
     layout = _layout_with_config(
         tmp_path,
         f"""
-        graph_dir: ../_cache/graph
+        graph_dir: ../.gw/cache/graph
         repositories:
           demo:
             path: {repo}

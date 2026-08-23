@@ -115,11 +115,14 @@ copy-pasteable lines. They all have working defaults, and walking them would be
 roughly sixty prompts:
 
 ```
-# Where things live inside the workspace (defaults are right for nearly every workspace)
+# Where things live inside the workspace (defaults are right for nearly every workspace).
+# `config_dir` is the control plane and the .gitignore anchor; `cache_dir` and
+# `worktrees_dir` derive from it when unset, so setting `config_dir` alone moves
+# the whole control plane as a unit.
 gw config set layout.bundle_dir okf
-gw config set layout.config_dir _config
-gw config set layout.cache_dir _cache
-gw config set layout.worktrees_dir worktrees
+gw config set layout.config_dir .gw
+gw config set layout.cache_dir .gw/cache
+gw config set layout.worktrees_dir .gw/worktrees
 
 # Per-variant pipeline dispatch overrides
 gw config set workflow.pipeline.<variant>.skill <skill-name>

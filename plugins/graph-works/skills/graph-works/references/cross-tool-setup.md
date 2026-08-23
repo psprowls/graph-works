@@ -20,7 +20,7 @@ The graph-works plugin is tool-agnostic. The **scripts** are pure Python stdlib 
 | Gemini CLI | `<workspace>/AGENTS.md` | Same convention |
 | Aider | `CONVENTIONS.md` or `.aider.conf.yml` | Point Aider at `CLAUDE.md` with `--read` |
 
-`<workspace>` is the graph-works workspace directory (default `<repo>/.works`; workspace path resolved via `gw`). The OKF bundle lives at `<workspace>/okf/`, alongside `_config/`, `_cache/` and `worktrees/`.
+`<workspace>` is the graph-works workspace directory (default `<repo>/.works`; workspace path resolved via `gw`). The OKF bundle lives at `<workspace>/okf/`, alongside the control plane `.gw/` and its gitignored `.gw/cache/` and `.gw/worktrees/`.
 
 **Recommendation:** ship **both** `CLAUDE.md` and `AGENTS.md` in every workspace. `gw bootstrap` does not write them — author them once and symlink the second to the first.
 

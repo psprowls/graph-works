@@ -1474,7 +1474,7 @@ block outright with its notice pipeline, and `2026-08-20-tech-debt-hooks-workspa
 with the routing context never injected.
 
 Neither hook spawns a Python stack now. `skill-doc-routing` resolves through
-`skills/shared/resolve-workspace.sh` and reads `<root>/_config/config.json` with `sed`. That is not
+`skills/shared/resolve-workspace.sh` and reads `<root>/.gw/cache/config.json` with `sed`. That is not
 merely cheaper (measured on this checkout: ~66 ms per matching Skill call down to ~25 ms — and that
 is the old hook's *fail-fast* path, the only one still reachable; the design spec measures the path
 where it resolved at ~670 ms): it is the only form that works from the **installed plugin tree**,

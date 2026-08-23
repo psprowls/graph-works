@@ -12,7 +12,7 @@ so the skip-list has nothing left to skip: the three rules are unrepresentable
 rather than enforced.
 
 **The embedding index lives under `layout.cache_dir`** — `<cache>/search/search.db`.
-Constraint 4 makes `_cache/` gitignored and scanner-excluded, which is what a
+Constraint 4 makes `cache_dir` gitignored and scanner-excluded, which is what a
 derived index needs on both counts. The lexical half is not persisted: it is
 `okf_ext.search`, rebuilt per query from the bundle already in memory, which is
 also what keeps one BM25 implementation in this workspace rather than two.

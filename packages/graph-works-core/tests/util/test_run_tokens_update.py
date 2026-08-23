@@ -251,10 +251,10 @@ def test_the_entity_lane_is_reached_by_the_bundle_walk(tmp_path):
 
     layout = WorkspaceLayout(
         root=tmp_path / ".works",
-        config_dir=tmp_path / ".works" / "_config",
-        cache_dir=tmp_path / ".works" / "_cache",
+        config_dir=tmp_path / ".works" / ".gw",
+        cache_dir=tmp_path / ".works" / ".gw" / "cache",
         bundle_dir=bundle_root,
-        worktrees_dir=tmp_path / ".works" / "worktrees",
+        worktrees_dir=tmp_path / ".works" / ".gw" / "worktrees",
     )
 
     update = run_tokens_update(layout, dry_run=False)

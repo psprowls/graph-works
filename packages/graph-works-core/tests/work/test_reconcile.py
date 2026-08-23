@@ -301,10 +301,10 @@ def test_the_spec_git_history_is_the_first_anchor_arm(tmp_path):
     # tolerating a fallback.
     layout = WorkspaceLayout(
         root=code,
-        config_dir=code / "_config",
-        cache_dir=code / "_cache",
+        config_dir=code / ".gw",
+        cache_dir=code / ".gw" / "cache",
         bundle_dir=code,
-        worktrees_dir=code / "worktrees",
+        worktrees_dir=code / ".gw" / "worktrees",
     )
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     _write_item(layout, "a")

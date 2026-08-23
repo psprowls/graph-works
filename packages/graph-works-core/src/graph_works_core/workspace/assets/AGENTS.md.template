@@ -4,7 +4,7 @@
 > **Initialized:** `{{INITIALIZED_AT}}`
 
 This is a graph-works workspace: a per-repo container for the knowledge graph, its
-config, and its work tracker. `okf/` is the OKF bundle (the content itself); `_gw/`
+config, and its work tracker. `okf/` is the OKF bundle (the content itself); `.gw/`
 holds everything graph-works owns about it.
 
 ## Layout
@@ -13,9 +13,11 @@ holds everything graph-works owns about it.
   relay tail live here.
 - `okf/` — the OKF bundle: `index.md`, `log.md`, and the concept/entity/work pages the
   installed verticals write.
-- `_gw/_config/` — declarations the installed verticals own (schemas, sections, tags).
-- `_gw/_cache/` — the derived code graph and traces. Gitignored.
-- `_gw/worktrees/` — feature-work worktrees created under this workspace. Gitignored.
+- `.gw/` — the control plane: `schema/`, `sections/` and `tags.yaml`, the declarations
+  the installed verticals own.
+- `.gw/cache/` — the derived code graph, traces, and the `config.json` projection.
+  Gitignored.
+- `.gw/worktrees/` — feature-work worktrees created under this workspace. Gitignored.
 - `workspace.yaml` — the scanned repositories (`repositories:`/`ignore:`), seeded from the layout at init.
 
 ## Plugins installed

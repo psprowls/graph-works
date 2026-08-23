@@ -26,10 +26,10 @@ def fake_resolve(monkeypatch):
             raise WorkspaceNotFound("no workspace.yaml here")
         return WorkspaceLayout(
             root=Path(workspace or "/default"),
-            config_dir=Path("/default/_config"),
-            cache_dir=Path("/default/_cache"),
+            config_dir=Path("/default/.gw"),
+            cache_dir=Path("/default/.gw/cache"),
             bundle_dir=Path("/default/okf"),
-            worktrees_dir=Path("/default/worktrees"),
+            worktrees_dir=Path("/default/.gw/worktrees"),
         )
 
     monkeypatch.setattr("graph_works_cli.workspace_resolution.discovery.resolve", _fake)

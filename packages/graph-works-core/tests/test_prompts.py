@@ -155,7 +155,7 @@ def test_the_overview_reflects_a_non_default_layout(tmp_path):
     assert "pages/" in rendered
     assert "state/" in rendered
     assert "okf/" not in rendered
-    assert "_cache/" not in rendered
+    assert ".gw/cache/" not in rendered
 
 
 def test_the_overview_names_the_manifest_and_the_workspace_root(tmp_path):
@@ -259,9 +259,9 @@ def test_project_context_falls_back_to_the_workspace_root_outside_a_repo(tmp_pat
 
 
 def test_the_config_dir_is_never_consulted_for_project_context(tmp_path):
-    # `ingest` read `config.declarations_dir` -- the `_config/` directory --
-    # which no package ever seeds a CLAUDE.md into, so its project-context
-    # block rendered empty on every run.
+    # `ingest` read `config.declarations_dir` -- the control-plane config
+    # directory -- which no package ever seeds a CLAUDE.md into, so its
+    # project-context block rendered empty on every run.
     layout = layout_for(tmp_path)
     layout.config_dir.mkdir(parents=True)
     (layout.config_dir / "CLAUDE.md").write_text("## Style\n\nNot from here.\n", encoding="utf-8")

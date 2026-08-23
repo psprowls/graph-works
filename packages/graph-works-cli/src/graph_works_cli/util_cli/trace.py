@@ -1,4 +1,4 @@
-"""`gw util trace` — the read side of the traces core writes to `_cache/traces/`.
+"""`gw util trace` — the read side of the traces core writes to `<cache_dir>/traces/`.
 
 Every domain rule lives in `subagents_io.trace`: the reader dedupes its warnings, the
 aggregate computes the totals, `cost_rollup()` owns the ordering, and `collapse_runs`

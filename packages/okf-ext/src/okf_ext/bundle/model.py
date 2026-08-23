@@ -16,9 +16,8 @@ from pathlib import Path
 from okf_ext.writing import Skipped, WriteFailure
 
 #: The two declaration directory names. A named constant rather than a
-#: repo-wide literal: eight call sites across three packages named
-#: `"_schema"` / `"_sections"` directly before this existed, and a rename
-#: three call sites deep is how they drift.
+#: repo-wide literal: eight call sites across three packages resolve these
+#: directories, and a rename three call sites deep is how they drift.
 SCHEMA_DIRNAME = "schema"
 SECTIONS_DIRNAME = "sections"
 

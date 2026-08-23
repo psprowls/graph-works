@@ -1,4 +1,4 @@
-"""The regenerable `_cache/drift/propagated.json` anchor. Losing it costs one
+"""The regenerable `<cache_dir>/drift/propagated.json` anchor. Losing it costs one
 extra judging pass, so nothing here raises."""
 
 from __future__ import annotations

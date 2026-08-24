@@ -1,4 +1,4 @@
-"""code-graph-io: SQLite-backed code graph for the agent-workspace ecosystem.
+"""code-graph-io: SQLite-backed code graph for the graph-works ecosystem.
 
 The package owns the SQLite store, manifest scanning, and read-only queries.
 The public access surface is the GraphReader / GraphStore handle pair and the

@@ -1,4 +1,4 @@
-# agent-workspace
+# graph-works
 
 A uv workspace for the OKF tooling packages. The root is a workspace root only —
 it is not itself distributable.
@@ -12,7 +12,7 @@ it is not itself distributable.
   validation, table read/splice, render correctness, bundle health and search
   today; budgeted context assembly later.
 - [`packages/code-graph-io`](packages/code-graph-io) — code-graph core for the
-  agent-workspace ecosystem: SQLite store, tree-sitter-backed source parsing,
+  graph-works ecosystem: SQLite store, tree-sitter-backed source parsing,
   manifest scanning, and read-only queries.
 - [`packages/workflow-local`](packages/workflow-local) — a subprocess
   `DispatchBackend` for `subagents-io`: a durable per-session ledger, JSONL

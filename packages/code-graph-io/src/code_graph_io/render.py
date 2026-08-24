@@ -1,7 +1,7 @@
 """Render lists of dataclass records as JSON or aligned-column human output.
 
-Public formatter module for code_graph_io. Shared by agent-workspace-cli's gw graph
-modules and other agent-workspace surfaces without pulling CLI code back into code-graph-io.
+Public formatter module for code_graph_io. Shared by graph-works-cli's gw graph
+modules and other graph-works surfaces without pulling CLI code back into code-graph-io.
 
 Per-kind formatters (format_package, format_app, format_path, format_repo,
 format_entry_point, format_suite, format_dependency,

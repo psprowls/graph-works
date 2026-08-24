@@ -237,8 +237,8 @@ Inspect the canonical repository-owned lanes and global Dependencies:
 
 ```bash
 find "$TEST_WS/okf/repositories" -name '*.md' | sort | head -20
-cat "$TEST_WS/okf/repositories/agent-workspace/packages/graph-works-cli.md"
-cat "$TEST_WS/okf/repositories/agent-workspace/repository.md"
+cat "$TEST_WS/okf/repositories/graph-works/packages/graph-works-cli.md"
+cat "$TEST_WS/okf/repositories/graph-works/repository.md"
 cat "$TEST_WS/okf/dependencies/pypi/code-graph-io.md"
 tail -20 "$TEST_WS/okf/log.md"
 ```
@@ -357,7 +357,7 @@ $GW scan --apply \
 Check the sections actually landed:
 
 ```bash
-grep -A2 "^## Purpose" "$TEST_WS"/okf/repositories/agent-workspace/packages/graph-works-cli.md
+grep -A2 "^## Purpose" "$TEST_WS"/okf/repositories/graph-works/packages/graph-works-cli.md
 ```
 
 Try it again with a **stale** short head to confirm the guard rail fires (exit code 2,

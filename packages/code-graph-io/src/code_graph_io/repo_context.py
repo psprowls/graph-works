@@ -1,7 +1,7 @@
 # packages/code-graph-io/src/code_graph_io/repo_context.py
 """Derive a repo's `(org, repo)` identity from its git remote.
 
-Public entry point for callers outside code-graph-io (e.g. agent-workspace-core's
+Public entry point for callers outside code-graph-io (e.g. graph-works-core's
 multi-repo gate helpers) that need a repo's identity without reaching into
 code-graph-io's internal `update` module.
 """

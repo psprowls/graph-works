@@ -277,7 +277,7 @@ round** — see step 2's note; running them in the old order produces a page of 
 
    ```
    /plugin marketplace add <path-to-this-repo>
-   /plugin install graph-works@agent-workspace
+   /plugin install graph-works@graph-works
    ```
 
 7. **Smoke-test a skill** — e.g. confirm `graph-works:brainstorming` resolves.

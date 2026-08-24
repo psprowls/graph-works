@@ -1,5 +1,5 @@
 [project]
-name = "agent-workspace"
+name = "graph-works"
 version = "0.0.0"
 description = "uv workspace root for the okf-io packages. Not distributable."
 # 3.12 is the floor for the whole workspace. `okf_io.models.Frontmatter.extra`

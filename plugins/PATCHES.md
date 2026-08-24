@@ -158,8 +158,8 @@ marketplace entry installs the wrong plugin.
 | `name` | **Patched** -> `graph-works` |
 | `description` | **Patched** -> ours |
 | `author` | **Patched** -> `Patrick Sprowls` (upstream's `email` line dropped) |
-| `homepage` | **Patched** -> `https://github.com/psprowls/agent-workspace` |
-| `repository` | **Patched** -> `https://github.com/psprowls/agent-workspace` |
+| `homepage` | **Patched** -> `https://github.com/psprowls/graph-works` |
+| `repository` | **Patched** -> `https://github.com/psprowls/graph-works` |
 | `license` | Verbatim — MIT both ways |
 | `keywords` | **Patched** -> obra's six plus `wiki`, `knowledge-management`, `work-tracking` (D-007) |
 | `env` | **Patched (new)** -> `GRAPH_WORKS_ROOT`, a graph-works-only addition with no obra counterpart |

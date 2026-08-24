@@ -1,6 +1,6 @@
 # code-graph-io
 
-Code-graph backend for agent-workspace. Owns:
+Code-graph backend for graph-works. Owns:
 
 - SQLite schema + store at `<graph_dir>/code.db` (the graph directory is supplied by the caller)
 - Tree-sitter-backed source parsing (`code_graph_io.parser`) into a span-bearing

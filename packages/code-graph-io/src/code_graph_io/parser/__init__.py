@@ -1,4 +1,4 @@
-"""code-parser — tree-sitter-backed source parsing for the agent-workspace ecosystem."""
+"""code-parser — tree-sitter-backed source parsing for the graph-works ecosystem."""
 
 from code_graph_io.parser.errors import UnsupportedLanguageError
 from code_graph_io.parser.parse import parse_bytes, parse_file

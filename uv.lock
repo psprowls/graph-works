@@ -8,11 +8,11 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "agent-workspace",
     "code-graph-io",
     "code-wiki-okf",
     "config-io",
     "doc-wiki-okf",
+    "graph-works",
     "graph-works-cli",
     "graph-works-core",
     "models-io",
@@ -22,51 +22,6 @@ members = [
     "work-tracker-okf",
     "workflow-local",
     "workflow-orca",
-]
-
-[[package]]
-name = "agent-workspace"
-version = "0.0.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "doc-wiki-okf" },
-    { name = "graph-works-core" },
-    { name = "import-linter" },
-    { name = "models-io" },
-    { name = "mypy" },
-    { name = "okf-ext", extra = ["schemas"] },
-    { name = "okf-io" },
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "pytest-cov" },
-    { name = "ruff" },
-    { name = "types-jsonschema" },
-    { name = "types-pyyaml" },
-    { name = "workflow-local" },
-    { name = "workflow-orca" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
-    { name = "graph-works-core", editable = "packages/graph-works-core" },
-    { name = "import-linter", specifier = ">=2.0" },
-    { name = "models-io", editable = "packages/models-io" },
-    { name = "mypy", specifier = ">=1.11" },
-    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
-    { name = "okf-io", editable = "packages/okf-io" },
-    { name = "pytest", specifier = ">=8.0" },
-    { name = "pytest-asyncio", specifier = ">=0.24" },
-    { name = "pytest-cov", specifier = ">=5.0" },
-    { name = "ruff", specifier = ">=0.6" },
-    { name = "types-jsonschema" },
-    { name = "types-pyyaml" },
-    { name = "workflow-local", editable = "packages/workflow-local" },
-    { name = "workflow-orca", editable = "packages/workflow-orca" },
 ]
 
 [[package]]
@@ -413,6 +368,51 @@ requires-dist = [
     { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
     { name = "okf-io", editable = "packages/okf-io" },
     { name = "typer", specifier = ">=0.12" },
+]
+
+[[package]]
+name = "graph-works"
+version = "0.0.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "doc-wiki-okf" },
+    { name = "graph-works-core" },
+    { name = "import-linter" },
+    { name = "models-io" },
+    { name = "mypy" },
+    { name = "okf-ext", extra = ["schemas"] },
+    { name = "okf-io" },
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "pytest-cov" },
+    { name = "ruff" },
+    { name = "types-jsonschema" },
+    { name = "types-pyyaml" },
+    { name = "workflow-local" },
+    { name = "workflow-orca" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
+    { name = "graph-works-core", editable = "packages/graph-works-core" },
+    { name = "import-linter", specifier = ">=2.0" },
+    { name = "models-io", editable = "packages/models-io" },
+    { name = "mypy", specifier = ">=1.11" },
+    { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
+    { name = "okf-io", editable = "packages/okf-io" },
+    { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.24" },
+    { name = "pytest-cov", specifier = ">=5.0" },
+    { name = "ruff", specifier = ">=0.6" },
+    { name = "types-jsonschema" },
+    { name = "types-pyyaml" },
+    { name = "workflow-local", editable = "packages/workflow-local" },
+    { name = "workflow-orca", editable = "packages/workflow-orca" },
 ]
 
 [[package]]

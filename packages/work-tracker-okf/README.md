@@ -115,15 +115,6 @@ executor applies those plans atomically and reconciles every affected index.
 `IGNORE` is the normal read/validation lens. `ARCHIVE_IGNORE` exposes members
 beneath `references/` to the move planner; it must not be used for validation.
 
-## Migration boundary
-
-Ordinary readers and writers accept only the path-native contract. The
-one-time compatibility dialect is isolated in `work_tracker_okf.migration` and
-is reached only by the explicit workspace migration command. It builds a full
-manifest, normalizes frontmatter and dependency edges, renames managed
-artifacts, preserves opaque nested attachments, and refuses ambiguous or
-incomplete input before any write.
-
 ## Validation and tests
 
 `work_tracker_okf.rules.lane_rules()` composes the state, plan, graph,

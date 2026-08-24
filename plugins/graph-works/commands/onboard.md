@@ -13,8 +13,10 @@ workspace itself, or the repo's `.claude/settings.local.json`; `gw` is the sole 
 
 ## Ground rules
 
-- Run `gw` from the repo. If `gw` is not on PATH, use
-  `uv run --package graph-works-cli gw ...`.
+- Run `gw` from the repo. `gw` being on PATH doesn't prove it's this repo's build —
+  a stale entry point can own the name. Verify identity, not presence: `gw util
+  describe-surface --json >/dev/null 2>&1 || echo "gw is not graph-works-cli —
+  use: uv run --package graph-works-cli gw ..."`.
 - When step 0 finds no workspace, Q1–Q3 and the apply step are required — that's the
   creation path, not a toggle. The feature questions after it (Q4) are optional: "No"
   runs nothing and moves on.

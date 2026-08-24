@@ -76,6 +76,7 @@ def rule_set(
     root: Path,
     *,
     repo_root: Path | None = None,
+    vault_root: Path | None = None,
     declarations_dir: Path | None = None,
 ) -> tuple[Rule, ...]:
     """The one rule set `lint` and `advance` both validate against (C6-M).
@@ -107,10 +108,16 @@ def rule_set(
     `items.placement_directories`, narrowed to this lane's own types -- see
     there for why an allow-list.
 
-    **`repo_root` stays optional and skips rather than reports.** Omitting it
-    drops `targets.affects-missing` and `plan.action-target-missing`, because
-    not knowing where the repo is says nothing about whether the paths are
-    good.
+    **`repo_root` and `vault_root` stay optional and skip rather than
+    report.** `repo_root` gates `targets.affects-missing`; either one present
+    is enough to run `plan.action-target-missing`, which checks a token
+    against whichever root(s) it is given -- not knowing where a root is says
+    nothing about whether the paths under it are good. The two are distinct
+    because a plan action can name either a code path (`repo_root`) or, via
+    the standard "Execute implementation plan: ..." row, its own artifact's
+    vault-relative path (`vault_root`); in a split topology (workspace and
+    code repo are different git repos) the two roots are different
+    directories.
 
     Raises `OSError` for a missing declarations directory and `ValueError` for
     a malformed one, straight out of `load_schemas` / `load_sections`. That is
@@ -125,7 +132,7 @@ def rule_set(
         section_rule(load_sections(declarations / "sections"), severity="error"),
         render_rule(),
         placement_rule(placement_directories(schema_set), severity="error"),
-        *lane_rules(repo_root=repo_root),
+        *lane_rules(repo_root=repo_root, vault_root=vault_root),
     )
 
 

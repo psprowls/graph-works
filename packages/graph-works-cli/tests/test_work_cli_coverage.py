@@ -223,15 +223,14 @@ def test_finish_path_mutation_all_policies(capsys: pytest.CaptureFixture[str]) -
     assert _exit_code(lambda: main._finish_path_mutation(base, dry_run=False, json_output=False)) == 1
 
 
-@pytest.mark.parametrize("name", ["reparent", "adopt", "migrate_layout"])
+@pytest.mark.parametrize("name", ["reparent", "adopt"])
 def test_mutation_commands_map_io_failures(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
-    target = {"reparent": "run_reparent", "adopt": "run_release_adoption", "migrate_layout": "run_migrate_layout"}[name]
+    target = {"reparent": "run_reparent", "adopt": "run_release_adoption"}[name]
     monkeypatch.setattr(main.work, target, lambda *args, **kwargs: (_ for _ in ()).throw(OSError("io")))
     calls = {
         "reparent": lambda: main.reparent("work/a", "work/e", False, "", False),
         "adopt": lambda: main.adopt("work/e", "work/r", False, "", False),
-        "migrate_layout": lambda: main.migrate_layout(False, "", False),
     }
     assert _exit_code(calls[name]) == 1
 

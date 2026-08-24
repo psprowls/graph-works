@@ -55,7 +55,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
-from typing import Literal, Protocol
+from typing import Literal
 
 from code_wiki_okf.config import Config
 from okf_ext.bundle import SECTIONS_DIRNAME
@@ -470,7 +470,9 @@ def run_lint(
     `strict=False`.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=_work_only_ignore(layout))
-    rules = rule_set(layout.bundle_dir, repo_root=repo_root, declarations_dir=config.declarations_dir)
+    rules = rule_set(
+        layout.bundle_dir, repo_root=repo_root, vault_root=layout.root, declarations_dir=config.declarations_dir
+    )
     return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
 
 
@@ -549,43 +551,6 @@ class PathMutationResult:
 
     plan: WorkMutationPlan
     application: MutationApplication | None = None
-
-
-class MigrationPlanView(Protocol):
-    """The path-native migration surface, without importing legacy parsing."""
-
-    @property
-    def mutation(self) -> WorkMutationPlan: ...
-
-    @property
-    def ok(self) -> bool: ...
-
-    def diff(self) -> str: ...
-
-
-@dataclass(frozen=True, slots=True)
-class MigrationLayoutResult:
-    """An explicitly requested migration preview and optional application."""
-
-    plan: MigrationPlanView
-    application: MutationApplication | None = None
-
-
-def run_migrate_layout(
-    layout: WorkspaceLayout,
-    *,
-    apply: bool = False,
-) -> MigrationLayoutResult:
-    """Plan the isolated legacy conversion; apply only on explicit request.
-
-    The local import is intentional. Ordinary work-command imports stay wholly
-    path-native and never load the one-time legacy parser.
-    """
-    from work_tracker_okf.migration import LEGACY_IGNORE, plan_migration
-
-    plan = plan_migration(load_bundle(layout.bundle_dir, ignore=LEGACY_IGNORE))
-    application = apply_mutation(layout, plan.mutation) if apply and plan.ok else None
-    return MigrationLayoutResult(plan, application)
 
 
 def run_reparent(
@@ -1024,8 +989,6 @@ __all__ = [
     "DependencyIssue",
     "DependencyParse",
     "FilingRun",
-    "MigrationLayoutResult",
-    "MigrationPlanView",
     "NextApplication",
     "NextResult",
     "OverturnApplication",
@@ -1045,7 +1008,6 @@ __all__ = [
     "run_decision_supersede",
     "run_file",
     "run_lint",
-    "run_migrate_layout",
     "run_next",
     "run_regen_indexes",
     "run_release_adoption",

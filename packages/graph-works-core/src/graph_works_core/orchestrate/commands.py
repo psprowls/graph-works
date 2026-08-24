@@ -1188,7 +1188,7 @@ def run_stage_advance(
         validate_paths=(path,),
         directory_preconditions=conditions,
     )
-    application = apply_mutation(layout, mutation)
+    application = apply_mutation(layout, mutation, repo_root=resolved_repo)
     if application.ok:
         outcome = replace(outcome, written=True)
         if result_member is not None:

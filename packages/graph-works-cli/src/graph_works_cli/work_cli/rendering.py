@@ -30,7 +30,6 @@ from graph_works_core.work.commands import (
     Decision,
     DecisionCommandResult,
     FilingRun,
-    MigrationLayoutResult,
     NextResult,
     OverturnResult,
     PathMutationResult,
@@ -171,18 +170,6 @@ class _WorktreeView(Protocol):
     branch: str
     base_branch: str | None
     exists: bool | None
-
-
-class _MigrationEntryView(Protocol):
-    old_path: str
-    new_path: str
-    type: str
-
-
-class _MigrationDetailView(Protocol):
-    manifest: tuple[_MigrationEntryView, ...]
-    frontmatter_edits: tuple[str, ...]
-    opaque_warnings: tuple[str, ...]
 
 
 def _refusal(value: object) -> dict[str, str]:
@@ -476,36 +463,6 @@ def path_mutation_payload(result: PathMutationResult) -> dict[str, Any]:
         "indexes": [write.member for write in result.plan.writes if write.member.endswith("index.md")],
         "warnings": [*result.plan.warnings, *(() if result.application is None else result.application.warnings)],
         "refusals": [_refusal(refusal) for refusal in result.plan.refusals],
-        **_application(result.application),
-    }
-
-
-def migration_payload(result: MigrationLayoutResult) -> dict[str, Any]:
-    plan = result.plan
-    details = cast(_MigrationDetailView, plan)
-    mutation = plan.mutation
-    move_plan = mutation.move_plan
-    managed_edits = () if move_plan is None else move_plan.edits
-    return {
-        "moves": [{"from": entry.old_path, "to": entry.new_path, "type": entry.type} for entry in details.manifest],
-        "path_mapping": dict(mutation.path_mapping),
-        "frontmatter_edits": list(details.frontmatter_edits),
-        "managed_markdown_edits": [
-            {
-                "member": edit.member,
-                "where": edit.where,
-                "target": edit.target,
-                "old": edit.old,
-                "new": edit.new,
-                "line": edit.line,
-                "column": edit.column,
-                "key": edit.key,
-            }
-            for edit in managed_edits
-        ],
-        "indexes": [write.member for write in mutation.writes if write.member.endswith("index.md")],
-        "opaque_warnings": list(details.opaque_warnings),
-        "refusals": [_refusal(refusal) for refusal in mutation.refusals],
         **_application(result.application),
     }
 

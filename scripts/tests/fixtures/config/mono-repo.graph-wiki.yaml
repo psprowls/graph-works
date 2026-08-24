@@ -1,0 +1,25 @@
+version: 2
+initialized_at: '2026-06-05'
+topic: Personal monorepo
+repo-directory: /Users/pat/Personal/mono-repo
+plugins:
+- name: graph-wiki
+  installed_version: 0.1.1
+  applied_version: 0.1.1
+- name: graph-wiki-agent
+  installed_version: 0.1.1
+  applied_version: 0.1.1
+
+state_gate:           # gate that guards last_updated_commit narrative stamping
+  enabled: false       # set false to disable the gate entirely
+  branches:           # branches on which stamping is allowed (clean tree also required)
+    - main
+
+plugin:
+  backend_default: claude # global default: "claude" (default) | "bedrock"
+  backend_overrides: # optional per-command override
+    bootstrap: bedrock
+    scan: bedrock
+    lint: claude
+    ingest: claude
+    query: bedrock

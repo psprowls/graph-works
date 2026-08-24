@@ -23,7 +23,10 @@ bundle-relative path returned by the CLI. Never derive identity from a page stem
    `<workspace>/okf/<work-path>/references/01-design.md`, or the exact
    source path supplied by the dispatch brief.
 
-If `gw` is not on PATH, use `uv run --package graph-works-cli gw …`.
+`gw` being on PATH doesn't prove it's this repo's build — a stale entry point can
+own the name. Verify identity, not presence: `gw util describe-surface --json
+>/dev/null 2>&1 || echo "gw is not graph-works-cli — use: uv run --package
+graph-works-cli gw …"`.
 
 ## Decompose and order
 

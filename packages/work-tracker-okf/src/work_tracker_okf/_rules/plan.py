@@ -90,15 +90,28 @@ def table(ctx: RuleContext) -> Iterable[Finding]:
             )
 
 
-def _actions(repo_root: Path) -> Rule:
-    """11: an action cell naming a repo path that does not exist.
+def _actions(repo_root: Path | None, vault_root: Path | None) -> Rule:
+    """11: an action cell naming a path that exists under neither root.
 
     Only rows of an `ok` table are scanned, and only the `Action` column --
     `Done when` and `Rationale` are prose. `http`-prefixed tokens are skipped.
     work-io's `workspace_root` second chance is **not** ported: nothing in this
     lane reads a path it was not handed, and one injected root is the whole
     contract.
+
+    A token is checked against **either** configured root, not just one: a
+    hand-written action naming a code file ("Edit packages/foo/bar.py")
+    resolves under *repo_root*, while the one boilerplate "Execute
+    implementation plan: ..." row every plan-stage item carries names its own
+    plan artifact's vault path, which resolves under *vault_root*. In a
+    co-located topology the two roots are the same directory and this
+    collapses to a single check; in a split topology (workspace and code repo
+    are different git repos) they are not, and a token existing under either
+    is enough.
     """
+
+    _roots = (("the repo root", repo_root), ("the vault root", vault_root))
+    root_names = " or ".join(name for name, root in _roots if root is not None) or "the repo root"
 
     def rule(ctx: RuleContext) -> Iterable[Finding]:
         for item, document in with_documents(ctx):
@@ -113,22 +126,25 @@ def _actions(repo_root: Path) -> Rule:
                     if match is None:
                         continue
                     token = match.group()
-                    if (repo_root / token).exists():
+                    if repo_root is not None and (repo_root / token).exists():
+                        continue
+                    if vault_root is not None and (vault_root / token).exists():
                         continue
                     yield _finding(
                         "plan.action-target-missing",
                         "error",
                         item,
-                        f"plan action names `{token}`, which does not exist under the repo root",
+                        f"plan action names `{token}`, which does not exist under {root_names}",
                     )
 
     return rule
 
 
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
-    """`repo_root=None` **skips** `plan.action-target-missing` rather than
-    reporting it as a failure: not knowing where the repo is says nothing about
-    whether the paths are good. work-io's behaviour, and the right one."""
-    if config.repo_root is None:
+    """No root at all **skips** `plan.action-target-missing` rather than
+    reporting it as a failure: not knowing where a root is says nothing about
+    whether the paths under it are good. work-io's behaviour, and the right
+    one."""
+    if config.repo_root is None and config.vault_root is None:
         return (table,)
-    return (table, _actions(config.repo_root))
+    return (table, _actions(config.repo_root, config.vault_root))

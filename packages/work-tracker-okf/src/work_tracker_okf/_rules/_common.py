@@ -25,12 +25,22 @@ class LaneConfig:
     """What a lane rule may be handed that `RuleContext` cannot carry.
 
     `RuleContext` deliberately touches no filesystem, and two of the 37 codes
-    (`targets.affects-missing`, `plan.action-target-missing`) are questions about
-    a repository. `repo_root=None` **skips** both rather than reporting them:
-    not knowing where the repo is says nothing about whether the paths are good.
+    are questions about a filesystem root -- but not the same root.
+    `targets.affects-missing` checks `affects` entries against the **code
+    repository**; `plan.action-target-missing` checks plan-table Action-cell
+    path tokens against the **vault** (the bundle root), since the one
+    boilerplate "Execute implementation plan: ..." row every plan-stage item
+    carries names its own plan artifact's vault path, not a code repo path.
+    In a split topology (workspace and code repo are different git repos)
+    those are two different directories; a single shared root cannot satisfy
+    both checks.
+    Either field being `None` **skips** its rule rather than reporting a
+    failure: not knowing where a root is says nothing about whether the
+    paths under it are good.
     """
 
     repo_root: Path | None = None
+    vault_root: Path | None = None
 
 
 def items(ctx: RuleContext) -> tuple[WorkItem, ...]:

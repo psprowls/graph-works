@@ -20,8 +20,10 @@ it already holds.
 
 The workspace doc-routing hook injects the resolved absolute workspace path into your context — use it if present when you see `<workspace>` mentioned in a command or instruction.
 
-If `gw` is not on PATH, run it as
-`uv run --package graph-works-cli gw …`.
+`gw` being on PATH doesn't prove it's this repo's build — a stale entry point can
+own the name. Verify identity, not presence: `gw util describe-surface --json
+>/dev/null 2>&1 || echo "gw is not graph-works-cli — use: uv run --package
+graph-works-cli gw …"`.
 
 ## Steps
 

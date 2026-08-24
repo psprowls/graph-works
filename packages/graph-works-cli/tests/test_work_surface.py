@@ -26,7 +26,6 @@ VERBS = [
     ["work", "regen-index"],
     ["work", "reparent"],
     ["work", "adopt"],
-    ["work", "migrate-layout"],
     ["work", "orchestrate"],
     ["work", "reconcile-context"],
     ["work", "decision", "add"],
@@ -37,8 +36,8 @@ VERBS = [
 ]
 
 
-def test_the_surface_is_exactly_seventeen_verbs() -> None:
-    assert len(VERBS) == 17
+def test_the_surface_is_exactly_sixteen_verbs() -> None:
+    assert len(VERBS) == 16
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))
@@ -107,13 +106,6 @@ def test_advance_declares_the_donor_provenance_pair() -> None:
     payload = json.loads(runner.invoke(app, ["help", "work", "advance", "--json"]).stdout)
     opts = {opt for option in payload["options"] for opt in option["opts"]}
     assert {"--owner", "--effort", "--resolved-in", "--released-at", "--worktree", "--branch"} <= opts
-
-
-def test_migrate_layout_requires_an_explicit_apply_switch_without_a_compatibility_alias() -> None:
-    payload = json.loads(runner.invoke(app, ["help", "work", "migrate-layout", "--json"]).stdout)
-    opts = {opt for option in payload["options"] for opt in option["opts"]}
-    assert "--apply" in opts
-    assert "--dry-run" not in opts
 
 
 def _imported_roots(path: Path) -> set[str]:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -258,54 +257,6 @@ def test_adopt_live_apply_updates_lane_indexes(workspace: Path) -> None:
     layout = resolve_workspace(str(workspace))
     assert layout.bundle_dir.joinpath(f"{payload['path_mapping'][source]}.md").is_file()
     assert "work/index.md" in payload["indexes"]
-
-
-def test_migrate_layout_preview_has_the_frozen_shape(workspace: Path) -> None:
-    layout = resolve_workspace(str(workspace))
-    fixture = Path(__file__).resolve().parents[2] / "work-tracker-okf/tests/fixtures/legacy_graph_wiki"
-    shutil.copytree(fixture, layout.bundle_dir, dirs_exist_ok=True)
-    result = runner.invoke(app, ["work", "migrate-layout", "--workspace", str(workspace), "--json"])
-    payload = json.loads(result.stdout)
-    assert result.exit_code == 0, result.output
-    assert {
-        "moves",
-        "frontmatter_edits",
-        "managed_markdown_edits",
-        "indexes",
-        "opaque_warnings",
-        "refusals",
-        "path_mapping",
-        "applied",
-        "rolled_back",
-        "failures",
-    } == set(payload)
-    assert payload["applied"] is False
-
-
-def test_migrate_layout_failure_is_incomplete_without_partial_json(
-    workspace: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(work_main.work, "run_migrate_layout", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(
-        work_main.rendering,
-        "migration_payload",
-        lambda _result: {
-            "moves": [],
-            "path_mapping": {},
-            "frontmatter_edits": [],
-            "managed_markdown_edits": [],
-            "indexes": [],
-            "opaque_warnings": [],
-            "refusals": [],
-            "applied": True,
-            "rolled_back": False,
-            "failures": ["apply failed before touching a member"],
-        },
-    )
-    result = runner.invoke(app, ["work", "migrate-layout", "--apply", "--workspace", str(workspace), "--json"])
-    assert result.exit_code == exit_codes.GENERIC
-    assert result.stdout == ""
-    assert "apply failed before touching a member" in result.stderr
 
 
 def test_archive_live_apply_updates_lane_indexes(workspace: Path) -> None:

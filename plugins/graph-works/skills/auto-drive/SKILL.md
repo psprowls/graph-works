@@ -26,7 +26,10 @@ handle and goes back down through `reply --id` (see §4.3); an `escalation`
 through `send --to dispatch:<id>` instead (see §4.4) — `reply` on that
 handle reaches a passive mailbox, not the worker.
 
-If `gw` is not on PATH, run it as `uv run --package graph-works-cli gw …`.
+`gw` being on PATH doesn't prove it's this repo's build — a stale entry point can
+own the name. Verify identity, not presence: `gw util describe-surface --json
+>/dev/null 2>&1 || echo "gw is not graph-works-cli — use: uv run --package
+graph-works-cli gw …"`.
 
 ## 0. Preconditions
 
@@ -39,9 +42,10 @@ explanation — no degraded mode, no partial loop:
    orchestration layer is available on this install. An "unknown command" or
    feature-disabled error means the Experimental orchestration feature isn't
    enabled; stop and say so (do not try to work around it).
-3. `gw` resolvable: bare `gw --help` on PATH, else
-   `uv run --package graph-works-cli gw --help` from the workspace's repo
-   root.
+3. `gw` resolvable **as this repo's build**: `gw util describe-surface --json
+   >/dev/null 2>&1` exits 0. If it doesn't — absent from PATH, or present but
+   naming a different CLI — fall back to `uv run --package graph-works-cli gw
+   --help` from the workspace's repo root.
 4. Workspace resolves: `GRAPH_WORKS_DIR` is set, or discovery from cwd
    succeeds. `gw work status` fails loudly if not — treat that failure as a
    precondition failure, not a mid-loop error.

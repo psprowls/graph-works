@@ -28,11 +28,23 @@ LEGACY_DATE_WORK_PATH = re.compile(
     re.ASCII,
 )
 LEGACY_EXCLUSIONS = (
-    ROOT / "packages" / "work-tracker-okf" / "src" / "work_tracker_okf" / "migration.py",
-    ROOT / "packages" / "work-tracker-okf" / "tests" / "test_migration.py",
-    ROOT / "packages" / "graph-works-core" / "tests" / "work" / "test_run_migrate_layout.py",
+    # The harvested copy and its carried-over suite (D-013). These stay until
+    # the script itself is retired (mono-repo cutover, a follow-on item).
+    ROOT / "scripts" / "migrate_vault_work.py",
+    ROOT / "scripts" / "tests" / "test_migrate_vault_work.py",
+    # The sweep driver's own test suite exercises the legacy graph-wiki dialect
+    # it converts away from -- synthetic fixtures necessarily spell out the
+    # retired `work/<YYYY-MM-DD>-.../NN-*.md` shape and its stage-document
+    # filenames as literal strings. Stays until migrate_vault.py is retired.
+    ROOT / "scripts" / "tests" / "test_migrate_vault.py",
+    # D-025/D-043: the relocated boundary test (`test_migration.py`'s
+    # `_legacy_boundary_violations`) permanently scans package source for the
+    # retired `workflow_status` key by AST identifier -- unlike the entries
+    # above, this exclusion does not retire with anything: the guard itself
+    # must keep naming the token it guards against.
+    ROOT / "packages" / "work-tracker-okf" / "tests" / "test_legacy_boundary.py",
 )
-LEGACY_FIXTURE = ROOT / "packages" / "work-tracker-okf" / "tests" / "fixtures" / "legacy_graph_wiki"
+HARVESTED_LEGACY_FIXTURE = ROOT / "scripts" / "tests" / "fixtures" / "legacy_graph_wiki"
 
 
 def _active_files() -> list[Path]:
@@ -72,7 +84,7 @@ def test_active_runtime_surfaces_use_only_the_path_native_work_contract() -> Non
     findings: list[str] = []
 
     for path in _active_files():
-        if path in LEGACY_EXCLUSIONS or path.is_relative_to(LEGACY_FIXTURE):
+        if path in LEGACY_EXCLUSIONS or path.is_relative_to(HARVESTED_LEGACY_FIXTURE):
             continue
         text = path.read_bytes().decode("utf-8", errors="ignore")
         for line_number, line in enumerate(text.splitlines(), start=1):

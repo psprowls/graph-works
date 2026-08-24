@@ -1,5 +1,19 @@
 """One-time conversion of legacy flat/hybrid work bundles.
 
+Harvested copy of ``work_tracker_okf.migration`` (D-013). A copy, not an
+import: C7 deletes the package module once C4 proves this one, and a script
+importing it would break at that moment. Do not edit the logic here to
+diverge from the original while both exist -- `scripts/tests/
+test_migrate_vault_work.py` carries the package's own 21 cases over precisely
+so a divergence is caught.
+
+Five of its imports reach package-private names in
+``work_tracker_okf.mutation`` (``_opaque_members``, ``_plan_path_mutation``,
+``_plan_with_domain_reserved``, ``_prepare_reference_markdown``,
+``_reference_owners``). That cross-package private coupling is deliberate and
+recorded: C7 must not tidy any of the five away while removing
+``migration.py``.
+
 This is the only module that understands the retired filename, hierarchy, and
 frontmatter dialect.  Path-native readers deliberately do not fall back to any
 of it: callers opt into this planner, inspect its complete manifest, and hand

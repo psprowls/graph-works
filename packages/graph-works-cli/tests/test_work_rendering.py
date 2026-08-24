@@ -287,25 +287,6 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
 
 
 def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> None:
-    edit = SimpleNamespace(member="a.md", where="body", target="old", old="old", new="new", line=2, column=3, key=None)
-    refusal = SimpleNamespace(path="work/a", kind="bad", detail="why")
-    mutation = SimpleNamespace(
-        move_plan=SimpleNamespace(edits=(edit,)),
-        path_mapping={"old": "new"},
-        writes=(SimpleNamespace(member="work/index.md"),),
-        refusals=(refusal,),
-    )
-    migration = SimpleNamespace(
-        plan=SimpleNamespace(
-            manifest=(SimpleNamespace(old_path="old", new_path="new", type="Feature"),),
-            frontmatter_edits=("edit",),
-            opaque_warnings=("opaque",),
-            mutation=mutation,
-        ),
-        application=SimpleNamespace(rolled_back=False, failures=()),
-    )
-    assert rendering.migration_payload(migration)["managed_markdown_edits"][0]["column"] == 3
-
     entry = SimpleNamespace(
         id="D-001",
         number=1,

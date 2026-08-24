@@ -28,10 +28,14 @@ so a move planner can see reference-tree members that must move with an item.
 
 ## Compatibility boundary
 
-The retired dialect belongs only in `migration.py`, its legacy fixture, and its
-tests. Production readers, rules, filing, archiving, reparenting, and indexing
-must stay path-native. Any new compatibility behavior must be implemented as an
-explicit migration, never as a read-time fallback.
+The one-time work-lane migrator retired with `migration.py` (D-013/D-007): the
+retired dialect belongs nowhere in this package now. Production readers,
+rules, filing, archiving, reparenting, and indexing stay path-native
+unconditionally, and `tests/test_legacy_boundary.py` scans every package's
+source for it with no exemption. Any new compatibility behavior must be
+implemented as an explicit migration, never as a read-time fallback -- and it
+does not belong in this package; the live migration path is
+`scripts/migrate_vault_work.py`.
 
 ## Testing
 
@@ -44,7 +48,6 @@ The committed fixtures are contracts:
   and opaque attachments.
 - `fixtures/nonconformant` triggers every lane catalog code without legacy
   hierarchy fields.
-- `fixtures/legacy_graph_wiki` is migration-only and must remain isolated.
 
 Run:
 

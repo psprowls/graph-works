@@ -1,0 +1,22 @@
+version: 2
+initialized_at: '2026-08-02'
+topic: agent-workspace
+plugins:
+- name: graph-wiki
+  installed_version: 0.1.1
+  applied_version: 0.1.1
+workflow:
+  commit_strategy: at-end
+  model_routing:
+    mechanical: haiku
+    standard: sonnet
+    frontier: inherit
+  auto_drive:
+    max_parallel: 4
+    permission_mode: bypassPermissions
+    models:
+      design: opus
+      plan: opus
+      execute: sonnet
+      finish: sonnet
+repo-directory: /Users/pat/Personal/graph-works

@@ -1848,6 +1848,8 @@ def _validate_postconditions(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
     root_fd: int | None = None,
+    *,
+    repo_root: Path | None = None,
 ) -> tuple[str, ...]:
     close_root = root_fd is None
     if root_fd is None:
@@ -1874,7 +1876,8 @@ def _validate_postconditions(
             today=date.max,
             extra_rules=rule_set(
                 validation_root,
-                repo_root=layout.repo_root,
+                repo_root=repo_root if repo_root is not None else layout.repo_root,
+                vault_root=layout.root,
                 declarations_dir=declarations_dir,
             ),
         )
@@ -1955,6 +1958,8 @@ def _apply_mutation_locked(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
     locked_root_fd: int,
+    *,
+    repo_root: Path | None = None,
 ) -> MutationApplication:
     transaction_id = uuid.uuid4().hex
     transaction_root = layout.cache_dir / "work-mutations"
@@ -2094,6 +2099,7 @@ def _apply_mutation_locked(
                     layout,
                     plan,
                     root_fd,
+                    repo_root=repo_root,
                 )
                 if postcondition_failures:
                     raise ValueError("; ".join(postcondition_failures))
@@ -2189,12 +2195,25 @@ def _apply_mutation_locked(
             os.close(root_fd)
 
 
-def apply_mutation(layout: WorkspaceLayout, plan: WorkMutationPlan) -> MutationApplication:
-    """Apply *plan* atomically, retaining durable recovery evidence in cache."""
+def apply_mutation(
+    layout: WorkspaceLayout,
+    plan: WorkMutationPlan,
+    *,
+    repo_root: Path | None = None,
+) -> MutationApplication:
+    """Apply *plan* atomically, retaining durable recovery evidence in cache.
+
+    *repo_root* overrides `layout.repo_root` for postcondition validation
+    (e.g. `targets.affects-missing`). `layout.repo_root` is a `.git` walk-up
+    from the workspace root, which resolves to the workspace's own repo in a
+    split topology -- workspace and code repo separate. A caller that already
+    resolved the code repo (`workspace.repos.resolve_repo`) passes it here so
+    validation checks `affects` paths against the code repo, not the vault.
+    """
     root_fd = _open_root(layout.bundle_dir)
     try:
         with _bundle_root_lock(root_fd):
-            return _apply_mutation_locked(layout, plan, root_fd)
+            return _apply_mutation_locked(layout, plan, root_fd, repo_root=repo_root)
     finally:
         os.close(root_fd)
 

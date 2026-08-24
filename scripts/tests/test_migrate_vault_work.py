@@ -1,26 +1,48 @@
+"""The carried-over acceptance suite for `scripts/migrate_vault_work.py` (D-013).
+
+Every case here is `packages/work-tracker-okf/tests/test_migration.py`'s, with
+the import line rebound to the harvested copy. The carry-over is the whole
+safety story for the harvest and is not optional: once C7 deletes the package
+module, this file is the only thing that still exercises the planner.
+
+Deliberately NOT carried: the four `_legacy_boundary_violations` cases. They
+assert that no module under `packages/*/src/` parses the legacy dialect. Their
+glob never reaches `scripts/`, so a harvested copy is outside their scope by
+construction, and D-043 assigns their relocation to C7.
+"""
+
 from __future__ import annotations
 
-import ast
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
 from okf_io import load_bundle, parse
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.migration import (
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from migrate_vault_work import (  # noqa: E402
     LEGACY_IGNORE,
+    MigrationManifestEntry,
+    MigrationPlan,
+    _LegacyNode,
+    _resolve_legacy,
+    plan_migration,
+)
+from migrate_vault_work import (  # noqa: E402, PLC2701 -- unit cases reach module internals, as the original did
     _convert_document,
     _dependency_edges,
     _desired_member,
-    _LegacyNode,
     _projected_refusals,
-    _resolve_legacy,
     _source_entries,
     _targets,
-    plan_migration,
 )
 
-FIXTURE_ROOT = Path(__file__).parent / "fixtures" / "legacy_graph_wiki"
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+LEGACY_GRAPH_WIKI = FIXTURES / "legacy_graph_wiki"
+FIXTURE_ROOT = LEGACY_GRAPH_WIKI
 
 
 def _legacy_node(
@@ -367,125 +389,6 @@ def test_projected_migration_refuses_an_ignored_raw_work_member(tmp_path: Path) 
     )
 
 
-def _legacy_boundary_violations(repo_root: Path) -> list[str]:
-    packages_root = repo_root / "packages"
-    dialect_roots = (
-        packages_root / "work-tracker-okf/src/work_tracker_okf",
-        packages_root / "graph-works-core/src/graph_works_core",
-    )
-    legacy_module = dialect_roots[0] / "migration.py"
-    migration_command = dialect_roots[1] / "work/commands.py"
-    forbidden = {"workflow_status", "parent", "children"}
-    violations: list[str] = []
-    for path in sorted(packages_root.glob("*/src/**/*.py")):
-        if path == legacy_module:
-            continue
-        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-        parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
-        checks_dialect = any(path.is_relative_to(root) for root in dialect_roots)
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and "DATE_PREFIX" in node.id:
-                violations.append(f"{path.name}:{node.lineno}:{node.id}")
-            if (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and (r"\d{4}-\d{2}-\d{2}-" in node.value or "YYYY-MM-DD-" in node.value)
-            ):
-                violations.append(f"{path.name}:{node.lineno}:legacy-date-prefix")
-            if (
-                checks_dialect
-                and isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and "workflow_status" in node.value
-            ):
-                violations.append(f"{path.name}:{node.lineno}:workflow_status")
-            imports_migration = (
-                isinstance(node, ast.Import) and any(alias.name == "work_tracker_okf.migration" for alias in node.names)
-            ) or (
-                isinstance(node, ast.ImportFrom)
-                and (
-                    node.module == "work_tracker_okf.migration"
-                    or (node.module == "work_tracker_okf" and any(alias.name == "migration" for alias in node.names))
-                    or (
-                        node.level > 0
-                        and path.is_relative_to(dialect_roots[0])
-                        and (
-                            node.module == "migration"
-                            or (node.module is None and any(alias.name == "migration" for alias in node.names))
-                        )
-                    )
-                )
-            )
-            if imports_migration:
-                ancestor = parents.get(node)
-                while ancestor is not None and not isinstance(ancestor, ast.FunctionDef):
-                    ancestor = parents.get(ancestor)
-                allowed = (
-                    path == migration_command
-                    and isinstance(ancestor, ast.FunctionDef)
-                    and ancestor.name == "run_migrate_layout"
-                    and isinstance(parents.get(ancestor), ast.Module)
-                    and parents.get(node) is ancestor
-                )
-                if not allowed:
-                    violations.append(f"{path.name}:{node.lineno}:legacy-import")
-            if not checks_dialect or not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
-                continue
-            if node.func.attr not in {"set", "insert", "__setitem__"} or not node.args:
-                continue
-            first = node.args[0]
-            if isinstance(first, ast.Constant) and first.value in forbidden:
-                violations.append(f"{path.name}:{node.lineno}:{first.value}")
-    return violations
-
-
-def test_legacy_parsing_and_frontmatter_writes_are_isolated_to_migration_module() -> None:
-    repo_root = Path(__file__).parents[3]
-
-    assert _legacy_boundary_violations(repo_root) == []
-
-
-def test_legacy_boundary_scans_cli_and_plain_imports(tmp_path: Path) -> None:
-    rogue = tmp_path / "packages/graph-works-cli/src/graph_works_cli/rogue.py"
-    rogue.parent.mkdir(parents=True)
-    rogue.write_text("import work_tracker_okf.migration\n", encoding="utf-8")
-    second = tmp_path / "packages/code-wiki-okf/src/code_wiki_okf/rogue_from.py"
-    second.parent.mkdir(parents=True)
-    second.write_text("from work_tracker_okf.migration import plan_migration\n", encoding="utf-8")
-
-    violations = _legacy_boundary_violations(tmp_path)
-
-    assert {"rogue.py:1:legacy-import", "rogue_from.py:1:legacy-import"} <= set(violations)
-
-
-def test_legacy_boundary_rejects_relative_import_forms(tmp_path: Path) -> None:
-    package = tmp_path / "packages/work-tracker-okf/src/work_tracker_okf"
-    package.mkdir(parents=True)
-    direct = package / "rogue_relative.py"
-    direct.write_text("from .migration import plan_migration\n", encoding="utf-8")
-    sibling = package / "rogue_sibling.py"
-    sibling.write_text("from . import migration\n", encoding="utf-8")
-
-    violations = _legacy_boundary_violations(tmp_path)
-
-    assert {"rogue_relative.py:1:legacy-import", "rogue_sibling.py:1:legacy-import"} <= set(violations)
-
-
-def test_legacy_boundary_rejects_same_named_class_method(tmp_path: Path) -> None:
-    commands = tmp_path / "packages/graph-works-core/src/graph_works_core/work/commands.py"
-    commands.parent.mkdir(parents=True)
-    commands.write_text(
-        "class Rogue:\n"
-        "    def run_migrate_layout(self):\n"
-        "        from work_tracker_okf.migration import plan_migration\n",
-        encoding="utf-8",
-    )
-
-    violations = _legacy_boundary_violations(tmp_path)
-
-    assert "commands.py:3:legacy-import" in violations
-
-
 def test_migration_source_entry_conversion_validates_shape_and_managed_ids() -> None:
     assert _source_entries(None) is None
     assert _source_entries("not-a-list") is None
@@ -597,3 +500,19 @@ def test_migration_dependency_conversion_accepts_string_and_mapping_edges() -> N
         DependencyEdge("work/feature-child", "execute", "resolved"),
         DependencyEdge("work/feature-child", "finish", "execute"),
     )
+
+
+def test_harvested_copy_still_matches_the_package_module() -> None:
+    """While both exist, a divergence is a bug. C7 deletes the package half."""
+    package_module = (
+        Path(__file__).resolve().parents[2]
+        / "packages" / "work-tracker-okf" / "src" / "work_tracker_okf" / "migration.py"
+    )
+    if not package_module.exists():  # pragma: no cover -- post-C7
+        pytest.skip("package module already removed by C7")
+    harvested = (Path(__file__).resolve().parents[1] / "migrate_vault_work.py").read_text(encoding="utf-8")
+    original = package_module.read_text(encoding="utf-8")
+    # The harvest adds a provenance paragraph to the module docstring and
+    # changes nothing else, so everything from the first import onwards is equal.
+    marker = "from __future__ import annotations"
+    assert harvested[harvested.index(marker) :] == original[original.index(marker) :]

@@ -166,7 +166,10 @@ def _member_mapping(bundle: Bundle, path_mapping: Mapping[str, str]) -> dict[str
     mapping: dict[str, str] = {}
     for member in _all_members(bundle):
         if PurePosixPath(member).name == INDEX_NAME and "/references/" not in member:
-            continue
+            directory = PurePosixPath(member).parent.as_posix()
+            directory = "" if directory == "." else directory
+            if parse_item_path(directory) is None:
+                continue
         for source in ordered:
             destination = path_mapping[source]
             if member == f"{source}.md":
@@ -855,8 +858,19 @@ def _plan_path_mutation(
         for source, destination in reserved_registered_candidates.items()
         if source in parsed_markdown
     }
-    reserved_members = {**reserved_opaque, **reserved_registered}
-    domain_reserved = set(reserved_opaque) | set(reserved_registered_candidates)
+    reserved_item_indexes: dict[str, str] = {}
+    for source, destination in members.items():
+        if PurePosixPath(source).name != INDEX_NAME or "/references/" in source:
+            continue
+        directory = PurePosixPath(source).parent.as_posix()
+        directory = "" if directory == "." else directory
+        if parse_item_path(directory) is None:
+            continue
+        if source not in parsed_markdown:
+            continue
+        reserved_item_indexes[source] = destination
+    reserved_members = {**reserved_opaque, **reserved_registered, **reserved_item_indexes}
+    domain_reserved = set(reserved_opaque) | set(reserved_registered_candidates) | set(reserved_item_indexes)
     generic_members = {source: destination for source, destination in members.items() if source not in domain_reserved}
     generic = _plan_with_domain_reserved(
         planning_bundle,

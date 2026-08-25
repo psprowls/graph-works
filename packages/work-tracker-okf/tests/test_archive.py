@@ -462,6 +462,49 @@ def test_archiving_a_nested_parent_reprojects_its_child(tmp_path: Path) -> None:
     assert reprojected[epic].archived is False
 
 
+def test_archive_moves_a_stray_item_level_index_instead_of_losing_it(tmp_path: Path) -> None:
+    """A misplaced index.md living directly in an item's own directory (not
+    a lane, not under references/) is still part of that item's owned
+    subtree and must travel with it -- leaving it behind means the source
+    directory never empties and the transactional apply aborts."""
+    _release, epic, feature = _terminal_tree(tmp_path)
+    (tmp_path / feature).mkdir(parents=True, exist_ok=True)
+    (tmp_path / feature / "index.md").write_text("stray\n", encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), (feature,))
+    assert plan.ok, plan.refusals
+
+    stray_destination = f"{epic}/children/_archive/feature-done/index.md"
+    moved_stray = any(move.dest == stray_destination for move in plan.moves)
+    written_stray = any(write.member == stray_destination for write in plan.writes)
+    assert moved_stray or written_stray, (plan.moves, plan.writes)
+
+    _apply_mutation(plan)
+
+    assert not (tmp_path / feature).exists()
+    assert (tmp_path / stray_destination).read_text(encoding="utf-8") == "stray\n"
+
+
+def test_archive_refuses_rather_than_crashes_on_an_unreadable_stray_item_index(tmp_path: Path) -> None:
+    """A stray item-level index.md that failed to load (non-UTF-8 content) is
+    never in `bundle.indexes`, so it can never be popped as a reserved alias.
+    Before the fix, `_plan_path_mutation` still routed it into
+    `reserved_item_indexes` and crashed with an uncaught `KeyError` instead of
+    returning a graceful `MutationRefusal` -- violating the planner's
+    write-free, refusal-as-data contract."""
+    _release, _epic, feature = _terminal_tree(tmp_path)
+    (tmp_path / feature).mkdir(parents=True, exist_ok=True)
+    (tmp_path / feature / "index.md").write_bytes(b"\xffnot UTF-8\n")
+    bundle = load_bundle(tmp_path)
+    assert f"{feature}/index.md" in bundle.unreadable
+
+    plan = plan_archive(bundle, load_items(bundle), (feature,))
+
+    assert plan.ok is False
+    assert any(refusal.path == f"{feature}/index.md" for refusal in plan.refusals), plan.refusals
+
+
 def test_a_non_canonical_destination_is_refused_before_any_write(tmp_path: Path) -> None:
     """A mapping the grammar cannot name is a planning fault, so the plan must
     refuse rather than leave it to postcondition validation after the apply."""

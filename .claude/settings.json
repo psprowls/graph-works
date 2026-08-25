@@ -1,6 +1,3 @@
 {
-  "enabledPlugins": {
-    "superpowers@claude-plugins-official": true,
-    "graph-wiki@agent-research": true
-  }
+  "enabledPlugins": {}
 }

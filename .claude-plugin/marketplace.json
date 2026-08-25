@@ -7,7 +7,7 @@
         {
             "name": "graph-works",
             "source": "./plugins/graph-works",
-            "description": "Fork of pcvelz/superpowers carrying the graph-wiki work-item pipeline as a native plugin surface."
+            "description": "Fork of obra/superpowers carrying the graph-works workflow as a native plugin surface."
         }
     ]
 }

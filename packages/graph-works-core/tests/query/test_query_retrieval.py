@@ -132,6 +132,31 @@ def test_prepare_retrieval_returns_ranked_concept_ids(tmp_path):
         assert set(scores) == {"bm25", "embed", "rrf"}
 
 
+def test_plan_query_brief_returns_excerpts_with_no_role_llm_call(tmp_path):
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_bundle_dir(tmp_path))
+    q.build_index(bundle, layout.cache_dir, embedder=FakeEmbedder())
+
+    brief = q.plan_query_brief("token refresh", layout, bundle=bundle, embedder=FakeEmbedder(), top_k=3)
+
+    assert brief.query == "token refresh"
+    assert len(brief.top_pages) > 0
+    page = brief.top_pages[0]
+    assert page.path in bundle.concepts
+    assert "Auth" in page.excerpt or "Storage" in page.excerpt
+    assert set(page.search_scores) == {"bm25", "embed", "rrf"}
+
+
+def test_plan_query_brief_loads_its_own_bundle_when_none_given(tmp_path):
+    layout = _layout(tmp_path)
+    bundle = load_bundle(_bundle_dir(tmp_path))  # both resolve to tmp_path / "okf"
+    q.build_index(bundle, layout.cache_dir, embedder=FakeEmbedder())
+
+    brief = q.plan_query_brief("token refresh", layout, embedder=FakeEmbedder(), top_k=3)
+
+    assert brief.top_pages
+
+
 def test_prepare_retrieval_builds_a_missing_index(tmp_path):
     layout = _layout(tmp_path)
     bundle = load_bundle(_bundle_dir(tmp_path))

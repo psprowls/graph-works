@@ -72,7 +72,7 @@ from typing import Any
 from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
 from code_wiki_okf.config import Config, load_config
 from code_wiki_okf.git_state import compute_state_gate
-from doc_wiki_okf.ingest import plan_document_brief
+from doc_wiki_okf.ingest import DocumentBrief, plan_document_brief
 from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatcher, StateGate
 from doc_wiki_okf.proposals.lanes import lane_set
@@ -380,6 +380,45 @@ def _log_line(result_page: str, title: str, status: Mapping[str, Any]) -> str:
     return line
 
 
+def plan_ingest_brief(
+    material: Path,
+    *,
+    layout: WorkspaceLayout,
+    repo: Path,
+    today: date,
+    source_kind: str = "doc",
+    match_entity: EntityMatcher | None = None,
+    state_gate: StateGate | None = None,
+    ingest_layout: IngestLayout = GRAPH_WIKI_LAYOUT,
+) -> DocumentBrief:
+    """Compute the ingest brief for one file. Writes nothing.
+
+    A standalone copy of `run_ingest_source`'s own brief-computation preamble,
+    not a shared call: see this module's own docstring note on why sharing a
+    return shape would couple this function's signature to `run_ingest_source`'s
+    later, unrelated need for `config`/`schema_set`/`section_set`/`lanes`/`bundle`.
+    """
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
+    schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
+    with _matcher_for(match_entity, config, schema_set) as matcher:
+        return plan_document_brief(
+            material,
+            wiki=layout.bundle_dir,
+            repo=repo,
+            workspace_root=layout.root,
+            today=today,
+            source_kind=source_kind,
+            layout=ingest_layout,
+            state_gate=state_gate,
+            match_entity=matcher,
+        )
+
+
 async def run_ingest_source(
     material: Path,
     *,
@@ -394,6 +433,7 @@ async def run_ingest_source(
     state_gate: StateGate | None = None,
     graph_tools: Sequence[BaseTool] = (),
     model_override: str | None = None,
+    backend_override: str | None = None,
     ingest_layout: IngestLayout = GRAPH_WIKI_LAYOUT,
 ) -> IngestResult:
     """Record *material* as a Source page, and propose what it justifies.
@@ -536,9 +576,9 @@ async def run_ingest_source(
         human = (
             f"{header}Word count: {brief.word_count}\n\n--- Source content ---\n{brief.preview}\n--- End source ---\n"
         )
-    response = await make_llm("ingestor", layout=layout, model_override=model_override).ainvoke(
-        [SystemMessage(system), HumanMessage(human)]
-    )
+    response = await make_llm(
+        "ingestor", layout=layout, model_override=model_override, backend_override=backend_override
+    ).ainvoke([SystemMessage(system), HumanMessage(human)])
     if not isinstance(response.content, str):
         raise RuntimeError("ingestor returned non-text content")
 
@@ -679,6 +719,7 @@ __all__ = [
     "compose_body",
     "compose_frontmatter",
     "parse_ingestor_response",
+    "plan_ingest_brief",
     "run_ingest_source",
     "state_gate_adapter",
     "validated_source_kind",

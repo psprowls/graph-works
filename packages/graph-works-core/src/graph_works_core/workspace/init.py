@@ -249,17 +249,17 @@ def _gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
     return PlannedWrite(label=label, path=path, content=missing, mode="append")
 
 
-def _bundle_relative(target: Path, bundle_dir: Path) -> str:
+def _workspace_relative(target: Path, root: Path) -> str:
     """*target* as `workspace.yaml`'s `repositories.<name>.path` should carry it.
 
-    Relative to *bundle_dir*, not the workspace root -- every reader
-    (`code_wiki_okf.config.load_config`, called with `bundle_root=
-    layout.bundle_dir` at every production call site) resolves a declared
-    repo's relative `path` against that same directory. Relative rather than
-    absolute because the file is committed, so an absolute path would pin the
-    workspace to one machine.
+    Relative to *root* -- the directory `workspace.yaml` itself lives in
+    (`layout.manifest_path == layout.root / "workspace.yaml"`), matching
+    every reader (`code_wiki_okf.config.load_config` resolves a declared
+    repo's relative `path` against the directory the manifest was read
+    from). Relative rather than absolute because the file is committed, so
+    an absolute path would pin the workspace to one machine.
     """
-    return Path(os.path.relpath(target, start=bundle_dir)).as_posix()
+    return Path(os.path.relpath(target, start=root)).as_posix()
 
 
 def _context_writes(layout: WorkspaceLayout, installers: Sequence[Installer], today: date) -> list[PlannedWrite]:
@@ -326,7 +326,7 @@ def plan_init(
     if not layout.manifest_path.exists():
         repositories: dict[str, str] = {}
         if layout.repo_root is not None:
-            repositories[layout.repo_root.name] = _bundle_relative(layout.repo_root, layout.bundle_dir)
+            repositories[layout.repo_root.name] = _workspace_relative(layout.repo_root, layout.root)
         writes.append(
             PlannedWrite(
                 label=MANIFEST_FILENAME,

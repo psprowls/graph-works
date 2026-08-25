@@ -1,25 +1,39 @@
 # Query Workflow
 
-> **Substrate ownership.** This document describes behavior that the graph-works rebuild is
-> re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`feature-epic-feature-query-vertical-adapter-registry`](/work/_archive/epic-graph-works-core/children/_archive/feature-epic-feature-query-vertical-adapter-registry.md) and is re-authored there, not here.
-> Treat a disagreement between this page and that item as this page being stale.
-
 The flow the LLM follows when the user runs `/graph-works:query <question>` or dispatches the `graph-works:librarian` sub-agent.
 
 ## Core principle
 
-**Read `index.md` first, then drill in.** Do NOT grep the entire wiki or the codebase on every query — the index is there precisely so you don't have to. For code-level details the wiki doesn't cover, fall back to reading the code directly.
+**Read `index.md` first, then drill in.** Do NOT grep the entire wiki or the codebase on every query — the index is there precisely so you don't have to. For code-level details neither the retrieval call nor the wiki covers, fall back to reading the code directly.
 
 ## Step-by-step
 
-### 1. Read `index.md`
+### 1. Read `index.md` and retrieve candidate pages
 
-The index is the catalog. Scan it and pick the 3-10 pages most likely to contain the answer. A good monorepo query usually pulls across categories:
+Read the index — the catalog — and, alongside it, run:
+
+```bash
+gw query --query "<question>" --json
+```
+
+This is the `claude_code`-backend default (the one `gw query` runs unless a workspace opts into `--backend bedrock`/`--backend vercel`). It is a retrieval call, not an answer-composing one: an internal LLM never sees the question. Treat its results as part of the starting candidate set, from the outset rather than only once the index comes up empty.
+
+**Output shape.** The `--json` output is a `QueryBrief`:
+```json
+{
+  "query": "<question>",
+  "top_pages": [
+    {"path": "concepts/foo", "excerpt": "...", "search_scores": {"...": 0.0}}
+  ]
+}
+```
+`path` is a bundle concept id relative to `<workspace>/okf/` — **no `.md` suffix**. To read the page, append `.md` (`<workspace>/okf/concepts/foo.md`), or resolve it via `gw graph`. Read each `top_pages` entry's `path` in full — the `excerpt` and `search_scores` are there to help you triage which pages to open first, not to quote as the answer.
+
+Scan the index and pick the 3-10 pages most likely to contain the answer, from `top_pages` and the index together. A good monorepo query usually pulls across categories:
 
 - `concepts/` — for cross-cutting patterns and high-level syntheses; filter by `kind: architecture` for big-picture questions, `kind: pattern` for reusable patterns
-- `entities/` — for specific package/app surface area (`pkg_*`, `app_*`)
-- `entities/dep_*` for "how do we use X library" questions
+- `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — for specific package/app surface area
+- `dependencies/<ecosystem>/` for "how do we use X library" questions
 - `work/` for "why does X fail / what's planned / what's in progress"
 - `adrs/` for "why did we do it this way"
 - `sources/` for evidence and original context
@@ -32,15 +46,9 @@ Read them in full. They're short, curated, and already cross-referenced.
 
 If a read page points to another clearly relevant page, follow it. Stop when you have enough.
 
-### 4. Fall back to search or the code
+### 4. Read the code as a last resort
 
-If the index doesn't surface the right page:
-
-```bash
-gw query --query "<terms>" --limit 5
-```
-
-If the wiki doesn't cover the topic at all, read the **code directly** — the wiki is not authoritative for code-level specifics. In that case, flag the gap: "The wiki doesn't document X. I read `<file>` to answer; want me to file a concept/package page?"
+`gw query` is already step 1's retrieval call, not something reached only when index-reading fails — do not re-run it here. If neither `top_pages` nor the index surfaces the right page, the wiki doesn't cover the topic at all: read the **code directly** — the wiki is not authoritative for code-level specifics. In that case, flag the gap: "The wiki doesn't document X. I read `<file>` to answer; want me to file a concept/package page?"
 
 ### 5. Synthesize the answer
 
@@ -48,7 +56,7 @@ Format:
 - **Direct answer** — 1-3 sentences
 - **Supporting detail** — organized thematically
 - **Inline citations** — mix of:
-  - wiki page wikilinks: `[[entities/pkg_xxx]]`, `[[sources/yyy]]`
+  - wiki page wikilinks: `[[repositories/<repo>/packages/xxx.md]]`, `[[sources/yyy]]`
   - code paths with line numbers: `` `packages/foo/src/bar.ts:42` ``
 - **Related pages** — 3-5 wikilinks at the end
 
@@ -57,7 +65,7 @@ Format:
 **Every good answer is a candidate wiki page.** At the end of the answer, ask:
 
 > _Should I file this as a new page? Suggested location:
-> `<workspace>/wiki/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses, `pattern` for reusable patterns, or omit for general concepts. Or I can append to [[existing-page]]._
+> `<workspace>/okf/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses, `pattern` for reusable patterns, or omit for general concepts. Or I can append to [[existing-page]]._
 
 If yes:
 - Pick the right category and kind:
@@ -69,7 +77,7 @@ If yes:
   - "what's planned for X / why does X fail / workaround for Y" → `work/` (`kind:` discriminates)
 - Use the appropriate template (`concept-architecture.md`, `concept-pattern.md`, or `concept.md`)
 - Add frontmatter with `category`, `summary`, `updated` (and `kind` if applicable)
-- Update `<workspace>/wiki/index.md`
+- Update `<workspace>/okf/index.md`
 - Append a `## [YYYY-MM-DD] create | <question>` entry to `log.md` with the filed response path.
 
 ## Output formats
@@ -80,7 +88,7 @@ Not every query wants a markdown answer. Offer the user:
 - **Dependency list / usage table** — for "who uses X" questions, derived from package frontmatter + scan data
 - **Comparison table** — for "A vs B"
 - **Marp slide deck** — not currently implemented; if asked, say so and offer a plain markdown synthesis instead
-- **Chart (matplotlib)** — for data-driven questions; save to `<workspace>/wiki/assets/charts/`
+- **Chart (matplotlib)** — for data-driven questions; save to `<workspace>/okf/assets/charts/`
 
 ## Anti-patterns
 

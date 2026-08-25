@@ -301,7 +301,7 @@ def test_every_role_override_defaults_to_none():
 
 def test_the_backend_override_is_a_closed_vocabulary():
     entry = next(entry for entry in CATALOG if entry.key == "roles.*.backend")
-    assert entry.allowed == ("bedrock", "vercel")
+    assert entry.allowed == ("bedrock", "vercel", "claude_code")
 
 
 def test_every_wildcard_catalog_entry_is_a_role_pipeline_or_repository_entry():

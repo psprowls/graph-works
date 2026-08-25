@@ -22,6 +22,7 @@ from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_co
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.pipeline import entry_for
+from graph_works_core.workspace.repos import resolve_repo
 
 from graph_works_cli import exit_codes
 from graph_works_cli.provenance import warn_if_stale_routing
@@ -221,7 +222,10 @@ def lint(
     layout = resolve_workspace(workspace)
     config = _config(layout)
     try:
-        report = work.run_lint(layout, config, repo_root=layout.repo_root, strict=strict, today=_today())
+        repo_root, _ = resolve_repo(layout)
+        report = work.run_lint(layout, config, repo_root=repo_root, strict=strict, today=_today())
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), cause=exc)
 
@@ -381,6 +385,8 @@ def regen_index(
     layout = resolve_workspace(workspace)
     try:
         update = work.run_regen_indexes(layout, dry_run=dry_run)
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), cause=exc)
 
@@ -426,6 +432,8 @@ def archive(
     targeted = list(path or ())
     try:
         run = run_archive(layout, targeted or None, today=_today(), dry_run=dry_run)
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), cause=exc)
 
@@ -505,6 +513,8 @@ def reparent(
     layout = resolve_workspace(workspace)
     try:
         result = work.run_reparent(layout, path, parent_path, dry_run=dry_run)
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), cause=exc)
     _finish_path_mutation(rendering.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
@@ -522,6 +532,8 @@ def adopt(
     layout = resolve_workspace(workspace)
     try:
         result = work.run_release_adoption(layout, path, release_path, dry_run=dry_run)
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), cause=exc)
     _finish_path_mutation(rendering.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)

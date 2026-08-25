@@ -55,7 +55,7 @@ cd <repo>             # /graph-works:onboard resolves the workspace via gw
 claude
 > /graph-works:onboard            # if the workspace isn't initialized
 > /graph-works:scan          # detect packages
-> /graph-works:ingest raw/specs/auth-migration.md
+> /graph-works:ingest ~/Downloads/auth-migration.md
 > /graph-works:query "which packages depend on common-context-node-ts?"
 ```
 
@@ -67,7 +67,7 @@ Codex reads `AGENTS.md` automatically. Then natural language:
 cd <repo>/.works
 codex
 > scan the monorepo and update package pages
-> ingest raw/specs/auth-migration.md into the wiki
+> ingest ~/Downloads/auth-migration.md into the wiki
 > query: which packages depend on common-context-node-ts?
 ```
 

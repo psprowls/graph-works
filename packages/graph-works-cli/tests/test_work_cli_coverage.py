@@ -117,6 +117,7 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
 def test_read_commands_map_io_failures(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
     monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
     monkeypatch.setattr(main, "_config", lambda layout: object())
+    monkeypatch.setattr(main, "resolve_repo", lambda layout: (None, None))
     monkeypatch.setattr(main.work, f"run_{name}", lambda *args, **kwargs: (_ for _ in ()).throw(OSError("io")))
     call = (lambda: main.status("", False)) if name == "status" else (lambda: main.lint(False, "", False))
     assert _exit_code(call) == 1
@@ -125,6 +126,7 @@ def test_read_commands_map_io_failures(monkeypatch: pytest.MonkeyPatch, name: st
 def test_lint_non_ok_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
     monkeypatch.setattr(main, "_config", lambda layout: object())
+    monkeypatch.setattr(main, "resolve_repo", lambda layout: (None, None))
     report = SimpleNamespace(ok=False, findings=())
     monkeypatch.setattr(main.work, "run_lint", lambda *args, **kwargs: report)
     assert _exit_code(lambda: main.lint(False, "", True)) == exit_codes.GENERIC
@@ -224,15 +226,27 @@ def test_finish_path_mutation_all_policies(capsys: pytest.CaptureFixture[str]) -
 
 
 @pytest.mark.parametrize("name", ["reparent", "adopt"])
-def test_mutation_commands_map_io_failures(monkeypatch: pytest.MonkeyPatch, name: str) -> None:
+@pytest.mark.parametrize("error,code", [(WorkspaceError("schema"), exit_codes.SCHEMA_MISMATCH), (OSError("io"), 1)])
+def test_mutation_commands_map_workspace_and_io_failures(
+    monkeypatch: pytest.MonkeyPatch, name: str, error: Exception, code: int
+) -> None:
     monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
     target = {"reparent": "run_reparent", "adopt": "run_release_adoption"}[name]
-    monkeypatch.setattr(main.work, target, lambda *args, **kwargs: (_ for _ in ()).throw(OSError("io")))
+    monkeypatch.setattr(main.work, target, lambda *args, **kwargs: (_ for _ in ()).throw(error))
     calls = {
         "reparent": lambda: main.reparent("work/a", "work/e", False, "", False),
         "adopt": lambda: main.adopt("work/e", "work/r", False, "", False),
     }
-    assert _exit_code(calls[name]) == 1
+    assert _exit_code(calls[name]) == code
+
+
+@pytest.mark.parametrize("error,code", [(WorkspaceError("schema"), exit_codes.SCHEMA_MISMATCH), (OSError("io"), 1)])
+def test_regen_index_maps_workspace_and_io_failures(
+    monkeypatch: pytest.MonkeyPatch, error: Exception, code: int
+) -> None:
+    monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
+    monkeypatch.setattr(main.work, "run_regen_indexes", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    assert _exit_code(lambda: main.regen_index(False, "", False)) == code
 
 
 def test_decision_emit_policies(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -271,6 +285,22 @@ def test_decision_verbs_map_target_and_io_errors(monkeypatch: pytest.MonkeyPatch
         assert _exit_code(call) == code
 
 
+def test_decision_write_verbs_map_workspace_errors(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(decision, "resolve_workspace", lambda workspace: LAYOUT)
+    error = WorkspaceError("schema")
+    calls = (
+        ("run_decision_add", lambda: decision.add("work/a", "q", "open", "", "", "", "", "user", False, "", False)),
+        ("run_decision_answer", lambda: decision.answer("work/a", "D-001", "a", "", "user", False, "", False)),
+        (
+            "run_decision_supersede",
+            lambda: decision.supersede("work/a", "D-001", "q", "a", "", "", "user", False, "", False),
+        ),
+    )
+    for target, call in calls:
+        monkeypatch.setattr(decision.work, target, lambda *args, **kwargs: (_ for _ in ()).throw(error))
+        assert _exit_code(call) == exit_codes.SCHEMA_MISMATCH
+
+
 @pytest.mark.parametrize(
     "error,code",
     [
@@ -295,3 +325,18 @@ def test_repo_override_and_reconcile_render_branch(monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(rendering, "reconcile_payload", lambda value: {"warnings": []})
     monkeypatch.setattr(rendering, "render_reconcile", lambda payload: None)
     reconcile.reconcile_context("work/a", "", "", "", False)
+
+
+@pytest.mark.parametrize("error,code", [(WorkspaceError("schema"), exit_codes.SCHEMA_MISMATCH), (OSError("io"), 1)])
+def test_archive_maps_workspace_and_io_failures(monkeypatch: pytest.MonkeyPatch, error: Exception, code: int) -> None:
+    monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
+    monkeypatch.setattr(main, "run_archive", lambda *args, **kwargs: (_ for _ in ()).throw(error))
+    assert _exit_code(lambda: main.archive([], False, "", False)) == code
+
+
+@pytest.mark.parametrize("error,code", [(WorkspaceError("schema"), exit_codes.SCHEMA_MISMATCH), (OSError("io"), 1)])
+def test_lint_maps_workspace_and_io_failures(monkeypatch: pytest.MonkeyPatch, error: Exception, code: int) -> None:
+    monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
+    monkeypatch.setattr(main, "_config", lambda layout: object())
+    monkeypatch.setattr(main, "resolve_repo", lambda layout: (_ for _ in ()).throw(error))
+    assert _exit_code(lambda: main.lint(False, "", False)) == code

@@ -19,7 +19,7 @@ def test_packaged_only_resolves_every_field():
     spec = resolve_role_spec("librarian", PACKAGED)
     assert spec == RoleSpec(
         model_id="vendor.model-1:0",
-        backend="bedrock",
+        backend="claude_code",
         region="us-west-2",
         max_tokens=4096,
         max_concurrency=5,
@@ -38,10 +38,14 @@ def test_a_partial_override_merges_field_by_field():
 def test_an_override_only_role_is_the_definition():
     spec = resolve_role_spec("newcomer", None, {"model_id": "vendor.model-2:0"})
     assert spec.model_id == "vendor.model-2:0"
-    assert spec.backend == "bedrock"
+    assert spec.backend == "claude_code"
     assert spec.region is None
     assert spec.max_tokens is None
     assert spec.max_concurrency == 3
+
+
+def test_the_dataclass_default_backend_is_claude_code():
+    assert RoleSpec(model_id="m").backend == "claude_code"
 
 
 def test_absent_from_both_sources_raises_keyerror_naming_the_role():

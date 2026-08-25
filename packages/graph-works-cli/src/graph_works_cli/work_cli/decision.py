@@ -91,6 +91,8 @@ def add(
             decided_by=decided_by,
             dry_run=dry_run,
         )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:
@@ -155,6 +157,8 @@ def answer(
             decided_by=decided_by,
             dry_run=dry_run,
         )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:
@@ -191,6 +195,8 @@ def supersede(
             decided_by=decided_by,
             dry_run=dry_run,
         )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:

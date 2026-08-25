@@ -1,6 +1,6 @@
 ---
 name: linter
-description: Dispatched sub-agent that runs a health check on a Code Wiki. Mechanical checks via scripts (orphans, broken links, stale pages, missing frontmatter, duplicate titles, log gaps, CODE DRIFT), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), mechanical work-lifecycle checks (32 rules over `wiki/work/*.md`), and produces a markdown report with suggested actions. Spawn weekly, after batch ingests, after /graph-works:scan, or when the user says "lint the wiki" / "check the wiki".
+description: Dispatched sub-agent that runs a health check on a Code Wiki. Mechanical checks via scripts (orphans, broken links, stale pages, missing frontmatter, duplicate titles, log gaps, CODE DRIFT), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), mechanical work-lifecycle checks (32 rules over every path-native item beneath the configured OKF bundle's `work/` tree), and produces a markdown report with suggested actions. Spawn weekly, after batch ingests, after /graph-works:scan, or when the user says "lint the wiki" / "check the wiki".
 skills: [graph-works]
 domain: engineering
 model: opus
@@ -20,7 +20,7 @@ Spawned per-lint-pass.
 
 ## Workflow
 
-Follow `references/lint-workflow.md`. Three passes.
+Follow `references/lint-workflow.md`. Four passes.
 
 ### Pass 1 — Mechanical (`gw`)
 
@@ -35,11 +35,12 @@ Parse the JSON. Capture:
 - Orphans, broken links, stale, missing frontmatter, duplicate titles, log gap
 - Connected components, hubs, sinks (from `/tmp/stats.json`)
 - **Code drift**: `missing_in_vault`, `orphaned_in_vault`, `exports_drift`
+- **Semantic**: `semantic` — an array of `{group, message, page, model}`, already produced by a real LLM pass inside `gw wiki lint`; groups are `page_quality`, `adr_chain`, `stale_claims`. Report these directly rather than re-deriving them by hand.
 - **Work lifecycle**: `work_lifecycle` — `{total_items, findings}`, all 32 lifecycle rules (same set as `gw work lint`)
 - **Obsidian render**: `obsidian_render_findings` — markdown that breaks Obsidian's renderer
-- **Guidance lint**: `guidance_lint_findings` — frontmatter/tag/placement findings for `wiki/guidance/` pages
+- **Guidance lint**: `guidance_lint_findings` — frontmatter/tag/placement findings for Diátaxis-lane pages
 - **Scanner heading drift**: `scanner_heading_drift` — entity pages missing a deterministic section
-- **Source path drift**: `source_path_drift` — `sources/` pages whose `raw/` file was archived
+- **Source path drift**: `source_path_drift` — `sources/` pages whose `sources/references/` copy is missing on disk
 
 Any of the last five may fail-soft as `{"error": "<msg>"}` — report the error line, don't skip the section silently.
 
@@ -49,17 +50,35 @@ Any of the last five may fail-soft as `{"error": "<msg>"}` — report the error 
 - **Never-synced packages** — pages with no `last_sync_commit` (legacy or freshly-created stub). The first clean-on-main `/graph-works:scan` will record one.
 - **Sync commit unreachable** — page records a `last_sync_commit` that isn't an ancestor of HEAD (typically means a feature-branch SHA, or main was rebased). Surface as: `<page>: last_sync_commit <sha> not reachable from HEAD`. Suggest re-running `/graph-works:scan` on a clean main checkout.
 
-### Pass 2 — Semantic (read and think)
+### Pass 2 — Residual semantic (read and think)
 
-- **Contradictions (vault↔vault)** — scan recently-touched pages
-- **Contradictions (vault↔code)** — spot-check recently-touched `entities/pkg_<name>.md` / `entities/app_<name>.md` pages against current code
-- **Stale claims** — are stale-flagged pages likely outdated by recent PRs or code changes?
+The `semantic` array captured in Pass 1 already covers contradictions (vault↔vault and vault↔code), stale claims, and ADR chain health (`page_quality`, `stale_claims`, `adr_chain`). Read those findings and present them in the report; Pass 2 is only what that array doesn't cover:
+
 - **Concept gaps** — grep for concept-shaped phrases across 3+ pages without a dedicated page
-- **ADR chain health** — `supersedes:` / `superseded_by:` pointing to existing IDs; `status: deprecated` should have a reason
 - **Cross-reference gaps** — plain-text mentions of packages/deps that should be wikilinks
-- **Index drift** — `index.md` vs. actual vault contents
+- **Index drift** — `gw wiki index` already reconciles `index.md` mechanically (dead entries pruned, missing ones added); this pass is for drift it wouldn't catch — e.g. a page that should exist but doesn't
 
-### Pass 3 — Report
+### Pass 3 — Drift (`gw wiki drift`)
+
+```bash
+gw wiki drift --json > /tmp/drift.json
+```
+
+`gw wiki drift` compares curated pages against the code graph and returns `{"targets": [...]}` — each a `Target` (one curated page) carrying a `candidates` list of `Candidate` (one drifted entity backlinking it):
+
+```json
+{"targets": [
+  {"concept_id": "...", "title": "...", "kind": "...", "candidates": [
+    {"concept_id": "...", "resource": "...", "title": "...", "narrative": "...", "last_updated_commit": "...", "changed_files": [...]}
+  ]}
+]}
+```
+
+For each target: open the cited entity narrative(s) named in `candidates` plus the curated page itself, and judge whether the page's claims are actually overtaken by what changed. Report the decision — don't silently rewrite the page; the user decides what to change.
+
+The graph reflects the last `gw scan`, not necessarily HEAD. Running `gw scan` first gives more reliable results, but don't hard-block on it — note in the report if the graph looks stale.
+
+### Pass 4 — Report
 
 The report MUST be structured as:
 
@@ -85,11 +104,12 @@ The report MUST be structured as:
 - <N> stale pages
 - <N> concept gaps (mentioned across 3+ pages)
 - <N> ADR chain issues
+- <N> drift candidates reviewed: `<concept>` — <overtaken / still accurate, one line why>
 
 ### Suggested actions
 1. Run `/graph-works:scan` to stub <package> and <package>
 2. Re-run `/graph-works:scan` — it deletes the entity page for `<old-pkg>` automatically when its graph node is gone
-3. Re-run `/graph-works:scan` to refresh `entities/pkg_<pkg>.md` graph-derived frontmatter from current code
+3. Re-run `/graph-works:scan` to refresh `repositories/<repo>/packages/<pkg>.md` graph-derived frontmatter from current code
 4. Revise the affected canonical `<work-path>` or update its `work_status`
 5. Create concept pages for: <names>
 6. Fix broken link in `[[<page>]]`
@@ -111,6 +131,7 @@ Then append a `## [YYYY-MM-DD] lint | <date> health check` entry to `log.md` wit
 ## Red flags
 
 - Auto-fixing structural issues without asking → stop
+- Silently rewriting a page off a `gw wiki drift` candidate → report the decision and let the user confirm the edit
 - Skipping code-drift pass → always run it
 - Skipping semantic pass because "mechanical looks clean" → do the read-and-think pass anyway
 - Reporting without suggestions → add suggestions

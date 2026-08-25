@@ -21,7 +21,7 @@ Spawned per-query.
 ## Inputs
 
 - The user's question
-- The current state of `<workspace>/wiki/` (especially `index.md`)
+- The current state of `<workspace>/okf/` (especially `index.md`)
 - The repo's code (fallback when vault is insufficient)
 
 ## Workflow
@@ -29,10 +29,16 @@ Spawned per-query.
 Follow `references/query-workflow.md`. Summary:
 
 ### 1. Read `index.md` first
+Also run the retrieval call:
+```bash
+gw query --query "<question>" --json
+```
+This is the `claude_code`-backend default — it returns a `top_pages` list, each with a `path`, an `excerpt`, and `search_scores`. Treat those paths as part of the starting candidate set alongside `index.md`, from the outset rather than only once the index comes up empty.
+
 Pick 3-10 pages across categories most likely to contain the answer:
 - `concepts/` — cross-cutting patterns and high-level syntheses (filter by `kind: architecture` for big-picture questions, `kind: pattern` for reusable patterns)
-- `entities/` — package/app surface area (`pkg_*`, `app_*`)
-- `entities/dep_*` — external-library questions
+- `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — package/app surface area
+- `dependencies/<ecosystem>/` — external-library questions
 - `work/` — bug / tech-debt / planned / in-progress questions
 - `adrs/` — "why did we do it this way"
 - `sources/` — evidence and original context
@@ -44,11 +50,8 @@ Pick 3-10 pages across categories most likely to contain the answer:
 ### 3. Follow wikilinks opportunistically
 Stop when you have enough.
 
-### 4. Fall back if needed
-```bash
-gw query --query "<terms>" --limit 5
-```
-Then read the code directly if the vault doesn't cover it.
+### 4. Read the code as a last resort
+`gw query` is already step 1's retrieval call, not something reached only when index-reading fails. If neither `top_pages` nor the index covers the question, read the code directly.
 
 ### 5. Synthesize the answer
 Format:
@@ -60,7 +63,7 @@ Format:
 ### 6. Offer to file back
 ```
 _Should I file this as a new page? Suggested location:
- `<workspace>/wiki/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses,
+ `<workspace>/okf/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses,
  `pattern` for reusable patterns, or omit `kind` for general concepts. Or I can append to [[existing-page]]._
 ```
 

@@ -365,10 +365,17 @@ result = asyncio.run(
         at=datetime.now(timezone.utc),
         source_kind="spec",  # a hint; the model classifies, the bundle's enum validates
         origin="https://example.com/some-spec",
+        backend_override="bedrock",
     )
 )
 print(result.page, result.copy, result.proposal_status)
 ```
+
+`backend_override` is required here because `ingestor` now defaults to the
+brief-only `claude_code` backend — `run_ingest_source` itself always runs the
+full write pipeline regardless of backend, so a caller must explicitly opt
+into a real model backend (`"bedrock"` or `"vercel"`) via `backend_override`
+or an equivalent workspace/CLI override.
 
 `today` and `at` are required and have no default — nothing in this package
 reads the clock.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.resources
+import unicodedata
 
 from doc_wiki_okf.archive import ARCHIVE_IGNORE, IGNORE, WIKI_LANES, apply_archive, plan_archive
 from doc_wiki_okf.diataxis.pages import directory_for
@@ -62,6 +63,21 @@ def test_a_targeted_archive_moves_the_page_regardless_of_status(tmp_path):
     assert _page_path(tmp_path, "tutorials/foo", archived=True).is_file()
     assert any(index.path == "tutorials/index.md" for index in result.indexes)
     assert any(index.path == "tutorials/_archive/index.md" for index in result.indexes)
+
+
+def test_a_targeted_token_with_a_differently_normalized_query_resolves_to_the_raw_disk_id(tmp_path):
+    """`_select` must key off the raw disk id, not the human-typed query --
+    see work/tech-debt-has-member-callers-raw-id."""
+    nfd = unicodedata.normalize("NFD", "café")
+    nfc = unicodedata.normalize("NFC", "café")
+    bundle = _build(tmp_path, {f"tutorials/{nfd}": _PAGE.format(title="Café")})
+
+    plan = plan_archive(bundle, [f"tutorials/{nfc}"])
+
+    assert plan.ok is True
+    assert plan.tokens == (f"tutorials/{nfd}",)
+    assert [move.source for move in plan.moves.moves] == [f"tutorials/{nfd}.md"]
+    assert [move.dest for move in plan.moves.moves] == [f"tutorials/_archive/{nfd}.md"]
 
 
 def test_a_targeted_token_naming_no_page_is_unknown_member(tmp_path):

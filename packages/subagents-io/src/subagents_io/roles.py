@@ -37,7 +37,7 @@ class RoleSpec:
     """
 
     model_id: str
-    backend: str = "bedrock"
+    backend: str = "claude_code"
     region: str | None = None
     max_tokens: int | None = None
     max_concurrency: int = 3
@@ -97,7 +97,7 @@ def resolve_role_spec(
             "the override does not set model_id either"
         )
 
-    backend = backend_override if backend_override is not None else merged.get("backend", "bedrock")
+    backend = backend_override if backend_override is not None else merged.get("backend", "claude_code")
     return RoleSpec(
         model_id=model_id,
         backend=backend,

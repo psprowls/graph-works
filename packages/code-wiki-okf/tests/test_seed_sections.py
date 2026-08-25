@@ -126,12 +126,8 @@ def test_the_seed_declares_all_invariant_catalog_sections() -> None:
     section_set = _seed_sections()
     assert tuple(section_set.indexes) == (
         "",
-        "agent-plugins",
-        "apps",
         "dependencies",
-        "packages",
         "repositories",
-        "test-suites",
     )
     assert tuple(spec.heading for spec in section_set.indexes[""].sections) == (
         "Repositories",

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from doc_wiki_okf.ingest import DocumentBrief
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.lint import LintReport
+from graph_works_core.lint_drift.propagate_drift import DriftBrief, PropagateResult
+from graph_works_core.query.commands import QueryBrief, QueryResult
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
@@ -81,6 +84,8 @@ def scan_normal_payload(result: ScanResult) -> dict[str, object]:
         "ok": result.ok,
         "short_head": result.worklist.short_head,
         "entities_written": list(result.structural.entities.written),
+        "entities_created": list(result.structural.entities.created),
+        "entities_updated": list(result.structural.entities.updated),
         "entities_deleted": list(result.structural.entities.deleted),
         "narrated": result.applied.narrated,
         "sections_filled": result.applied.sections_filled,
@@ -105,6 +110,8 @@ def scan_emit_payload(
         "results_dir": str(results_dir),
         "short_head": short_head,
         "entities_written": list(structural.entities.written),
+        "entities_created": list(structural.entities.created),
+        "entities_updated": list(structural.entities.updated),
         "entities_deleted": list(structural.entities.deleted),
         "entity_errors": list(structural.errors),
         **_mirror_keys(structural),
@@ -119,6 +126,11 @@ def scan_apply_payload(result: ApplyResult) -> dict[str, object]:
         "stamped": result.stamped,
         "entity_errors": list(result.entity_errors),
     }
+
+
+def ingest_brief_payload(brief: DocumentBrief) -> dict[str, object]:
+    """Render a computed ingest brief. Nothing was written for this payload."""
+    return brief.as_data()
 
 
 def ingest_payload(result: IngestResult) -> dict[str, object]:
@@ -148,6 +160,29 @@ def ingest_payload(result: IngestResult) -> dict[str, object]:
         "proposals": proposals,
         "warnings": warnings,
         "refusals": list(result.refusals),
+    }
+
+
+def query_brief_payload(brief: QueryBrief) -> dict[str, object]:
+    """Render a claude_code-backend query brief: retrieval only, no answer."""
+    return {
+        "query": brief.query,
+        "top_pages": [
+            {"path": page.path, "excerpt": page.excerpt, "search_scores": dict(page.search_scores)}
+            for page in brief.top_pages
+        ],
+    }
+
+
+def query_payload(result: QueryResult) -> dict[str, object]:
+    """Render a completed bedrock/vercel query result."""
+    return {
+        "answer": result.answer,
+        "citations": list(result.citations),
+        "pages_drilled": result.pages_drilled,
+        "search_scores": {page: dict(scores) for page, scores in result.search_scores.items()},
+        "path": result.path,
+        "fallback_error": result.fallback_error,
     }
 
 
@@ -186,6 +221,64 @@ def lint_payload(report: LintReport) -> dict[str, object]:
             "ages": dict(backlog.ages),
         },
         "errors": list(report.errors),
+    }
+
+
+def drift_brief_payload(brief: DriftBrief) -> dict[str, object]:
+    """Render a claude_code-backend drift brief: candidates and targets, no verdicts."""
+    return {
+        "targets": [
+            {
+                "concept_id": target.concept_id,
+                "title": target.title,
+                "kind": target.kind,
+                "candidates": [
+                    {
+                        "concept_id": c.concept_id,
+                        "resource": c.resource,
+                        "title": c.title,
+                        "narrative": c.narrative,
+                        "last_updated_commit": c.last_updated_commit,
+                        "changed_files": list(c.changed_files),
+                    }
+                    for c in target.candidates
+                ],
+            }
+            for target in brief.targets
+        ],
+    }
+
+
+def drift_payload(result: PropagateResult) -> dict[str, object]:
+    """Render a completed bedrock/vercel drift propagation run."""
+    return {
+        "entities_considered": result.entities_considered,
+        "pages_judged": result.pages_judged,
+        "pages_stale": result.pages_stale,
+        "pages_skipped_settled": result.pages_skipped_settled,
+        "findings": [
+            {
+                "target": f.target,
+                "target_title": f.target_title,
+                "entity_id": f.entity_id,
+                "entity_title": f.entity_title,
+                "detected_commit": f.detected_commit,
+                "rationale": f.rationale,
+            }
+            for f in result.findings
+        ],
+        "plans": [
+            {
+                "target": plan.target,
+                "proposal": plan.proposal,
+                "ok": plan.ok,
+                "is_empty": plan.is_empty,
+                "refusals": [{"path": r.path, "kind": r.kind, "detail": r.detail} for r in plan.refusals],
+            }
+            for plan in result.plans
+        ],
+        "errors": list(result.errors),
+        "dry_run": result.dry_run,
     }
 
 

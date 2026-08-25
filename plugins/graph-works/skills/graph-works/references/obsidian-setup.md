@@ -9,19 +9,19 @@ Recommended Obsidian configuration for a Code Wiki. None of this is strictly req
 
 ## Open the vault
 
-**Important:** point Obsidian at `<workspace>/` (the graph-works workspace root), not at the wiki subdir. Obsidian indexes whatever folder you open as a vault, and the workspace root is the level where `wiki/`, `raw/`, `work/`, and `knowledge/` are all visible as sibling folders — they're all part of the same compounding knowledge base.
+**Important:** point Obsidian at `<workspace>/okf/` — that is the bundle root and the Obsidian vault root; there is no separate `wiki/` subdir to distinguish it from.
 
-1. Obsidian → "Open folder as vault" → pick `<workspace>/`, e.g. `<repo>/graph-works/`. The Obsidian sidebar will show `wiki/`, `raw/`, `work/`, etc. as siblings. Naming the workspace dir something distinctive (the default `graph-works/` is fine) makes it obvious which repo the vault belongs to when several are open.
+1. Obsidian → "Open folder as vault" → pick `<workspace>/okf/`, e.g. `<repo>/.works/okf/`. The Obsidian sidebar will show `work/`, `repositories/`, `sources/`, etc. Naming the repo's workspace dir something distinctive makes it obvious which repo the vault belongs to when several are open.
 2. The repo root sits one level up — your repo-level `CLAUDE.md`, source code, and build artifacts stay outside Obsidian's view.
 
-**Note on CLAUDE.md files:** there are typically three relevant files when working from a graph-works workspace: the repo's root `CLAUDE.md` (build/style conventions), `<workspace>/CLAUDE.md` (workspace-level schema, owned by `gw`), and `<workspace>/wiki/CLAUDE.md` (wiki schema, owned by this plugin). Claude Code loads all three by walking the tree; they describe different layers and don't conflict.
+**Note on CLAUDE.md files:** there are typically three relevant files when working from a graph-works workspace: the repo's root `CLAUDE.md` (build/style conventions), `<workspace>/CLAUDE.md` (workspace-level schema, owned by `gw`), and `<workspace>/okf/CLAUDE.md` (wiki schema, owned by this plugin). Claude Code loads all three by walking the tree; they describe different layers and don't conflict.
 
 ## Settings → Files and Links
 
-- **Default location for new notes:** `wiki/` (curated pages go in the wiki, not at the workspace root)
+- **Default location for new notes:** none — new pages are typed (`concepts/`, `adrs/`, `work/`, `sources/`, etc. under `<workspace>/okf/`); file each note in the lane matching its kind rather than relying on a single default folder
 - **New link format:** `Shortest path when possible`
 - **Use `[[Wikilinks]]`:** ON
-- **Attachment folder path:** `raw/assets/` (clipped images go to the workspace's `raw/` layer alongside the wiki, owned by `gw`)
+- **Attachment folder path:** `sources/references/` (attached images are copied here by the ingest flow, alongside the material that references them)
 - **Automatically update internal links:** ON
 
 ## Settings → Hotkeys
@@ -42,7 +42,7 @@ Recommended Obsidian configuration for a Code Wiki. None of this is strictly req
 
 ## Recommended community plugins
 
-- **Obsidian Web Clipper** — clip articles to `../raw/articles/` as markdown
+- **Obsidian Web Clipper** — clip articles to a local folder, then run `/graph-works:ingest <path>` to bring them into `sources/`
 - **Dataview** — query over frontmatter. Dynamic tables like "all package pages where `language: typescript`".
 - **Marp for Obsidian** — render any markdown with `marp: true` frontmatter as a slide deck.
 - **Advanced Tables** — easier markdown table editing
@@ -94,14 +94,14 @@ The wiki is usually inside the repo — commit it with the code:
 
 ```bash
 cd <repo>
-git add graph-works/wiki/
+git add .works/okf/
 git commit -m "wiki: scan — detected 3 new packages"
 ```
 
 Or keep it as a separate repo if you want independent history:
 
 ```bash
-cd <repo>/graph-works/wiki
+cd <repo>/.works/okf
 git init
 git add .
 git commit -m "init wiki"

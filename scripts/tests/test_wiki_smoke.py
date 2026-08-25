@@ -127,8 +127,9 @@ def test_smoke_run_files_the_packages_own_dependency_under_its_ecosystem(tmp_pat
 
 
 def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:
-    """The top-level lanes are discovery indexes, never canonical concepts,
-    and there is deliberately no global File catalog (spec decision 7).
+    """`okf/index.md` is the one cross-repo discovery view (ADR-0039); there is
+    deliberately no standalone global Package/App/AgentPlugin/TestSuite lane
+    index, and no global File catalog either (spec decision 7).
     """
     bundle_dir = tmp_path / "bundle"
     result = wiki_smoke.run(_REAL_CHECKOUT, bundle_dir)
@@ -137,10 +138,6 @@ def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:
     for member in (
         "index.md",
         "repositories/index.md",
-        "packages/index.md",
-        "apps/index.md",
-        "agent-plugins/index.md",
-        "test-suites/index.md",
         "dependencies/index.md",
         "dependencies/pypi/index.md",
     ):
@@ -148,5 +145,4 @@ def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:
 
     assert not (bundle_dir / "files").exists()
     for lane in ("packages", "apps", "agent-plugins", "test-suites"):
-        extras = [p.name for p in (bundle_dir / lane).glob("*.md") if p.name != "index.md"]
-        assert extras == [], f"{lane} is discovery-only, found {extras}"
+        assert not (bundle_dir / lane).exists(), f"{lane} is a redundant global lane and must not exist"

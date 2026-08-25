@@ -85,7 +85,16 @@ def test_ingest_runs_one_source_against_the_first_configured_repo(
 
     result = runner.invoke(
         app,
-        ["ingest", "--source", str(source), "--json", "--workspace", str(initialized_workspace)],
+        [
+            "ingest",
+            "--source",
+            str(source),
+            "--json",
+            "--workspace",
+            str(initialized_workspace),
+            "--backend",
+            "bedrock",
+        ],
     )
 
     assert result.exit_code == 0
@@ -161,7 +170,16 @@ def test_ingest_refusal_prints_its_payload_then_exits_one(
 
     result = runner.invoke(
         app,
-        ["ingest", "--source", str(source), "--json", "--workspace", str(initialized_workspace)],
+        [
+            "ingest",
+            "--source",
+            str(source),
+            "--json",
+            "--workspace",
+            str(initialized_workspace),
+            "--backend",
+            "bedrock",
+        ],
     )
 
     assert result.exit_code == exit_codes.GENERIC
@@ -192,7 +210,9 @@ def test_ingest_reports_optional_degradation_without_failing(
 
     monkeypatch.setattr(ingest_module, "run_ingest_source", fake_run_ingest_source)
 
-    result = runner.invoke(app, ["ingest", "--source", str(source), "--workspace", str(initialized_workspace)])
+    result = runner.invoke(
+        app, ["ingest", "--source", str(source), "--workspace", str(initialized_workspace), "--backend", "bedrock"]
+    )
 
     assert result.exit_code == 0
     assert result.stdout == (
@@ -228,7 +248,16 @@ def test_ingest_reports_apply_time_suggestion_degradation_in_json_and_stderr(
 
     result = runner.invoke(
         app,
-        ["ingest", "--source", str(source), "--json", "--workspace", str(initialized_workspace)],
+        [
+            "ingest",
+            "--source",
+            str(source),
+            "--json",
+            "--workspace",
+            str(initialized_workspace),
+            "--backend",
+            "bedrock",
+        ],
     )
 
     expected = [
@@ -272,7 +301,9 @@ def test_ingest_reports_provider_failures_without_stdout_or_traceback(
 
     monkeypatch.setattr(ingest_module, "run_ingest_source", fail)
 
-    result = runner.invoke(app, ["ingest", "--source", str(source), "--workspace", str(initialized_workspace)])
+    result = runner.invoke(
+        app, ["ingest", "--source", str(source), "--workspace", str(initialized_workspace), "--backend", "bedrock"]
+    )
 
     assert result.exit_code == 1
     assert result.stdout == ""
@@ -308,3 +339,160 @@ def test_ingest_reports_unreadable_configuration_before_any_model_call(
 
     assert result.exit_code == exit_codes.GENERIC
     assert "Error: config.yaml is malformed" in result.stderr
+
+
+def test_ingest_defaults_to_the_brief_only_claude_code_backend(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, tmp_path: Path
+) -> None:
+    """With no --backend and no workspace override, ingest computes a brief and writes nothing."""
+    repo = tmp_path / "repo"
+    _configure_repositories(initialized_workspace, repo)
+    (repo / "docs").mkdir(parents=True)
+    source = repo / "docs" / "thing.md"
+    source.write_text("# A Thing\n\nSome prose about a thing.\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        ingest_module,
+        "run_ingest_source",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not run the full pipeline")),
+    )
+
+    result = runner.invoke(
+        app,
+        ["ingest", "--source", str(source), "--json", "--workspace", str(initialized_workspace)],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["title"] == "A Thing"
+    assert payload["merge_mode"] is False
+
+
+def test_ingest_brief_only_human_output(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    _configure_repositories(initialized_workspace, repo)
+    (repo / "docs").mkdir(parents=True)
+    source = repo / "docs" / "thing.md"
+    source.write_text("# A Thing\n\nSome prose about a thing.\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["ingest", "--source", str(source), "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == 0
+    assert "Title: A Thing" in result.stdout
+    assert "Suggested summary path:" in result.stdout
+
+
+def test_ingest_reports_an_unknown_backend_via_role_spec(initialized_workspace: Path, tmp_path: Path) -> None:
+    """A bad `--backend` value must fail through `role_spec`'s `WorkspaceError`."""
+    repo = tmp_path / "repo"
+    _configure_repositories(initialized_workspace, repo)
+    source = tmp_path / "source.md"
+    source.write_text("# Source\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "ingest",
+            "--source",
+            str(source),
+            "--backend",
+            "bogus",
+            "--workspace",
+            str(initialized_workspace),
+        ],
+    )
+
+    assert result.exit_code != 0
+    combined = result.stdout + result.stderr
+    assert "ingestor" in combined
+    assert "bogus" in combined
+
+
+def test_ingest_reports_brief_planning_failures_without_stdout_or_traceback(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, tmp_path: Path
+) -> None:
+    """A brief-planning failure under the default `claude_code` backend is one clean diagnostic."""
+    repo = tmp_path / "repo"
+    _configure_repositories(initialized_workspace, repo)
+    source = tmp_path / "source.md"
+    source.write_text("# Source\n", encoding="utf-8")
+
+    def fail(*args: object, **kwargs: object) -> object:
+        raise OSError("cannot read source")
+
+    monkeypatch.setattr(ingest_module, "plan_ingest_brief", fail)
+
+    result = runner.invoke(app, ["ingest", "--source", str(source), "--workspace", str(initialized_workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert result.stdout == ""
+    assert result.stderr == "Error: cannot read source\n"
+    assert "Traceback" not in result.stderr
+
+
+def test_ingest_backend_vercel_threads_the_override_into_run_ingest_source(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, tmp_path: Path
+) -> None:
+    """`--backend vercel` must reach `run_ingest_source` as `backend_override`."""
+    repo = tmp_path / "repo"
+    _configure_repositories(initialized_workspace, repo)
+    source = tmp_path / "source.md"
+    source.write_text("# Source\n", encoding="utf-8")
+    calls: list[dict[str, object]] = []
+
+    async def fake_run_ingest_source(*args: object, **kwargs: object) -> IngestResult:
+        calls.append(kwargs)
+        return IngestResult(
+            ok=True,
+            page="sources/demo.md",
+            copy="sources/references/demo.md",
+            title="Demo",
+            source_kind="doc",
+        )
+
+    monkeypatch.setattr(ingest_module, "run_ingest_source", fake_run_ingest_source)
+
+    result = runner.invoke(
+        app,
+        [
+            "ingest",
+            "--source",
+            str(source),
+            "--workspace",
+            str(initialized_workspace),
+            "--backend",
+            "vercel",
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert calls[0]["backend_override"] == "vercel"
+
+
+def test_ingest_backend_claude_code_explicit_matches_the_default(
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    _configure_repositories(initialized_workspace, repo)
+    (repo / "docs").mkdir(parents=True)
+    source = repo / "docs" / "thing.md"
+    source.write_text("# A Thing\n\nSome prose about a thing.\n", encoding="utf-8")
+
+    result = runner.invoke(
+        app,
+        [
+            "ingest",
+            "--source",
+            str(source),
+            "--json",
+            "--backend",
+            "claude_code",
+            "--workspace",
+            str(initialized_workspace),
+        ],
+    )
+
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["title"] == "A Thing"

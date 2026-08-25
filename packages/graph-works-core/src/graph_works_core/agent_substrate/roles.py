@@ -181,10 +181,15 @@ def _construct(spec: RoleSpec) -> BaseChatModel:
 
     `region` is a conditional keyword rather than `spec.region or "us-east-1"`:
     that literal is `make_bedrock_llm`'s own default, and a second copy of it
-    here is exactly what band 1 declined to write. Any backend other than
-    `"vercel"` is Bedrock — by elimination, not by assumption: `role_spec` has
-    already refused anything outside `BACKENDS`.
+    here is exactly what band 1 declined to write. `role_spec` has already
+    refused anything outside `BACKENDS`, so only three values reach here.
     """
+    if spec.backend == "claude_code":
+        raise WorkspaceError(
+            f"backend 'claude_code' has no model to construct for {spec.model_id!r} — "
+            "it delegates to the calling agent instead of invoking a model, and no "
+            "caller-side handoff is wired for this role"
+        )
     if spec.backend == "vercel":
         return make_gateway_llm(
             spec.model_id,

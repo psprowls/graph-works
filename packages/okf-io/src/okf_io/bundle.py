@@ -62,6 +62,16 @@ class Bundle:
     that reconstructs a path from an id must open the file that id names, on
     a filesystem that may not be normalization-insensitive the way APFS is.
     Matching is NFC-insensitive; identity is not.
+
+    ``canonical_collisions`` maps a colliding :func:`canonical_id` to every
+    raw id that has held it, in walk order -- so the last element of each
+    tuple is always the id ``_canonical`` currently resolves to, and every
+    earlier element is a raw id the walk silently displaced. Empty unless two
+    or more members are NFC-equal but byte-different: impossible on a
+    normalization-folding filesystem (APFS), reachable on one that is not
+    (ext4). See ``_rules/identity.py``, which turns a non-empty entry into a
+    reported ``Finding`` rather than raising -- CI is deferred (ADR-0010), so
+    this field exists for a hazard nothing here can currently reproduce.
     """
 
     root: Path
@@ -72,6 +82,7 @@ class Bundle:
     ignored: frozenset[str]
     unreadable: Mapping[str, str]
     _canonical: Mapping[str, str]
+    canonical_collisions: Mapping[str, tuple[str, ...]]
 
     def concept(self, concept_id: str) -> Document | None:
         return self.concepts.get(concept_id)
@@ -122,6 +133,13 @@ class Bundle:
         exists today; a non-ASCII query that misses it falls back to
         :attr:`_canonical`, which is empty unless the bundle carries a
         non-ASCII member.
+
+        **A ``True`` answer's path must not be reused for any further lookup
+        or write.** *path* may not be the raw disk id -- call :meth:`member_id`
+        again and use *its* return value to key ``concepts`` / ``assets`` /
+        ``indexes`` / ``logs``, or to reopen the file. Reusing the query path
+        after a ``True`` answer is exactly the gap that let ``has_member``
+        agree with a caller while ``concepts.get(...)`` disagreed with it.
         """
         return self.member_id(path) is not None
 
@@ -297,6 +315,27 @@ def _directory_id(relative: str) -> str:
     return "" if parent == "." else parent
 
 
+def _track_canonical(canonical: dict[str, str], collisions: dict[str, list[str]], relative: str) -> None:
+    """Record *relative* into *canonical*, noting a same-id collision.
+
+    ASCII is invariant under normalization (:func:`canonical_id`'s fast
+    path), so only a non-ASCII *relative* can collide with an existing entry;
+    an ASCII *relative* is a no-op here.
+
+    Last-write-wins for *canonical* is unchanged (§ADR-0027) -- the last raw
+    id seen in walk order always wins.
+    *collisions* additionally remembers every raw id a later member
+    displaced, in walk order, so the final element of each recorded list is
+    always the current winner.
+    """
+    if relative.isascii():
+        return
+    cid = canonical_id(relative)
+    if cid in canonical:
+        collisions.setdefault(cid, [canonical[cid]]).append(relative)
+    canonical[cid] = relative
+
+
 def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
     """Walk *root* once and load every member.
 
@@ -322,6 +361,7 @@ def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
     ignored: set[str] = set()
     unreadable: dict[str, str] = {}
     canonical: dict[str, str] = {}
+    collisions: dict[str, list[str]] = {}
 
     members = (
         ((path.relative_to(root).as_posix(), path) for path in _files(root, unreadable=unreadable))
@@ -331,13 +371,11 @@ def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
     for relative, path in members:
         if any(fnmatchcase(relative, pattern) for pattern in ignore):
             ignored.add(relative)
-            if not relative.isascii():
-                canonical[canonical_id(relative)] = relative
+            _track_canonical(canonical, collisions, relative)
             continue
         if path.suffix != ".md":
             assets.add(relative)
-            if not relative.isascii():
-                canonical[canonical_id(relative)] = relative
+            _track_canonical(canonical, collisions, relative)
             continue
         try:
             document = (
@@ -357,8 +395,7 @@ def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
             logs[_directory_id(relative)] = document
         else:
             concepts[relative[: -len(".md")]] = document
-        if not relative.isascii():
-            canonical[canonical_id(relative)] = relative
+        _track_canonical(canonical, collisions, relative)
 
     return Bundle(
         root=root,
@@ -369,6 +406,7 @@ def _load(root: Path, *, ignore: Sequence[str], root_fd: int | None) -> Bundle:
         ignored=frozenset(ignored),
         unreadable=MappingProxyType(dict(sorted(unreadable.items()))),
         _canonical=MappingProxyType(dict(sorted(canonical.items()))),
+        canonical_collisions=MappingProxyType({cid: tuple(ids) for cid, ids in sorted(collisions.items())}),
     )
 
 

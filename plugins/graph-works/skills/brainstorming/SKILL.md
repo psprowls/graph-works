@@ -279,7 +279,7 @@ is the whole process.
 
 **Documentation:**
 
-- Write the validated design (spec) to the graph-works workspace spec inbox: `<workspace>/raw/specs/YYYY-MM-DD-<topic>-design.md`. The workspace doc-routing hook injects the resolved absolute path into your context — use it if present.
+- Write the validated design (spec) to the graph-works workspace spec lane: `<workspace>/okf/<work-path>/references/01-design.md` in pipeline/auto-file mode. The workspace doc-routing hook injects the resolved absolute path into your context — use it if present.
   - (User preferences for spec location override this default)
 - Use elements-of-style:writing-clearly-and-concisely skill if available
 - Commit the design document to git

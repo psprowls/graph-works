@@ -1,6 +1,7 @@
 """The typer app: every command, both output modes, every exit path."""
 
 import json
+import unicodedata
 from datetime import date
 
 from doc_wiki_okf.cli import app
@@ -145,6 +146,60 @@ def test_show_exits_one_for_an_unknown_target(tmp_path) -> None:
     result = runner.invoke(app, ["proposal", "show", str(root), "adrs/nope.md"])
     assert result.exit_code == 1
     assert "no proposal" in result.stderr
+
+
+def test_show_targets_the_raw_disk_id_for_a_non_ascii_page(tmp_path, monkeypatch) -> None:
+    """Defensive per the ticket: `target_for`'s slug is ASCII-only today, so
+    monkeypatching `slugify` is what exercises the funnel `show` now routes
+    through -- see the sibling test in test_proposal_filing.py.
+
+    Adapted from the plan's literal text per two rulings on
+    work/tech-debt-has-member-callers-raw-id's task-3 ledger: the query-only
+    swap (NFC -> NFD) left the assertion non-discriminating, because filing
+    (fixed in the 3b commit) already stores the raw disk id at file time, so
+    `found.target` was always already current. This version instead models a
+    page rewritten under a different Unicode normalization *after* filing: the
+    proposal's stored `target` goes stale (still NFD), the live page is now
+    NFC, and `show` must resolve against the *current* raw disk id, not the
+    stale stored one."""
+    nfd = unicodedata.normalize("NFD", "café")
+    nfc = unicodedata.normalize("NFC", "café")
+    monkeypatch.setattr("doc_wiki_okf.proposals.lanes.slugify", lambda title: nfc)
+    root = tmp_path / "b"
+    _init(root)
+    (root / "references").mkdir(parents=True, exist_ok=True)
+    page_text = "---\ntype: Reference\ntitle: Café\n---\n\n# Café\n"
+    (root / "references" / f"{nfd}.md").write_text(page_text, encoding="utf-8")
+    filed = runner.invoke(
+        app,
+        [
+            "proposal",
+            "file",
+            str(root),
+            "--lane",
+            "reference",
+            "--title",
+            "Café",
+            "--description",
+            "Why this page.",
+            "--id",
+            "src-a",
+            "--resource",
+            "sources/a.md",
+        ],
+    )
+    assert filed.exit_code == 0, filed.stderr
+
+    # The page is rewritten under a different Unicode normalization after
+    # filing: delete the NFD file, write NFC in its place with identical
+    # content. The proposal's stored `target` (NFD) is now stale.
+    (root / "references" / f"{nfd}.md").unlink()
+    (root / "references" / f"{nfc}.md").write_text(page_text, encoding="utf-8")
+
+    result = runner.invoke(app, ["proposal", "show", str(root), f"references/{nfd}.md"])
+
+    assert result.exit_code == 0, result.stderr
+    assert f"Update existing Reference page `references/{nfc}.md`." in result.stdout
 
 
 def test_a_root_that_is_not_a_directory_exits_one(tmp_path) -> None:

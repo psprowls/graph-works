@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 
 from code_wiki_okf.config import Config, StateGateConfig
@@ -149,6 +150,36 @@ def test_run_file_refuses_a_log_changed_after_domain_planning(tmp_path, monkeypa
     assert result.application is not None and not result.application.ok
     assert log_path.read_bytes() == external
     assert not result.plan.filing.target.exists()
+
+
+def _split_workspace(tmp_path):
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    code = tmp_path / "code"
+    (code / "packages/foo").mkdir(parents=True)
+    layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+    return layout
+
+
+def test_split_topology_files_against_the_declared_code_repo_not_the_vault(tmp_path) -> None:
+    layout = _split_workspace(tmp_path)
+    outcome = work.run_file(
+        layout,
+        _config(layout),
+        type="Feature",
+        title="Split-topology filing",
+        description="d",
+        on=TODAY,
+        affects=("packages/foo",),
+        dry_run=False,
+    )
+    assert outcome.plan.filing.refusal is None
+    assert outcome.application is not None
+    assert outcome.application.ok, outcome.application.failures
 
 
 def test_the_vertical_is_not_hoisted_to_the_front_door():

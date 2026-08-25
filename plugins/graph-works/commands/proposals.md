@@ -1,6 +1,6 @@
 ---
 name: proposals
-description: Review and dispose of curated-page proposals in `wiki/proposals/` — accept / reject / supersede. Approving only flips status; this skill then fans out one subagent per accepted proposal to author the destination page, flips notes to `created`, regenerates indexes, and archives. Usage /graph-works:proposals [slug...]
+description: Review and dispose of curated-page proposals in `okf/proposals/` — accept / reject / supersede. Approving only flips status; this skill then fans out one subagent per accepted proposal to author the destination page, flips notes to `created`, regenerates indexes, and archives. Usage /graph-works:proposals [slug...]
 ---
 
 # /graph-works:proposals

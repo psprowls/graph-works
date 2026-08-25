@@ -96,11 +96,23 @@ from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.repos import resolve_repo
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
 def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _repo_root(layout: WorkspaceLayout) -> Path | None:
+    """The code repo `workspace.yaml` declares, for `apply_mutation`'s
+    postcondition validation -- never `layout.repo_root`, which is a `.git`
+    walk-up that lands on the vault in a split topology. Matches
+    `orchestrate/commands.py`'s own resolution exactly; every `apply_mutation`
+    call site in this module calls this instead of re-deriving it.
+    """
+    resolved, _note = resolve_repo(layout)
+    return resolved
 
 
 def _materialize(value: object) -> object:
@@ -241,7 +253,10 @@ def run_file(
     if dry_run or outcome.plan.refusal is not None:
         return FilingRun(plan=outcome.plan)
 
-    return FilingRun(plan=outcome.plan, application=apply_mutation(layout, _filing_mutation(bundle, outcome.plan)))
+    return FilingRun(
+        plan=outcome.plan,
+        application=apply_mutation(layout, _filing_mutation(bundle, outcome.plan), repo_root=_repo_root(layout)),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -334,7 +349,7 @@ def _apply_normalizations(
                     (_planned_write(member, before, document.serialize().encode("utf-8")),),
                     validate_paths=(change.path,),
                 )
-                application = apply_mutation(layout, mutation)
+                application = apply_mutation(layout, mutation, repo_root=_repo_root(layout))
                 if application.ok:
                     normalized.append(change.path)
                 else:
@@ -541,7 +556,7 @@ def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> Regen
             condition for lane, condition in lane_preconditions.items() if lane in changed_lanes
         ),
     )
-    application = None if dry_run else apply_mutation(layout, mutation)
+    application = None if dry_run else apply_mutation(layout, mutation, repo_root=_repo_root(layout))
     return RegenIndexesResult(plans=plans, mutation=mutation, application=application)
 
 
@@ -562,7 +577,9 @@ def run_reparent(
 ) -> PathMutationResult:
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
-    return PathMutationResult(plan, None if dry_run or not plan.ok else apply_mutation(layout, plan))
+    return PathMutationResult(
+        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_root=_repo_root(layout))
+    )
 
 
 def run_release_adoption(
@@ -574,7 +591,9 @@ def run_release_adoption(
 ) -> PathMutationResult:
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
-    return PathMutationResult(plan, None if dry_run or not plan.ok else apply_mutation(layout, plan))
+    return PathMutationResult(
+        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_root=_repo_root(layout))
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -728,7 +747,7 @@ def _apply_decision(
 ) -> MutationApplication | None:
     if plan.refusal is not None:
         return None
-    return apply_mutation(layout, _decision_mutation(context, plan, ledger_before))
+    return apply_mutation(layout, _decision_mutation(context, plan, ledger_before), repo_root=_repo_root(layout))
 
 
 def _decision_result(
@@ -971,7 +990,7 @@ def run_decision_overturn(
             _decision_mutation(context, combined.decision, ledger_before),
             _filing_mutation(context.bundle, combined.filing),
         )
-        application = apply_mutation(layout, mutation)
+        application = apply_mutation(layout, mutation, repo_root=_repo_root(layout))
     return OverturnResult(
         owner=context.owner,
         plan=combined,

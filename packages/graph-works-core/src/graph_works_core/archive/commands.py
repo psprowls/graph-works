@@ -29,6 +29,7 @@ import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date
+from pathlib import Path
 
 from doc_wiki_okf.archive import ARCHIVE_IGNORE as WIKI_ARCHIVE_IGNORE
 from doc_wiki_okf.archive import ArchivePlan as WikiArchivePlan
@@ -37,12 +38,14 @@ from doc_wiki_okf.archive import apply_archive as apply_wiki_archive
 from doc_wiki_okf.archive import plan_archive as plan_wiki_archive
 from okf_ext.moves import MovePlan, stranded_warning
 from okf_io import append_log_entry, load, load_bundle
+from okf_io import parse as parse_document
 from work_tracker_okf.archive import plan_archive
 from work_tracker_okf.items import ARCHIVE_IGNORE, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.repos import resolve_repo
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
@@ -97,6 +100,28 @@ def stranded_warnings(run: ArchiveRun) -> tuple[str, ...]:
     return tuple(warnings)
 
 
+def _plan_with_log_entry(plan: WorkMutationPlan, bundle_root: Path, today: date, logged: str) -> WorkMutationPlan:
+    """Fold the archive's `log.md` entry into *plan*, chaining onto any
+    existing `log.md` write (from reference repair) instead of layering a
+    second, independently-sourced write onto the same member -- see
+    `work/bug-archive-duplicate-log-write` for why that trips the transaction
+    layer's duplicate-target guard."""
+    existing = next((write for write in plan.writes if write.member == "log.md"), None)
+    base = (
+        parse_document(existing.after.decode("utf-8"), path=bundle_root / "log.md")
+        if existing is not None
+        else load(bundle_root / "log.md")
+    )
+    log = append_log_entry(base, logged, on=today, dry_run=True)
+    before_digest = (
+        existing.before_digest if existing is not None else hashlib.sha256(log.before.encode("utf-8")).hexdigest()
+    )
+    source_member = existing.source_member if existing is not None else None
+    merged = PlannedWrite("log.md", before_digest, log.after.encode("utf-8"), source_member)
+    others = tuple(write for write in plan.writes if write.member != "log.md")
+    return replace(plan, writes=tuple(sorted((*others, merged), key=lambda write: write.member)))
+
+
 def run_archive(
     layout: WorkspaceLayout,
     paths: Sequence[str] | str | None = None,
@@ -148,8 +173,6 @@ def run_archive(
         *plan.deletes,
     }
     conflict = tuple(sorted(work_touched & _touched_members(wiki_plan.moves)))
-    if dry_run or not plan.ok or not wiki_plan.ok or conflict:
-        return ArchiveRun(plan=plan, wiki_plan=wiki_plan, conflict=conflict)
 
     work_roots = tuple(
         source
@@ -161,21 +184,11 @@ def run_archive(
         messages.append(f"archived wiki {', '.join(wiki_plan.tokens)}")
     logged = "; ".join(messages) or None
     if logged is not None:
-        log = append_log_entry(load(bundle.root / "log.md"), logged, on=today, dry_run=True)
-        before = log.before.encode("utf-8")
-        plan = replace(
-            plan,
-            writes=tuple(
-                sorted(
-                    (
-                        *plan.writes,
-                        PlannedWrite("log.md", hashlib.sha256(before).hexdigest(), log.after.encode("utf-8")),
-                    ),
-                    key=lambda write: write.member,
-                )
-            ),
-        )
-    result = apply_mutation(layout, plan)
+        plan = _plan_with_log_entry(plan, bundle.root, today, logged)
+    if dry_run or not plan.ok or not wiki_plan.ok or conflict:
+        return ArchiveRun(plan=plan, wiki_plan=wiki_plan, conflict=conflict, logged=logged)
+
+    result = apply_mutation(layout, plan, repo_root=resolve_repo(layout)[0])
     if not result.ok:
         return ArchiveRun(plan=plan, wiki_plan=wiki_plan, result=result, logged=logged)
 

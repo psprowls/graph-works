@@ -10,12 +10,14 @@ from typing import cast
 
 import typer
 from code_wiki_okf.config import ConfigError, load_config
-from graph_works_core.ingest.commands import run_ingest_source, state_gate_adapter
+from graph_works_core.agent_substrate.roles import role_spec
+from graph_works_core.ingest.commands import plan_ingest_brief, run_ingest_source, state_gate_adapter
+from graph_works_core.workspace.errors import WorkspaceError
 from models_io import ModelsIoError
 
 from graph_works_cli import exit_codes
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import ingest_payload
+from graph_works_cli.wiki_cli.rendering import ingest_brief_payload, ingest_payload
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -25,6 +27,13 @@ def _emit_human(payload: dict[str, object]) -> None:
     typer.echo(f"Copy: {payload['copy']}")
     for proposal in cast(list[dict[str, object]], payload["proposals"]):
         typer.echo(f"Proposal: {proposal['status']} {proposal['target']}")
+
+
+def _emit_brief_human(payload: dict[str, object]) -> None:
+    """Print the small, human-facing projection of a computed brief."""
+    typer.echo(f"Title: {payload['title']}")
+    typer.echo(f"Suggested summary path: {payload['suggested_summary_path']}")
+    typer.echo(f"Merge mode: {payload['merge_mode']}")
 
 
 def _emit_warnings(payload: dict[str, object]) -> None:
@@ -37,6 +46,7 @@ def ingest(
     source: Path = typer.Option(..., "--source"),  # noqa: B008 -- Typer declares CLI options in defaults
     json_output: bool = typer.Option(False, "--json"),
     workspace: str = typer.Option("", "--workspace"),
+    backend: str = typer.Option("", "--backend"),
 ) -> None:
     """Ingest one source into the initialized workspace."""
     layout = resolve_workspace(workspace)
@@ -52,6 +62,30 @@ def ingest(
     if not config.repos:
         exit_error("no repositories are configured", code=exit_codes.NOT_IN_GIT_REPO)
 
+    backend_override = backend or None
+    try:
+        resolved_backend = role_spec("ingestor", layout=layout, backend_override=backend_override).backend
+    except WorkspaceError as exc:
+        exit_error(str(exc), cause=exc)
+
+    if resolved_backend == "claude_code":
+        try:
+            brief = plan_ingest_brief(
+                source,
+                layout=layout,
+                repo=config.repos[0].path,
+                today=datetime.now(UTC).date(),
+                state_gate=state_gate_adapter(config),
+            )
+        except (OSError, ValueError) as exc:
+            exit_error(str(exc), cause=exc)
+        payload = ingest_brief_payload(brief)
+        if json_output:
+            typer.echo(json.dumps(payload, indent=2))
+        else:
+            _emit_brief_human(payload)
+        return
+
     now = datetime.now(UTC)
     try:
         result = asyncio.run(
@@ -63,6 +97,7 @@ def ingest(
                 at=now,
                 by="agent:graph-works-cli",
                 state_gate=state_gate_adapter(config),
+                backend_override=backend_override,
             )
         )
     except (ModelsIoError, OSError, ValueError) as exc:

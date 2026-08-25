@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -67,3 +68,35 @@ def test_refused_path_mutation_never_invokes_executor(tmp_path: Path) -> None:
     result = work.run_reparent(layout, "work/feature-a", "work/missing", dry_run=False)
     assert not result.plan.ok
     assert result.application is None
+
+
+def _split_layout(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    code = tmp_path / "code"
+    (code / "packages/a").mkdir(parents=True)
+    layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
+    return layout
+
+
+def test_split_topology_reparent_validates_against_the_declared_code_repo(tmp_path: Path) -> None:
+    layout = _split_layout(tmp_path)
+    _write(layout, "work/epic-a", type="Epic")
+    _write(layout, "work/feature-b")
+    result = work.run_reparent(layout, "work/feature-b", "work/epic-a", dry_run=False)
+    assert result.application is not None
+    assert result.application.ok, result.application.failures
+
+
+def test_split_topology_adoption_validates_against_the_declared_code_repo(tmp_path: Path) -> None:
+    layout = _split_layout(tmp_path)
+    _write(layout, "work/release-v1", type="Release")
+    _write(layout, "work/epic-a", type="Epic")
+    result = work.run_release_adoption(layout, "work/epic-a", "work/release-v1", dry_run=False)
+    assert result.application is not None
+    assert result.application.ok, result.application.failures

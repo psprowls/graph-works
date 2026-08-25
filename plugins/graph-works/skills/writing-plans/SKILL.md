@@ -15,7 +15,7 @@ Assume they are a skilled developer, but know almost nothing about our toolset o
 
 **Context:** If working in an isolated worktree, it should have been created via the `graph-works:using-git-worktrees` skill at execution time.
 
-**Save plans to:** the graph-works workspace plan inbox: `<workspace>/raw/plans/YYYY-MM-DD-<feature-name>.md`. The workspace doc-routing hook injects the resolved absolute path into your context — use it if present.
+**Save plans to:** the graph-works workspace plan lane: `<workspace>/okf/<work-path>/references/02-plan.md` in pipeline/auto-file mode. The workspace doc-routing hook injects the resolved absolute path into your context — use it if present.
 - (User preferences for plan location override this default)
 
 ## Scope Check
@@ -156,7 +156,7 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 After saving the plan, offer execution choice:
 
-**"Plan complete and saved to `<workspace>/raw/plans/<filename>.md`. Two execution options:**
+**"Plan complete and saved to `<workspace>/okf/<work-path>/references/02-plan.md`. Two execution options:**
 
 **1. Subagent-Driven (recommended)** - I dispatch a fresh subagent per task, review between tasks, fast iteration
 

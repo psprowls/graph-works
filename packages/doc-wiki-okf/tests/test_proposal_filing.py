@@ -1,5 +1,7 @@
 """Filing: the lane resolves the target, the capability owns the merge."""
 
+import unicodedata
+
 import pytest
 from doc_wiki_okf.proposals.filing import plan_file
 from okf_ext.proposals import apply
@@ -85,3 +87,29 @@ def test_an_existing_target_files_in_update_mode(tmp_path) -> None:
         at=AT,
     )
     assert "Update existing Reference page `references/flags.md`." in plan.writes[0].text
+
+
+def test_a_non_ascii_target_files_in_update_mode_against_the_raw_disk_id(tmp_path, monkeypatch) -> None:
+    """Defensive per the ticket: `target_for`'s slug is ASCII-only today
+    (`SLUG_RE`), so this can only be exercised by monkeypatching `slugify` --
+    see work/tech-debt-has-member-callers-raw-id."""
+    nfd = unicodedata.normalize("NFD", "café")
+    nfc = unicodedata.normalize("NFC", "café")
+    monkeypatch.setattr("doc_wiki_okf.proposals.lanes.slugify", lambda title: nfc)
+    root = tmp_path / "b"
+    page = "---\ntype: Reference\ntitle: Café\n---\n\n# Café\n"
+    bundle = build_bundle(root, {f"references/{nfd}": page})
+
+    plan = plan_file(
+        bundle,
+        lanes(),
+        lane="reference",
+        title="Café",
+        description="",
+        source=source("src-a", "sources/x.md"),
+        by=BY,
+        at=AT,
+    )
+
+    assert plan.target == f"references/{nfd}.md"
+    assert f"Update existing Reference page `references/{nfd}.md`." in plan.writes[0].text

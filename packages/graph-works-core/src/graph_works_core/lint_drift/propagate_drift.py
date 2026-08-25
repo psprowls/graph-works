@@ -676,6 +676,35 @@ async def run_propagate_drift(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class DriftBrief:
+    """The read-only half of drift propagation: candidates -> targets, no judge, no write."""
+
+    targets: tuple[Target, ...]
+
+
+def plan_drift_brief(
+    layout: WorkspaceLayout,
+    config: Config,
+    reader: _NodeLister,
+    *,
+    repo_root: Path | None,
+) -> DriftBrief:
+    """Candidates -> curated backlink targets, and nothing past it.
+
+    The `claude_code`-backend counterpart to `run_propagate_drift`: reuses
+    `propagation_candidates`/`drift_targets` unchanged and stops there -- no
+    judge call, no proposal write. The calling agent reads each target's
+    candidates, judges staleness itself, and files any proposal via
+    `gw wiki proposal file`.
+    """
+    bundle = load_bundle(layout.bundle_dir)
+    anchors = read_anchors(layout.cache_dir)
+    candidates = propagation_candidates(bundle, reader, anchors, config=config, repo_root=repo_root)
+    targets = drift_targets(candidates, bundle, build_link_graph(bundle))
+    return DriftBrief(targets=targets)
+
+
 __all__ = [
     "HUMAN_DECIDED",
     "LAST_UPDATED_COMMIT_KEY",
@@ -683,10 +712,12 @@ __all__ = [
     "PROPAGATOR_ACTOR",
     "PROPAGATOR_ROLE",
     "Candidate",
+    "DriftBrief",
     "DriftFinding",
     "PropagateResult",
     "Target",
     "drift_targets",
+    "plan_drift_brief",
     "propagation_candidates",
     "run_propagate_drift",
     "write_propagation_findings",

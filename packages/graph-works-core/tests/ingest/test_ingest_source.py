@@ -86,6 +86,59 @@ def _models(monkeypatch, *, ingestor=_RESPONSE, extractor=_SUGGESTIONS, reasoner
         monkeypatch.setattr(f"{path}.make_llm", fake_make_llm, raising=False)
 
 
+def test_plan_ingest_brief_computes_without_writing(workspace):
+    from graph_works_core.ingest.commands import plan_ingest_brief
+
+    layout, repo, material = workspace
+    before = sorted(p.relative_to(layout.bundle_dir) for p in layout.bundle_dir.rglob("*") if p.is_file())
+
+    brief = plan_ingest_brief(material, layout=layout, repo=repo, today=TODAY)
+
+    after = sorted(p.relative_to(layout.bundle_dir) for p in layout.bundle_dir.rglob("*") if p.is_file())
+    assert brief.title == "A Thing"
+    assert brief.source_path == material.resolve()
+    assert brief.merge_mode is False
+    assert after == before
+
+
+def test_plan_ingest_brief_detects_merge_mode(workspace):
+    from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT
+    from graph_works_core.ingest.commands import plan_ingest_brief
+
+    layout, repo, material = workspace
+    suggested = GRAPH_WIKI_LAYOUT.source_page_template.format(month=TODAY.strftime("%Y-%m"), slug="a-thing")
+    existing = layout.bundle_dir / suggested
+    existing.parent.mkdir(parents=True, exist_ok=True)
+    existing.write_text("---\ntype: Source\ntitle: A Thing\n---\n", encoding="utf-8")
+
+    brief = plan_ingest_brief(material, layout=layout, repo=repo, today=TODAY)
+
+    assert brief.merge_mode is True
+
+
+async def test_backend_override_reaches_the_ingestor_model_call(workspace, monkeypatch):
+    layout, repo, material = workspace
+    calls: list[object] = []
+
+    def fake_make_llm(role, **kwargs):
+        if role == "ingestor":
+            calls.append(kwargs.get("backend_override"))
+        scripts = {"ingestor": _RESPONSE, "extractor": _SUGGESTIONS, "proposal_reasoner": "analysis"}
+        return FakeLLM(FakeResponse(scripts[role]))
+
+    for path in (
+        "graph_works_core.ingest.commands",
+        "graph_works_core.ingest.suggest_pages",
+        "graph_works_core.ingest.proposal_reasoner",
+    ):
+        monkeypatch.setattr(f"{path}.make_llm", fake_make_llm, raising=False)
+
+    result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT, backend_override="bedrock")
+
+    assert result.ok
+    assert calls == ["bedrock"]
+
+
 async def test_a_path_and_a_layout_are_enough(workspace, monkeypatch):
     layout, repo, material = workspace
     _models(monkeypatch)

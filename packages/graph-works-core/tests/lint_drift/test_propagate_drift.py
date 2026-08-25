@@ -588,3 +588,18 @@ async def test_only_a_real_page_that_did_not_drift_is_a_legitimate_zero(layout, 
     result = await _run(layout, config, reader, monkeypatch, only="concepts/unlinked")
     assert result.pages_judged == 0
     assert result.errors == ()
+
+
+def test_plan_drift_brief_returns_targets_with_no_judge_call(layout, config, reader, monkeypatch):
+    """The claude_code brief must never construct a role LLM."""
+
+    def fail_role_binding(*args: object, **kwargs: object) -> object:
+        raise AssertionError("plan_drift_brief must not call role_binding")
+
+    monkeypatch.setattr(pd, "role_binding", fail_role_binding)
+
+    brief = pd.plan_drift_brief(layout, config, reader, repo_root=None)
+
+    assert isinstance(brief, pd.DriftBrief)
+    for target in brief.targets:
+        assert target.candidates

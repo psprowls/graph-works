@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 import typer
 from code_wiki_okf.config import ConfigError, load_config
 from graph_works_core.lint_drift.lint import run_lint
+from graph_works_core.workspace.repos import resolve_repo
 
 from graph_works_cli.wiki_cli.errors import exit_error
 from graph_works_cli.wiki_cli.rendering import lint_payload
@@ -33,7 +34,8 @@ def lint(
 
     today = datetime.now(UTC).date()
     try:
-        report = asyncio.run(run_lint(layout, config, today=today, repo_root=layout.repo_root))
+        repo_root, _ = resolve_repo(layout)
+        report = asyncio.run(run_lint(layout, config, today=today, repo_root=repo_root))
     except (OSError, ValueError, RuntimeError) as exc:
         exit_error(str(exc), cause=exc)
 

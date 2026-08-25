@@ -72,7 +72,7 @@ def test_prompts_and_roles_stay_submodules():
 
 
 def test_the_ingest_vertical_is_exported():
-    for name in ("IngestResult", "entity_matcher", "run_ingest_source", "state_gate_adapter"):
+    for name in ("IngestResult", "entity_matcher", "plan_ingest_brief", "run_ingest_source", "state_gate_adapter"):
         assert name in graph_works_core.__all__
 
 

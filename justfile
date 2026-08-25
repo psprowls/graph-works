@@ -196,6 +196,8 @@ test-plugin:
     bash tests/hooks/test-session-start.sh
     echo "--- hooks/test-skill-doc-routing"
     bash tests/hooks/test-skill-doc-routing.sh
+    echo "--- test-doc-layout-claims"
+    bash tests/test-doc-layout-claims.sh
     echo "--- skills/shared/resolve-workspace"
     bash skills/shared/resolve-workspace.test.sh
     echo "--- shell-lint/test-lint-shell"

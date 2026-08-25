@@ -168,13 +168,13 @@ def test_commit_strategy_and_model_routing_are_dropped(tmp_path: Path) -> None:
     assert "workflow.model_routing" in dropped
 
 
-def test_repo_directory_becomes_a_bundle_relative_named_scan_target(tmp_path: Path) -> None:
+def test_repo_directory_becomes_a_workspace_relative_named_scan_target(tmp_path: Path) -> None:
     d = by_target(convert_agent_workspace(tmp_path), "repositories.graph-works.path")
     assert d.action == "re-express"
-    # Bundle-relative, not workspace-root-relative: `<tmp>/workspaces/graph-works/wiki`
-    # up three to `<tmp>`, then down into the repo.
-    assert d.value == "../../../graph-works"
-    assert d.value != "../../graph-works"  # the workspace-root-relative value, asserted absent
+    # Workspace-root-relative, not bundle-relative: `<tmp>/workspaces/graph-works`
+    # up two to `<tmp>`, then down into the repo.
+    assert d.value == "../../graph-works"
+    assert d.value != "../../../graph-works"  # the bundle-relative value, asserted absent
 
 
 def test_repo_name_defaults_to_the_repo_basename_and_is_overridable(tmp_path: Path) -> None:
@@ -327,7 +327,7 @@ def good_body() -> str:
         '      finish: "sonnet"\n'
         'repositories:\n'
         '  "graph-works":\n'
-        '    path: "../../../graph-works"\n'
+        '    path: "../../graph-works"\n'
         'ignore: []\n'
     )
 

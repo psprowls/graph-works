@@ -71,13 +71,6 @@ _REPOSITORY_GROUPS: tuple[tuple[str, str], ...] = (
     ("Test Suites", "TestSuite"),
     ("Files", "File"),
 )
-_GLOBAL_DIRECTORY_BY_TYPE = {
-    "Repository": "repositories",
-    "Package": "packages",
-    "App": "apps",
-    "AgentPlugin": "agent-plugins",
-    "TestSuite": "test-suites",
-}
 _REPOSITORY_LANE_BY_TYPE = {
     "Package": "packages",
     "App": "apps",
@@ -230,10 +223,6 @@ def _required_catalogs(
     headings: dict[str, tuple[str, ...]] = {
         "": tuple(heading for heading, _type_name in _ROOT_GROUPS),
         "repositories": ("Repositories",),
-        "packages": ("Packages",),
-        "apps": ("Apps",),
-        "agent-plugins": ("Agent Plugins",),
-        "test-suites": ("Test Suites",),
         "dependencies": ("Dependencies",),
     }
     index_renders: dict[str, Render] = {
@@ -250,11 +239,6 @@ def _required_catalogs(
             sections={"Dependencies": _section_body(tuple(_index_entry(f"dependencies/{item}") for item in ecosystems))}
         ),
     }
-    for type_name, directory in _GLOBAL_DIRECTORY_BY_TYPE.items():
-        heading = next(heading for heading, candidate in _ROOT_GROUPS if candidate == type_name)
-        index_renders[directory] = Render(
-            sections={heading: _section_body(tuple(item.entry for item in by_type.get(type_name, ())))}
-        )
 
     concept_renders: dict[str, Render] = {}
     for repository, items in sorted(by_repository.items()):

@@ -244,8 +244,8 @@ def test_dry_run_reports_the_complete_plan_and_writes_nothing(tmp_path: Path) ->
     assert "repositories/demo/packages/widgets" in result.entities.created
     assert result.entities.updated == ()
     assert result.entities.written == result.entities.created
-    assert "packages/index.md" in result.entities.catalog_created
-    assert "packages/index.md" not in result.entities.catalog_updated
+    assert "repositories/demo/packages/index.md" in result.entities.catalog_created
+    assert "repositories/demo/packages/index.md" not in result.entities.catalog_updated
     assert set(result.entities.catalog_created).isdisjoint(result.entities.catalog_updated)
     assert "index.md" in result.entities.catalog_updated
     assert result.mirror.plans[0].creates
@@ -364,7 +364,6 @@ def test_dry_run_reports_guarded_stale_delete_and_catalog_updates_without_writes
     assert preview.entities.declined == ()
     assert {
         "index.md",
-        "packages/index.md",
         "repositories/demo/index.md",
         "repositories/demo/packages/index.md",
         "repositories/demo/repository.md",
@@ -419,8 +418,10 @@ def test_second_composite_sync_is_idempotent_and_keeps_file_resources_current(tm
     assert all(plan.is_empty for plan in second.mirror.plans)
     assert _bundle_bytes(bundle_root) == after_first
     assert (bundle_root / "repositories/demo/files/src/widgets.py.md").is_file()
-    assert (bundle_root / "packages/index.md").is_file()
-    assert "/repositories/demo/packages/widgets.md" in (bundle_root / "packages/index.md").read_text(encoding="utf-8")
+    assert (bundle_root / "repositories/demo/packages/index.md").is_file()
+    assert "/repositories/demo/packages/widgets.md" in (bundle_root / "repositories/demo/packages/index.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_second_wet_sync_ignores_derived_index_conflict_for_an_empty_mirror_plan(tmp_path: Path) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -45,6 +46,20 @@ def _workspace(tmp_path: Path):
     return layout
 
 
+def _workspace_with_referring_log(tmp_path: Path):
+    """Like `_workspace`, but `log.md` already carries an OKF markdown link
+    into `DONE` -- the trigger for `work/bug-archive-duplicate-log-write`:
+    reference repair plans its own `log.md` write, which the archive-entry
+    append must chain onto rather than duplicate."""
+    layout = _workspace(tmp_path)
+    log_path = layout.bundle_dir / "log.md"
+    log_path.write_text(
+        log_path.read_text(encoding="utf-8") + f"- filed [{DONE}]({DONE}.md)\n",
+        encoding="utf-8",
+    )
+    return layout
+
+
 def _snapshot(root: Path) -> dict[str, bytes]:
     return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
 
@@ -57,7 +72,7 @@ def test_dry_run_plans_full_canonical_path_mapping(tmp_path: Path) -> None:
     result = archive.run_archive(layout, today=TODAY)
     assert result.plan.path_mapping == {DONE: "work/_archive/feature-done"}
     assert result.result is None
-    assert result.logged is None
+    assert result.logged == f"archived {DONE}", "preview reports the same message apply would log"
     assert _snapshot(layout.bundle_dir) == before_bundle
     assert (layout.cache_dir / provenance.ACTIVE_WORK_FILENAME).read_bytes() == before_pointer
 
@@ -71,6 +86,33 @@ def test_live_work_archive_goes_through_journal_and_clears_path_pointer(tmp_path
     assert (layout.bundle_dir / "work/_archive/feature-done.md").is_file()
     assert result.pointer_cleared is True
     assert result.logged == f"archived {DONE}"
+
+
+def test_archive_composes_log_entry_write_with_reference_repair(tmp_path: Path) -> None:
+    """`work/bug-archive-duplicate-log-write`: when `log.md` links into the
+    archived item, reference repair already plans a `log.md` write; the
+    archive-entry append must chain onto it instead of layering a second,
+    independently-sourced write for the same member -- which trips the
+    transaction layer's duplicate-target guard and refuses the whole apply."""
+    layout = _workspace_with_referring_log(tmp_path)
+    result = archive.run_archive(layout, today=TODAY, dry_run=False)
+    assert result.result is not None and result.result.ok, result.result.failures if result.result is not None else None
+    log_text = (layout.bundle_dir / "log.md").read_text(encoding="utf-8")
+    assert f"[{DONE}](work/_archive/feature-done.md)" in log_text, "reference repair survives"
+    assert f"archived {DONE}" in log_text, "archive-entry append survives"
+
+
+def test_dry_run_log_write_matches_the_write_actually_applied(tmp_path: Path) -> None:
+    """Preview and apply must plan `log.md` identically -- the secondary
+    defect from `work/bug-archive-duplicate-log-write`: `dry_run=True`
+    returned before the archive-entry append, so a preview that reported
+    `ok: true` could still refuse on apply."""
+    layout = _workspace_with_referring_log(tmp_path)
+    preview = archive.run_archive(layout, today=TODAY)
+    previewed = next(write for write in preview.plan.writes if write.member == "log.md")
+    result = archive.run_archive(layout, today=TODAY, dry_run=False)
+    assert result.result is not None and result.result.ok, result.result.failures if result.result is not None else None
+    assert (layout.bundle_dir / "log.md").read_bytes() == previewed.after
 
 
 def test_archive_wide_lens_moves_item_owned_reference_bytes(tmp_path: Path) -> None:
@@ -158,3 +200,61 @@ def test_archive_stranded_warnings_are_projected_by_core() -> None:
     assert len(warnings) == 2
     assert warnings[0].startswith("work items: ! 1 inbound [[wikilink]] reference(s)")
     assert warnings[1].startswith("wiki pages: ! 1 inbound [[wikilink]] reference(s)")
+
+
+def _split_layout(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    code = tmp_path / "code"
+    (code / "packages/a").mkdir(parents=True)
+    layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
+    return layout
+
+
+def test_split_topology_archive_validates_against_the_declared_code_repo(tmp_path: Path) -> None:
+    layout = _split_layout(tmp_path)
+    _write(layout, DONE, work_status="resolved", phase="done")
+    result = archive.run_archive(layout, today=TODAY, dry_run=False)
+    assert result.result is not None
+    assert result.result.ok, result.result.failures
+
+
+def _write_referring(layout, path: str, *, work_status: str, phase: str, type_: str, refers_to: str) -> None:
+    """Like `_write`, but for an item that stays active and links to *refers_to*.
+
+    Archiving the linked target rewrites this item's body (a referrer edit),
+    which keeps it in the mutation's postcondition `validate_paths` even
+    though it was never itself archived -- the only way `targets.affects-missing`
+    gets a chance to fire against a still-active item in the same archive run.
+    """
+    page = layout.bundle_dir / f"{path}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        f"---\ntype: {type_}\ntitle: {path}\ndescription: d\nstatus: stable\n"
+        f"work_status: {work_status}\nphase: {phase}\neffort: medium\nopened: 2026-08-01\n"
+        "updated: 2026-08-01\naffects:\n- packages/a\n---\n\n## Summary\nd\n\n## Plan\n\n"
+        f"| Action | Done when | Rationale |\n| --- | --- | --- |\n\nSee [it]({refers_to}).\n",
+        encoding="utf-8",
+    )
+
+
+def test_split_topology_archive_validates_referring_item_against_the_declared_code_repo(tmp_path: Path) -> None:
+    """A single archived item is exempt from `targets.affects-missing` (an
+    archived item is never `active()`), so the sibling test above cannot
+    distinguish a correct `repo_root` from a wrong one. A still-active item
+    that references the archived item gets a referrer-rewrite edit as part of
+    the same archive plan, which keeps it in postcondition `validate_paths`
+    -- this is the scenario that actually depends on `repo_root` resolving to
+    the declared code repo rather than `layout.repo_root`'s `.git` walk-up
+    (the vault, in a split topology)."""
+    layout = _split_layout(tmp_path)
+    _write(layout, DONE, work_status="resolved", phase="done")
+    _write_referring(layout, OPEN, work_status="open", phase="execute", type_="Bug", refers_to="feature-done.md")
+    result = archive.run_archive(layout, paths=(DONE,), today=TODAY, dry_run=False)
+    assert result.result is not None
+    assert result.result.ok, result.result.failures

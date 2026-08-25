@@ -705,6 +705,28 @@ def test_existing_canonical_resource_with_the_wrong_type_is_refused(tmp_path: Pa
         plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
 
+def test_wrong_typed_page_pre_squatting_a_resource_refuses_before_any_write(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("widgets",))])
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
+    wrong = bundle_root / "apps" / "mismatch.md"
+    wrong.parent.mkdir(parents=True, exist_ok=True)
+    wrong.write_text(
+        "---\ntype: App\ntitle: mismatch\nresource: pkg:acme/demo/widgets\n---\n",
+        encoding="utf-8",
+    )
+
+    with open_reader(graph_dir=graph_dir) as reader, pytest.raises(PlacementError) as raised:
+        plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert raised.value.resource == "pkg:acme/demo/widgets"
+    assert raised.value.expected == "repositories/demo/packages/widgets"
+    assert "apps/mismatch.md" in raised.value.reason
+    assert "delete" in raised.value.reason and "regenerate" in raised.value.reason
+    assert not (bundle_root / "repositories" / "demo" / "packages" / "widgets.md").exists()
+
+
 def test_entity_apply_revalidates_canonical_members_before_writes(tmp_path: Path) -> None:
     bundle_root = _installed_bundle(tmp_path)
     context = context_from_resource("Package", "pkg:acme/demo/lib")

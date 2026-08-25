@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
 import code_wiki_okf.init
@@ -213,6 +214,20 @@ def test_a_declared_repository_round_trips_through_load_config(tmp_path):
     assert [entry.name for entry in config.repos] == [repo.name]
     assert config.repos[0].path == repo.resolve()
     assert config.repos[0].ignore == (".works/**",)
+
+
+def test_declared_repository_path_climbs_from_workspace_root_not_bundle_dir(tmp_path):
+    """The written `repositories.<name>.path` is relative to `layout.root`
+    (where `workspace.yaml` lives) -- one `..` segment here, not two, since
+    `layout.bundle_dir` sits one level inside `layout.root`."""
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    result = _init(repo / ".works")
+
+    raw = result.layout.manifest_path.read_text(encoding="utf-8")
+    match = re.search(r'path:\s*"?([^"\n]+)"?', raw)
+    assert match is not None
+    assert match.group(1) == ".."
 
 
 def test_a_workspace_outside_a_repo_declares_no_repository(tmp_path):

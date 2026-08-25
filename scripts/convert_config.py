@@ -210,18 +210,18 @@ def _text(value: object) -> str:
     return str(value)
 
 
-def _bundle_relative(target: Path, bundle_dir: Path) -> str:
+def _workspace_relative(target: Path, root: Path) -> str:
     """*target* as `repositories.<name>.path` should carry it.
 
-    Relative to *bundle_dir*, not the workspace root: every reader resolves a
-    declared repo's relative path against the bundle root
-    (`code_wiki_okf.config._resolve` called with `bundle_root=layout.bundle_dir`
-    at every production call site). Same computation as
-    `graph_works_core.workspace.init._bundle_relative`, restated here rather
-    than imported because that name is private to a package this script only
-    reads through its public surface.
+    Relative to *root* -- the directory `workspace.yaml` itself lives in:
+    every reader resolves a declared repo's relative path against the
+    directory the manifest was read from
+    (`code_wiki_okf.config.load_config`, anchored on `config_path`'s parent).
+    Same computation as `graph_works_core.workspace.init._workspace_relative`,
+    restated here rather than imported because that name is private to a
+    package this script only reads through its public surface.
     """
-    return Path(os.path.relpath(target, start=bundle_dir)).as_posix()
+    return Path(os.path.relpath(target, start=root)).as_posix()
 
 
 def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversion:
@@ -407,7 +407,7 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
     else:
         repo_target = Path(_text(raw_repo)).expanduser()
         repo_name = options.repo_name or repo_target.name
-        repo_relative = _bundle_relative(repo_target, root / bundle_dir)
+        repo_relative = _workspace_relative(repo_target, root)
         add(
             Disposition(
                 "repo-directory",
@@ -415,7 +415,7 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
                 "re-express",
                 repo_relative,
                 "A repo root becomes one entry in a mapping of named scan targets -- deliberately "
-                "different things (layout.py:10-15). Rewritten relative to the bundle, not the root.",
+                "different things (layout.py:10-15). Rewritten relative to the workspace root.",
             )
         )
 
@@ -572,7 +572,7 @@ def validate_manifest(layout: WorkspaceLayout) -> None:
         if not repo.path.is_dir():
             raise ConversionRefused(
                 f"repositories.{repo.name}.path: {repo.path} is not a directory -- "
-                "the value is resolved against the bundle root, not the workspace root."
+                "the value is resolved against the workspace root."
             )
 
     # Reader 4 -- the carried `models` block is live, not dead. Mirrors

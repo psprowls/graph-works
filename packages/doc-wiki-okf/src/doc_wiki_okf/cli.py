@@ -403,10 +403,12 @@ def show(
     if lane is None:
         typer.echo(f"{found.target}: in no declared lane directory", err=True)
         raise typer.Exit(code=1)
+    raw_target = bundle.member_id(found.target)
+    resolved = raw_target if raw_target is not None else found.target
     render = ReviewRenderer(
         lane=lane,
-        target=found.target,
-        mode="update" if bundle.has_member(found.target) else "create",
+        target=resolved,
+        mode="update" if raw_target is not None else "create",
     )
     typer.echo(render(description=found.description, sources=found.sources), nl=False)
 

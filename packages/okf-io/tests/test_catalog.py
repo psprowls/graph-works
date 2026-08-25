@@ -25,6 +25,7 @@ ERROR_CODES = frozenset(
         "frontmatter.unparseable",
         "frontmatter.unreadable",
         "frontmatter.missing-type",
+        "identity.canonical-collision",
         "provenance.source-resource-missing",
         "trust.generated-by-missing",
         "lifecycle.status-unknown",
@@ -37,6 +38,21 @@ ERROR_CODES = frozenset(
         "reserved.log-heading-not-date",
     }
 )
+
+#: `identity.canonical-collision` requires two members whose raw disk ids are
+#: NFC-equal but byte-different -- exactly what a normalization-folding
+#: filesystem (APFS, this repo's dev machines) collapses into one directory
+#: entry on write, so it cannot exist as two real files in this fixture. It
+#: is exempted from "one walk triggers every code" and covered instead by
+#: `test_rules_identity.py`'s synthetic-`Bundle` test.
+NOT_REPRODUCIBLE_FROM_DISK = frozenset({"identity.canonical-collision"})
+
+
+def test_not_reproducible_from_disk_is_a_subset_of_the_catalog():
+    """A careless addition to this carve-out set should not silently widen
+    it past codes the catalog actually declares."""
+    assert NOT_REPRODUCIBLE_FROM_DISK <= _rules.CATALOG
+
 
 #: The corpus's genuinely malformed members: no frontmatter block, unterminated
 #: YAML, and a member that fails UTF-8 decoding entirely (so it never becomes a
@@ -71,18 +87,24 @@ def _fresh_golden_report() -> Report:
     return validate(bundle.load(NONCONFORMANT), today=GOLDEN_TODAY)
 
 
-def test_the_corpus_triggers_every_catalog_code(golden_report: Report) -> None:
-    """One walk, all 30. This is what catches a rule that stops firing."""
-    assert {f.code for f in golden_report.findings} == _rules.CATALOG
+def test_the_corpus_triggers_every_catalog_code_except_the_disk_unreproducible_one(
+    golden_report: Report,
+) -> None:
+    """One walk, every code except `NOT_REPRODUCIBLE_FROM_DISK` -- see its
+    docstring for why that one cannot be a real on-disk fixture here."""
+    assert {f.code for f in golden_report.findings} == _rules.CATALOG - NOT_REPRODUCIBLE_FROM_DISK
 
 
-def test_the_error_codes_are_exactly_the_fourteen(golden_report: Report) -> None:
+def test_the_golden_report_errors_match_the_reproducible_error_codes(golden_report: Report) -> None:
+    """`ERROR_CODES` is fifteen (the declared catalog count); the golden
+    corpus reproduces fourteen of them, since `identity.canonical-collision`
+    is in `NOT_REPRODUCIBLE_FROM_DISK` and never fires from a real walk."""
     assert {f.severity for f in golden_report.errors} == {"error"}
-    assert {f.code for f in golden_report.errors} == ERROR_CODES
+    assert {f.code for f in golden_report.errors} == ERROR_CODES - NOT_REPRODUCIBLE_FROM_DISK
 
 
 def test_the_severity_split_matches_the_catalog(golden_report: Report) -> None:
-    assert len(ERROR_CODES) == 14
+    assert len(ERROR_CODES) == 15
     assert len(_rules.CATALOG - ERROR_CODES) == 16
     assert {f.code for f in golden_report.warnings} == _rules.CATALOG - ERROR_CODES
 
@@ -121,10 +143,10 @@ def test_every_declared_code_carries_its_module_prefix():
             assert code.startswith(f"{topic}."), (topic, code)
 
 
-def test_the_catalog_is_thirty_codes_across_eight_topics():
-    assert len(_rules.CATALOG) == 30
-    assert len(_rules.TOPICS) == 8
-    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 30
+def test_the_catalog_is_thirty_one_codes_across_nine_topics():
+    assert len(_rules.CATALOG) == 31
+    assert len(_rules.TOPICS) == 9
+    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 31
 
 
 @pytest.mark.parametrize("claude_md", [_REPO_ROOT / "CLAUDE.md", _PACKAGE_ROOT / "CLAUDE.md"], ids=["root", "okf-io"])
@@ -155,8 +177,9 @@ def test_no_rule_emits_an_undeclared_code(golden_report: Report) -> None:
 
 
 def test_every_declared_code_is_actually_emitted(golden_report: Report) -> None:
-    """A code declared but never produced is a catalog entry nothing implements."""
-    assert {f.code for f in golden_report.findings} >= _rules.CATALOG
+    """A code declared but never produced by a real walk is a catalog entry
+    nothing on disk can implement, except the one carved out above."""
+    assert {f.code for f in golden_report.findings} >= _rules.CATALOG - NOT_REPRODUCIBLE_FROM_DISK
 
 
 @pytest.mark.parametrize("name", ["acme_retail", "ga4"])

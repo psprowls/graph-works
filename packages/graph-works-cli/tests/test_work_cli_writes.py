@@ -301,3 +301,42 @@ def test_archive_incomplete_apply_emits_no_partial_json(workspace: Path, monkeyp
     assert result.exit_code == exit_codes.GENERIC
     assert result.stdout == ""
     assert "stale lane index" in result.stderr
+
+
+def test_split_topology_files_and_lints_clean(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    root = vault / "works"
+    assert runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)]).exit_code == 0
+    code = tmp_path / "code"
+    (code / "packages/foo").mkdir(parents=True)
+    layout = resolve_workspace(str(root))
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+
+    file_result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Split-topology filing",
+            "--kind",
+            "Feature",
+            "--summary",
+            "One line",
+            "--affects",
+            "packages/foo",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert file_result.exit_code == 0, file_result.output
+
+    lint_result = runner.invoke(app, ["work", "lint", "--workspace", str(root), "--json"])
+    payload = json.loads(lint_result.stdout)
+    assert payload["ok"] is True, payload["findings"]
+    assert not any(finding["code"] == "targets.affects-missing" for finding in payload["findings"])

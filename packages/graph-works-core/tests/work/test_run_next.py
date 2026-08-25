@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 
@@ -163,6 +164,31 @@ def test_open_owner_decision_blocks_exact_affected_path(tmp_path: Path) -> None:
     result = work.run_next(layout, CHILD)
     assert result.state.has_open_decision is True
     assert result.route.dispatch is None
+
+
+def _split_layout(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    code = tmp_path / "code"
+    (code / "packages/a").mkdir(parents=True)
+    layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
+    return layout
+
+
+def test_split_topology_normalization_validates_against_the_declared_code_repo(tmp_path: Path) -> None:
+    layout = _split_layout(tmp_path)
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD)
+    _spec(layout, CHILD)
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    result = work.run_next(layout, CHILD, dry_run=False)
+    assert result.warnings == ()
+    assert result.application.normalized == (CHILD,)
 
 
 def test_dependency_parser_requires_complete_path_mapping() -> None:

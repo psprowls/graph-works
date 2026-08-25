@@ -58,7 +58,7 @@ MANIFEST_VERSION = 1
 #: The provider backends a role may name. Declared here because both the
 #: catalog entry below and `roles.role_spec`'s refusal read it, and a second
 #: literal is how the two would drift apart.
-BACKENDS: tuple[str, ...] = ("bedrock", "vercel")
+BACKENDS: tuple[str, ...] = ("bedrock", "vercel", "claude_code")
 
 #: The discovery override. `discovery.resolve` reads the variable directly; the
 #: catalog carries it as an `env-only` entry anyway, because the catalog is

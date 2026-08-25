@@ -142,8 +142,11 @@ def load_config(
 
     *declarations_dir* defaults to *bundle_root* itself when absent.
 
-    *bundle_root* resolves every relative path the document declares (each
-    repo's `path`) -- only the document's own address is independent of it.
+    Each declared repo's relative `path` resolves against the directory the
+    document itself was read from (`config_path`'s parent, or *bundle_root*
+    when `config_path` is absent) -- not *bundle_root* directly. The two
+    coincide whenever `config_path` is omitted or points at
+    `<bundle_root>/workspace.yaml`.
 
     Every top-level key other than `repositories`, `ignore`, `state_gate` is
     ignored -- the manifest catalog (`graph_works_core.workspace.manifest`)
@@ -182,7 +185,7 @@ def load_config(
         allowed_repo_keys = {"path", "ignore"}
         _reject_unknown_keys(entry, allowed=allowed_repo_keys, name=name, where=f"`repositories.{repo_name}`")
         repo_path_raw = _require_nonempty_string(entry.get("path"), name=name, where=f"`repositories.{repo_name}.path`")
-        repo_path = _resolve(bundle_root, repo_path_raw)
+        repo_path = _resolve(path.parent, repo_path_raw)
         per_repo_ignore = _string_list(entry.get("ignore"), name=name, where=f"`repositories.{repo_name}.ignore`")
         repos.append(RepoConfig(name=repo_name, path=repo_path, ignore=global_ignore + per_repo_ignore))
 

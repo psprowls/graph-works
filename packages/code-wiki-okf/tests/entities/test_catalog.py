@@ -138,10 +138,6 @@ def test_reconcile_catalogs_creates_every_invariant_catalog_from_actual_disk(tmp
     assert result.ok
     required = {
         "repositories/index.md",
-        "packages/index.md",
-        "apps/index.md",
-        "agent-plugins/index.md",
-        "test-suites/index.md",
         "dependencies/index.md",
         "dependencies/npm/index.md",
         "dependencies/pypi/index.md",
@@ -161,13 +157,17 @@ def test_reconcile_catalogs_creates_every_invariant_catalog_from_actual_disk(tmp
     }
     assert required <= {path.relative_to(root).as_posix() for path in root.rglob("index.md")}
     assert not (root / "files/index.md").exists()
+    assert not (root / "packages/index.md").exists()
+    assert not (root / "apps/index.md").exists()
+    assert not (root / "agent-plugins/index.md").exists()
+    assert not (root / "test-suites/index.md").exists()
 
     root_text = root_index.read_text(encoding="utf-8")
     assert "A human introduction." in root_text
     for heading in ("Repositories", "Packages", "Apps", "Agent Plugins", "Test Suites", "Dependencies"):
         assert f"## {heading}" in root_text
     assert "/repositories/one/packages/widgets.md" in root_text
-    assert "/repositories/two/packages/retained.md" in (root / "packages/index.md").read_text(encoding="utf-8")
+    assert "/repositories/two/packages/retained.md" in root_text
     assert "/dependencies/npm/index.md" in (root / "dependencies/index.md").read_text(encoding="utf-8")
     assert "/dependencies/npm/react.md" in (root / "dependencies/npm/index.md").read_text(encoding="utf-8")
     assert "/repositories/one/files/src/index.md" in (root / "repositories/one/files/index.md").read_text(
@@ -249,7 +249,7 @@ def test_catalogs_follow_guarded_post_prune_disk_and_are_idempotent(tmp_path: Pa
     after_first = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     second = reconcile_catalogs(load_bundle(root), today=date(2026, 1, 1))
 
-    packages = (root / "packages/index.md").read_text(encoding="utf-8")
+    packages = (root / "index.md").read_text(encoding="utf-8")
     assert "/repositories/one/packages/retained.md" in packages
     assert "/repositories/one/packages/removed.md" not in packages
     assert first.ok and second.ok

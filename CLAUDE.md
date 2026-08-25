@@ -80,7 +80,7 @@ validate(bundle, today=…)  ->  Report
 
 `validate()` takes a **required `today=`** keyword — okf-io never reads the
 clock — plus optional `strict=False` and `extra_rules=()`. Nothing rejects a
-bundle: the catalog's 20 rule functions (30 codes, 8 topics) yield `Finding`s
+bundle: the catalog's 21 rule functions (31 codes, 9 topics) yield `Finding`s
 and `validate()` returns a `Report` (`.errors`, `.warnings`, `.ok`,
 `.by_code()`).
 

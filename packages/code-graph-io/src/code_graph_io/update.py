@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as _dt
+import hashlib
 import os
 import sqlite3
 import subprocess
@@ -116,6 +117,16 @@ def _get_metadata(conn: sqlite3.Connection, key: str) -> str | None:
     return row[0] if row else None
 
 
+def _fingerprint_ignore_patterns(patterns: tuple[str, ...]) -> str:
+    """Stable digest of a member's raw `ignore:` pattern tuple, order-preserved.
+
+    Computed from the raw patterns, not the compiled `IgnoreSpec` — compiling
+    discards the original pattern strings, and pattern order can affect match
+    semantics in principle, so it isn't sorted away.
+    """
+    return hashlib.sha256(repr(patterns).encode("utf-8")).hexdigest()
+
+
 def _changed_files(repo_root: Path, full: bool, prev: str | None) -> list[tuple[str, str]]:
     if full or prev is None:
         return _all_tracked(repo_root)
@@ -213,6 +224,7 @@ def _update_one_repo(
     full: bool,
     manifests: tuple[packages.ManifestPackage, ...],
     ignore: _ignore.IgnoreSpec,
+    ignore_patterns: tuple[str, ...],
 ) -> None:
     """Run the single-repo pipeline for one member, then stamp its nodes.
 
@@ -223,6 +235,14 @@ def _update_one_repo(
     that is still unstamped (`repo IS NULL`, excluding the global builtin /
     dependency nodes) is stamped with this member's `repo:` URI, and the
     per-repo `last_indexed_commit:<uri>` metadata key is written.
+
+    Before computing `changed`, compares `ignore_patterns` against this
+    member's stored `ignore_fingerprint:<uri>` metadata. A moved fingerprint
+    escalates this member's `full` to `True` — mirroring the workspace-global
+    `deriver_version` escalation in `run_workspace` — because an `ignore:`
+    edit has zero footprint in `_changed_files`'s git diff and would
+    otherwise leave already-graphed nodes under the newly-ignored path
+    stranded. A first-ever build (no stored fingerprint) is not a change.
     """
     head = _head(repo_root)
     from code_graph_io.repo_context import (
@@ -232,6 +252,17 @@ def _update_one_repo(
     ctx = repo_context(repo_root)
     repo_uri_val = repo_uri(ctx)
     skip_dirs = _ignore.DEFAULT_SKIP_DIRS
+
+    ignore_fingerprint_key = f"ignore_fingerprint:{repo_uri_val}"
+    ignore_fingerprint = _fingerprint_ignore_patterns(ignore_patterns)
+    stored_ignore_fingerprint = _get_metadata(conn, ignore_fingerprint_key)
+    if stored_ignore_fingerprint is not None and stored_ignore_fingerprint != ignore_fingerprint:
+        print(
+            f"ignore: patterns changed for {repo_uri_val} — forcing full rebuild.",
+            file=sys.stderr,
+        )
+        full = True
+
     commit_key = f"last_indexed_commit:{repo_uri_val}"
     prev = _get_metadata(conn, commit_key)
     changed = _changed_files(repo_root, full=full, prev=prev)
@@ -325,6 +356,7 @@ def _update_one_repo(
             (repo_uri_val,),
         )
         _set_metadata(conn, commit_key, head)
+        _set_metadata(conn, ignore_fingerprint_key, ignore_fingerprint)
     finally:
         upsert.set_current_repo(conn, None)
 
@@ -411,7 +443,7 @@ def run_workspace(
                 for ctx in [repo_context(member)]
             }
             with store.transaction(conn):
-                for repo_root, spec in zip(members, specs, strict=True):
+                for repo_root, spec, patterns in zip(members, specs, member_ignore, strict=True):
                     member_uri = repo_uri(repo_context(repo_root))
                     _update_one_repo(
                         conn,
@@ -420,6 +452,7 @@ def run_workspace(
                         full=full,
                         manifests=manifests_by_repo[member_uri],
                         ignore=spec,
+                        ignore_patterns=patterns,
                     )
                 all_manifests = tuple(manifest for manifests in manifests_by_repo.values() for manifest in manifests)
                 virtual_repository_dependencies = {

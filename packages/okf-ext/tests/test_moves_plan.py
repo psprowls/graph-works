@@ -280,6 +280,29 @@ def test_plan_move_accepts_an_nfc_source_against_an_nfd_named_member(tmp_path):
     assert "%C3%A9" in edit.new
 
 
+def test_a_rebased_reference_to_a_non_ascii_sibling_targets_the_raw_disk_id(tmp_path):
+    """`_body_edits`' rebase branch (`plan.py`'s `elif rebase:`) resolves a
+    rebased destination through `bundle.member_id` before rewriting it --
+    "believed correct" per the ticket, pinned here. `mover.md` moves (so its
+    own outbound reference is rebased); `café.md` does not move and is
+    referenced in NFC while its disk id is NFD."""
+    nfd = unicodedata.normalize("NFD", "café")
+    bundle = ext_helpers.write_bundle(
+        tmp_path,
+        {
+            f"concepts/{nfd}.md": "---\ntype: Concept\ntitle: Café\n---\n\n# Café\n",
+            "concepts/mover.md": "---\ntype: Concept\ntitle: Mover\n---\n\nSee [café](./café.md).\n",
+        },
+    )
+
+    plan = plan_move(bundle, "concepts/mover.md", "nested/deep/mover.md")
+
+    assert plan.ok, plan.refusals
+    edit = edit_for(plan, "concepts/mover.md", "./café.md")
+    assert edit.target == f"concepts/{nfd}.md"
+    assert unquote(edit.new) == f"../../concepts/{nfd}.md"
+
+
 def test_an_angle_bracket_destination_repairs_unencoded(linked):
     plan = plan_move(linked, "concepts/spaced name.md", "pages/spaced name.md")
     assert plan.ok

@@ -113,7 +113,7 @@ def test_an_absent_region_is_left_to_the_provider_default(monkeypatch, tmp_path)
     # write, so the keyword is omitted rather than defaulted.
     recorder = _Recorder()
     monkeypatch.setattr(roles, "make_bedrock_llm", recorder)
-    layout = _workspace(tmp_path, "version: 1\nroles:\n  auditor:\n    model_id: zai.glm-5\n")
+    layout = _workspace(tmp_path, "version: 1\nroles:\n  auditor:\n    model_id: zai.glm-5\n    backend: bedrock\n")
     roles.make_llm("auditor", layout=layout)
     assert recorder.calls == [("zai.glm-5", {"max_tokens": None})]
 
@@ -216,7 +216,7 @@ def test_an_unknown_backend_override_is_refused_by_name():
     message = str(excinfo.value)
     assert "code_reader" in message
     assert "bedrok" in message
-    assert "['bedrock', 'vercel']" in message
+    assert "['bedrock', 'claude_code', 'vercel']" in message
 
 
 def test_a_hand_edited_unknown_backend_is_refused_the_same_way(tmp_path):
@@ -226,3 +226,17 @@ def test_a_hand_edited_unknown_backend_is_refused_the_same_way(tmp_path):
     with pytest.raises(WorkspaceError) as excinfo:
         roles.role_spec("code_reader", layout=layout)
     assert "bedrok" in str(excinfo.value)
+
+
+def test_construct_raises_for_claude_code_with_no_brief_short_circuit(tmp_path):
+    # Any role other than ingestor explicitly set to claude_code has no
+    # caller-side handoff wired for it -- constructing a model for it must
+    # fail loudly, not silently fall into the Bedrock branch by elimination.
+    layout = _workspace(tmp_path, "version: 1\nroles:\n  librarian:\n    backend: claude_code\n")
+    with pytest.raises(WorkspaceError) as excinfo:
+        roles.make_llm("librarian", layout=layout)
+    assert "has no model to construct" in str(excinfo.value)
+
+
+def test_ingestor_defaults_to_the_claude_code_backend_with_no_override():
+    assert roles.role_spec("ingestor").backend == "claude_code"

@@ -589,6 +589,7 @@ def _reserved_aliases(
         ignored=frozenset(ignored),
         unreadable=bundle.unreadable,
         _canonical=bundle._canonical,
+        canonical_collisions=bundle.canonical_collisions,
         aliases=MappingProxyType(member_aliases),
     )
     return virtual, member_aliases, source_aliases, destination_aliases

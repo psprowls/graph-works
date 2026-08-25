@@ -144,6 +144,7 @@ def test_the_registry_is_loaded_lazily():
     assert topics == {
         "computation",
         "frontmatter",
+        "identity",
         "legacy",
         "lifecycle",
         "links",

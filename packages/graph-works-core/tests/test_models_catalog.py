@@ -103,8 +103,19 @@ def test_no_role_carries_sweep_candidates():
 
 
 def test_every_role_is_fully_specified():
+    required = {"model_id", "region", "max_tokens", "max_concurrency"}
     for name, entry in _catalog()["roles"].items():
-        assert set(entry) == {"model_id", "region", "max_tokens", "max_concurrency"}, name
+        assert required <= set(entry), name
+        assert set(entry) - required <= {"backend"}, name
+
+
+def test_every_role_except_ingestor_pins_the_bedrock_backend():
+    bare = {"ingestor", "query_orchestrator", "drift_propagator"}
+    for name, entry in _catalog()["roles"].items():
+        if name in bare:
+            assert "backend" not in entry, name
+        else:
+            assert entry["backend"] == "bedrock", name
 
 
 def test_the_catalog_and_the_bindings_agree():

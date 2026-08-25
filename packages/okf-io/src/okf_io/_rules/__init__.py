@@ -18,6 +18,7 @@ from types import MappingProxyType
 from okf_io._rules import (
     computation,
     frontmatter,
+    identity,
     legacy,
     lifecycle,
     links,
@@ -31,6 +32,7 @@ RULES_BY_TOPIC: Mapping[str, tuple[Rule, ...]] = MappingProxyType(
     {
         "computation": computation.RULES,
         "frontmatter": frontmatter.RULES,
+        "identity": identity.RULES,
         "legacy": legacy.RULES,
         "lifecycle": lifecycle.RULES,
         "links": links.RULES,
@@ -44,6 +46,7 @@ CODES_BY_TOPIC: Mapping[str, tuple[str, ...]] = MappingProxyType(
     {
         "computation": computation.CODES,
         "frontmatter": frontmatter.CODES,
+        "identity": identity.CODES,
         "legacy": legacy.CODES,
         "lifecycle": lifecycle.CODES,
         "links": links.CODES,

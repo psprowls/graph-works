@@ -441,8 +441,73 @@ def test_member_id_returns_none_for_a_non_member(tmp_path):
     assert loaded.member_id(f"concepts/{_NFC}-nope.md") is None
 
 
+def test_a_raw_concepts_lookup_on_the_query_path_misses_what_has_member_found(tmp_path):
+    """The regression this whole work item exists to prevent: `has_member`
+    can say yes for a non-ASCII path whose written form differs from the
+    disk id, while a literal `concepts` lookup keyed on that same query
+    string says no. A caller must route through `member_id` to get the id
+    `concepts` actually uses -- this is the funnel's whole point, pinned
+    through the public `Bundle` surface rather than any one consumer."""
+    write(tmp_path, f"concepts/{_NFD}.md", CONCEPT)
+    loaded = bundle.load(tmp_path)
+    query = f"concepts/{_NFC}.md"
+
+    assert loaded.has_member(query)
+    assert loaded.concepts.get(query[:-3]) is None  # the query-keyed miss
+
+    raw_id = loaded.member_id(query)
+    assert raw_id is not None
+    assert loaded.concepts.get(raw_id[:-3]) is not None  # the funnel finds it
+
+
 def test_an_all_ascii_bundle_never_consults_the_canonical_map(acme):
     """`isascii()` is the whole fast-path story: an ASCII bundle carries no
     non-ASCII members, so `_canonical` is empty and behaviour is unchanged."""
     assert acme.has_member("metrics/revenue.md")
     assert not acme.has_member("metrics/does-not-exist.md")
+
+
+def test_track_canonical_records_every_losing_raw_id_in_walk_order():
+    canonical: dict[str, str] = {}
+    collisions: dict[str, list[str]] = {}
+    bundle._track_canonical(canonical, collisions, f"concepts/{_NFD}.md")
+    bundle._track_canonical(canonical, collisions, "concepts/plain.md")  # ASCII: no-op
+    bundle._track_canonical(canonical, collisions, f"concepts/{_NFC}.md")
+
+    cid = f"concepts/{_NFC}.md"
+    assert canonical[cid] == f"concepts/{_NFC}.md"  # last write wins, unchanged
+    assert collisions == {cid: [f"concepts/{_NFD}.md", f"concepts/{_NFC}.md"]}
+
+
+def test_track_canonical_is_a_no_op_with_no_collision():
+    canonical: dict[str, str] = {}
+    collisions: dict[str, list[str]] = {}
+    bundle._track_canonical(canonical, collisions, f"concepts/{_NFD}.md")
+    assert collisions == {}
+
+
+def test_load_wires_a_real_collision_into_the_public_canonical_collisions_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`_load`'s final `canonical_collisions=MappingProxyType(...)`
+    construction is otherwise only ever exercised against an empty
+    `collisions` dict: two real *simultaneous* sibling files that are
+    NFC-equal but byte-different can't be committed and checked out here --
+    APFS folds them into one directory entry. Monkeypatching `_files` -- the
+    walk `_load` consumes when `root_fd is None`, exactly the path
+    `bundle.load()` takes -- stands two differently-spelled `Path`s in for a
+    real collision without needing two files: APFS resolves either spelling
+    to the one file written on disk, so both opens succeed and `_load` runs
+    its real collision-tracking code end to end, asserted on the public
+    `Bundle` `load()` returns."""
+    write(tmp_path, f"concepts/{_NFC}.md", CONCEPT)
+
+    def fake_files(root: Path, *, unreadable: dict[str, str]):
+        yield root / "concepts" / f"{_NFD}.md"
+        yield root / "concepts" / f"{_NFC}.md"
+
+    monkeypatch.setattr(bundle, "_files", fake_files)
+    loaded = bundle.load(tmp_path)
+
+    cid = f"concepts/{_NFC}.md"
+    assert loaded.canonical_collisions == {cid: (f"concepts/{_NFD}.md", f"concepts/{_NFC}.md")}

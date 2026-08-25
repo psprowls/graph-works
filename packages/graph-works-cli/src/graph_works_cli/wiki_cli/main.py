@@ -5,6 +5,7 @@ from __future__ import annotations
 import typer
 
 from graph_works_cli.wiki_cli.bootstrap import bootstrap
+from graph_works_cli.wiki_cli.drift import drift
 from graph_works_cli.wiki_cli.ingest import ingest
 from graph_works_cli.wiki_cli.lint import lint
 from graph_works_cli.wiki_cli.maintenance import archive, index, stats
@@ -14,6 +15,7 @@ from graph_works_cli.wiki_cli.scan import scan
 
 wiki_app = typer.Typer(name="wiki", help="Wiki scan/ingest/query/lint.", no_args_is_help=True)
 wiki_app.command(name="lint")(lint)
+wiki_app.command(name="drift")(drift)
 wiki_app.command(name="stats")(stats)
 wiki_app.command(name="index")(index)
 wiki_app.command(name="archive")(archive)

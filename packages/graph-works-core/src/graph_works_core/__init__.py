@@ -48,7 +48,7 @@ names at this package's front door. The graph surface follows the same rule
 and for the same reason — `GraphTarget`, `GraphResult` and `graph_target` are
 hoisted, `build`, `describe`, `find` and `export` stay `graph.commands.build`,
 and `find` would collide with `graph_tools.find` besides. The ingest vertical
-hoists `IngestResult`, `run_ingest_source`, `entity_matcher` and
+hoists `IngestResult`, `plan_ingest_brief`, `run_ingest_source`, `entity_matcher` and
 `state_gate_adapter` — its whole defaulted API — for the same reason `resolve`
 and `apply_init` are hoisted: they are the call, not an implementation detail.
 
@@ -131,7 +131,7 @@ from graph_works_core.agent_substrate.agent_tools import (
 from graph_works_core.agent_substrate.roles import make_llm, role_binding, role_spec
 from graph_works_core.archive.commands import ArchiveRun, run_archive
 from graph_works_core.graph.commands import GraphResult, GraphTarget, graph_target
-from graph_works_core.ingest.commands import IngestResult, run_ingest_source, state_gate_adapter
+from graph_works_core.ingest.commands import IngestResult, plan_ingest_brief, run_ingest_source, state_gate_adapter
 from graph_works_core.ingest.entity_match import entity_matcher
 from graph_works_core.lint_drift.drift_anchor import read_anchors, write_anchors
 from graph_works_core.lint_drift.lanes import Lane, LaneSet, compose_lanes
@@ -277,6 +277,7 @@ __all__ = [
     "make_llm",
     "orchestrate_plan",
     "pipeline_table",
+    "plan_ingest_brief",
     "plan_init",
     "propagation_candidates",
     "read_anchors",

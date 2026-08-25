@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "commands": [
     {
       "name": "gw archive",
@@ -790,6 +790,17 @@
           "required": false,
           "default": "",
           "is_flag": false
+        },
+        {
+          "name": "backend",
+          "opts": [
+            "--backend"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
         }
       ],
       "commands": [],
@@ -882,6 +893,28 @@
           "required": false,
           "default": 5,
           "is_flag": false
+        },
+        {
+          "name": "backend",
+          "opts": [
+            "--backend"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
         },
         {
           "name": "workspace",
@@ -1014,8 +1047,8 @@
     },
     {
       "name": "gw util describe-surface",
-      "help": "Describe every command in the gw tree — the machine-readable surface freeze.",
-      "short_help": "Describe every command in the gw tree — the machine-readable surface freeze.",
+      "help": "Describe every command in the gw tree \u2014 the machine-readable surface freeze.",
+      "short_help": "Describe every command in the gw tree \u2014 the machine-readable surface freeze.",
       "usage": [
         "[OPTIONS]"
       ],
@@ -1219,6 +1252,7 @@
       "options": [],
       "commands": [
         "archive",
+        "drift",
         "index",
         "lint",
         "proposal",
@@ -1272,6 +1306,79 @@
       "path": [
         "wiki",
         "archive"
+      ]
+    },
+    {
+      "name": "gw wiki drift",
+      "help": "Propose curated-page updates for entities whose code moved.\n\nReads the code graph as of the last `gw scan` -- it does not rebuild the\ngraph itself. Run `gw scan` first if the graph needs refreshing.",
+      "short_help": "Propose curated-page updates for entities whose code moved.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "backend",
+          "opts": [
+            "--backend"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "only",
+          "opts": [
+            "--only"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [
+            "--no-dry-run"
+          ],
+          "help": "",
+          "required": false,
+          "default": true,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "drift"
       ]
     },
     {

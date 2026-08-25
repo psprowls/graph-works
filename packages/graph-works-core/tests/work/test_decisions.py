@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import hashlib
+import json
 import os
 from datetime import date
 from pathlib import Path
@@ -537,3 +538,64 @@ def test_overturn_revalidates_owner_selection_after_acquiring_the_lock(tmp_path:
         )
     assert ledger.read_bytes() == before
     assert not (layout.bundle_dir / "work/tech-debt-must-not-file.md").exists()
+
+
+def _split_layout(tmp_path: Path):
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    code = tmp_path / "code"
+    (code / "packages/a").mkdir(parents=True)
+    layout = apply_init(plan_init(vault / ".works", today=TODAY, topic="Split")).layout
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
+    return layout
+
+
+def _split_workspace(tmp_path: Path):
+    layout = _split_layout(tmp_path)
+    _write(layout, "work/release-v1", "Release")
+    _write(layout, "work/release-v1/children/epic-a", "Epic")
+    _write(layout, OWNER, "Feature")
+    _write(layout, LEAF, "Bug")
+    return layout
+
+
+def test_split_topology_decision_add_validates_owner_against_the_declared_code_repo(tmp_path: Path) -> None:
+    layout = _split_workspace(tmp_path)
+    result = work.run_decision_add(
+        layout, LEAF, question="Ship it?", affects=(LEAF,), on=TODAY, decided_by="pat", dry_run=False
+    )
+    assert result.application is not None
+    assert result.application.ok, result.application.failures
+
+
+def test_split_topology_overturn_validates_follow_up_against_the_declared_code_repo(tmp_path: Path) -> None:
+    layout = _split_workspace(tmp_path)
+    work.run_decision_add(
+        layout,
+        LEAF,
+        question="Original?",
+        status="answered",
+        answer="yes",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    result = work.run_decision_overturn(
+        layout,
+        _config(layout),
+        LEAF,
+        "D-001",
+        answer="no",
+        rationale="new evidence",
+        follow_up_title="Repair original choice",
+        follow_up_affects=("packages/a",),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert result.application.mutation is not None
+    assert result.application.mutation.ok, result.warnings

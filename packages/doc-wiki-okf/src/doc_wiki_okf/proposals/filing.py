@@ -42,16 +42,25 @@ def plan_file(
 
     Raises `KeyError` for a lane the set does not declare -- caller
     configuration, and the one validation `file_proposal.py` did that survives.
+
+    The target is resolved through `bundle.member_id`, so it now also tracks
+    the raw disk id rather than the slugified title alone. Real slugs are
+    always ASCII, so this is unreachable today, but it is a new coupling: if
+    the same page were re-saved under a different Unicode normalization
+    between two filings for the same source, a second filing could compute a
+    different target and fork instead of merging.
     """
     target = lane_set.target_for(lane, title)
+    raw_target = bundle.member_id(target)
+    resolved = raw_target if raw_target is not None else target
     render = ReviewRenderer(
         lane=lane_set[lane],
-        target=target,
-        mode="update" if bundle.has_member(target) else "create",
+        target=resolved,
+        mode="update" if raw_target is not None else "create",
     )
     return plan_propose(
         bundle,
-        target,
+        resolved,
         [dict(source)],
         title=title,
         description=description,

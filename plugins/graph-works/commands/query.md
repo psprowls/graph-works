@@ -21,12 +21,15 @@ Ask the wiki a question. The librarian reads `index.md` first, picks relevant pa
 
 ## What happens
 
-1. **Index-first read** — `<workspace>/wiki/index.md`
-2. **Drill-in** — 3-10 pages across categories (concepts + entities + sources + adrs + work)
-3. **Follow links** — opportunistic
-4. **Fallback** — `gw query` (BM25); if still nothing, reads code directly
-5. **Synthesize** — direct answer + supporting detail + inline citations (`[[wikilinks]]` + `` `code-paths:line` ``) + "Related pages"
-6. **Offer to file back** — as a concept page (choosing the kind: `architecture`, `pattern`, or default `concept`), comparison, or adr
+1. **Retrieve** — `gw query --query "<question>" --json` (the default `claude_code` backend) returns a `top_pages` list (path + excerpt + search_scores per page); Claude Code reads those pages directly rather than an internal LLM composing the answer
+2. **Index-first read** — `<workspace>/okf/index.md`, alongside the `top_pages` candidates
+3. **Drill-in** — 3-10 pages across categories (concepts + entities + sources + adrs + work)
+4. **Follow links** — opportunistic
+5. **Last resort** — read code directly if neither `top_pages` nor the index covers it
+6. **Synthesize** — direct answer + supporting detail + inline citations (`[[wikilinks]]` + `` `code-paths:line` ``) + "Related pages"
+7. **Offer to file back** — as a concept page (choosing the kind: `architecture`, `pattern`, or default `concept`), comparison, or adr
+
+`--backend bedrock` / `--backend vercel` still run the full internal pipeline (an internal LLM call composes the answer) for workspaces that opt into it.
 
 ## Output formats
 

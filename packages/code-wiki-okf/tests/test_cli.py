@@ -364,7 +364,7 @@ def test_sync_command_dry_run_writes_nothing(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert not (bundle_root / "repositories").exists()
     assert "entities: would create repositories/repo/repository" in result.stdout
-    assert "catalog: would create packages/index.md" in result.stdout
+    assert "catalog: would create repositories/repo/packages/index.md" in result.stdout
     assert "repo: would create a.py" in result.stdout
 
 

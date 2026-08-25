@@ -71,7 +71,11 @@ _MIRROR_KEYS = {
 
 def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None:
     sync = SyncSummary(
-        written=("packages/demo.md",), deleted=("apps/old.md",), catalog_declined=(("index.md", "locked"),)
+        created=("packages/created.md",),
+        updated=("packages/updated.md",),
+        written=("packages/demo.md",),
+        deleted=("apps/old.md",),
+        catalog_declined=(("index.md", "locked"),),
     )
     structural = StructuralSummary(entities=sync, mirror=MirrorSummary())
     result = ScanResult(
@@ -97,6 +101,8 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "ok",
             "short_head",
             "entities_written",
+            "entities_created",
+            "entities_updated",
             "entities_deleted",
             "narrated",
             "sections_filled",
@@ -113,6 +119,8 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "results_dir",
             "short_head",
             "entities_written",
+            "entities_created",
+            "entities_updated",
             "entities_deleted",
             "entity_errors",
         }
@@ -120,6 +128,11 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
     )
     assert set(applied) == {"narrated", "sections_filled", "stamped", "entity_errors"}
     assert "dry_run" not in applied
+
+    assert normal["entities_created"] == ["packages/created.md"]
+    assert normal["entities_updated"] == ["packages/updated.md"]
+    assert emitted["entities_created"] == ["packages/created.md"]
+    assert emitted["entities_updated"] == ["packages/updated.md"]
 
 
 def test_scan_normal_payload_reports_both_lanes() -> None:

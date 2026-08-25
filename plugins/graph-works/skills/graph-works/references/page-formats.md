@@ -1,15 +1,26 @@
 # Page Formats
 
-> **Substrate ownership.** This document describes behavior that the graph-works rebuild is
-> re-implementing. Identifiers and paths here are retargeted for the `graph-works` namespace, but
-> the behavioral truth is owned by [`epic-wiki-io-format-layer`](/work/_archive/epic-wiki-io-format-layer.md) and is re-authored there, not here.
-> Treat a disagreement between this page and that item as this page being stale.
+> **Substrate ownership.** `epic-wiki-io-format-layer` (the item this disclaimer used to
+> point at) is `resolved`/`phase: done` — pointing readers there now sends them to closed
+> history, not live truth. If this page and the shipped workspace tree
+> (`<repo>/.works/okf/...`) disagree, treat this page as stale and file (or find) the
+> TechDebt item that tracks the drift; see
+> [[../../../../work/tech-debt-plugin-docs-layout-claims]] for the layout-claim sweep that
+> last corrected this page.
 
 Every wiki page has the same skeleton: YAML frontmatter + a section structure that matches its category. Below are the canonical formats. Templates live in `assets/page-templates/`. The full enum and per-category frontmatter spec lives in `wiki-schema.md`.
 
 ## File map convention (entity pages)
 
-Each admitted entity is a single page under `entities/<prefix>_<name>[__<6hex>].md`. Package, app, and agent-plugin entity pages carry a `## File map - <name>` section composed of one H3 subsection per major folder, each containing a markdown table. Rules:
+Each admitted entity is a single page nested under `repositories/<repo>/`: packages at
+`repositories/<repo>/packages/<name>.md`, apps at `repositories/<repo>/apps/<name>.md`,
+agent plugins at `repositories/<repo>/agent-plugins/<name>.md`, test suites at
+`repositories/<repo>/test-suites/<name>.md`, and the repository's own page at
+`repositories/<repo>/repository.md`. Dependencies are a sibling root, not nested under
+`repositories/`: `dependencies/<ecosystem>/<name>.md`. There is no filename prefix
+scheme and no `entities/` folder. Package, app, and agent-plugin entity pages carry a
+`## File map - <name>` section composed of one H3 subsection per major folder, each
+containing a markdown table. Rules:
 
 - The H2 heading carries the package or app name: `## File map - <name>`, followed by a one-line overview paragraph.
 - Files at the workspace root live in a synthetic `### <name>/` H3 section directly under the H2 — uniform shape, no special-cased root.
@@ -24,7 +35,7 @@ Each admitted entity is a single page under `entities/<prefix>_<name>[__<6hex>].
 
 ## Test-suite entity pages
 
-A package or app's test surface is its own admitted entity: a `test_suite` page under `entities/` (rendered from the `entity-test-suite.md` template, `kind: test_suite`). There is no companion `testing.md` sub-page — the test suite is a sibling entity page, linked back to the package it tests via the `tested_packages` edge. The scanner emits one `test_suite` entity per discovered suite and populates its File-map table from the graph's test-file node paths.
+A package or app's test surface is its own admitted entity: a `test_suite` page under `repositories/<repo>/test-suites/<name>.md` (rendered from the `entity-test-suite.md` template, `kind: test_suite`). There is no companion `testing.md` sub-page — the test suite is a sibling entity page, linked back to the package it tests via the `tested_packages` edge. The scanner emits one `test_suite` entity per discovered suite and populates its File-map table from the graph's test-file node paths.
 
 ### Frontmatter (scanner-owned)
 - `title`, `uri`, `kind: test_suite`, `graph_name`, `last_scan_at`
@@ -85,7 +96,7 @@ Integration tests + fixtures.
 
 ## 1. Entity page (package)
 
-All entity pages live under `entities/` named `<prefix>_<name>[__<6hex>].md`. The frontmatter is scanner-owned (replaced every scan); human-preserved keys (`status`, `last_reviewed`, `owner`, `notes`) are never overwritten. `summary` is fill-when-empty.
+Package entity pages live at `repositories/<repo>/packages/<name>.md`. The frontmatter is scanner-owned (replaced every scan); human-preserved keys (`status`, `last_reviewed`, `owner`, `notes`) are never overwritten. `summary` is fill-when-empty.
 
 ```markdown
 ---
@@ -117,7 +128,7 @@ Entity-page content splits into two classes by how it's produced. `## Referenced
 
 ## 2. Entity page (app)
 
-App entity pages follow the same shape as package pages with the addition of `app_kind` and `app_signals` in the scanner-owned frontmatter. Filename prefix: `app_`.
+App entity pages follow the same shape as package pages with the addition of `app_kind` and `app_signals` in the scanner-owned frontmatter, at `repositories/<repo>/apps/<name>.md`.
 
 ```markdown
 ---
@@ -145,7 +156,13 @@ _(scanner will populate on next scan)_
 
 ## Other entity kinds
 
-All other admitted entity kinds (`repository`, `agent_plugin`, `dependency`, `test_suite`) also live in `entities/` with their respective filename prefixes (`repo_`, `agent-plugin_`, `dep_`, `unit_tests_` / `int_tests_` / `tests_`). Each carries the universal scanner-owned keys (`uri`, `kind`, `graph_name`, `last_scan_at`) plus kind-specific keys (see `wiki-schema.md` Entity pages). The authoritative templates are the packaged `entity-*.md` files in `packages/wiki-io/src/wiki_io/assets/page-templates/`.
+All other admitted entity kinds live nested under `repositories/<repo>/`, one folder per
+kind: `repository` at `repositories/<repo>/repository.md` itself, `agent_plugin` at
+`repositories/<repo>/agent-plugins/<name>.md`, `test_suite` at
+`repositories/<repo>/test-suites/<name>.md`. `dependency` is the one exception — a
+sibling root, not nested under `repositories/`: `dependencies/<ecosystem>/<name>.md`.
+Each carries the universal scanner-owned keys (`uri`, `kind`, `graph_name`,
+`last_scan_at`) plus kind-specific keys (see `wiki-schema.md` Entity pages).
 
 ## 3. Concept page
 
@@ -181,8 +198,8 @@ interface IGlobalContext {
 From `packages/common-context-node-ts/src/globalContext.ts`.
 
 ## Used in
-- [[entities/pkg_common-aws-node-ts]] — injects via middleware
-- [[entities/pkg_common-context-node-ts]] — defines the interface
+- [[repositories/<repo>/packages/common-aws-node-ts.md]] — injects via middleware
+- [[repositories/<repo>/packages/common-context-node-ts.md]] — defines the interface
 - All `*-data-node-ts` packages — scope queries by `session.user_id`
 
 ## Related patterns
@@ -194,7 +211,7 @@ From `packages/common-context-node-ts/src/globalContext.ts`.
 
 ## Open questions / gotchas
 - Default `session.user_id` is `ObjectId(0)` — tests must call `updateSession()` before DB operations.
-- ⚠️ Contradiction: `[[entities/pkg_shared-aws-node-ts]]` assumes `session.session_id` always populated, but `[[sources/auth-migration-spec]]` says pre-login requests have null.
+- ⚠️ Contradiction: `[[repositories/<repo>/packages/shared-aws-node-ts.md]]` assumes `session.session_id` always populated, but `[[sources/auth-migration-spec]]` says pre-login requests have null.
 ```
 
 ## 3a. Concept page — pattern variant
@@ -234,8 +251,8 @@ The shape of the pattern. Code sketch is fine; keep it minimal and language-agno
 - [[sources/2026-04-react-19-suspense-blog]] — conceptual write-up.
 
 ## Where this could apply in the codebase
-- [[entities/pkg_web-next-ts]] — current isLoading-flag pattern in dashboard queries.
-- [[entities/pkg_app-expo-ts]] — same.
+- [[repositories/<repo>/packages/web-next-ts.md]] — current isLoading-flag pattern in dashboard queries.
+- [[repositories/<repo>/packages/app-expo-ts.md]] — same.
 
 ## Related patterns
 - [[concepts/error-boundary-pattern]]
@@ -258,7 +275,7 @@ One per ingested source (article, spec, PR, transcript, ticket). Summarized **on
 title: "Auth Migration Spec"
 category: source
 summary: Move from opaque session tokens to JWTs; driven by compliance, affects 4 packages
-source_path: raw/_archive/specs/auth-migration.md
+source_path: sources/references/auth-migration.md
 source_type: spec                # spec | article | pr | ticket | transcript | example | doc | note
 source_date: 2026-04-01
 last_sync_commit:                # set only for in-repo docs (source_type: doc) — full SHA at last ingest, used by /graph-works:lint to detect changes
@@ -291,9 +308,9 @@ Two sentences max. What the source proposes / argues / reports.
 - Spec claims `session.session_id` unchanged, but see `[[concepts/global-context]]` — field shape differs.
 
 ## Touches
-- [[entities/pkg_shared-aws-node-ts]]
-- [[entities/pkg_shared-native-ts]]
-- [[entities/pkg_shared-domain-ts]]
+- [[repositories/<repo>/packages/shared-aws-node-ts.md]]
+- [[repositories/<repo>/packages/shared-native-ts.md]]
+- [[repositories/<repo>/packages/shared-domain-ts.md]]
 - [[concepts/global-context]]
 
 ## Decisions triggered
@@ -329,20 +346,20 @@ Two-three sentences capturing the current understanding of how requests flow thr
 
 ## Layers
 
-1. **Client** — React Native (`[[entities/pkg_app-expo-ts]]`) or Next.js (`[[entities/pkg_web-next-ts]]`) uses `[[entities/pkg_shared-domain-ts]]` client
+1. **Client** — React Native (`[[repositories/<repo>/packages/app-expo-ts.md]]`) or Next.js (`[[repositories/<repo>/packages/web-next-ts.md]]`) uses `[[repositories/<repo>/packages/shared-domain-ts.md]]` client
 2. **API Gateway / Lambda** — routes to `*-aws-node-ts` handlers; middleware pipeline establishes `[[concepts/global-context]]`
 3. **Data layer** — handlers delegate to `*-data-node-ts` repositories scoped by `session.user_id`
 4. **MongoDB** — per-domain database via `IDatabaseManager.getDatabase(name)`
 
 ## Diagrams
-- See `raw/assets/request-flow.svg` (from `[[sources/2025-12-architecture-overview]]`)
+- See the diagram attached to `[[sources/2025-12-architecture-overview]]` (the ingest flow copies attached material to `sources/references/`)
 
 ## Key packages
-- [[entities/pkg_shared-domain-ts]] — client
-- [[entities/pkg_shared-aws-node-ts]] — auth
-- [[entities/pkg_common-aws-node-ts]] — middleware base
-- [[entities/pkg_common-context-node-ts]] — context
-- [[entities/pkg_activities-data-node-ts]] — repo base classes
+- [[repositories/<repo>/packages/shared-domain-ts.md]] — client
+- [[repositories/<repo>/packages/shared-aws-node-ts.md]] — auth
+- [[repositories/<repo>/packages/common-aws-node-ts.md]] — middleware base
+- [[repositories/<repo>/packages/common-context-node-ts.md]] — context
+- [[repositories/<repo>/packages/activities-data-node-ts.md]] — repo base classes
 
 ## Key concepts
 - [[concepts/global-context]]
@@ -403,9 +420,9 @@ Adopt short-lived JWTs signed by Cognito. Validation in middleware; refresh on t
 - Auth0 (rejected: see [[concepts/cognito-vs-auth0]])
 
 ## Impact
-- [[entities/pkg_shared-aws-node-ts]] — middleware change
-- [[entities/pkg_shared-native-ts]] — refresh logic
-- [[entities/pkg_shared-domain-ts]] — header injection
+- [[repositories/<repo>/packages/shared-aws-node-ts.md]] — middleware change
+- [[repositories/<repo>/packages/shared-native-ts.md]] — refresh logic
+- [[repositories/<repo>/packages/shared-domain-ts.md]] — header injection
 
 ## Follow-ups
 - Roll out to staging 2026-05
@@ -414,7 +431,7 @@ Adopt short-lived JWTs signed by Cognito. Validation in middleware; refresh on t
 
 ## 7. Dependency page
 
-`/graph-works:scan` writes one graph-derived dependency page per dep the monorepo touches into `entities/dep_<name>.md`, using the scanner-owned `entity-dependency.md` template shape (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use`). The `kind: package | service` example below is a **legacy curated-page shape** that no lint group checks — the `dependency_layer` group it was gated behind does not exist in graph-works-core. It is not what the scanner writes, and its fate is open in `2026-08-20-tech-debt-revisit-dependency-layer-lint`. See `wiki-schema.md` for the `kind: service` variant.
+`/graph-works:scan` writes one graph-derived dependency page per dep the monorepo touches into `dependencies/<ecosystem>/<name>.md`, using the scanner-owned `entity-dependency.md` template shape (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use`). The `kind: package | service` example below is a **legacy curated-page shape** that no lint group checks — the `dependency_layer` group it was gated behind does not exist in graph-works-core. It is not what the scanner writes, and its fate is open in `2026-08-20-tech-debt-revisit-dependency-layer-lint`. See `wiki-schema.md` for the `kind: service` variant.
 
 ```markdown
 ---
@@ -440,18 +457,18 @@ One paragraph: what this library does, why we use it, which surfaces.
 ## Versions in use
 | Version | Used in | Notes |
 |---|---|---|
-| 19.0.0 | [[entities/pkg_web-next-ts]], [[entities/pkg_shared-ui-react-ts]] | Migrated 2026-Q1 |
-| 18.3.1 | [[entities/pkg_app-expo-ts]], [[entities/pkg_shared-ui-native-ts]] | Pinned by RN 0.76 |
+| 19.0.0 | [[repositories/<repo>/packages/web-next-ts.md]], [[repositories/<repo>/packages/shared-ui-react-ts.md]] | Migrated 2026-Q1 |
+| 18.3.1 | [[repositories/<repo>/packages/app-expo-ts.md]], [[repositories/<repo>/packages/shared-ui-native-ts.md]] | Pinned by RN 0.76 |
 
 ## Used by
-- [[entities/pkg_web-next-ts]]
-- [[entities/pkg_app-expo-ts]]
-- [[entities/pkg_shared-ui-react-ts]]
-- [[entities/pkg_shared-ui-native-ts]]
+- [[repositories/<repo>/packages/web-next-ts.md]]
+- [[repositories/<repo>/packages/app-expo-ts.md]]
+- [[repositories/<repo>/packages/shared-ui-react-ts.md]]
+- [[repositories/<repo>/packages/shared-ui-native-ts.md]]
 
 ## Key patterns in this repo
 - Functional components only; no class components.
-- Suspense + Server Components in `[[entities/pkg_web-next-ts]]` (Next 15 App Router).
+- Suspense + Server Components in `[[repositories/<repo>/packages/web-next-ts.md]]` (Next 15 App Router).
 - `use client` directive boundaries — see [[concepts/nextjs-client-boundary]].
 
 ## Gotchas / workarounds
@@ -466,7 +483,7 @@ One paragraph: what this library does, why we use it, which surfaces.
 - [[adrs/0011-react-19-on-web-only]]
 
 ## Related
-- [[entities/dep_react-native]]
+- [[dependencies/npm/react-native.md]]
 - [[concepts/server-state-vs-client-state]]
 - [[work/rn-0-77-upgrade]]
 ```

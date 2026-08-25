@@ -80,6 +80,26 @@ def test_load_config_repo_entry_not_mapping_raises(tmp_path: Path) -> None:
         load_config(tmp_path, graph_dir="../graphs/code")
 
 
+def test_load_config_repo_path_anchors_at_config_path_parent_not_bundle_root(tmp_path: Path) -> None:
+    """When `config_path` names a file outside `bundle_root`, a declared
+    repo's relative `path` resolves against *that file's* directory, not
+    `bundle_root` -- the directory `workspace.yaml` was actually read from."""
+    config_dir = tmp_path / "deep" / "config"
+    config_dir.mkdir(parents=True)
+    manifest_path = config_dir / "workspace.yaml"
+    manifest_path.write_text(
+        "version: 1\nrepositories:\n  sibling:\n    path: ../repo\n",
+        encoding="utf-8",
+    )
+    bundle_root = tmp_path / "bundle"
+    bundle_root.mkdir()
+
+    config = load_config(bundle_root, config_path=manifest_path, graph_dir="../graphs/code")
+
+    assert config.repos[0].path == (config_dir / "../repo").resolve()
+    assert config.repos[0].path != (bundle_root / "../repo").resolve()
+
+
 def test_load_config_state_gate_not_mapping_raises(tmp_path: Path) -> None:
     _write(tmp_path, "version: 1\nstate_gate: hello\n")
     with pytest.raises(ConfigError, match="must be a mapping"):

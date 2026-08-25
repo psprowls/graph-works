@@ -20,6 +20,7 @@
 
 [roles.librarian]
 model_id        = "moonshotai.kimi-k2.5"
+backend         = "bedrock"
 region          = "us-east-1"
 max_tokens      = 2048
 max_concurrency = 5
@@ -29,12 +30,14 @@ max_concurrency = 5
 # fallback is opt-in and bounded.
 [roles.code_reader]
 model_id        = "minimax.minimax-m2.5"
+backend         = "bedrock"
 region          = "us-east-1"
 max_tokens      = 2048
 max_concurrency = 3
 
 [roles.linter]
 model_id        = "us.amazon.nova-lite-v1:0"
+backend         = "bedrock"
 region          = "us-east-1"
 max_tokens      = 3000
 max_concurrency = 10
@@ -48,6 +51,7 @@ max_concurrency = 5
 # The ingest proposal-reasoning pass.
 [roles.proposal_reasoner]
 model_id        = "moonshotai.kimi-k2.5"
+backend         = "bedrock"
 region          = "us-east-1"
 max_tokens      = 4096
 max_concurrency = 3
@@ -56,6 +60,7 @@ max_concurrency = 3
 # for multi-section structured output.
 [roles.prose_refresher]
 model_id        = "moonshotai.kimi-k2.5"
+backend         = "bedrock"
 region          = "us-east-1"
 max_tokens      = 4096
 max_concurrency = 10
@@ -74,6 +79,7 @@ max_concurrency = 1
 # own answer and never calls this.
 [roles.synthesizer]
 model_id        = "moonshotai.kimi-k2.5"
+backend         = "bedrock"
 region          = "us-east-1"
 max_tokens      = 4096
 max_concurrency = 3
@@ -81,6 +87,7 @@ max_concurrency = 3
 # Normalizes proposal_reasoner analysis into strict proposal YAML.
 [roles.extractor]
 model_id        = "moonshotai.kimi-k2.5"
+backend         = "bedrock"
 region          = "us-east-1"
 max_tokens      = 2048
 max_concurrency = 5

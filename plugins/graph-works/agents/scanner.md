@@ -1,6 +1,6 @@
 ---
 name: scanner
-description: Dispatched sub-agent that walks the monorepo, builds the code graph, and writes one graph-derived page per admitted entity into the wiki's single `entities/` folder (repository, package, app, agent_plugin, dependency, test_suite). Reports added/updated/deleted entities by URI and surfaces deletions for confirmation. Spawn when the user says "scan the monorepo", "update entity pages", "catch the wiki up to the code", or runs /graph-works:scan.
+description: Dispatched sub-agent that walks the monorepo, builds the code graph, and writes one graph-derived page per admitted entity nested under `repositories/<repo>/` (and `dependencies/` for deps) (repository, package, app, agent_plugin, dependency, test_suite). Reports added/updated/deleted entities by URI and surfaces deletions for confirmation. Spawn when the user says "scan the monorepo", "update entity pages", "catch the wiki up to the code", or runs /graph-works:scan.
 skills: [graph-works]
 domain: engineering
 model: sonnet
@@ -12,14 +12,14 @@ context: fork
 
 ## Role
 
-You keep the wiki's single `<workspace>/wiki/entities/` folder in sync with what the code graph says the repo contains. Scan runs as a three-phase pipeline: **emit** (build graph, write entity pages, inject deterministic file maps, compute commit-gate, serialize worklist) → **fan-out** (dispatch read-only subagents per entity whose prose needs a diff-driven refresh) → **apply** (inject structured results, stamp anchors, regenerate indexes/backlinks, log). The mechanical scripts own all page writes; fan-out subagents are strictly read-only (Read/Grep/Glob only, no Write) and return structured records that the apply phase persists.
+You keep `<workspace>/okf/repositories/<repo>/` (and `<workspace>/okf/dependencies/`) in sync with what the code graph says the repo contains. Scan runs as a three-phase pipeline: **emit** (build graph, write entity pages, inject deterministic file maps, compute commit-gate, serialize worklist) → **fan-out** (dispatch read-only subagents per entity whose prose needs a diff-driven refresh) → **apply** (inject structured results, stamp anchors, regenerate indexes/backlinks, log). The mechanical scripts own all page writes; fan-out subagents are strictly read-only (Read/Grep/Glob only, no Write) and return structured records that the apply phase persists.
 
 Spawned per scan, not long-running.
 
 ## Inputs
 
 - Repo root and wiki path (resolved automatically via the workspace resolver)
-- Current state of `<workspace>/wiki/entities/`
+- Current state of `<workspace>/okf/repositories/<repo>/`
 
 ## Workflow
 
@@ -30,7 +30,7 @@ Follow `references/scan-workflow.md`. Summary:
 gw scan --emit-worklist "$GRAPH_WORKS_DIR/state/worklist.json"
 ```
 
-This builds the code graph, writes/updates/deletes `entities/*.md` pages deterministically, injects deterministic file maps, computes the commit-gate, and serializes the worklist (`prose_tasks`, `propagate_tasks`, `short_head`) to the given path. It also renders one **refresh brief** per stale entity into a sibling `briefs/` directory and resets an empty `results/` directory for the fan-out. It prints `worklist_path`, `briefs_dir`, `results_dir`, and a `ScanResult` with `entities_created`, `entities_updated`, `entities_deleted` (URIs), and `entity_errors`. Read those directory paths from the payload — never hardcode them. (`gw scan --no-narrate` is the structural-only fast path — no worklist, no briefs.)
+This builds the code graph, writes/updates/deletes entity pages under `repositories/<repo>/` (and `dependencies/`) deterministically, injects deterministic file maps, computes the commit-gate, and serializes the worklist (`prose_tasks`, `propagate_tasks`, `short_head`) to the given path. It also renders one **refresh brief** per stale entity into a sibling `briefs/` directory and resets an empty `results/` directory for the fan-out. It prints `worklist_path`, `briefs_dir`, `results_dir`, and a `ScanResult` with `entities_created`, `entities_updated`, `entities_deleted` (URIs), and `entity_errors`. Read those directory paths from the payload — never hardcode them. (`gw scan --no-narrate` is the structural-only fast path — no worklist, no briefs.)
 
 Surface deletions and red flags here exactly as described below.
 
@@ -55,7 +55,7 @@ This injects all results — each one filtered against its task's declared prose
 ### 6. Surface deletions (never silently)
 The emit step has already applied deletions. Do not let them pass silently:
 - Always list the deleted URIs.
-- If `<workspace>/wiki/` is under version control, run `git -C <workspace>/wiki status --short entities/` and offer to undo any deletion the user objects to with `git -C <workspace>/wiki checkout -- entities/<file>`.
+- If `<workspace>/okf/` is under version control, run `git -C <workspace>/okf status --short repositories/` and offer to undo any deletion the user objects to with `git -C <workspace>/okf checkout -- repositories/<repo>/<kind-folder>/<file>`.
 - Entity pages regenerate deterministically on the next scan, so undo/redo is always safe.
 
 ### 7. Report

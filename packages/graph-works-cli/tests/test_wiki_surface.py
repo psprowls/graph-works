@@ -63,10 +63,11 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
             "--json",
             "--workspace",
         },
-        ("ingest",): {"--source", "--json", "--workspace"},
-        ("query",): {"--query", "--limit", "--workspace"},
+        ("ingest",): {"--source", "--json", "--workspace", "--backend"},
+        ("query",): {"--query", "--limit", "--backend", "--json", "--workspace"},
         ("archive",): {"--dry-run", "--workspace"},
         ("wiki", "lint"): {"--json", "--workspace"},
+        ("wiki", "drift"): {"--backend", "--only", "--dry-run", "--no-dry-run", "--json", "--workspace"},
         ("wiki", "stats"): {"--top", "--json", "--workspace"},
         ("wiki", "index"): {"--workspace"},
         ("wiki", "archive"): {"--dry-run", "--workspace"},
@@ -89,7 +90,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
 
     wiki = _help("wiki")
     proposal = _help("wiki", "proposal")
-    assert _command_names(wiki) == ["lint", "stats", "index", "archive", "proposals", "proposal"]
+    assert _command_names(wiki) == ["lint", "drift", "stats", "index", "archive", "proposals", "proposal"]
     assert _command_names(proposal) == ["file", "approve", "reject"]
     assert _option_names(wiki) == set()
     assert _option_names(proposal) == set()
@@ -97,7 +98,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
     assert not {"--tool", "--force"} & _option_names(_help("bootstrap"))
     assert not {"--limit", "--all"} & _option_names(_help("ingest"))
     assert not {"--stale-days", "--log-gap-days", "--check"} & _option_names(_help("wiki", "lint"))
-    assert not {"--json", "--model"} & _option_names(_help("query"))
+    assert not {"--model"} & _option_names(_help("query"))
     for command_path in (("wiki", "proposal", "file"), ("wiki", "proposal", "approve"), ("wiki", "proposal", "reject")):
         assert not {"--dry-run", "--json"} & _option_names(_help(*command_path))
     assert not {"show", "promote"} & set(_command_names(proposal))

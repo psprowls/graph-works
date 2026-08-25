@@ -1,11 +1,11 @@
 ---
 name: log
-description: Show recent entries from the Code Wiki log (<workspace>/wiki/log.md). Uses the standardized ## [YYYY-MM-DD] header format so grep + tail works. Usage /graph-works:log [--last N] [--op scan|ingest|query|lint|...]
+description: Show recent entries from the Code Wiki log (<workspace>/okf/log.md). Uses the standardized ## [YYYY-MM-DD] header format so grep + tail works. Usage /graph-works:log [--last N] [--op scan|ingest|query|lint|...]
 ---
 
 # /graph-works:log
 
-Show recent entries from `<workspace>/wiki/log.md`. Every LLM operation on the wiki leaves a standardized entry:
+Show recent entries from `<workspace>/okf/log.md`. Every LLM operation on the wiki leaves a standardized entry:
 
 ```
 ## [YYYY-MM-DD] <op> | <title>
@@ -24,10 +24,10 @@ Show recent entries from `<workspace>/wiki/log.md`. Every LLM operation on the w
 
 ## What it does
 
-Parses `<workspace>/wiki/log.md` and prints matching entries. Essentially:
+Parses `<workspace>/okf/log.md` and prints matching entries. Essentially:
 
 ```bash
-grep "^## \[" <workspace>/wiki/log.md | tail -N
+grep "^## \[" <workspace>/okf/log.md | tail -N
 ```
 
 …plus optional filters for op type and date range.
@@ -51,10 +51,10 @@ Code drift: 2 new packages un-documented. 3 orphans, 1 stale roadmap page.
 
 ## [2026-04-20] ingest | Auth Migration Spec
 Added sources/2026-04-auth-migration-spec.md. Updated concepts/global-context,
-entities/pkg_shared-aws-node-ts, adrs/0014-jwt-sessions (new).
+repositories/my-monorepo/packages/shared-aws-node-ts.md, adrs/0014-jwt-sessions (new).
 
 ## [2026-04-19] scan | detected 3 new packages
-Added entities/pkg_timeline-native-ts, entities/pkg_timeline-data-node-ts, entities/pkg_timeline-domain-ts.
+Added repositories/my-monorepo/packages/timeline-native-ts.md, repositories/my-monorepo/packages/timeline-data-node-ts.md, repositories/my-monorepo/packages/timeline-domain-ts.md.
 ```
 
 ## Skill Reference

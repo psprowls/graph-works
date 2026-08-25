@@ -529,6 +529,52 @@ def _prepare_query_retrieval(
     )
 
 
+@dataclass(frozen=True)
+class QueryPageBrief:
+    """One retrieved page, unread by any role — a pointer for the calling agent."""
+
+    path: str
+    excerpt: str
+    search_scores: Mapping[str, float]
+
+
+@dataclass(frozen=True)
+class QueryBrief:
+    """The `claude_code`-backend counterpart to `QueryResult`: retrieval only."""
+
+    query: str
+    top_pages: tuple[QueryPageBrief, ...]
+
+
+def plan_query_brief(
+    query: str,
+    layout: WorkspaceLayout,
+    *,
+    bundle: Bundle | None = None,
+    embedder: Embedder,
+    top_k: int = 5,
+) -> QueryBrief:
+    """Retrieval only -- no role LLM call, no write.
+
+    The `claude_code`-backend counterpart to `run_query`: same
+    `_prepare_query_retrieval`, and nothing past it. The calling agent reads
+    `top_pages` itself (via `Read`, following the pages' own links, or
+    `gw graph`) and composes the answer.
+    """
+    if bundle is None:
+        bundle = load_bundle(layout.bundle_dir)
+    prepared = _prepare_query_retrieval(query, layout, bundle, top_k=top_k, embedder=embedder)
+    pages = tuple(
+        QueryPageBrief(
+            path=page,
+            excerpt=read_bounded_page(prepared.bundle, page, max_chars=_CANDIDATE_EXCERPT_CHARS),
+            search_scores=dict(prepared.search_scores[page]),
+        )
+        for page in prepared.top_pages
+    )
+    return QueryBrief(query=query, top_pages=pages)
+
+
 _GRAPH_UNAVAILABLE_STDERR = "[graph unavailable: run 'gw graph build' to enable code-graph grounding tools]"
 
 

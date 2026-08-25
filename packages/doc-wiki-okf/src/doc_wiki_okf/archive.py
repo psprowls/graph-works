@@ -182,8 +182,12 @@ def _select(bundle: Bundle, tokens: Sequence[str]) -> tuple[tuple[str, ...], tup
         if lane is None:
             skipped.append(Skipped(token, "unknown-member", f"{token!r} names no known wiki lane"))
             continue
-        if bundle.has_member(_page(token)):
-            chosen.append(token)
+        raw_page = bundle.member_id(_page(token))
+        if raw_page is not None:
+            chosen.append(raw_page[:-3])
+        # has_member, not member_id: this check is message-only (the token
+        # feeds a human-readable Skipped reason, not a further lookup or
+        # write), and the boolean answer is NFC-insensitive either way.
         elif bundle.has_member(_archived_page(token, lane)):
             skipped.append(Skipped(token, "already-archived", f"{token} already sits under {lane}/_archive/"))
         else:

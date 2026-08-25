@@ -23,6 +23,7 @@ Root commands:
 Wiki commands:
 
 - `gw wiki lint [--json]`
+- `gw wiki drift [--backend TEXT] [--only TEXT] [--dry-run] [--json]`
 - `gw wiki stats [--top N] [--json]`
 - `gw wiki index`
 - `gw wiki archive [TARGET] [--dry-run]`
@@ -31,8 +32,9 @@ Wiki commands:
 - `gw wiki proposal approve TARGET`
 - `gw wiki proposal reject TARGET`
 
-Mutating commands apply by default. `--dry-run` is the only preview, and two commands offer it:
-`gw bootstrap --dry-run` and `gw wiki archive --dry-run` print their plan without applying it.
+Most mutating commands apply by default; `--dry-run` is the preview option. `gw bootstrap --dry-run`
+and `gw wiki archive --dry-run` show the plan without applying. `gw wiki drift` inverts this: it
+previews by default (use `--no-dry-run` to apply).
 
 ### Scan worklist handoff
 
@@ -47,6 +49,8 @@ $ gw scan --emit-worklist --workspace .works
   "results_dir": ".works/.gw/cache/scan/results",
   "short_head": "abc1234",
   "entities_written": [],
+  "entities_created": [],
+  "entities_updated": [],
   "entities_deleted": [],
   "entity_errors": []
 }

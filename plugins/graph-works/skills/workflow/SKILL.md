@@ -9,7 +9,7 @@ Dispatch one pipeline stage for a work item, then advance it. The CLI owns every
 decision (routing, transitions, validation); this skill only relays.
 
 **One stage per invocation, by design.** Never chain stages in a session — each
-stage gets a fresh context window. The work item plus `raw/` artifacts are the
+stage gets a fresh context window. The work item plus its owned `references/` artifacts are the
 durable state between sessions; nothing depends on conversation memory.
 
 **Invariant:** a work item's canonical path — and its
@@ -141,9 +141,11 @@ The stock skills honor user-preference path overrides; they stay unmodified.
 ### 4. Verify the artifact
 
 When `artifact.path` is set, check the file exists after the stage completes.
-If the skill wrote to its stock location (`<workspace>/raw/specs/` or
-`<workspace>/raw/plans/` in the workspace), move the file (and any `.tasks.json`
-companion) to `artifact.path` and say so.
+The brainstorming and writing-plans skills' own stock locations are already
+the pipeline path — `<work-path>/references/01-design.md` and `02-plan.md`
+respectively — the same path `artifact.path` points to, so the file should
+already be there. If the skill instead wrote elsewhere, move the file (and
+any `.tasks.json` companion) to `artifact.path` and say so.
 
 ### 5. Advance
 

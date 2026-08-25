@@ -120,7 +120,7 @@ frontmatter. Writing them dirties every neighbour on each edit.
 
 ## The rule catalog
 
-8 topics, 20 rule functions, 30 codes. Module name is the code prefix, asserted
+9 topics, 21 rule functions, 31 codes. Module name is the code prefix, asserted
 mechanically in `test_catalog.py`.
 
 A rule is `Callable[[RuleContext], Iterable[Finding]]`. `RuleContext` carries

@@ -181,6 +181,55 @@ def test_lint_rejects_removed_flags(flag: str) -> None:
     assert f"No such option: {flag}" in result.stderr
 
 
+def test_lint_resolves_repo_root_from_workspace_yaml_in_split_topology(tmp_path: Path) -> None:
+    """`wiki lint`'s work lane must resolve the same repo root `work lint` does.
+
+    `layout.repo_root` is a `.git` walk-up from the workspace root -- in a
+    split topology (vault and code repo as separate checkouts) that walk-up
+    lands on the *vault*, not the declared code repo, and the work lane's
+    `targets.affects-missing` rule would then fire on every legitimate
+    `affects` entry. `resolve_repo(layout)` reads `workspace.yaml`'s
+    `repositories:` block instead, exactly as `gw work lint` already does.
+    """
+    vault = tmp_path / "vault"
+    (vault / ".git").mkdir(parents=True)
+    root = vault / "works"
+    assert runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)]).exit_code == 0
+    code = tmp_path / "code"
+    (code / "packages/foo").mkdir(parents=True)
+    layout = lint_module.resolve_workspace(str(root))
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+
+    file_result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Split-topology filing",
+            "--kind",
+            "Feature",
+            "--summary",
+            "One line",
+            "--affects",
+            "packages/foo",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert file_result.exit_code == 0, file_result.output
+
+    lint_result = runner.invoke(app, ["wiki", "lint", "--json", "--workspace", str(root)])
+    payload = json.loads(lint_result.stdout)
+    findings = [finding for lane in payload["mechanical"] for finding in lane["findings"]]
+    assert not any(finding["code"] == "targets.affects-missing" for finding in findings), findings
+    assert lint_result.exit_code == 0, lint_result.output
+
+
 def test_lint_reports_unreadable_configuration_before_running(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:

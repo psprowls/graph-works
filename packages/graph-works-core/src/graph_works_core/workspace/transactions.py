@@ -4,6 +4,14 @@ The domain package plans immutable bundle-relative effects.  This module is
 the workspace-aware commit boundary: it revalidates the complete plan before
 the first live effect, keeps recovery evidence outside the bundle, and either
 lands every effect plus its targeted postconditions or restores the snapshot.
+
+Postcondition validation is *differential*: a baseline is captured under the
+same lock before the first effect, and only failures whose count rises are the
+mutation's fault.  That doubles validation cost per mutation (~9s each on a
+large live bundle).  Two optimizations are known and deliberately deferred:
+reusing the planner's already-loaded bundle for the baseline, and restricting
+validation to the targeted members.  Both are separate work -- a gate that is
+only conditionally correct is worth nothing.
 """
 
 from __future__ import annotations
@@ -17,7 +25,8 @@ import shutil
 import stat
 import sys
 import uuid
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections import Counter
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from ctypes import CDLL, c_char_p, c_int, c_uint, get_errno
 from dataclasses import dataclass
@@ -27,7 +36,7 @@ from typing import IO, Literal, Protocol
 
 from okf_ext.moves import Move
 from okf_ext.writing import body_digest
-from okf_io import Finding, parse, validate
+from okf_io import Rule, parse, validate
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
 from work_tracker_okf.indexes import reconcile_marked_index, render_entry
@@ -1829,19 +1838,102 @@ def _is_lane_index(member: str) -> bool:
     return parse_item_path(owner) is not None
 
 
-def _item_failures(item: WorkItem, by_path: dict[str, WorkItem], findings: Iterable[Finding]) -> list[str]:
-    failures: list[str] = []
+def _map_member(path_mapping: Mapping[str, str], member: str) -> str:
+    """*member*'s path after the mutation, per the plan's item-path mapping.
+
+    Mirrors `work_tracker_okf.mutation._member_mapping`'s matching rule --
+    deepest source first, so a nested child that moves independently of its
+    ancestor wins -- but answers for one member without a bundle in hand,
+    which is what the pre-mutation baseline has.
+    """
+    for source in sorted(path_mapping, key=lambda path: (path.count("/"), len(path)), reverse=True):
+        destination = path_mapping[source]
+        if member == f"{source}.md":
+            return f"{destination}.md"
+        if member.startswith(f"{source}/"):
+            return f"{destination}{member[len(source) :]}"
+    return member
+
+
+def _item_conditions(item: WorkItem, by_path: dict[str, WorkItem]) -> tuple[tuple[str, str], ...]:
+    """The structural problems *item* carries, as `(kind, message)` pairs.
+
+    The kind is what the differential gate counts: an operation is at fault
+    only when it raises the number of problems of one kind on one item.  The
+    message stays free-form because it is only ever reported, never compared.
+    """
+    conditions: list[tuple[str, str]] = []
     if item.parent_path is not None and item.parent_path not in by_path:
-        failures.append(f"{item.path}: parent {item.parent_path!r} is missing after mutation")
+        conditions.append(("parent-missing", f"{item.path}: parent {item.parent_path!r} is missing after mutation"))
     for edge in item.dependency_edges:
         if edge.path not in by_path:
-            failures.append(f"{item.path}: dependency target {edge.path!r} is missing after mutation")
+            conditions.append(
+                ("dependency-missing", f"{item.path}: dependency target {edge.path!r} is missing after mutation")
+            )
     for issue in item.dependency_issues:
-        failures.append(f"{item.path}: dependency {issue.code}: {issue.detail}")
-    for finding in findings:
-        if finding.severity == "error" and finding.path == item.page_path:
-            failures.append(f"{finding.path}: {finding.code}: {finding.message}")
-    return failures
+        conditions.append((f"dependency-{issue.code}", f"{item.path}: dependency {issue.code}: {issue.detail}"))
+    return tuple(conditions)
+
+
+@dataclass(frozen=True, slots=True)
+class _ValidationState:
+    """One bundle revision's validation outcome, counted and forward-mapped.
+
+    Both halves are multisets rather than sets: what makes an operation
+    culpable is *raising the count* of a `(path, code)` or `(path, kind)`
+    pair, not the pair existing.  Keys carry no message -- a message embeds
+    canonical paths that a move rewrites unevenly, so message identity would
+    mark surviving pre-existing failures as new.
+    """
+
+    findings: Mapping[tuple[str, str], int]
+    conditions: Mapping[tuple[str, str], int]
+
+
+def _extra_rules(layout: WorkspaceLayout, repo_root: Path | None) -> tuple[Rule, ...]:
+    """The one rule set both sides of the differential gate validate against."""
+    validation_root = layout.bundle_dir
+    declarations_dir = layout.config_dir if (layout.config_dir / "schema").is_dir() else validation_root
+    return rule_set(
+        validation_root,
+        repo_root=repo_root if repo_root is not None else layout.repo_root,
+        vault_root=layout.root,
+        declarations_dir=declarations_dir,
+    )
+
+
+def _capture_validation_state(
+    layout: WorkspaceLayout,
+    plan: WorkMutationPlan,
+    root_fd: int,
+    *,
+    repo_root: Path | None,
+) -> _ValidationState:
+    """Validate the bundle as it stands and key the outcome post-mutation.
+
+    Called under the held bundle lock while the bundle is still pristine, with
+    the same load, rule set and `repo_root` the postcondition pass will use --
+    identical inputs on both sides are what makes the difference meaningful.
+    Raising is safe here: no effect has been committed yet.
+    """
+    validation_root = layout.bundle_dir
+    _assert_root_identity(validation_root, root_fd)
+    bundle = _load_bundle_at(validation_root, root_fd, ignore=IGNORE)
+    _assert_root_identity(validation_root, root_fd)
+    items = load_items(bundle)
+    report = validate(bundle, today=date.max, extra_rules=_extra_rules(layout, repo_root))
+    _assert_root_identity(validation_root, root_fd)
+    by_path = {item.path: item for item in items}
+    findings = Counter(
+        (_map_member(plan.path_mapping, finding.path), finding.code)
+        for finding in report.errors
+        if finding.path is not None
+    )
+    conditions: Counter[tuple[str, str]] = Counter()
+    for item in items:
+        mapped = plan.path_mapping.get(item.path, item.path)
+        conditions.update((mapped, kind) for kind, _message in _item_conditions(item, by_path))
+    return _ValidationState(findings=dict(findings), conditions=dict(conditions))
 
 
 def _validate_postconditions(
@@ -1850,7 +1942,18 @@ def _validate_postconditions(
     root_fd: int | None = None,
     *,
     repo_root: Path | None = None,
+    baseline: _ValidationState | None = None,
+    excused: list[str] | None = None,
 ) -> tuple[str, ...]:
+    """Fail on what *this* mutation broke, not on what was already broken.
+
+    With a *baseline* in hand the gate is differential: a `(path, code)` or
+    `(path, kind)` pair fails only where its post-mutation count exceeds the
+    baseline count, and the surplus-free remainder is appended to *excused*
+    for the caller to report.  Without one it is the absolute gate it always
+    was.  The lane-index staleness check is absolute either way -- a stale
+    index after the mutation is always the mutation's fault.
+    """
     close_root = root_fd is None
     if root_fd is None:
         root_fd = _open_root(layout.bundle_dir)
@@ -1869,29 +1972,33 @@ def _validate_postconditions(
     targeted_members = {f"{path}.md" for path in plan.validate_paths}
     targeted_indexes = set(_affected_index_members(plan))
     targeted_members.update(targeted_indexes)
-    declarations_dir = layout.config_dir if (layout.config_dir / "schema").is_dir() else validation_root
     try:
         report = validate(
             bundle,
             today=date.max,
-            extra_rules=rule_set(
-                validation_root,
-                repo_root=repo_root if repo_root is not None else layout.repo_root,
-                vault_root=layout.root,
-                declarations_dir=declarations_dir,
-            ),
+            extra_rules=_extra_rules(layout, repo_root),
         )
         _assert_root_identity(validation_root, root_fd)
     except (OSError, ValueError) as exc:
         if close_root:
             os.close(root_fd)
         return (f"postcondition validation setup failed: {exc}",)
-    findings = tuple(
-        finding for finding in report.errors if finding.path is not None and finding.path in targeted_members
-    )
+    notes = excused if excused is not None else []
+    count_before = len(notes)
+    finding_allowance = Counter(baseline.findings) if baseline is not None else Counter()
+    condition_allowance = Counter(baseline.conditions) if baseline is not None else Counter()
 
     failures: list[str] = []
-    failures.extend(f"{finding.path}: {finding.code}: {finding.message}" for finding in findings)
+    for finding in report.errors:
+        if finding.path is None or finding.path not in targeted_members:
+            continue
+        detail = f"{finding.path}: {finding.code}: {finding.message}"
+        key = (finding.path, finding.code)
+        if finding_allowance[key] > 0:
+            finding_allowance[key] -= 1
+            notes.append(f"pre-existing, not caused by this operation: {detail}")
+            continue
+        failures.append(detail)
     for path in plan.validate_paths:
         if parse_item_path(path) is None:
             failures.append(f"{path}: validate path is not canonical")
@@ -1900,7 +2007,16 @@ def _validate_postconditions(
         if item is None:
             failures.append(f"{path}: final work item did not reload")
             continue
-        failures.extend(_item_failures(item, by_path, ()))
+        for kind, message in _item_conditions(item, by_path):
+            key = (path, kind)
+            if condition_allowance[key] > 0:
+                condition_allowance[key] -= 1
+                notes.append(f"pre-existing, not caused by this operation: {message}")
+                continue
+            failures.append(message)
+    excused_here = len(notes) - count_before
+    if excused_here:
+        notes.append(f"{excused_here} pre-existing validation failure(s) excused; run `gw lint` for bundle health")
 
     for member in _affected_index_members(plan):
         lane = PurePosixPath(member).parent.as_posix()
@@ -1941,6 +2057,7 @@ def _application(
     created: Sequence[str] = (),
     failures: Sequence[str] = (),
     rolled_back: bool = False,
+    warnings: Sequence[str] | None = None,
 ) -> MutationApplication:
     return MutationApplication(
         transaction_id=transaction_id,
@@ -1948,7 +2065,7 @@ def _application(
         moved=tuple(moved),
         written=tuple(written),
         created_directories=tuple(created),
-        warnings=plan.warnings,
+        warnings=plan.warnings if warnings is None else tuple(warnings),
         failures=tuple(failures),
         rolled_back=rolled_back,
     )
@@ -2007,6 +2124,8 @@ def _apply_mutation_locked(
         protected: dict[str, str] = {}
         effect_attempted = False
         phase = "preflight"
+        baseline: _ValidationState | None = None
+        excused: list[str] = []
         root_fd = os.dup(locked_root_fd)
         try:
             try:
@@ -2023,6 +2142,14 @@ def _apply_mutation_locked(
                 staged = _stage_writes(plan, transaction_dir, root_fd)
                 _preflight(layout, plan, root_fd, transaction_dir / "preflight-final")
                 _verify_directory_modes(root_fd, directory_modes)
+                try:
+                    baseline = _capture_validation_state(layout, plan, root_fd, repo_root=repo_root)
+                except (OSError, ValueError) as exc:
+                    baseline = None
+                    excused.append(
+                        f"baseline capture failed, falling back to absolute postcondition gate for this mutation: {exc}"
+                    )
+                _assert_root_identity(layout.bundle_dir, root_fd)
                 expected_fingerprints = {
                     member: _entry_fingerprint_at(root_fd, member)
                     for member in {*(move.source for move in plan.moves), *plan.deletes}
@@ -2100,6 +2227,8 @@ def _apply_mutation_locked(
                     plan,
                     root_fd,
                     repo_root=repo_root,
+                    baseline=baseline,
+                    excused=excused,
                 )
                 if postcondition_failures:
                     raise ValueError("; ".join(postcondition_failures))
@@ -2130,6 +2259,7 @@ def _apply_mutation_locked(
                     moved=moved,
                     written=written,
                     created=created,
+                    warnings=(*plan.warnings, *excused),
                 )
             except Exception as exc:
                 failure = f"{phase} failed: {exc}"
@@ -2189,6 +2319,7 @@ def _apply_mutation_locked(
                     created=created,
                     failures=(failure, *recovery_failures),
                     rolled_back=bool(touched) and not rollback_failures,
+                    warnings=(*plan.warnings, *excused),
                 )
 
         finally:

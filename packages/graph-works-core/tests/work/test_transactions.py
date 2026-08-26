@@ -78,11 +78,12 @@ def _plan(
     mkdirs: tuple[str, ...] = (),
     validate_paths: tuple[str, ...] = (),
     directory_preconditions: tuple[DirectoryPrecondition, ...] = (),
+    path_mapping: dict[str, str] | None = None,
 ) -> WorkMutationPlan:
     return WorkMutationPlan(
         root=layout.bundle_dir,
         operation="reparent",
-        path_mapping={},
+        path_mapping={} if path_mapping is None else path_mapping,
         move_plan=None,
         moves=moves,
         writes=writes,
@@ -99,9 +100,21 @@ def _states(journal: Path) -> list[str]:
     return [json.loads(line)["state"] for line in journal.read_text(encoding="utf-8").splitlines()]
 
 
-def _write_item(root: Path, path: str, *, type: str) -> None:
+def _write_item(
+    root: Path,
+    path: str,
+    *,
+    type: str,
+    affects: tuple[str, ...] = (),
+    depends_on: tuple[dict[str, str], ...] = (),
+) -> None:
     page = root / f"{path}.md"
     page.parent.mkdir(parents=True, exist_ok=True)
+    affects_block = "".join(f"  - {entry}\n" for entry in affects)
+    depends_block = "".join(
+        "  - " + ", ".join(f"{key}: {value}" for key, value in sorted(edge.items())).join(("{", "}")) + "\n"
+        for edge in depends_on
+    )
     page.write_text(
         "---\n"
         f"type: {type}\n"
@@ -111,8 +124,9 @@ def _write_item(root: Path, path: str, *, type: str) -> None:
         "work_status: open\n"
         "phase: design\n"
         "effort: small\n"
-        "affects: []\n"
-        "opened: 2026-08-22\n"
+        + (f"affects:\n{affects_block}" if affects else "affects: []\n")
+        + (f"depends_on:\n{depends_block}" if depends_on else "")
+        + "opened: 2026-08-22\n"
         "updated: 2026-08-22\n"
         "---\n\n"
         "## Plan\n\n"
@@ -1092,6 +1106,95 @@ def test_symlink_move_cannot_make_a_later_effect_traverse_its_target(
     assert child.read_bytes() == b"physical-before"
     assert source_link.is_symlink()
     assert not (work / "link").exists()
+
+
+def test_item_conditions_are_kinded_pairs_for_parent_and_dependency_problems(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    path = "work/bug-orphan"
+    _write_item(
+        layout.bundle_dir,
+        path,
+        type="Bug",
+        depends_on=({"path": "work/bug-absent", "blocks": "execute", "needs": "resolved"},),
+    )
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    by_path = {item.path: item for item in items}
+
+    conditions = transactions._item_conditions(by_path[path], by_path)
+
+    assert [kind for kind, _message in conditions] == ["dependency-missing"]
+    assert "work/bug-absent" in conditions[0][1]
+
+
+def test_baseline_capture_counts_findings_under_their_post_move_paths(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = "work/bug-source"
+    release = "work/release-cutover"
+    _write_item(layout.bundle_dir, release, type="Release")
+    _write_item(layout.bundle_dir, path, type="Bug", affects=("src/gone.py",))
+    (layout.bundle_dir / release / "children").mkdir(parents=True)
+    (layout.bundle_dir / release / "children/_archive").mkdir()
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    plan = plan_reparent(bundle, load_items(bundle), path, release)
+    root_fd = transactions._open_root(layout.bundle_dir)
+    try:
+        state = transactions._capture_validation_state(layout, plan, root_fd, repo_root=repo)
+    finally:
+        os.close(root_fd)
+
+    destination = f"{release}/children/bug-source.md"
+    assert state.findings[(destination, "targets.affects-missing")] == 1
+    assert (f"{path}.md", "targets.affects-missing") not in state.findings
+
+
+def test_pre_existing_error_on_a_targeted_item_is_excused_and_reported(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = "work/bug-target"
+    _write_item(layout.bundle_dir, path, type="Bug", affects=("src/gone.py",))
+    (layout.bundle_dir / path).mkdir()
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+    after = before.replace(b"updated: 2026-08-22", b"updated: 2026-08-23")
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite(f"{path}.md", _digest(before), after),),
+        validate_paths=(path,),
+    )
+
+    result = apply_mutation(layout, plan, repo_root=repo)
+
+    assert result.ok is True
+    assert result.failures == ()
+    assert page.read_bytes() == after
+    assert any("targets.affects-missing" in warning and "pre-existing" in warning for warning in result.warnings)
+    assert any("gw lint" in warning for warning in result.warnings)
+
+
+def test_unrelated_excused_note_does_not_fabricate_a_pre_existing_summary(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    path = "work/feature-clean"
+    _write_item(layout.bundle_dir, path, type="Feature")
+    (layout.bundle_dir / path).mkdir()
+    plan = _plan(layout, validate_paths=(path,))
+    root_fd = transactions._open_root(layout.bundle_dir)
+    excused = ["baseline capture failed, falling back to absolute postcondition gate for this mutation: boom"]
+    try:
+        failures = transactions._validate_postconditions(
+            layout,
+            plan,
+            root_fd,
+            baseline=None,
+            excused=excused,
+        )
+    finally:
+        os.close(root_fd)
+
+    assert failures == ()
+    assert excused == ["baseline capture failed, falling back to absolute postcondition gate for this mutation: boom"]
 
 
 def test_targeted_malformed_yaml_is_a_postcondition_failure_and_rolls_back(tmp_path: Path) -> None:
@@ -2219,6 +2322,8 @@ def test_relative_moved_symlink_projection_follows_destination_ancestor_links(
         assert result.ok is True
         assert moved.readlink() == Path("gateway/target.bin")
         assert moved.read_bytes() == b"internal"
+        assert any("baseline capture failed" in warning for warning in result.warnings)
+        assert not any("pre-existing validation failure(s) excused" in warning for warning in result.warnings)
     else:
         assert result.ok is False
         assert result.rolled_back is False
@@ -2586,3 +2691,138 @@ def test_rollback_refuses_a_backup_holding_an_unsupported_entry_type(tmp_path: P
 
     with pytest.raises(ValueError, match="unsupported filesystem entry type"):
         transactions._restore_snapshot(root, entries)
+
+
+def test_map_member_rewrites_pages_and_owned_directory_contents_deepest_first() -> None:
+    mapping = {
+        "work/epic-a": "work/_archive/epic-a",
+        "work/epic-a/children/bug-b": "work/epic-a/children/_archive/bug-b",
+    }
+
+    assert transactions._map_member(mapping, "work/epic-a.md") == "work/_archive/epic-a.md"
+    assert (
+        transactions._map_member(mapping, "work/epic-a/references/01-design.md")
+        == "work/_archive/epic-a/references/01-design.md"
+    )
+    assert (
+        transactions._map_member(mapping, "work/epic-a/children/bug-b.md") == "work/epic-a/children/_archive/bug-b.md"
+    )
+    assert transactions._map_member(mapping, "work/index.md") == "work/index.md"
+    assert transactions._map_member({}, "work/epic-a.md") == "work/epic-a.md"
+
+
+def test_pre_existing_error_survives_a_real_move_and_is_excused_at_its_new_path(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    release = "work/release-cutover"
+    source = "work/bug-source"
+    _write_item(layout.bundle_dir, release, type="Release")
+    _write_item(layout.bundle_dir, source, type="Bug", affects=("src/gone.py",))
+    (layout.bundle_dir / release / "children").mkdir(parents=True)
+    (layout.bundle_dir / release / "children/_archive").mkdir()
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    plan = plan_reparent(bundle, load_items(bundle), source, release)
+
+    result = apply_mutation(layout, plan, repo_root=repo)
+
+    destination = f"{release}/children/bug-source"
+    assert result.ok is True
+    assert result.failures == ()
+    assert (layout.bundle_dir / f"{destination}.md").exists()
+    assert any(
+        "pre-existing" in warning and f"{destination}.md: targets.affects-missing" in warning
+        for warning in result.warnings
+    )
+
+
+def test_a_second_failure_of_the_same_code_on_the_same_page_still_fails(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = "work/bug-target"
+    _write_item(layout.bundle_dir, path, type="Bug", affects=("src/gone.py",))
+    (layout.bundle_dir / path).mkdir()
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+    after = before.replace(b"  - src/gone.py\n", b"  - src/gone.py\n  - src/also-gone.py\n")
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite(f"{path}.md", _digest(before), after),),
+        validate_paths=(path,),
+    )
+
+    result = apply_mutation(layout, plan, repo_root=repo)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert page.read_bytes() == before
+    introduced = [failure for failure in result.failures if "targets.affects-missing" in failure]
+    assert len(introduced) == 1
+    assert "src/also-gone.py" in introduced[0] or "src/gone.py" in introduced[0]
+
+
+def test_pre_existing_dangling_dependency_is_excused_by_the_structural_half(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = "work/bug-target"
+    _write_item(
+        layout.bundle_dir,
+        path,
+        type="Bug",
+        depends_on=({"path": "work/bug-absent", "blocks": "execute", "needs": "resolved"},),
+    )
+    (layout.bundle_dir / path).mkdir()
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+    after = before.replace(b"updated: 2026-08-22", b"updated: 2026-08-23")
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite(f"{path}.md", _digest(before), after),),
+        validate_paths=(path,),
+    )
+
+    result = apply_mutation(layout, plan, repo_root=repo)
+
+    assert result.ok is True
+    assert result.failures == ()
+    assert any(
+        "pre-existing" in warning and "dependency target 'work/bug-absent'" in warning for warning in result.warnings
+    )
+
+
+def test_a_new_dangling_dependency_added_on_top_of_a_pre_existing_one_still_fails(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    path = "work/bug-target"
+    _write_item(
+        layout.bundle_dir,
+        path,
+        type="Bug",
+        depends_on=({"path": "work/bug-absent", "blocks": "execute", "needs": "resolved"},),
+    )
+    (layout.bundle_dir / path).mkdir()
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+    after = before.replace(
+        b"  - {blocks: execute, needs: resolved, path: work/bug-absent}\n",
+        b"  - {blocks: execute, needs: resolved, path: work/bug-absent}\n"
+        b"  - {blocks: execute, needs: resolved, path: work/bug-also-absent}\n",
+    )
+    assert after != before
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite(f"{path}.md", _digest(before), after),),
+        validate_paths=(path,),
+    )
+
+    result = apply_mutation(layout, plan, repo_root=repo)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert page.read_bytes() == before
+    introduced = [failure for failure in result.failures if "dependency target" in failure]
+    assert len(introduced) == 1
+    assert "work/bug-absent" in introduced[0] or "work/bug-also-absent" in introduced[0]

@@ -81,7 +81,7 @@ Destination naming, from the note's `kind` / `target_slug` / `mode`:
 
 Omit the `tokens:` key (stamped later by `gw util tokens`). Write real prose grounded in
 the note's evidence + source — never a bullet dump, never invented facts. Cite the source
-as `[[sources/<ref>]]` and wikilink only `[[entities/…]]` pages you've verified exist.
+as `[<ref>](/sources/<ref>.md)` and link only pages under their real per-type lane (e.g. `/repositories/<repo>/packages/<name>.md`) that you've verified exist.
 
 Assign numbers and supersession links **centrally before dispatch** (you, the orchestrator,
 own cross-page identity); give each subagent its exact filename + any supersedes link so

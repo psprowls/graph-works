@@ -56,16 +56,16 @@ Format:
 - **Direct answer** — 1-3 sentences
 - **Supporting detail** — organized thematically
 - **Inline citations** — mix of:
-  - wiki page wikilinks: `[[repositories/<repo>/packages/xxx.md]]`, `[[sources/yyy]]`
+  - wiki page links: `[xxx](/repositories/<repo>/packages/xxx.md)`, `[yyy](/sources/yyy.md)`
   - code paths with line numbers: `` `packages/foo/src/bar.ts:42` ``
-- **Related pages** — 3-5 wikilinks at the end
+- **Related pages** — 3-5 links at the end
 
 ### 6. Offer to file the answer back
 
 **Every good answer is a candidate wiki page.** At the end of the answer, ask:
 
 > _Should I file this as a new page? Suggested location:
-> `<workspace>/okf/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses, `pattern` for reusable patterns, or omit for general concepts. Or I can append to [[existing-page]]._
+> `<workspace>/okf/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses, `pattern` for reusable patterns, or omit for general concepts. Or I can append to [existing-page](/existing-page.md)._
 
 If yes:
 - Pick the right category and kind:

@@ -82,7 +82,7 @@ test suites — is rendered as a single page nested under `repositories/<repo>/`
 
 1. **Scan** — build the code graph and render one page per admitted entity into `repositories/<repo>/` (and `dependencies/` for deps); the default scan then fills prose via a commit-gated **emit → fan-out → apply** pipeline (`## Narrative`, file/dir descriptions, `## Purpose`/`## Public API`). A bare `--no-narrate` invocation is the mechanical structural-only fast path (`## Narrative` placeholder + `— TODO` file-map rows). See `references/scan-workflow.md`.
 2. **Ingest** — `gw ingest --source <any path>` reads material directly (article, spec, PR, transcript) and classifies it. By default (`claude_code` backend) it returns a brief and writes nothing — the dispatched `ingestor` sub-agent discusses with you, then drafts a source summary, links relevant pages, updates the index, and appends to the log. `--backend bedrock` (or `vercel`) runs the fully autonomous one-call pipeline instead.
-3. **Query** — read `index.md`, drill into 3-10 pages, synthesize with inline `[[wikilinks]]`, offer to file the answer back. See `references/query-workflow.md`.
+3. **Query** — read `index.md`, drill into 3-10 pages, synthesize with inline root-absolute markdown links, offer to file the answer back. See `references/query-workflow.md`.
 4. **Lint** — health check including **code-drift detection**: packages on disk missing from the vault, vault pages referencing deleted/renamed packages, stale package summaries whose exports have changed. See `references/lint-workflow.md`.
 
 ## Quick start
@@ -196,5 +196,5 @@ Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AG
 3. **All curated concept writes go under `<workspace>/okf/`.** Work items use canonical paths under `<workspace>/okf/work/`; managed work artifacts go only in the item’s owned `references/` directory.
 4. **Every vault page has YAML frontmatter.** Curated pages (concept/source/adr/dependency/work) carry `title`, `category`, `summary`, `updated`; concept pages may also carry `kind: concept | pattern | architecture`; graph-derived entity pages carry `uri`, `kind`, `graph_name`, `last_scan_at` plus per-kind edge/attr keys (the scanner owns their frontmatter) — `title`/`updated` are intentionally absent; the H1 carries the entity name and `last_scan_at` is the freshness signal.
 5. **Every ingest or scan touches ≥3 files:** the changed/new page(s), `index.md`, `log.md`.
-6. **Every claim on a package page cites** either a source page (`[[sources/xxx]]`) or a code path (`packages/foo/src/bar.ts`).
+6. **Every claim on a package page cites** either a source page (`[…](/sources/xxx.md)`) or a code path (`packages/foo/src/bar.ts`).
 7. **Good query answers get filed back** — explorations compound.

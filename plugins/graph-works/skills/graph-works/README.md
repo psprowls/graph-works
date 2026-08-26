@@ -115,7 +115,7 @@ Only the schema loader file changes per tool. The scripts run identically everyw
     └── AGENTS.md                # same content for Codex/Cursor/Antigravity/OpenCode
 ```
 
-**Iron rule:** the code is the source of truth. Ingested material is never edited — the ingest flow (either `gw ingest`'s `--backend bedrock`/`vercel` pipeline, or the `claude_code`-mode ingestor sub-agent per `/graph-works:ingest`) copies it into `<workspace>/okf/sources/references/`, leaving the original untouched; all curated writes go under `<workspace>/okf/`. Work items live at `<workspace>/okf/work/` and are referenced from other pages via wikilinks (e.g. `[[../work/release-healthkit/children/epic-reliability/children/bug-flaky-healthkit-tests]]`).
+**Iron rule:** the code is the source of truth. Ingested material is never edited — the ingest flow (either `gw ingest`'s `--backend bedrock`/`vercel` pipeline, or the `claude_code`-mode ingestor sub-agent per `/graph-works:ingest`) copies it into `<workspace>/okf/sources/references/`, leaving the original untouched; all curated writes go under `<workspace>/okf/`. Work items live at `<workspace>/okf/work/` and are referenced from other pages via root-absolute markdown links (e.g. `[bug-flaky-healthkit-tests](/work/release-healthkit/children/epic-reliability/children/bug-flaky-healthkit-tests.md)`).
 
 ## Four operations
 

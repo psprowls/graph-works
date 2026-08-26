@@ -1,6 +1,6 @@
 ---
 name: librarian
-description: Dispatched sub-agent that answers queries against a Code Wiki. Reads index.md first, drills into 3-10 relevant pages across categories (concepts, entities, ADRs, sources, work), synthesizes an answer with inline [[wikilink]] and `code-path:line` citations, and offers to file the answer back as a new concept page (choosing the kind). Spawn when the user asks a substantive question about the monorepo the wiki might answer.
+description: Dispatched sub-agent that answers queries against a Code Wiki. Reads index.md first, drills into 3-10 relevant pages across categories (concepts, entities, ADRs, sources, work), synthesizes an answer with inline root-absolute markdown links and `code-path:line` citations, and offers to file the answer back as a new concept page (choosing the kind). Spawn when the user asks a substantive question about the monorepo the wiki might answer.
 skills: [graph-works]
 domain: engineering
 model: sonnet
@@ -43,7 +43,7 @@ Pick 3-10 pages across categories most likely to contain the answer:
 - `adrs/` — "why did we do it this way"
 - `sources/` — evidence and original context
 
-**In-repo doc sources:** Search results may include `category: source` pages with `source_type: doc` — these summarize in-repo `.md` design docs. When citing a claim that originates in such a doc, prefer the vault source page (`[[sources/<YYYY-MM>-<slug>]]`); the source page itself cites the canonical repo-relative `source_path`.
+**In-repo doc sources:** Search results may include `category: source` pages with `source_type: doc` — these summarize in-repo `.md` design docs. When citing a claim that originates in such a doc, prefer the vault source page (`[<slug>](/sources/<YYYY-MM>-<slug>.md)`); the source page itself cites the canonical repo-relative `source_path`.
 
 ### 2. Read the picked pages in full
 
@@ -57,14 +57,14 @@ Stop when you have enough.
 Format:
 - **Direct answer** — 1-3 sentences
 - **Supporting detail** — organized thematically
-- **Inline citations** — `[[wikilinks]]` for vault pages, `` `code-paths:line` `` for code
-- **Related pages** — 3-5 wikilinks at the end
+- **Inline citations** — root-absolute markdown links for vault pages, `` `code-paths:line` `` for code
+- **Related pages** — 3-5 links at the end
 
 ### 6. Offer to file back
 ```
 _Should I file this as a new page? Suggested location:
  `<workspace>/okf/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses,
- `pattern` for reusable patterns, or omit `kind` for general concepts. Or I can append to [[existing-page]]._
+ `pattern` for reusable patterns, or omit `kind` for general concepts. Or I can append to [existing-page](/existing-page.md)._
 ```
 
 If yes, pick the right kind (see above), use the matching template (`concept-architecture.md`, `concept-pattern.md`, or `concept.md`), add frontmatter, update `index.md`, append to `log.md` with `op: create`.

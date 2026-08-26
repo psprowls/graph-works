@@ -1,6 +1,6 @@
 ---
 name: query
-description: Query the Code Wiki — reads index.md first, drills into 3-10 relevant pages (concepts, entities, ADRs, sources), synthesizes answer with inline [[wikilinks]] and `code-paths:line`, and offers to file the answer back as a concept page. Usage /graph-works:query "<question>"
+description: Query the Code Wiki — reads index.md first, drills into 3-10 relevant pages (concepts, entities, ADRs, sources), synthesizes answer with inline root-absolute markdown links and `code-paths:line`, and offers to file the answer back as a concept page. Usage /graph-works:query "<question>"
 ---
 
 # /graph-works:query
@@ -26,7 +26,7 @@ Ask the wiki a question. The librarian reads `index.md` first, picks relevant pa
 3. **Drill-in** — 3-10 pages across categories (concepts + entities + sources + adrs + work)
 4. **Follow links** — opportunistic
 5. **Last resort** — read code directly if neither `top_pages` nor the index covers it
-6. **Synthesize** — direct answer + supporting detail + inline citations (`[[wikilinks]]` + `` `code-paths:line` ``) + "Related pages"
+6. **Synthesize** — direct answer + supporting detail + inline citations (root-absolute markdown links + `` `code-paths:line` ``) + "Related pages"
 7. **Offer to file back** — as a concept page (choosing the kind: `architecture`, `pattern`, or default `concept`), comparison, or adr
 
 `--backend bedrock` / `--backend vercel` still run the full internal pipeline (an internal LLM call composes the answer) for workspaces that opt into it.

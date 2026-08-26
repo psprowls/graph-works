@@ -5,7 +5,7 @@
 > history, not live truth. If this page and the shipped workspace tree
 > (`<repo>/.works/okf/...`) disagree, treat this page as stale and file (or find) the
 > TechDebt item that tracks the drift; see
-> [[../../../../work/tech-debt-plugin-docs-layout-claims]] for the layout-claim sweep that
+> [tech-debt-plugin-docs-layout-claims](/work/tech-debt-plugin-docs-layout-claims.md) for the layout-claim sweep that
 > last corrected this page.
 
 The wiki sits inside a graph-works workspace alongside other workspace-level directories. The LLM must respect the boundaries.
@@ -425,17 +425,16 @@ Three categories use markdown tables in the body for structured rows. Header row
 
 ## Linking
 
-Use Obsidian wikilinks. Three forms:
+Use root-absolute markdown links — `okf_io.LinkGraph` parses `[text](/path.md)` and cannot see a `[[wikilink]]` at all:
 
 ```
-[[repositories/<repo>/packages/common-aws-node-ts.md]]                         # full path to entity page
-[[repositories/<repo>/packages/common-aws-node-ts.md|the AWS helpers package]] # custom display
-[[common-aws-node-ts]]                                                          # stem — resolves if unique
+[the AWS helpers package](/repositories/<repo>/packages/common-aws-node-ts.md)  # full path to entity page, custom display
+[common-aws-node-ts](/repositories/<repo>/packages/common-aws-node-ts.md)       # full path, display matches the stem
 ```
 
-For entity pages (packages, apps, etc.), prefer stem links when the name is unambiguous; use the full `repositories/<repo>/<kind-folder>/<name>.md` path only when disambiguation is needed. Use full paths for non-entity pages (concepts, sources, ADRs, etc.).
+Always use the full `/repositories/<repo>/<kind-folder>/<name>.md` path for entity pages — there is no stem-only resolution. Use full root-absolute paths for non-entity pages (concepts, sources, ADRs, etc.) too.
 
-Code references — when citing actual code — use a plain code reference (Obsidian won't wikilink them but it's searchable):
+Code references — when citing actual code — use a plain code reference (not a link):
 
 ```
 See `packages/common-aws-node-ts/src/handlers/baseApiHandler.ts:42`
@@ -443,9 +442,9 @@ See `packages/common-aws-node-ts/src/handlers/baseApiHandler.ts:42`
 
 ## Cross-reference rules
 
-- **Every package mentioned on an entity or concept page must be a wikilink** to `repositories/<repo>/packages/<name>.md`.
-- **Every ADR referenced in entity/concept pages must be a wikilink** to `adrs/<id>-<slug>`.
-- **Every claim on an entity page cites** either a source page (`[[sources/xxx]]`) or a code path (backticked, with file:line).
+- **Every package mentioned on an entity or concept page must be a link** to `/repositories/<repo>/packages/<name>.md`.
+- **Every ADR referenced in entity/concept pages must be a link** to `/adrs/<id>-<slug>.md`.
+- **Every claim on an entity page cites** either a source page (`[…](/sources/xxx.md)`) or a code path (backticked, with file:line).
 - **Contradictions get flagged inline** with a `> ⚠️ Contradiction:` callout naming the conflicting sources or code paths.
 - **Concept pages with `kind: architecture` link back to every entity and ADR they draw on.**
 

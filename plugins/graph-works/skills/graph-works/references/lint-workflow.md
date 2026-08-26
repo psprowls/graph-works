@@ -20,7 +20,7 @@ gw wiki lint
 
 Default report:
 
-- **Orphans** — pages with zero inbound `[[wikilinks]]`
+- **Orphans** — pages with zero inbound links
 - **Broken links** — wikilinks pointing to non-existent pages
 - **Stale pages** — pages whose `updated:` frontmatter is older than 90 days (tune via `--stale-days`)
 - **Missing frontmatter** — curated pages lacking `title`/`category`/`summary`; entity pages (under `repositories/<repo>/` or `dependencies/`) lacking `uri`/`kind` (entity pages use the scanner-owned frontmatter contract, not `category`/`tokens`/`title`/`updated`)

@@ -112,7 +112,7 @@ The report MUST be structured as:
 3. Re-run `/graph-works:scan` to refresh `repositories/<repo>/packages/<pkg>.md` graph-derived frontmatter from current code
 4. Revise the affected canonical `<work-path>` or update its `work_status`
 5. Create concept pages for: <names>
-6. Fix broken link in `[[<page>]]`
+6. Fix broken link in `[<page>](/<page>.md)`
 
 Want me to run these in order, or pick specific ones?
 ```
@@ -121,7 +121,7 @@ Then append a `## [YYYY-MM-DD] lint | <date> health check` entry to `log.md` wit
 
 ## Rules
 
-- **Check Obsidian syntax** during the semantic pass — flag pages that use plain Markdown links to `.md` targets instead of `[[wikilinks]]`, malformed callouts, or properties duplicated between frontmatter and body.
+- **Check link syntax** during the semantic pass — flag pages that use `[[wikilinks]]` instead of root-absolute markdown links to `.md` targets, malformed callouts, or properties duplicated between frontmatter and body.
 - **Report, don't silently fix.** The user decides.
 - **Prioritize by impact.** Code drift > contradictions > broken links > orphans > stale > style.
 - **Use the scripts AND read pages.** Mechanical + semantic both reveal different problems.

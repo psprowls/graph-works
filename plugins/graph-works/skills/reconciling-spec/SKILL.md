@@ -122,7 +122,7 @@ a contradiction it could not resolve.
 ## Reconciled <date> (<short-anchor>..<short-head>)
 
 **Landed since this spec was written:**
-- [[work/<sibling-path>]] resolved_in `<sha>` — what it changed, and whether the spec cared.
+- [<sibling-path>](/work/<sibling-path>.md) resolved_in `<sha>` — what it changed, and whether the spec cared.
 
 **Decisions reconciled:**
 - D-nnn (assumed → answered): ...

@@ -4,8 +4,10 @@
 descriptor so that a path swapped underneath the engine cannot redirect a
 write.  On POSIX that anchor *is* an `int` and every operation is an
 `os.*(..., dir_fd=...)` call.  Windows has no such primitive, so the `int`
-cannot be the interface; this module makes the *handle* the interface and
-leaves one implementation behind it.
+cannot be the interface; this module makes the *handle* the interface, with
+two implementations behind it -- `_PosixAnchor` and `_WindowsAnchor` -- chosen
+by the `open_anchor`/`open_absolute_anchor` selectors at `anchor_tier`'s
+platform argument.
 
 Five things that are POSIX-only become methods here, which is the whole point
 of the exercise: `flock`, the `renameat2`/`renameatx_np` NOREPLACE rename,
@@ -46,8 +48,7 @@ from typing import Protocol, runtime_checkable
 
 #: The tier name a POSIX anchor declares.  `graph_works_core.util.platform`'s
 #: `DurabilityTierProvider` currently answers by proxy (is `fcntl` importable?);
-#: once it asks the selector instead, this is the string it reports.  Retiring
-#: that proxy is child 7's work, not this module's.
+#: once it asks the selector instead, this is the string it reports.
 POSIX_STRONG_TIER = "posix-strong"
 
 
@@ -714,31 +715,42 @@ def _anchor_platform(platform_name: str | None) -> str:
 def anchor_tier(platform_name: str | None = None) -> str:
     """The durability tier this platform's anchor declares.
 
-    Raises rather than returning a placeholder: a tier name for an
+    Two tiers, both implemented, both declared in ADR-0042: `posix-strong`
+    pins directory descriptors, `windows-revalidated` re-`lstat`s a held path.
+    A platform name that matches neither is a programming error rather than a
+    third tier, so it raises rather than defaulting -- a tier name for an
     implementation that does not exist would be a claim nothing can honour.
     """
     resolved = _anchor_platform(platform_name)
-    if resolved.startswith("win"):
-        raise UnsupportedAnchorPlatform(
-            f"no anchor implementation for platform {resolved!r}: _WindowsAnchor is not implemented yet"
-        )
+    if _is_windows(resolved):
+        return WINDOWS_REVALIDATED_TIER
     return POSIX_STRONG_TIER
+
+
+def _anchor_class(platform_name: str | None) -> type[_PosixAnchor] | type[_WindowsAnchor]:
+    return _WindowsAnchor if _is_windows(_anchor_platform(platform_name)) else _PosixAnchor
+
+
+def _is_windows(platform_name: str) -> bool:
+    """`sys.platform` is `win32` on every 32- and 64-bit CPython for Windows;
+    `cygwin` is matched too because it is the other name a Windows Python
+    reports, and misrouting it to the descriptor arm would fail obscurely."""
+    return platform_name.startswith("win") or platform_name == "cygwin"
 
 
 def open_anchor(path: Path, *, platform_name: str | None = None) -> Anchor:
     """Pin an existing directory as an anchor, selecting by platform."""
-    anchor_tier(platform_name)
-    return _PosixAnchor.open_root(path)
+    return _anchor_class(platform_name).open_root(path)
 
 
 def open_absolute_anchor(path: Path, *, platform_name: str | None = None) -> Anchor:
     """As `open_anchor`, walking an absolute path component by component."""
-    anchor_tier(platform_name)
-    return _PosixAnchor.open_absolute(path)
+    return _anchor_class(platform_name).open_absolute(path)
 
 
 __all__ = [
     "POSIX_STRONG_TIER",
+    "WINDOWS_REVALIDATED_TIER",
     "Anchor",
     "UnsupportedAnchorPlatform",
     "anchor_tier",

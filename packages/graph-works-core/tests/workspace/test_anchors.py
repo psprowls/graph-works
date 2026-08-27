@@ -31,13 +31,54 @@ def test_open_anchor_selects_the_posix_implementation_and_reports_its_tier(tmp_p
         anchor.close()
 
 
-def test_open_anchor_on_windows_names_the_implementation_that_does_not_exist_yet(tmp_path: Path) -> None:
-    with pytest.raises(anchors.UnsupportedAnchorPlatform, match="_WindowsAnchor"):
-        anchors.open_anchor(tmp_path, platform_name="win32")
-    with pytest.raises(anchors.UnsupportedAnchorPlatform, match="_WindowsAnchor"):
-        anchors.open_absolute_anchor(tmp_path, platform_name="win32")
-    with pytest.raises(anchors.UnsupportedAnchorPlatform, match="_WindowsAnchor"):
-        anchors.anchor_tier("win32")
+def test_raw_descriptor_refuses_a_windows_anchor(tmp_path: Path) -> None:
+    """`UnsupportedAnchorPlatform` still fires -- now only from the one call
+    site (`transactions._raw_descriptor`) that genuinely cannot take a
+    `_WindowsAnchor`, not from the selectors themselves."""
+    from graph_works_core.workspace import transactions
+
+    anchor = anchors.open_anchor(tmp_path, platform_name="win32")
+    try:
+        with pytest.raises(anchors.UnsupportedAnchorPlatform, match="POSIX anchor"):
+            transactions._raw_descriptor(anchor)
+    finally:
+        anchor.close()
+
+
+@pytest.mark.parametrize("platform_name", ["win32", "cygwin", "windows"])
+def test_a_windows_platform_selects_the_revalidated_tier(platform_name: str) -> None:
+    assert anchors.anchor_tier(platform_name) == anchors.WINDOWS_REVALIDATED_TIER
+
+
+@pytest.mark.parametrize("platform_name", ["linux", "darwin", "freebsd13"])
+def test_a_posix_platform_still_selects_the_strong_tier(platform_name: str) -> None:
+    assert anchors.anchor_tier(platform_name) == anchors.POSIX_STRONG_TIER
+
+
+def test_open_anchor_returns_the_windows_arm_when_asked(tmp_path: Path) -> None:
+    anchor = anchors.open_anchor(tmp_path, platform_name="win32")
+    try:
+        assert isinstance(anchor, anchors._WindowsAnchor)
+    finally:
+        anchor.close()
+
+
+def test_open_absolute_anchor_returns_the_windows_arm_when_asked(tmp_path: Path) -> None:
+    nested = tmp_path / "a" / "b"
+    nested.mkdir(parents=True)
+    anchor = anchors.open_absolute_anchor(nested, platform_name="win32")
+    try:
+        assert isinstance(anchor, anchors._WindowsAnchor)
+    finally:
+        anchor.close()
+
+
+def test_the_two_tier_names_are_the_only_two(tmp_path: Path) -> None:
+    """A third tier must be a deliberate act, not a typo that falls through."""
+    assert {anchors.anchor_tier("linux"), anchors.anchor_tier("win32")} == {
+        anchors.POSIX_STRONG_TIER,
+        anchors.WINDOWS_REVALIDATED_TIER,
+    }
 
 
 def test_posix_anchor_opens_creates_and_lists_children(tmp_path: Path) -> None:

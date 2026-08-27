@@ -232,3 +232,4 @@ tmp/
 
 # Per-task SDD working reports — scratch, superseded by the work item log.
 .superpowers/
+.pi/

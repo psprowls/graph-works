@@ -857,3 +857,103 @@ A `UnicodeDecodeError` or `UnicodeEncodeError` anywhere in this checkpoint is a
 **FAIL**, including from the `gw` command itself.
 
 **If it fails:** Owner: **reopens** `bug-explicit-encoding-newline`.
+
+## Group E — Orca as the dispatch backend
+
+Owner: `tech-debt-guard-workflow-local-verify-orca`.
+
+**Availability is already settled and is not what is being checked here.** D-004
+established, from Orca's own source tree rather than a local install, that a
+native Windows build ships: a `build:win` script driving electron-builder with
+NSIS packaging, three Windows-specific e2e suites, a WSL hook-relay reattach
+benchmark, and an `electron.vite.config.ts` note about Windows NSIS deploying
+`app.asar` before external resources. What remains is D-002's *verify, not
+assume* — a run, not a question.
+
+**Start E1 early** (run order step 3) and come back for E2–E4 (step 8).
+
+#### E1 — install Orca's Windows (NSIS) build
+
+**Gate:** none.
+
+**Command:** download the Windows NSIS installer and run it. Record the exact
+installer filename and the version shown in-app under Help → About.
+
+**Expected:** the installer completes and Orca launches to its main window.
+
+**If it fails:** record the installer error verbatim. Owner: fires
+`tech-debt-port-workflow-local-process-control`.
+
+#### E2 — `orca status` shows a reachable runtime
+
+**Gate:** E1.
+
+This is the same precondition `plugins/graph-works/skills/auto-drive/SKILL.md`
+checks before every auto-drive run.
+
+**Command:**
+
+```bat
+orca status
+echo rc=%ERRORLEVEL%
+```
+
+**Expected:** `rc=0` and output naming a reachable runtime. Paste it verbatim.
+`'orca' is not recognized` is a FAIL — the NSIS installer did not put the CLI on
+`PATH`, which is itself the finding.
+
+**If it fails:** Owner: fires `tech-debt-port-workflow-local-process-control`.
+
+#### E3 — `orca orchestration run-current --json` answers
+
+**Gate:** E2.
+
+This is the orchestration surface the auto-drive skill depends on.
+
+**Command:**
+
+```bat
+orca orchestration run-current --json
+echo rc=%ERRORLEVEL%
+```
+
+**Expected:** well-formed JSON on stdout and `rc=0`. A JSON body reporting *no
+current run* is a **PASS** — the surface answered. A non-zero exit, a stack
+trace, or a hang is a FAIL.
+
+**If it fails:** Owner: fires `tech-debt-port-workflow-local-process-control`.
+
+#### E4 — one real auto-drive stage, end to end
+
+**Gate:** E3, and the scratch item from F2.
+
+**Command:** dispatch one auto-drive stage against the scratch item and watch it
+settle:
+
+```bat
+gw work orchestrate work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+```
+
+then drive that stage through Orca as a real dispatched worker, exactly as a
+macOS run would, and observe the worker settle with a `worker_done` through the
+same channel.
+
+**Expected:** the worker starts, does its stage, and settles with `worker_done`.
+Record: the dispatch id, the worker's terminal handle, the elapsed time, and
+whether the settle arrived through the same channel a macOS run uses. A worker
+that starts and never settles is a **FAIL**, and the elapsed time before you
+called it is part of the evidence.
+
+**A `worker_done` is the checkpoint; the stage's own product is not.** If the
+worker settles with `--outcome failed` for a reason of its own — a stage that had
+nothing to do, a plan it declined to write — that is still a **PASS** here: the
+dispatch channel carried a worker from start to settle on Windows, which is the
+only claim E4 makes. Record the outcome value either way.
+
+**If it fails:** this is the trigger. Owner: fires
+`tech-debt-port-workflow-local-process-control` — D-002's filed contingency,
+currently unfired.
+
+**Record the outcome either way.** A pass is what makes *"workflow-orca is the
+native-Windows auto-drive backend"* a verified statement rather than an inherited
+assumption, and that sentence is the whole reason this group exists.

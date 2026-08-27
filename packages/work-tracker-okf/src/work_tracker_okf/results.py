@@ -81,7 +81,7 @@ def write_results(root: Path, item_path: str, facts: ResultsFacts) -> Path:
     document = load(item_page(item_path).path(root))
     target = ref.path(root)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(render(facts), encoding="utf-8")
+    target.write_text(render(facts), encoding="utf-8", newline="")
     upsert(document, ref, title=f"{facts.phase.capitalize()} results")
     document.save()
     return target

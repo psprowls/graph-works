@@ -337,7 +337,7 @@ def apply(plan: FilingPlan) -> Path:
 
     document = _document(plan)
     plan.target.parent.mkdir(parents=True, exist_ok=True)
-    with plan.target.open("x", encoding="utf-8") as stream:
+    with plan.target.open("x", encoding="utf-8", newline="") as stream:
         stream.write(document.serialize())
     root = plan.target
     for _ in Path(plan.path).parts:
@@ -346,7 +346,7 @@ def apply(plan: FilingPlan) -> Path:
         (root / relative).mkdir(parents=True, exist_ok=False)
     (plan.owned_directory / "references" / ".gitkeep").touch(exist_ok=False)
     for relative in plan.required_indexes:
-        (root / relative).write_text(_empty_index(), encoding="utf-8")
+        (root / relative).write_text(_empty_index(), encoding="utf-8", newline="")
     return plan.target
 
 

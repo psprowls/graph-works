@@ -1073,7 +1073,7 @@ def emit_scan_worklist(worklist: ScanWorklist, *, out_dir: Path) -> tuple[str, .
         if seen[slug] > 1:
             slug = f"{slug}-{hashlib.sha1(task.uri.encode('utf-8')).hexdigest()[:8]}"
         brief = briefs / f"{slug}.md"
-        brief.write_text(build_prose_refresh_prompt(task), encoding="utf-8")
+        brief.write_text(build_prose_refresh_prompt(task), encoding="utf-8", newline="")
         written.append(str(brief))
     return tuple(written)
 

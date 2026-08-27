@@ -371,11 +371,11 @@ def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
     for write in plan.writes:
         write.path.parent.mkdir(parents=True, exist_ok=True)
         if write.mode == "create":
-            write.path.write_text(write.content, encoding="utf-8")
+            write.path.write_text(write.content, encoding="utf-8", newline="")
         else:
             existing = write.path.read_text(encoding="utf-8")
             separator = "" if existing.endswith("\n") or not existing else "\n"
-            write.path.write_text(existing + separator + write.content, encoding="utf-8")
+            write.path.write_text(existing + separator + write.content, encoding="utf-8", newline="")
         written.append(write.label)
 
     projection_path = plan.layout.cache_dir / PROJECTION_FILENAME

@@ -41,9 +41,10 @@ import errno
 import os
 import stat
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, suppress
-from pathlib import Path
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 from typing import Protocol, runtime_checkable
 
 #: The tier name a POSIX anchor declares.  `graph_works_core.util.platform`'s
@@ -54,6 +55,27 @@ POSIX_STRONG_TIER = "posix-strong"
 
 class UnsupportedAnchorPlatform(RuntimeError):
     """No anchor implementation is registered for the requested platform."""
+
+
+#: Win32 refuses these as filenames regardless of extension, at every path
+#: component.  Read by the tier record and by ADR-0042.
+RESERVED_DEVICE_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL"} | {f"COM{digit}" for digit in "123456789"} | {f"LPT{digit}" for digit in "123456789"}
+)
+
+
+@dataclass(frozen=True, slots=True)
+class RefusedShape:
+    """One member a tier declines, and what the user can do about it.
+
+    A refusal is a declared contract statement of the tier, not an incident:
+    `gw util platform` reports the refusable shapes as normal output, and
+    ADR-0042 records them as the tier boundary.
+    """
+
+    member: str
+    reason: str
+    remedy: str
 
 
 def nofollow_flag() -> int:
@@ -118,6 +140,9 @@ class Anchor(Protocol):
     # -- locking ------------------------------------------------------------
     def exclusive_lock(self) -> AbstractContextManager[None]: ...
     def lock_file(self, name: str, *, assert_identity: bool) -> AbstractContextManager[None]: ...
+
+    # -- tier contract --------------------------------------------------------
+    def refused_members(self, members: Sequence[str]) -> tuple[RefusedShape, ...]: ...
 
 
 class _PosixAnchor:
@@ -362,6 +387,12 @@ class _PosixAnchor:
                 with suppress(OSError):
                     fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+
+    # -- tier contract --------------------------------------------------------
+
+    def refused_members(self, members: Sequence[str]) -> tuple[RefusedShape, ...]:
+        """The strong tier refuses no plan shapes."""
+        return ()
 
 
 #: The tier name a path-revalidating anchor declares.  Paired with
@@ -700,6 +731,61 @@ class _WindowsAnchor:
         """As `exclusive_lock`: a presence-only stub, replaced for real in Task 8."""
         raise NotImplementedError("Task 8 implements Windows file locking")
 
+    # -- tier contract --------------------------------------------------------
+
+    def refused_members(self, members: Sequence[str]) -> tuple[RefusedShape, ...]:
+        """Every member of *members* this tier cannot honour.
+
+        Called from `transactions._preflight` before the first live effect,
+        because the symlink case is on the ROLLBACK path
+        (`_copy_backup_to_live:1029,1065`) -- the one path that must not fail.
+        Discovering it mid-rollback would leave a half-restored bundle.
+
+        The scan is over the *planned* members only, not the whole bundle.  A
+        symlink deeper inside a targeted directory subtree is caught instead
+        by `symlink()` raising during snapshot creation
+        (`_copy_live_entry:849`), which still runs before any live mutation --
+        so the guarantee holds either way.  Preflight makes it explicit rather
+        than incidental.
+        """
+        refusals: list[RefusedShape] = []
+        root = self._revalidate()
+        for member in members:
+            parts = PurePosixPath(member).parts
+            named = _refused_name(member, parts)
+            if named is not None:
+                refusals.append(named)
+                continue
+            if root.joinpath(*parts).is_symlink():
+                refusals.append(
+                    RefusedShape(
+                        member,
+                        "is a symlink",
+                        "enable Developer Mode or grant SeCreateSymbolicLinkPrivilege, "
+                        f"or run under WSL for the {POSIX_STRONG_TIER} tier",
+                    )
+                )
+        return tuple(sorted(refusals, key=lambda item: item.member))
+
+
+def _refused_name(member: str, parts: Sequence[str]) -> RefusedShape | None:
+    """The name-shape half of the scan: reserved devices, trailing dots/spaces.
+
+    Both are checked at EVERY component, not just the last: `CON/page.md` is
+    as unopenable as `work/CON.md`, and `work/trailing./child.md` round-trips
+    to `work/trailing/child.md`, silently violating member identity.
+    """
+    for part in parts:
+        if part.split(".", 1)[0].upper() in RESERVED_DEVICE_NAMES:
+            return RefusedShape(member, f"{part!r} is a reserved device name", "rename the member")
+        if part != part.rstrip(". "):
+            return RefusedShape(
+                member,
+                f"{part!r} ends in a trailing dot or space, which Win32 strips silently",
+                "rename the member",
+            )
+    return None
+
 
 def _assert_regular_entry_identity(anchor: Anchor, name: str, descriptor: int, label: str) -> None:
     """From transactions.py:264.  Duplicated as a module private rather than
@@ -787,8 +873,10 @@ def open_absolute_anchor(path: Path, *, platform_name: str | None = None) -> Anc
 __all__ = [
     "MAX_PATH",
     "POSIX_STRONG_TIER",
+    "RESERVED_DEVICE_NAMES",
     "WINDOWS_REVALIDATED_TIER",
     "Anchor",
+    "RefusedShape",
     "UnsupportedAnchorPlatform",
     "anchor_tier",
     "directory_flags",

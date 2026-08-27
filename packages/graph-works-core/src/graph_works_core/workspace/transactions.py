@@ -314,6 +314,14 @@ def _open_absolute_directory(path: Path) -> Anchor:
     return open_absolute_anchor(path)
 
 
+def _refuse_unsupported_shapes(root: Anchor, members: Sequence[str]) -> None:
+    refusals = root.refused_members(members)
+    if not refusals:
+        return
+    detail = "; ".join(f"{item.member}: {item.reason} ({item.remedy})" for item in refusals)
+    raise ValueError(f"this durability tier refuses the planned members -- {detail}")
+
+
 def _open_or_create_directory(parent: Anchor, name: str) -> Anchor:
     return parent.open_or_create_child(name)
 
@@ -691,6 +699,7 @@ def _preflight(
         manifest_scratch = layout.cache_dir / "work-mutations" / f".preflight-{uuid.uuid4().hex}"
     effect_paths = {member: plan.root.joinpath(*_lexical_member(member).parts) for member in _effective_members(plan)}
     try:
+        _refuse_unsupported_shapes(root, tuple(effect_paths))
         for member in effect_paths:
             _validate_ancestor_chain(root, member)
 

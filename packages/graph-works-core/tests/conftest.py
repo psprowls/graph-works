@@ -16,10 +16,23 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
 from pathlib import Path
 
 import pytest
 from code_graph_io.testing import raw_conn
+
+# `tests/work/_transaction_helpers.py` is a plain (non-package) module shared
+# by `tests/work/test_transactions.py` and `tests/workspace/test_windows_anchor.py`.
+# Neither `tests/` nor its subdirectories carry `__init__.py`, so pytest's
+# default "prepend" import mode only ever puts a test module's OWN directory
+# on `sys.path` -- it happens to also work when `tests/work` is collected
+# before `tests/workspace` (alphabetical order), but that is an accident of
+# collection order, not a guarantee, and it breaks outright when
+# `test_windows_anchor.py` is run on its own. This conftest is collected
+# before any test module in the run, regardless of target, so inserting the
+# helper's directory here is the one place that is order-independent.
+sys.path.insert(0, str(Path(__file__).parent / "work"))
 
 _ORG = "acme"
 _REPO = "demo"

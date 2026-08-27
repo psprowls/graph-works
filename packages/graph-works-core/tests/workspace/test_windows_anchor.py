@@ -11,7 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from graph_works_core.workspace import anchors
+from _transaction_helpers import _forced_tier, _plan, _snapshot, _workspace
+from graph_works_core.workspace import anchors, transactions
 
 
 def _anchor(root: Path) -> anchors._WindowsAnchor:
@@ -212,3 +213,70 @@ def test_a_child_anchor_inherits_the_long_path_answer(tmp_path: Path) -> None:
             child.close()
     finally:
         anchor.close()
+
+
+def test_refused_members_is_empty_on_the_strong_tier(tmp_path: Path) -> None:
+    anchor = anchors.open_anchor(tmp_path, platform_name="linux")
+    try:
+        assert anchor.refused_members(["work/CON.md", "work/page.", "work/link.md"]) == ()
+    finally:
+        anchor.close()
+
+
+def test_refused_members_names_every_symlink_at_once(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    (tmp_path / "target.md").write_text("x\n", encoding="utf-8")
+    (tmp_path / "work" / "a.md").symlink_to(tmp_path / "target.md")
+    (tmp_path / "work" / "b.md").symlink_to(tmp_path / "target.md")
+    anchor = _anchor(tmp_path)
+    try:
+        refusals = anchor.refused_members(["work/a.md", "work/b.md"])
+        assert {item.member for item in refusals} == {"work/a.md", "work/b.md"}
+        assert all("Developer Mode" in item.remedy for item in refusals)
+    finally:
+        anchor.close()
+
+
+@pytest.mark.parametrize("member", ["work/CON.md", "work/nul.md", "work/COM1", "work/lpt9.md", "CON/page.md"])
+def test_refused_members_catches_reserved_device_names(tmp_path: Path, member: str) -> None:
+    anchor = _anchor(tmp_path)
+    try:
+        refusals = anchor.refused_members([member])
+        assert len(refusals) == 1
+        assert "reserved device name" in refusals[0].reason
+    finally:
+        anchor.close()
+
+
+@pytest.mark.parametrize("member", ["work/page.", "work/page ", "work/trailing./child.md"])
+def test_refused_members_catches_trailing_dots_and_spaces(tmp_path: Path, member: str) -> None:
+    anchor = _anchor(tmp_path)
+    try:
+        refusals = anchor.refused_members([member])
+        assert len(refusals) == 1
+        assert "trailing dot or space" in refusals[0].reason
+    finally:
+        anchor.close()
+
+
+def test_refused_members_accepts_ordinary_members(tmp_path: Path) -> None:
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "page.md").write_text("x\n", encoding="utf-8")
+    anchor = _anchor(tmp_path)
+    try:
+        assert anchor.refused_members(["work/page.md", "work/lane"]) == ()
+    finally:
+        anchor.close()
+
+
+def test_preflight_refuses_before_any_effect_lands(tmp_path: Path) -> None:
+    """D-002's whole point: the refusal precedes the first mutation."""
+    layout = _workspace(tmp_path)  # shared helper -- see Step 3
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work" / "linked.md").symlink_to(layout.bundle_dir / "index.md")
+    before = _snapshot(layout.bundle_dir)
+    with _forced_tier("win32"):
+        result = transactions.apply_mutation(layout, _plan(layout, deletes=("work/linked.md",)))
+    assert not result.ok
+    assert not result.rolled_back  # nothing was touched, so nothing was rolled back
+    assert _snapshot(layout.bundle_dir) == before

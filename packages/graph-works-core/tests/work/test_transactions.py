@@ -10,18 +10,16 @@ import stat
 import sys
 import threading
 from contextlib import contextmanager
-from datetime import date
 from pathlib import Path
 
 import pytest
+from _transaction_helpers import _plan, _snapshot, _workspace
 from graph_works_core.work import MutationApplication, apply_mutation
 from graph_works_core.work import transactions as public_transactions
 from graph_works_core.workspace import anchors, transactions
-from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
 from okf_ext.moves import Move
 from okf_io import load_bundle
 from work_tracker_okf.indexes import plan_indexes as path_plan_indexes
-from work_tracker_okf.init import install_bundle
 from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
@@ -40,60 +38,6 @@ def _digest(content: bytes) -> str:
 def test_public_work_transaction_surface_reexports_the_workspace_executor() -> None:
     assert public_transactions.apply_mutation is apply_mutation
     assert public_transactions.MutationApplication is MutationApplication
-
-
-def _workspace(tmp_path: Path) -> WorkspaceLayout:
-    layout = layout_for(tmp_path / "workspace")
-    layout.bundle_dir.mkdir(parents=True)
-    layout.cache_dir.mkdir(parents=True)
-    installed = install_bundle(layout.bundle_dir, today=date(2026, 8, 22), dry_run=False)
-    assert installed.ok
-    return layout
-
-
-def _snapshot(root: Path) -> dict[str, tuple[str, int, bytes | str | None]]:
-    snapshot: dict[str, tuple[str, int, bytes | str | None]] = {}
-    pending = [root]
-    while pending:
-        current = pending.pop()
-        for path in sorted(current.iterdir(), key=lambda entry: os.fsencode(entry.name), reverse=True):
-            relative = path.relative_to(root).as_posix()
-            mode = stat.S_IMODE(path.lstat().st_mode)
-            if path.is_symlink():
-                snapshot[relative] = ("symlink", mode, str(path.readlink()))
-            elif path.is_dir():
-                snapshot[relative] = ("directory", mode, None)
-                pending.append(path)
-            else:
-                snapshot[relative] = ("file", mode, path.read_bytes())
-    return snapshot
-
-
-def _plan(
-    layout: WorkspaceLayout,
-    *,
-    moves: tuple[Move, ...] = (),
-    writes: tuple[PlannedWrite, ...] = (),
-    deletes: tuple[str, ...] = (),
-    mkdirs: tuple[str, ...] = (),
-    validate_paths: tuple[str, ...] = (),
-    directory_preconditions: tuple[DirectoryPrecondition, ...] = (),
-    path_mapping: dict[str, str] | None = None,
-) -> WorkMutationPlan:
-    return WorkMutationPlan(
-        root=layout.bundle_dir,
-        operation="reparent",
-        path_mapping={} if path_mapping is None else path_mapping,
-        move_plan=None,
-        moves=moves,
-        writes=writes,
-        deletes=deletes,
-        mkdirs=mkdirs,
-        warnings=("opaque reference retained",),
-        refusals=(),
-        validate_paths=validate_paths,
-        directory_preconditions=directory_preconditions,
-    )
 
 
 def _states(journal: Path) -> list[str]:

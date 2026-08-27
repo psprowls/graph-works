@@ -16,7 +16,7 @@ only conditionally correct is worth nothing.
 
 from __future__ import annotations
 
-import fcntl
+import fcntl  # noqa: F401 -- kept for `test_transactions.py`'s `transactions.fcntl.flock` monkeypatch handle
 import hashlib
 import json
 import math
@@ -45,7 +45,7 @@ from work_tracker_okf.mutation import WorkMutationPlan, directory_manifest_diges
 from work_tracker_okf.paths import parse_item_path
 
 from graph_works_core.workspace import anchors
-from graph_works_core.workspace.anchors import Anchor, open_absolute_anchor
+from graph_works_core.workspace.anchors import Anchor, open_absolute_anchor, open_anchor
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 
@@ -278,19 +278,10 @@ def _executor_lock(transaction_root: Path, *, root: Anchor | None = None) -> Ite
 
 
 @contextmanager
-def _bundle_root_lock(root_fd: int) -> Iterator[None]:
+def _bundle_root_lock(root: Anchor) -> Iterator[None]:
     """Serialize every executor holding this anchored bundle directory."""
-    if not stat.S_ISDIR(os.fstat(root_fd).st_mode):
-        raise NotADirectoryError("bundle root descriptor is not a directory")
-    locked = False
-    try:
-        fcntl.flock(root_fd, fcntl.LOCK_EX)
-        locked = True
+    with root.exclusive_lock():
         yield
-    finally:
-        if locked:
-            with suppress(OSError):
-                fcntl.flock(root_fd, fcntl.LOCK_UN)
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +324,21 @@ def _descriptor_path(anchor: Anchor) -> Path:
 def _directory_descriptor_alias(anchor: Anchor) -> Path:
     """A descriptor-rooted namespace path suitable for resolving descendants."""
     return anchor.alias()
+
+
+def _raw_descriptor(anchor: Anchor) -> int:
+    """The POSIX descriptor backing *anchor*.
+
+    A narrow escape hatch for the handful of call sites this item does not
+    touch: `okf_io.bundle._load_at` still takes a raw `int`, and the
+    multi-component `dir_fd` open in `_projected_symlink_is_internal` falls
+    outside the single-component `Anchor` vocabulary above.  `root` is always
+    a `_PosixAnchor` today -- the selector has no other implementation yet --
+    so this is not a behaviour change.
+    """
+    if not isinstance(anchor, anchors._PosixAnchor):
+        raise anchors.UnsupportedAnchorPlatform("this call requires a POSIX anchor")
+    return anchor.descriptor
 
 
 @contextmanager
@@ -394,11 +400,8 @@ def _new_transaction_directory(
         transaction.close()
 
 
-def _open_root(root: Path) -> int:
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    return os.open(root, flags)
+def _open_root(root: Path) -> Anchor:
+    return open_anchor(root)
 
 
 def _directory_flags() -> int:
@@ -416,64 +419,73 @@ def _file_flags() -> int:
 
 
 def _open_parent(
-    root_fd: int,
+    root: Anchor,
     member: str,
     *,
     create: bool = False,
     touched: set[str] | None = None,
     must_create: set[str] | None = None,
 ) -> tuple[int, str]:
-    """Open *member*'s parent by walking beneath *root_fd* without following links."""
+    """Open *member*'s parent by walking beneath *root* without following links.
+
+    The walk is expressed against the `Anchor` abstraction throughout; only the
+    final hop back to a raw descriptor is POSIX-specific, because every caller
+    of this function still consumes a raw parent descriptor (Task 4 finishes
+    converting that return to an `Anchor`).  `root` is always a `_PosixAnchor`
+    today -- the selector has no other implementation yet -- so narrowing to it
+    here is not a behaviour change, just the seam where the still-`int`-typed
+    rest of this function's callers meet the new `Anchor`-typed callers.
+    """
     pure = _lexical_member(member)
-    descriptor = os.dup(root_fd)
+    cursor = root.duplicate()
     traversed: list[str] = []
     try:
         for part in pure.parts[:-1]:
             traversed.append(part)
             try:
-                child = os.open(part, _directory_flags(), dir_fd=descriptor)
+                child = cursor.open_child(part)
                 created = "/".join(traversed)
                 if must_create is not None and created in must_create and (touched is None or created not in touched):
-                    os.close(child)
+                    child.close()
                     raise ValueError(f"{created}: directory changed since planning (now exists); re-plan")
             except FileNotFoundError:
                 if not create:
                     raise
-                os.mkdir(part, dir_fd=descriptor)
+                cursor.mkdir(part)
                 created = "/".join(traversed)
                 if touched is not None:
                     touched.add(created)
-                _fsync_live_directory(descriptor)
-                child = os.open(part, _directory_flags(), dir_fd=descriptor)
+                _fsync_live_directory(cursor)
+                child = cursor.open_child(part)
                 _fsync_live_directory(child)
             except OSError as exc:
                 raise ValueError(f"{member}: unsafe ancestor {part!r}: {exc}") from exc
-            os.close(descriptor)
-            descriptor = child
+            cursor.close()
+            cursor = child
     except Exception:
-        os.close(descriptor)
+        cursor.close()
         raise
-    return descriptor, pure.name
+    return _raw_descriptor(cursor), pure.name
 
 
-def _lstat_at(root_fd: int, member: str) -> os.stat_result:
-    parent_fd, name = _open_parent(root_fd, member)
+def _lstat_at(root: Anchor, member: str) -> os.stat_result:
+    parent_fd, name = _open_parent(root, member)
     try:
         return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
     finally:
         os.close(parent_fd)
 
 
-def _lexists_at(root_fd: int, member: str) -> bool:
+def _lexists_at(root: Anchor, member: str) -> bool:
     try:
-        _lstat_at(root_fd, member)
+        _lstat_at(root, member)
     except FileNotFoundError:
         return False
     return True
 
 
-def _read_bytes_at(root_fd: int, member: str) -> bytes:
-    parent_fd, name = _open_parent(root_fd, member)
+def _read_bytes_at(root: Anchor, member: str) -> bytes:
+    parent_fd, name = _open_parent(root, member)
     try:
         descriptor = os.open(name, _file_flags(), dir_fd=parent_fd)
         try:
@@ -485,16 +497,16 @@ def _read_bytes_at(root_fd: int, member: str) -> bytes:
         os.close(parent_fd)
 
 
-def _readlink_at(root_fd: int, member: str) -> str:
-    parent_fd, name = _open_parent(root_fd, member)
+def _readlink_at(root: Anchor, member: str) -> str:
+    parent_fd, name = _open_parent(root, member)
     try:
         return os.readlink(name, dir_fd=parent_fd)
     finally:
         os.close(parent_fd)
 
 
-def _fsync_live_file(root_fd: int, member: str) -> None:
-    parent_fd, name = _open_parent(root_fd, member)
+def _fsync_live_file(root: Anchor, member: str) -> None:
+    parent_fd, name = _open_parent(root, member)
     try:
         descriptor = os.open(name, _file_flags(), dir_fd=parent_fd)
         try:
@@ -517,11 +529,8 @@ def _fsync_live_directory(descriptor: int | Anchor) -> None:
         descriptor.fsync()
 
 
-def _assert_root_identity(root: Path, root_fd: int) -> None:
-    expected = os.fstat(root_fd)
-    current = os.stat(root, follow_symlinks=False)  # noqa: PTH116 -- no-follow identity check is required
-    if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
-        raise ValueError("bundle root changed during mutation")
+def _assert_root_identity(root: Path, anchor: Anchor) -> None:
+    anchor.assert_identity(root, "bundle root")
 
 
 def _fsync_entry(path: Path) -> None:
@@ -565,22 +574,22 @@ def _manifest_field(hasher: _HashSink, content: bytes) -> None:
     hasher.update(content)
 
 
-def _entry_manifest_at(root_fd: int, member: str, *, include_mode: bool) -> str:
+def _entry_manifest_at(root: Anchor, member: str, *, include_mode: bool) -> str:
     """Hash one anchored entry tree without following any symlink."""
     hasher = hashlib.sha256()
     pending = [(".", member)]
     while pending:
         relative, current = pending.pop()
-        info = _lstat_at(root_fd, current)
+        info = _lstat_at(root, current)
         if stat.S_ISDIR(info.st_mode):
             kind = b"directory"
             payload = b""
         elif stat.S_ISREG(info.st_mode):
             kind = b"file"
-            payload = hashlib.sha256(_read_bytes_at(root_fd, current)).digest()
+            payload = hashlib.sha256(_read_bytes_at(root, current)).digest()
         elif stat.S_ISLNK(info.st_mode):
             kind = b"symlink"
-            payload = os.fsencode(_readlink_at(root_fd, current))
+            payload = os.fsencode(_readlink_at(root, current))
         else:
             raise ValueError(f"{current}: unsupported filesystem entry type")
         _manifest_field(hasher, relative.encode("utf-8", "surrogateescape"))
@@ -589,7 +598,7 @@ def _entry_manifest_at(root_fd: int, member: str, *, include_mode: bool) -> str:
         if include_mode:
             _manifest_field(hasher, stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
         if kind == b"directory":
-            parent_fd, name = _open_parent(root_fd, current)
+            parent_fd, name = _open_parent(root, current)
             try:
                 directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
                 try:
@@ -608,8 +617,8 @@ def _entry_manifest_at(root_fd: int, member: str, *, include_mode: bool) -> str:
     return hasher.hexdigest()
 
 
-def _entry_fingerprint_at(root_fd: int, member: str) -> str:
-    return _entry_manifest_at(root_fd, member, include_mode=True)
+def _entry_fingerprint_at(root: Anchor, member: str) -> str:
+    return _entry_manifest_at(root, member, include_mode=True)
 
 
 def _effective_members(plan: WorkMutationPlan) -> tuple[str, ...]:
@@ -630,32 +639,26 @@ def _effective_members(plan: WorkMutationPlan) -> tuple[str, ...]:
     return tuple(sorted(members))
 
 
-def _validate_ancestor_chain(root_fd: int, member: str) -> None:
+def _validate_ancestor_chain(root: Anchor, member: str) -> None:
     pure = _lexical_member(member)
-    descriptor = os.dup(root_fd)
+    cursor = root.duplicate()
     try:
         for part in pure.parts[:-1]:
             try:
-                child = os.open(part, _directory_flags(), dir_fd=descriptor)
+                child = cursor.open_child(part)
             except FileNotFoundError:
                 return
             except OSError as exc:
                 raise ValueError(f"{member}: unsafe ancestor {part!r}: {exc}") from exc
-            os.close(descriptor)
-            descriptor = child
+            cursor.close()
+            cursor = child
     finally:
-        os.close(descriptor)
+        cursor.close()
 
 
-def _projected_symlink_is_internal(root_fd: int, destination: str, link: PurePosixPath) -> bool:
-    # `root_fd` is the F1 bundle-root descriptor (out of scope for this item;
-    # see Task 3).  `_descriptor_path`/`_directory_descriptor_alias` now speak
-    # `Anchor`, so this wraps the still-raw descriptor in a transient,
-    # non-owning `_PosixAnchor` -- it is never closed here, matching the
-    # original code, which never closed `root_fd` either.
-    root_anchor = anchors._PosixAnchor(root_fd)
-    descriptor_root = _directory_descriptor_alias(root_anchor)
-    resolved_root = _descriptor_path(root_anchor).resolve(strict=True)
+def _projected_symlink_is_internal(root: Anchor, destination: str, link: PurePosixPath) -> bool:
+    descriptor_root = _directory_descriptor_alias(root)
+    resolved_root = _descriptor_path(root).resolve(strict=True)
     if link.is_absolute():
         projected_text = link.as_posix()
         projected_path = Path(projected_text)
@@ -663,8 +666,11 @@ def _projected_symlink_is_internal(root_fd: int, destination: str, link: PurePos
         projected_pure = PurePosixPath(*PurePosixPath(destination).parent.parts, *link.parts)
         projected_text = projected_pure.as_posix()
         projected_path = descriptor_root.joinpath(*projected_pure.parts)
+    # The projected path is frequently a multi-component relative path, so it
+    # cannot go through `Anchor.open_child` (single component only); this stays
+    # a raw `dir_fd` open.
     try:
-        descriptor = os.open(projected_text, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0), dir_fd=root_fd)
+        descriptor = os.open(projected_text, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0), dir_fd=_raw_descriptor(root))
     except FileNotFoundError:
         resolved_target = projected_path.resolve(strict=False)
     except OSError as exc:
@@ -680,7 +686,7 @@ def _projected_symlink_is_internal(root_fd: int, destination: str, link: PurePos
 def _preflight(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
-    root_fd: int | None = None,
+    root: Anchor | None = None,
     manifest_scratch: Path | None = None,
 ) -> dict[str, Path]:
     if not plan.ok:
@@ -694,42 +700,42 @@ def _preflight(
     if plan_root != layout_root:
         raise ValueError("mutation plan belongs to a different bundle root")
 
-    close_root = root_fd is None
-    if root_fd is None:
-        root_fd = _open_root(layout.bundle_dir)
+    close_root = root is None
+    if root is None:
+        root = _open_root(layout.bundle_dir)
     owns_manifest_scratch = manifest_scratch is None
     if manifest_scratch is None:
         manifest_scratch = layout.cache_dir / "work-mutations" / f".preflight-{uuid.uuid4().hex}"
     effect_paths = {member: plan.root.joinpath(*_lexical_member(member).parts) for member in _effective_members(plan)}
     try:
         for member in effect_paths:
-            _validate_ancestor_chain(root_fd, member)
+            _validate_ancestor_chain(root, member)
 
-        _preflight_anchored(plan, root_fd, manifest_scratch)
+        _preflight_anchored(plan, root, manifest_scratch)
     finally:
         if owns_manifest_scratch:
             _remove_entry(manifest_scratch)
         if close_root:
-            os.close(root_fd)
+            root.close()
     return effect_paths
 
 
-def _preflight_anchored(plan: WorkMutationPlan, root_fd: int, manifest_scratch: Path) -> None:
+def _preflight_anchored(plan: WorkMutationPlan, root: Anchor, manifest_scratch: Path) -> None:
     conditions = [condition.member for condition in plan.directory_preconditions]
     if len(conditions) != len(set(conditions)):
         raise ValueError("directory preconditions contain duplicate members")
 
     for index, condition in enumerate(plan.directory_preconditions):
         if condition.before_digest is None:
-            if _lexists_at(root_fd, condition.member):
+            if _lexists_at(root, condition.member):
                 raise ValueError(f"{condition.member}: directory changed since planning (now exists); re-plan")
             continue
-        if not _lexists_at(root_fd, condition.member):
+        if not _lexists_at(root, condition.member):
             raise ValueError(f"{condition.member}: directory changed since planning (now missing); re-plan")
         try:
             manifest_scratch.mkdir(parents=True, exist_ok=True)
             anchored_copy = manifest_scratch / f"{index:06d}"
-            _copy_live_entry(root_fd, condition.member, anchored_copy)
+            _copy_live_entry(root, condition.member, anchored_copy)
             current_manifest = directory_manifest_digest(anchored_copy)
         except (OSError, ValueError) as exc:
             raise ValueError(f"{condition.member}: directory changed since planning ({exc}); re-plan") from exc
@@ -743,22 +749,22 @@ def _preflight_anchored(plan: WorkMutationPlan, root_fd: int, manifest_scratch: 
         if write.before_digest is None:
             if write.source_member is not None:
                 raise ValueError(f"{preimage_member}: invalid plan without a source digest")
-            if _lexists_at(root_fd, write.member):
+            if _lexists_at(root, write.member):
                 raise ValueError(f"{write.member}: changed since planning (now exists); re-plan")
             continue
         try:
-            current_bytes = _read_bytes_at(root_fd, preimage_member)
+            current_bytes = _read_bytes_at(root, preimage_member)
         except OSError as exc:
             raise ValueError(f"{preimage_member}: changed since planning ({exc}); re-plan") from exc
         if hashlib.sha256(current_bytes).hexdigest() != write.before_digest:
             raise ValueError(f"{preimage_member}: changed since planning; re-plan")
-        if write.source_member is not None and _lexists_at(root_fd, write.member):
+        if write.source_member is not None and _lexists_at(root, write.member):
             raise ValueError(f"{write.member}: changed since planning (now exists); re-plan")
 
     if plan.move_plan is not None:
         for member, expected in plan.move_plan.digests.items():
             try:
-                content = _read_bytes_at(root_fd, member).decode("utf-8")
+                content = _read_bytes_at(root, member).decode("utf-8")
                 current_document = parse(content, path=plan.root / member)
             except (OSError, UnicodeDecodeError, ValueError) as exc:
                 raise ValueError(f"{member}: changed since planning ({exc}); re-plan") from exc
@@ -767,16 +773,16 @@ def _preflight_anchored(plan: WorkMutationPlan, root_fd: int, manifest_scratch: 
 
     destinations: set[str] = set()
     for move in plan.moves:
-        if not _lexists_at(root_fd, move.source):
+        if not _lexists_at(root, move.source):
             raise ValueError(f"{move.source}: direct move changed since planning (source missing); re-plan")
-        if _lexists_at(root_fd, move.dest):
+        if _lexists_at(root, move.dest):
             raise ValueError(f"{move.dest}: direct move changed since planning (destination exists); re-plan")
         if move.dest in destinations:
             raise ValueError(f"{move.dest}: multiple effects claim the same move destination")
         destinations.add(move.dest)
-        if stat.S_ISLNK(_lstat_at(root_fd, move.source).st_mode):
-            link = PurePosixPath(_readlink_at(root_fd, move.source))
-            if not _projected_symlink_is_internal(root_fd, move.dest, link):
+        if stat.S_ISLNK(_lstat_at(root, move.source).st_mode):
+            link = PurePosixPath(_readlink_at(root, move.source))
+            if not _projected_symlink_is_internal(root, move.dest, link):
                 raise ValueError(f"{move.dest}: moved symlink would escape the bundle root")
 
     write_members = [write.member for write in plan.writes]
@@ -841,8 +847,8 @@ def _copy_entry(source: Path, destination: Path) -> None:
             shutil.copystat(source_directory, destination_directory, follow_symlinks=False)
 
 
-def _copy_live_file(root_fd: int, member: str, destination: Path, mode: int) -> None:
-    parent_fd, name = _open_parent(root_fd, member)
+def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int) -> None:
+    parent_fd, name = _open_parent(root, member)
     try:
         source_fd = os.open(name, _file_flags(), dir_fd=parent_fd)
         try:
@@ -857,13 +863,13 @@ def _copy_live_file(root_fd: int, member: str, destination: Path, mode: int) -> 
         os.close(parent_fd)
 
 
-def _copy_live_entry(root_fd: int, member: str, destination: Path) -> None:
-    root_info = _lstat_at(root_fd, member)
+def _copy_live_entry(root: Anchor, member: str, destination: Path) -> None:
+    root_info = _lstat_at(root, member)
     if stat.S_ISLNK(root_info.st_mode):
-        destination.symlink_to(_readlink_at(root_fd, member))
+        destination.symlink_to(_readlink_at(root, member))
         return
     if stat.S_ISREG(root_info.st_mode):
-        _copy_live_file(root_fd, member, destination, root_info.st_mode)
+        _copy_live_file(root, member, destination, root_info.st_mode)
         return
     if not stat.S_ISDIR(root_info.st_mode):
         raise ValueError(f"unsupported filesystem entry type at {member}")
@@ -873,7 +879,7 @@ def _copy_live_entry(root_fd: int, member: str, destination: Path) -> None:
     pending = [(member, destination)]
     while pending:
         source_directory, destination_directory = pending.pop()
-        parent_fd, name = _open_parent(root_fd, source_directory)
+        parent_fd, name = _open_parent(root, source_directory)
         try:
             directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
             try:
@@ -885,11 +891,11 @@ def _copy_live_entry(root_fd: int, member: str, destination: Path) -> None:
         for entry_name in names:
             source_entry = f"{source_directory}/{entry_name}"
             destination_entry = destination_directory / entry_name
-            entry_mode = _lstat_at(root_fd, source_entry).st_mode
+            entry_mode = _lstat_at(root, source_entry).st_mode
             if stat.S_ISLNK(entry_mode):
-                destination_entry.symlink_to(_readlink_at(root_fd, source_entry))
+                destination_entry.symlink_to(_readlink_at(root, source_entry))
             elif stat.S_ISREG(entry_mode):
-                _copy_live_file(root_fd, source_entry, destination_entry, entry_mode)
+                _copy_live_file(root, source_entry, destination_entry, entry_mode)
             elif stat.S_ISDIR(entry_mode):
                 destination_entry.mkdir(mode=0o700)
                 directories.append((source_entry, destination_entry, stat.S_IMODE(entry_mode)))
@@ -903,29 +909,29 @@ def _copy_live_entry(root_fd: int, member: str, destination: Path) -> None:
 def _create_snapshot(
     plan: WorkMutationPlan,
     transaction_dir: Path,
-    root_fd: int | None = None,
+    root: Anchor | None = None,
 ) -> tuple[_SnapshotEntry, ...]:
     backup_root = transaction_dir / "backups"
     backup_root.mkdir()
-    close_root = root_fd is None
-    if root_fd is None:
-        root_fd = _open_root(plan.root)
+    close_root = root is None
+    if root is None:
+        root = _open_root(plan.root)
     entries: list[_SnapshotEntry] = []
     try:
         for index, member in enumerate(_snapshot_members(plan)):
-            if not _lexists_at(root_fd, member):
+            if not _lexists_at(root, member):
                 entries.append(_SnapshotEntry(member, False, None, None))
                 continue
             backup = backup_root / f"{index:06d}"
-            fingerprint = _entry_fingerprint_at(root_fd, member)
-            _copy_live_entry(root_fd, member, backup)
+            fingerprint = _entry_fingerprint_at(root, member)
+            _copy_live_entry(root, member, backup)
             _fsync_entry(backup)
-            backup_root_fd = _open_root(backup_root)
+            backup_root_anchor = _open_root(backup_root)
             try:
-                backup_fingerprint = _entry_fingerprint_at(backup_root_fd, backup.name)
+                backup_fingerprint = _entry_fingerprint_at(backup_root_anchor, backup.name)
             finally:
-                os.close(backup_root_fd)
-            if backup_fingerprint != fingerprint or _entry_fingerprint_at(root_fd, member) != fingerprint:
+                backup_root_anchor.close()
+            if backup_fingerprint != fingerprint or _entry_fingerprint_at(root, member) != fingerprint:
                 raise ValueError(f"{member}: changed while snapshotting; re-plan")
             entries.append(_SnapshotEntry(member, True, backup, fingerprint))
         _fsync_directory(backup_root)
@@ -933,7 +939,7 @@ def _create_snapshot(
         return tuple(entries)
     finally:
         if close_root:
-            os.close(root_fd)
+            root.close()
 
 
 def _remove_entry(path: Path) -> None:
@@ -956,12 +962,12 @@ def _remove_entry(path: Path) -> None:
         directory.rmdir()
 
 
-def _remove_live_entry(root_fd: int, member: str) -> None:
-    if not _lexists_at(root_fd, member):
+def _remove_live_entry(root: Anchor, member: str) -> None:
+    if not _lexists_at(root, member):
         return
-    info = _lstat_at(root_fd, member)
+    info = _lstat_at(root, member)
     if not stat.S_ISDIR(info.st_mode):
-        parent_fd, name = _open_parent(root_fd, member)
+        parent_fd, name = _open_parent(root, member)
         try:
             os.unlink(name, dir_fd=parent_fd)
             _fsync_live_directory(parent_fd)
@@ -974,7 +980,7 @@ def _remove_live_entry(root_fd: int, member: str) -> None:
     while pending:
         directory = pending.pop()
         directories.append(directory)
-        parent_fd, name = _open_parent(root_fd, directory)
+        parent_fd, name = _open_parent(root, directory)
         try:
             directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
             try:
@@ -985,18 +991,18 @@ def _remove_live_entry(root_fd: int, member: str) -> None:
             os.close(parent_fd)
         for entry_name in names:
             child = f"{directory}/{entry_name}"
-            child_info = _lstat_at(root_fd, child)
+            child_info = _lstat_at(root, child)
             if stat.S_ISDIR(child_info.st_mode):
                 pending.append(child)
             else:
-                child_parent, child_name = _open_parent(root_fd, child)
+                child_parent, child_name = _open_parent(root, child)
                 try:
                     os.unlink(child_name, dir_fd=child_parent)
                     _fsync_live_directory(child_parent)
                 finally:
                     os.close(child_parent)
     for directory in reversed(directories):
-        parent_fd, name = _open_parent(root_fd, directory)
+        parent_fd, name = _open_parent(root, directory)
         try:
             os.rmdir(name, dir_fd=parent_fd)
             _fsync_live_directory(parent_fd)
@@ -1004,8 +1010,8 @@ def _remove_live_entry(root_fd: int, member: str) -> None:
             os.close(parent_fd)
 
 
-def _chmod_directory_at(root_fd: int, member: str, mode: int) -> None:
-    parent_fd, name = _open_parent(root_fd, member)
+def _chmod_directory_at(root: Anchor, member: str, mode: int) -> None:
+    parent_fd, name = _open_parent(root, member)
     try:
         descriptor = os.open(name, _directory_flags(), dir_fd=parent_fd)
         try:
@@ -1018,8 +1024,8 @@ def _chmod_directory_at(root_fd: int, member: str, mode: int) -> None:
         os.close(parent_fd)
 
 
-def _copy_backup_file(root_fd: int, source: Path, member: str, mode: int) -> None:
-    parent_fd, name = _open_parent(root_fd, member, create=True)
+def _copy_backup_file(root: Anchor, source: Path, member: str, mode: int) -> None:
+    parent_fd, name = _open_parent(root, member, create=True)
     try:
         descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(mode), dir_fd=parent_fd)
         try:
@@ -1030,15 +1036,15 @@ def _copy_backup_file(root_fd: int, source: Path, member: str, mode: int) -> Non
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
-        _fsync_live_file(root_fd, member)
+        _fsync_live_file(root, member)
         _fsync_live_directory(parent_fd)
     finally:
         os.close(parent_fd)
 
 
-def _copy_backup_to_live(root_fd: int, source: Path, member: str) -> None:
+def _copy_backup_to_live(root: Anchor, source: Path, member: str) -> None:
     mode = source.lstat().st_mode
-    parent_fd, name = _open_parent(root_fd, member, create=True)
+    parent_fd, name = _open_parent(root, member, create=True)
     try:
         if stat.S_ISLNK(mode):
             os.symlink(os.fspath(source.readlink()), name, dir_fd=parent_fd)
@@ -1047,7 +1053,7 @@ def _copy_backup_to_live(root_fd: int, source: Path, member: str) -> None:
         if stat.S_ISREG(mode):
             os.close(parent_fd)
             parent_fd = -1
-            _copy_backup_file(root_fd, source, member, mode)
+            _copy_backup_file(root, source, member, mode)
             return
         if not stat.S_ISDIR(mode):
             raise ValueError(f"unsupported filesystem entry type at {source}")
@@ -1066,7 +1072,7 @@ def _copy_backup_to_live(root_fd: int, source: Path, member: str) -> None:
             destination_entry = f"{destination_directory}/{source_entry.name}"
             entry_mode = source_entry.lstat().st_mode
             if stat.S_ISDIR(entry_mode) and not stat.S_ISLNK(entry_mode):
-                destination_parent, destination_name = _open_parent(root_fd, destination_entry)
+                destination_parent, destination_name = _open_parent(root, destination_entry)
                 try:
                     os.mkdir(destination_name, 0o700, dir_fd=destination_parent)
                     _fsync_live_directory(destination_parent)
@@ -1075,18 +1081,18 @@ def _copy_backup_to_live(root_fd: int, source: Path, member: str) -> None:
                 directories.append((source_entry, destination_entry, stat.S_IMODE(entry_mode)))
                 pending.append((source_entry, destination_entry))
             elif stat.S_ISLNK(entry_mode):
-                destination_parent, destination_name = _open_parent(root_fd, destination_entry)
+                destination_parent, destination_name = _open_parent(root, destination_entry)
                 try:
                     os.symlink(os.fspath(source_entry.readlink()), destination_name, dir_fd=destination_parent)
                     _fsync_live_directory(destination_parent)
                 finally:
                     os.close(destination_parent)
             elif stat.S_ISREG(entry_mode):
-                _copy_backup_file(root_fd, source_entry, destination_entry, entry_mode)
+                _copy_backup_file(root, source_entry, destination_entry, entry_mode)
             else:
                 raise ValueError(f"unsupported filesystem entry type at {source_entry}")
     for _, destination_directory, directory_mode in reversed(directories):
-        _chmod_directory_at(root_fd, destination_directory, directory_mode)
+        _chmod_directory_at(root, destination_directory, directory_mode)
 
 
 def _selected_snapshot_entries(
@@ -1109,33 +1115,33 @@ def _selected_snapshot_entries(
 
 
 def _restore_snapshot(
-    root: Path,
+    bundle_root: Path,
     entries: Sequence[_SnapshotEntry],
     *,
-    root_fd: int | None = None,
+    root: Anchor | None = None,
     touched: set[str] | None = None,
     protected: Mapping[str, str] | None = None,
 ) -> None:
-    close_root = root_fd is None
-    if root_fd is None:
-        root_fd = _open_root(root)
+    close_root = root is None
+    if root is None:
+        root = _open_root(bundle_root)
     selected = _selected_snapshot_entries(entries, touched, protected)
     try:
         for entry in sorted(selected, key=lambda current: current.member.count("/"), reverse=True):
-            _remove_live_entry(root_fd, entry.member)
+            _remove_live_entry(root, entry.member)
         for entry in sorted(selected, key=lambda current: current.member.count("/")):
             if not entry.existed:
                 continue
             assert entry.backup is not None
-            _copy_backup_to_live(root_fd, entry.backup, entry.member)
-        _fsync_live_directory(root_fd)
+            _copy_backup_to_live(root, entry.backup, entry.member)
+        _fsync_live_directory(root)
     finally:
         if close_root:
-            os.close(root_fd)
+            root.close()
 
 
 def _verify_snapshot(
-    root_fd: int,
+    root: Anchor,
     entries: Sequence[_SnapshotEntry],
     protected: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
@@ -1148,7 +1154,7 @@ def _verify_snapshot(
         if entry.member in protected:
             continue
         try:
-            exists = _lexists_at(root_fd, entry.member)
+            exists = _lexists_at(root, entry.member)
         except (OSError, ValueError) as exc:
             failures.append(f"{entry.member}: restored entry cannot be located safely: {exc}")
             continue
@@ -1161,7 +1167,7 @@ def _verify_snapshot(
             continue
         assert entry.fingerprint is not None
         try:
-            fingerprint = _entry_fingerprint_at(root_fd, entry.member)
+            fingerprint = _entry_fingerprint_at(root, entry.member)
         except (OSError, ValueError) as exc:
             failures.append(f"{entry.member}: restored entry cannot be verified: {exc}")
             continue
@@ -1170,12 +1176,12 @@ def _verify_snapshot(
     return tuple(failures)
 
 
-def _stage_writes(plan: WorkMutationPlan, transaction_dir: Path, root_fd: int | None = None) -> dict[str, Path]:
+def _stage_writes(plan: WorkMutationPlan, transaction_dir: Path, root: Anchor | None = None) -> dict[str, Path]:
     staging = transaction_dir / "staging"
     staging.mkdir()
-    close_root = root_fd is None
-    if root_fd is None:
-        root_fd = _open_root(plan.root)
+    close_root = root is None
+    if root is None:
+        root = _open_root(plan.root)
     staged: dict[str, Path] = {}
     try:
         for index, write in enumerate(sorted(plan.writes, key=lambda current: current.member)):
@@ -1183,7 +1189,7 @@ def _stage_writes(plan: WorkMutationPlan, transaction_dir: Path, root_fd: int | 
             with path.open("xb") as stream:
                 stream.write(write.after)
                 if write.before_digest is not None:
-                    preimage_mode = _lstat_at(root_fd, write.source_member or write.member).st_mode
+                    preimage_mode = _lstat_at(root, write.source_member or write.member).st_mode
                     os.fchmod(stream.fileno(), stat.S_IMODE(preimage_mode))
                 stream.flush()
                 os.fsync(stream.fileno())
@@ -1193,10 +1199,10 @@ def _stage_writes(plan: WorkMutationPlan, transaction_dir: Path, root_fd: int | 
         return staged
     finally:
         if close_root:
-            os.close(root_fd)
+            root.close()
 
 
-def _mapped_directory_modes(plan: WorkMutationPlan, root_fd: int) -> tuple[_DirectoryMode, ...]:
+def _mapped_directory_modes(plan: WorkMutationPlan, root: Anchor) -> tuple[_DirectoryMode, ...]:
     ordered_mapping = sorted(
         plan.path_mapping.items(),
         key=lambda item: len(PurePosixPath(item[1]).parts),
@@ -1211,25 +1217,25 @@ def _mapped_directory_modes(plan: WorkMutationPlan, root_fd: int) -> tuple[_Dire
                 source = f"{source_root}{destination[len(destination_root) :]}"
             else:
                 continue
-            if _lexists_at(root_fd, source):
-                info = _lstat_at(root_fd, source)
+            if _lexists_at(root, source):
+                info = _lstat_at(root, source)
                 if stat.S_ISDIR(info.st_mode):
                     modes.append(_DirectoryMode(source, destination, stat.S_IMODE(info.st_mode)))
             break
     return tuple(sorted(modes, key=lambda item: (item.destination.count("/"), item.destination)))
 
 
-def _verify_directory_modes(root_fd: int, modes: Sequence[_DirectoryMode]) -> None:
+def _verify_directory_modes(root: Anchor, modes: Sequence[_DirectoryMode]) -> None:
     for captured in modes:
         try:
-            current = _lstat_at(root_fd, captured.source)
+            current = _lstat_at(root, captured.source)
         except OSError as exc:
             raise ValueError(f"{captured.source}: directory mode changed since planning ({exc}); re-plan") from exc
         if not stat.S_ISDIR(current.st_mode) or stat.S_IMODE(current.st_mode) != captured.mode:
             raise ValueError(f"{captured.source}: directory mode changed since planning; re-plan")
 
 
-def _effects(plan: WorkMutationPlan, staged: dict[str, Path], root_fd: int | None = None) -> tuple[_Effect, ...]:
+def _effects(plan: WorkMutationPlan, staged: dict[str, Path], root: Anchor | None = None) -> tuple[_Effect, ...]:
     mkdirs = tuple(
         _Effect("mkdir", member) for member in sorted(plan.mkdirs, key=lambda current: (current.count("/"), current))
     )
@@ -1239,12 +1245,12 @@ def _effects(plan: WorkMutationPlan, staged: dict[str, Path], root_fd: int | Non
     directories: list[_Effect] = []
     for member in plan.deletes:
         effect = _Effect("delete", member)
-        if root_fd is None:
+        if root is None:
             target = plan.root / member
             is_directory = target.is_dir() and not target.is_symlink()
         else:
             try:
-                is_directory = stat.S_ISDIR(_lstat_at(root_fd, member).st_mode)
+                is_directory = stat.S_ISDIR(_lstat_at(root, member).st_mode)
             except FileNotFoundError:
                 is_directory = False
         (directories if is_directory else non_directories).append(effect)
@@ -1319,14 +1325,14 @@ def _quarantine_member(member: str) -> tuple[str, str]:
 
 
 def _take_custody(
-    root_fd: int,
+    root: Anchor,
     member: str,
     touched: set[str],
     *,
     defer_fsync: bool = False,
 ) -> tuple[int, str, str, str, bool]:
     """Move *member* to a unique adjacent name before inspecting its bytes."""
-    parent_fd, name = _open_parent(root_fd, member)
+    parent_fd, name = _open_parent(root, member)
     quarantine_name, quarantine_member = _quarantine_member(member)
     previously_touched = member in touched
     try:
@@ -1396,14 +1402,14 @@ def _entry_identity(info: os.stat_result) -> _EntryIdentity:
 
 
 def _commit_write(
-    root_fd: int,
+    root: Anchor,
     effect: _Effect,
     expected_digest: str | None,
     touched: set[str],
     protected: dict[str, str],
 ) -> None:
     assert effect.staged is not None
-    parent_fd, name = _open_parent(root_fd, effect.member)
+    parent_fd, name = _open_parent(root, effect.member)
     temporary = _live_temporary(parent_fd, name, effect.staged)
     try:
         if expected_digest is None:
@@ -1421,7 +1427,7 @@ def _commit_write(
         else:
             os.close(parent_fd)
             parent_fd, name, quarantine, quarantine_member, previously_touched = _take_custody(
-                root_fd, effect.member, touched
+                root, effect.member, touched
             )
             try:
                 actual = _digest_in_directory(parent_fd, quarantine)
@@ -1468,7 +1474,7 @@ def _commit_write(
                     effect.member, quarantine_member, protected, "installed name changed during commit"
                 )
             os.unlink(quarantine, dir_fd=parent_fd)
-        _fsync_live_file(root_fd, effect.member)
+        _fsync_live_file(root, effect.member)
     finally:
         with suppress(FileNotFoundError):
             os.unlink(temporary, dir_fd=parent_fd)
@@ -1477,7 +1483,7 @@ def _commit_write(
 
 
 def _recover_move_custody_or_raise(
-    root_fd: int,
+    root: Anchor,
     effect: _Effect,
     *,
     source_fd: int,
@@ -1514,7 +1520,7 @@ def _recover_move_custody_or_raise(
         if not destination_was_touched:
             touched.discard(effect.destination)
         try:
-            destination_absent = not _lexists_at(root_fd, effect.destination)
+            destination_absent = not _lexists_at(root, effect.destination)
         except OSError:
             destination_absent = False
         if destination_absent:
@@ -1522,7 +1528,7 @@ def _recover_move_custody_or_raise(
 
     if not captured_at_destination:
         try:
-            destination_absent = not _lexists_at(root_fd, effect.destination)
+            destination_absent = not _lexists_at(root, effect.destination)
         except OSError:
             destination_absent = False
         if destination_absent:
@@ -1545,9 +1551,9 @@ def _recover_move_custody_or_raise(
         try:
             if _identity_at(source_fd, source_name) != captured_identity:
                 raise ValueError("restored source identity changed")
-            if _entry_fingerprint_at(root_fd, effect.member) != expected_fingerprint:
+            if _entry_fingerprint_at(root, effect.member) != expected_fingerprint:
                 raise ValueError("restored source content changed")
-            if _lexists_at(root_fd, quarantine_member):
+            if _lexists_at(root, quarantine_member):
                 raise ValueError("quarantine remains after source restoration")
         except Exception as recovery_exc:
             protected[effect.member] = effect.member
@@ -1565,7 +1571,7 @@ def _recover_move_custody_or_raise(
 
 
 def _commit_move(
-    root_fd: int,
+    root: Anchor,
     effect: _Effect,
     expected_fingerprint: str,
     expected_identity: _EntryIdentity,
@@ -1574,7 +1580,7 @@ def _commit_move(
 ) -> None:
     assert effect.destination is not None
     source_fd, source_name, quarantine, quarantine_member, previously_touched = _take_custody(
-        root_fd,
+        root,
         effect.member,
         touched,
         defer_fsync=True,
@@ -1592,32 +1598,32 @@ def _commit_move(
         captured_info = os.stat(quarantine, dir_fd=source_fd, follow_symlinks=False)
         if _entry_identity(captured_info) != expected_identity:
             raise ValueError(f"{effect.member}: changed since planning; re-plan")
-        if _entry_fingerprint_at(root_fd, quarantine_member) != expected_fingerprint:
+        if _entry_fingerprint_at(root, quarantine_member) != expected_fingerprint:
             raise ValueError(f"{effect.member}: changed since planning; re-plan")
-        if _lexists_at(root_fd, effect.member):
+        if _lexists_at(root, effect.member):
             raise _CustodyConflict(
                 f"{effect.member}: name was recreated during custody verification; "
                 f"external entry preserved and captured preimage retained in quarantine {quarantine_member}"
             )
-        destination_fd, destination_name = _open_parent(root_fd, effect.destination)
+        destination_fd, destination_name = _open_parent(root, effect.destination)
         _rename_noreplace_at(source_fd, quarantine, destination_fd, destination_name)
         captured_at_destination = True
         touched.update((effect.member, effect.destination))
         if _identity_at(destination_fd, destination_name) != captured_identity:
             raise _CustodyConflict(f"{effect.member}: captured entry changed while moving")
-        if _entry_fingerprint_at(root_fd, effect.destination) != expected_fingerprint:
+        if _entry_fingerprint_at(root, effect.destination) != expected_fingerprint:
             raise _CustodyConflict(f"{effect.member}: captured entry changed while moving")
-        if _lexists_at(root_fd, effect.member):
+        if _lexists_at(root, effect.member):
             raise _CustodyConflict(f"{effect.member}: name was recreated during move")
         destination_mode = os.stat(destination_name, dir_fd=destination_fd, follow_symlinks=False).st_mode
         if stat.S_ISREG(destination_mode):
-            _fsync_live_file(root_fd, effect.destination)
+            _fsync_live_file(root, effect.destination)
         _fsync_live_directory(source_fd)
         if destination_fd != source_fd:
             _fsync_live_directory(destination_fd)
     except Exception as exc:
         _recover_move_custody_or_raise(
-            root_fd,
+            root,
             effect,
             source_fd=source_fd,
             source_name=source_name,
@@ -1646,10 +1652,10 @@ def _commit_move(
 
 
 def _commit_effect(
-    root: Path,
+    bundle_root: Path,
     effect: _Effect,
     *,
-    root_fd: int | None = None,
+    root: Anchor | None = None,
     write_digests: dict[str, str | None] | None = None,
     expected_fingerprints: dict[str, str] | None = None,
     expected_identities: dict[str, _EntryIdentity] | None = None,
@@ -1657,9 +1663,9 @@ def _commit_effect(
     touched: set[str] | None = None,
     protected: dict[str, str] | None = None,
 ) -> None:
-    close_root = root_fd is None
-    if root_fd is None:
-        root_fd = _open_root(root)
+    close_root = root is None
+    if root is None:
+        root = _open_root(bundle_root)
     if touched is None:
         touched = set()
     if protected is None:
@@ -1667,7 +1673,7 @@ def _commit_effect(
     try:
         if effect.kind == "mkdir":
             parent_fd, name = _open_parent(
-                root_fd,
+                root,
                 effect.member,
                 create=True,
                 touched=touched,
@@ -1699,7 +1705,7 @@ def _commit_effect(
             assert expected_fingerprints is not None
             assert expected_identities is not None
             _commit_move(
-                root_fd,
+                root,
                 effect,
                 expected_fingerprints[effect.member],
                 expected_identities[effect.member],
@@ -1709,16 +1715,14 @@ def _commit_effect(
             return
         if effect.kind == "write":
             assert write_digests is not None
-            _commit_write(root_fd, effect, write_digests[effect.member], touched, protected)
+            _commit_write(root, effect, write_digests[effect.member], touched, protected)
             return
         expected = None if expected_fingerprints is None else expected_fingerprints.get(effect.member)
-        if not _lexists_at(root_fd, effect.member):
+        if not _lexists_at(root, effect.member):
             if expected is not None:
                 raise ValueError(f"{effect.member}: changed since planning (now missing); re-plan")
             return
-        parent_fd, name, quarantine, quarantine_member, previously_touched = _take_custody(
-            root_fd, effect.member, touched
-        )
+        parent_fd, name, quarantine, quarantine_member, previously_touched = _take_custody(root, effect.member, touched)
         try:
             info = os.stat(quarantine, dir_fd=parent_fd, follow_symlinks=False)
             if expected_identities is not None and _entry_identity(info) != expected_identities[effect.member]:
@@ -1736,7 +1740,7 @@ def _commit_effect(
             if (
                 expected is not None
                 and not stat.S_ISDIR(info.st_mode)
-                and _entry_fingerprint_at(root_fd, quarantine_member) != expected
+                and _entry_fingerprint_at(root, quarantine_member) != expected
             ):
                 _restore_custody_or_raise(
                     parent_fd,
@@ -1749,7 +1753,7 @@ def _commit_effect(
                     previously_touched=previously_touched,
                     detail="changed since planning",
                 )
-            if _lexists_at(root_fd, effect.member):
+            if _lexists_at(root, effect.member):
                 raise _preserve_conflict(
                     effect.member, quarantine_member, protected, "name was recreated during custody verification"
                 )
@@ -1777,17 +1781,17 @@ def _commit_effect(
             os.close(parent_fd)
     finally:
         if close_root:
-            os.close(root_fd)
+            root.close()
 
 
-def _apply_directory_modes(root_fd: int, modes: Sequence[_DirectoryMode], touched: set[str]) -> None:
+def _apply_directory_modes(root: Anchor, modes: Sequence[_DirectoryMode], touched: set[str]) -> None:
     for captured in sorted(modes, key=lambda item: item.destination.count("/"), reverse=True):
-        current = _lstat_at(root_fd, captured.destination)
+        current = _lstat_at(root, captured.destination)
         if not stat.S_ISDIR(current.st_mode):
             raise ValueError(f"{captured.destination}: mapped directory is no longer a directory")
         if stat.S_IMODE(current.st_mode) != captured.mode:
             touched.add(captured.destination)
-            _chmod_directory_at(root_fd, captured.destination, captured.mode)
+            _chmod_directory_at(root, captured.destination, captured.mode)
 
 
 def _affected_index_members(plan: WorkMutationPlan) -> tuple[str, ...]:
@@ -1886,7 +1890,7 @@ def _extra_rules(layout: WorkspaceLayout, repo_root: Path | None) -> tuple[Rule,
 def _capture_validation_state(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
-    root_fd: int,
+    root: Anchor,
     *,
     repo_root: Path | None,
 ) -> _ValidationState:
@@ -1898,12 +1902,12 @@ def _capture_validation_state(
     Raising is safe here: no effect has been committed yet.
     """
     validation_root = layout.bundle_dir
-    _assert_root_identity(validation_root, root_fd)
-    bundle = _load_bundle_at(validation_root, root_fd, ignore=IGNORE)
-    _assert_root_identity(validation_root, root_fd)
+    _assert_root_identity(validation_root, root)
+    bundle = _load_bundle_at(validation_root, _raw_descriptor(root), ignore=IGNORE)
+    _assert_root_identity(validation_root, root)
     items = load_items(bundle)
     report = validate(bundle, today=date.max, extra_rules=_extra_rules(layout, repo_root))
-    _assert_root_identity(validation_root, root_fd)
+    _assert_root_identity(validation_root, root)
     by_path = {item.path: item for item in items}
     findings = Counter(
         (_map_member(plan.path_mapping, finding.path), finding.code)
@@ -1920,7 +1924,7 @@ def _capture_validation_state(
 def _validate_postconditions(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
-    root_fd: int | None = None,
+    root: Anchor | None = None,
     *,
     repo_root: Path | None = None,
     baseline: _ValidationState | None = None,
@@ -1935,19 +1939,19 @@ def _validate_postconditions(
     was.  The lane-index staleness check is absolute either way -- a stale
     index after the mutation is always the mutation's fault.
     """
-    close_root = root_fd is None
-    if root_fd is None:
-        root_fd = _open_root(layout.bundle_dir)
+    close_root = root is None
+    if root is None:
+        root = _open_root(layout.bundle_dir)
     validation_root = layout.bundle_dir
     try:
-        _assert_root_identity(validation_root, root_fd)
-        bundle = _load_bundle_at(validation_root, root_fd, ignore=IGNORE)
-        _assert_root_identity(validation_root, root_fd)
+        _assert_root_identity(validation_root, root)
+        bundle = _load_bundle_at(validation_root, _raw_descriptor(root), ignore=IGNORE)
+        _assert_root_identity(validation_root, root)
         items = load_items(bundle)
     except (OSError, ValueError) as exc:
         reload_failures = (f"postcondition reload failed: {exc}",)
         if close_root:
-            os.close(root_fd)
+            root.close()
         return reload_failures
     by_path = {item.path: item for item in items}
     targeted_members = {f"{path}.md" for path in plan.validate_paths}
@@ -1959,10 +1963,10 @@ def _validate_postconditions(
             today=date.max,
             extra_rules=_extra_rules(layout, repo_root),
         )
-        _assert_root_identity(validation_root, root_fd)
+        _assert_root_identity(validation_root, root)
     except (OSError, ValueError) as exc:
         if close_root:
-            os.close(root_fd)
+            root.close()
         return (f"postcondition validation setup failed: {exc}",)
     notes = excused if excused is not None else []
     count_before = len(notes)
@@ -2002,7 +2006,7 @@ def _validate_postconditions(
     for member in _affected_index_members(plan):
         lane = PurePosixPath(member).parent.as_posix()
         try:
-            current = _read_bytes_at(root_fd, member).decode("utf-8")
+            current = _read_bytes_at(root, member).decode("utf-8")
         except (OSError, UnicodeDecodeError) as exc:
             failures.append(f"{member}: postcondition read failed: {exc}")
             continue
@@ -2020,11 +2024,11 @@ def _validate_postconditions(
         if current != expected:
             failures.append(f"{member}: generated direct-descendant inventory is stale")
     try:
-        _assert_root_identity(validation_root, root_fd)
+        _assert_root_identity(validation_root, root)
     except (OSError, ValueError) as exc:
         failures.append(f"postcondition validation failed: {exc}")
     if close_root:
-        os.close(root_fd)
+        root.close()
     return tuple(failures)
 
 
@@ -2055,7 +2059,7 @@ def _application(
 def _apply_mutation_locked(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
-    locked_root_fd: int,
+    locked_root: Anchor,
     *,
     repo_root: Path | None = None,
 ) -> MutationApplication:
@@ -2107,39 +2111,39 @@ def _apply_mutation_locked(
         phase = "preflight"
         baseline: _ValidationState | None = None
         excused: list[str] = []
-        root_fd = os.dup(locked_root_fd)
+        root = locked_root.duplicate()
         try:
             try:
                 _assert_directory_identity(layout.cache_dir, cache, "cache")
                 _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                _assert_root_identity(layout.bundle_dir, root_fd)
-                _preflight(layout, plan, root_fd, transaction_dir / "preflight-initial")
-                created = [member for member in plan.mkdirs if not _lexists_at(root_fd, member)]
+                _assert_root_identity(layout.bundle_dir, root)
+                _preflight(layout, plan, root, transaction_dir / "preflight-initial")
+                created = [member for member in plan.mkdirs if not _lexists_at(root, member)]
                 snapshot_records = [
-                    {"member": member, "existed": _lexists_at(root_fd, member)} for member in _snapshot_targets(plan)
+                    {"member": member, "existed": _lexists_at(root, member)} for member in _snapshot_targets(plan)
                 ]
-                directory_modes = _mapped_directory_modes(plan, root_fd)
-                snapshots = _create_snapshot(plan, transaction_dir, root_fd)
-                staged = _stage_writes(plan, transaction_dir, root_fd)
-                _preflight(layout, plan, root_fd, transaction_dir / "preflight-final")
-                _verify_directory_modes(root_fd, directory_modes)
+                directory_modes = _mapped_directory_modes(plan, root)
+                snapshots = _create_snapshot(plan, transaction_dir, root)
+                staged = _stage_writes(plan, transaction_dir, root)
+                _preflight(layout, plan, root, transaction_dir / "preflight-final")
+                _verify_directory_modes(root, directory_modes)
                 try:
-                    baseline = _capture_validation_state(layout, plan, root_fd, repo_root=repo_root)
+                    baseline = _capture_validation_state(layout, plan, root, repo_root=repo_root)
                 except (OSError, ValueError) as exc:
                     baseline = None
                     excused.append(
                         f"baseline capture failed, falling back to absolute postcondition gate for this mutation: {exc}"
                     )
-                _assert_root_identity(layout.bundle_dir, root_fd)
+                _assert_root_identity(layout.bundle_dir, root)
                 expected_fingerprints = {
-                    member: _entry_fingerprint_at(root_fd, member)
+                    member: _entry_fingerprint_at(root, member)
                     for member in {*(move.source for move in plan.moves), *plan.deletes}
-                    if _lexists_at(root_fd, member)
+                    if _lexists_at(root, member)
                 }
                 expected_identities = {
-                    member: _entry_identity(_lstat_at(root_fd, member))
+                    member: _entry_identity(_lstat_at(root, member))
                     for member in {*(move.source for move in plan.moves), *plan.deletes}
-                    if _lexists_at(root_fd, member)
+                    if _lexists_at(root, member)
                 }
                 absent_directories = {
                     condition.member for condition in plan.directory_preconditions if condition.before_digest is None
@@ -2170,12 +2174,12 @@ def _apply_mutation_locked(
                 phase = "apply"
                 _assert_directory_identity(layout.cache_dir, cache, "cache")
                 _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                for effect in _effects(plan, staged, root_fd):
+                for effect in _effects(plan, staged, root):
                     effect_attempted = True
                     _commit_effect(
                         plan.root,
                         effect,
-                        root_fd=root_fd,
+                        root=root,
                         write_digests=write_digests,
                         expected_fingerprints=expected_fingerprints,
                         expected_identities=expected_identities,
@@ -2188,11 +2192,11 @@ def _apply_mutation_locked(
                         moved.append((effect.member, effect.destination))
                     elif effect.kind == "write":
                         written.append(effect.member)
-                _apply_directory_modes(root_fd, directory_modes, touched)
-                _assert_root_identity(layout.bundle_dir, root_fd)
+                _apply_directory_modes(root, directory_modes, touched)
+                _assert_root_identity(layout.bundle_dir, root)
                 _assert_directory_identity(layout.cache_dir, cache, "cache")
                 _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                _fsync_live_directory(root_fd)
+                _fsync_live_directory(root)
                 phase = "validation"
                 validating_details: dict[str, object] = {"validate_paths": list(plan.validate_paths)}
                 validating_record = _journal_record("validating", validating_details)
@@ -2206,17 +2210,17 @@ def _apply_mutation_locked(
                 postcondition_failures = _validate_postconditions(
                     layout,
                     plan,
-                    root_fd,
+                    root,
                     repo_root=repo_root,
                     baseline=baseline,
                     excused=excused,
                 )
                 if postcondition_failures:
                     raise ValueError("; ".join(postcondition_failures))
-                _assert_root_identity(layout.bundle_dir, root_fd)
+                _assert_root_identity(layout.bundle_dir, root)
                 _assert_directory_identity(layout.cache_dir, cache, "cache")
                 _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                _fsync_live_directory(root_fd)
+                _fsync_live_directory(root)
                 complete_record = _complete_record(transaction_id, moved, written, created)
                 try:
                     _append_journal(
@@ -2261,14 +2265,14 @@ def _apply_mutation_locked(
                         _restore_snapshot(
                             plan.root,
                             snapshots,
-                            root_fd=root_fd,
+                            root=root,
                             touched=touched,
                             protected=protected,
                         )
                     except Exception as rollback_exc:
                         rollback_failures.append(f"rollback failed: {rollback_exc}")
                     try:
-                        verification_failures = _verify_snapshot(root_fd, snapshots, protected)
+                        verification_failures = _verify_snapshot(root, snapshots, protected)
                     except Exception as verification_exc:
                         rollback_failures.append(f"rollback verification failed: {verification_exc}")
                     else:
@@ -2276,7 +2280,7 @@ def _apply_mutation_locked(
                             f"rollback verification failed: {detail}" for detail in verification_failures
                         )
                     try:
-                        _assert_root_identity(layout.bundle_dir, root_fd)
+                        _assert_root_identity(layout.bundle_dir, root)
                     except Exception as identity_exc:
                         rollback_failures.append(f"rollback verification failed: {identity_exc}")
                 recovery_failures.extend(rollback_failures)
@@ -2304,7 +2308,7 @@ def _apply_mutation_locked(
                 )
 
         finally:
-            os.close(root_fd)
+            root.close()
 
 
 def apply_mutation(
@@ -2322,12 +2326,12 @@ def apply_mutation(
     resolved the code repo (`workspace.repos.resolve_repo`) passes it here so
     validation checks `affects` paths against the code repo, not the vault.
     """
-    root_fd = _open_root(layout.bundle_dir)
+    root = _open_root(layout.bundle_dir)
     try:
-        with _bundle_root_lock(root_fd):
-            return _apply_mutation_locked(layout, plan, root_fd, repo_root=repo_root)
+        with _bundle_root_lock(root):
+            return _apply_mutation_locked(layout, plan, root, repo_root=repo_root)
     finally:
-        os.close(root_fd)
+        root.close()
 
 
 __all__ = ["MutationApplication", "apply_mutation"]

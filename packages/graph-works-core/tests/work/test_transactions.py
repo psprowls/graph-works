@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 from graph_works_core.work import MutationApplication, apply_mutation
 from graph_works_core.work import transactions as public_transactions
-from graph_works_core.workspace import transactions
+from graph_works_core.workspace import anchors, transactions
 from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
 from okf_ext.moves import Move
 from okf_io import load_bundle
@@ -1138,11 +1138,11 @@ def test_baseline_capture_counts_findings_under_their_post_move_paths(tmp_path: 
     (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), path, release)
-    root_fd = transactions._open_root(layout.bundle_dir)
+    root = transactions._open_root(layout.bundle_dir)
     try:
-        state = transactions._capture_validation_state(layout, plan, root_fd, repo_root=repo)
+        state = transactions._capture_validation_state(layout, plan, root, repo_root=repo)
     finally:
-        os.close(root_fd)
+        root.close()
 
     destination = f"{release}/children/bug-source.md"
     assert state.findings[(destination, "targets.affects-missing")] == 1
@@ -1180,18 +1180,18 @@ def test_unrelated_excused_note_does_not_fabricate_a_pre_existing_summary(tmp_pa
     _write_item(layout.bundle_dir, path, type="Feature")
     (layout.bundle_dir / path).mkdir()
     plan = _plan(layout, validate_paths=(path,))
-    root_fd = transactions._open_root(layout.bundle_dir)
+    root = transactions._open_root(layout.bundle_dir)
     excused = ["baseline capture failed, falling back to absolute postcondition gate for this mutation: boom"]
     try:
         failures = transactions._validate_postconditions(
             layout,
             plan,
-            root_fd,
+            root,
             baseline=None,
             excused=excused,
         )
     finally:
-        os.close(root_fd)
+        root.close()
 
     assert failures == ()
     assert excused == ["baseline capture failed, falling back to absolute postcondition gate for this mutation: boom"]
@@ -1469,13 +1469,13 @@ def test_direct_move_destination_open_failure_preserves_a_recreated_source(
         if state == "applying":
             armed = True
 
-    def fail_destination_parent(root_fd: int, member: str, **kwargs: object):
+    def fail_destination_parent(root: anchors.Anchor, member: str, **kwargs: object):
         nonlocal injected
         if armed and not injected and member == "work/destination/child.bin":
             injected = True
             source.write_bytes(b"external-source")
             raise OSError("injected destination-parent open failure")
-        return real_open_parent(root_fd, member, **kwargs)
+        return real_open_parent(root, member, **kwargs)
 
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_open_parent", fail_destination_parent)
@@ -1514,12 +1514,12 @@ def test_direct_move_destination_open_failure_restores_custody_without_residue(
         if state == "applying":
             armed = True
 
-    def fail_destination_parent(root_fd: int, member: str, **kwargs: object):
+    def fail_destination_parent(root: anchors.Anchor, member: str, **kwargs: object):
         nonlocal injected
         if armed and not injected and member == "work/destination/child.bin":
             injected = True
             raise OSError("injected destination-parent open failure")
-        return real_open_parent(root_fd, member, **kwargs)
+        return real_open_parent(root, member, **kwargs)
 
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_open_parent", fail_destination_parent)
@@ -2426,12 +2426,12 @@ def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) ->
 
     file = tmp_path / "file"
     file.write_text("x", encoding="utf-8")
-    file_fd = os.open(file, os.O_RDONLY)
+    file_anchor = anchors._PosixAnchor(os.open(file, os.O_RDONLY))
     try:
-        with pytest.raises(NotADirectoryError), transactions._bundle_root_lock(file_fd):
+        with pytest.raises(NotADirectoryError), transactions._bundle_root_lock(file_anchor):
             pass
     finally:
-        os.close(file_fd)
+        file_anchor.close()
 
     with pytest.raises(ValueError, match="must be absolute"):
         transactions._open_absolute_directory(Path("relative"))
@@ -2455,15 +2455,15 @@ def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) ->
 
 
 def test_transaction_path_helpers_create_ancestors_and_hash_entry_kinds(tmp_path: Path) -> None:
-    root_fd = os.open(tmp_path, os.O_RDONLY)
+    root = transactions._open_root(tmp_path)
     touched: set[str] = set()
     try:
-        parent_fd, name = transactions._open_parent(root_fd, "new/deep/file", create=True, touched=touched)
+        parent_fd, name = transactions._open_parent(root, "new/deep/file", create=True, touched=touched)
         os.close(parent_fd)
         assert name == "file" and touched == {"new", "new/deep"}
         with pytest.raises(ValueError, match="now exists"):
             transactions._open_parent(
-                root_fd,
+                root,
                 "new/deep/file",
                 create=True,
                 touched=set(),
@@ -2476,13 +2476,13 @@ def test_transaction_path_helpers_create_ancestors_and_hash_entry_kinds(tmp_path
         (tmp_path / "tree").mkdir()
         (tmp_path / "tree/file").write_text("payload", encoding="utf-8")
         (tmp_path / "tree/link").symlink_to("file")
-        assert transactions._entry_fingerprint_at(root_fd, "tree")
-        transactions._validate_ancestor_chain(root_fd, "missing/child")
+        assert transactions._entry_fingerprint_at(root, "tree")
+        transactions._validate_ancestor_chain(root, "missing/child")
         (tmp_path / "ancestor-link").symlink_to(tmp_path / "tree")
         with pytest.raises(ValueError, match="unsafe ancestor"):
-            transactions._validate_ancestor_chain(root_fd, "ancestor-link/child")
+            transactions._validate_ancestor_chain(root, "ancestor-link/child")
     finally:
-        os.close(root_fd)
+        root.close()
 
     transactions._fsync_entry(tmp_path / "tree")
     transactions._fsync_entry(tmp_path / "tree/file")
@@ -2555,18 +2555,18 @@ def test_transaction_preflight_rejects_refused_foreign_and_duplicate_effect_plan
         layout,
         directory_preconditions=(DirectoryPrecondition("absent", None), DirectoryPrecondition("absent", None)),
     )
-    root_fd = transactions._open_root(layout.bundle_dir)
+    root = transactions._open_root(layout.bundle_dir)
     try:
         with pytest.raises(ValueError, match="duplicate members"):
-            transactions._preflight_anchored(duplicate_conditions, root_fd, tmp_path / "scratch")
+            transactions._preflight_anchored(duplicate_conditions, root, tmp_path / "scratch")
         duplicate_writes = _plan(
             layout,
             writes=(PlannedWrite("new", None, b"a"), PlannedWrite("new", None, b"b")),
         )
         with pytest.raises(ValueError, match="duplicate targets"):
-            transactions._preflight_anchored(duplicate_writes, root_fd, tmp_path / "scratch")
+            transactions._preflight_anchored(duplicate_writes, root, tmp_path / "scratch")
     finally:
-        os.close(root_fd)
+        root.close()
 
 
 def test_anchored_preflight_rejects_each_stale_write_and_move_shape(tmp_path: Path) -> None:
@@ -2575,7 +2575,7 @@ def test_anchored_preflight_rejects_each_stale_write_and_move_shape(tmp_path: Pa
     (root / "existing").write_bytes(b"old")
     (root / "source").write_bytes(b"source")
     (root / "destination").write_bytes(b"destination")
-    root_fd = transactions._open_root(root)
+    root_anchor = transactions._open_root(root)
 
     cases = [
         (_plan(layout, directory_preconditions=(DirectoryPrecondition("missing", "digest"),)), "now missing"),
@@ -2602,9 +2602,9 @@ def test_anchored_preflight_rejects_each_stale_write_and_move_shape(tmp_path: Pa
     try:
         for index, (plan, message) in enumerate(cases):
             with pytest.raises(ValueError, match=message):
-                transactions._preflight_anchored(plan, root_fd, tmp_path / f"scratch-{index}")
+                transactions._preflight_anchored(plan, root_anchor, tmp_path / f"scratch-{index}")
     finally:
-        os.close(root_fd)
+        root_anchor.close()
 
 
 def test_copy_entry_handles_top_level_files_and_symlinks(tmp_path: Path) -> None:

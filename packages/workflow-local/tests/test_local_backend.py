@@ -478,3 +478,49 @@ def _pid_alive(pid):
     except ProcessLookupError:
         return False
     return True
+
+
+def test_local_backend_refuses_windows(tmp_path, monkeypatch):
+    # `_pid_alive`'s `os.kill(pid, 0)` probe maps to `TerminateProcess` on
+    # Windows, so the backend must refuse before anything destructive runs.
+    from workflow_local import backend as backend_module
+
+    monkeypatch.setattr(backend_module.sys, "platform", "win32")
+    with pytest.raises(BackendError):
+        make_backend(tmp_path / "root")
+
+
+def test_local_session_refuses_windows(tmp_path, monkeypatch):
+    # LocalSession is the exported constructor in front of `_probe_on_open`;
+    # guarding only the backend leaves the destructive path reachable.
+    from workflow_local import backend as backend_module
+
+    backend = make_backend(tmp_path / "root")
+    monkeypatch.setattr(backend_module.sys, "platform", "win32")
+    with pytest.raises(BackendError):
+        backend.open_session("s")
+
+
+def test_windows_refusal_names_the_data_loss_and_points_at_workflow_orca(tmp_path, monkeypatch):
+    from workflow_local import backend as backend_module
+
+    monkeypatch.setattr(backend_module.sys, "platform", "win32")
+    with pytest.raises(BackendError, match="workflow-orca") as excinfo:
+        make_backend(tmp_path / "root")
+    assert "kill" in str(excinfo.value).lower() or "terminat" in str(excinfo.value).lower()
+
+
+def test_ledger_still_usable_on_a_patched_windows_platform(tmp_path, monkeypatch):
+    # Pure json/pathlib; inspecting a POSIX-written ledger on Windows is a
+    # real use and a gain, not a side effect the guard should block.
+    session = make_backend(tmp_path / "root").open_session("s")
+    session.launch(dispatch(tmp_path, "done:succeeded"))
+    drain(session, until=is_done)
+    session.close()
+
+    import workflow_local
+    from workflow_local import backend as backend_module
+
+    monkeypatch.setattr(backend_module.sys, "platform", "win32")
+    entries = workflow_local.read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)
+    assert entries["slug#plan"].state == "succeeded"

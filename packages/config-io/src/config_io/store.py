@@ -102,7 +102,7 @@ class PlainYamlStore:
     def write(self, data: Mapping[str, object]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         rendered = yaml.safe_dump(dict(data), sort_keys=False, default_flow_style=False)
-        self.path.write_text(rendered, encoding="utf-8")
+        self.path.write_text(rendered, encoding="utf-8", newline="")
 
     def snapshot(self) -> bytes | None:
         return self.path.read_bytes() if self.path.exists() else None

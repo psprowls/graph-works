@@ -60,7 +60,11 @@ def write_anchors(cache_dir: Path, anchors: Mapping[str, str]) -> None:
     """
     path = anchor_path(cache_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(dict(sorted(anchors.items())), indent=2) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(dict(sorted(anchors.items())), indent=2) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
 
 __all__ = ["ANCHOR_RELATIVE_PATH", "anchor_path", "read_anchors", "write_anchors"]

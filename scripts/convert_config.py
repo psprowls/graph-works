@@ -608,13 +608,13 @@ def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
         # The header is imported rather than restated so a converted workspace's
         # gitignore is byte-identical to a bootstrapped one, and phase 3's
         # `gw bootstrap` sees nothing to append.
-        path.write_text(GITIGNORE_HEADER + body, encoding="utf-8")
+        path.write_text(GITIGNORE_HEADER + body, encoding="utf-8", newline="")
         created.append(path)
     else:
         present = {line.strip() for line in path.read_text(encoding="utf-8").splitlines()}
         missing = "".join(f"{entry}\n" for entry in entries if entry not in present)
         if missing:
-            with path.open("a", encoding="utf-8") as handle:
+            with path.open("a", encoding="utf-8", newline="") as handle:
                 handle.write(missing)
             created.append(path)
     return created
@@ -726,7 +726,7 @@ def convert(
             )
         unchanged = True
     else:
-        manifest_path.write_text(conversion.manifest_text, encoding="utf-8")
+        manifest_path.write_text(conversion.manifest_text, encoding="utf-8", newline="")
         created_manifest = True
 
     # Act 5 -- four readers. A failure unlinks a manifest *this run* created and

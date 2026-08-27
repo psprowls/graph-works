@@ -493,7 +493,7 @@ def _locked(lock: Path) -> Iterator[None]:
 def _write(ledger: Path, text: str) -> None:
     """Temp file + rename, so a crash mid-write cannot truncate the ledger."""
     tmp = ledger.parent / f".{ledger.name}.tmp.{os.getpid()}"
-    tmp.write_text(text, encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8", newline="")
     tmp.replace(ledger)
 
 

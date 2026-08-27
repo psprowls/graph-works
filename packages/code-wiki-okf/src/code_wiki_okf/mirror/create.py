@@ -69,7 +69,7 @@ def write_new_page(
     document.set_body(render_skeleton(declaration))
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(document.serialize(), encoding="utf-8")
+    target.write_text(document.serialize(), encoding="utf-8", newline="")
     return target
 
 

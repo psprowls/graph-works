@@ -264,6 +264,7 @@ def _write_manifest(cache_dir: Path, manifest: _Manifest) -> None:
         )
         + "\n",
         encoding="utf-8",
+        newline="\n",
     )
 
 
@@ -1210,7 +1211,7 @@ def _write_query_summary(
         "ended_at": datetime.now(tz=UTC).isoformat(),
     }
     try:
-        (trace_dir / f"query_{query_id}.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8")
+        (trace_dir / f"query_{query_id}.jsonl").write_text(json.dumps(record) + "\n", encoding="utf-8", newline="\n")
     except OSError as exc:
         logger.warning("could not write query summary trace: %s", exc)
 

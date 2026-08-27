@@ -15,6 +15,22 @@ default: check
 normalization:
     uv run python scripts/check_filename_normalization.py .
 
+# Implicit text-IO defaults in shipped source -- a missing `encoding=` on any
+# text read/write, or a missing `newline=` on any text write.
+#
+# Not a `lint` addition, deliberately: `lint` is ruff, ruff's PLW1514 is
+# preview-only and covers `encoding=` alone, and `scripts` and `plugins` are in
+# ruff's `exclude`. The half ruff cannot express -- a missing `newline=` -- is
+# the half that corrupts data: a CRLF okf document written back through a
+# translating writer on Windows becomes CR CR LF, one stray CR per line, and
+# non-idempotently. See work/epic-native-windows-support/children/bug-explicit-encoding-newline.
+#
+# Scope is shipped source (`packages/*/src`, `scripts` minus `scripts/tests`).
+# Test trees write to `tmp_path`; the instrument for those is a suite run on
+# Windows, which is child 9's job.
+text-io:
+    uv run python scripts/check_text_io_explicit.py .
+
 # A tracked file that would check out CRLF under Git for Windows' default
 # core.autocrlf=true (see work/epic-native-windows-support/children/bug-enforce-lf-line-endings).
 line-endings:
@@ -119,7 +135,7 @@ plugin-contract *ARGS:
 # happens to pull `sync` in today. Without it the gate's result depends on the
 # order of this list: `types` before `cov` fails from a clean checkout, `cov`
 # before `types` passes, on identical code.
-check: sync subtree-base normalization line-endings lint types contracts cov test-plugin
+check: sync subtree-base normalization text-io line-endings lint types contracts cov test-plugin
 
 # Subtree merge-base guard -- the `git-subtree-split` note behind
 # `plugins/graph-works`.

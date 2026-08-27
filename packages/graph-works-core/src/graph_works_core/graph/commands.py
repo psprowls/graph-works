@@ -267,7 +267,7 @@ def export(target: GraphTarget, *, out: Path | None = None) -> GraphResult:
     if out is None:
         return GraphResult(exit_codes.SUCCESS, document)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(document, encoding="utf-8")
+    out.write_text(document, encoding="utf-8", newline="")
     return GraphResult(exit_codes.SUCCESS, f"wrote {node_count} nodes, {edge_count} edges → {out}")
 
 

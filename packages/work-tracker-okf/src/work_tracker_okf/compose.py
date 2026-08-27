@@ -542,7 +542,7 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
 
         for index in plan.indexes:
             index.path.parent.mkdir(parents=True, exist_ok=True)
-            index.path.write_text(index.after, encoding="utf-8")
+            index.path.write_text(index.after, encoding="utf-8", newline="")
         indexes = plan.indexes
         application = FilingApplication(page=page, indexes=indexes)
 

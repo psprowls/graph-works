@@ -173,7 +173,7 @@ def _read_pyproject(path: Path) -> dict[str, Any] | None:
 
 def _read_package_json(path: Path) -> dict[str, Any] | None:
     try:
-        with path.open() as f:
+        with path.open(encoding="utf-8") as f:
             data = json.load(f)
     except json.JSONDecodeError as exc:
         print(f"warning: skipping {path} ({exc})", file=sys.stderr)

@@ -128,8 +128,9 @@ def _append_journal(
         os.fsync(_journal_fd)
         _fsync_live_directory(_parent_fd)
         return
+    stream: IO[bytes]
     if _parent_fd is None:
-        stream = journal.open("a", encoding="utf-8")
+        stream = journal.open("ab")
     else:
         descriptor = os.open(
             journal.name,
@@ -137,9 +138,9 @@ def _append_journal(
             0o600,
             dir_fd=_parent_fd,
         )
-        stream = os.fdopen(descriptor, "a", encoding="utf-8")
+        stream = os.fdopen(descriptor, "ab")
     with stream:
-        stream.write(encoded.decode("utf-8"))
+        stream.write(encoded)
         stream.flush()
         os.fsync(stream.fileno())
     if _parent_fd is None:

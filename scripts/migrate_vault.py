@@ -312,7 +312,7 @@ def cmd_decisions(args: argparse.Namespace) -> PhaseReport:
     )
     if args.write:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_render_decisions(merged), encoding="utf-8")
+        target.write_text(_render_decisions(merged), encoding="utf-8", newline="")
     return PhaseReport(phase="decisions", changed=(str(target),) if args.write else (), notes=notes)
 
 
@@ -944,7 +944,7 @@ def cmd_entities(args: argparse.Namespace) -> PhaseReport:
     )["rows"]
     if args.write and not snapshot_path.exists():
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        snapshot_path.write_text(json.dumps({"rows": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        snapshot_path.write_text(json.dumps({"rows": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
     notes.append(f"{len(rows)} entity page(s) snapshotted")
 
     # --- step 2: quarantine ----------------------------------------------
@@ -984,7 +984,7 @@ def cmd_entities(args: argparse.Namespace) -> PhaseReport:
     report_path = out / "entities-unmatched.md"
     if args.write:
         report_path.parent.mkdir(parents=True, exist_ok=True)
-        report_path.write_text(_render_unmatched(unmatched, bundle, rows, renames), encoding="utf-8")
+        report_path.write_text(_render_unmatched(unmatched, bundle, rows, renames), encoding="utf-8", newline="")
     notes.append(f"{len(unmatched)} unmatched entity uri(s); see {report_path}")
     notes.append(f"{len(successors)} matched; {len(changed)} member(s) rewritten")
 
@@ -1451,7 +1451,7 @@ def cmd_gate(args: argparse.Namespace) -> PhaseReport:
         notes.append(f"baseline written to {baseline}; assertion 3 not evaluated on this run")
         if args.write:
             baseline.parent.mkdir(parents=True, exist_ok=True)
-            baseline.write_text(json.dumps({"broken": broken}, indent=2) + "\n", encoding="utf-8")
+            baseline.write_text(json.dumps({"broken": broken}, indent=2) + "\n", encoding="utf-8", newline="\n")
     else:
         before = int(json.loads(baseline.read_text(encoding="utf-8"))["broken"])
         if broken > before:

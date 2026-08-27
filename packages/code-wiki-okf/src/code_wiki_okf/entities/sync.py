@@ -509,7 +509,7 @@ def apply_entities(
         )
         path = bundle_root / write.member
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(text, encoding="utf-8")
+        path.write_text(text, encoding="utf-8", newline="")
 
     working_bundle = load_bundle(bundle_root)
     planned_ids = {write.member.removesuffix(".md") for write in plan.writes}

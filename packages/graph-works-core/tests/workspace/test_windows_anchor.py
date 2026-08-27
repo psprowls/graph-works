@@ -8,6 +8,8 @@ to return this tier yet.
 
 from __future__ import annotations
 
+import os
+import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -423,3 +425,33 @@ def test_lock_file_detects_a_swapped_lock_file(tmp_path: Path, monkeypatch: pyte
             pass
     finally:
         anchor.close()
+
+
+def test_nofollow_availability_is_stated_rather_than_inferred() -> None:
+    assert anchors.NOFOLLOW_AVAILABLE is hasattr(os, "O_NOFOLLOW")
+
+
+def test_the_windows_tier_still_refuses_a_symlinked_ancestor_without_o_nofollow(tmp_path: Path) -> None:
+    """The flag is gone; the refusal is not.  `open_child` lstats every
+    component, which is a check rather than a kernel guarantee -- weaker, and
+    ADR-0042 says so."""
+    (tmp_path / "escape").mkdir()
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work" / "link").symlink_to(tmp_path / "escape", target_is_directory=True)
+    anchor = _anchor(tmp_path)
+    try:
+        with pytest.raises(ValueError, match="unsafe ancestor"):
+            transactions._open_parent(anchor, "work/link/page.md")
+    finally:
+        anchor.close()
+
+
+def test_directory_fsync_is_honored_only_on_the_strong_tier(tmp_path: Path) -> None:
+    posix = anchors.open_anchor(tmp_path, platform_name="linux")
+    windows = anchors.open_anchor(tmp_path, platform_name="win32")
+    try:
+        assert posix.fsync() is None and windows.fsync() is None  # both return None...
+        assert anchors.DIRECTORY_FSYNC_HONORED is (sys.platform != "win32")
+    finally:
+        posix.close()
+        windows.close()

@@ -80,13 +80,36 @@ class RefusedShape:
     remedy: str
 
 
+#: Whether the kernel will refuse to follow a symlink on open.  Stated rather
+#: than inferred at each call site: on Windows this is False and the flag
+#: silently becomes 0, so the protection VANISHES with no diagnostic.  Naming
+#: it is what lets ADR-0042 record the loss and `gw util platform` report it.
+NOFOLLOW_AVAILABLE = hasattr(os, "O_NOFOLLOW")
+
+#: Whether `Anchor.fsync()` actually flushes.  False on Windows (L2): rename
+#: and link durability is not flushable there.
+DIRECTORY_FSYNC_HONORED = sys.platform != "win32"
+
+
 def nofollow_flag() -> int:
-    return getattr(os, "O_NOFOLLOW", 0)
+    """`O_NOFOLLOW` where the platform has it, `0` where it does not.
+
+    Returning 0 is not a graceful degradation -- the no-follow protection
+    disappears and nothing raises.  On the windows-revalidated tier the
+    replacement is `_WindowsAnchor.open_child`, which `lstat`s each component
+    and refuses a link explicitly.  That is weaker: a check, not a kernel
+    guarantee, so a swap between the check and the syscall is not caught.
+    ADR-0042 records this as the tier's largest security difference.
+    """
+    return os.O_NOFOLLOW if NOFOLLOW_AVAILABLE else 0
 
 
 def directory_flags() -> int:
+    # os.O_DIRECTORY is POSIX-only and unguarded here on purpose: this
+    # function is only ever called from _PosixAnchor, and Task 5's selector
+    # means a Windows run never reaches it.
     flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
+    if NOFOLLOW_AVAILABLE:
         flags |= os.O_NOFOLLOW
     return flags
 
@@ -912,7 +935,9 @@ def open_absolute_anchor(path: Path, *, platform_name: str | None = None) -> Anc
 
 __all__ = [
     "BUNDLE_LOCK_NAME",
+    "DIRECTORY_FSYNC_HONORED",
     "MAX_PATH",
+    "NOFOLLOW_AVAILABLE",
     "POSIX_STRONG_TIER",
     "RESERVED_DEVICE_NAMES",
     "WINDOWS_REVALIDATED_TIER",

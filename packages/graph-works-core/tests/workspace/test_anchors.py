@@ -9,9 +9,11 @@ dead lines against the 95% floor.
 from __future__ import annotations
 
 import ast
+import importlib
 import importlib.util
 import os
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -190,24 +192,26 @@ def test_exclusive_lock_and_lock_file_round_trip(tmp_path: Path) -> None:
 
 
 def test_lock_file_detects_a_lock_swapped_between_open_and_lock(tmp_path: Path) -> None:
+    import fcntl
+
     anchor = anchors.open_anchor(tmp_path)
-    original = anchors.fcntl.flock
+    original = fcntl.flock
 
     def swap_then_lock(descriptor: int, operation: int) -> None:
-        if operation == anchors.fcntl.LOCK_EX and (tmp_path / "executor.lock").exists():
+        if operation == fcntl.LOCK_EX and (tmp_path / "executor.lock").exists():
             (tmp_path / "executor.lock").unlink()
             (tmp_path / "executor.lock").write_text("", encoding="utf-8")
         original(descriptor, operation)
 
     try:
-        anchors.fcntl.flock = swap_then_lock  # type: ignore[assignment]
+        fcntl.flock = swap_then_lock  # type: ignore[assignment]
         with (
             pytest.raises(ValueError, match="changed during mutation"),
             anchor.lock_file("executor.lock", assert_identity=True),
         ):
             pass
     finally:
-        anchors.fcntl.flock = original  # type: ignore[assignment]
+        fcntl.flock = original  # type: ignore[assignment]
         anchor.close()
 
 
@@ -240,22 +244,58 @@ def _module_scope_imports(source: str) -> set[str]:
     return names
 
 
+def _module_source(dotted: str) -> str:
+    spec = importlib.util.find_spec(dotted)
+    assert spec is not None and spec.origin is not None
+    return Path(spec.origin).read_text(encoding="utf-8")
+
+
 def test_transactions_imports_no_posix_only_module_at_module_scope() -> None:
     """On native Windows the engine must *import* and fail at call time.
 
     Asserted against the module source rather than a mocked import: a mock can
     pass vacuously, and this property is the reason the anchor seam exists.
     """
-    spec = importlib.util.find_spec("graph_works_core.workspace.transactions")
-    assert spec is not None and spec.origin is not None
-    source = Path(spec.origin).read_text(encoding="utf-8")
+    source = _module_source("graph_works_core.workspace.transactions")
     offending = _module_scope_imports(source) & POSIX_ONLY_MODULES
     assert offending == set(), f"transactions.py imports POSIX-only modules at module scope: {sorted(offending)}"
 
 
-def test_anchors_is_the_module_that_owns_the_posix_only_imports() -> None:
-    """The companion half: the seam did not simply delete the dependency."""
-    spec = importlib.util.find_spec("graph_works_core.workspace.anchors")
-    assert spec is not None and spec.origin is not None
-    source = Path(spec.origin).read_text(encoding="utf-8")
-    assert "fcntl" in _module_scope_imports(source)
+def test_anchors_imports_no_posix_only_module_at_module_scope() -> None:
+    """The hazard is transitive: `transactions` imports `anchors`.
+
+    The sibling item asserted this property against `transactions.py` alone,
+    which passed vacuously -- `import fcntl` at `anchors.py` module scope
+    still killed `import transactions` on native Windows before argv was
+    parsed.  Both halves are asserted now.
+    """
+    source = _module_source("graph_works_core.workspace.anchors")
+    offending = _module_scope_imports(source) & POSIX_ONLY_MODULES
+    assert offending == set(), f"anchors.py imports POSIX-only modules at module scope: {sorted(offending)}"
+
+
+def test_anchors_still_owns_the_posix_only_primitives() -> None:
+    """The seam did not simply delete the dependency: `fcntl` still appears,
+    inside the functions that use it, and nowhere else in `workspace`."""
+    source = _module_source("graph_works_core.workspace.anchors")
+    assert "import fcntl" in source
+    assert "fcntl" not in _module_scope_imports(source)
+
+
+def test_no_workspace_module_imports_a_posix_only_module_at_module_scope() -> None:
+    """The transitive closure, asserted once rather than per module."""
+    package = Path(importlib.util.find_spec("graph_works_core.workspace").origin).parent
+    for module_path in sorted(package.glob("*.py")):
+        offending = _module_scope_imports(module_path.read_text(encoding="utf-8")) & POSIX_ONLY_MODULES
+        assert offending == set(), f"{module_path.name} imports {sorted(offending)} at module scope"
+
+
+def test_workspace_engine_imports_with_fcntl_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The native-Windows import path, simulated: hide `fcntl`, drop the
+    modules from `sys.modules`, and import again.  A structural `ast` check
+    cannot catch a lazily-added top-level import in a helper module; this can.
+    """
+    for name in [n for n in sys.modules if n.startswith("graph_works_core.workspace")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    monkeypatch.setitem(sys.modules, "fcntl", None)  # a None entry makes `import fcntl` raise
+    importlib.import_module("graph_works_core.workspace.transactions")

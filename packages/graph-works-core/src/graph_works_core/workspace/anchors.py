@@ -18,11 +18,13 @@ has, which inherits it from okf-io's required `today=`.  That is what lets a
 POSIX box assert the behaviour a Windows user would actually see, and it is
 why neither selector arm is dead lines against a 95% coverage floor.
 
-This module is the *only* place in `graph_works_core.workspace` that imports
-`fcntl` or `ctypes`.  `transactions.py` imports neither, which is a hard
-acceptance property of the item that created this module: on native Windows the
-engine then imports successfully and fails at call time, which is strictly
-better than dying at import.
+This module is the *only* place in `graph_works_core.workspace` that touches
+`fcntl` or `ctypes`, and it touches them only inside the function bodies that
+need them -- never at module scope.  `transactions.py` imports this module at
+module scope, so a module-scope `import fcntl` here would kill
+`import transactions` on native Windows transitively, which is precisely the
+failure the anchor seam exists to prevent.  `okf_ext.locking` documents the
+same pattern for the same reason.
 
 It deliberately does not import `graph_works_core.util.platform`:
 `workspace` is the bottom import-linter layer and `util` sits above it, so
@@ -33,13 +35,11 @@ where that import is legal.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import stat
 import sys
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, contextmanager, suppress
-from ctypes import CDLL, c_char_p, c_int, c_uint, get_errno
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -218,6 +218,8 @@ class _PosixAnchor:
     def path(self) -> Path:
         """The current namespace path of this descriptor.  From transactions.py:355."""
         if sys.platform == "darwin":
+            import fcntl  # POSIX-only, imported at the point of use
+
             raw = fcntl.fcntl(self.descriptor, 50, bytes(1024))
             return Path(os.fsdecode(raw.split(b"\0", 1)[0]))
         return Path(f"/proc/self/fd/{self.descriptor}").readlink()
@@ -267,6 +269,8 @@ class _PosixAnchor:
         """
         if not isinstance(destination, _PosixAnchor):
             raise TypeError("rename_noreplace requires a POSIX anchor destination")
+        from ctypes import CDLL, c_char_p, c_int, c_uint, get_errno  # POSIX-only, imported at the point of use
+
         flag = 0x00000004 if sys.platform == "darwin" else 0x00000001
         library = CDLL(None, use_errno=True)
         function = library.renameatx_np if sys.platform == "darwin" else library.renameat2
@@ -318,6 +322,8 @@ class _PosixAnchor:
         immune to the path being swapped underneath -- which is why this does
         not route through any path-based lock helper.
         """
+        import fcntl  # POSIX-only, imported at the point of use
+
         if not stat.S_ISDIR(self.self_stat().st_mode):
             raise NotADirectoryError("bundle root descriptor is not a directory")
         locked = False
@@ -333,6 +339,8 @@ class _PosixAnchor:
     @contextmanager
     def lock_file(self, name: str, *, assert_identity: bool) -> Iterator[None]:
         """Lock a regular file beneath this anchor.  From transactions.py:280-299."""
+        import fcntl  # POSIX-only, imported at the point of use
+
         descriptor = os.open(
             name,
             os.O_RDWR | os.O_CREAT | nofollow_flag(),
@@ -381,6 +389,8 @@ def lock_path(path: Path) -> Iterator[None]:
     runs before any anchor exists, and strengthening it to a descriptor walk
     here would be a behaviour change smuggled into a mechanical extraction.
     """
+    import fcntl  # POSIX-only, imported at the point of use
+
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT | nofollow_flag(), 0o600)
     locked = False
     try:

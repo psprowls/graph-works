@@ -232,7 +232,9 @@ def test_exclusive_lock_and_lock_file_round_trip(tmp_path: Path) -> None:
         anchor.close()
 
 
-def test_lock_file_detects_a_lock_swapped_between_open_and_lock(tmp_path: Path) -> None:
+def test_lock_file_detects_a_lock_swapped_between_open_and_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import fcntl
 
     anchor = anchors.open_anchor(tmp_path)
@@ -244,15 +246,14 @@ def test_lock_file_detects_a_lock_swapped_between_open_and_lock(tmp_path: Path) 
             (tmp_path / "executor.lock").write_text("", encoding="utf-8")
         original(descriptor, operation)
 
+    monkeypatch.setattr(fcntl, "flock", swap_then_lock)
     try:
-        fcntl.flock = swap_then_lock  # type: ignore[assignment]
         with (
             pytest.raises(ValueError, match="changed during mutation"),
             anchor.lock_file("executor.lock", assert_identity=True),
         ):
             pass
     finally:
-        fcntl.flock = original  # type: ignore[assignment]
         anchor.close()
 
 

@@ -260,7 +260,8 @@ def _fsync_directory(path: Path) -> None:
 
 
 def _nofollow_flag() -> int:
-    return getattr(os, "O_NOFOLLOW", 0)
+    # A delegator, not a re-export.  See the note above `_open_parent`.
+    return anchors.nofollow_flag()
 
 
 def _require_regular_file(descriptor: int, label: str) -> os.stat_result:

@@ -404,7 +404,11 @@ class _PosixAnchor:
 
     @contextmanager
     def lock_file(self, name: str, *, assert_identity: bool) -> Iterator[None]:
-        """Lock a regular file beneath this anchor.  From transactions.py:280-299."""
+        """Lock a regular file beneath this anchor.  From transactions.py:280-299.
+
+        `assert_identity=False` is exercised only by unit tests; the engine
+        always passes `True` (see `transactions._executor_lock:275`).
+        """
         import fcntl  # POSIX-only, imported at the point of use
 
         descriptor = os.open(
@@ -1031,7 +1035,6 @@ __all__ = [
     "RefusedShape",
     "UnsupportedAnchorPlatform",
     "anchor_tier",
-    "directory_flags",
     "durability_tier",
     "lock_path",
     "long_paths_enabled",

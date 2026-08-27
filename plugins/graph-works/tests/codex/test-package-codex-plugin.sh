@@ -270,12 +270,15 @@ else
 fi
 assert_contains "$missing_output" "ERROR: metadata source is incomplete" "incomplete metadata reports clear error"
 
+monorepo_root="$(git -C "$REPO_ROOT" rev-parse --show-toplevel)"
+repo_prefix="$(git -C "$REPO_ROOT" rev-parse --show-prefix)"
 dirty_repo="$TEST_ROOT/dirty-repo"
-git clone -q --no-local "$REPO_ROOT" "$dirty_repo"
-printf '\n# dirty fixture\n' >>"$dirty_repo/README.md"
+git clone -q --no-local "$monorepo_root" "$dirty_repo"
+dirty_plugin_root="$dirty_repo/$repo_prefix"
+printf '\n# dirty fixture\n' >>"$dirty_plugin_root/README.md"
 set +e
 dirty_output="$(
-  cd "$dirty_repo"
+  cd "$dirty_plugin_root"
   scripts/package-codex-plugin.sh \
     --metadata-source "$metadata_source" \
     --output "$TEST_ROOT/dirty.zip" 2>&1

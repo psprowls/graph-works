@@ -44,6 +44,8 @@ from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import WorkMutationPlan, directory_manifest_digest
 from work_tracker_okf.paths import parse_item_path
 
+from graph_works_core.workspace import anchors
+from graph_works_core.workspace.anchors import Anchor, open_absolute_anchor
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 
@@ -114,39 +116,38 @@ def _append_journal(
     journal: Path,
     state: str,
     *,
-    _parent_fd: int | None = None,
+    _parent: Anchor | None = None,
     _journal_fd: int | None = None,
     **details: object,
 ) -> None:
     record = _journal_record(state, details)
     encoded = (json.dumps(record, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     if _journal_fd is not None:
-        if _parent_fd is None:
+        if _parent is None:
             raise ValueError("retained journal requires its anchored parent descriptor")
-        _assert_regular_entry_identity(_parent_fd, journal.name, _journal_fd, "journal")
+        _assert_regular_entry_identity(_parent, journal.name, _journal_fd, "journal")
         _write_bytes(_journal_fd, encoded)
         os.fsync(_journal_fd)
-        _fsync_live_directory(_parent_fd)
+        _fsync_live_directory(_parent)
         return
     stream: IO[bytes]
-    if _parent_fd is None:
+    if _parent is None:
         stream = journal.open("ab")
     else:
-        descriptor = os.open(
+        descriptor = _parent.open_file(
             journal.name,
             os.O_WRONLY | os.O_APPEND | os.O_CREAT,
             0o600,
-            dir_fd=_parent_fd,
         )
         stream = os.fdopen(descriptor, "ab")
     with stream:
         stream.write(encoded)
         stream.flush()
         os.fsync(stream.fileno())
-    if _parent_fd is None:
+    if _parent is None:
         _fsync_directory(journal.parent)
     else:
-        _fsync_live_directory(_parent_fd)
+        _fsync_live_directory(_parent)
 
 
 def _journal_has_terminal_complete(
@@ -256,48 +257,24 @@ def _nofollow_flag() -> int:
 
 
 def _require_regular_file(descriptor: int, label: str) -> os.stat_result:
-    info = os.fstat(descriptor)
-    if not stat.S_ISREG(info.st_mode):
-        raise ValueError(f"{label} is not a regular file")
-    return info
+    # A delegator, not a re-export.  See the note above `_open_parent`.
+    return anchors.require_regular_file(descriptor, label)
 
 
-def _assert_regular_entry_identity(parent_fd: int, name: str, descriptor: int, label: str) -> None:
-    expected = _require_regular_file(descriptor, label)
-    try:
-        current = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    except OSError as exc:
-        raise ValueError(f"{label} changed during mutation: {exc}") from exc
-    if not stat.S_ISREG(current.st_mode) or (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
-        raise ValueError(f"{label} changed during mutation")
+def _assert_regular_entry_identity(parent: Anchor, name: str, descriptor: int, label: str) -> None:
+    anchors._assert_regular_entry_identity(parent, name, descriptor, label)
 
 
 @contextmanager
-def _executor_lock(transaction_root: Path, *, root_fd: int | None = None) -> Iterator[None]:
+def _executor_lock(transaction_root: Path, *, root: Anchor | None = None) -> Iterator[None]:
     """Serialize mutation executors that honor the workspace transaction boundary."""
-    if root_fd is None:
+    if root is None:
         transaction_root.mkdir(parents=True, exist_ok=True)
-        descriptor = os.open(transaction_root / "executor.lock", os.O_RDWR | os.O_CREAT | _nofollow_flag(), 0o600)
+        with anchors.lock_path(transaction_root / "executor.lock"):
+            yield
     else:
-        descriptor = os.open(
-            "executor.lock",
-            os.O_RDWR | os.O_CREAT | _nofollow_flag(),
-            0o600,
-            dir_fd=root_fd,
-        )
-    locked = False
-    try:
-        _require_regular_file(descriptor, "executor lock")
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        locked = True
-        if root_fd is not None:
-            _assert_regular_entry_identity(root_fd, "executor.lock", descriptor, "executor lock")
-        yield
-    finally:
-        if locked:
-            with suppress(OSError):
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
+        with root.lock_file("executor.lock", assert_identity=True):
+            yield
 
 
 @contextmanager
@@ -316,95 +293,84 @@ def _bundle_root_lock(root_fd: int) -> Iterator[None]:
                 fcntl.flock(root_fd, fcntl.LOCK_UN)
 
 
-def _open_absolute_directory(path: Path) -> int:
+# ---------------------------------------------------------------------------
+# The anchored-operation vocabulary below is a layer of thin delegators onto
+# `graph_works_core.workspace.anchors`.  It looks like dead indirection and it
+# is not: `monkeypatch.setattr(transactions, ...)` only bites if this module's
+# own call sites resolve the name through *this* module's globals.  The test
+# suite injects 16 of these names -- `_open_parent`, `_open_or_create_directory`,
+# `_rename_noreplace_at`, `_digest_in_directory`, `_executor_lock`,
+# `_fsync_live_file`, `_fsync_live_directory`, `_entry_fingerprint_at`,
+# `_append_journal`, `_commit_effect`, `_create_snapshot`, `_restore_snapshot`,
+# `_validate_postconditions`, `_load_bundle_at`, `directory_manifest_digest`,
+# `plan_indexes` -- and replacing any of these `def`s with a
+# `from anchors import ...` would leave the import succeeding, the attribute
+# present, and every one of those injections silently inert, with no runtime
+# signal, in the most safety-critical module in this repository.
+#
+# Do not "tidy" these into re-exports.
+# ---------------------------------------------------------------------------
+
+
+def _open_absolute_directory(path: Path) -> Anchor:
     """Open an absolute directory by walking every component without following links."""
-    if not path.is_absolute():
-        raise ValueError(f"cache directory must be absolute: {path}")
-    descriptor = os.open(path.anchor, _directory_flags())
-    try:
-        for part in path.parts[1:]:
-            child = os.open(part, _directory_flags(), dir_fd=descriptor)
-            os.close(descriptor)
-            descriptor = child
-    except Exception:
-        os.close(descriptor)
-        raise
-    return descriptor
+    return open_absolute_anchor(path)
 
 
-def _open_or_create_directory(parent_fd: int, name: str) -> int:
-    try:
-        return os.open(name, _directory_flags(), dir_fd=parent_fd)
-    except FileNotFoundError:
-        os.mkdir(name, 0o700, dir_fd=parent_fd)
-        _fsync_live_directory(parent_fd)
-        child = os.open(name, _directory_flags(), dir_fd=parent_fd)
-        _fsync_live_directory(child)
-        return child
+def _open_or_create_directory(parent: Anchor, name: str) -> Anchor:
+    return parent.open_or_create_child(name)
 
 
-def _assert_directory_identity(path: Path, descriptor: int, label: str) -> None:
-    expected = os.fstat(descriptor)
-    try:
-        current = os.stat(path, follow_symlinks=False)  # noqa: PTH116 -- identity check must not follow links
-    except OSError as exc:
-        raise ValueError(f"{label} directory changed during mutation: {exc}") from exc
-    if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (expected.st_dev, expected.st_ino):
-        raise ValueError(f"{label} directory changed during mutation")
+def _assert_directory_identity(path: Path, anchor: Anchor, label: str) -> None:
+    anchor.assert_directory_identity(path, label)
 
 
-def _descriptor_path(descriptor: int) -> Path:
-    """Return the current namespace path of an open directory descriptor."""
-    if sys.platform == "darwin":
-        raw = fcntl.fcntl(descriptor, 50, bytes(1024))
-        return Path(os.fsdecode(raw.split(b"\0", 1)[0]))
-    return Path(f"/proc/self/fd/{descriptor}").readlink()
+def _descriptor_path(anchor: Anchor) -> Path:
+    """Return the current namespace path of an open directory anchor."""
+    return anchor.path()
 
 
-def _directory_descriptor_alias(descriptor: int) -> Path:
+def _directory_descriptor_alias(anchor: Anchor) -> Path:
     """A descriptor-rooted namespace path suitable for resolving descendants."""
-    if sys.platform == "darwin":
-        return _descriptor_path(descriptor)
-    return Path(f"/proc/self/fd/{descriptor}")
+    return anchor.alias()
 
 
 @contextmanager
-def _locked_transaction_root(cache_dir: Path, transaction_root: Path) -> Iterator[tuple[int, int]]:
+def _locked_transaction_root(cache_dir: Path, transaction_root: Path) -> Iterator[tuple[Anchor, Anchor]]:
     """Anchor the cache namespace before acquiring the cross-process executor lock."""
     try:
-        cache_fd = _open_absolute_directory(cache_dir)
+        cache = _open_absolute_directory(cache_dir)
     except FileNotFoundError:
-        parent_fd = _open_absolute_directory(cache_dir.parent)
+        parent = _open_absolute_directory(cache_dir.parent)
         try:
-            cache_fd = _open_or_create_directory(parent_fd, cache_dir.name)
+            cache = _open_or_create_directory(parent, cache_dir.name)
         finally:
-            os.close(parent_fd)
+            parent.close()
     try:
-        transaction_root_fd = _open_or_create_directory(cache_fd, transaction_root.name)
+        transaction_root_anchor = _open_or_create_directory(cache, transaction_root.name)
         try:
-            with _executor_lock(transaction_root, root_fd=transaction_root_fd):
-                _assert_directory_identity(cache_dir, cache_fd, "cache")
-                _assert_directory_identity(transaction_root, transaction_root_fd, "transaction cache")
-                yield cache_fd, transaction_root_fd
+            with _executor_lock(transaction_root, root=transaction_root_anchor):
+                _assert_directory_identity(cache_dir, cache, "cache")
+                _assert_directory_identity(transaction_root, transaction_root_anchor, "transaction cache")
+                yield cache, transaction_root_anchor
         finally:
-            os.close(transaction_root_fd)
+            transaction_root_anchor.close()
     finally:
-        os.close(cache_fd)
+        cache.close()
 
 
 @contextmanager
-def _new_journal(transaction_fd: int, name: str) -> Iterator[int]:
-    descriptor = os.open(
+def _new_journal(transaction: Anchor, name: str) -> Iterator[int]:
+    descriptor = transaction.open_file(
         name,
         os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_EXCL | _nofollow_flag(),
         0o600,
-        dir_fd=transaction_fd,
     )
     try:
         _require_regular_file(descriptor, "journal")
-        _assert_regular_entry_identity(transaction_fd, name, descriptor, "journal")
+        _assert_regular_entry_identity(transaction, name, descriptor, "journal")
         os.fsync(descriptor)
-        _fsync_live_directory(transaction_fd)
+        _fsync_live_directory(transaction)
         yield descriptor
     finally:
         os.close(descriptor)
@@ -412,20 +378,20 @@ def _new_journal(transaction_fd: int, name: str) -> Iterator[int]:
 
 @contextmanager
 def _new_transaction_directory(
-    transaction_root_fd: int,
+    transaction_root: Anchor,
     configured: Path,
     transaction_id: str,
-) -> Iterator[tuple[int, Path, int]]:
-    os.mkdir(transaction_id, 0o700, dir_fd=transaction_root_fd)
-    _fsync_live_directory(transaction_root_fd)
-    descriptor = os.open(transaction_id, _directory_flags(), dir_fd=transaction_root_fd)
+) -> Iterator[tuple[Anchor, Path, int]]:
+    transaction_root.mkdir(transaction_id, 0o700)
+    _fsync_live_directory(transaction_root)
+    transaction = transaction_root.open_child(transaction_id)
     try:
-        _assert_directory_identity(configured, descriptor, "transaction")
-        _fsync_live_directory(descriptor)
-        with _new_journal(descriptor, "journal.jsonl") as journal_fd:
-            yield descriptor, _descriptor_path(descriptor), journal_fd
+        _assert_directory_identity(configured, transaction, "transaction")
+        _fsync_live_directory(transaction)
+        with _new_journal(transaction, "journal.jsonl") as journal_fd:
+            yield transaction, _descriptor_path(transaction), journal_fd
     finally:
-        os.close(descriptor)
+        transaction.close()
 
 
 def _open_root(root: Path) -> int:
@@ -539,8 +505,16 @@ def _fsync_live_file(root_fd: int, member: str) -> None:
         os.close(parent_fd)
 
 
-def _fsync_live_directory(descriptor: int) -> None:
-    os.fsync(descriptor)
+def _fsync_live_directory(descriptor: int | Anchor) -> None:
+    # F2 call sites (the cache/transaction-root/per-transaction anchors) pass
+    # an `Anchor`; every other call site here still anchors a bare bundle-root
+    # descendant descriptor (F1/F3, out of scope for this item) and passes a
+    # raw `int`.  Both delegate to the identical `os.fsync` Windows documents
+    # as a directory no-op -- see `Anchor.fsync`.
+    if isinstance(descriptor, int):
+        os.fsync(descriptor)
+    else:
+        descriptor.fsync()
 
 
 def _assert_root_identity(root: Path, root_fd: int) -> None:
@@ -674,8 +648,14 @@ def _validate_ancestor_chain(root_fd: int, member: str) -> None:
 
 
 def _projected_symlink_is_internal(root_fd: int, destination: str, link: PurePosixPath) -> bool:
-    descriptor_root = _directory_descriptor_alias(root_fd)
-    resolved_root = _descriptor_path(root_fd).resolve(strict=True)
+    # `root_fd` is the F1 bundle-root descriptor (out of scope for this item;
+    # see Task 3).  `_descriptor_path`/`_directory_descriptor_alias` now speak
+    # `Anchor`, so this wraps the still-raw descriptor in a transient,
+    # non-owning `_PosixAnchor` -- it is never closed here, matching the
+    # original code, which never closed `root_fd` either.
+    root_anchor = anchors._PosixAnchor(root_fd)
+    descriptor_root = _directory_descriptor_alias(root_anchor)
+    resolved_root = _descriptor_path(root_anchor).resolve(strict=True)
     if link.is_absolute():
         projected_text = link.as_posix()
         projected_path = Path(projected_text)
@@ -691,7 +671,7 @@ def _projected_symlink_is_internal(root_fd: int, destination: str, link: PurePos
         raise ValueError(f"{destination}: moved symlink target cannot be resolved safely: {exc}") from exc
     else:
         try:
-            resolved_target = _descriptor_path(descriptor).resolve(strict=False)
+            resolved_target = _descriptor_path(anchors._PosixAnchor(descriptor)).resolve(strict=False)
         finally:
             os.close(descriptor)
     return resolved_target.is_relative_to(resolved_root)
@@ -2088,14 +2068,14 @@ def _apply_mutation_locked(
     configured_transaction_dir = transaction_root / transaction_id
     with (
         _locked_transaction_root(layout.cache_dir, transaction_root) as (
-            cache_fd,
-            transaction_root_fd,
+            cache,
+            transaction_root_anchor,
         ),
         _new_transaction_directory(
-            transaction_root_fd,
+            transaction_root_anchor,
             configured_transaction_dir,
             transaction_id,
-        ) as (transaction_fd, transaction_dir, journal_fd),
+        ) as (transaction, transaction_dir, journal_fd),
     ):
         journal = configured_transaction_dir / "journal.jsonl"
         journal_storage = transaction_dir / "journal.jsonl"
@@ -2112,7 +2092,7 @@ def _apply_mutation_locked(
         _append_journal(
             journal_storage,
             "planned",
-            _parent_fd=transaction_fd,
+            _parent=transaction,
             _journal_fd=journal_fd,
             **planned_details,
         )
@@ -2130,8 +2110,8 @@ def _apply_mutation_locked(
         root_fd = os.dup(locked_root_fd)
         try:
             try:
-                _assert_directory_identity(layout.cache_dir, cache_fd, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction_fd, "transaction")
+                _assert_directory_identity(layout.cache_dir, cache, "cache")
+                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
                 _assert_root_identity(layout.bundle_dir, root_fd)
                 _preflight(layout, plan, root_fd, transaction_dir / "preflight-initial")
                 created = [member for member in plan.mkdirs if not _lexists_at(root_fd, member)]
@@ -2183,13 +2163,13 @@ def _apply_mutation_locked(
                 _append_journal(
                     journal_storage,
                     "applying",
-                    _parent_fd=transaction_fd,
+                    _parent=transaction,
                     _journal_fd=journal_fd,
                     **applying_details,
                 )
                 phase = "apply"
-                _assert_directory_identity(layout.cache_dir, cache_fd, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction_fd, "transaction")
+                _assert_directory_identity(layout.cache_dir, cache, "cache")
+                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
                 for effect in _effects(plan, staged, root_fd):
                     effect_attempted = True
                     _commit_effect(
@@ -2210,8 +2190,8 @@ def _apply_mutation_locked(
                         written.append(effect.member)
                 _apply_directory_modes(root_fd, directory_modes, touched)
                 _assert_root_identity(layout.bundle_dir, root_fd)
-                _assert_directory_identity(layout.cache_dir, cache_fd, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction_fd, "transaction")
+                _assert_directory_identity(layout.cache_dir, cache, "cache")
+                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
                 _fsync_live_directory(root_fd)
                 phase = "validation"
                 validating_details: dict[str, object] = {"validate_paths": list(plan.validate_paths)}
@@ -2219,7 +2199,7 @@ def _apply_mutation_locked(
                 _append_journal(
                     journal_storage,
                     "validating",
-                    _parent_fd=transaction_fd,
+                    _parent=transaction,
                     _journal_fd=journal_fd,
                     **validating_details,
                 )
@@ -2234,15 +2214,15 @@ def _apply_mutation_locked(
                 if postcondition_failures:
                     raise ValueError("; ".join(postcondition_failures))
                 _assert_root_identity(layout.bundle_dir, root_fd)
-                _assert_directory_identity(layout.cache_dir, cache_fd, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction_fd, "transaction")
+                _assert_directory_identity(layout.cache_dir, cache, "cache")
+                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
                 _fsync_live_directory(root_fd)
                 complete_record = _complete_record(transaction_id, moved, written, created)
                 try:
                     _append_journal(
                         journal_storage,
                         "complete",
-                        _parent_fd=transaction_fd,
+                        _parent=transaction,
                         _journal_fd=journal_fd,
                         **{key: value for key, value in complete_record.items() if key != "state"},
                     )
@@ -2269,7 +2249,7 @@ def _apply_mutation_locked(
                     _append_journal(
                         journal_storage,
                         "rolling-back",
-                        _parent_fd=transaction_fd,
+                        _parent=transaction,
                         _journal_fd=journal_fd,
                         failure=failure,
                     )
@@ -2304,7 +2284,7 @@ def _apply_mutation_locked(
                     _append_journal(
                         journal_storage,
                         "rolled-back",
-                        _parent_fd=transaction_fd,
+                        _parent=transaction,
                         _journal_fd=journal_fd,
                         failures=recovery_failures,
                         complete=not recovery_failures,

@@ -2368,14 +2368,14 @@ def test_transaction_journal_helpers_reject_malformed_histories_and_support_anch
     journal.write_text('["prepared"]\n', encoding="utf-8")
     assert not transactions._journal_has_terminal_complete(journal, expected)
 
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
-    descriptor = os.open("journal.jsonl", os.O_RDWR | os.O_APPEND, dir_fd=parent_fd)
+    parent = transactions._open_absolute_directory(tmp_path)
+    descriptor = os.open("journal.jsonl", os.O_RDWR | os.O_APPEND, dir_fd=parent.descriptor)
     try:
         journal.write_text("", encoding="utf-8")
         transactions._append_journal(
             journal,
             "prepared",
-            _parent_fd=parent_fd,
+            _parent=parent,
             _journal_fd=descriptor,
             transaction_id="tx",
         )
@@ -2384,7 +2384,7 @@ def test_transaction_journal_helpers_reject_malformed_histories_and_support_anch
             transactions._append_journal(journal, "bad", _journal_fd=descriptor)
     finally:
         os.close(descriptor)
-        os.close(parent_fd)
+        parent.close()
 
 
 def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures(tmp_path: Path) -> None:
@@ -2407,16 +2407,16 @@ def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures
 
     entry = tmp_path / "entry"
     entry.write_text("one", encoding="utf-8")
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
+    parent = transactions._open_absolute_directory(tmp_path)
     entry_fd = os.open(entry, os.O_RDONLY)
     entry.unlink()
     entry.write_text("two", encoding="utf-8")
     try:
         with pytest.raises(ValueError, match="changed during mutation"):
-            transactions._assert_regular_entry_identity(parent_fd, "entry", entry_fd, "entry")
+            transactions._assert_regular_entry_identity(parent, "entry", entry_fd, "entry")
     finally:
         os.close(entry_fd)
-        os.close(parent_fd)
+        parent.close()
 
 
 def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) -> None:
@@ -2436,22 +2436,22 @@ def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) ->
     with pytest.raises(ValueError, match="must be absolute"):
         transactions._open_absolute_directory(Path("relative"))
     opened = transactions._open_absolute_directory(tmp_path)
-    os.close(opened)
+    opened.close()
 
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
+    parent = transactions._open_absolute_directory(tmp_path)
     try:
-        child_fd = transactions._open_or_create_directory(parent_fd, "created")
-        os.close(child_fd)
-        child_fd = transactions._open_or_create_directory(parent_fd, "created")
+        child = transactions._open_or_create_directory(parent, "created")
+        child.close()
+        child = transactions._open_or_create_directory(parent, "created")
         try:
             moved = tmp_path / "moved"
             (tmp_path / "created").rename(moved)
             with pytest.raises(ValueError, match="directory changed"):
-                transactions._assert_directory_identity(tmp_path / "created", child_fd, "child")
+                transactions._assert_directory_identity(tmp_path / "created", child, "child")
         finally:
-            os.close(child_fd)
+            child.close()
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def test_transaction_path_helpers_create_ancestors_and_hash_entry_kinds(tmp_path: Path) -> None:
@@ -2622,12 +2622,12 @@ def test_copy_entry_handles_top_level_files_and_symlinks(tmp_path: Path) -> None
 
 
 def test_append_journal_supports_parent_descriptor_without_retained_file(tmp_path: Path) -> None:
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
+    parent = transactions._open_absolute_directory(tmp_path)
     try:
         journal = tmp_path / "anchored.jsonl"
-        transactions._append_journal(journal, "prepared", _parent_fd=parent_fd, transaction_id="tx")
+        transactions._append_journal(journal, "prepared", _parent=parent, transaction_id="tx")
     finally:
-        os.close(parent_fd)
+        parent.close()
     assert json.loads(journal.read_text(encoding="utf-8"))["state"] == "prepared"
 
 

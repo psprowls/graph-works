@@ -103,6 +103,20 @@ def test_a_disagreement_is_visible_in_json(monkeypatch) -> None:
     assert payload["probes"][0]["agrees_with_declared"] is False
 
 
+def test_probing_end_to_end_against_a_real_workspace(tmp_path: Path) -> None:
+    """No monkeypatching of `build_report` or `resolve_workspace`: a fully
+    real run against a real, minimal, initialized workspace, proving the
+    real probe path renders through `_human()`."""
+    root = tmp_path / "works"
+    bootstrap_result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
+    assert bootstrap_result.exit_code == 0, bootstrap_result.output
+
+    result = runner.invoke(app, ["util", "platform", "--probe", "--workspace", str(root)])
+
+    assert result.exit_code == 0, result.output
+    assert "probed:" in result.stdout
+
+
 def test_probing_resolves_a_workspace(tmp_path: Path, monkeypatch) -> None:
     seen: list[str] = []
 

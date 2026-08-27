@@ -266,9 +266,12 @@ class DispatchBackendProvider:
         return self._result("available", f"orca at {executable}: {completed.stdout.strip() or 'no version reported'}")
 
     def _result(self, status: CapabilityStatus, detail: str) -> ProbeResult:
-        """Always disagrees with the declaration while it reads `unresolved`:
-        an observation where the declaration has none is exactly the news this
-        verb exists to carry."""
+        """Unconditionally disagrees with the declaration, in the current
+        implementation: no resolver exists yet, so `declare()` always reads
+        `unresolved`, and an observation where the declaration has none is
+        exactly the news this verb exists to carry. Revisit once a resolver
+        lands and `declare()` can return a real value — a probe confirming
+        that real declared value should then agree instead."""
         return ProbeResult(capability=self.name, status=status, detail=detail, agrees_with_declared=False)
 
 
@@ -281,6 +284,11 @@ LOCK_SITES = (
     "graph_works_core/work/commands.py",
     "okf_ext/logs/__init__.py",
 )
+
+#: The dotted module name for the first lock site, used as `Capability.provider`
+#: in both branches of `FileLockProvider.declare` — computed once so the two
+#: branches cannot drift apart.
+LOCK_SITES_PROVIDER = LOCK_SITES[0].replace("/", ".").removesuffix(".py")
 
 #: The probe's own lock file. Deliberately NOT a live decisions-cache lock:
 #: contending for a real ledger lock to answer a diagnostic question could
@@ -310,7 +318,7 @@ class FileLockProvider:
                 status="available",
                 detail=f"advisory exclusive locks via fcntl.flock at {sites}",
                 guarantees=("an exclusive advisory lock serializes writers across processes",),
-                provider=LOCK_SITES[0].replace("/", ".").removesuffix(".py"),
+                provider=LOCK_SITES_PROVIDER,
             )
         return Capability(
             name=self.name,
@@ -334,7 +342,19 @@ class FileLockProvider:
                 fcntl.flock(descriptor, fcntl.LOCK_UN)
             finally:
                 os.close(descriptor)
-        except (ImportError, OSError) as exc:
+        except ImportError as exc:
+            # Native Windows: `declare()` also reports "unavailable" here (via
+            # `module_available("fcntl", ...)`), so the two answers agree.
+            return ProbeResult(
+                capability=self.name,
+                status="unavailable",
+                detail=f"fcntl is unavailable here: {exc}",
+                agrees_with_declared=True,
+            )
+        except OSError as exc:
+            # `fcntl` imported fine but the actual lock attempt failed (e.g.
+            # permission denied): `declare()` says "available", so this is a
+            # genuine disagreement.
             return ProbeResult(
                 capability=self.name,
                 status="unavailable",
@@ -352,9 +372,15 @@ class FileLockProvider:
 class ProcessControlProvider:
     """Whether worker liveness and teardown can run here.
 
-    Derived from `signal.SIGKILL`, the attribute CPython omits on Windows —
-    the backend's teardown polls SIGTERM then SIGKILL, and its liveness check
-    is `os.kill(pid, 0)`. Asking for the attribute is asking the machinery.
+    `fcntl`'s availability is the cross-platform-testable proxy for
+    POSIX-ness — it is the part of `posix_signals` that actually varies with
+    the injected `platform_name`, the same way the other providers derive
+    from it. `hasattr(signal, "SIGKILL")` is an additional sanity check
+    against the *running* host only: it does not vary with `platform_name`,
+    so it has no effect when asserting a foreign platform's answer from this
+    host — the running host's `hasattr(signal, "SIGKILL")` is always True on
+    POSIX, and this repo runs on POSIX/CI. The backend's teardown polls
+    SIGTERM then SIGKILL, and its liveness check is `os.kill(pid, 0)`.
     """
 
     name = "process-control"

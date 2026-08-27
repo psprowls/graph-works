@@ -179,7 +179,8 @@ command -v python3 >/dev/null || die "python3 not found in PATH"
 
 gh auth status >/dev/null 2>&1 || die "gh not authenticated — run 'gh auth login'"
 
-[[ -d "$UPSTREAM/.git" ]]         || die "upstream '$UPSTREAM' is not a git checkout"
+git -C "$UPSTREAM" rev-parse --is-inside-work-tree >/dev/null 2>&1 ||
+  die "upstream '$UPSTREAM' is not inside a git checkout"
 [[ -f "$UPSTREAM/.codex-plugin/plugin.json" ]] || die "committed Codex manifest missing at $UPSTREAM/.codex-plugin/plugin.json"
 
 # Read the upstream version from the committed Codex manifest.
@@ -201,7 +202,7 @@ if [[ "$UPSTREAM_BRANCH" != "main" ]]; then
   confirm "Sync from '$UPSTREAM_BRANCH' anyway?" || exit 1
 fi
 
-UPSTREAM_STATUS="$(cd "$UPSTREAM" && git status --porcelain)"
+UPSTREAM_STATUS="$(cd "$UPSTREAM" && git status --porcelain -- .)"
 if [[ -n "$UPSTREAM_STATUS" ]]; then
   echo "WARNING: upstream has uncommitted changes:"
   echo "$UPSTREAM_STATUS" | sed 's/^/  /'

@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from graph_works_core.workspace import anchors, transactions
+from graph_works_core.workspace.anchors import BUNDLE_LOCK_NAME
 from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
 from okf_ext.moves import Move
 from work_tracker_okf.init import install_bundle
@@ -33,11 +34,22 @@ def _workspace(tmp_path: Path) -> WorkspaceLayout:
 
 
 def _snapshot(root: Path) -> dict[str, tuple[str, int, bytes | str | None]]:
+    """A recursive content snapshot, tier-blind by construction.
+
+    The windows-revalidated tier's bundle-root lock lives at
+    `anchors.BUNDLE_LOCK_NAME`, root-scoped -- a file a POSIX bundle never
+    carries (see the constant's docstring). Excluding it here mirrors
+    `load_bundle()`'s own ADR-0028 root-scoped dot exclusion, so a
+    before/after snapshot comparison reflects bundle *content*, not which
+    durability tier happened to acquire the lock first.
+    """
     snapshot: dict[str, tuple[str, int, bytes | str | None]] = {}
     pending = [root]
     while pending:
         current = pending.pop()
         for path in sorted(current.iterdir(), key=lambda entry: os.fsencode(entry.name), reverse=True):
+            if current == root and path.name == BUNDLE_LOCK_NAME:
+                continue
             relative = path.relative_to(root).as_posix()
             mode = stat.S_IMODE(path.lstat().st_mode)
             if path.is_symlink():

@@ -47,6 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Protocol, runtime_checkable
 
+from okf_ext.locking import locked
+
 #: The tier name a POSIX anchor declares.  `graph_works_core.util.platform`'s
 #: `DurabilityTierProvider` currently answers by proxy (is `fcntl` importable?);
 #: once it asks the selector instead, this is the string it reports.
@@ -403,6 +405,16 @@ WINDOWS_REVALIDATED_TIER = "windows-revalidated"
 #: refusal message and ADR-0042 cite the same number.
 MAX_PATH = 260
 
+#: The weak tier's on-disk serialization point, inside the bundle root.
+#:
+#: A Windows bundle carries a file a POSIX bundle does not.  It is
+#: dot-prefixed and lives at the root, where ADR-0028's root-scoped dot
+#: exclusion already keeps it out of `load_bundle()` -- but the two digest
+#: tests assert that rather than assume it, because a divergence here would
+#: make the two tiers compute different manifest digests for identical
+#: content.
+BUNDLE_LOCK_NAME = ".gw-bundle.lock"
+
 
 def long_paths_enabled() -> bool:
     """Whether this system lifts the 260-character `MAX_PATH` limit.
@@ -716,20 +728,39 @@ class _WindowsAnchor:
 
     # -- locking ------------------------------------------------------------
 
-    def exclusive_lock(self) -> AbstractContextManager[None]:
-        """Task 8 implements Windows directory locking for real.
+    @contextmanager
+    def exclusive_lock(self) -> Iterator[None]:
+        """Serialize every executor over this anchored directory, via a lock file.
 
-        `Anchor` is `runtime_checkable`, which checks attribute presence, not
-        behaviour, so a stub -- not an omission -- is what keeps
-        `isinstance(anchor, Anchor)` structurally true in the meantime.  It
-        raises rather than no-ops so a caller that reaches it before Task 8
-        lands fails loudly instead of running unlocked.
+        The strong tier flocks the directory DESCRIPTOR, which is immune to the
+        directory being swapped underneath it.  This tier cannot: Windows has
+        no directory lock, so serialization moves to a file inside the
+        directory, and the immunity is replaced by `_revalidate()`'s check at
+        acquisition time.  ADR-0042 records the difference.
         """
-        raise NotImplementedError("Task 8 implements Windows directory locking")
+        directory = self._revalidate()
+        with locked(directory / BUNDLE_LOCK_NAME):
+            yield
 
-    def lock_file(self, name: str, *, assert_identity: bool) -> AbstractContextManager[None]:
-        """As `exclusive_lock`: a presence-only stub, replaced for real in Task 8."""
-        raise NotImplementedError("Task 8 implements Windows file locking")
+    @contextmanager
+    def lock_file(self, name: str, *, assert_identity: bool) -> Iterator[None]:
+        """Lock a regular file beneath this anchor.
+
+        `assert_identity=False` is exercised only by unit tests; the engine
+        always passes `True` (see `transactions._executor_lock:275`).  The
+        kwarg exists to mirror `_PosixAnchor.lock_file`'s signature, which in
+        turn mirrors the two branches the pre-refactor `_executor_lock` had.
+        """
+        directory = self._revalidate()
+        target = directory / name
+        descriptor = os.open(target, os.O_RDONLY | os.O_CREAT, 0o600)
+        try:
+            with locked(target):
+                if assert_identity:
+                    _assert_regular_entry_identity(self, name, descriptor, "executor lock")
+                yield
+        finally:
+            os.close(descriptor)
 
     # -- tier contract --------------------------------------------------------
 
@@ -813,7 +844,16 @@ def lock_path(path: Path) -> Iterator[None]:
     deliberately not routed through the workspace-wide path lock: this branch
     runs before any anchor exists, and strengthening it to a descriptor walk
     here would be a behaviour change smuggled into a mechanical extraction.
+
+    Windows has no descriptor-based flock to be faithful to in the first
+    place, so its arm is a straight call onto `okf_ext.locking.locked` --
+    the portable primitive, not the workspace-wide path lock this docstring
+    otherwise disclaims.
     """
+    if sys.platform == "win32":  # pragma: no cover -- native Windows only
+        with locked(path):
+            yield
+        return
     import fcntl  # POSIX-only, imported at the point of use
 
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT | nofollow_flag(), 0o600)
@@ -871,6 +911,7 @@ def open_absolute_anchor(path: Path, *, platform_name: str | None = None) -> Anc
 
 
 __all__ = [
+    "BUNDLE_LOCK_NAME",
     "MAX_PATH",
     "POSIX_STRONG_TIER",
     "RESERVED_DEVICE_NAMES",

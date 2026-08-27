@@ -8,11 +8,15 @@ to return this tier yet.
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
 from _transaction_helpers import _forced_tier, _plan, _snapshot, _workspace
 from graph_works_core.workspace import anchors, transactions
+from okf_io import load_bundle
 
 
 def _anchor(root: Path) -> anchors._WindowsAnchor:
@@ -269,7 +273,6 @@ def test_refused_members_accepts_ordinary_members(tmp_path: Path) -> None:
         anchor.close()
 
 
-@pytest.mark.xfail(strict=True, reason="blocked on Task 8's exclusive_lock landing")
 def test_preflight_refuses_before_any_effect_lands(tmp_path: Path) -> None:
     """D-002's whole point: the refusal precedes the first mutation."""
     layout = _workspace(tmp_path)  # shared helper -- see Step 3
@@ -280,7 +283,16 @@ def test_preflight_refuses_before_any_effect_lands(tmp_path: Path) -> None:
         result = transactions.apply_mutation(layout, _plan(layout, deletes=("work/linked.md",)))
     assert not result.ok
     assert not result.rolled_back  # nothing was touched, so nothing was rolled back
-    assert _snapshot(layout.bundle_dir) == before
+    after = _snapshot(layout.bundle_dir)
+    # `apply_mutation` takes the bundle-root lock -- creating BUNDLE_LOCK_NAME --
+    # before `_preflight` runs, so the lock file's own appearance is expected
+    # here and is not a bundle-content effect: it is exactly the artifact
+    # `test_the_lock_file_never_enters_the_loaded_bundle` and
+    # `test_the_lock_file_never_enters_a_manifest_digest` assert is invisible
+    # to the bundle.  Strip it before comparing so this test still asserts
+    # what it means to: no *bundle content* was touched.
+    after.pop(anchors.BUNDLE_LOCK_NAME, None)
+    assert after == before
 
 
 def test_preflight_directly_refuses_a_symlink_member_on_the_windows_tier(tmp_path: Path) -> None:
@@ -292,3 +304,122 @@ def test_preflight_directly_refuses_a_symlink_member_on_the_windows_tier(tmp_pat
     (layout.bundle_dir / "work" / "linked.md").symlink_to(layout.bundle_dir / "index.md")
     with _forced_tier("win32"), pytest.raises(ValueError, match="durability tier refuses"):
         transactions._preflight(layout, _plan(layout, deletes=("work/linked.md",)))
+
+
+def test_the_bundle_lock_file_is_dot_prefixed_at_the_bundle_root() -> None:
+    """ADR-0028's dot exclusion is root-scoped, so a root-level dotted name is
+    already invisible to `load_bundle()`.  That is why this name was chosen."""
+    assert anchors.BUNDLE_LOCK_NAME.startswith(".")
+    assert "/" not in anchors.BUNDLE_LOCK_NAME
+
+
+def test_exclusive_lock_creates_and_holds_the_lock_file(tmp_path: Path) -> None:
+    anchor = _anchor(tmp_path)
+    try:
+        with anchor.exclusive_lock():
+            assert (tmp_path / anchors.BUNDLE_LOCK_NAME).is_file()
+    finally:
+        anchor.close()
+
+
+def test_exclusive_lock_refuses_a_root_that_is_no_longer_a_directory(tmp_path: Path) -> None:
+    """Parity with `_PosixAnchor.exclusive_lock`'s `NotADirectoryError`, which
+    raises on `__enter__` rather than on construction."""
+    inner = tmp_path / "bundle"
+    inner.mkdir()
+    anchor = _anchor(inner)
+    try:
+        inner.rmdir()
+        with pytest.raises(ValueError, match="changed during mutation"), anchor.exclusive_lock():
+            pass
+    finally:
+        anchor.close()
+
+
+def test_the_lock_file_never_enters_the_loaded_bundle(tmp_path: Path) -> None:
+    """Both tiers must produce the same member set for identical content."""
+    layout = _workspace(tmp_path)
+    anchor = _anchor(layout.bundle_dir)
+    try:
+        with anchor.exclusive_lock():
+            bundle = load_bundle(layout.bundle_dir)
+        members = set(bundle.concepts) | bundle.assets
+        assert anchors.BUNDLE_LOCK_NAME not in members
+    finally:
+        anchor.close()
+
+
+def test_the_lock_file_never_enters_a_manifest_digest(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work" / "lane").mkdir(parents=True, exist_ok=True)
+    anchor = _anchor(layout.bundle_dir)
+    try:
+        before = transactions._entry_manifest_at(anchor, "work/lane", include_mode=True)
+        with anchor.exclusive_lock():
+            after = transactions._entry_manifest_at(anchor, "work/lane", include_mode=True)
+        assert before == after
+    finally:
+        anchor.close()
+
+
+def test_the_windows_lock_serializes_two_anchors_on_one_bundle(tmp_path: Path) -> None:
+    """The weak tier's serialization guarantee, exercised in-process on POSIX."""
+    layout = _workspace(tmp_path)
+    first, second = _anchor(layout.bundle_dir), _anchor(layout.bundle_dir)
+    order: list[str] = []
+    entered = threading.Event()
+
+    def _contend() -> None:
+        entered.set()
+        with second.exclusive_lock():
+            order.append("second")
+
+    try:
+        with first.exclusive_lock():
+            order.append("first")
+            worker = threading.Thread(target=_contend)
+            worker.start()
+            entered.wait(timeout=5)
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+        assert order == ["first", "second"]
+    finally:
+        first.close()
+        second.close()
+
+
+def test_lock_file_serializes_the_executor_lock(tmp_path: Path) -> None:
+    anchor = _anchor(tmp_path)
+    try:
+        with anchor.lock_file("executor.lock", assert_identity=True):
+            assert (tmp_path / "executor.lock").is_file()
+    finally:
+        anchor.close()
+
+
+def test_lock_file_detects_a_swapped_lock_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`assert_identity=True` is what the engine always passes.  Parity with
+    the POSIX arm's `_assert_regular_entry_identity` call: the file is
+    replaced between the lock being taken and the identity being checked, and
+    the mismatch must be caught rather than silently locking a dead inode."""
+    anchor = _anchor(tmp_path)
+    target = tmp_path / "executor.lock"
+    target.write_text("", encoding="utf-8")
+    real_locked = anchors.locked
+
+    @contextmanager
+    def swap_then_lock(path: Path, **kwargs: object) -> Iterator[None]:
+        with real_locked(path, **kwargs):  # type: ignore[arg-type]
+            path.unlink()
+            path.write_text("", encoding="utf-8")  # same name, new inode
+            yield
+
+    monkeypatch.setattr(anchors, "locked", swap_then_lock)
+    try:
+        with (
+            pytest.raises(ValueError, match="changed during mutation"),
+            anchor.lock_file("executor.lock", assert_identity=True),
+        ):
+            pass
+    finally:
+        anchor.close()

@@ -1,9 +1,9 @@
 ---
 name: log
-description: Show recent entries from the Code Wiki log (<workspace>/okf/log.md). Uses the standardized ## [YYYY-MM-DD] header format so grep + tail works. Usage /graph-works:log [--last N] [--op scan|ingest|query|lint|...]
+description: Invoked explicitly as /graph-works:log [--last N] [--op scan|ingest|query|lint|...]. Shows recent entries from the workspace log at <workspace>/okf/log.md, which uses the standardized `## [YYYY-MM-DD] <op> | <title>` header format so grep plus tail works. Explicit invocation only.
 ---
 
-# /graph-works:log
+# Show the wiki log
 
 Show recent entries from `<workspace>/okf/log.md`. Every LLM operation on the wiki leaves a standardized entry:
 
@@ -16,6 +16,7 @@ Show recent entries from `<workspace>/okf/log.md`. Every LLM operation on the wi
 
 ```
 /graph-works:log                          # last 10 entries
+$log                                       # last 10 entries — Codex
 /graph-works:log --last 20
 /graph-works:log --op scan --last 10      # only scan entries
 /graph-works:log --op ingest              # recent ingests
@@ -57,6 +58,6 @@ repositories/my-monorepo/packages/shared-aws-node-ts.md, adrs/0014-jwt-sessions 
 Added repositories/my-monorepo/packages/timeline-native-ts.md, repositories/my-monorepo/packages/timeline-data-node-ts.md, repositories/my-monorepo/packages/timeline-domain-ts.md.
 ```
 
-## Skill Reference
+## Reference
 
-→ `graph-works/SKILL.md`
+→ `../graph-works/SKILL.md`

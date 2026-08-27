@@ -1,9 +1,9 @@
 ---
 name: onboard
-description: "Locate or create the graph-works workspace, then configure it. One guided walk — workspace location, topic, the repository it catalogs, then optional session transcript capture. Usage /graph-works:onboard"
+description: Invoked explicitly as /graph-works:onboard. Locates or creates the graph-works workspace, then configures it — one guided walk covering workspace location, topic, the repository it catalogs, and optional session transcript capture. Writes the workspace manifest and repo settings through `gw`; explicit invocation only, never on inference.
 ---
 
-# /graph-works:onboard
+# Onboard a graph-works workspace
 
 One command for one job: find the workspace or create it, then turn on the optional
 features it supports. Ask with AskUserQuestion, then immediately apply the answer by
@@ -151,6 +151,6 @@ Do not commit. Do not re-ask any question.
 - `gw config hooks enable transcript` / `gw config hooks disable transcript`
 - `gw config list`, `gw config set <key> <value>`
 
-## Skill Reference
+## Reference
 
-→ `graph-works/SKILL.md`
+→ `../graph-works/SKILL.md`

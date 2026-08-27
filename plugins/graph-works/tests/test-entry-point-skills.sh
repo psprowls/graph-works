@@ -85,7 +85,7 @@ echo "entry-point-skills guard test"
 
 assert_dir_absent "agents" "agents/ is gone — its four agents are skills"
 
-for skill in scan ingest query lint; do
+for skill in scan ingest query lint file archive log status regen-index proposals onboard; do
     assert_skill "$skill" "entry point '$skill' is a skill"
 done
 

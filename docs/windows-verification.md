@@ -338,3 +338,346 @@ route by what failed: a transaction/anchor failure reopens
 `feature-windows-anchor-and-tier-adr`, anything else is a **new child** scoped to
 the failing suite. B8 → a **new child**; `test-plugin` hard-requires `bash`,
 `node` and `npm`, so record which was missing if that is the cause.
+
+## Group C — the transaction tier
+
+Owner: `feature-windows-anchor-and-tier-adr`. Its design lists exactly these as
+the cases its POSIX parametrization must leave `xfail`ed — *implemented and
+continuously regression-tested for logic, but unverified for platform behavior*.
+This group removes that qualifier, or confirms it.
+
+**Gate for the whole group:** `tech-debt-anchor-abstraction` **and**
+`feature-windows-anchor-and-tier-adr` must both be `resolved`. Confirm before
+starting — note that these two commands read the **graph-works vault**, not the
+scratch workspace, so point `--workspace` at the vault checkout on this box:
+
+```bat
+gw work next work/epic-native-windows-support/children/tech-debt-anchor-abstraction --workspace <vault> --json
+gw work next work/epic-native-windows-support/children/feature-windows-anchor-and-tier-adr --workspace <vault> --json
+```
+
+**Expected:** each reports a terminal blocker (`work_status: resolved` or
+`phase: done`). If either does not, **stop**: mark C1–C7 `NOT RUN`, reason
+"group gate unsatisfied", owner `feature-windows-anchor-and-tier-adr`.
+
+**Everything here goes through public verbs.** No checkpoint imports an anchor
+class or calls a preflight function directly. That is deliberate: the anchor's
+internal surface is still moving, and a protocol pinned to it would be stale
+before this page is next opened. `gw work file` and `gw work advance` are the
+stable mutation entry points and each one is a full transaction.
+
+**The mutation used throughout** — call it *the mutation* below — is:
+
+```bat
+gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+```
+
+against the scratch item created in F2. Where a checkpoint needs a *fresh*
+workspace on a different volume it says so, and names that workspace explicitly.
+
+#### C1 — `CreateHardLinkW` off NTFS
+
+**Gate:** group gate.
+
+`os.link` is how every file install happens in `_commit_write`. On exFAT, FAT32,
+a network share, or across volumes it fails outright — there the Windows tier
+does not degrade, **it does not work at all**. That is a tier boundary, and the
+tier ADR states it; C1 is what makes the statement measured rather than asserted.
+
+**Command:** create an exFAT volume, then bootstrap a workspace on it. From an
+**elevated** cmd.exe:
+
+```bat
+mkdir C:\gw-verify
+(echo create vdisk file="C:\gw-verify\exfat.vhd" maximum=512 type=expandable
+ echo select vdisk file="C:\gw-verify\exfat.vhd"
+ echo attach vdisk
+ echo create partition primary
+ echo format fs=exfat quick label=GWEXFAT
+ echo assign letter=E) > C:\gw-verify\mkexfat.txt
+diskpart /s C:\gw-verify\mkexfat.txt
+fsutil fsinfo volumeinfo E:
+```
+
+Confirm `File System Name : exFAT`, then:
+
+```bat
+gw bootstrap --topic windows-verification-exfat --workspace E:\ws
+gw work file --workspace E:\ws --title "exFAT probe" --kind TechDebt --summary "C1" --json
+echo rc=%ERRORLEVEL%
+```
+
+**Expected:** a **loud, attributable refusal that names the filesystem
+requirement** and a non-zero `rc`, with **no partial commit** — `E:\ws\okf` must
+contain no half-written item. Verify:
+
+```bat
+dir /s /b E:\ws\okf
+```
+
+A refusal here is a **PASS**. A silent success is a FAIL (the tier's stated
+boundary is wrong). A crash with an unattributable `OSError` is also a FAIL — the
+boundary exists but is not surfaced.
+
+Record **which** of the two commands refused. If `gw bootstrap` itself refuses,
+that is a PASS and `gw work file` is moot — say so rather than leaving the
+second command's row blank.
+
+**Teardown:**
+
+```bat
+(echo select vdisk file="C:\gw-verify\exfat.vhd" & echo detach vdisk) > C:\gw-verify\rmexfat.txt
+diskpart /s C:\gw-verify\rmexfat.txt
+```
+
+**If it fails:** Owner: `feature-windows-anchor-and-tier-adr` if the ADR's stated
+contract is wrong; a **new child** if the contract is right and the
+implementation does not honour it.
+
+#### C2 — `st_ino` stability on NTFS across a rename
+
+**Gate:** group gate.
+
+Child 6 kept `_take_custody`'s `st_dev`/`st_ino` identity checks as written, on
+the reading that Python populates both via `GetFileInformationByHandle`, and
+explicitly declined to assert it. This is that assertion.
+
+**Command:** from cmd.exe, on the **NTFS** checkout volume:
+
+```bat
+python -c "import os, pathlib, tempfile; d = pathlib.Path(tempfile.mkdtemp(dir=r'C:\gw-verify')); p = d / 'a'; p.write_bytes(b'x'); a = os.stat(p); q = d / 'b'; os.replace(p, q); b = os.stat(q); c = os.stat(q); print('before', a.st_dev, a.st_ino); print('after ', b.st_dev, b.st_ino); print('restat', c.st_dev, c.st_ino); print('STABLE' if (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino) == (c.st_dev, c.st_ino) else 'UNSTABLE')"
+```
+
+**Expected:** the last line reads `STABLE`, and the three `st_dev`/`st_ino` pairs
+printed above it are identical. Record all four lines verbatim — the actual
+numbers are the evidence, not the verdict word.
+
+A printed `st_ino` of `0` is a **FAIL even if the line reads `STABLE`**: zero is
+what CPython reports when it could not obtain a file index at all, and three
+matching zeroes prove nothing about identity.
+
+**If it fails** (`UNSTABLE`, `st_ino` of `0`, or any non-zero `st_ino` changing
+across the rename): this is the outcome child 6's design already names. The epic
+design's name-plus-type-plus-re-`lstat` fallback becomes necessary. Owner:
+**reopens** `feature-windows-anchor-and-tier-adr`.
+
+#### C3 — `MAX_PATH`
+
+**Gate:** group gate.
+
+Bundle paths nest deep — `work/<epic>/children/<child>/references/` — which makes
+this the likeliest real-world failure in the group. **Run it both ways.**
+
+**Command:** first record the starting state (the preamble already did; confirm
+it has not changed):
+
+```bat
+reg query "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled
+```
+
+Then, from an **elevated** cmd.exe, for each of `0` and `1`:
+
+```bat
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled /t REG_DWORD /d 0 /f
+```
+
+Reboot (the setting is read at process start, and rebooting removes any doubt
+about which processes inherited which value), then, writing `<deep>` for
+`C:\gw-verify\aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\bbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\cccccccccccccccccccccccccccccc\dddddddddddddddddddddddddddddd\eeeeeeeeeeeeeeeeeeeeeeeeeeeeee\ffffffffffffffffffffffffffffff\gggggggggggggggggggggggggggggg`:
+
+```bat
+mkdir <deep>
+gw bootstrap --topic windows-verification-longpath --workspace <deep>\ws
+gw work file --workspace <deep>\ws --title "Long path probe with a deliberately verbose title" --kind TechDebt --summary "C3" --name long-path-probe-with-a-deliberately-verbose-name --json
+echo rc=%ERRORLEVEL%
+```
+
+Then repeat the whole block with `/d 1`, another reboot, and the same commands.
+
+**File this item at the top level, with no `--parent-path`.** The depth this
+checkpoint needs comes from the workspace path and the long `--name`, not from a
+parent lane. Passing a `--parent-path` naming an item that does not exist in this
+fresh workspace is refused `unknown-parent` before any path is ever touched,
+which would record a `MAX_PATH` FAIL that has nothing to do with `MAX_PATH`.
+
+**Expected:**
+
+- With `LongPathsEnabled=1`: both commands succeed, `rc=0`, and the item lands on
+  disk.
+- With `LongPathsEnabled=0`: **an actionable refusal naming the path-length
+  limit, raised before any effect lands** — not a mid-commit `FileNotFoundError`
+  or `[WinError 3] The system cannot find the path specified` from inside a
+  partially applied transaction. Confirm nothing was half-written with
+  `dir /s /b <deep>\ws\okf`.
+
+**Restore the starting value from the preamble when done**, and say in the record
+which value the box started at.
+
+**If it fails:** Owner: `feature-windows-anchor-and-tier-adr` if the ADR's stated
+contract is wrong; a **new child** otherwise.
+
+#### C4 — open handles and AV interference
+
+**Gate:** group gate.
+
+This has no POSIX analogue. Child 6 documents it as a known weak-tier failure
+mode rather than solving it; C4 measures whether the rollback claim holds and
+whether the error is attributable.
+
+**Command:** in **PowerShell**, hold an exclusive handle on a bundle member:
+
+```powershell
+$m = "C:\gw-verify\ws\okf\work\scratch-windows-verification.md"
+$h = [System.IO.File]::Open($m, 'Open', 'ReadWrite', 'None')
+"handle held on $m"
+```
+
+Leave that window open. In a **second** window, record the item's phase, then run
+*the mutation*:
+
+```bat
+findstr /b "phase:" C:\gw-verify\ws\okf\work\scratch-windows-verification.md
+gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+echo rc=%ERRORLEVEL%
+```
+
+Then release the handle in the first window:
+
+```powershell
+$h.Close()
+```
+
+**Expected:** the mutation either refuses before starting or **rolls back
+cleanly**, with an error naming the member it could not touch. After it returns,
+the bundle must be exactly as it was — verify with `git status` if the scratch
+workspace is under git, or by re-reading the item's `phase:` line:
+
+```bat
+findstr /b "phase:" C:\gw-verify\ws\okf\work\scratch-windows-verification.md
+```
+
+**Expected:** identical to the reading taken before the mutation.
+
+**FAIL:** a partially applied mutation, or an error that does not name the
+locked member.
+
+**If it fails:** Owner: `feature-windows-anchor-and-tier-adr` if the ADR's stated
+rollback contract is wrong; a **new child** otherwise.
+
+#### C5 — crash consistency without directory `fsync`
+
+**Gate:** group gate. This is loss **L2** of the Windows tier.
+
+**Command:** in one window start *the mutation*; in a second, kill it mid-commit:
+
+```bat
+taskkill /F /IM python.exe
+```
+
+Postcondition validation costs several seconds per mutation, so the window is
+real, but hitting it may take repeats. **Repeat until the kill lands mid-commit**
+— confirmed by the transaction journal lacking a terminal record:
+
+```bat
+dir /b /o-d C:\gw-verify\ws\.gw\cache\work-mutations
+findstr /c:"\"state\"" C:\gw-verify\ws\.gw\cache\work-mutations\<newest-id>\journal.jsonl
+```
+
+A journal whose last record is **not** a completion record is the state this
+checkpoint wants. Then reopen the bundle:
+
+```bat
+gw work next work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+findstr /b "phase:" C:\gw-verify\ws\okf\work\scratch-windows-verification.md
+```
+
+**Expected:** the bundle is **either fully pre- or fully post-mutation** — never
+half — and `journal.jsonl` records what happened. Paste the whole journal into
+the evidence record; it is short and it is the evidence.
+
+`taskkill /F /IM python.exe` kills *every* Python process on the box. Close the
+PowerShell window from C4 and any editor language server first, and do not run
+this checkpoint while B7 is still going.
+
+**FAIL:** a bundle in a mixed state, or a journal that does not explain it.
+
+**If it fails:** Owner: `feature-windows-anchor-and-tier-adr` if L2 is stated
+more strongly than the machine delivers; a **new child** otherwise.
+
+#### C6 — `msvcrt.locking` contention and D-012's declared divergence
+
+**Gate:** group gate.
+
+POSIX `flock(LOCK_EX)` blocks indefinitely. The Windows branch is
+`msvcrt.locking(fd, LK_LOCK, 1)`, which retries once a second for ten tries and
+then raises. D-012 declared that bound a **property of the Windows tier**, not a
+bug; C6 observes it.
+
+**Command:** two cmd.exe windows, started as close together as possible, each
+running:
+
+```bat
+gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json & echo rc=%ERRORLEVEL%
+```
+
+**Expected:** one of exactly two outcomes, and both are a **PASS**:
+
+1. The second caller **blocks, then proceeds** after the first releases; `rc=0`.
+2. The second caller **fails after roughly ten seconds** with an `OSError` whose
+   message **names the lock file path**; `rc` non-zero.
+
+Time the second window and record the elapsed seconds. A message that does not
+name the lock path is a **FAIL** — D-012 requires it precisely because a bare
+`OSError` after ten silent seconds is indistinguishable from a corrupt lock file.
+
+**If it fails:** Owner: `tech-debt-portable-file-lock` if `locked()` does not
+re-raise with the path; a **new child** if the bound itself is unworkable
+(D-012 names `LockFileEx` via `ctypes` as the upgrade path).
+
+#### C7 — the preflight refusals
+
+**Gate:** group gate. **A refusal here is a PASS.** These are contract statements
+of the Windows tier.
+
+**Command:** stage each offending member in the scratch bundle, then run *the
+mutation*. Reserved names cannot be created through the normal Win32 path, so
+use the `\\?\` prefix:
+
+```bat
+python -c "open(r'\\?\C:\gw-verify\ws\okf\work\CON.md','wb').write(b'---\ntype: TechDebt\n---\n')"
+python -c "open(r'\\?\C:\gw-verify\ws\okf\work\COM1.md','wb').write(b'---\ntype: TechDebt\n---\n')"
+python -c "open(r'\\?\C:\gw-verify\ws\okf\work\trailing. .md','wb').write(b'---\ntype: TechDebt\n---\n')"
+mklink C:\gw-verify\ws\okf\work\linked.md C:\gw-verify\ws\okf\work\scratch-windows-verification.md
+gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+echo rc=%ERRORLEVEL%
+```
+
+**Expected:** a refusal **before any mutation starts**, naming the offending
+members — `CON.md`, `COM1.md`, `trailing. .md`, `linked.md`. Confirm nothing
+moved:
+
+```bat
+findstr /b "phase:" C:\gw-verify\ws\okf\work\scratch-windows-verification.md
+```
+
+**Expected:** unchanged.
+
+Two sub-results to record separately:
+
+- If Windows itself refuses to create a reserved-name file even through `\\?\`,
+  record that as `PASS (unreachable — Windows refused creation)` with the exact
+  error. The tier's boundary holds; it just holds one layer lower.
+- If `mklink` fails with `You do not have sufficient privilege`, that is the
+  precondition child 6's D-002 preflight refusal keys off. Re-run it from an
+  elevated prompt or with Developer Mode on, and record which.
+
+Remove every staged member afterwards — including through `\\?\` for the ones
+Explorer and `del` will not touch:
+
+```bat
+python -c "import os; [os.remove(p) for p in (r'\\?\C:\gw-verify\ws\okf\work\CON.md', r'\\?\C:\gw-verify\ws\okf\work\COM1.md', r'\\?\C:\gw-verify\ws\okf\work\trailing. .md') if os.path.exists(p)]"
+del C:\gw-verify\ws\okf\work\linked.md
+```
+
+**If it fails** (a mutation proceeds past any of them): Owner:
+`feature-windows-anchor-and-tier-adr`.

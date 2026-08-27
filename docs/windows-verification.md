@@ -1189,3 +1189,157 @@ type C:\gw-verify\ws\okf\work\index.md
 `regen-index` reports no further change. Paste the index.
 
 **If it fails:** Owner: a **new child** scoped to the failing verb.
+
+## Writing up the run
+
+**Write this at the machine, not from memory afterwards.** That is the entire
+reason the shape is pinned here.
+
+Create
+`okf/work/epic-native-windows-support/children/tech-debt-windows-verification-run/references/03-windows-run-<YYYY-MM-DD>.md`
+in the graph-works vault, with this frontmatter and these four sections:
+
+````markdown
+---
+type: Concept
+title: "Native Windows verification run — <YYYY-MM-DD>"
+description: Recorded verdicts for every checkpoint of docs/windows-verification.md, executed on <machine>, at repo <short-sha>.
+category: work
+status: stable
+updated: <YYYY-MM-DD>
+tags: [graph-works, windows, portability, verification, evidence]
+---
+
+# Native Windows verification run — <YYYY-MM-DD>
+
+Executed against [`docs/windows-verification.md`](...) at repo `<full-sha>`.
+Protocol version: the revision of that file at `<full-sha>`.
+
+## Preamble
+
+<every row of the protocol's machine-identity table, output pasted verbatim>
+
+Which siblings had landed in `<full-sha>`:
+
+| Child | Resolved in this tree? |
+|---|---|
+| bug-enforce-lf-line-endings | |
+| bug-explicit-encoding-newline | |
+| tech-debt-portable-file-lock | |
+| tech-debt-guard-workflow-local-verify-orca | |
+| tech-debt-anchor-abstraction | |
+| feature-windows-anchor-and-tier-adr | |
+| feature-gw-util-platform | |
+| tech-debt-publish-platform-matrix | |
+
+## Verdicts
+
+| Checkpoint | Verdict | Observed | Owner |
+|---|---|---|---|
+| A1 | | | |
+| A2 | | | |
+| A3 | | | |
+| B0 | | | |
+| B1 | | | |
+| B2 | | | |
+| B3 | | | |
+| B4 | | | |
+| B5 | | | |
+| B6 | | | |
+| B7 | | | |
+| B8 | | | |
+| B9 | | | |
+| C1 | | | |
+| C2 | | | |
+| C3 | | | |
+| C4 | | | |
+| C5 | | | |
+| C6 | | | |
+| C7 | | | |
+| D1 | | | |
+| D2 | | | |
+| D3 | | | |
+| E1 | | | |
+| E2 | | | |
+| E3 | | | |
+| E4 | | | |
+| F1 | | | |
+| F2 | | | |
+| F3 | | | |
+| F4 | | | |
+| F5 | | | |
+| F6 | | | |
+| F7 | | | |
+
+Rules for this table, and they are not negotiable:
+
+- **Every row has a verdict.** No blanks. `NOT RUN` is a verdict; it needs a
+  reason in **Observed** and an owner in **Owner**.
+- **Owner is required on every non-`PASS` row.** A red or `NOT RUN` row with an
+  empty Owner cell is an incomplete write-up, not a finished run.
+- **Owner is empty on `PASS` rows.** Nothing to own.
+- **Observed carries output, not adjectives.** Exit codes, hex, the first failing
+  assertion. "Worked fine" is not an observation.
+
+## Raw output
+
+<the pasted transcripts the Verdicts table's Observed column points at —
+xxd/certutil hex for Group D, the journal for C5, both platform reports for F5>
+
+## Summary
+
+<three to six sentences: what passed, what went red, what each red now owns.
+This is what gets copied into the work item body and the epic ledger.>
+````
+
+Before committing the record, check it mechanically — 34 rows, every verdict in
+the vocabulary, every non-`PASS` row owned:
+
+```bash
+python3 - <<'PY'
+import re, pathlib, sys
+p = pathlib.Path('okf/work/epic-native-windows-support/children/tech-debt-windows-verification-run/references/03-windows-run-<DATE>.md')
+rows = [l for l in p.read_text(encoding='utf-8').splitlines() if re.match(r'^\| [A-F]\d+ \|', l)]
+print('rows:', len(rows))
+bad = [r for r in rows if r.split('|')[2].strip() not in {'PASS', 'FAIL', 'NOT RUN'}]
+missing_owner = [r for r in rows if r.split('|')[2].strip() in {'FAIL', 'NOT RUN'} and not r.split('|')[4].strip()]
+print('bad verdict:', *bad, sep='\n')
+print('missing owner:', *missing_owner, sep='\n')
+sys.exit(1 if bad or missing_owner or len(rows) != 34 else 0)
+PY
+```
+
+**Expected:** `rows: 34`, nothing under `bad verdict:` or `missing owner:`, exit 0.
+
+## Red → owner routing
+
+Fill the **Owner** column from this table. Where it says *reopens*, the child
+already names this outcome in its own design — reopen it rather than filing a
+duplicate.
+
+| Red | Owner |
+|---|---|
+| A1, A2 | reopens `bug-enforce-lf-line-endings` |
+| A3 (`run-hook.cmd` mis-parse) | **new child** — flatten the batch half's `if` blocks, keep LF |
+| B0 (`just check` not natively invocable) | **new child** — a `set windows-shell` line or a documented prerequisite |
+| B1–B3, B9 | **new child** scoped to the failing guard script |
+| B4–B6, B8 | **new child** scoped to the failing check |
+| B7 | transaction/anchor failure reopens `feature-windows-anchor-and-tier-adr`; anything else is a **new child** |
+| C1, C3–C5, C7 | `feature-windows-anchor-and-tier-adr` if the ADR's stated contract is wrong; a **new child** if the contract is right and the implementation is not |
+| C2 (`st_ino` unstable on NTFS) | **reopens** `feature-windows-anchor-and-tier-adr` — its design already names this outcome |
+| C6 | `tech-debt-portable-file-lock` if `locked()` does not re-raise naming the path; a **new child** if the 10s bound itself is unworkable |
+| D1–D3 | **reopens** `bug-explicit-encoding-newline` — its guard passed while the behaviour did not |
+| E1–E4 | fires `tech-debt-port-workflow-local-process-control`, D-002's filed contingency |
+| F1–F4, F7 | **new child** scoped to the failing verb |
+| F5 | `feature-gw-util-platform` if the provider's derivation is wrong; the capability's owning child if the machinery is |
+| F6 | **new child** scoped to the differing part of the surface |
+
+## What this run does not settle
+
+- **The reds.** This protocol measures; the owners above fix.
+- **CI.** ADR-0010 stands. No `.github/`.
+- **WSL.** Unaffected throughout — it is the supported channel and nothing in
+  this epic changes it.
+- **ADR-0027 case-insensitivity and ADR-0036 on-disk shape on NTFS.** Scoped out
+  deliberately: settling them could force a member-identity change affecting
+  every platform. Do not add them as checkpoints.

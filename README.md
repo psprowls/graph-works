@@ -40,6 +40,12 @@ implementation without the foundation carving out an exemption to hold it.
 | Windows via WSL | yes (WSL is Linux) | `gw util platform` |
 | Native Windows (`python.exe`, Git Bash, PowerShell) | committed, not yet | `gw util platform` |
 
+The full manual verification protocol for native Windows is
+[`docs/windows-verification.md`](docs/windows-verification.md) — 34 checkpoints
+across six groups, each with an exact command and an exact expected output.
+There is no CI on that platform (ADR-0010), so a recorded run of that protocol is
+the whole of the native-Windows signal.
+
 This table is coarse and slow-moving on purpose. The per-capability truth —
 durability tier, dispatch backend, file lock, process control — is *derived
 at runtime* by `gw util platform`, not restated here, so it cannot drift out

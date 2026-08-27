@@ -138,3 +138,51 @@ def test_guarantees_are_rendered_under_their_capability(monkeypatch) -> None:
     result = runner.invoke(app, ["util", "platform"])
 
     assert "every effect lands or none does" in result.stdout
+
+
+def test_no_guarantee_line_when_guarantees_is_empty(monkeypatch) -> None:
+    """An empty `guarantees` tuple must render zero `guarantee:` lines."""
+    monkeypatch.setattr(
+        platform_module,
+        "build_report",
+        lambda **_kwargs: PlatformReport(
+            schema_version=1,
+            platform="darwin",
+            python="3.12.7",
+            capabilities=(Capability("durability-tier", "posix-strong", "available", "ok", (), "m"),),
+            probes=(),
+        ),
+    )
+    result = runner.invoke(app, ["util", "platform"])
+
+    assert result.exit_code == 0, result.output
+    assert "guarantee:" not in result.stdout
+
+
+def test_a_probe_appears_only_under_its_own_capability(monkeypatch) -> None:
+    """A report with two capabilities and one probe must not leak the probe
+    line into the capability block it does not belong to."""
+    monkeypatch.setattr(
+        platform_module,
+        "build_report",
+        lambda **_kwargs: PlatformReport(
+            schema_version=1,
+            platform="win32",
+            python="3.12.7",
+            capabilities=(
+                Capability("durability-tier", "posix-strong", "available", "ok", (), "m"),
+                Capability("dispatch-backend", "workflow-orca", "available", "resolved", (), "m"),
+            ),
+            probes=(ProbeResult("durability-tier", "available", "confirmed", agrees_with_declared=True),),
+        ),
+    )
+    result = runner.invoke(app, ["util", "platform"])
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.count("probed:") == 1
+
+    _, _, after_durability = result.stdout.partition("durability-tier:")
+    durability_block, _, dispatch_block = after_durability.partition("dispatch-backend:")
+
+    assert "probed:" in durability_block
+    assert "probed:" not in dispatch_block

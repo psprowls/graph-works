@@ -20,7 +20,10 @@ than last.
 from __future__ import annotations
 
 import importlib.util
+import shutil
+import subprocess
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
 
@@ -191,3 +194,77 @@ class DurabilityTierProvider:
             detail=NOT_PROBEABLE_DETAIL,
             agrees_with_declared=True,
         )
+
+
+#: Bounded because a diagnostic verb that hangs while diagnosing is worthless.
+ORCA_PROBE_TIMEOUT_SECONDS = 5.0
+
+#: The shell whose docstring states the rule this provider reports. Named as a
+#: string rather than imported: `graph_works_core.util` and
+#: `graph_works_core.orchestrate` are siblings under an `independence`
+#: import-linter contract, so citing it must not become importing it.
+ORCHESTRATE_SHELL = "graph_works_core.orchestrate.commands"
+
+
+class DispatchBackendProvider:
+    """Which dispatch backend a run would use — and whether `orca` actually works here.
+
+    Declares `unresolved` because no resolver exists yet: the orchestrate shell
+    resolves no backend by design, and nothing imports `workflow_local` or
+    `workflow_orca`. When the resolver lands, this asks it. Until then the slot
+    reports honestly rather than guessing a default.
+
+    The probe does not need the resolver, and is implemented now: Orca's own
+    availability on a given box is a prerequisite to verify, not assume.
+    """
+
+    name = "dispatch-backend"
+
+    def __init__(
+        self,
+        *,
+        which: Callable[[str], str | None] = shutil.which,
+        run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    ) -> None:
+        self._which = which
+        self._run = run
+
+    def declare(self, platform_name: str) -> Capability:
+        return Capability(
+            name=self.name,
+            value="unresolved",
+            status="unknown",
+            detail=(
+                f"no backend resolver exists; {ORCHESTRATE_SHELL} resolves no "
+                f"backend by design and nothing imports workflow_local or "
+                f"workflow_orca — run with --probe to ask whether orca works here"
+            ),
+            guarantees=(),
+            provider=ORCHESTRATE_SHELL,
+        )
+
+    def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:
+        executable = self._which("orca")
+        if executable is None:
+            return self._result("unavailable", "orca is not on PATH")
+        try:
+            completed = self._run(
+                [executable, "--version"],
+                capture_output=True,
+                text=True,
+                timeout=ORCA_PROBE_TIMEOUT_SECONDS,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return self._result("unavailable", f"`orca --version` timed out after {ORCA_PROBE_TIMEOUT_SECONDS}s")
+        except OSError as exc:
+            return self._result("unavailable", f"`orca --version` could not be launched: {exc}")
+        if completed.returncode != 0:
+            return self._result("unavailable", f"`orca --version` exited {completed.returncode}")
+        return self._result("available", f"orca at {executable}: {completed.stdout.strip() or 'no version reported'}")
+
+    def _result(self, status: CapabilityStatus, detail: str) -> ProbeResult:
+        """Always disagrees with the declaration while it reads `unresolved`:
+        an observation where the declaration has none is exactly the news this
+        verb exists to carry."""
+        return ProbeResult(capability=self.name, status=status, detail=detail, agrees_with_declared=False)

@@ -8,12 +8,14 @@ Windows-shaped behaviour is checked on the machine the work is done on.
 
 from __future__ import annotations
 
+import subprocess
 import sys
 
 from graph_works_core.util.platform import (
     POSIX_ONLY_MODULES,
     SCHEMA_VERSION,
     Capability,
+    DispatchBackendProvider,
     DurabilityTierProvider,
     PlatformReport,
     ProbeResult,
@@ -108,3 +110,85 @@ def test_the_durability_tier_is_not_probeable() -> None:
     assert result is not None
     assert result.status == "unknown"
     assert "not probeable" in result.detail
+
+
+def _completed(returncode: int, stdout: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(args=["orca", "--version"], returncode=returncode, stdout=stdout, stderr="")
+
+
+def test_the_dispatch_backend_is_unresolved_on_every_platform() -> None:
+    """No resolver exists yet. The provider says so; it does not anticipate one."""
+    for platform_name in ("darwin", "linux", "win32"):
+        capability = DispatchBackendProvider().declare(platform_name)
+
+        assert capability.value == "unresolved"
+        assert capability.status == "unknown"
+        assert "resolver" in capability.detail
+
+
+def test_a_present_orca_probes_available_and_disagrees_with_unresolved() -> None:
+    """`unresolved` is not `unavailable`: finding a working orca is news, and
+    the disagreement is the point of reporting both."""
+    provider = DispatchBackendProvider(
+        which=lambda _name: "/usr/local/bin/orca",
+        run=lambda *_args, **_kwargs: _completed(0, "orca 1.2.3\n"),
+    )
+
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.status == "available"
+    assert result.agrees_with_declared is False
+
+
+def test_an_absent_orca_probes_unavailable_without_running_anything() -> None:
+    calls: list[object] = []
+
+    def _run(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        calls.append(args)
+        return _completed(0)
+
+    provider = DispatchBackendProvider(which=lambda _name: None, run=_run)
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.status == "unavailable"
+    assert "PATH" in result.detail
+    assert calls == []
+
+
+def test_a_nonzero_orca_probes_unavailable() -> None:
+    provider = DispatchBackendProvider(
+        which=lambda _name: "/usr/local/bin/orca",
+        run=lambda *_args, **_kwargs: _completed(127),
+    )
+
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.status == "unavailable"
+
+
+def test_a_timing_out_orca_probes_unavailable_rather_than_raising() -> None:
+    """A diagnostic verb that crashes while diagnosing is worthless."""
+
+    def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(cmd="orca", timeout=5.0)
+
+    provider = DispatchBackendProvider(which=lambda _name: "/usr/local/bin/orca", run=_run)
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.status == "unavailable"
+    assert "timed out" in result.detail
+
+
+def test_an_unlaunchable_orca_probes_unavailable_rather_than_raising() -> None:
+    def _run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise OSError("Exec format error")
+
+    provider = DispatchBackendProvider(which=lambda _name: "/usr/local/bin/orca", run=_run)
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.status == "unavailable"

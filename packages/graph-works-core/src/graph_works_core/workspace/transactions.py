@@ -507,16 +507,9 @@ def _fsync_live_file(root: Anchor, member: str) -> None:
         parent.close()
 
 
-def _fsync_live_directory(descriptor: int | Anchor) -> None:
-    # F2 call sites (the cache/transaction-root/per-transaction anchors) pass
-    # an `Anchor`; every other call site here still anchors a bare bundle-root
-    # descendant descriptor (F1/F3, out of scope for this item) and passes a
-    # raw `int`.  Both delegate to the identical `os.fsync` Windows documents
-    # as a directory no-op -- see `Anchor.fsync`.
-    if isinstance(descriptor, int):
-        os.fsync(descriptor)
-    else:
-        descriptor.fsync()
+def _fsync_live_directory(anchor: Anchor) -> None:
+    # A delegator, not a re-export.  See the note above `_open_parent`.
+    anchor.fsync()
 
 
 def _assert_root_identity(root: Path, anchor: Anchor) -> None:

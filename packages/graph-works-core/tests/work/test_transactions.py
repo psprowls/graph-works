@@ -1469,13 +1469,13 @@ def test_direct_move_destination_open_failure_preserves_a_recreated_source(
         if state == "applying":
             armed = True
 
-    def fail_destination_parent(root: anchors.Anchor, member: str, **kwargs: object):
+    def fail_destination_parent(root_fd: int, member: str, **kwargs: object):
         nonlocal injected
         if armed and not injected and member == "work/destination/child.bin":
             injected = True
             source.write_bytes(b"external-source")
             raise OSError("injected destination-parent open failure")
-        return real_open_parent(root, member, **kwargs)
+        return real_open_parent(root_fd, member, **kwargs)
 
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_open_parent", fail_destination_parent)
@@ -1514,12 +1514,12 @@ def test_direct_move_destination_open_failure_restores_custody_without_residue(
         if state == "applying":
             armed = True
 
-    def fail_destination_parent(root: anchors.Anchor, member: str, **kwargs: object):
+    def fail_destination_parent(root_fd: int, member: str, **kwargs: object):
         nonlocal injected
         if armed and not injected and member == "work/destination/child.bin":
             injected = True
             raise OSError("injected destination-parent open failure")
-        return real_open_parent(root, member, **kwargs)
+        return real_open_parent(root_fd, member, **kwargs)
 
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_open_parent", fail_destination_parent)

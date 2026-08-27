@@ -504,6 +504,15 @@ class _WindowsAnchor:
     __slots__ = ("_identity", "_long_paths", "root")
 
     def __init__(self, root: Path, *, long_paths: bool | None = None) -> None:
+        # `resolve()` would silently follow a symlinked final component, so the
+        # refusal has to happen on the UNresolved path -- same shape and
+        # reasoning as `open_child`'s refusal of a symlinked component, just at
+        # construction time and for the root itself.  A symlinked ANCESTOR of
+        # the root is unaffected: `resolve()` below still collapses it, which
+        # matches `_PosixAnchor.open_root`'s behaviour.
+        unresolved = root.lstat()
+        if stat.S_ISLNK(unresolved.st_mode):
+            raise NotADirectoryError(f"refusing to anchor a symlinked root: {root!r}")
         self.root = root.resolve(strict=True)
         info = self.root.lstat()
         if not stat.S_ISDIR(info.st_mode):

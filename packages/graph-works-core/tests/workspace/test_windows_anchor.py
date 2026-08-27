@@ -1,9 +1,10 @@
 """Unit tests for `_WindowsAnchor`, the path-revalidating anchor tier.
 
 These are the tier's unit tests; the engine-level coverage comes from
-Task 11.  Every test constructs `_WindowsAnchor` directly rather than going
-through `open_anchor`/`anchor_tier`, since Task 5 has not wired the selectors
-to return this tier yet.
+Task 11.  Most tests construct `_WindowsAnchor` directly for precise control
+over its constructor arguments; a number of others go through
+`open_anchor`/`anchor_tier` with `platform_name="win32"` now that Task 5 has
+wired the selectors to return this tier.
 """
 
 from __future__ import annotations
@@ -35,15 +36,34 @@ def test_windows_anchor_satisfies_the_anchor_protocol(tmp_path: Path) -> None:
 
 
 def test_windows_anchor_holds_a_resolved_root(tmp_path: Path) -> None:
+    """A symlinked ANCESTOR of the root still resolves -- only the root's own
+    final component being a symlink is refused (see
+    `test_windows_anchor_refuses_a_symlinked_root`), matching how
+    `_PosixAnchor.open_root` behaves when only an ancestor, not the immediate
+    root, is a symlink."""
     (tmp_path / "real").mkdir()
     (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
-    anchor = _anchor(tmp_path / "link")
+    (tmp_path / "link" / "child").mkdir()
+    anchor = _anchor(tmp_path / "link" / "child")
     try:
-        assert anchor.root == (tmp_path / "real").resolve()
+        assert anchor.root == (tmp_path / "real" / "child").resolve()
         assert anchor.path() == anchor.root
         assert anchor.alias() == anchor.root
     finally:
         anchor.close()
+
+
+def test_windows_anchor_refuses_a_symlinked_root(tmp_path: Path) -> None:
+    """Constructing directly on a path whose final component is a symlink is
+    refused, matching `open_child`'s refusal of a symlinked component (see
+    `test_open_child_refuses_a_symlinked_component`) -- just enforced at
+    construction time and for the root itself.  `resolve()` would otherwise
+    silently follow the link, so the check has to run against the unresolved
+    path."""
+    (tmp_path / "real").mkdir()
+    (tmp_path / "link").symlink_to(tmp_path / "real", target_is_directory=True)
+    with pytest.raises(NotADirectoryError, match="refusing to anchor a symlinked root"):
+        anchors._WindowsAnchor(tmp_path / "link", long_paths=True)
 
 
 def test_windows_anchor_refuses_a_root_that_is_not_a_directory(tmp_path: Path) -> None:
@@ -298,8 +318,8 @@ def test_preflight_refuses_before_any_effect_lands(tmp_path: Path) -> None:
 
 
 def test_preflight_directly_refuses_a_symlink_member_on_the_windows_tier(tmp_path: Path) -> None:
-    """Exercises `_preflight`'s call to `_refuse_unsupported_shapes` without going through
-    `apply_mutation`'s lock acquisition, which is still blocked on Task 8's `exclusive_lock`.
+    """Exercises `_preflight`'s call to `_refuse_unsupported_shapes` directly, without going
+    through `apply_mutation`'s lock acquisition.
     """
     layout = _workspace(tmp_path)
     (layout.bundle_dir / "work").mkdir(exist_ok=True)

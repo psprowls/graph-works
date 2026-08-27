@@ -20,7 +20,9 @@ than last.
 from __future__ import annotations
 
 import importlib.util
+import os
 import shutil
+import signal
 import subprocess
 import sys
 from collections.abc import Callable
@@ -268,3 +270,118 @@ class DispatchBackendProvider:
         an observation where the declaration has none is exactly the news this
         verb exists to carry."""
         return ProbeResult(capability=self.name, status=status, detail=detail, agrees_with_declared=False)
+
+
+#: The three modules that take an advisory file lock today, as `<pkg>/<path>`
+#: below `packages/*/src/`. Named rather than discovered so the report cites
+#: real files — and so a test can assert each one still imports `fcntl`, which
+#: is what keeps this list from rotting once the portable-lock work lands.
+LOCK_SITES = (
+    "work_tracker_okf/decisions.py",
+    "graph_works_core/work/commands.py",
+    "okf_ext/logs/__init__.py",
+)
+
+#: The probe's own lock file. Deliberately NOT a live decisions-cache lock:
+#: contending for a real ledger lock to answer a diagnostic question could
+#: stall a concurrent writer.
+PROBE_LOCK_NAME = "platform-probe.lock"
+
+#: The package whose README already declares itself POSIX-only.
+WORKFLOW_LOCAL_BACKEND = "workflow_local.backend"
+
+
+class FileLockProvider:
+    """Which primitive serializes a read-mutate-write cycle across processes.
+
+    Derived from `fcntl`'s availability, because that is literally what the
+    three lock sites import. When a portable `locked(path)` helper exists,
+    this asks it which branch it took instead.
+    """
+
+    name = "file-lock"
+
+    def declare(self, platform_name: str) -> Capability:
+        sites = ", ".join(LOCK_SITES)
+        if module_available("fcntl", platform_name):
+            return Capability(
+                name=self.name,
+                value="fcntl.flock",
+                status="available",
+                detail=f"advisory exclusive locks via fcntl.flock at {sites}",
+                guarantees=("an exclusive advisory lock serializes writers across processes",),
+                provider=LOCK_SITES[0].replace("/", ".").removesuffix(".py"),
+            )
+        return Capability(
+            name=self.name,
+            value="unavailable",
+            status="unavailable",
+            detail=f"{sites} each import `fcntl`, which native Windows does not provide",
+            guarantees=(),
+            provider=LOCK_SITES[0].replace("/", ".").removesuffix(".py"),
+        )
+
+    def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:
+        """Take and immediately release a lock on a dedicated cache path."""
+        lock = layout.cache_dir / PROBE_LOCK_NAME
+        try:
+            import fcntl
+
+            lock.parent.mkdir(parents=True, exist_ok=True)
+            descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+                fcntl.flock(descriptor, fcntl.LOCK_UN)
+            finally:
+                os.close(descriptor)
+        except (ImportError, OSError) as exc:
+            return ProbeResult(
+                capability=self.name,
+                status="unavailable",
+                detail=f"could not take an advisory lock at {lock}: {exc}",
+                agrees_with_declared=False,
+            )
+        return ProbeResult(
+            capability=self.name,
+            status="available",
+            detail=f"took and released an exclusive advisory lock at {lock}",
+            agrees_with_declared=True,
+        )
+
+
+class ProcessControlProvider:
+    """Whether worker liveness and teardown can run here.
+
+    Derived from `signal.SIGKILL`, the attribute CPython omits on Windows —
+    the backend's teardown polls SIGTERM then SIGKILL, and its liveness check
+    is `os.kill(pid, 0)`. Asking for the attribute is asking the machinery.
+    """
+
+    name = "process-control"
+
+    def declare(self, platform_name: str) -> Capability:
+        posix_signals = module_available("fcntl", platform_name) and hasattr(signal, "SIGKILL")
+        if posix_signals:
+            return Capability(
+                name=self.name,
+                value="workflow-local",
+                status="available",
+                detail=f"{WORKFLOW_LOCAL_BACKEND} uses os.kill(pid, 0) for liveness and SIGTERM/SIGKILL for teardown",
+                guarantees=("a worker's liveness is observable and its teardown is enforceable",),
+                provider=WORKFLOW_LOCAL_BACKEND,
+            )
+        return Capability(
+            name=self.name,
+            value="unavailable",
+            status="unavailable",
+            detail=(
+                f"{WORKFLOW_LOCAL_BACKEND} polls SIGTERM then SIGKILL for teardown and calls "
+                f"os.kill(pid, 0) for liveness; native Windows provides no SIGKILL"
+            ),
+            guarantees=(),
+            provider=WORKFLOW_LOCAL_BACKEND,
+        )
+
+    def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:
+        """None: sending a signal to prove signalling works is not read-only."""
+        return None

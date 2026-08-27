@@ -12,15 +12,19 @@ import subprocess
 import sys
 
 from graph_works_core.util.platform import (
+    LOCK_SITES,
     POSIX_ONLY_MODULES,
     SCHEMA_VERSION,
     Capability,
     DispatchBackendProvider,
     DurabilityTierProvider,
+    FileLockProvider,
     PlatformReport,
     ProbeResult,
+    ProcessControlProvider,
     module_available,
 )
+from graph_works_core.workspace.layout import layout_for
 
 
 def test_the_schema_version_is_frozen_at_one() -> None:
@@ -192,3 +196,75 @@ def test_an_unlaunchable_orca_probes_unavailable_rather_than_raising() -> None:
 
     assert result is not None
     assert result.status == "unavailable"
+
+
+def test_the_file_lock_is_flock_on_posix() -> None:
+    capability = FileLockProvider().declare(sys.platform)
+
+    assert capability.status == "available"
+    assert capability.value == "fcntl.flock"
+
+
+def test_the_file_lock_is_unavailable_on_win32_and_names_its_sites() -> None:
+    capability = FileLockProvider().declare("win32")
+
+    assert capability.status == "unavailable"
+    assert "work_tracker_okf" in capability.detail
+
+
+def test_every_named_lock_site_still_imports_fcntl(tmp_path) -> None:
+    """The detail names three files. If one stops importing `fcntl` — because
+    the portable-lock work landed — this report is stale and must be updated
+    with it."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[4]
+    for site in LOCK_SITES:
+        matches = list(root.glob(f"packages/*/src/{site}"))
+        assert matches, site
+        assert "import fcntl" in matches[0].read_text(encoding="utf-8")
+
+
+def test_the_file_lock_probe_takes_and_releases_a_real_lock(tmp_path) -> None:
+    layout = layout_for(tmp_path / ".works")
+    layout.cache_dir.mkdir(parents=True)
+
+    result = FileLockProvider().probe(layout)
+
+    assert result is not None
+    assert result.status == "available"
+    assert result.agrees_with_declared is True
+
+
+def test_the_file_lock_probe_reports_rather_than_raises_when_the_cache_is_unwritable(tmp_path) -> None:
+    layout = layout_for(tmp_path / ".works")
+    unwritable = layout.cache_dir
+    unwritable.parent.mkdir(parents=True, exist_ok=True)
+    unwritable.parent.chmod(0o500)
+    try:
+        result = FileLockProvider().probe(layout)
+    finally:
+        unwritable.parent.chmod(0o700)
+
+    assert result is not None
+    assert result.status == "unavailable"
+    assert result.agrees_with_declared is False
+
+
+def test_process_control_is_available_on_posix() -> None:
+    capability = ProcessControlProvider().declare(sys.platform)
+
+    assert capability.status == "available"
+    assert capability.value == "workflow-local"
+
+
+def test_process_control_is_unavailable_on_win32() -> None:
+    capability = ProcessControlProvider().declare("win32")
+
+    assert capability.status == "unavailable"
+    assert "SIGKILL" in capability.detail
+
+
+def test_process_control_has_no_probe() -> None:
+    """Sending a signal to prove signalling works is not read-only."""
+    assert ProcessControlProvider().probe(layout=None) is None  # type: ignore[arg-type]

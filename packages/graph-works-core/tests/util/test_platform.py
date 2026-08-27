@@ -14,6 +14,7 @@ from graph_works_core.util.platform import (
     POSIX_ONLY_MODULES,
     SCHEMA_VERSION,
     Capability,
+    DurabilityTierProvider,
     PlatformReport,
     ProbeResult,
     module_available,
@@ -72,3 +73,38 @@ def test_a_probe_result_records_whether_it_agrees() -> None:
     result = ProbeResult("dispatch-backend", "unavailable", "orca not on PATH", agrees_with_declared=False)
 
     assert result.agrees_with_declared is False
+
+
+def test_the_durability_tier_is_available_on_posix() -> None:
+    capability = DurabilityTierProvider().declare(sys.platform)
+
+    assert capability.name == "durability-tier"
+    assert capability.status == "available"
+    assert capability.value == "posix-strong"
+    assert capability.guarantees  # a tier name with no contract surfaces nothing
+
+
+def test_the_durability_tier_is_unavailable_on_win32() -> None:
+    """Today the engine imports `fcntl` at module scope, so on native Windows
+    it cannot be imported at all — the honest answer, not 'the weaker tier'."""
+    capability = DurabilityTierProvider().declare("win32")
+
+    assert capability.status == "unavailable"
+    assert "fcntl" in capability.detail
+
+
+def test_the_durability_tier_names_the_module_that_answered() -> None:
+    """Traceability is the whole reason `provider` exists."""
+    capability = DurabilityTierProvider().declare("win32")
+
+    assert capability.provider == "graph_works_core.workspace.transactions"
+
+
+def test_the_durability_tier_is_not_probeable() -> None:
+    """Running a real transaction is not read-only. The report says so and
+    names the manual verification run as the evidence instead."""
+    result = DurabilityTierProvider().probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.status == "unknown"
+    assert "not probeable" in result.detail

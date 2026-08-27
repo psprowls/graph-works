@@ -22,7 +22,9 @@ from __future__ import annotations
 import importlib.util
 import sys
 from dataclasses import dataclass
-from typing import Literal
+from typing import Literal, Protocol
+
+from graph_works_core.workspace.layout import WorkspaceLayout
 
 #: Bumped when a consumer-visible field changes shape. Follows
 #: `describe-surface`'s precedent, for the same reason: scripts read this.
@@ -105,3 +107,87 @@ class PlatformReport:
         """Which POSIX-only components are unavailable — the item's fourth
         required field, derived rather than maintained."""
         return tuple(c.name for c in self.capabilities if c.status == "unavailable")
+
+
+#: The engine whose durability tier this report describes. Named once so the
+#: provider's `provider` field and its detail sentence cannot drift apart.
+TRANSACTIONS_MODULE = "graph_works_core.workspace.transactions"
+
+#: Why the durability tier has no liveness check. Stated as a constant so a
+#: later reader finds the reason next to the refusal.
+NOT_PROBEABLE_DETAIL = (
+    "not probeable — running a real transaction is not read-only; the tier's "
+    "guarantee is bought by a measured run on real Windows hardware, not by a "
+    "diagnostic verb asserting it"
+)
+
+_STRONG_TIER_GUARANTEES = (
+    "an exclusive lock is held across the whole read-mutate-write cycle",
+    "every effect lands or the pre-mutation snapshot is restored",
+    "recovery evidence is journaled outside the bundle",
+)
+
+
+class Provider(Protocol):
+    """One capability, answered by whoever owns the machinery behind it.
+
+    The strict rule, and the whole point of the seam: a provider never
+    restates a platform fact it could ask for. When the tier ADR's second
+    anchor lands, the answer changes *in the engine* and this verb reports the
+    new answer without being edited. A provider that cannot ask — because the
+    machinery does not exist yet — says `unresolved` / `unknown` with a detail
+    naming what is missing. It does not guess, and it does not anticipate.
+    """
+
+    name: str
+
+    def declare(self, platform_name: str) -> Capability:
+        """The static answer for *platform_name*. No subprocess, no I/O."""
+        ...
+
+    def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:
+        """A cheap liveness check, or `None` when this capability has none."""
+        ...
+
+
+class DurabilityTierProvider:
+    """Which durability tier the transaction engine actually runs here.
+
+    Derived, not tabulated: the engine imports `fcntl` at module scope, so its
+    availability *is* that module's availability. When a selector and a second
+    anchor exist, this asks the engine which one it selects instead — and the
+    verb's answer changes without the verb changing.
+    """
+
+    name = "durability-tier"
+
+    def declare(self, platform_name: str) -> Capability:
+        if module_available("fcntl", platform_name):
+            return Capability(
+                name=self.name,
+                value="posix-strong",
+                status="available",
+                detail="the transaction engine's advisory-lock path is importable here",
+                guarantees=_STRONG_TIER_GUARANTEES,
+                provider=TRANSACTIONS_MODULE,
+            )
+        return Capability(
+            name=self.name,
+            value="unavailable",
+            status="unavailable",
+            detail=(
+                f"{TRANSACTIONS_MODULE} imports `fcntl` at module scope; native "
+                f"Windows cannot load it, so no transaction can run at all"
+            ),
+            guarantees=(),
+            provider=TRANSACTIONS_MODULE,
+        )
+
+    def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:
+        """Deliberately never runs a transaction. See `NOT_PROBEABLE_DETAIL`."""
+        return ProbeResult(
+            capability=self.name,
+            status="unknown",
+            detail=NOT_PROBEABLE_DETAIL,
+            agrees_with_declared=True,
+        )

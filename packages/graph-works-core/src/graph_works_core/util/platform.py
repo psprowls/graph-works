@@ -1,0 +1,107 @@
+"""What `gw util platform` reports: platform, durability tier, dispatch backend,
+and which POSIX-only components are unavailable.
+
+The epic's tier decision requires the weaker durability tier be *surfaced at
+runtime* rather than inferred from a crash. That requirement is why this is a
+provider seam and not a table: each capability is answered by a provider that
+asks the machinery that owns it. A hand-maintained table keyed on
+`sys.platform` is the pattern this CLI already rejected once, when
+`describe-surface` dropped its `json_keys` field — a registry nothing asserts
+against real behaviour rots silently, and a platform verb that can claim a
+durability tier the engine is not actually running is worse than no verb.
+
+Nothing here reads `sys.platform` except as `build_report`'s default: the
+platform is an argument, the same shape okf-io's required `today=` has and the
+whole band inherits. That is what lets a POSIX box assert the report a Windows
+user would actually see — the strongest reason this verb is built early rather
+than last.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import sys
+from dataclasses import dataclass
+from typing import Literal
+
+#: Bumped when a consumer-visible field changes shape. Follows
+#: `describe-surface`'s precedent, for the same reason: scripts read this.
+SCHEMA_VERSION = 1
+
+#: `available` — present and usable. `unavailable` — the machinery cannot run
+#: here. `degraded` — usable with a weaker guarantee than the strong tier.
+#: `unknown` — nothing could be asked, and this report does not guess.
+CapabilityStatus = Literal["available", "unavailable", "degraded", "unknown"]
+
+#: The one irreducible platform fact in this module: stdlib modules CPython
+#: does not ship on native Windows. Every provider derives from
+#: `module_available` rather than restating a per-platform literal of its own —
+#: that duplication is exactly what turns a seam back into a table.
+POSIX_ONLY_MODULES = frozenset({"fcntl", "grp", "pwd", "termios"})
+
+
+def module_available(module_name: str, platform_name: str) -> bool:
+    """Whether *module_name* is importable on *platform_name*.
+
+    For the running platform this asks the import system. For a foreign one it
+    can only answer for the modules whose absence is a fixed property of the
+    build — hence `POSIX_ONLY_MODULES`, kept small and named rather than
+    inferred, so a reader can see the whole assumption at once.
+    """
+    if importlib.util.find_spec(module_name) is None:
+        return False
+    if platform_name == sys.platform:
+        return True
+    return not (platform_name.startswith("win") and module_name in POSIX_ONLY_MODULES)
+
+
+@dataclass(frozen=True, slots=True)
+class Capability:
+    """One declared platform fact and the machinery that answered for it.
+
+    `provider` is the dotted module that produced `value`. It is what makes
+    every claim traceable, and what stops the seam quietly degenerating back
+    into a table. `guarantees` is the declared contract — for the durability
+    tier, the sentences the tier ADR commits to; a tier *name* with no contract
+    beside it surfaces nothing a user can act on.
+    """
+
+    name: str
+    value: str
+    status: CapabilityStatus
+    detail: str
+    guarantees: tuple[str, ...]
+    provider: str
+
+
+@dataclass(frozen=True, slots=True)
+class ProbeResult:
+    """What a liveness check observed, and whether it matches the declaration.
+
+    Rendered *beside* the declared value, never in place of it: a box where
+    `dispatch-backend` declares one thing and probes another is the single most
+    useful thing this verb can say, and collapsing the two destroys it.
+    """
+
+    capability: str
+    status: CapabilityStatus
+    detail: str
+    agrees_with_declared: bool
+
+
+@dataclass(frozen=True, slots=True)
+class PlatformReport:
+    """The whole report. Data, not a printer — the CLI formats this, and a
+    future `gw doctor` could carry it as one section."""
+
+    schema_version: int
+    platform: str
+    python: str
+    capabilities: tuple[Capability, ...]
+    probes: tuple[ProbeResult, ...]
+
+    @property
+    def unavailable(self) -> tuple[str, ...]:
+        """Which POSIX-only components are unavailable — the item's fourth
+        required field, derived rather than maintained."""
+        return tuple(c.name for c in self.capabilities if c.status == "unavailable")

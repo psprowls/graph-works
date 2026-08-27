@@ -46,7 +46,6 @@ everywhere else in this package and in `work-tracker-okf`.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import os
 from collections.abc import Iterator, Mapping, Sequence
@@ -59,6 +58,7 @@ from typing import Literal
 
 from code_wiki_okf.config import Config
 from okf_ext.bundle import SECTIONS_DIRNAME
+from okf_ext.locking import locked as _locked_file
 from okf_ext.shape import load_sections
 from okf_io import Bundle, load_bundle, parse
 from okf_io import validate as okf_validate
@@ -664,15 +664,8 @@ def _decision_lock_path(layout: WorkspaceLayout, owner_path: str) -> Path:
 @contextmanager
 def _decision_lock(layout: WorkspaceLayout, owner_path: str) -> Iterator[None]:
     """Serialize decision composition on caller-owned, replace-stable cache state."""
-    lock = _decision_lock_path(layout, owner_path)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    with _locked_file(_decision_lock_path(layout, owner_path)):
         yield
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
 
 
 def _decision_context(layout: WorkspaceLayout, path: str) -> DecisionContext:

@@ -24,7 +24,6 @@ human's problem, not a reason to lose a write that already happened.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import stat
 import tempfile
@@ -34,6 +33,8 @@ from datetime import date
 from pathlib import Path
 
 from okf_io import append_log_entry, load
+
+from okf_ext.locking import locked
 
 #: Ordered UPPER_SNAKE_CASE constants, then CapWords, then lowercase
 #: functions, each group alphabetical -- `RUF022` enforces it.
@@ -53,14 +54,8 @@ def _log_lock_path(log_path: Path) -> Path:
 @contextmanager
 def locked_log(log_path: Path) -> Iterator[None]:
     """Serialize compare-and-replace cycles even though replacement changes inode."""
-    lock_path = _log_lock_path(log_path)
-    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    with locked(_log_lock_path(log_path)):
         yield
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
 
 
 def atomic_replace(path: Path, data: bytes) -> None:

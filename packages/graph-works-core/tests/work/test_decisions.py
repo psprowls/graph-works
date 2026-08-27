@@ -328,7 +328,7 @@ def test_live_decision_revalidates_owner_selection_after_acquiring_the_lock(tmp_
     new_owner = "work/release-v1/children/epic-a/children/feature-b"
     new_leaf = f"{new_owner}/children/bug-a"
     _write(layout, new_owner, "Feature")
-    original = work.fcntl.flock
+    original = fcntl.flock
     moved = False
 
     def move_before_lock(descriptor, operation):
@@ -340,7 +340,7 @@ def test_live_decision_revalidates_owner_selection_after_acquiring_the_lock(tmp_
             moved = True
         return original(descriptor, operation)
 
-    monkeypatch.setattr(work.fcntl, "flock", move_before_lock)
+    monkeypatch.setattr(fcntl, "flock", move_before_lock)
     with pytest.raises(ValueError, match="unknown work item"):
         work.run_decision_add(
             layout,
@@ -510,7 +510,7 @@ def test_overturn_revalidates_owner_selection_after_acquiring_the_lock(tmp_path:
     new_owner = "work/release-v1/children/epic-a/children/feature-b"
     new_leaf = f"{new_owner}/children/bug-a"
     _write(layout, new_owner, "Feature")
-    original = work.fcntl.flock
+    original = fcntl.flock
     moved = False
 
     def move_before_lock(descriptor, operation):
@@ -522,7 +522,7 @@ def test_overturn_revalidates_owner_selection_after_acquiring_the_lock(tmp_path:
             moved = True
         return original(descriptor, operation)
 
-    monkeypatch.setattr(work.fcntl, "flock", move_before_lock)
+    monkeypatch.setattr(fcntl, "flock", move_before_lock)
     with pytest.raises(ValueError, match="unknown work item"):
         work.run_decision_overturn(
             layout,

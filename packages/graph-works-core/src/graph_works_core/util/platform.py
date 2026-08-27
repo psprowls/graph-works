@@ -385,3 +385,47 @@ class ProcessControlProvider:
     def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:
         """None: sending a signal to prove signalling works is not read-only."""
         return None
+
+
+#: Ordered: the two facts the epic asks for first, then the primitives they
+#: rest on. Rendering follows this order, so it is the reading order too.
+PROVIDERS: tuple[Provider, ...] = (
+    DurabilityTierProvider(),
+    DispatchBackendProvider(),
+    FileLockProvider(),
+    ProcessControlProvider(),
+)
+
+
+def build_report(
+    *,
+    platform_name: str = sys.platform,
+    layout: WorkspaceLayout | None = None,
+    probe: bool = False,
+) -> PlatformReport:
+    """Every provider's answer for *platform_name*, plus probes when asked.
+
+    `platform_name` is an argument rather than a read, so a POSIX box can
+    assert the report a Windows user would actually see. `probe=True` requires
+    *layout*: the liveness checks need a resolved workspace, and the default
+    run must work on a machine that has none — a user diagnosing "why does gw
+    not start here?" is exactly the caller without a working workspace.
+
+    A library function returning data, not a printer: the CLI formats this,
+    and a future general health verb could carry it as one section.
+    """
+    if probe and layout is None:
+        raise ValueError("probing requires a resolved workspace; pass layout=")
+
+    capabilities = tuple(provider.declare(platform_name) for provider in PROVIDERS)
+    probes: tuple[ProbeResult, ...] = ()
+    if probe:
+        assert layout is not None  # narrowed by the guard above
+        probes = tuple(result for provider in PROVIDERS if (result := provider.probe(layout)) is not None)
+    return PlatformReport(
+        schema_version=SCHEMA_VERSION,
+        platform=platform_name,
+        python=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        capabilities=capabilities,
+        probes=probes,
+    )

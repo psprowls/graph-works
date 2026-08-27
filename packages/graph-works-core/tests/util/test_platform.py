@@ -11,9 +11,11 @@ from __future__ import annotations
 import subprocess
 import sys
 
+import pytest
 from graph_works_core.util.platform import (
     LOCK_SITES,
     POSIX_ONLY_MODULES,
+    PROVIDERS,
     SCHEMA_VERSION,
     Capability,
     DispatchBackendProvider,
@@ -22,6 +24,7 @@ from graph_works_core.util.platform import (
     PlatformReport,
     ProbeResult,
     ProcessControlProvider,
+    build_report,
     module_available,
 )
 from graph_works_core.workspace.layout import layout_for
@@ -268,3 +271,70 @@ def test_process_control_is_unavailable_on_win32() -> None:
 def test_process_control_has_no_probe() -> None:
     """Sending a signal to prove signalling works is not read-only."""
     assert ProcessControlProvider().probe(layout=None) is None  # type: ignore[arg-type]
+
+
+def test_every_provider_is_registered_exactly_once() -> None:
+    names = [provider.name for provider in PROVIDERS]
+
+    assert names == ["durability-tier", "dispatch-backend", "file-lock", "process-control"]
+    assert len(set(names)) == len(names)
+
+
+def test_the_default_report_describes_the_running_platform() -> None:
+    report = build_report()
+
+    assert report.platform == sys.platform
+    assert report.schema_version == 1
+    assert report.python.startswith("3.")
+    assert report.probes == ()
+    assert [c.name for c in report.capabilities] == [p.name for p in PROVIDERS]
+
+
+def test_the_windows_report_is_asserted_from_a_posix_box() -> None:
+    """Acceptance property 1. Not a testing convenience: with no Windows CI,
+    this is the only place in the epic where a Windows-shaped answer is
+    checked on the machine the work is done on."""
+    report = build_report(platform_name="win32")
+
+    assert report.platform == "win32"
+    assert set(report.unavailable) == {"durability-tier", "file-lock", "process-control"}
+
+
+def test_the_default_report_needs_no_workspace_and_runs_nothing(monkeypatch) -> None:
+    """Acceptance property 3."""
+
+    def _forbidden(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("the default run must not start a subprocess")
+
+    monkeypatch.setattr(subprocess, "run", _forbidden)
+    report = build_report(platform_name="win32")
+
+    assert report.probes == ()
+
+
+def test_probing_without_a_layout_is_a_caller_error() -> None:
+    with pytest.raises(ValueError, match="workspace"):
+        build_report(probe=True)
+
+
+def test_probing_collects_one_result_per_probeable_capability(tmp_path) -> None:
+    layout = layout_for(tmp_path / ".works")
+    layout.cache_dir.mkdir(parents=True)
+
+    report = build_report(layout=layout, probe=True)
+
+    probed = {result.capability for result in report.probes}
+    assert probed == {"durability-tier", "dispatch-backend", "file-lock"}
+    assert "process-control" not in probed
+
+
+def test_a_probe_never_replaces_the_declared_value(tmp_path) -> None:
+    """Acceptance property 4, at the data layer: both survive into the report."""
+    layout = layout_for(tmp_path / ".works")
+    layout.cache_dir.mkdir(parents=True)
+
+    report = build_report(layout=layout, probe=True)
+    declared = {c.name: c.value for c in report.capabilities}
+
+    assert declared["dispatch-backend"] == "unresolved"
+    assert any(r.capability == "dispatch-backend" for r in report.probes)

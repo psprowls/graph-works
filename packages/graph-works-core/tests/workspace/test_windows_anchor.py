@@ -501,6 +501,40 @@ def test_both_tiers_agree_on_the_same_projection(tmp_path: Path) -> None:
         windows.close()
 
 
+def test_both_tiers_agree_on_the_same_projection_when_the_target_exists(tmp_path: Path) -> None:
+    """Same claim as above, but for the `.resolve(strict=True)` SUCCESS arm.
+
+    The other test's targets are never materialized, so both tiers only ever
+    exercise the `FileNotFoundError` -> non-strict-resolve fallback. Here the
+    projected target physically exists for both the internal and the
+    external case, so this is the first test to demonstrate tier agreement
+    on the strict-resolve success path itself.
+    """
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work" / "inside.md").symlink_to("index.md")
+    assert (layout.bundle_dir / "index.md").exists()  # internal target: real, from install_bundle
+    (layout.bundle_dir.parent / "outside.md").write_text("outside\n")  # external target: real, on purpose
+    posix = anchors.open_anchor(layout.bundle_dir, platform_name="linux")
+    windows = anchors.open_anchor(layout.bundle_dir, platform_name="win32")
+    try:
+        # "work/../../outside.md" is the genuinely-external one: "work/.." cancels
+        # to the bundle root, and the remaining ".." steps out of it -- unlike
+        # the sibling test's "../outside.md", which only cancels back to the
+        # bundle root itself and so never actually escapes.
+        for link in (PurePosixPath("index.md"), PurePosixPath("../../outside.md")):
+            posix_result = transactions._projected_symlink_is_internal(posix, "work/moved.md", link)
+            windows_result = transactions._projected_symlink_is_internal(windows, "work/moved.md", link)
+            assert posix_result is windows_result
+        assert transactions._projected_symlink_is_internal(posix, "work/moved.md", PurePosixPath("index.md"))
+        assert not transactions._projected_symlink_is_internal(
+            posix, "work/moved.md", PurePosixPath("../../outside.md")
+        )
+    finally:
+        posix.close()
+        windows.close()
+
+
 def test_validation_state_loads_through_either_tier(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     windows = anchors.open_anchor(layout.bundle_dir, platform_name="win32")

@@ -674,6 +674,17 @@ def _projected_symlink_is_internal(root: Anchor, destination: str, link: PurePos
     Resolves through `Anchor.resolve_descendant` rather than opening the
     target and resolving the descriptor: see Task 10 for the equivalence
     check this rewrite required on the POSIX arm.
+
+    That equivalence is not total: the old `os.open(..., dir_fd=...)` idiom
+    opened the target, which needs read permission on it and can block on a
+    special file (a FIFO, say). `Path.resolve(strict=True)` only `stat`s
+    ancestors and never opens the target, so it needs search permission
+    on directories, not read permission on the target -- a target that
+    exists but is unreadable (`chmod 000`) now resolves instead of raising
+    `OSError`, which narrows this function's refusal surface for degenerate
+    targets. It does not weaken the escape-containment guarantee: whichever
+    path got the target open or `stat`ed, the containment check runs on the
+    same canonical path either way.
     """
     resolved_root = _descriptor_path(root).resolve(strict=True)
     if link.is_absolute():

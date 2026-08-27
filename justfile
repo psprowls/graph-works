@@ -36,6 +36,12 @@ text-io:
 line-endings:
     uv run python scripts/check_line_endings.py .
 
+# A package that imports a POSIX-only module, or reaches a POSIX-only process
+# primitive, with no `## Platform` section declaring it -- ADR-0021 rule 3a
+# turned into a check (see work/epic-native-windows-support/children/tech-debt-publish-platform-matrix).
+platform-declared:
+    uv run python scripts/check_platform_declared.py .
+
 # Provision the workspace environment. Idempotent; a no-op once in sync.
 #
 # A bare `uv run` installs the ROOT's dependencies only — not those declared by
@@ -135,7 +141,7 @@ plugin-contract *ARGS:
 # happens to pull `sync` in today. Without it the gate's result depends on the
 # order of this list: `types` before `cov` fails from a clean checkout, `cov`
 # before `types` passes, on identical code.
-check: sync subtree-base normalization text-io line-endings lint types contracts cov test-plugin
+check: sync subtree-base normalization text-io line-endings platform-declared lint types contracts cov test-plugin
 
 # Subtree merge-base guard -- the `git-subtree-split` note behind
 # `plugins/graph-works`.

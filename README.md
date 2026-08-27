@@ -32,6 +32,24 @@ The suffix is a band, and a permission:
 `workflow-<backend>` exists so the band-1 seam can ship with a real
 implementation without the foundation carving out an exemption to hold it.
 
+## Platform
+
+| Channel | Supported | How to check |
+|---|---|---|
+| macOS, Linux | yes | `gw util platform` |
+| Windows via WSL | yes (WSL is Linux) | `gw util platform` |
+| Native Windows (`python.exe`, Git Bash, PowerShell) | committed, not yet | `gw util platform` |
+
+This table is coarse and slow-moving on purpose. The per-capability truth —
+durability tier, dispatch backend, file lock, process control — is *derived
+at runtime* by `gw util platform`, not restated here, so it cannot drift out
+of sync with what the machinery actually reports.
+
+A package `README.md` with no `## Platform` section is platform-neutral —
+that silence is itself the claim, not an omission. ADR-0021 ("Windows is
+supported via WSL; native Windows is deferred"), rule 3, is the record
+behind this commitment.
+
 ## Checks
 
 Every recipe below is exactly the command a future CI job will call. CI itself is

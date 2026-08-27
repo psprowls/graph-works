@@ -1411,7 +1411,16 @@ file: skills/shared/resolve-workspace.test.sh
 file: hooks/skill-doc-routing
 file: tests/hooks/test-skill-doc-routing.sh
 file: tests/pi/test-pi-extension.mjs
+file: PLATFORM.md
 -->
+
+**`PLATFORM.md` — added 2026-08-27** by
+`work/epic-native-windows-support/children/tech-debt-publish-platform-matrix`. ADR-0021 rule 3c
+names "the plugin README" as where the platform matrix is published for a plugin consumer, but
+`README.md` is upstream's file (verbatim, never reviewed by this fork — entry #5), and a file
+upstream does not have merges free forever. `PLATFORM.md` is the ours-side answer instead: a short
+pointer at the repo root `README.md`'s matrix and at `gw util platform`, restating no capability
+facts of its own. `README.md` itself is untouched.
 
 **Why this entry exists.** `scripts/audit_delta.py` derives divergence from `git diff --name-status`
 against the upstream base, which reports added files exactly the way it reports modified ones. A file

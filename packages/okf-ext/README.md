@@ -9,6 +9,17 @@ workspace: it extends `okf-io` and never modifies it.
 | 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration, the proposal ledger, additive bundle setup, page placement and locked log appends today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
+## Platform
+
+`locking.py` is the shared portable exclusive-lock primitive for this
+workspace: `fcntl.flock` on POSIX, `msvcrt.locking` on Windows, chosen per
+`sys.platform` and imported only inside the branch that uses it, never at
+module scope. It exists because `work_tracker_okf.decisions`,
+`graph_works_core.work.commands`, and this package's own `logs` module each
+took the same five lines of `fcntl.flock` before consolidating here — every
+caller of `locked()` is portable as a result. See `gw util platform` for the
+live, per-capability answer on the running host.
+
 ## Dependency policy
 
 `okf-io` carries a hard two-dependency budget because every dependency is a

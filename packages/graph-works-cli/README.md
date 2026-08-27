@@ -76,6 +76,30 @@ $ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc12
 | 4 | The emitted scan worklist has an unsupported schema version. |
 | 5 | A required repository could not be resolved. |
 
+## Utility commands
+
+- `gw util platform [--probe] [--workspace PATH] [--json]` reports the
+  platform, durability tier, dispatch backend, file lock and process control
+  — each derived from the machinery that owns it, with `unavailable` as a
+  derived property rather than a maintained list. `--probe` also runs
+  liveness checks and requires a workspace (via `--workspace` or discovery);
+  without it the command is a pure declaration and needs no workspace.
+
+  ```console
+  $ gw util platform
+  platform: darwin
+  python: 3.12.13
+
+  durability-tier: posix-strong (available)
+    guarantee: an exclusive lock is held across the whole read-mutate-write cycle
+    ...
+  unavailable: none
+  ```
+
+- `gw util describe-surface [--json]` describes every command in the `gw`
+  tree — the machine-readable surface freeze used to catch an undocumented or
+  accidentally-renamed command.
+
 ## Testing
 
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests -v

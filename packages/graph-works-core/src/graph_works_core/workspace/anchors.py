@@ -35,6 +35,7 @@ where that import is legal.
 
 from __future__ import annotations
 
+import errno
 import os
 import stat
 import sys
@@ -360,6 +361,307 @@ class _PosixAnchor:
                 with suppress(OSError):
                     fcntl.flock(descriptor, fcntl.LOCK_UN)
             os.close(descriptor)
+
+
+#: The tier name a path-revalidating anchor declares.  Paired with
+#: `POSIX_STRONG_TIER`; ADR-0042 records what each one guarantees.
+WINDOWS_REVALIDATED_TIER = "windows-revalidated"
+
+
+class _WindowsAnchor:
+    """An `Anchor` backed by a held, resolved directory path.
+
+    `_PosixAnchor` pins a directory descriptor, which makes the anchored
+    directory un-swappable for the descriptor's lifetime: a rename underneath
+    the engine redirects the *path*, never the descriptor.  Windows cannot open
+    a directory descriptor at all -- `os.O_DIRECTORY` does not exist there --
+    so this tier holds the resolved path plus the `(st_dev, st_ino)` pair it
+    had when the anchor was taken, and re-`lstat`s before every operation.
+
+    That narrows the swap window.  It does not close it: between the
+    re-validation and the syscall that follows, the path can still be
+    replaced.  ADR-0042 records this as the tier's defining weakness, and
+    records that the bundle-root lock is held for the whole mutation, so the
+    exposure is to actors outside the transaction protocol -- a user, an
+    editor, a sync client -- not to a second `gw`.
+    """
+
+    __slots__ = ("_identity", "_long_paths", "root")
+
+    def __init__(self, root: Path, *, long_paths_enabled: bool | None = None) -> None:
+        self.root = root.resolve(strict=True)
+        info = self.root.lstat()
+        if not stat.S_ISDIR(info.st_mode):
+            raise NotADirectoryError(f"anchor root is not a directory: {self.root}")
+        self._identity = (info.st_dev, info.st_ino)
+        # Task 6 replaces this with the real registry read.
+        self._long_paths = True if long_paths_enabled is None else long_paths_enabled
+
+    # -- lifetime ---------------------------------------------------------
+
+    @classmethod
+    def open_root(cls, root: Path) -> _WindowsAnchor:
+        return cls(root)
+
+    @classmethod
+    def open_absolute(cls, path: Path) -> _WindowsAnchor:
+        """Walk every component of an absolute path without following links.
+
+        The POSIX arm (`_PosixAnchor.open_absolute`) opens each component with
+        `O_NOFOLLOW`; here each component is `lstat`ed and refused if it is a
+        link, which is the same refusal without the kernel enforcing it.
+        """
+        if not path.is_absolute():
+            raise ValueError(f"cache directory must be absolute: {path}")
+        anchor = cls(Path(path.anchor))
+        try:
+            for part in path.parts[1:]:
+                child = anchor.open_child(part)
+                anchor.close()
+                anchor = child
+        except Exception:
+            anchor.close()
+            raise
+        return anchor
+
+    def open_child(self, name: str) -> _WindowsAnchor:
+        """Descend one component, refusing a link or a non-directory.
+
+        `FileNotFoundError` must propagate unchanged: `transactions._open_parent`
+        catches it specifically to drive create-on-demand, and treats every
+        other `OSError` as an unsafe ancestor.
+        """
+        candidate = self._revalidate() / name
+        info = candidate.lstat()  # FileNotFoundError propagates
+        if stat.S_ISLNK(info.st_mode):
+            raise NotADirectoryError(f"refusing to follow a symlinked component: {name!r}")
+        if not stat.S_ISDIR(info.st_mode):
+            raise NotADirectoryError(f"not a directory: {name!r}")
+        return _WindowsAnchor(candidate, long_paths_enabled=self._long_paths)
+
+    def open_or_create_child(self, name: str) -> _WindowsAnchor:
+        try:
+            return self.open_child(name)
+        except FileNotFoundError:
+            (self._revalidate() / name).mkdir(mode=0o700)
+            self.fsync()
+            child = self.open_child(name)
+            child.fsync()
+            return child
+
+    def duplicate(self) -> _WindowsAnchor:
+        """A second handle on the same directory.
+
+        The POSIX arm `dup`s a descriptor so the copy survives the original's
+        close.  A held path has no such lifetime, so this re-anchors on the
+        *same resolved path* and re-reads its identity -- which means a
+        duplicate taken after a swap refuses, where the POSIX arm would carry
+        the pre-swap directory forward.  That difference is a tier property,
+        not a bug, and ADR-0042 names it.
+        """
+        return _WindowsAnchor(self.root, long_paths_enabled=self._long_paths)
+
+    def close(self) -> None:
+        """Nothing to release.  A path is not a descriptor.
+
+        Deliberately not a no-op-by-omission: `transactions` closes anchors in
+        `finally` blocks everywhere, and a missing `close` would be an
+        `AttributeError` at exactly the moment an error is already being
+        handled.
+        """
+        return None
+
+    # -- identity and metadata --------------------------------------------
+
+    def _revalidate(self) -> Path:
+        """The held path, having confirmed it is still the same directory."""
+        try:
+            current = self.root.lstat()
+        except OSError as exc:
+            raise ValueError(f"anchored directory changed during mutation: {exc}") from exc
+        if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != self._identity:
+            raise ValueError("anchored directory changed during mutation")
+        return self.root
+
+    def self_stat(self) -> os.stat_result:
+        return self._revalidate().lstat()
+
+    def lstat(self, name: str) -> os.stat_result:
+        return (self._revalidate() / name).lstat()
+
+    def identity(self, name: str) -> tuple[int, int]:
+        info = self.lstat(name)
+        return info.st_dev, info.st_ino
+
+    def assert_identity(self, path: Path, label: str) -> None:
+        self._assert_named(path, f"{label} changed during mutation", wrap_oserror=False)
+
+    def assert_directory_identity(self, path: Path, label: str) -> None:
+        self._assert_named(path, f"{label} directory changed during mutation", wrap_oserror=True)
+
+    def _assert_named(self, path: Path, message: str, *, wrap_oserror: bool) -> None:
+        """The two `assert_*_identity` variants differ only in wording and in
+        whether `OSError` is wrapped -- see `_PosixAnchor:195,205`, which is
+        faithful to two distinct pre-refactor originals.  Collapsing them is a
+        behavioural-change ticket of its own; this keeps the same two shapes."""
+        expected = self._revalidate().lstat()
+        try:
+            current = path.lstat()
+        except OSError as exc:
+            if wrap_oserror:
+                raise ValueError(f"{message}: {exc}") from exc
+            raise
+        if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (
+            expected.st_dev,
+            expected.st_ino,
+        ):
+            raise ValueError(message)
+
+    def path(self) -> Path:
+        """The anchored directory's path.
+
+        On POSIX this is a descriptor-to-path resolution; here the path IS the
+        anchor, so it is returned directly -- which is why this tier's
+        `path()` cannot go stale in the way a resolved descriptor path can.
+        """
+        return self._revalidate()
+
+    def alias(self) -> Path:
+        """A path suitable for resolving descendants.
+
+        `_PosixAnchor.alias` returns `/proc/self/fd/N` on Linux so a descendant
+        resolves through the pinned descriptor.  There is no Windows analogue
+        and none is needed: the held path already is the descendant-resolving
+        root.  `transactions._projected_symlink_is_internal` is this method's
+        only consumer -- see Task 10.
+        """
+        return self._revalidate()
+
+    # -- entry operations --------------------------------------------------
+
+    def mkdir(self, name: str, mode: int | None = None) -> None:
+        target = self._revalidate() / name
+        if mode is None:
+            target.mkdir()
+        else:
+            target.mkdir(mode=mode)
+
+    def unlink(self, name: str) -> None:
+        (self._revalidate() / name).unlink()
+
+    def rmdir(self, name: str) -> None:
+        (self._revalidate() / name).rmdir()
+
+    def listdir(self) -> list[str]:
+        return os.listdir(self._revalidate())  # noqa: PTH208 -- parity with the POSIX arm
+
+    def readlink(self, name: str) -> str:
+        return str((self._revalidate() / name).readlink())
+
+    def symlink(self, target: str, name: str) -> None:
+        """Always refuses.  D-002's backstop.
+
+        Creating a symlink on Windows needs Developer Mode or
+        SeCreateSymbolicLinkPrivilege.  `transactions._copy_backup_to_live`
+        (`:1029`, `:1065`) creates symlinks on the ROLLBACK path -- the one
+        path that must not fail -- so an unprivileged failure there would
+        leave a half-restored bundle.  Task 7's preflight makes this
+        unreachable for planned members; this stays as the backstop because
+        "unreachable" is a property of the preflight, not of this class.
+        """
+        raise ValueError(
+            f"the {WINDOWS_REVALIDATED_TIER} tier cannot create symlinks "
+            f"({name!r} -> {target!r}): enable Developer Mode or grant "
+            "SeCreateSymbolicLinkPrivilege, or run under WSL for the "
+            f"{POSIX_STRONG_TIER} tier"
+        )
+
+    def link(self, source: str, name: str) -> None:
+        """A hard link, both names beneath this anchor.
+
+        `CreateHardLinkW` on Windows, and it fails outright on FAT32, exFAT, a
+        network share, or across volumes.  That is a filesystem requirement of
+        the whole tier, not a degradation: `transactions._commit_write`
+        (`:1380`, `:1417`) installs EVERY file this way.
+        """
+        directory = self._revalidate()
+        os.link(directory / source, directory / name, follow_symlinks=False)
+
+    def rename_noreplace(self, name: str, destination: Anchor, destination_name: str) -> None:
+        """Fail-if-exists rename.
+
+        `os.rename` IS no-replace on Windows -- it is `MoveFileExW` without
+        `MOVEFILE_REPLACE_EXISTING`, which is exactly the semantic
+        `transactions._take_custody` (`:1291`) and `_restore_custody_or_raise`
+        (`:1325`) depend on.  It is NOT no-replace on POSIX, where it clobbers
+        silently.  So when this tier runs on POSIX for coverage, the
+        destination is probed first.
+
+        The probe is itself a TOCTOU window and exists ONLY to make the POSIX
+        pass faithful to the Windows semantic; on Windows the kernel enforces
+        it and the probe is skipped.  Do not "simplify" this into an
+        unconditional probe -- that would replace a kernel guarantee with a
+        check on the platform where the guarantee is real.
+        """
+        if not isinstance(destination, _WindowsAnchor):
+            raise TypeError("rename_noreplace requires a path-revalidated anchor destination")
+        source_directory = self._revalidate()
+        destination_directory = destination._revalidate()
+        target = destination_directory / destination_name
+        if sys.platform != "win32" and target.exists():
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), str(target))
+        (source_directory / name).rename(target)
+
+    def open_file(self, name: str, flags: int, mode: int = 0o777) -> int:
+        """Open a *file* beneath this anchor.  Returns a plain descriptor.
+
+        Windows opens files by path without difficulty, which is why the
+        landed `Anchor` never wrapped file descriptors.  `O_NOFOLLOW` is
+        already absent from `flags` here via `nofollow_flag()` -- see Task 9.
+        """
+        return os.open(self._revalidate() / name, flags, mode)
+
+    def chmod_child_directory(self, name: str, mode: int) -> None:
+        """chmod a child directory.
+
+        `_PosixAnchor` opens the child, `os.fchmod`es it and `os.fsync`es the
+        descriptor.  `os.fchmod` does not exist on Windows and a directory
+        cannot be fsynced there, so this is a path chmod with no flush -- a
+        sixth loss the design's table did not enumerate, recorded in ADR-0042.
+        On NTFS `chmod` honours only the read-only bit; the mode bits the
+        engine sets are preserved on the POSIX coverage pass, which is where
+        the mode assertions actually run.
+        """
+        (self._revalidate() / name).chmod(mode)
+
+    # -- durability ---------------------------------------------------------
+
+    def fsync(self) -> None:
+        """L2: a directory fsync is impossible on Windows.
+
+        Returning `None` is the tier's declared contract, not an oversight.
+        Rename and link durability on this tier is whatever the filesystem
+        gives unprompted; ADR-0042 says so, and the manual verification run
+        is what measures it.
+        """
+        return None
+
+    # -- locking ------------------------------------------------------------
+
+    def exclusive_lock(self) -> AbstractContextManager[None]:
+        """Task 8 implements Windows directory locking for real.
+
+        `Anchor` is `runtime_checkable`, which checks attribute presence, not
+        behaviour, so a stub -- not an omission -- is what keeps
+        `isinstance(anchor, Anchor)` structurally true in the meantime.  It
+        raises rather than no-ops so a caller that reaches it before Task 8
+        lands fails loudly instead of running unlocked.
+        """
+        raise NotImplementedError("Task 8 implements Windows directory locking")
+
+    def lock_file(self, name: str, *, assert_identity: bool) -> AbstractContextManager[None]:
+        """As `exclusive_lock`: a presence-only stub, replaced for real in Task 8."""
+        raise NotImplementedError("Task 8 implements Windows file locking")
 
 
 def _assert_regular_entry_identity(anchor: Anchor, name: str, descriptor: int, label: str) -> None:

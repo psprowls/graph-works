@@ -30,6 +30,7 @@ from typing import Literal, Protocol
 
 from okf_ext.locking import locked, primitive_for
 
+from graph_works_core.workspace.anchors import POSIX_STRONG_TIER, DurabilityTier, durability_tier
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 #: Bumped when a consumer-visible field changes shape. Follows
@@ -119,6 +120,13 @@ class PlatformReport:
 #: provider's `provider` field and its detail sentence cannot drift apart.
 TRANSACTIONS_MODULE = "graph_works_core.workspace.transactions"
 
+#: The module that answers the durability-tier question directly, now that a
+#: selector and a second anchor exist. `DurabilityTierProvider.declare` cites
+#: this rather than `TRANSACTIONS_MODULE`: the tier record lives in
+#: `workspace.anchors`, and `provider` names the machinery that actually
+#: answered.
+ANCHORS_MODULE = "graph_works_core.workspace.anchors"
+
 #: Why the durability tier has no liveness check. Stated as a constant so a
 #: later reader finds the reason next to the refusal.
 NOT_PROBEABLE_DETAIL = (
@@ -127,7 +135,12 @@ NOT_PROBEABLE_DETAIL = (
     "diagnostic verb asserting it"
 )
 
-_STRONG_TIER_GUARANTEES = (
+#: True of both tiers: these three sentences describe the transaction
+#: protocol, not the anchoring mechanism, so neither tier's guarantees are
+#: "stronger" here — the anchoring difference is what the rest of the tier
+#: record (directory_fsync, nofollow_protection, refused_plan_shapes, ...)
+#: exists to carry.
+_SHARED_TIER_GUARANTEES = (
     "an exclusive lock is held across the whole read-mutate-write cycle",
     "every effect lands or the pre-mutation snapshot is restored",
     "recovery evidence is journaled outside the bundle",
@@ -159,34 +172,45 @@ class Provider(Protocol):
 class DurabilityTierProvider:
     """Which durability tier the transaction engine actually runs here.
 
-    Derived, not tabulated: the engine imports `fcntl` at module scope, so its
-    availability *is* that module's availability. When a selector and a second
-    anchor exist, this asks the engine which one it selects instead — and the
-    verb's answer changes without the verb changing.
+    Asks `workspace.anchors` which anchor its selector would return for the
+    given platform, and reports that tier's own declaration.  This provider
+    used to proxy the question -- is the transaction engine's POSIX-only
+    advisory-lock module importable? -- because only one anchor existed; that
+    proxy is retired, and it would now be wrong as well as indirect, since the
+    engine no longer imports that module at module scope at all.
+
+    Both tiers run, so the status is never `unavailable`; the weak tier is
+    `degraded`, which is exactly what that status exists to say.
     """
 
     name = "durability-tier"
 
     def declare(self, platform_name: str) -> Capability:
-        if module_available("fcntl", platform_name):
-            return Capability(
-                name=self.name,
-                value="posix-strong",
-                status="available",
-                detail="the transaction engine's advisory-lock path is importable here",
-                guarantees=_STRONG_TIER_GUARANTEES,
-                provider=TRANSACTIONS_MODULE,
-            )
+        tier = durability_tier(platform_name)
         return Capability(
             name=self.name,
-            value="unavailable",
-            status="unavailable",
-            detail=(
-                f"{TRANSACTIONS_MODULE} imports `fcntl` at module scope; native "
-                f"Windows cannot load it, so no transaction can run at all"
-            ),
-            guarantees=(),
-            provider=TRANSACTIONS_MODULE,
+            value=tier.name,
+            status="available" if tier.name == POSIX_STRONG_TIER else "degraded",
+            detail=tier.anchoring,
+            guarantees=self._guarantees(tier),
+            provider=ANCHORS_MODULE,
+        )
+
+    @staticmethod
+    def _guarantees(tier: DurabilityTier) -> tuple[str, ...]:
+        """The tier's contract, including the refusals.
+
+        The refusals belong here rather than in an error path: D-002 settled
+        that "this tier refuses plans containing symlink members" is a
+        declared contract statement, and this is the verb's normal output.
+        """
+        return (
+            *_SHARED_TIER_GUARANTEES,
+            f"directory fsync is {'honored' if tier.directory_fsync else 'a documented no-op'}",
+            f"no-follow protection is {'enforced by the kernel' if tier.nofollow_protection else 'unavailable'}",
+            f"filesystem requirement: {tier.filesystem_requirement}",
+            *(f"refuses: {shape}" for shape in tier.refused_plan_shapes),
+            f"verification: {tier.verification_status}",
         )
 
     def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:

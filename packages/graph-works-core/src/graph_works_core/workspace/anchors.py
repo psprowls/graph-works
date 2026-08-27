@@ -50,8 +50,8 @@ from typing import Protocol, runtime_checkable
 from okf_ext.locking import locked
 
 #: The tier name a POSIX anchor declares.  `graph_works_core.util.platform`'s
-#: `DurabilityTierProvider` currently answers by proxy (is `fcntl` importable?);
-#: once it asks the selector instead, this is the string it reports.
+#: `DurabilityTierProvider` asks `durability_tier()` for this string rather
+#: than restating it.
 POSIX_STRONG_TIER = "posix-strong"
 
 
@@ -934,6 +934,66 @@ def anchor_tier(platform_name: str | None = None) -> str:
     return POSIX_STRONG_TIER
 
 
+@dataclass(frozen=True, slots=True)
+class DurabilityTier:
+    """What a platform's transaction engine guarantees, and what it does not.
+
+    The two tiers are declared in ADR-0042.  `gw util platform` renders this
+    verbatim; the refusals are contract statements, not error conditions.
+
+    Every field is derived from a constant in this module rather than restated,
+    so a change to the tier's behaviour cannot silently desynchronize from what
+    the verb prints -- that derivation is the whole reason
+    `util.platform.DurabilityTierProvider` is a provider seam and not a table.
+    """
+
+    name: str
+    anchoring: str
+    directory_fsync: bool
+    nofollow_protection: bool
+    refused_plan_shapes: tuple[str, ...]
+    filesystem_requirement: str
+    verification_status: str
+
+
+_POSIX_TIER = DurabilityTier(
+    name=POSIX_STRONG_TIER,
+    anchoring="pinned directory descriptors; every operation is os.*(..., dir_fd=...)",
+    directory_fsync=True,
+    nofollow_protection=True,
+    refused_plan_shapes=(),
+    filesystem_requirement="any POSIX filesystem",
+    verification_status="continuously tested",
+)
+
+_WINDOWS_TIER = DurabilityTier(
+    name=WINDOWS_REVALIDATED_TIER,
+    anchoring=(
+        f"a held resolved path, re-lstat'ed before every operation, under a bundle-root lock file ({BUNDLE_LOCK_NAME})"
+    ),
+    directory_fsync=False,
+    nofollow_protection=False,
+    refused_plan_shapes=(
+        "symlink members without SeCreateSymbolicLinkPrivilege or Developer Mode",
+        f"members whose name at any component is a reserved device name ({', '.join(sorted(RESERVED_DEVICE_NAMES))})",
+        "members whose name at any component ends in a trailing dot or space",
+    ),
+    filesystem_requirement="NTFS, same volume (every file install is a hard link)",
+    verification_status=(
+        "logic-tested continuously on POSIX; platform-unverified pending the manual Windows verification run"
+    ),
+)
+
+
+def durability_tier(platform_name: str | None = None) -> DurabilityTier:
+    """The full tier declaration for *platform_name*.
+
+    `anchor_tier()` answers the name alone and stays the cheap query; this
+    answers everything `gw util platform` and ADR-0042 need.
+    """
+    return _WINDOWS_TIER if _is_windows(_anchor_platform(platform_name)) else _POSIX_TIER
+
+
 def _anchor_class(platform_name: str | None) -> type[_PosixAnchor] | type[_WindowsAnchor]:
     return _WindowsAnchor if _is_windows(_anchor_platform(platform_name)) else _PosixAnchor
 
@@ -964,10 +1024,12 @@ __all__ = [
     "RESERVED_DEVICE_NAMES",
     "WINDOWS_REVALIDATED_TIER",
     "Anchor",
+    "DurabilityTier",
     "RefusedShape",
     "UnsupportedAnchorPlatform",
     "anchor_tier",
     "directory_flags",
+    "durability_tier",
     "lock_path",
     "long_paths_enabled",
     "nofollow_flag",

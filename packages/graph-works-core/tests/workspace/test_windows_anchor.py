@@ -554,3 +554,44 @@ def test_raw_descriptor_still_refuses_a_path_revalidated_anchor(tmp_path: Path) 
             transactions._raw_descriptor(anchor)
     finally:
         anchor.close()
+
+
+@pytest.mark.parametrize("platform_name", ["linux", "darwin", "win32"])
+def test_every_tier_record_answers_all_seven_questions(platform_name: str) -> None:
+    tier = anchors.durability_tier(platform_name)
+    assert tier.name == anchors.anchor_tier(platform_name)
+    assert tier.anchoring
+    assert isinstance(tier.directory_fsync, bool)
+    assert isinstance(tier.nofollow_protection, bool)
+    assert isinstance(tier.refused_plan_shapes, tuple)
+    assert tier.filesystem_requirement
+    assert tier.verification_status
+
+
+def test_the_strong_tier_refuses_no_plan_shapes() -> None:
+    tier = anchors.durability_tier("linux")
+    assert tier.refused_plan_shapes == ()
+    assert tier.directory_fsync is True
+    assert tier.nofollow_protection is True
+
+
+def test_the_weak_tier_reports_its_refusals_as_normal_output() -> None:
+    """A refusal is a contract statement, not an incident (D-002)."""
+    tier = anchors.durability_tier("win32")
+    assert tier.name == anchors.WINDOWS_REVALIDATED_TIER
+    assert any("symlink" in shape for shape in tier.refused_plan_shapes)
+    assert any("reserved device name" in shape for shape in tier.refused_plan_shapes)
+    assert any("trailing dot" in shape for shape in tier.refused_plan_shapes)
+    assert tier.directory_fsync is False
+    assert tier.nofollow_protection is False
+    assert "NTFS" in tier.filesystem_requirement
+    assert "unverified" in tier.verification_status
+
+
+def test_the_declared_refusals_match_what_the_anchor_actually_refuses(tmp_path: Path) -> None:
+    """The record is not allowed to drift from the code it describes."""
+    (tmp_path / "CON.md").write_text("x\n", encoding="utf-8")
+    refusals = _anchor(tmp_path).refused_members(["CON.md"])
+    declared = anchors.durability_tier("win32").refused_plan_shapes
+    assert any("reserved device name" in shape for shape in declared)
+    assert "reserved device name" in refusals[0].reason

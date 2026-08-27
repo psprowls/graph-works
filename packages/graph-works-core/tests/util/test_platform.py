@@ -8,8 +8,10 @@ Windows-shaped behaviour is checked on the machine the work is done on.
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 from graph_works_core.util.platform import (
@@ -27,6 +29,7 @@ from graph_works_core.util.platform import (
     build_report,
     module_available,
 )
+from graph_works_core.workspace import anchors
 from graph_works_core.workspace.layout import layout_for
 
 
@@ -93,20 +96,40 @@ def test_the_durability_tier_is_available_on_posix() -> None:
     assert capability.guarantees  # a tier name with no contract surfaces nothing
 
 
-def test_the_durability_tier_is_unavailable_on_win32() -> None:
-    """Today the engine imports `fcntl` at module scope, so on native Windows
-    it cannot be imported at all — the honest answer, not 'the weaker tier'."""
+def test_the_durability_tier_is_degraded_on_win32() -> None:
+    """Both tiers run — the weak tier is `degraded`, not `unavailable`. A
+    refusal is a declared contract statement (D-002), not an incident."""
     capability = DurabilityTierProvider().declare("win32")
 
-    assert capability.status == "unavailable"
-    assert "fcntl" in capability.detail
+    assert capability.status == "degraded"
+    assert capability.value == anchors.WINDOWS_REVALIDATED_TIER
 
 
 def test_the_durability_tier_names_the_module_that_answered() -> None:
     """Traceability is the whole reason `provider` exists."""
     capability = DurabilityTierProvider().declare("win32")
 
-    assert capability.provider == "graph_works_core.workspace.transactions"
+    assert capability.provider == "graph_works_core.workspace.anchors"
+
+
+@pytest.mark.parametrize("platform_name", ["linux", "darwin", "win32"])
+def test_the_durability_tier_is_asked_of_the_engine_not_proxied(platform_name: str) -> None:
+    """The provider's own docstring promised this once a second anchor landed."""
+    report = build_report(platform_name=platform_name)
+    capability = next(c for c in report.capabilities if c.name == "durability-tier")
+    assert capability.value == anchors.anchor_tier(platform_name)
+    assert capability.status != "unavailable"  # never "unavailable" -- both tiers run
+    assert capability.guarantees  # the tier's declared contract, not ()
+
+
+def test_the_durability_tier_provider_no_longer_reads_fcntl() -> None:
+    """`transactions` stopped importing fcntl at module scope, so the old
+    proxy was measuring the wrong thing as well as the wrong way."""
+    source_file = inspect.getsourcefile(DurabilityTierProvider)
+    assert source_file is not None
+    source = Path(source_file).read_text(encoding="utf-8")
+    provider = source.split("class DurabilityTierProvider")[1].split("\nclass ")[0]
+    assert "fcntl" not in provider
 
 
 def test_the_durability_tier_is_not_probeable() -> None:
@@ -298,7 +321,9 @@ def test_the_windows_report_is_asserted_from_a_posix_box() -> None:
     report = build_report(platform_name="win32")
 
     assert report.platform == "win32"
-    assert set(report.unavailable) == {"durability-tier", "process-control"}
+    # durability-tier moved from "unavailable" to "degraded" once the tier
+    # record made the weak tier a declared contract rather than an incident.
+    assert set(report.unavailable) == {"process-control"}
 
 
 def test_the_default_report_needs_no_workspace_and_runs_nothing(monkeypatch) -> None:

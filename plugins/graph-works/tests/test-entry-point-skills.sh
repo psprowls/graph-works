@@ -96,8 +96,11 @@ assert_no_match 'agents/(scanner|ingestor|librarian|linter)\.md' \
 assert_no_match '/graph-works:next' \
     "no /graph-works:next reference survives — the skill is named workflow"
 
-assert_no_match 'graph-works:code-reviewer' \
-    "no reference to a code-reviewer agent this plugin does not define"
+assert_no_match 'graph-works:(code-reviewer|implementer|spec-reviewer|code-quality-reviewer)' \
+    "no reference to a reviewer/implementer agent this plugin does not define"
+
+assert_no_match 'graph-works:(scanner|ingestor|librarian|linter)' \
+    "no reference to a deleted sub-agent by name"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

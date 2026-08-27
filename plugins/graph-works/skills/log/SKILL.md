@@ -15,8 +15,8 @@ Show recent entries from `<workspace>/okf/log.md`. Every LLM operation on the wi
 ## Usage
 
 ```
-/graph-works:log                          # last 10 entries
-$log                                       # last 10 entries — Codex
+/graph-works:log                          # Claude Code — last 10 entries
+$log                                       # Codex — last 10 entries
 /graph-works:log --last 20
 /graph-works:log --op scan --last 10      # only scan entries
 /graph-works:log --op ingest              # recent ingests

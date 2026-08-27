@@ -81,7 +81,7 @@ test suites — is rendered as a single page nested under `repositories/<repo>/`
 ## Four core operations
 
 1. **Scan** — build the code graph and render one page per admitted entity into `repositories/<repo>/` (and `dependencies/` for deps); the default scan then fills prose via a commit-gated **emit → fan-out → apply** pipeline (`## Narrative`, file/dir descriptions, `## Purpose`/`## Public API`). A bare `--no-narrate` invocation is the mechanical structural-only fast path (`## Narrative` placeholder + `— TODO` file-map rows). See `references/scan-workflow.md`.
-2. **Ingest** — `gw ingest --source <any path>` reads material directly (article, spec, PR, transcript) and classifies it. By default (`claude_code` backend) it returns a brief and writes nothing — the dispatched `ingestor` sub-agent discusses with you, then drafts a source summary, links relevant pages, updates the index, and appends to the log. `--backend bedrock` (or `vercel`) runs the fully autonomous one-call pipeline instead.
+2. **Ingest** — `gw ingest --source <any path>` reads material directly (article, spec, PR, transcript) and classifies it. By default (`claude_code` backend) it returns a brief and writes nothing — the `ingest` skill discusses with you, then drafts a source summary, links relevant pages, updates the index, and appends to the log. `--backend bedrock` (or `vercel`) runs the fully autonomous one-call pipeline instead.
 3. **Query** — read `index.md`, drill into 3-10 pages, synthesize with inline root-absolute markdown links, offer to file the answer back. See `references/query-workflow.md`.
 4. **Lint** — health check including **code-drift detection**: packages on disk missing from the vault, vault pages referencing deleted/renamed packages, stale package summaries whose exports have changed. See `references/lint-workflow.md`.
 
@@ -138,7 +138,7 @@ the supported fallback on a harness without sub-agent dispatch.
 
 ## Cross-tool compatibility
 
-Every substrate operation goes through the `gw` CLI — one boundary, no in-process imports. Run `gw <verb> --help` for flags. The full set of verbs this skill and its commands depend on is the CLI contract at `okf/concepts/graph-works-plugin-cli-contract.md`.
+Every substrate operation goes through the `gw` CLI — one boundary, no in-process imports. Run `gw <verb> --help` for flags. The full set of verbs these skills depend on is the CLI contract at `okf/concepts/graph-works-plugin-cli-contract.md`.
 
 Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AGENTS.md` (Codex/Cursor/Antigravity/OpenCode). The plugin ships both. The `gw` CLI runs identically everywhere. See `references/cross-tool-setup.md`.
 

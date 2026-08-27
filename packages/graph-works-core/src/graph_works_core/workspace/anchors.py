@@ -717,9 +717,9 @@ def anchor_tier(platform_name: str | None = None) -> str:
 
     Two tiers, both implemented, both declared in ADR-0042: `posix-strong`
     pins directory descriptors, `windows-revalidated` re-`lstat`s a held path.
-    A platform name that matches neither is a programming error rather than a
-    third tier, so it raises rather than defaulting -- a tier name for an
-    implementation that does not exist would be a claim nothing can honour.
+    A platform name that does not match a Windows shape defaults to the
+    POSIX-strong tier, since every non-Windows platform this engine runs on
+    is POSIX-shaped.
     """
     resolved = _anchor_platform(platform_name)
     if _is_windows(resolved):

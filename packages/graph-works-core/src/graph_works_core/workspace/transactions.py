@@ -23,12 +23,10 @@ import math
 import os
 import shutil
 import stat
-import sys
 import uuid
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
-from ctypes import CDLL, c_char_p, c_int, c_uint, get_errno
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -425,17 +423,8 @@ def _open_parent(
     create: bool = False,
     touched: set[str] | None = None,
     must_create: set[str] | None = None,
-) -> tuple[int, str]:
-    """Open *member*'s parent by walking beneath *root* without following links.
-
-    The walk is expressed against the `Anchor` abstraction throughout; only the
-    final hop back to a raw descriptor is POSIX-specific, because every caller
-    of this function still consumes a raw parent descriptor (Task 4 finishes
-    converting that return to an `Anchor`).  `root` is always a `_PosixAnchor`
-    today -- the selector has no other implementation yet -- so narrowing to it
-    here is not a behaviour change, just the seam where the still-`int`-typed
-    rest of this function's callers meet the new `Anchor`-typed callers.
-    """
+) -> tuple[Anchor, str]:
+    """Open *member*'s parent by walking beneath *root* without following links."""
     pure = _lexical_member(member)
     cursor = root.duplicate()
     traversed: list[str] = []
@@ -465,15 +454,15 @@ def _open_parent(
     except Exception:
         cursor.close()
         raise
-    return _raw_descriptor(cursor), pure.name
+    return cursor, pure.name
 
 
 def _lstat_at(root: Anchor, member: str) -> os.stat_result:
-    parent_fd, name = _open_parent(root, member)
+    parent, name = _open_parent(root, member)
     try:
-        return os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        return parent.lstat(name)
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def _lexists_at(root: Anchor, member: str) -> bool:
@@ -485,36 +474,36 @@ def _lexists_at(root: Anchor, member: str) -> bool:
 
 
 def _read_bytes_at(root: Anchor, member: str) -> bytes:
-    parent_fd, name = _open_parent(root, member)
+    parent, name = _open_parent(root, member)
     try:
-        descriptor = os.open(name, _file_flags(), dir_fd=parent_fd)
+        descriptor = parent.open_file(name, _file_flags())
         try:
             with os.fdopen(descriptor, "rb", closefd=False) as stream:
                 return stream.read()
         finally:
             os.close(descriptor)
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def _readlink_at(root: Anchor, member: str) -> str:
-    parent_fd, name = _open_parent(root, member)
+    parent, name = _open_parent(root, member)
     try:
-        return os.readlink(name, dir_fd=parent_fd)
+        return parent.readlink(name)
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def _fsync_live_file(root: Anchor, member: str) -> None:
-    parent_fd, name = _open_parent(root, member)
+    parent, name = _open_parent(root, member)
     try:
-        descriptor = os.open(name, _file_flags(), dir_fd=parent_fd)
+        descriptor = parent.open_file(name, _file_flags())
         try:
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def _fsync_live_directory(descriptor: int | Anchor) -> None:
@@ -598,15 +587,15 @@ def _entry_manifest_at(root: Anchor, member: str, *, include_mode: bool) -> str:
         if include_mode:
             _manifest_field(hasher, stat.S_IMODE(info.st_mode).to_bytes(4, "big"))
         if kind == b"directory":
-            parent_fd, name = _open_parent(root, current)
+            parent, name = _open_parent(root, current)
             try:
-                directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
+                directory = parent.open_child(name)
                 try:
-                    names = sorted(os.listdir(directory_fd), key=os.fsencode, reverse=True)  # noqa: PTH208
+                    names = sorted(directory.listdir(), key=os.fsencode, reverse=True)
                 finally:
-                    os.close(directory_fd)
+                    directory.close()
             finally:
-                os.close(parent_fd)
+                parent.close()
             pending.extend(
                 (
                     name if relative == "." else f"{relative}/{name}",
@@ -848,9 +837,9 @@ def _copy_entry(source: Path, destination: Path) -> None:
 
 
 def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int) -> None:
-    parent_fd, name = _open_parent(root, member)
+    parent, name = _open_parent(root, member)
     try:
-        source_fd = os.open(name, _file_flags(), dir_fd=parent_fd)
+        source_fd = parent.open_file(name, _file_flags())
         try:
             with os.fdopen(os.dup(source_fd), "rb") as source, destination.open("wb") as target:
                 shutil.copyfileobj(source, target)
@@ -860,7 +849,7 @@ def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int) -> 
         finally:
             os.close(source_fd)
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def _copy_live_entry(root: Anchor, member: str, destination: Path) -> None:
@@ -879,15 +868,15 @@ def _copy_live_entry(root: Anchor, member: str, destination: Path) -> None:
     pending = [(member, destination)]
     while pending:
         source_directory, destination_directory = pending.pop()
-        parent_fd, name = _open_parent(root, source_directory)
+        parent, name = _open_parent(root, source_directory)
         try:
-            directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
+            child = parent.open_child(name)
             try:
-                names = sorted(os.listdir(directory_fd), key=os.fsencode, reverse=True)  # noqa: PTH208
+                names = sorted(child.listdir(), key=os.fsencode, reverse=True)
             finally:
-                os.close(directory_fd)
+                child.close()
         finally:
-            os.close(parent_fd)
+            parent.close()
         for entry_name in names:
             source_entry = f"{source_directory}/{entry_name}"
             destination_entry = destination_directory / entry_name
@@ -967,12 +956,12 @@ def _remove_live_entry(root: Anchor, member: str) -> None:
         return
     info = _lstat_at(root, member)
     if not stat.S_ISDIR(info.st_mode):
-        parent_fd, name = _open_parent(root, member)
+        parent, name = _open_parent(root, member)
         try:
-            os.unlink(name, dir_fd=parent_fd)
-            _fsync_live_directory(parent_fd)
+            parent.unlink(name)
+            _fsync_live_directory(parent)
         finally:
-            os.close(parent_fd)
+            parent.close()
         return
 
     pending = [member]
@@ -980,15 +969,15 @@ def _remove_live_entry(root: Anchor, member: str) -> None:
     while pending:
         directory = pending.pop()
         directories.append(directory)
-        parent_fd, name = _open_parent(root, directory)
+        parent, name = _open_parent(root, directory)
         try:
-            directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
+            child_directory = parent.open_child(name)
             try:
-                names = sorted(os.listdir(directory_fd), key=os.fsencode, reverse=True)  # noqa: PTH208
+                names = sorted(child_directory.listdir(), key=os.fsencode, reverse=True)
             finally:
-                os.close(directory_fd)
+                child_directory.close()
         finally:
-            os.close(parent_fd)
+            parent.close()
         for entry_name in names:
             child = f"{directory}/{entry_name}"
             child_info = _lstat_at(root, child)
@@ -997,37 +986,32 @@ def _remove_live_entry(root: Anchor, member: str) -> None:
             else:
                 child_parent, child_name = _open_parent(root, child)
                 try:
-                    os.unlink(child_name, dir_fd=child_parent)
+                    child_parent.unlink(child_name)
                     _fsync_live_directory(child_parent)
                 finally:
-                    os.close(child_parent)
+                    child_parent.close()
     for directory in reversed(directories):
-        parent_fd, name = _open_parent(root, directory)
+        parent, name = _open_parent(root, directory)
         try:
-            os.rmdir(name, dir_fd=parent_fd)
-            _fsync_live_directory(parent_fd)
+            parent.rmdir(name)
+            _fsync_live_directory(parent)
         finally:
-            os.close(parent_fd)
+            parent.close()
 
 
 def _chmod_directory_at(root: Anchor, member: str, mode: int) -> None:
-    parent_fd, name = _open_parent(root, member)
+    parent, name = _open_parent(root, member)
     try:
-        descriptor = os.open(name, _directory_flags(), dir_fd=parent_fd)
-        try:
-            os.fchmod(descriptor, mode)
-            _fsync_live_directory(descriptor)
-        finally:
-            os.close(descriptor)
-        _fsync_live_directory(parent_fd)
+        parent.chmod_child_directory(name, mode)
+        _fsync_live_directory(parent)
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def _copy_backup_file(root: Anchor, source: Path, member: str, mode: int) -> None:
-    parent_fd, name = _open_parent(root, member, create=True)
+    parent, name = _open_parent(root, member, create=True)
     try:
-        descriptor = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(mode), dir_fd=parent_fd)
+        descriptor = parent.open_file(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(mode))
         try:
             with source.open("rb") as incoming, os.fdopen(os.dup(descriptor), "wb") as outgoing:
                 shutil.copyfileobj(incoming, outgoing)
@@ -1037,31 +1021,32 @@ def _copy_backup_file(root: Anchor, source: Path, member: str, mode: int) -> Non
         finally:
             os.close(descriptor)
         _fsync_live_file(root, member)
-        _fsync_live_directory(parent_fd)
+        _fsync_live_directory(parent)
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def _copy_backup_to_live(root: Anchor, source: Path, member: str) -> None:
     mode = source.lstat().st_mode
-    parent_fd, name = _open_parent(root, member, create=True)
+    parent: Anchor | None
+    parent, name = _open_parent(root, member, create=True)
     try:
         if stat.S_ISLNK(mode):
-            os.symlink(os.fspath(source.readlink()), name, dir_fd=parent_fd)
-            _fsync_live_directory(parent_fd)
+            parent.symlink(os.fspath(source.readlink()), name)
+            _fsync_live_directory(parent)
             return
         if stat.S_ISREG(mode):
-            os.close(parent_fd)
-            parent_fd = -1
+            parent.close()
+            parent = None
             _copy_backup_file(root, source, member, mode)
             return
         if not stat.S_ISDIR(mode):
             raise ValueError(f"unsupported filesystem entry type at {source}")
-        os.mkdir(name, 0o700, dir_fd=parent_fd)
-        _fsync_live_directory(parent_fd)
+        parent.mkdir(name, 0o700)
+        _fsync_live_directory(parent)
     finally:
-        if parent_fd >= 0:
-            os.close(parent_fd)
+        if parent is not None:
+            parent.close()
 
     directories = [(source, member, stat.S_IMODE(mode))]
     pending = [(source, member)]
@@ -1074,19 +1059,19 @@ def _copy_backup_to_live(root: Anchor, source: Path, member: str) -> None:
             if stat.S_ISDIR(entry_mode) and not stat.S_ISLNK(entry_mode):
                 destination_parent, destination_name = _open_parent(root, destination_entry)
                 try:
-                    os.mkdir(destination_name, 0o700, dir_fd=destination_parent)
+                    destination_parent.mkdir(destination_name, 0o700)
                     _fsync_live_directory(destination_parent)
                 finally:
-                    os.close(destination_parent)
+                    destination_parent.close()
                 directories.append((source_entry, destination_entry, stat.S_IMODE(entry_mode)))
                 pending.append((source_entry, destination_entry))
             elif stat.S_ISLNK(entry_mode):
                 destination_parent, destination_name = _open_parent(root, destination_entry)
                 try:
-                    os.symlink(os.fspath(source_entry.readlink()), destination_name, dir_fd=destination_parent)
+                    destination_parent.symlink(os.fspath(source_entry.readlink()), destination_name)
                     _fsync_live_directory(destination_parent)
                 finally:
-                    os.close(destination_parent)
+                    destination_parent.close()
             elif stat.S_ISREG(entry_mode):
                 _copy_backup_file(root, source_entry, destination_entry, entry_mode)
             else:
@@ -1265,23 +1250,8 @@ def _move_key(move: Move) -> tuple[str, str]:
     return (move.source, move.dest)
 
 
-def _rename_flags_at(source_fd: int, source: str, destination_fd: int, destination: str, flag: int) -> None:
-    library = CDLL(None, use_errno=True)
-    if sys.platform == "darwin":
-        function = library.renameatx_np
-    else:
-        function = library.renameat2
-    function.argtypes = (c_int, c_char_p, c_int, c_char_p, c_uint)
-    function.restype = c_int
-    result = function(source_fd, os.fsencode(source), destination_fd, os.fsencode(destination), flag)
-    if result != 0:
-        error = get_errno()
-        raise OSError(error, os.strerror(error), destination)
-
-
-def _rename_noreplace_at(source_fd: int, source: str, destination_fd: int, destination: str) -> None:
-    flag = 0x00000004 if sys.platform == "darwin" else 0x00000001
-    _rename_flags_at(source_fd, source, destination_fd, destination, flag)
+def _rename_noreplace_at(source: Anchor, source_name: str, destination: Anchor, destination_name: str) -> None:
+    source.rename_noreplace(source_name, destination, destination_name)
 
 
 def _write_all(descriptor: int, stream: IO[bytes]) -> None:
@@ -1291,10 +1261,10 @@ def _write_all(descriptor: int, stream: IO[bytes]) -> None:
             offset += os.write(descriptor, chunk[offset:])
 
 
-def _live_temporary(parent_fd: int, target_name: str, staged: Path) -> str:
+def _live_temporary(parent: Anchor, target_name: str, staged: Path) -> str:
     temporary = f".{target_name}.{uuid.uuid4().hex}.tmp"
     mode = stat.S_IMODE(staged.stat().st_mode)
-    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode, dir_fd=parent_fd)
+    descriptor = parent.open_file(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
     try:
         with staged.open("rb") as stream:
             _write_all(descriptor, stream)
@@ -1302,12 +1272,12 @@ def _live_temporary(parent_fd: int, target_name: str, staged: Path) -> str:
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
-    _fsync_live_directory(parent_fd)
+    _fsync_live_directory(parent)
     return temporary
 
 
-def _digest_in_directory(parent_fd: int, name: str) -> str:
-    descriptor = os.open(name, _file_flags(), dir_fd=parent_fd)
+def _digest_in_directory(parent: Anchor, name: str) -> str:
+    descriptor = parent.open_file(name, _file_flags())
     try:
         hasher = hashlib.sha256()
         while chunk := os.read(descriptor, 1024 * 1024):
@@ -1330,20 +1300,20 @@ def _take_custody(
     touched: set[str],
     *,
     defer_fsync: bool = False,
-) -> tuple[int, str, str, str, bool]:
+) -> tuple[Anchor, str, str, str, bool]:
     """Move *member* to a unique adjacent name before inspecting its bytes."""
-    parent_fd, name = _open_parent(root, member)
+    parent, name = _open_parent(root, member)
     quarantine_name, quarantine_member = _quarantine_member(member)
     previously_touched = member in touched
     try:
-        _rename_noreplace_at(parent_fd, name, parent_fd, quarantine_name)
+        _rename_noreplace_at(parent, name, parent, quarantine_name)
     except FileNotFoundError as exc:
-        os.close(parent_fd)
+        parent.close()
         raise ValueError(f"{member}: changed since planning (now missing); re-plan") from exc
     touched.add(member)
     if not defer_fsync:
-        _fsync_live_directory(parent_fd)
-    return parent_fd, name, quarantine_name, quarantine_member, previously_touched
+        _fsync_live_directory(parent)
+    return parent, name, quarantine_name, quarantine_member, previously_touched
 
 
 def _preserve_conflict(
@@ -1359,7 +1329,7 @@ def _preserve_conflict(
 
 
 def _restore_custody_or_raise(
-    parent_fd: int,
+    parent: Anchor,
     name: str,
     quarantine_name: str,
     *,
@@ -1371,15 +1341,15 @@ def _restore_custody_or_raise(
     detail: str,
 ) -> None:
     """Restore captured bytes only when their original name is still absent."""
-    captured_identity = _identity_at(parent_fd, quarantine_name)
+    captured_identity = _identity_at(parent, quarantine_name)
     try:
-        _rename_noreplace_at(parent_fd, quarantine_name, parent_fd, name)
+        _rename_noreplace_at(parent, quarantine_name, parent, name)
     except FileExistsError as exc:
         raise _preserve_conflict(member, quarantine_member, protected, detail) from exc
-    if _identity_at(parent_fd, name) != captured_identity:
+    if _identity_at(parent, name) != captured_identity:
         protected[member] = member
         raise _CustodyConflict(f"{member}: restored custody identity could not be verified")
-    _fsync_live_directory(parent_fd)
+    _fsync_live_directory(parent)
     protected.pop(member, None)
     protected.pop(quarantine_member, None)
     if not previously_touched:
@@ -1387,9 +1357,8 @@ def _restore_custody_or_raise(
     raise ValueError(f"{member}: {detail}; re-plan")
 
 
-def _identity_at(parent_fd: int, name: str) -> tuple[int, int]:
-    info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-    return info.st_dev, info.st_ino
+def _identity_at(parent: Anchor, name: str) -> tuple[int, int]:
+    return parent.identity(name)
 
 
 def _entry_identity(info: os.stat_result) -> _EntryIdentity:
@@ -1409,31 +1378,25 @@ def _commit_write(
     protected: dict[str, str],
 ) -> None:
     assert effect.staged is not None
-    parent_fd, name = _open_parent(root, effect.member)
-    temporary = _live_temporary(parent_fd, name, effect.staged)
+    parent, name = _open_parent(root, effect.member)
+    temporary = _live_temporary(parent, name, effect.staged)
     try:
         if expected_digest is None:
             try:
-                os.link(
-                    temporary,
-                    name,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                    follow_symlinks=False,
-                )
+                parent.link(temporary, name)
             except FileExistsError as exc:
                 raise ValueError(f"{effect.member}: changed since planning (now exists); re-plan") from exc
             touched.add(effect.member)
         else:
-            os.close(parent_fd)
-            parent_fd, name, quarantine, quarantine_member, previously_touched = _take_custody(
+            parent.close()
+            parent, name, quarantine, quarantine_member, previously_touched = _take_custody(
                 root, effect.member, touched
             )
             try:
-                actual = _digest_in_directory(parent_fd, quarantine)
+                actual = _digest_in_directory(parent, quarantine)
             except Exception as exc:
                 _restore_custody_or_raise(
-                    parent_fd,
+                    parent,
                     name,
                     quarantine,
                     member=effect.member,
@@ -1446,7 +1409,7 @@ def _commit_write(
                 raise AssertionError("custody recovery must raise") from exc
             if actual != expected_digest:
                 _restore_custody_or_raise(
-                    parent_fd,
+                    parent,
                     name,
                     quarantine,
                     member=effect.member,
@@ -1457,40 +1420,34 @@ def _commit_write(
                     detail="changed since planning",
                 )
             try:
-                os.link(
-                    temporary,
-                    name,
-                    src_dir_fd=parent_fd,
-                    dst_dir_fd=parent_fd,
-                    follow_symlinks=False,
-                )
+                parent.link(temporary, name)
             except FileExistsError as exc:
                 raise _preserve_conflict(
                     effect.member, quarantine_member, protected, "name was recreated during commit"
                 ) from exc
             touched.add(effect.member)
-            if _identity_at(parent_fd, name) != _identity_at(parent_fd, temporary):
+            if _identity_at(parent, name) != _identity_at(parent, temporary):
                 raise _preserve_conflict(
                     effect.member, quarantine_member, protected, "installed name changed during commit"
                 )
-            os.unlink(quarantine, dir_fd=parent_fd)
+            parent.unlink(quarantine)
         _fsync_live_file(root, effect.member)
     finally:
         with suppress(FileNotFoundError):
-            os.unlink(temporary, dir_fd=parent_fd)
-        _fsync_live_directory(parent_fd)
-        os.close(parent_fd)
+            parent.unlink(temporary)
+        _fsync_live_directory(parent)
+        parent.close()
 
 
 def _recover_move_custody_or_raise(
     root: Anchor,
     effect: _Effect,
     *,
-    source_fd: int,
+    source: Anchor,
     source_name: str,
     quarantine: str,
     quarantine_member: str,
-    destination_fd: int | None,
+    destination: Anchor | None,
     destination_name: str,
     captured_at_destination: bool,
     captured_identity: tuple[int, int],
@@ -1504,13 +1461,13 @@ def _recover_move_custody_or_raise(
     """Recover one captured move without overwriting any concurrent entry."""
     assert effect.destination is not None
     if captured_at_destination:
-        assert destination_fd is not None
+        assert destination is not None
         try:
-            if _identity_at(destination_fd, destination_name) != captured_identity:
+            if _identity_at(destination, destination_name) != captured_identity:
                 raise ValueError("captured destination identity changed")
-            _rename_noreplace_at(destination_fd, destination_name, source_fd, quarantine)
-            _fsync_live_directory(destination_fd)
-            _fsync_live_directory(source_fd)
+            _rename_noreplace_at(destination, destination_name, source, quarantine)
+            _fsync_live_directory(destination)
+            _fsync_live_directory(source)
         except Exception as recovery_exc:
             raise _CustodyConflict(
                 f"{effect.member}: move custody recovery failed; source, destination, and quarantine "
@@ -1534,9 +1491,9 @@ def _recover_move_custody_or_raise(
         if destination_absent:
             protected.pop(effect.destination, None)
         try:
-            if _identity_at(source_fd, quarantine) != captured_identity:
+            if _identity_at(source, quarantine) != captured_identity:
                 raise ValueError("quarantine identity changed")
-            _rename_noreplace_at(source_fd, quarantine, source_fd, source_name)
+            _rename_noreplace_at(source, quarantine, source, source_name)
         except FileExistsError as recovery_exc:
             raise _CustodyConflict(
                 f"{effect.member}: move custody recovery found a recreated source; external entry preserved "
@@ -1547,9 +1504,9 @@ def _recover_move_custody_or_raise(
                 f"{effect.member}: move custody recovery failed; source and quarantine {quarantine_member} "
                 f"were preserved: {recovery_exc}"
             ) from recovery_exc
-        _fsync_live_directory(source_fd)
+        _fsync_live_directory(source)
         try:
-            if _identity_at(source_fd, source_name) != captured_identity:
+            if _identity_at(source, source_name) != captured_identity:
                 raise ValueError("restored source identity changed")
             if _entry_fingerprint_at(root, effect.member) != expected_fingerprint:
                 raise ValueError("restored source content changed")
@@ -1579,7 +1536,7 @@ def _commit_move(
     protected: dict[str, str],
 ) -> None:
     assert effect.destination is not None
-    source_fd, source_name, quarantine, quarantine_member, previously_touched = _take_custody(
+    source, source_name, quarantine, quarantine_member, previously_touched = _take_custody(
         root,
         effect.member,
         touched,
@@ -1589,13 +1546,13 @@ def _commit_move(
     protected[effect.member] = quarantine_member
     protected[quarantine_member] = quarantine_member
     protected[effect.destination] = effect.destination
-    destination_fd: int | None = None
+    destination: Anchor | None = None
     destination_name = PurePosixPath(effect.destination).name
     captured_at_destination = False
     destination_was_touched = effect.destination in touched
     try:
-        _fsync_live_directory(source_fd)
-        captured_info = os.stat(quarantine, dir_fd=source_fd, follow_symlinks=False)
+        _fsync_live_directory(source)
+        captured_info = source.lstat(quarantine)
         if _entry_identity(captured_info) != expected_identity:
             raise ValueError(f"{effect.member}: changed since planning; re-plan")
         if _entry_fingerprint_at(root, quarantine_member) != expected_fingerprint:
@@ -1605,31 +1562,31 @@ def _commit_move(
                 f"{effect.member}: name was recreated during custody verification; "
                 f"external entry preserved and captured preimage retained in quarantine {quarantine_member}"
             )
-        destination_fd, destination_name = _open_parent(root, effect.destination)
-        _rename_noreplace_at(source_fd, quarantine, destination_fd, destination_name)
+        destination, destination_name = _open_parent(root, effect.destination)
+        _rename_noreplace_at(source, quarantine, destination, destination_name)
         captured_at_destination = True
         touched.update((effect.member, effect.destination))
-        if _identity_at(destination_fd, destination_name) != captured_identity:
+        if _identity_at(destination, destination_name) != captured_identity:
             raise _CustodyConflict(f"{effect.member}: captured entry changed while moving")
         if _entry_fingerprint_at(root, effect.destination) != expected_fingerprint:
             raise _CustodyConflict(f"{effect.member}: captured entry changed while moving")
         if _lexists_at(root, effect.member):
             raise _CustodyConflict(f"{effect.member}: name was recreated during move")
-        destination_mode = os.stat(destination_name, dir_fd=destination_fd, follow_symlinks=False).st_mode
+        destination_mode = destination.lstat(destination_name).st_mode
         if stat.S_ISREG(destination_mode):
             _fsync_live_file(root, effect.destination)
-        _fsync_live_directory(source_fd)
-        if destination_fd != source_fd:
-            _fsync_live_directory(destination_fd)
+        _fsync_live_directory(source)
+        if destination is not source:
+            _fsync_live_directory(destination)
     except Exception as exc:
         _recover_move_custody_or_raise(
             root,
             effect,
-            source_fd=source_fd,
+            source=source,
             source_name=source_name,
             quarantine=quarantine,
             quarantine_member=quarantine_member,
-            destination_fd=destination_fd,
+            destination=destination,
             destination_name=destination_name,
             captured_at_destination=captured_at_destination,
             captured_identity=captured_identity,
@@ -1646,9 +1603,9 @@ def _commit_move(
         protected.pop(quarantine_member, None)
         protected.pop(effect.destination, None)
     finally:
-        if destination_fd is not None:
-            os.close(destination_fd)
-        os.close(source_fd)
+        if destination is not None:
+            destination.close()
+        source.close()
 
 
 def _commit_effect(
@@ -1672,7 +1629,7 @@ def _commit_effect(
         protected = {}
     try:
         if effect.kind == "mkdir":
-            parent_fd, name = _open_parent(
+            parent, name = _open_parent(
                 root,
                 effect.member,
                 create=True,
@@ -1681,25 +1638,25 @@ def _commit_effect(
             )
             try:
                 try:
-                    info = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+                    info = parent.lstat(name)
                 except FileNotFoundError:
-                    os.mkdir(name, dir_fd=parent_fd)
+                    parent.mkdir(name)
                     touched.add(effect.member)
-                    directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
+                    directory = parent.open_child(name)
                     try:
-                        _fsync_live_directory(directory_fd)
+                        _fsync_live_directory(directory)
                     finally:
-                        os.close(directory_fd)
-                    _fsync_live_directory(parent_fd)
+                        directory.close()
+                    _fsync_live_directory(parent)
                 else:
                     if absent_directories is not None and effect.member in absent_directories:
                         raise ValueError(f"{effect.member}: directory changed since planning (now exists); re-plan")
                     if not stat.S_ISDIR(info.st_mode):
                         raise ValueError(f"{effect.member}: mkdir target is not a directory")
-                    directory_fd = os.open(name, _directory_flags(), dir_fd=parent_fd)
-                    os.close(directory_fd)
+                    directory = parent.open_child(name)
+                    directory.close()
             finally:
-                os.close(parent_fd)
+                parent.close()
             return
         if effect.kind == "move":
             assert expected_fingerprints is not None
@@ -1722,12 +1679,12 @@ def _commit_effect(
             if expected is not None:
                 raise ValueError(f"{effect.member}: changed since planning (now missing); re-plan")
             return
-        parent_fd, name, quarantine, quarantine_member, previously_touched = _take_custody(root, effect.member, touched)
+        parent, name, quarantine, quarantine_member, previously_touched = _take_custody(root, effect.member, touched)
         try:
-            info = os.stat(quarantine, dir_fd=parent_fd, follow_symlinks=False)
+            info = parent.lstat(quarantine)
             if expected_identities is not None and _entry_identity(info) != expected_identities[effect.member]:
                 _restore_custody_or_raise(
-                    parent_fd,
+                    parent,
                     name,
                     quarantine,
                     member=effect.member,
@@ -1743,7 +1700,7 @@ def _commit_effect(
                 and _entry_fingerprint_at(root, quarantine_member) != expected
             ):
                 _restore_custody_or_raise(
-                    parent_fd,
+                    parent,
                     name,
                     quarantine,
                     member=effect.member,
@@ -1759,12 +1716,12 @@ def _commit_effect(
                 )
             try:
                 if stat.S_ISDIR(info.st_mode):
-                    os.rmdir(quarantine, dir_fd=parent_fd)
+                    parent.rmdir(quarantine)
                 else:
-                    os.unlink(quarantine, dir_fd=parent_fd)
+                    parent.unlink(quarantine)
             except OSError as exc:
                 _restore_custody_or_raise(
-                    parent_fd,
+                    parent,
                     name,
                     quarantine,
                     member=effect.member,
@@ -1776,9 +1733,9 @@ def _commit_effect(
                 )
                 raise AssertionError("custody recovery must raise") from exc
             touched.add(effect.member)
-            _fsync_live_directory(parent_fd)
+            _fsync_live_directory(parent)
         finally:
-            os.close(parent_fd)
+            parent.close()
     finally:
         if close_root:
             root.close()

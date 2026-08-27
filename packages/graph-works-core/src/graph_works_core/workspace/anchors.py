@@ -108,6 +108,7 @@ class Anchor(Protocol):
     def link(self, source: str, name: str) -> None: ...
     def rename_noreplace(self, name: str, destination: Anchor, destination_name: str) -> None: ...
     def open_file(self, name: str, flags: int, mode: int = 0o777) -> int: ...
+    def chmod_child_directory(self, name: str, mode: int) -> None: ...
 
     # -- durability ---------------------------------------------------------
     def fsync(self) -> None: ...
@@ -290,6 +291,14 @@ class _PosixAnchor:
         add surface with no portability payoff.
         """
         return os.open(name, flags, mode, dir_fd=self.descriptor)
+
+    def chmod_child_directory(self, name: str, mode: int) -> None:
+        """From transactions.py:1026 -- chmod a child *directory* via its own descriptor."""
+        descriptor = os.open(name, directory_flags(), dir_fd=self.descriptor)
+        try:
+            os.fchmod(descriptor, mode)
+        finally:
+            os.close(descriptor)
 
     # -- durability ---------------------------------------------------------
 

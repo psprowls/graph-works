@@ -2458,8 +2458,8 @@ def test_transaction_path_helpers_create_ancestors_and_hash_entry_kinds(tmp_path
     root = transactions._open_root(tmp_path)
     touched: set[str] = set()
     try:
-        parent_fd, name = transactions._open_parent(root, "new/deep/file", create=True, touched=touched)
-        os.close(parent_fd)
+        parent, name = transactions._open_parent(root, "new/deep/file", create=True, touched=touched)
+        parent.close()
         assert name == "file" and touched == {"new", "new/deep"}
         with pytest.raises(ValueError, match="now exists"):
             transactions._open_parent(

@@ -87,6 +87,16 @@ def test_posix_anchor_open_file_returns_a_plain_descriptor(tmp_path: Path) -> No
         anchor.close()
 
 
+def test_posix_anchor_chmods_a_child_directory(tmp_path: Path) -> None:
+    (tmp_path / "child").mkdir(mode=0o755)
+    anchor = anchors.open_anchor(tmp_path)
+    try:
+        anchor.chmod_child_directory("child", 0o700)
+        assert stat.S_IMODE((tmp_path / "child").stat().st_mode) == 0o700
+    finally:
+        anchor.close()
+
+
 def test_posix_anchor_rename_noreplace_refuses_to_clobber(tmp_path: Path) -> None:
     (tmp_path / "source").write_text("one", encoding="utf-8")
     (tmp_path / "occupied").write_text("two", encoding="utf-8")

@@ -957,3 +957,235 @@ currently unfired.
 **Record the outcome either way.** A pass is what makes *"workflow-orca is the
 native-Windows auto-drive backend"* a verified statement rather than an inherited
 assumption, and that sentence is the whole reason this group exists.
+
+## Group F — the end-to-end pipeline run
+
+The item's headline, and the part no single child hands over: **does the tool
+this epic exists to ship actually drive its own pipeline on Windows?**
+
+F1 and F2 create the scratch workspace and item that C4–C7, D1b and E4 reuse, so
+run them before those.
+
+#### F1 — `gw bootstrap` a scratch workspace
+
+**Gate:** none.
+
+**Command:**
+
+```bat
+gw bootstrap --topic windows-verification --workspace C:\gw-verify\ws --json
+echo rc=%ERRORLEVEL%
+dir /b C:\gw-verify\ws
+dir /b C:\gw-verify\ws\.gw
+```
+
+**Expected:** `rc=0`; `C:\gw-verify\ws` contains `.gw` and `okf`; `.gw` contains
+`cache` (and the config members bootstrap creates). Paste both listings.
+
+**If it fails:** Owner: a **new child** scoped to `gw bootstrap` on Windows.
+
+#### F2 — file a scratch work item
+
+**Gate:** F1.
+
+**Command:**
+
+```bat
+gw work file --workspace C:\gw-verify\ws --title "Scratch windows verification" --kind TechDebt --summary "Scratch item for the Windows verification run" --name scratch-windows-verification --effort small --json
+echo rc=%ERRORLEVEL%
+dir /b /s C:\gw-verify\ws\okf\work
+```
+
+**Expected:** `rc=0`; the JSON reports the canonical path
+`work/scratch-windows-verification`; on disk there is both
+`C:\gw-verify\ws\okf\work\scratch-windows-verification.md` **and** the owned
+directory `C:\gw-verify\ws\okf\work\scratch-windows-verification\references\`,
+containing a `.gitkeep`. The owned directory existing is the checkpoint — the
+invariant is that a work item's owned directory is created at filing time, and a
+Windows path bug that skipped it would be invisible until the design stage. The
+`.gitkeep` is what proves the directory was *created by the filing*, not left
+behind by `dir` or an editor.
+
+**If it fails:** Owner: a **new child** scoped to `gw work file` on Windows.
+
+#### F3 — `gw next` returns a well-formed envelope
+
+**Gate:** F2.
+
+**Command:**
+
+```bat
+gw next work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+echo rc=%ERRORLEVEL%
+```
+
+**Expected:** `rc=0` and a JSON object carrying at least the keys
+`requested_path`, `selected_path`, `work_status`, `kind`, `phase`, `action`,
+`artifact`, `on_dispatch`, `on_complete`, `blockers`. Paste it whole.
+
+**If it fails:** Owner: a **new child** scoped to `gw next` on Windows.
+
+#### F4 — drive the scratch item design → plan → execute → finish
+
+**Gate:** F3.
+
+Every one of these is a bundle mutation through the transaction engine, so **F4
+is also Group C's integration case.**
+
+**Command:** after each `advance`, read the phase back off disk rather than
+trusting the command's own report:
+
+```bat
+gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+findstr /b "phase:" C:\gw-verify\ws\okf\work\scratch-windows-verification.md
+```
+
+Repeat until the item reaches `finish`, supplying whatever flags `gw next`'s
+`on_dispatch.requires` names — `--owner <handle>` at the execute transition and
+`--resolved-in <ref>` at the finish transition.
+
+**Expected:** the on-disk `phase:` line changes at every step, in order, and
+never disagrees with what the command reported. Record the phase sequence
+observed and the flags each step required.
+
+**If it fails:** Owner: a **new child** scoped to `gw work advance` on Windows;
+if the failure is inside the transaction engine, reopens
+`feature-windows-anchor-and-tier-adr` instead.
+
+#### F5 — the differential platform report
+
+**Gate:** none, but the expected values shift as `tech-debt-portable-file-lock`
+and `feature-windows-anchor-and-tier-adr` land. **This checkpoint therefore
+generates its own expected value rather than reading one from this page.**
+
+The comparison is the checkpoint, not the output. A disagreement between what
+the code *declares* a Windows box gets and what the box *actually reports* is
+precisely what `agrees_with_declared` was built to surface — and `durability-tier`
+is deliberately not probeable, naming this run as its evidence instead.
+
+**Command:**
+
+```bat
+git rev-parse HEAD > C:\gw-verify\f5-head.txt
+gw util platform --json > C:\gw-verify\f5-actual.json
+gw util platform --probe --workspace C:\gw-verify\ws --json > C:\gw-verify\f5-actual-probed.json
+uv run python -c "import json; from graph_works_core.util.platform import build_report; from graph_works_cli.util_cli.platform import _payload; open(r'C:\gw-verify\f5-declared.json','w',encoding='utf-8',newline='\n').write(json.dumps(_payload(build_report(platform_name='win32')), indent=2))"
+```
+
+Run all four from the **checkout root**, so `uv run` resolves this tree's
+`graph_works_core` and not an unrelated install — the comparison is only
+meaningful if both sides come from the commit in `f5-head.txt`.
+
+Then diff, under Git Bash:
+
+```bash
+diff /c/gw-verify/f5-declared.json /c/gw-verify/f5-actual.json
+```
+
+**Expected:** the two agree on `platform` (`win32`) and on every capability's
+`name`, `value` and `status`. `python` may differ only if the interpreter
+running `gw` differs from the one running the simulation — if so, say which.
+
+The declared side is written with `indent=2`; if `gw util platform --json` emits
+a different indentation the raw `diff` will be noisy without a real disagreement.
+Compare the parsed structures instead when that happens, and say in the record
+that you did:
+
+```bash
+python -c "
+import json
+a = json.load(open('/c/gw-verify/f5-declared.json'))
+b = json.load(open('/c/gw-verify/f5-actual.json'))
+print('platform', a['platform'], b['platform'])
+ka = {c['name']: (c['value'], c['status']) for c in a['capabilities']}
+kb = {c['name']: (c['value'], c['status']) for c in b['capabilities']}
+for n in sorted(set(ka) | set(kb)):
+    print('AGREE ' if ka.get(n) == kb.get(n) else 'DIFFER', n, ka.get(n), kb.get(n))
+"
+```
+
+Then read the probed report:
+
+```bash
+python -c "
+import json
+r = json.load(open('/c/gw-verify/f5-actual-probed.json'))
+for p in r['probes']:
+    print(p['capability'], p['status'], p['agrees_with_declared'], '|', p['detail'])
+print('unavailable:', r['unavailable'])
+"
+```
+
+**Expected — record all of it, and treat any disagreement as the finding:**
+
+- `durability-tier` probes `unknown` with the *not probeable* detail and
+  `agrees_with_declared: true`. That is by design: the tier's guarantee is bought
+  by **this run**, not by a diagnostic verb asserting it.
+- `file-lock` and `process-control`: whatever the box says, compared against the
+  declaration. Any `agrees_with_declared: false` is the checkpoint's whole point
+  — paste the `detail` verbatim.
+- `dispatch-backend`: a probe disagreeing with `unresolved` is expected while no
+  resolver exists; record the probed detail.
+
+**Record with the verdict:** the `git rev-parse HEAD` from `f5-head.txt`, and
+which of `tech-debt-portable-file-lock` / `feature-windows-anchor-and-tier-adr`
+had landed in that tree. Without those two facts the comparison cannot be
+reproduced later.
+
+**If it fails** (declared and actual disagree on any capability's `value` or
+`status`): Owner: `feature-gw-util-platform` if the provider's derivation is
+wrong; the capability's own owning child if the machinery is.
+
+#### F6 — `gw util describe-surface --json` matches the committed golden
+
+**Gate:** none.
+
+Following ADR-0019 Q3's precedent, where a byte-for-byte match was what made
+"the pipeline ran" a measurement rather than an impression. The repo already
+carries the reference — `packages/graph-works-cli/tests/fixtures/surface.golden.json` —
+so there is nothing to hand-carry from a macOS box.
+
+**Command:** from Git Bash at the checkout root:
+
+```bash
+gw util describe-surface --json > /c/gw-verify/f6-actual.json
+diff packages/graph-works-cli/tests/fixtures/surface.golden.json /c/gw-verify/f6-actual.json && echo IDENTICAL
+```
+
+**Expected:** `IDENTICAL`, with no diff output. Ordering is a plain sort on
+`path`, so the output is byte-stable across runs and across platforms — which is
+exactly what makes a difference here meaningful. This equality was measured on
+macOS at the commit that introduced this page, so a difference on Windows is a
+platform result rather than a stale golden.
+
+If the only difference is the `version` field, record it and treat it as a
+**PASS with a note**: the golden was frozen at a different package version.
+Anything else — a missing command, a reordered list, a changed help string — is a
+**FAIL**.
+
+**If it fails:** Owner: a **new child** scoped to the differing part of the
+surface.
+
+#### F7 — `gw work archive` and `gw work regen-index`
+
+**Gate:** F4 (the scratch item must have reached a terminal state).
+
+These are the mutation verbs the earlier steps did not exercise, and each is a
+full transaction.
+
+**Command:**
+
+```bat
+gw work archive work/scratch-windows-verification --workspace C:\gw-verify\ws --json
+echo rc=%ERRORLEVEL%
+dir /b /s C:\gw-verify\ws\okf\work\_archive
+gw work regen-index --workspace C:\gw-verify\ws --json
+echo rc=%ERRORLEVEL%
+type C:\gw-verify\ws\okf\work\index.md
+```
+
+**Expected:** `rc=0` from both; the item now lives under
+`okf\work\_archive\`; `work\index.md` no longer lists it and the second
+`regen-index` reports no further change. Paste the index.
+
+**If it fails:** Owner: a **new child** scoped to the failing verb.

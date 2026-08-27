@@ -127,3 +127,105 @@ this repository's own vault — the command says so.
 
 **If it fails:** <what the failure means and who owns it>
 ```
+
+## Group A — checkout and line endings
+
+Owner: `bug-enforce-lf-line-endings`. Its fix is a `.gitattributes` rule; this
+group is where that rule is verified **on the platform the rule exists for**.
+
+The premise is Git for Windows' shipped default `core.autocrlf=true`. Do not
+change it before this group — running Group A with `core.autocrlf=false` tests
+nothing.
+
+#### A1 — the attributes resolve on the platform that needs them
+
+**Gate:** none.
+
+**Command:** in a fresh directory, with `core.autocrlf` at its Git-for-Windows
+default (confirm with `git config --get core.autocrlf` → `true`):
+
+```bash
+git clone <repo-url> gw-a1
+cd gw-a1
+git ls-files --eol | grep -c 'w/crlf'
+```
+
+**Expected:** `0`. Record the full `git ls-files --eol | grep 'w/crlf'` output
+(empty on a pass) in the evidence record.
+
+Cross-check that the fixture corpus is *deliberately* exempt and did not get
+normalized either:
+
+```bash
+git ls-files --eol packages/okf-io/tests/fixtures/edge/encoding/crlf.md
+```
+
+**Expected:** the line reports `w/crlf` for that one path — it is pinned `-text`
+on purpose and is a byte-exact regression fixture. A `w/lf` here is a **FAIL**.
+
+**If it fails:** the root or plugin `.gitattributes` does not cover a path it
+must. Owner: reopens `bug-enforce-lf-line-endings`.
+
+#### A2 — the four fork-added extensionless bash scripts execute
+
+**Gate:** none.
+
+**Command:** under **Git Bash**, from the clone's root:
+
+```bash
+bash plugins/graph-works/skills/subagent-driven-development/scripts/review-package; echo "rc=$?"
+bash plugins/graph-works/skills/subagent-driven-development/scripts/sdd-workspace; echo "rc=$?"
+bash plugins/graph-works/skills/subagent-driven-development/scripts/task-brief; echo "rc=$?"
+printf '{}' | bash plugins/graph-works/hooks/skill-doc-routing; echo "rc=$?"
+```
+
+**Expected:** each of the first three prints its own usage line —
+`usage: review-package PLAN_FILE BASE HEAD [OUTFILE]`,
+`usage: sdd-workspace PLAN_FILE`,
+`usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]` — and a non-zero `rc`.
+`skill-doc-routing` prints a single JSON object and `rc=0`.
+
+**Nowhere in any of the four outputs may the string `\r` appear**, and in
+particular none of them may print `$'\r': command not found` or
+`/usr/bin/env: 'bash\r': No such file or directory`. That string is the actual
+failure mode this checkpoint exists for.
+
+A non-zero `rc` from the first three is a **PASS** — they are refusing bad
+arguments, which is the cheapest way to prove the interpreter line parsed.
+
+**If it fails:** the file checked out CRLF. Note that `skill-doc-routing` fails
+*silently* in production — it is fail-open by design — which is why it is checked
+by hand here. Owner: reopens `bug-enforce-lf-line-endings`.
+
+#### A3 — `run-hook.cmd` parses under cmd.exe
+
+**Gate:** none. **Nobody in this fork has ever executed this.**
+
+**Command:** from **cmd.exe**, at the clone's root:
+
+```bat
+cmd /c plugins\graph-works\hooks\run-hook.cmd session-start
+echo rc=%ERRORLEVEL%
+```
+
+**Expected:** a single JSON object on stdout beginning
+`{` and containing `"hookSpecificOutput"` or `"additionalContext"`, followed by
+`rc=0`. That output is `hooks/session-start`'s, which means the batch half
+reached its `bash.exe` call and propagated `%ERRORLEVEL%`.
+
+**FAIL** looks like any of: cmd.exe echoing raw script lines; `The syntax of the
+command is incorrect.`; `) was unexpected at this time.`; empty output with a
+non-zero `rc`.
+
+**If it fails — and this is the standing rule:** the file is a cmd/bash polyglot
+pinned `eol=lf`, and it contains four multi-line parenthesised `if … ( … )`
+blocks, the construct where cmd.exe's line-at-a-time parser is least reliable
+with bare LF. **The fix is to flatten the batch half's `if` blocks into
+single-line forms. The fix is never to change the EOL.** The bash half opens
+`: << 'CMDBLOCK'` and needs a line reading exactly `CMDBLOCK` to close the
+heredoc; under CRLF that line is `CMDBLOCK\r`, the terminator never matches,
+bash swallows the rest of the file as heredoc body, and the wrapper executes
+nothing at all — silently, on Unix, which is where it is used every day.
+
+Owner: a **new child** under `epic-native-windows-support`, scoped to
+restructuring the batch half.

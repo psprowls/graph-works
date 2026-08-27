@@ -160,7 +160,7 @@ type = "layers"
 layers = [
     "okf_ext.bundle : okf_ext.generators : okf_ext.health : okf_ext.logs : okf_ext.moves : okf_ext.placement : okf_ext.proposals : okf_ext.render : okf_ext.schemas : okf_ext.search : okf_ext.sections : okf_ext.tags : okf_ext.tables",
     "okf_ext.shape",
-    "okf_ext.splice : okf_ext.writing",
+    "okf_ext.locking : okf_ext.splice : okf_ext.writing",
     "okf_ext.body",
     "okf_ext.context",
 ]

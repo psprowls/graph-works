@@ -41,7 +41,7 @@ def main() -> int:
         print(f"error: no worklist at {worklist_path} — run `gw scan --emit-worklist` first", file=sys.stderr)
         return 1
 
-    worklist = json.loads(worklist_path.read_text())
+    worklist = json.loads(worklist_path.read_text(encoding="utf-8"))
     tasks = worklist.get("prose_tasks", [])
     if not tasks:
         print("no prose_tasks in worklist — nothing to stub")
@@ -61,7 +61,7 @@ def main() -> int:
             slug = f"{slug}-{hashlib.sha1(uri.encode('utf-8')).hexdigest()[:8]}"
 
         out_path = results_dir / f"{slug}.json"
-        out_path.write_text(json.dumps(result, indent=2))
+        out_path.write_text(json.dumps(result, indent=2), encoding="utf-8", newline="\n")
         written += 1
 
     print(f"wrote {written} stub result(s) to {results_dir}")

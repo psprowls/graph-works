@@ -134,7 +134,7 @@ class Ledger:
     def load(cls, path: Path) -> Ledger:
         if path.exists():
             try:
-                data = json.loads(path.read_text())
+                data = json.loads(path.read_text(encoding="utf-8"))
                 return cls(path=path, runs=data.get("runs", {}))
             except (OSError, json.JSONDecodeError) as exc:
                 print(f"warn: unreadable ledger {path} ({exc}); starting fresh", file=sys.stderr)
@@ -143,7 +143,11 @@ class Ledger:
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".json.tmp")
-        tmp.write_text(json.dumps({"updated_at": now_iso(), "runs": self.runs}, indent=2) + "\n")
+        tmp.write_text(
+            json.dumps({"updated_at": now_iso(), "runs": self.runs}, indent=2) + "\n",
+            encoding="utf-8",
+            newline="\n",
+        )
         tmp.replace(self.path)
 
     def state_of(self, path: str) -> str | None:
@@ -162,7 +166,7 @@ class EventLog:
         rec = {"at": now_iso(), "event": kind, "path": path, **fields}
         try:
             self.path.parent.mkdir(parents=True, exist_ok=True)
-            with self.path.open("a") as fh:
+            with self.path.open("a", encoding="utf-8", newline="\n") as fh:
                 fh.write(json.dumps(rec) + "\n")
         except OSError as exc:
             print(f"warn: could not append event log ({exc})", file=sys.stderr)

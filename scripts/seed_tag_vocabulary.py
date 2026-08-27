@@ -481,7 +481,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 sys.stdout.write(text)
             else:
                 args.out.parent.mkdir(parents=True, exist_ok=True)
-                args.out.write_text(text, encoding="utf-8")
+                args.out.write_text(text, encoding="utf-8", newline="")
                 print(f"wrote {args.out}")
         elif args.command == "gate":
             vocab_path = args.workspace / CONFIG_DIRNAME / tags.VOCABULARY_FILENAME

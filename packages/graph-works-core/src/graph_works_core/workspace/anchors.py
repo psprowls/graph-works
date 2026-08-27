@@ -297,6 +297,7 @@ class _PosixAnchor:
         descriptor = os.open(name, directory_flags(), dir_fd=self.descriptor)
         try:
             os.fchmod(descriptor, mode)
+            os.fsync(descriptor)
         finally:
             os.close(descriptor)
 

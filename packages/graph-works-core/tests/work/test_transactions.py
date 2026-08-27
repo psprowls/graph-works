@@ -2140,22 +2140,24 @@ def test_validation_reads_anchored_root_when_configured_name_swaps_during_load(
 def test_executor_lock_name_swap_never_redirects_lock_io_into_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import fcntl  # E1: transactions.py no longer imports fcntl at module scope (Task 5).
+
     layout = _workspace(tmp_path)
     lock_path = layout.cache_dir / "work-mutations/executor.lock"
     held_lock = lock_path.with_name("executor-held.lock")
     escaped = layout.bundle_dir / ".lock-escape"
-    real_flock = transactions.fcntl.flock
+    real_flock = fcntl.flock
     swapped = False
 
     def swap_after_lock(descriptor: int, operation: int) -> None:
         nonlocal swapped
         real_flock(descriptor, operation)
-        if operation == transactions.fcntl.LOCK_EX and stat.S_ISREG(os.fstat(descriptor).st_mode) and not swapped:
+        if operation == fcntl.LOCK_EX and stat.S_ISREG(os.fstat(descriptor).st_mode) and not swapped:
             swapped = True
             lock_path.rename(held_lock)
             lock_path.symlink_to(escaped)
 
-    monkeypatch.setattr(transactions.fcntl, "flock", swap_after_lock)
+    monkeypatch.setattr(fcntl, "flock", swap_after_lock)
 
     with pytest.raises(ValueError, match=r"lock.*changed|changed.*lock"):
         apply_mutation(layout, _plan(layout))

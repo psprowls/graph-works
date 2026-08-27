@@ -8,11 +8,14 @@ dead lines against the 95% floor.
 
 from __future__ import annotations
 
+import ast
+import importlib.util
 import os
 import stat
 from pathlib import Path
 
 import pytest
+from graph_works_core.util.platform import POSIX_ONLY_MODULES
 from graph_works_core.workspace import anchors
 
 
@@ -223,3 +226,36 @@ def test_require_regular_file_rejects_a_directory(tmp_path: Path) -> None:
             anchors.require_regular_file(descriptor, "directory")
     finally:
         os.close(descriptor)
+
+
+def _module_scope_imports(source: str) -> set[str]:
+    """Top-level import names only -- a function-scope import is not the hazard."""
+    tree = ast.parse(source)
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None and node.level == 0:
+            names.add(node.module.split(".")[0])
+    return names
+
+
+def test_transactions_imports_no_posix_only_module_at_module_scope() -> None:
+    """On native Windows the engine must *import* and fail at call time.
+
+    Asserted against the module source rather than a mocked import: a mock can
+    pass vacuously, and this property is the reason the anchor seam exists.
+    """
+    spec = importlib.util.find_spec("graph_works_core.workspace.transactions")
+    assert spec is not None and spec.origin is not None
+    source = Path(spec.origin).read_text(encoding="utf-8")
+    offending = _module_scope_imports(source) & POSIX_ONLY_MODULES
+    assert offending == set(), f"transactions.py imports POSIX-only modules at module scope: {sorted(offending)}"
+
+
+def test_anchors_is_the_module_that_owns_the_posix_only_imports() -> None:
+    """The companion half: the seam did not simply delete the dependency."""
+    spec = importlib.util.find_spec("graph_works_core.workspace.anchors")
+    assert spec is not None and spec.origin is not None
+    source = Path(spec.origin).read_text(encoding="utf-8")
+    assert "fcntl" in _module_scope_imports(source)

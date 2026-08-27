@@ -12,11 +12,19 @@ large live bundle).  Two optimizations are known and deliberately deferred:
 reusing the planner's already-loaded bundle for the baseline, and restricting
 validation to the targeted members.  Both are separate work -- a gate that is
 only conditionally correct is worth nothing.
+
+Every platform-specific primitive this module needs -- advisory locking, the
+NOREPLACE rename, descriptor-to-path resolution, st_dev/st_ino identity, the
+directory fsync -- is reached through `workspace.anchors`.  This module
+therefore imports no POSIX-only module at module scope, which is a *tested*
+property, not a convention: on native Windows the engine imports successfully
+and raises at call time, which is strictly better than dying at import.  Adding
+`import fcntl` back here would pass every behavioural test and silently undo
+that.
 """
 
 from __future__ import annotations
 
-import fcntl  # noqa: F401 -- kept for `test_transactions.py`'s `transactions.fcntl.flock` monkeypatch handle
 import hashlib
 import json
 import math
@@ -400,13 +408,6 @@ def _new_transaction_directory(
 
 def _open_root(root: Path) -> Anchor:
     return open_anchor(root)
-
-
-def _directory_flags() -> int:
-    flags = os.O_RDONLY | os.O_DIRECTORY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    return flags
 
 
 def _file_flags() -> int:

@@ -26,7 +26,7 @@ When a skill says to dispatch a named agent type, use `@generalist` with the ful
 |-------------------|----------------------|
 | `Agent tool (graph-works:implementer)` | `@generalist` with the filled `implementer-prompt.md` template |
 | `Agent tool (graph-works:spec-reviewer)` | `@generalist` with the filled `spec-reviewer-prompt.md` template |
-| `Agent tool (graph-works:code-reviewer)` | `@code-reviewer` (bundled agent) or `@generalist` with the filled review prompt |
+| `Agent tool (general-purpose)` with the filled `code-reviewer.md` template | `@code-reviewer` (bundled agent) or `@generalist` with the filled review prompt |
 | `Agent tool (graph-works:code-quality-reviewer)` | `@generalist` with the filled `code-quality-reviewer-prompt.md` template |
 | `Agent tool (general-purpose)` with inline prompt | `@generalist` with your inline prompt |
 

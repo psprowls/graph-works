@@ -15,6 +15,11 @@ default: check
 normalization:
     uv run python scripts/check_filename_normalization.py .
 
+# A tracked file that would check out CRLF under Git for Windows' default
+# core.autocrlf=true (see work/epic-native-windows-support/children/bug-enforce-lf-line-endings).
+line-endings:
+    uv run python scripts/check_line_endings.py .
+
 # Provision the workspace environment. Idempotent; a no-op once in sync.
 #
 # A bare `uv run` installs the ROOT's dependencies only — not those declared by
@@ -114,7 +119,7 @@ plugin-contract *ARGS:
 # happens to pull `sync` in today. Without it the gate's result depends on the
 # order of this list: `types` before `cov` fails from a clean checkout, `cov`
 # before `types` passes, on identical code.
-check: sync subtree-base normalization lint types contracts cov test-plugin
+check: sync subtree-base normalization line-endings lint types contracts cov test-plugin
 
 # Subtree merge-base guard -- the `git-subtree-split` note behind
 # `plugins/graph-works`.

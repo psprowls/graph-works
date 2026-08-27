@@ -575,6 +575,19 @@ def test_the_strong_tier_refuses_no_plan_shapes() -> None:
     assert tier.nofollow_protection is True
 
 
+def test_the_posix_tier_record_traces_to_the_module_constants_it_claims_to_mirror() -> None:
+    """`DurabilityTier`'s docstring claims every field derives from a module constant.
+    `directory_fsync`/`nofollow_protection` are literals, not live references (see the
+    module docstring for why -- `_WINDOWS_TIER`'s equivalents can't literally reference
+    these constants, since the constants read the REAL host's `sys.platform`, not the
+    simulated `platform_name` a Windows-tier query might be asked about). This closes the
+    silent-drift risk for the one tier record that CAN be checked directly: on a real
+    POSIX host, `_POSIX_TIER`'s two literals must agree with what the constants say.
+    """
+    assert anchors._POSIX_TIER.directory_fsync is anchors.DIRECTORY_FSYNC_HONORED
+    assert anchors._POSIX_TIER.nofollow_protection is anchors.NOFOLLOW_AVAILABLE
+
+
 def test_the_weak_tier_reports_its_refusals_as_normal_output() -> None:
     """A refusal is a contract statement, not an incident (D-002)."""
     tier = anchors.durability_tier("win32")

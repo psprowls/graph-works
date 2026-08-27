@@ -971,6 +971,9 @@ _WINDOWS_TIER = DurabilityTier(
     anchoring=(
         f"a held resolved path, re-lstat'ed before every operation, under a bundle-root lock file ({BUNDLE_LOCK_NAME})"
     ),
+    # Literals, not DIRECTORY_FSYNC_HONORED / NOFOLLOW_AVAILABLE: those constants reflect the
+    # REAL host's sys.platform, but this record describes Windows's properties even when
+    # durability_tier() is asked about a simulated "win32" from a POSIX dev box.
     directory_fsync=False,
     nofollow_protection=False,
     refused_plan_shapes=(

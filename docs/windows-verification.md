@@ -681,3 +681,179 @@ del C:\gw-verify\ws\okf\work\linked.md
 
 **If it fails** (a mutation proceeds past any of them): Owner:
 `feature-windows-anchor-and-tier-adr`.
+
+## Group D — the byte-level newline and encoding proof
+
+Owner: `bug-explicit-encoding-newline`. Its acceptance property is a **static
+guard** (`just text-io`, B2). The **behavioral** proof — these files, on Windows,
+byte-for-byte — is here, because it is not reproducible on POSIX: `os.linesep`
+translation is compiled into CPython.
+
+The defect being hunted is `CR CR LF` — one stray `CR` per line, added
+**non-idempotently**, so a second pass adds another. Every D checkpoint therefore
+runs its round-trip **twice**.
+
+Compare bytes with `xxd` under Git Bash, or `certutil -f -encodehex` under
+cmd.exe. **The evidence record carries the hex, not a description of it.**
+
+> **POSIX baseline, measured while this protocol was authored.** On macOS at the
+> commit that introduced this page, D1 part a prints `pass1 IDENTICAL`,
+> `pass2 IDENTICAL`, `crcrlf False` against
+> `packages/okf-io/tests/fixtures/edge/encoding/crlf.md` (9 CRLF line endings).
+> A `CHANGED` on Windows is therefore unambiguously a platform result and not a
+> pre-existing round-trip defect.
+
+#### D1 — a CRLF okf document round-trips byte-identical
+
+**Gate:** none.
+
+**Command, part a — the narrow proof, through `okf_io` directly.** From Git
+Bash at the checkout root:
+
+```bash
+cp packages/okf-io/tests/fixtures/edge/encoding/crlf.md /c/gw-verify/d1.md
+uv run python -c "
+from pathlib import Path
+from okf_io import Document
+p = Path(r'C:\gw-verify\d1.md')
+before = p.read_bytes()
+Document.load(p).save(p)
+once = p.read_bytes()
+Document.load(p).save(p)
+twice = p.read_bytes()
+print('pass1', 'IDENTICAL' if once == before else 'CHANGED')
+print('pass2', 'IDENTICAL' if twice == once else 'CHANGED')
+print('crcrlf', b'\r\r\n' in twice)
+"
+xxd /c/gw-verify/d1.md | head -5
+```
+
+**Expected:**
+
+```
+pass1 IDENTICAL
+pass2 IDENTICAL
+crcrlf False
+```
+
+and the `xxd` output showing `0d0a` (never `0d0d0a`) at every line end. Paste the
+`xxd` output.
+
+**Command, part b — the wide proof, through the pipeline.** Convert the scratch
+item to CRLF, then mutate it through a real verb:
+
+```bash
+python - <<'PY'
+from pathlib import Path
+p = Path(r'C:\gw-verify\ws\okf\work\scratch-windows-verification.md')
+b = p.read_bytes().replace(b'\r\n', b'\n').replace(b'\n', b'\r\n')
+p.write_bytes(b)
+print('crlf lines:', b.count(b'\r\n'), 'bare lf:', b.count(b'\n') - b.count(b'\r\n'))
+PY
+gw work advance work/scratch-windows-verification --workspace C:\\gw-verify\\ws --json >/dev/null
+gw work advance work/scratch-windows-verification --workspace C:\\gw-verify\\ws --json >/dev/null
+python -c "from pathlib import Path; b=Path(r'C:\gw-verify\ws\okf\work\scratch-windows-verification.md').read_bytes(); print('CRCRLF' if b'\r\r\n' in b else 'CLEAN'); print('crlf', b.count(b'\r\n'), 'bare lf', b.count(b'\n')-b.count(b'\r\n'))"
+```
+
+**Expected:** `CLEAN`, and the CRLF count unchanged from before the two
+mutations (only the lines the mutation actually edited may differ, and they must
+be `\r\n` too). `bare lf 0`.
+
+Part b consumes two of the scratch item's phase transitions. Run it **after** F4
+has recorded the phase sequence it needs, or file a second scratch item for it —
+either is fine, but say in the record which you did.
+
+**If it fails:** Owner: **reopens** `bug-explicit-encoding-newline` — its static
+guard passed while the behaviour did not, which is exactly the case this run
+exists to catch.
+
+#### D2 — pinned-LF machine formats stay LF
+
+**Gate:** none.
+
+The `newline="\n"` sites — JSON and JSONL — must contain **no `\r` at all**,
+whatever the platform.
+
+**Command:** after at least one mutation has run in the scratch workspace:
+
+```bash
+python -c "
+import pathlib
+root = pathlib.Path(r'C:\gw-verify\ws\.gw')
+bad = [str(p) for p in root.rglob('*') if p.is_file() and p.suffix in {'.json', '.jsonl'} and b'\r' in p.read_bytes()]
+print('\n'.join(bad) if bad else 'NO CR IN ANY JSON/JSONL')
+print('files checked:', sum(1 for p in root.rglob('*') if p.is_file() and p.suffix in {'.json', '.jsonl'}))
+"
+```
+
+**Expected:** `NO CR IN ANY JSON/JSONL`, and `files checked:` greater than zero.
+A zero count is a **FAIL of the checkpoint's own setup**, not a pass — nothing
+was inspected. Run a mutation first.
+
+Then confirm the transaction journal specifically:
+
+```bash
+xxd C:/gw-verify/ws/.gw/cache/work-mutations/<newest-id>/journal.jsonl | grep -c '0d0a'
+```
+
+**Expected:** `0`.
+
+**If it fails:** Owner: **reopens** `bug-explicit-encoding-newline`.
+
+#### D3 — a non-cp1252 character survives
+
+**Gate:** none.
+
+Windows' default text encoding is cp1252, so a character outside it is the
+discriminator. An em dash (U+2014) and a CJK ideograph (U+6F22) are used because
+the first is the one that appears throughout this repo's own prose and the second
+cannot be represented in cp1252 at all.
+
+**Command:**
+
+```bash
+gw work file --workspace C:\\gw-verify\\ws \
+  --title "Encoding probe — 漢字 in a title" \
+  --kind TechDebt --summary "D3 — 漢字" --name d3-encoding-probe --json
+python -c "
+from pathlib import Path
+p = Path(r'C:\gw-verify\ws\okf\work\d3-encoding-probe.md')
+b = p.read_bytes()
+print('utf8 em dash', b'\xe2\x80\x94' in b)
+print('utf8 CJK    ', b'\xe6\xbc\xa2\xe5\xad\x97' in b)
+print('cp1252 dash ', b'\x97' in b.replace(b'\xe2\x80\x94', b''))
+print('decodes     ', bool(b.decode('utf-8')))
+"
+```
+
+**Expected:**
+
+```
+utf8 em dash True
+utf8 CJK     True
+cp1252 dash  False
+decodes      True
+```
+
+The shell must hand those characters through unmangled before the checkpoint
+means anything. If the cmd.exe code page mangles them at the prompt (a `?` in the
+title on disk is the tell), re-run from Git Bash, or `chcp 65001` first, and
+record which shell produced the result. A mangled title from a cp1252 console is
+a finding about the console, not about `gw` — do not record it as a `FAIL`
+without saying so.
+
+Then mutate it twice and re-check the same four lines are unchanged:
+
+```bash
+gw work advance work/d3-encoding-probe --workspace C:\\gw-verify\\ws --json >/dev/null
+gw work advance work/d3-encoding-probe --workspace C:\\gw-verify\\ws --json >/dev/null
+```
+
+**Expected:** identical output. Paste
+`certutil -f -encodehex C:\gw-verify\ws\okf\work\d3-encoding-probe.md CON 4` (or
+`xxd`) for the title line into the record.
+
+A `UnicodeDecodeError` or `UnicodeEncodeError` anywhere in this checkpoint is a
+**FAIL**, including from the `gw` command itself.
+
+**If it fails:** Owner: **reopens** `bug-explicit-encoding-newline`.

@@ -1027,8 +1027,8 @@
     },
     {
       "name": "gw util",
-      "help": "Diagnostics: log/tokens/trace and the surface freeze.",
-      "short_help": "Diagnostics: log/tokens/trace and the surface freeze.",
+      "help": "Diagnostics: platform/log/tokens/trace and the surface freeze.",
+      "short_help": "Diagnostics: platform/log/tokens/trace and the surface freeze.",
       "usage": [
         "[OPTIONS]",
         "COMMAND [ARGS]..."
@@ -1038,6 +1038,7 @@
       "commands": [
         "describe-surface",
         "log",
+        "platform",
         "tokens",
         "trace"
       ],
@@ -1141,6 +1142,55 @@
       "path": [
         "util",
         "log"
+      ]
+    },
+    {
+      "name": "gw util platform",
+      "help": "Report the platform, durability tier, dispatch backend and unavailable components.",
+      "short_help": "Report the platform, durability tier, dispatch backend and unavailable components.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "probe",
+          "opts": [
+            "--probe"
+          ],
+          "secondary_opts": [],
+          "help": "Also run liveness checks. Requires a workspace.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace root; defaults to discovery. Only read under --probe.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the whole report as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "util",
+        "platform"
       ]
     },
     {

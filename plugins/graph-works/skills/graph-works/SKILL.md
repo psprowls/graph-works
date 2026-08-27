@@ -121,7 +121,7 @@ test suites — is rendered as a single page nested under `repositories/<repo>/`
 | `/graph-works:archive` | Archive terminal-status work items (`gw work archive`) |
 | `/graph-works:regen-index` | Reconcile Markdown indexes throughout the path-native work tree |
 | `/graph-works:status` | One-screen work item rollup (`gw work status`) |
-| `/graph-works:next` | Drive a work item to its next pipeline stage (`gw work next`/`advance`) |
+| `/graph-works:workflow` | Drive a work item to its next pipeline stage (`gw work next`/`advance`) |
 | `/graph-works:proposals` | Review/accept/reject/supersede curated-page proposals |
 | `/graph-works:auto-drive` | Drive a work item's full pipeline unattended via Orca-supervised workers |
 

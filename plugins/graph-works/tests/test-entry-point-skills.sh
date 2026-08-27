@@ -84,6 +84,7 @@ assert_no_match() {
 echo "entry-point-skills guard test"
 
 assert_dir_absent "agents" "agents/ is gone — its four agents are skills"
+assert_dir_absent "commands" "commands/ is gone — every entry point is a skill"
 
 for skill in scan ingest query lint file archive log status regen-index proposals onboard; do
     assert_skill "$skill" "entry point '$skill' is a skill"
@@ -91,6 +92,9 @@ done
 
 assert_no_match 'agents/(scanner|ingestor|librarian|linter)\.md' \
     "nothing points at a deleted agent file"
+
+assert_no_match '/graph-works:next' \
+    "no /graph-works:next reference survives — the skill is named workflow"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

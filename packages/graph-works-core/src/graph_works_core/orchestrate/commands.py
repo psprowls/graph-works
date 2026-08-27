@@ -68,9 +68,10 @@ _UNKNOWN_TYPE_SEGMENT = "work"
 #: The phases a stage can be dispatched at. `done` is terminal.
 DISPATCH_PHASES: frozenset[str] = frozenset(PHASES - {"done"})
 
-#: The plugin command a dispatched worker runs. Named rather than inlined so the
-#: namespace has one grep-able home when the fork lands.
-DISPATCH_COMMAND = "/graph-works:next"
+#: The plugin skill a dispatched worker runs. Named rather than inlined so the
+#: namespace has one grep-able home when the fork lands. It is a skill, not a
+#: command: `commands/` did not ship to Codex, so every entry point is a skill.
+DISPATCH_COMMAND = "/graph-works:workflow"
 
 #: The workspace pointer a dispatched session reads at startup.
 WORKSPACE_VAR = "GRAPH_WORKS_DIR"

@@ -146,6 +146,7 @@ class Anchor(Protocol):
     def assert_directory_identity(self, path: Path, label: str) -> None: ...
     def path(self) -> Path: ...
     def alias(self) -> Path: ...
+    def resolve_descendant(self, relative: str) -> Path: ...
 
     # -- entry operations --------------------------------------------------
     def mkdir(self, name: str, mode: int | None = None) -> None: ...
@@ -281,6 +282,19 @@ class _PosixAnchor:
         if sys.platform == "darwin":
             return self.path()
         return Path(f"/proc/self/fd/{self.descriptor}")
+
+    def resolve_descendant(self, relative: str) -> Path:
+        """A path to a possibly-multi-component descendant of this anchor.
+
+        The `Anchor` vocabulary is single-component by design, but
+        `transactions._projected_symlink_is_internal` genuinely needs to open a
+        multi-component relative path in one call.  This is the one sanctioned
+        way to get one, and it is per-tier: the POSIX arm resolves through the
+        pinned descriptor's `/proc/self/fd` alias so the descendant cannot be
+        redirected by a rename of an ancestor; the path arm resolves under the
+        held root, which can be.
+        """
+        return self.alias().joinpath(relative)
 
     # -- entry operations --------------------------------------------------
 
@@ -639,6 +653,14 @@ class _WindowsAnchor:
         only consumer -- see Task 10.
         """
         return self._revalidate()
+
+    def resolve_descendant(self, relative: str) -> Path:
+        """A path to a possibly-multi-component descendant of this anchor.
+
+        See `Anchor.resolve_descendant`.  This tier has no descriptor to pin,
+        so the descendant resolves under the re-validated held root instead.
+        """
+        return self._revalidate().joinpath(relative)
 
     # -- entry operations --------------------------------------------------
 

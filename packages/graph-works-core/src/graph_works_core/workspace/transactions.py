@@ -42,7 +42,8 @@ from typing import IO, Literal, Protocol
 
 from okf_ext.moves import Move
 from okf_ext.writing import body_digest
-from okf_io import Rule, parse, validate
+from okf_io import Bundle, Rule, parse, validate
+from okf_io import load_bundle as _load_bundle
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
 from work_tracker_okf.indexes import reconcile_marked_index, render_entry
@@ -299,7 +300,7 @@ def _bundle_root_lock(root: Anchor) -> Iterator[None]:
 # `_rename_noreplace_at`, `_digest_in_directory`, `_executor_lock`,
 # `_fsync_live_file`, `_fsync_live_directory`, `_entry_fingerprint_at`,
 # `_append_journal`, `_commit_effect`, `_create_snapshot`, `_restore_snapshot`,
-# `_validate_postconditions`, `_load_bundle_at`, `directory_manifest_digest`,
+# `_validate_postconditions`, `_load_bundle_through`, `directory_manifest_digest`,
 # `plan_indexes` -- and replacing any of these `def`s with a
 # `from anchors import ...` would leave the import succeeding, the attribute
 # present, and every one of those injections silently inert, with no runtime
@@ -343,16 +344,35 @@ def _directory_descriptor_alias(anchor: Anchor) -> Path:
 def _raw_descriptor(anchor: Anchor) -> int:
     """The POSIX descriptor backing *anchor*.
 
-    A narrow escape hatch for the handful of call sites this item does not
-    touch: `okf_io.bundle._load_at` still takes a raw `int`, and the
-    multi-component `dir_fd` open in `_projected_symlink_is_internal` falls
-    outside the single-component `Anchor` vocabulary above.  `root` is always
-    a `_PosixAnchor` today -- the selector has no other implementation yet --
-    so this is not a behaviour change.
+    A narrow escape hatch with exactly one remaining consumer:
+    `_load_bundle_through`'s POSIX arm, which still calls `okf_io.bundle._load_at`
+    with a raw `int`. `_projected_symlink_is_internal` no longer needs this --
+    Task 10 moved it onto `Anchor.resolve_descendant` instead.
+
+    Refuses anything that is not a `_PosixAnchor` because a path-revalidated
+    anchor has no descriptor to lend, by construction: `_WindowsAnchor` never
+    opens one, so there is nothing here to hand back.
     """
     if not isinstance(anchor, anchors._PosixAnchor):
-        raise anchors.UnsupportedAnchorPlatform("this call requires a POSIX anchor")
+        raise anchors.UnsupportedAnchorPlatform("a path-revalidated anchor has no descriptor to lend")
     return anchor.descriptor
+
+
+def _load_bundle_through(root: Anchor, path: Path, *, ignore: Sequence[str]) -> Bundle:
+    """Load the bundle at *path*, anchored as strongly as this tier allows.
+
+    `okf_io.bundle._load_at` takes a raw descriptor and is the strong tier's
+    load: every read happens beneath the pinned root, so a rename mid-load
+    cannot redirect it.  The path-revalidated tier has no descriptor to give,
+    so it uses okf-io's ordinary path walk -- which is the SAME loader
+    (`okf_io.bundle._load` with `root_fd=None`), not a different one.  The
+    caller's `_assert_root_identity` before and after still bounds the window.
+
+    This is the last consumer of `_raw_descriptor`.
+    """
+    if isinstance(root, anchors._PosixAnchor):
+        return _load_bundle_at(path, _raw_descriptor(root), ignore=ignore)
+    return _load_bundle(path, ignore=ignore)
 
 
 @contextmanager
@@ -648,29 +668,25 @@ def _validate_ancestor_chain(root: Anchor, member: str) -> None:
 
 
 def _projected_symlink_is_internal(root: Anchor, destination: str, link: PurePosixPath) -> bool:
-    descriptor_root = _directory_descriptor_alias(root)
+    """Whether *link* -- read as a moved symlink's still-relative target --
+    still resolves inside the bundle root once its destination has moved.
+
+    Resolves through `Anchor.resolve_descendant` rather than opening the
+    target and resolving the descriptor: see Task 10 for the equivalence
+    check this rewrite required on the POSIX arm.
+    """
     resolved_root = _descriptor_path(root).resolve(strict=True)
     if link.is_absolute():
-        projected_text = link.as_posix()
-        projected_path = Path(projected_text)
+        projected = Path(link.as_posix())
     else:
         projected_pure = PurePosixPath(*PurePosixPath(destination).parent.parts, *link.parts)
-        projected_text = projected_pure.as_posix()
-        projected_path = descriptor_root.joinpath(*projected_pure.parts)
-    # The projected path is frequently a multi-component relative path, so it
-    # cannot go through `Anchor.open_child` (single component only); this stays
-    # a raw `dir_fd` open.
+        projected = root.resolve_descendant(projected_pure.as_posix())
     try:
-        descriptor = os.open(projected_text, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0), dir_fd=_raw_descriptor(root))
+        resolved_target = projected.resolve(strict=True)
     except FileNotFoundError:
-        resolved_target = projected_path.resolve(strict=False)
+        resolved_target = projected.resolve(strict=False)
     except OSError as exc:
         raise ValueError(f"{destination}: moved symlink target cannot be resolved safely: {exc}") from exc
-    else:
-        try:
-            resolved_target = _descriptor_path(anchors._PosixAnchor(descriptor)).resolve(strict=False)
-        finally:
-            os.close(descriptor)
     return resolved_target.is_relative_to(resolved_root)
 
 
@@ -1863,7 +1879,7 @@ def _capture_validation_state(
     """
     validation_root = layout.bundle_dir
     _assert_root_identity(validation_root, root)
-    bundle = _load_bundle_at(validation_root, _raw_descriptor(root), ignore=IGNORE)
+    bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
     _assert_root_identity(validation_root, root)
     items = load_items(bundle)
     report = validate(bundle, today=date.max, extra_rules=_extra_rules(layout, repo_root))
@@ -1905,7 +1921,7 @@ def _validate_postconditions(
     validation_root = layout.bundle_dir
     try:
         _assert_root_identity(validation_root, root)
-        bundle = _load_bundle_at(validation_root, _raw_descriptor(root), ignore=IGNORE)
+        bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
         _assert_root_identity(validation_root, root)
         items = load_items(bundle)
     except (OSError, ValueError) as exc:

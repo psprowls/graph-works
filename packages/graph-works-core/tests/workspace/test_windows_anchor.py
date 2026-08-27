@@ -13,7 +13,7 @@ import sys
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 from _transaction_helpers import _forced_tier, _plan, _snapshot, _workspace
@@ -455,3 +455,67 @@ def test_directory_fsync_is_honored_only_on_the_strong_tier(tmp_path: Path) -> N
     finally:
         posix.close()
         windows.close()
+
+
+def test_a_moved_symlink_escaping_the_bundle_is_refused_on_the_windows_tier(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (layout.bundle_dir / "work" / "escape.md").symlink_to(outside / "target.md")
+    anchor = _anchor(layout.bundle_dir)
+    try:
+        assert not transactions._projected_symlink_is_internal(
+            anchor, "work/moved.md", PurePosixPath((layout.bundle_dir / "work" / "escape.md").readlink())
+        )
+    finally:
+        anchor.close()
+
+
+def test_an_internal_moved_symlink_is_accepted_on_the_windows_tier(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work" / "inside.md").symlink_to("index.md")
+    anchor = _anchor(layout.bundle_dir)
+    try:
+        assert transactions._projected_symlink_is_internal(anchor, "work/moved.md", PurePosixPath("index.md"))
+    finally:
+        anchor.close()
+
+
+def test_both_tiers_agree_on_the_same_projection(tmp_path: Path) -> None:
+    """The strongest form of this test: the two anchors must not disagree
+    about whether a given symlink escapes."""
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work" / "inside.md").symlink_to("index.md")
+    posix = anchors.open_anchor(layout.bundle_dir, platform_name="linux")
+    windows = anchors.open_anchor(layout.bundle_dir, platform_name="win32")
+    try:
+        for link in (PurePosixPath("index.md"), PurePosixPath("../outside.md")):
+            assert transactions._projected_symlink_is_internal(
+                posix, "work/moved.md", link
+            ) is transactions._projected_symlink_is_internal(windows, "work/moved.md", link)
+    finally:
+        posix.close()
+        windows.close()
+
+
+def test_validation_state_loads_through_either_tier(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    windows = anchors.open_anchor(layout.bundle_dir, platform_name="win32")
+    try:
+        state = transactions._capture_validation_state(layout, _plan(layout), windows, repo_root=None)
+        assert isinstance(state.findings, dict)
+    finally:
+        windows.close()
+
+
+def test_raw_descriptor_still_refuses_a_path_revalidated_anchor(tmp_path: Path) -> None:
+    """The escape hatch keeps its guard; it just has one consumer now."""
+    anchor = anchors.open_anchor(tmp_path, platform_name="win32")
+    try:
+        with pytest.raises(anchors.UnsupportedAnchorPlatform):
+            transactions._raw_descriptor(anchor)
+    finally:
+        anchor.close()

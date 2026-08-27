@@ -2060,18 +2060,18 @@ def test_validation_reads_anchored_root_when_configured_name_swaps_during_load(
         writes=(PlannedWrite(f"{item}.md", _digest(before), b"\xff\xfe"),),
         validate_paths=(item,),
     )
-    real_load = transactions._load_bundle_at
+    real_load = transactions._load_bundle_through
 
-    def swap_only_while_loading(root: Path, root_fd: int, **kwargs: object):
+    def swap_only_while_loading(root: transactions.Anchor, path: Path, **kwargs: object):
         layout.bundle_dir.rename(held)
         decoy.rename(layout.bundle_dir)
         try:
-            return real_load(root, root_fd, **kwargs)
+            return real_load(root, path, **kwargs)
         finally:
             layout.bundle_dir.rename(decoy)
             held.rename(layout.bundle_dir)
 
-    monkeypatch.setattr(transactions, "_load_bundle_at", swap_only_while_loading)
+    monkeypatch.setattr(transactions, "_load_bundle_through", swap_only_while_loading)
 
     result = apply_mutation(layout, plan)
 

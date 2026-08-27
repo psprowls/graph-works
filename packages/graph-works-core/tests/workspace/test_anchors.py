@@ -39,7 +39,7 @@ def test_raw_descriptor_refuses_a_windows_anchor(tmp_path: Path) -> None:
 
     anchor = anchors.open_anchor(tmp_path, platform_name="win32")
     try:
-        with pytest.raises(anchors.UnsupportedAnchorPlatform, match="POSIX anchor"):
+        with pytest.raises(anchors.UnsupportedAnchorPlatform, match="no descriptor to lend"):
             transactions._raw_descriptor(anchor)
     finally:
         anchor.close()

@@ -513,7 +513,8 @@ def test_both_tiers_agree_on_the_same_projection_when_the_target_exists(tmp_path
     layout = _workspace(tmp_path)
     (layout.bundle_dir / "work").mkdir(exist_ok=True)
     (layout.bundle_dir / "work" / "inside.md").symlink_to("index.md")
-    assert (layout.bundle_dir / "index.md").exists()  # internal target: real, from install_bundle
+    (layout.bundle_dir / "work" / "index.md").write_text("x\n")  # internal target: real, matches the projection
+    assert (layout.bundle_dir / "work" / "index.md").exists()
     (layout.bundle_dir.parent / "outside.md").write_text("outside\n")  # external target: real, on purpose
     posix = anchors.open_anchor(layout.bundle_dir, platform_name="linux")
     windows = anchors.open_anchor(layout.bundle_dir, platform_name="win32")

@@ -281,3 +281,14 @@ def test_preflight_refuses_before_any_effect_lands(tmp_path: Path) -> None:
     assert not result.ok
     assert not result.rolled_back  # nothing was touched, so nothing was rolled back
     assert _snapshot(layout.bundle_dir) == before
+
+
+def test_preflight_directly_refuses_a_symlink_member_on_the_windows_tier(tmp_path: Path) -> None:
+    """Exercises `_preflight`'s call to `_refuse_unsupported_shapes` without going through
+    `apply_mutation`'s lock acquisition, which is still blocked on Task 8's `exclusive_lock`.
+    """
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work" / "linked.md").symlink_to(layout.bundle_dir / "index.md")
+    with _forced_tier("win32"), pytest.raises(ValueError, match="durability tier refuses"):
+        transactions._preflight(layout, _plan(layout, deletes=("work/linked.md",)))

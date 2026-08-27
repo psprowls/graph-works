@@ -15,7 +15,7 @@ from graph_works_core.workspace import anchors
 
 
 def _anchor(root: Path) -> anchors._WindowsAnchor:
-    return anchors._WindowsAnchor(root, long_paths_enabled=True)
+    return anchors._WindowsAnchor(root, long_paths=True)
 
 
 def test_windows_anchor_satisfies_the_anchor_protocol(tmp_path: Path) -> None:
@@ -43,7 +43,7 @@ def test_windows_anchor_refuses_a_root_that_is_not_a_directory(tmp_path: Path) -
     target = tmp_path / "file.md"
     target.write_text("x\n", encoding="utf-8")
     with pytest.raises(NotADirectoryError):
-        anchors._WindowsAnchor(target, long_paths_enabled=True)
+        anchors._WindowsAnchor(target, long_paths=True)
 
 
 def test_open_child_refuses_a_symlinked_component(tmp_path: Path) -> None:
@@ -179,3 +179,36 @@ def test_open_absolute_walks_every_component(tmp_path: Path) -> None:
 def test_open_absolute_refuses_a_relative_path(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="must be absolute"):
         anchors._WindowsAnchor.open_absolute(Path("relative/path"))
+
+
+def test_the_windows_anchor_refuses_construction_without_long_path_support(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="long path support"):
+        anchors._WindowsAnchor(tmp_path, long_paths=False)
+
+
+def test_the_refusal_names_the_remedy_and_the_limit(tmp_path: Path) -> None:
+    with pytest.raises(ValueError) as caught:
+        anchors._WindowsAnchor(tmp_path, long_paths=False)
+    message = str(caught.value)
+    assert "LongPathsEnabled" in message
+    assert "260" in message
+    assert "WSL" in message
+
+
+def test_long_paths_are_unconditionally_available_off_windows() -> None:
+    assert anchors.long_paths_enabled() is True
+
+
+def test_a_child_anchor_inherits_the_long_path_answer(tmp_path: Path) -> None:
+    """`open_child` constructs a new anchor; it must not re-probe and it must
+    not silently re-enable what the parent refused."""
+    (tmp_path / "lane").mkdir()
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True)
+    try:
+        child = anchor.open_child("lane")
+        try:
+            assert child._long_paths is True
+        finally:
+            child.close()
+    finally:
+        anchor.close()

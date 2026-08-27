@@ -368,6 +368,36 @@ class _PosixAnchor:
 #: `POSIX_STRONG_TIER`; ADR-0042 records what each one guarantees.
 WINDOWS_REVALIDATED_TIER = "windows-revalidated"
 
+#: The Win32 path length ceiling that the registry opt-in lifts.  Named so the
+#: refusal message and ADR-0042 cite the same number.
+MAX_PATH = 260
+
+
+def long_paths_enabled() -> bool:
+    """Whether this system lifts the 260-character `MAX_PATH` limit.
+
+    Off Windows there is no limit to lift, so the answer is unconditionally
+    yes -- and that is what makes the POSIX coverage pass able to construct a
+    `_WindowsAnchor` at all.
+
+    On Windows the registry value is the machine-wide opt-in.  The
+    per-application manifest half is not readable from here, so a `False`
+    can be a false negative for a manifested interpreter.  Refusing on a
+    false negative is the safe direction: the alternative is a commit that
+    fails partway through a deep member path, which is the failure this
+    check exists to prevent.
+    """
+    if sys.platform != "win32":
+        return True
+    import winreg  # Windows-only, imported at the point of use
+
+    try:  # pragma: no cover -- native Windows only
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as key:
+            value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+    except OSError:
+        return False
+    return bool(value)
+
 
 class _WindowsAnchor:
     """An `Anchor` backed by a held, resolved directory path.
@@ -389,14 +419,20 @@ class _WindowsAnchor:
 
     __slots__ = ("_identity", "_long_paths", "root")
 
-    def __init__(self, root: Path, *, long_paths_enabled: bool | None = None) -> None:
+    def __init__(self, root: Path, *, long_paths: bool | None = None) -> None:
         self.root = root.resolve(strict=True)
         info = self.root.lstat()
         if not stat.S_ISDIR(info.st_mode):
             raise NotADirectoryError(f"anchor root is not a directory: {self.root}")
         self._identity = (info.st_dev, info.st_ino)
-        # Task 6 replaces this with the real registry read.
-        self._long_paths = True if long_paths_enabled is None else long_paths_enabled
+        self._long_paths = long_paths_enabled() if long_paths is None else long_paths
+        if not self._long_paths:
+            raise ValueError(
+                f"the {WINDOWS_REVALIDATED_TIER} tier requires long path support: bundle "
+                f"member paths routinely exceed the {MAX_PATH}-character MAX_PATH limit. "
+                r"Set HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled "
+                f"to 1 and restart, or run under WSL for the {POSIX_STRONG_TIER} tier."
+            )
 
     # -- lifetime ---------------------------------------------------------
 
@@ -438,7 +474,7 @@ class _WindowsAnchor:
             raise NotADirectoryError(f"refusing to follow a symlinked component: {name!r}")
         if not stat.S_ISDIR(info.st_mode):
             raise NotADirectoryError(f"not a directory: {name!r}")
-        return _WindowsAnchor(candidate, long_paths_enabled=self._long_paths)
+        return _WindowsAnchor(candidate, long_paths=self._long_paths)
 
     def open_or_create_child(self, name: str) -> _WindowsAnchor:
         try:
@@ -460,7 +496,7 @@ class _WindowsAnchor:
         the pre-swap directory forward.  That difference is a tier property,
         not a bug, and ADR-0042 names it.
         """
-        return _WindowsAnchor(self.root, long_paths_enabled=self._long_paths)
+        return _WindowsAnchor(self.root, long_paths=self._long_paths)
 
     def close(self) -> None:
         """Nothing to release.  A path is not a descriptor.
@@ -749,6 +785,7 @@ def open_absolute_anchor(path: Path, *, platform_name: str | None = None) -> Anc
 
 
 __all__ = [
+    "MAX_PATH",
     "POSIX_STRONG_TIER",
     "WINDOWS_REVALIDATED_TIER",
     "Anchor",
@@ -756,6 +793,7 @@ __all__ = [
     "anchor_tier",
     "directory_flags",
     "lock_path",
+    "long_paths_enabled",
     "nofollow_flag",
     "open_absolute_anchor",
     "open_anchor",

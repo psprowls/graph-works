@@ -1064,7 +1064,11 @@ def emit_scan_worklist(worklist: ScanWorklist, *, out_dir: Path) -> tuple[str, .
     worklist_path = out_dir / WORKLIST_FILENAME
     if worklist_path.is_symlink():
         worklist_path.unlink()
-    worklist_path.write_text(json.dumps(worklist_payload(worklist), indent=2, sort_keys=True), encoding="utf-8")
+    worklist_path.write_text(
+        json.dumps(worklist_payload(worklist), indent=2, sort_keys=True),
+        encoding="utf-8",
+        newline="\n",
+    )
     written = [str(worklist_path)]
     seen: dict[str, int] = {}
     for task in worklist.prose_tasks:

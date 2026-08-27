@@ -243,7 +243,7 @@ def write_active_work(layout: WorkspaceLayout, path: str, phase: str, *, updated
     target = layout.cache_dir / ACTIVE_WORK_FILENAME
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8")
+        target.write_text(json.dumps(pointer, indent=2) + "\n", encoding="utf-8", newline="\n")
     except OSError:
         return None
     return target

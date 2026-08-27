@@ -48,7 +48,7 @@ def write_projection(store: ConfigStore, target: Path) -> Path:
     fd, tmp_name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".tmp")
     tmp = Path(tmp_name)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
             handle.write(rendered)
         # mkstemp creates the file at mode 0600; Path.replace carries that mode
         # across the rename. Consumers read this file across process/user

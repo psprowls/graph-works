@@ -183,7 +183,7 @@ def _write_settings(path: Path, data: dict[str, Any]) -> None:
     try:
         rendered = json.dumps(data, indent=2) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(rendered, encoding="utf-8")
+        path.write_text(rendered, encoding="utf-8", newline="\n")
         json.loads(path.read_text(encoding="utf-8"))  # confirm the write re-parses
     except (OSError, UnicodeError, TypeError, ValueError) as exc:
         raise HooksIOError(f"could not write settings {path}: {exc}") from exc

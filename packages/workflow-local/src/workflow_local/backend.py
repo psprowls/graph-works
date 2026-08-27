@@ -215,7 +215,7 @@ class LocalSession:
         if entry is None:
             raise UnknownWorker(reply_token)
         path = self._dir / entry.handle / REPLIES_NAME
-        with path.open("a", encoding="utf-8") as fh:
+        with path.open("a", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps({"reply_token": reply_token, "answer": answer}) + "\n")
 
     def stop(self, key: str) -> None:

@@ -192,3 +192,15 @@ def test_main_exits_one_and_names_the_site(tmp_path, capsys):
     stderr = capsys.readouterr().err
     assert "scripts/bad.py:2" in stderr
     assert "newline=" in stderr
+
+
+def test_this_repository_has_no_implicit_text_io():
+    """The property, asserted against the real tree rather than a fixture.
+
+    `just check`'s `text-io` recipe is the primary gate; this is the same
+    assertion inside the suite, so a regression fails `just test` too and does
+    not wait for someone to run the full gate.
+    """
+    root = Path(__file__).resolve().parent.parent.parent
+    violations = find_violations(root)
+    assert violations == [], "\n" + "\n".join(v.render() for v in violations)

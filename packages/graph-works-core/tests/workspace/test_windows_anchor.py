@@ -269,6 +269,7 @@ def test_refused_members_accepts_ordinary_members(tmp_path: Path) -> None:
         anchor.close()
 
 
+@pytest.mark.xfail(strict=True, reason="blocked on Task 8's exclusive_lock landing")
 def test_preflight_refuses_before_any_effect_lands(tmp_path: Path) -> None:
     """D-002's whole point: the refusal precedes the first mutation."""
     layout = _workspace(tmp_path)  # shared helper -- see Step 3

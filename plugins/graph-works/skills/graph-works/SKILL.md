@@ -107,32 +107,34 @@ test suites — is rendered as a single page nested under `repositories/<repo>/`
 /graph-works:lint
 ```
 
-## Slash commands
+## Entry points
 
-| Command | Purpose |
+Every entry point is a skill under `skills/`. Claude Code namespaces plugin
+skills as `<plugin>:<name>`, so each is invoked `/graph-works:<name>`. Codex
+invokes skills with a `$` sigil and rejects unrecognised `/` tokens
+client-side, so there the form is `$<name>` — or `$graph-works:<name>` if your
+Codex build namespaces plugin skills rather than exposing them flat.
+
+| Skill | Purpose |
 |---|---|
-| `/graph-works:onboard` | Locate or create the workspace (defaults to `<repo>/.works`), then configure it |
-| `/graph-works:scan` | Build the code graph; create/update/delete one page per admitted entity under `repositories/<repo>/` (or `dependencies/`) |
-| `/graph-works:ingest <path>` | Read a source from any path, update vault, log it |
-| `/graph-works:query <question>` | Search vault, synthesize answer with citations, offer to file back |
-| `/graph-works:lint` | Health check — orphans, broken links, stale claims, **code drift**, and the work-layer catalog |
-| `/graph-works:log` | Show recent log entries (uses unix tools on `log.md`) |
-| `/graph-works:file` | Interactively file a new work item (`gw work file`) |
-| `/graph-works:archive` | Archive terminal-status work items (`gw work archive`) |
-| `/graph-works:regen-index` | Reconcile Markdown indexes throughout the path-native work tree |
-| `/graph-works:status` | One-screen work item rollup (`gw work status`) |
-| `/graph-works:workflow` | Drive a work item to its next pipeline stage (`gw work next`/`advance`) |
-| `/graph-works:proposals` | Review/accept/reject/supersede curated-page proposals |
-| `/graph-works:auto-drive` | Drive a work item's full pipeline unattended via Orca-supervised workers |
+| `onboard` | Locate or create the workspace (defaults to `<repo>/.works`), then configure it |
+| `scan` | Build the code graph; create/update/delete one page per admitted entity under `repositories/<repo>/` (or `dependencies/`) |
+| `ingest` | Read a source from any path, update vault, log it |
+| `query` | Search vault, synthesize answer with citations, offer to file back |
+| `lint` | Health check — orphans, broken links, stale claims, **code drift**, and the work-layer catalog |
+| `log` | Show recent log entries (uses unix tools on `log.md`) |
+| `file` | Interactively file a new work item (`gw work file`) |
+| `archive` | Archive terminal-status work items (`gw work archive`) |
+| `regen-index` | Reconcile Markdown indexes throughout the path-native work tree |
+| `status` | One-screen work item rollup (`gw work status`) |
+| `workflow` | Drive a work item to its next pipeline stage (`gw work next`/`advance`) |
+| `proposals` | Review/accept/reject/supersede curated-page proposals |
+| `auto-drive` | Drive a work item's full pipeline unattended via Orca-supervised workers |
 
-## Sub-agents
-
-| Agent | When dispatched |
-|---|---|
-| `graph-works:scanner` | Build the code graph; write/update/delete one page per admitted entity under `repositories/<repo>/` (or `dependencies/`) |
-| `graph-works:ingestor` | Delegated ingest flow — reads source, proposes updates, applies after approval |
-| `graph-works:linter` | Runs the health-check workflow (mechanical + semantic + code drift) |
-| `graph-works:librarian` | Answers queries using index-first search with citations |
+`scan`, `ingest`, `query`, and `lint` were sub-agents until they became skills.
+Each carries a `## Dispatch` section stating that a forked sub-agent with
+`Read, Write, Edit, Bash, Grep, Glob` is preferred, and that running inline is
+the supported fallback on a harness without sub-agent dispatch.
 
 ## Cross-tool compatibility
 

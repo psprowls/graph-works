@@ -27,8 +27,7 @@ READMEs go stale. Architecture diagrams drift. Comments rot. This skill turns an
 | Piece | What it does |
 |---|---|
 | **SKILL.md** | Master skill — architecture, workflows, page categories, iron rules |
-| **4 sub-agents** | `graph-works:scanner`, `graph-works:ingestor`, `graph-works:librarian`, `graph-works:linter` |
-| **13 slash commands** | `/graph-works:onboard`, `/graph-works:scan`, `/graph-works:ingest`, `/graph-works:query`, `/graph-works:lint`, `/graph-works:log`, `/graph-works:file`, `/graph-works:archive`, `/graph-works:regen-index`, `/graph-works:status`, `/graph-works:workflow`, `/graph-works:proposals`, `/graph-works:auto-drive` |
+| **13 entry-point skills** | `onboard`, `scan`, `ingest`, `query`, `lint`, `log`, `file`, `archive`, `regen-index`, `status`, `workflow`, `proposals`, `auto-drive` — invoked `/graph-works:<name>` in Claude Code, `$<name>` in Codex |
 | **Substrate operations** | Via `gw`: `bootstrap`, `scan`, `ingest`, `query`, `wiki lint` (+ code-drift) |
 | **12 reference docs** | Schema, page formats, 4 workflows (scan/ingest/query/lint), Obsidian setup, cross-tool setup, monorepo principles, lifecycle rules, sidecar schema |
 | **Wiki templates** | `CLAUDE.md`, `AGENTS.md`, `cursorrules`, `index.md`, `log.md`, plus entity templates (`entity-repository`, `entity-package`, `entity-app`, `entity-agent-plugin`, `entity-dependency`, `entity-test-suite`) and curated-page templates (`concept`, `concept-pattern`, `concept-architecture`, `source`, `adr`, `dependency`, `work`, `index`) |

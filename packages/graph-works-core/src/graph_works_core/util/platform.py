@@ -20,7 +20,6 @@ than last.
 from __future__ import annotations
 
 import importlib.util
-import os
 import shutil
 import signal
 import subprocess
@@ -28,6 +27,8 @@ import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, Protocol
+
+from okf_ext.locking import locked, primitive_for
 
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -277,18 +278,17 @@ class DispatchBackendProvider:
 
 #: The three modules that take an advisory file lock today, as `<pkg>/<path>`
 #: below `packages/*/src/`. Named rather than discovered so the report cites
-#: real files — and so a test can assert each one still imports `fcntl`, which
-#: is what keeps this list from rotting once the portable-lock work lands.
+#: real files — and so a test can assert each one still imports
+#: `okf_ext.locking`, which is what keeps this list from rotting.
 LOCK_SITES = (
     "work_tracker_okf/decisions.py",
     "graph_works_core/work/commands.py",
     "okf_ext/logs/__init__.py",
 )
 
-#: The dotted module name for the first lock site, used as `Capability.provider`
-#: in both branches of `FileLockProvider.declare` — computed once so the two
-#: branches cannot drift apart.
-LOCK_SITES_PROVIDER = LOCK_SITES[0].replace("/", ".").removesuffix(".py")
+#: The dotted module name of the portable lock helper every site above
+#: delegates to — `Capability.provider` for `FileLockProvider.declare`.
+LOCKING_MODULE = "okf_ext.locking"
 
 #: The probe's own lock file. Deliberately NOT a live decisions-cache lock:
 #: contending for a real ledger lock to answer a diagnostic question could
@@ -298,63 +298,54 @@ PROBE_LOCK_NAME = "platform-probe.lock"
 #: The package whose README already declares itself POSIX-only.
 WORKFLOW_LOCAL_BACKEND = "workflow_local.backend"
 
+#: `msvcrt.locking(LK_LOCK, ...)` retries once per second for ten attempts and
+#: then raises `OSError` — a real, declared divergence from `fcntl.flock`'s
+#: unbounded block. Named so `declare()`'s win32 detail and any future ADR
+#: cite the same number.
+WIN32_LOCK_BOUND_SECONDS = 10
+
 
 class FileLockProvider:
     """Which primitive serializes a read-mutate-write cycle across processes.
 
-    Derived from `fcntl`'s availability, because that is literally what the
-    three lock sites import. When a portable `locked(path)` helper exists,
-    this asks it which branch it took instead.
+    Asks `okf_ext.locking.primitive_for` which branch a portable `locked(path)`
+    would take, rather than restating `fcntl`'s availability itself — the
+    machinery that owns the answer gives it.
     """
 
     name = "file-lock"
 
     def declare(self, platform_name: str) -> Capability:
         sites = ", ".join(LOCK_SITES)
-        if module_available("fcntl", platform_name):
-            return Capability(
-                name=self.name,
-                value="fcntl.flock",
-                status="available",
-                detail=f"advisory exclusive locks via fcntl.flock at {sites}",
-                guarantees=("an exclusive advisory lock serializes writers across processes",),
-                provider=LOCK_SITES_PROVIDER,
+        primitive = primitive_for(platform_name)
+        if platform_name == "win32":
+            detail = (
+                f"advisory exclusive locks via {primitive} at {sites}, bounded "
+                f"to roughly {WIN32_LOCK_BOUND_SECONDS}s per acquisition — a "
+                f"contended lock past that raises OSError rather than blocking "
+                f"indefinitely"
             )
+        else:
+            detail = f"advisory exclusive locks via {primitive} at {sites}"
         return Capability(
             name=self.name,
-            value="unavailable",
-            status="unavailable",
-            detail=f"{sites} each import `fcntl`, which native Windows does not provide",
-            guarantees=(),
-            provider=LOCK_SITES[0].replace("/", ".").removesuffix(".py"),
+            value=primitive,
+            status="available",
+            detail=detail,
+            guarantees=("an exclusive advisory lock serializes writers across processes",),
+            provider=LOCKING_MODULE,
         )
 
     def probe(self, layout: WorkspaceLayout) -> ProbeResult | None:
         """Take and immediately release a lock on a dedicated cache path."""
         lock = layout.cache_dir / PROBE_LOCK_NAME
         try:
-            import fcntl
-
-            lock.parent.mkdir(parents=True, exist_ok=True)
-            descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
-            try:
-                fcntl.flock(descriptor, fcntl.LOCK_EX)
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
-            finally:
-                os.close(descriptor)
-        except ImportError as exc:
-            # Native Windows: `declare()` also reports "unavailable" here (via
-            # `module_available("fcntl", ...)`), so the two answers agree.
-            return ProbeResult(
-                capability=self.name,
-                status="unavailable",
-                detail=f"fcntl is unavailable here: {exc}",
-                agrees_with_declared=True,
-            )
+            with locked(lock):
+                pass
         except OSError as exc:
-            # `fcntl` imported fine but the actual lock attempt failed (e.g.
-            # permission denied): `declare()` says "available", so this is a
-            # genuine disagreement.
+            # `declare()` reports "available" unconditionally, so any failure
+            # here — a permission error, a Windows retry exhaustion — is a
+            # genuine disagreement, not an expected native-Windows absence.
             return ProbeResult(
                 capability=self.name,
                 status="unavailable",

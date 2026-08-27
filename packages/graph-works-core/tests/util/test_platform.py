@@ -208,24 +208,25 @@ def test_the_file_lock_is_flock_on_posix() -> None:
     assert capability.value == "fcntl.flock"
 
 
-def test_the_file_lock_is_unavailable_on_win32_and_names_its_sites() -> None:
+def test_the_file_lock_is_available_on_win32_via_msvcrt_and_names_its_sites() -> None:
     capability = FileLockProvider().declare("win32")
 
-    assert capability.status == "unavailable"
+    assert capability.status == "available"
+    assert capability.value == "msvcrt.locking"
     assert "work_tracker_okf" in capability.detail
+    assert "10s" in capability.detail
 
 
-def test_every_named_lock_site_still_imports_fcntl() -> None:
-    """The detail names three files. If one stops importing `fcntl` — because
-    the portable-lock work landed — this report is stale and must be updated
-    with it."""
+def test_every_named_lock_site_still_imports_the_portable_lock_helper() -> None:
+    """The detail names three files. If one stops importing `okf_ext.locking`
+    this report is stale and must be updated with it."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[4]
     for site in LOCK_SITES:
         matches = list(root.glob(f"packages/*/src/{site}"))
         assert matches, site
-        assert "import fcntl" in matches[0].read_text(encoding="utf-8")
+        assert "okf_ext.locking" in matches[0].read_text(encoding="utf-8")
 
 
 def test_the_file_lock_probe_takes_and_releases_a_real_lock(tmp_path) -> None:
@@ -252,21 +253,6 @@ def test_the_file_lock_probe_reports_rather_than_raises_when_the_cache_is_unwrit
     assert result is not None
     assert result.status == "unavailable"
     assert result.agrees_with_declared is False
-
-
-def test_the_file_lock_probe_agrees_when_fcntl_cannot_be_imported(tmp_path, monkeypatch) -> None:
-    """Native Windows: `declare()` also reports `unavailable` here (no
-    `fcntl` to import), so the probe's `ImportError` branch AGREES with the
-    declaration rather than disagreeing — unlike a real lock failure."""
-    monkeypatch.setitem(sys.modules, "fcntl", None)
-    layout = layout_for(tmp_path / ".works")
-    layout.cache_dir.mkdir(parents=True)
-
-    result = FileLockProvider().probe(layout)
-
-    assert result is not None
-    assert result.status == "unavailable"
-    assert result.agrees_with_declared is True
 
 
 def test_process_control_is_available_on_posix() -> None:
@@ -312,7 +298,7 @@ def test_the_windows_report_is_asserted_from_a_posix_box() -> None:
     report = build_report(platform_name="win32")
 
     assert report.platform == "win32"
-    assert set(report.unavailable) == {"durability-tier", "file-lock", "process-control"}
+    assert set(report.unavailable) == {"durability-tier", "process-control"}
 
 
 def test_the_default_report_needs_no_workspace_and_runs_nothing(monkeypatch) -> None:

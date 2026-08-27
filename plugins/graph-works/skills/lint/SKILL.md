@@ -1,14 +1,37 @@
 ---
-name: linter
-description: Dispatched sub-agent that runs a health check on a Code Wiki. Mechanical checks via scripts (orphans, broken links, stale pages, missing frontmatter, duplicate titles, log gaps, CODE DRIFT), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), mechanical work-lifecycle checks (32 rules over every path-native item beneath the configured OKF bundle's `work/` tree), and produces a markdown report with suggested actions. Spawn weekly, after batch ingests, after /graph-works:scan, or when the user says "lint the wiki" / "check the wiki".
-skills: [graph-works]
-domain: engineering
-model: opus
-tools: [Read, Write, Edit, Bash, Grep, Glob]
-context: fork
+name: lint
+description: Use when the user says "lint the wiki" or "check the wiki", weekly, after batch ingests, or after a scan — or when they invoke /graph-works:lint. Runs mechanical checks (orphans, broken links, stale pages, missing frontmatter, duplicate titles, log gaps, code drift), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), and the mechanical work-lifecycle catalog over every path-native item beneath the configured OKF bundle's work/ tree, then produces a markdown report with suggested actions.
 ---
 
-# linter
+# Health-check the wiki
+
+Health-check the wiki. Includes **code-drift detection** on top of generic wiki checks — surfaces when the vault has fallen out of sync with the code.
+
+**Reports, doesn't silently fix.** You decide what to change.
+
+Run weekly, after every `/graph-works:scan`, and after batch ingests.
+
+## Usage
+
+```
+/graph-works:lint          # Claude Code
+$lint                      # Codex
+```
+
+No arguments. The staleness and log-gap thresholds are `gw wiki lint`'s own, not
+something this command threads through.
+
+Workspace and repo are discovered automatically via `workspace_io`.
+
+## Dispatch
+
+Prefer running this skill's body in a forked sub-agent with the tool set
+`Read, Write, Edit, Bash, Grep, Glob`. A lint pass parses several large JSON
+reports and reads many pages; its intermediate output would flood a caller's
+context if run inline.
+
+On a harness without sub-agent dispatch, run it inline in the current
+context — the body below is written to work either way.
 
 ## Role
 
@@ -18,9 +41,19 @@ Code Wiki lint adds **code-drift detection** to the generic wiki health check: p
 
 Spawned per-lint-pass.
 
+## Frequency
+
+| Trigger | Pass |
+|---|---|
+| Weekly | Mechanical only |
+| After `/graph-works:scan` | Full — catches drift |
+| After batch ingest | Full |
+| Monthly | Full + structural review |
+| Before sharing the wiki | Full + extra review |
+
 ## Workflow
 
-Follow `references/lint-workflow.md`. Four passes.
+Follow `../graph-works/references/lint-workflow.md`. Four passes.
 
 ### Pass 1 — Mechanical (`gw`)
 
@@ -136,3 +169,8 @@ Then append a `## [YYYY-MM-DD] lint | <date> health check` entry to `log.md` wit
 - Skipping semantic pass because "mechanical looks clean" → do the read-and-think pass anyway
 - Reporting without suggestions → add suggestions
 - Not updating `log.md` → always log
+
+## Reference
+
+→ `../graph-works/SKILL.md`
+→ `../graph-works/references/lint-workflow.md`

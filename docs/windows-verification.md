@@ -229,3 +229,112 @@ nothing at all — silently, on Unix, which is where it is used every day.
 
 Owner: a **new child** under `epic-native-windows-support`, scoped to
 restructuring the batch half.
+
+## Group B — the static gates, on Windows
+
+Every recipe in the `justfile` is exactly what a future CI job would call. This
+group runs each one natively and records its exit code.
+
+**Read this before recording a `FAIL` for an "unexpected" line.** `just` echoes
+each recipe's command line to **stderr** before running it. That echo is not
+output from the check — it is `just` narrating. Every **Expected** below is
+therefore stated as *what appears on stdout*, plus the exit code. Capture the two
+streams separately (`2>` to a file, or `2>/dev/null` under Git Bash) rather than
+eyeballing a merged transcript.
+
+#### B0 — is `just check` natively invocable at all?
+
+**Gate:** none.
+
+**Command:** from **cmd.exe**, at the clone's root:
+
+```bat
+just --version
+just sync
+echo rc=%ERRORLEVEL%
+```
+
+**Expected — and read this carefully: the answer is itself the finding.** The
+recipes assume a POSIX shell: several chain with `&&`, and `test-plugin` carries
+a `#!/usr/bin/env bash` shebang, `cd`s, and hard-requires `bash`, `node` and
+`npm`. `just` on Windows defaults to `cmd.exe` unless told otherwise.
+
+Record in the evidence one of:
+
+- **PASS, unmodified** — `just sync` completes and `rc=0` with no changes to the
+  checkout.
+- **PASS, with a documented prerequisite** — it works once `just` is pointed at
+  Git Bash. Record the exact mechanism used, verbatim: the `--shell` flags, or
+  the `set windows-shell := [...]` line that would have to be added to the
+  `justfile`. **Do not commit that line as part of this run** — recording what
+  it would be is this checkpoint's deliverable; adding it is a separate child's.
+- **FAIL** — not invocable by any means you tried. Record what you tried.
+
+A `FAIL` here is a **red with an owner**, not a blocked run: continue to
+B1–B9 by invoking each recipe's underlying commands directly from Git Bash
+(they are listed verbatim in the `justfile`) and say so in the record.
+
+**If it fails:** Owner: a **new child** under `epic-native-windows-support` —
+either a `set windows-shell` line in the `justfile` or a documented prerequisite
+in the root README.
+
+#### B1–B9 — recipe by recipe
+
+**Gate:** none, except B7 — see below.
+
+**Command:** run each in turn, from whichever shell B0 established, recording
+the exit code of each:
+
+| # | Command | Expected on stdout | Exit |
+|---|---|---|---|
+| B1 | `just normalization` | **nothing** | 0 |
+| B2 | `just text-io` | **nothing** | 0 |
+| B3 | `just line-endings` | **nothing** | 0 |
+| B4 | `just lint` | `All checks passed!` from `ruff check`, then `N files already formatted` from `ruff format --check` | 0 |
+| B5 | `just types` | one `Success: no issues found in N source files` line per `mypy --strict` invocation | 0 |
+| B6 | `just contracts` | one `KEPT` line per contract, then `Contracts: N kept, 0 broken.` | 0 |
+| B7 | `just cov` | every per-package `pytest --cov` run reports `Required test coverage of N% reached` | 0 |
+| B8 | `just test-plugin` | the `--- ` banner lines print in order and the run ends with npm's test summary | 0 |
+| B9 | `just subtree-base` | the four-line `subtree-base -- plugins/graph-works` report, ending `ok -- the subtree merge base is reachable, recorded, and prefix-rooted` | 0 |
+
+Record the exit code for each. On any failure, record **the first failing
+assertion verbatim** — not a summary of it. For B7 that means the first failing
+test's node id and its assertion output; for B4/B5/B6 the first reported
+violation.
+
+**B1, B2 and B3 print nothing on stdout when they pass.** Empty stdout plus exit
+0 is the pass; any stdout at all is a failure and gets pasted. Their guards
+report by *printing the offending paths*, so silence is the whole signal. The
+`uv run python scripts/check_*.py .` line you will see is `just`'s stderr echo,
+not the guard's output.
+
+**B9 prints a report, not nothing.** It is the one recipe in this group whose
+success is verbose: it names the recorded squash commit, the upstream commit,
+the `plugins/SYNC.md` ledger row, and the prefix-rooted tree check, and closes
+with the `ok -- ` line above. The commit hashes will differ from any transcribed
+here; what must match is the shape and the final `ok -- ` line.
+
+**B7 is the real payload.** It runs every package suite, including
+`packages/graph-works-core/tests/test_transactions.py` — the asset D-003's
+rationale named, and the only thing that turns "a weaker Windows tier" from a
+claim into a tier. Its Windows-anchor parametrization is gated on
+`tech-debt-anchor-abstraction` and `feature-windows-anchor-and-tier-adr`; if a
+Windows-anchor case reports `xfail`, record which, because that is precisely the
+qualifier this run exists to remove.
+
+**B9 is not in the design's checkpoint list — it was added at plan time.**
+`just check` depends on `subtree-base`, which invokes `python3 scripts/check_subtree_base.py`.
+Windows Python installers do not all create a `python3` name. If B9 fails with
+`'python3' is not recognized`, that is a **real finding about `just check` on
+Windows**, not an environment complaint — record it as such.
+
+Note what `just text-io` deliberately does **not** cover: child 2 scoped its
+guard to shipped source, because test trees write to `tmp_path`. The instrument
+for those is a suite run on Windows — which is B7.
+
+**If any fails:** B1–B3, B9 → the guard scripts themselves; owner is a **new
+child**. B4–B6 → owner is a **new child** scoped to the failing check. B7 →
+route by what failed: a transaction/anchor failure reopens
+`feature-windows-anchor-and-tier-adr`, anything else is a **new child** scoped to
+the failing suite. B8 → a **new child**; `test-plugin` hard-requires `bash`,
+`node` and `npm`, so record which was missing if that is the cause.

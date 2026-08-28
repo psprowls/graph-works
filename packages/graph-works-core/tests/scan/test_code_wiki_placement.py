@@ -30,12 +30,15 @@ _TRACKED_FILES = (
     "tests/test_alpha.py",
 )
 
+#: ADR-0039 dropped the four global lane indexes (`{packages,apps,agent-plugins,
+#: test-suites}/index.md`): the bundle root index already carries those exact
+#: sections, built from the same flat cross-repo list by the same code. The
+#: per-repository lanes below (`{prefix}/packages/index.md` and friends) are
+#: untouched by that ADR and stay.
 _GLOBAL_MEMBERS = frozenset(
     {
         "index.md",
         "log.md",
-        "agent-plugins/index.md",
-        "apps/index.md",
         "dependencies/index.md",
         "dependencies/npm/httpx.md",
         "dependencies/npm/index.md",
@@ -44,9 +47,7 @@ _GLOBAL_MEMBERS = frozenset(
         "dependencies/pypi/httpx.md",
         "dependencies/pypi/index.md",
         "dependencies/pypi/widgets.md",
-        "packages/index.md",
         "repositories/index.md",
-        "test-suites/index.md",
     }
 )
 

@@ -36,10 +36,20 @@ def test_graph_result_ok_tracks_the_exit_code():
 
 
 def test_graph_target_reads_the_bundle_config(tmp_path):
+    """A repo's relative `path` resolves against the manifest's own directory.
+
+    `load_config` anchors each `repositories.*.path` at `config_path.parent` --
+    the directory `workspace.yaml` was read from -- not at `bundle_root`. So the
+    repos sit beside the workspace root here, which is the live shape: this
+    repo's own workspace declares `path: ../../graph-works`, reaching a sibling
+    of the workspace, not of the bundle.
+    """
+    root = tmp_path / "workspace"
+    root.mkdir()
     (tmp_path / "repo-a").mkdir()
     (tmp_path / "repo-b").mkdir()
     layout = _layout_with_config(
-        tmp_path,
+        root,
         """
         repositories:
           alpha:

@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from convert_wikilinks import mask_inline_code, run, strip_entity_prefix
+from convert_wikilinks import mask_inline_code, report, run, strip_entity_prefix
 
 
 def page(vault: Path, path: str, body: str, *, frontmatter: str = "") -> Path:
@@ -35,7 +35,7 @@ def vault(tmp_path: Path) -> Path:
     root.mkdir()
     page(root, "entities/pkg_okf-io.md", "# okf-io\n\nThe core.\n", frontmatter="kind: package\n")
     page(root, "entities/unit_tests_okf-io.md", "# okf-io-unit-tests\n\nTests.\n", frontmatter="kind: test_suite\n")
-    page(root, "concepts/okf-bundle-format.md", "# Bundle\n", frontmatter='title: OKF bundle format\n')
+    page(root, "concepts/okf-bundle-format.md", "# Bundle\n", frontmatter="title: OKF bundle format\n")
     return root
 
 
@@ -49,7 +49,7 @@ def convert(vault: Path, **kwargs: object) -> str:
 
 def test_fenced_code_is_untouched(vault: Path) -> None:
     """`[[tool.importlinter.contracts]]` is TOML, and appears in six real pages."""
-    body = "Prose.\n\n```toml\n[[tool.importlinter.contracts]]\nname = \"x\"\n```\n"
+    body = 'Prose.\n\n```toml\n[[tool.importlinter.contracts]]\nname = "x"\n```\n'
     page(vault, "notes.md", body)
     assert "[[tool.importlinter.contracts]]" in convert(vault, read="notes.md")
 
@@ -153,6 +153,89 @@ def test_ambiguous_bare_name_resolves_to_neither(vault: Path) -> None:
     page(vault, "b/dupe.md", "# B\n")
     page(vault, "notes.md", "See [[dupe]].\n")
     assert "[[dupe]]" in convert(vault, read="notes.md")
+
+
+# --- ladder step 2: legacy work-item slug repair ---------------------------
+
+
+def item_vault(vault: Path) -> Path:
+    """The work-lane shapes this sweep has to repair, drawn from the live bundle."""
+    page(
+        vault,
+        "work/_archive/epic-graph-works-cli.md",
+        "# CLI\n",
+        frontmatter="title: graph-works-cli — port the gw binary\n",
+    )
+    page(
+        vault,
+        "work/_archive/bug-scan-skips-mirror-lane.md",
+        "# Mirror\n",
+        frontmatter="title: scan skips the mirror lane\n",
+    )
+    page(
+        vault,
+        "work/_archive/epic-graph-works-plugin-fork/children/_archive/spike-epic-spike-obra-rebase.md",
+        "# Obra\n",
+        frontmatter="title: obra rebase spike\n",
+    )
+    return vault
+
+
+def test_work_prefixed_dated_slug_resolves_to_the_current_item(vault: Path) -> None:
+    item_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli]].\n")
+    out = convert(vault, read="notes.md", backfill=False)
+    assert "[graph-works-cli — port the gw binary](/work/_archive/epic-graph-works-cli.md)" in out
+
+
+def test_archive_prefixed_dated_slug_resolves(vault: Path) -> None:
+    item_vault(vault)
+    page(vault, "notes.md", "See [[work/_archive/2026-08-11-epic-graph-works-cli]].\n")
+    assert "(/work/_archive/epic-graph-works-cli.md)" in convert(vault, read="notes.md", backfill=False)
+
+
+def test_bare_dated_slug_without_work_prefix_resolves(vault: Path) -> None:
+    """112 live occurrences carry no `work/` prefix; the date is what makes them safe."""
+    item_vault(vault)
+    page(vault, "notes.md", "See [[2026-08-19-bug-scan-skips-mirror-lane]].\n")
+    assert "(/work/_archive/bug-scan-skips-mirror-lane.md)" in convert(vault, read="notes.md", backfill=False)
+
+
+def test_undated_generic_basename_is_not_repaired(vault: Path) -> None:
+    """`01-design-spec` alone matches 170+ files in the live bundle. Step 1's
+    unique-stem branch already declines an ambiguous name; step 2 must not
+    rescue it, because the dated prefix is what licenses a bare slug match.
+
+    Note a *unique* undated basename still resolves -- through step 1, which
+    this task does not touch. Only the generic colliding case is at issue.
+    """
+    item_vault(vault)
+    page(vault, "work/a-item/references/01-design-spec.md", "# A\n")
+    page(vault, "work/b-item/references/01-design-spec.md", "# B\n")
+    page(vault, "notes.md", "See [[01-design-spec]].\n")
+    assert "[[01-design-spec]]" in convert(vault, read="notes.md", backfill=False)
+
+
+def test_historic_epic_kind_alias_is_tried(vault: Path) -> None:
+    """The rename produced `spike-epic-spike-obra-rebase`; hyphenated kinds
+    (`tech-debt`, `test-gap`) exist too, so the kind list is explicit."""
+    item_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-17-epic-spike-obra-rebase]].\n")
+    out = convert(vault, read="notes.md", backfill=False)
+    assert "spike-epic-spike-obra-rebase.md)" in out
+
+
+def test_ambiguous_item_slug_is_not_repaired(vault: Path) -> None:
+    page(vault, "work/dupe-item.md", "# Live\n")
+    page(vault, "work/_archive/dupe-item.md", "# Archived\n")
+    page(vault, "notes.md", "See [[work/2026-08-11-dupe-item]].\n")
+    assert "[[work/2026-08-11-dupe-item]]" in convert(vault, read="notes.md", backfill=False)
+
+
+def test_item_slug_naming_nothing_is_left_alone(vault: Path) -> None:
+    item_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-tech-debt-never-existed]].\n")
+    assert "[[work/2026-08-11-epic-tech-debt-never-existed]]" in convert(vault, read="notes.md", backfill=False)
 
 
 # --- regressions -----------------------------------------------------------
@@ -294,3 +377,262 @@ def test_mask_inline_code_preserves_offsets() -> None:
 
 def test_mask_inline_code_leaves_unpaired_backtick_alone() -> None:
     assert mask_inline_code("a ` b") == "a ` b"
+
+
+# --- ladder step 3: artifact under item, with demotion ---------------------
+
+
+def artifact_vault(vault: Path) -> Path:
+    item_vault(vault)
+    root = "work/_archive/epic-graph-works-plugin-fork/children/_archive/spike-epic-spike-obra-rebase"
+    page(
+        vault, f"{root}/references/04-reconcile-cost-table.md", "# Costs\n", frontmatter="title: reconcile cost table\n"
+    )
+    page(
+        vault,
+        "work/_archive/epic-graph-works-cli/references/_archive/00-decisions.md",
+        "# Decisions\n",
+        frontmatter="title: decision ledger\n",
+    )
+    return vault
+
+
+def test_artifact_under_the_repaired_item_resolves(vault: Path) -> None:
+    artifact_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-17-epic-spike-obra-rebase/04-reconcile-cost-table.md]].\n")
+    assert (
+        "[reconcile cost table](/work/_archive/epic-graph-works-plugin-fork/children/"
+        "_archive/spike-epic-spike-obra-rebase/references/04-reconcile-cost-table.md)"
+        in convert(vault, read="notes.md", backfill=False)
+    )
+
+
+def test_trailing_md_suffix_is_not_doubled(vault: Path) -> None:
+    """Without the `.md` strip the candidate becomes `…/00-decisions.md.md`;
+    that single bug accounted for 21 of the live bundle's artifact hits."""
+    artifact_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/00-decisions.md]].\n")
+    assert "(/work/_archive/epic-graph-works-cli/references/_archive/00-decisions.md)" in convert(
+        vault, read="notes.md", backfill=False
+    )
+
+
+def test_references_archive_variant_is_searched(vault: Path) -> None:
+    artifact_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/00-decisions]].\n")
+    assert "(/work/_archive/epic-graph-works-cli/references/_archive/00-decisions.md)" in convert(
+        vault, read="notes.md", backfill=False
+    )
+
+
+def test_unresolvable_artifact_demotes_to_the_item_page(vault: Path) -> None:
+    """The item page is the durable identity and its `references/index.md`
+    reaches the artifact; a dangling artifact link would reach nothing."""
+    artifact_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/99-gone]].\n")
+    out = convert(vault, read="notes.md", backfill=False)
+    assert "[graph-works-cli — port the gw binary](/work/_archive/epic-graph-works-cli.md)" in out
+
+
+def test_demotion_is_reported_as_its_own_step(vault: Path) -> None:
+    artifact_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/99-gone]].\n")
+    result = run(vault, write=False, relative=False, backfill=False)
+    assert [c.step for c in result.conversions] == ["demoted"]
+
+
+def test_artifact_under_an_unresolvable_item_is_left_alone(vault: Path) -> None:
+    artifact_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-tech-debt-never-existed/01-design-spec]].\n")
+    assert "[[work/2026-08-11-epic-tech-debt-never-existed/01-design-spec]]" in convert(
+        vault, read="notes.md", backfill=False
+    )
+
+
+# --- anchors, across the ladder ---------------------------------------------
+
+
+def test_anchor_is_preserved_through_step_2_item_resolution(vault: Path) -> None:
+    item_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli#8-1-mode-skeletons]].\n")
+    out = convert(vault, read="notes.md", backfill=False)
+    assert "(/work/_archive/epic-graph-works-cli.md#8-1-mode-skeletons)" in out
+
+
+def test_anchor_is_preserved_through_step_3_artifact_resolution(vault: Path) -> None:
+    artifact_vault(vault)
+    page(
+        vault,
+        "notes.md",
+        "See [[work/2026-08-17-epic-spike-obra-rebase/04-reconcile-cost-table#8-1-mode-skeletons]].\n",
+    )
+    out = convert(vault, read="notes.md", backfill=False)
+    assert (
+        "(/work/_archive/epic-graph-works-plugin-fork/children/"
+        "_archive/spike-epic-spike-obra-rebase/references/04-reconcile-cost-table.md#8-1-mode-skeletons)" in out
+    )
+
+
+def test_anchor_is_dropped_on_demotion(vault: Path) -> None:
+    """Demotion swaps the destination to the item page; an anchor written
+    against the original artifact almost never exists there, so it must not
+    be carried across."""
+    artifact_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli/references/99-gone#8-1-mode-skeletons]].\n")
+    out = convert(vault, read="notes.md", backfill=False)
+    assert "[graph-works-cli — port the gw binary](/work/_archive/epic-graph-works-cli.md)" in out
+    assert "#8-1-mode-skeletons" not in out
+
+
+# --- ladder step 4: de-link ------------------------------------------------
+
+
+def delinked(vault: Path, read: str) -> str:
+    run(vault, write=True, relative=False, backfill=False, delink_unresolved=True)
+    return (vault / read).read_text(encoding="utf-8")
+
+
+def test_unresolved_target_is_delinked_when_asked(vault: Path) -> None:
+    page(vault, "notes.md", "Prose about [[wikilink]] syntax.\n")
+    assert "`[[wikilink]]`" in delinked(vault, "notes.md")
+
+
+def test_delink_preserves_the_historical_name_verbatim(vault: Path) -> None:
+    page(vault, "notes.md", "See [[concepts/graph-works-tier-architecture]].\n")
+    assert "`[[concepts/graph-works-tier-architecture]]`" in delinked(vault, "notes.md")
+
+
+def test_delink_preserves_an_alias(vault: Path) -> None:
+    page(vault, "notes.md", "See [[nothing/here|some text]].\n")
+    assert "`[[nothing/here|some text]]`" in delinked(vault, "notes.md")
+
+
+def test_delink_fences_around_inner_backticks(vault: Path) -> None:
+    """A CommonMark span needs a fence longer than any run it contains, and
+    padding when the content starts or ends with a backtick."""
+    page(vault, "notes.md", "See [[nothing|a `b` c]].\n")
+    out = delinked(vault, "notes.md")
+    assert "``[[nothing|a `b` c]]``" in out
+
+
+def test_delink_is_off_by_default(vault: Path) -> None:
+    page(vault, "notes.md", "Prose about [[wikilink]] syntax.\n")
+    assert "[[wikilink]]" in convert(vault, read="notes.md", backfill=False)
+    assert "`[[wikilink]]`" not in convert(vault, read="notes.md", backfill=False)
+
+
+def test_delink_is_idempotent(vault: Path) -> None:
+    target = page(vault, "notes.md", "Prose about [[wikilink]] syntax.\n")
+    run(vault, write=True, relative=False, backfill=False, delink_unresolved=True)
+    once = target.read_bytes()
+    run(vault, write=True, relative=False, backfill=False, delink_unresolved=True)
+    assert target.read_bytes() == once
+
+
+def test_delink_leaves_embeds_alone(vault: Path) -> None:
+    page(vault, "notes.md", "An embed ![[nothing/here]] renders differently.\n")
+    assert "![[nothing/here]]" in delinked(vault, "notes.md")
+
+
+def test_delink_is_reported_as_its_own_reason(vault: Path) -> None:
+    page(vault, "notes.md", "Prose about [[wikilink]] syntax.\n")
+    result = run(vault, write=False, relative=False, backfill=False, delink_unresolved=True)
+    assert [s.reason for s in result.skips] == ["delinked"]
+
+
+def test_delink_declines_when_a_trailing_backtick_is_adjacent(vault: Path) -> None:
+    """A stray unpaired backtick right after the match would merge with the
+    inserted fence into a wider, unpairable run -- leave it alone instead."""
+    source = "See [[nothing]]`s example.\n"
+    page(vault, "notes.md", source)
+    out = delinked(vault, "notes.md")
+    assert out.endswith(source)
+    assert "[[nothing]]" in out
+    assert "`[[nothing]]`" not in out
+
+
+def test_delink_declines_when_a_leading_backtick_is_adjacent(vault: Path) -> None:
+    source = "code`[[nothing]] rest\n"
+    page(vault, "notes.md", source)
+    out = delinked(vault, "notes.md")
+    assert out.endswith(source)
+    assert "[[nothing]]" in out
+    assert "`[[nothing]]`" not in out
+
+
+def test_delink_declines_when_a_closed_single_backtick_span_is_flush(vault: Path) -> None:
+    """A well-formed `code`[[nothing]] span has its backticks masked out of
+    `scannable` by `mask_inline_code`, so the guard must consult the raw line
+    -- otherwise the inserted fence merges with the span into one wide,
+    unpairable run and the wikilink stops rendering as a code span at all."""
+    source = "Trailing span: `code`[[nothing]] rest.\n"
+    page(vault, "notes.md", source)
+    out = delinked(vault, "notes.md")
+    assert out.endswith(source)
+    assert "`code`" in out
+    assert "[[nothing]]" in out
+
+
+def test_delink_declines_when_a_closed_double_backtick_span_is_flush(vault: Path) -> None:
+    """Same hazard, but for a double-backtick span -- this is the destructive
+    case: without consulting the raw line, the merged run has no pairs left
+    and the whole line renders as literal text instead of a code span."""
+    source = "Double: ``x``[[nothing]] rest.\n"
+    page(vault, "notes.md", source)
+    out = delinked(vault, "notes.md")
+    assert out.endswith(source)
+    assert "``x``" in out
+    assert "[[nothing]]" in out
+
+
+# --- the target map --------------------------------------------------------
+
+
+def test_mapping_records_each_distinct_target_once(vault: Path) -> None:
+    item_vault(vault)
+    page(
+        vault,
+        "notes.md",
+        "Twice: [[work/2026-08-11-epic-graph-works-cli]] and [[work/2026-08-11-epic-graph-works-cli]].\n",
+    )
+    result = run(vault, write=False, relative=False, backfill=False)
+    assert result.mapping["work/2026-08-11-epic-graph-works-cli"] == ("work/_archive/epic-graph-works-cli.md", "item")
+
+
+def test_mapping_records_the_step_that_resolved_it(vault: Path) -> None:
+    artifact_vault(vault)
+    page(
+        vault,
+        "notes.md",
+        "A [[entities/pkg_okf-io]] and a [[work/2026-08-11-epic-graph-works-cli/references/99-gone]].\n",
+    )
+    result = run(vault, write=False, relative=False, backfill=False)
+    assert result.mapping["entities/pkg_okf-io"][1] == "exact"
+    assert result.mapping["work/2026-08-11-epic-graph-works-cli/references/99-gone"][1] == "demoted"
+
+
+def test_report_prints_the_map_on_a_dry_run(vault: Path, capsys) -> None:
+    item_vault(vault)
+    page(vault, "notes.md", "See [[work/2026-08-11-epic-graph-works-cli]].\n")
+    report(run(vault, write=False, relative=False, backfill=False), write=False)
+    out = capsys.readouterr().out
+    assert "target map" in out
+    assert "work/2026-08-11-epic-graph-works-cli -> work/_archive/epic-graph-works-cli.md" in out
+
+
+def test_report_map_groups_by_step(vault: Path, capsys) -> None:
+    artifact_vault(vault)
+    page(vault, "notes.md", "A [[entities/pkg_okf-io]] and a [[work/2026-08-11-epic-graph-works-cli]].\n")
+    report(run(vault, write=False, relative=False, backfill=False), write=False)
+    out = capsys.readouterr().out
+    assert "[exact]" in out
+    assert "[item]" in out
+
+
+def test_report_prints_delinked_targets(vault: Path, capsys) -> None:
+    page(vault, "notes.md", "Prose about [[wikilink]] syntax.\n")
+    result = run(vault, write=False, relative=False, backfill=False, delink_unresolved=True)
+    report(result, write=False)
+    out = capsys.readouterr().out
+    assert "de-linked" in out
+    assert "wikilink" in out

@@ -82,6 +82,16 @@ _ENTITY_PREFIXES = ("unit_tests_", "agent_plugin_", "domain_", "repo_", "pkg_", 
 #: Filler for masked-out code. Same length as what it replaces, so every offset
 #: on the line still points where it did.
 _MASK = "\x00"
+#: The dated-slug form every pre-migration work item carried
+#: (`2026-08-11-epic-graph-works-cli`). The date is what makes a bare slug safe
+#: to match against basenames: an undated bare name like `01-design-spec`
+#: matches 170+ files in this bundle, which is why `okf_ext.body.resolve_wikilink`
+#: declines shortest-path resolution outright.
+_DATED_SLUG_RE = re.compile(r"^\d{4}-\d{2}-\d{2}-(?P<slug>.+)$")
+#: Work-item kinds, for the historic `epic-<kind>-<rest>` -> `<kind>-epic-<kind>-<rest>`
+#: rename. Spelled out rather than matched as `[a-z]+` because `tech-debt` and
+#: `test-gap` are hyphenated and both appear in the renamed form on disk.
+_WORK_KINDS = ("bug", "feature", "spike", "tech-debt", "test-gap")
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +102,15 @@ class Conversion:
     line: int
     before: str
     after: str
+    step: str
+
+
+@dataclass(frozen=True, slots=True)
+class Resolution:
+    """Where a wikilink target landed, and which ladder step put it there."""
+
+    member: str
+    step: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,6 +129,10 @@ class Result:
     skips: list[Skip] = field(default_factory=list)
     titled: list[tuple[str, str]] = field(default_factory=list)
     changed: set[str] = field(default_factory=set)
+    #: raw wikilink target -> (destination member, ladder step). One entry per
+    #: distinct target across the whole bundle -- 164 of them here, against 1257
+    #: occurrences. This is what a human reads before `--write`.
+    mapping: dict[str, tuple[str, str]] = field(default_factory=dict)
 
 
 def is_reserved(member: str) -> bool:
@@ -242,6 +265,99 @@ def resolve(target: str, bundle: Bundle, by_stem: dict[str, list[str]]) -> str |
     return None
 
 
+def split_item_path(target: str) -> tuple[str, str] | None:
+    """A legacy work-item target as `(item_slug, trailing_artifact_path)`.
+
+    Two accepted shapes, and nothing else:
+
+    * `work/[_archive/]<slug>[/<trail>]` -- the lane prefix is the licence to
+      treat the next segment as an item slug, dated or not.
+    * `<YYYY-MM-DD>-<slug>[/<trail>]` -- no lane prefix, so the date is the
+      licence instead.
+
+    Returns None for anything else, which sends the target down to step 4.
+    That includes every undated bare name: `01-design-spec` names 170+ files
+    here, so matching it against basenames would be a coin flip.
+    """
+    parts = target.strip().lstrip("/").split("/")
+    if not parts or not parts[0]:
+        return None
+    if parts[0] == "work":
+        parts.pop(0)
+        if parts and parts[0] == "_archive":
+            parts.pop(0)
+        if not parts or not parts[0]:
+            return None
+        dated = _DATED_SLUG_RE.match(parts[0])
+        slug = dated.group("slug") if dated else parts[0]
+    else:
+        dated = _DATED_SLUG_RE.match(parts[0])
+        if dated is None:
+            return None
+        slug = dated.group("slug")
+    # The trail is written both with and without `.md` in this bundle; strip it
+    # so `<item-dir>/<trail>.md` cannot become `<item-dir>/00-decisions.md.md`.
+    return slug, "/".join(parts[1:]).removesuffix(".md")
+
+
+def resolve_item(slug: str, by_stem: dict[str, list[str]]) -> str | None:
+    """The one member whose basename is *slug*, or None on zero or many hits.
+
+    Ambiguity is unresolved rather than first-wins: a slug that names both a
+    live item and an archived one is exactly the case a human should look at.
+    """
+    hits = by_stem.get(slug, [])
+    if not hits:
+        for kind in _WORK_KINDS:
+            if slug == f"epic-{kind}" or slug.startswith(f"epic-{kind}-"):
+                hits = by_stem.get(f"{kind}-{slug}", [])
+                break
+    return hits[0] if len(hits) == 1 else None
+
+
+def resolve_artifact(item_member: str, trail: str, bundle: Bundle) -> str | None:
+    """An artifact path beneath a located item's owned directory, or None.
+
+    The search is confined to that one item's directory on purpose. Bare-basename
+    matching is what makes this safe to attempt at all: `01-design-spec` is a
+    universal filename, meaningless outside the item that owns it.
+    """
+    directory = item_member.removesuffix(".md")
+    base = posixpath.basename(trail)
+    for candidate in (
+        f"{directory}/{trail}.md",
+        f"{directory}/references/{base}.md",
+        f"{directory}/references/_archive/{base}.md",
+    ):
+        if bundle.has_member(candidate):
+            return candidate
+    return None
+
+
+def resolve_ladder(target: str, bundle: Bundle, by_stem: dict[str, list[str]]) -> Resolution | None:
+    """Steps 1-3 of the resolution ladder. None means step 4 (de-link).
+
+    Step order is significance order: an exact member always wins, and a target
+    only gets treated as a legacy work path once it has failed to be a real one.
+    """
+    exact = resolve(target, bundle, by_stem)
+    if exact is not None:
+        return Resolution(exact, "exact")
+    split = split_item_path(target)
+    if split is None:
+        return None
+    slug, trail = split
+    item = resolve_item(slug, by_stem)
+    if item is None:
+        return None
+    if not trail:
+        return Resolution(item, "item")
+    artifact = resolve_artifact(item, trail, bundle)
+    if artifact is not None:
+        return Resolution(artifact, "artifact")
+    return Resolution(item, "demoted")
+
+
 def escape_text(text: str) -> str:
     """Make *text* safe as a markdown link label.
 
@@ -249,6 +365,18 @@ def escape_text(text: str) -> str:
     grow a column; `[` and `]` because they would close the label early.
     """
     return re.sub(r"([\[\]\\])", r"\\\1", text).replace("|", r"\|")
+
+
+def delink(raw: str) -> str:
+    """`[[x]]` as inline code, so it renders as the dead name it is.
+
+    Idempotent by construction: once an occurrence is inline code, the scanner's
+    `mask_inline_code` blanks it and the next run does not see it at all.
+    """
+    longest = max((run_.end() - run_.start() for run_ in _BACKTICK_RUN_RE.finditer(raw)), default=0)
+    fence = "`" * (longest + 1)
+    pad = " " if raw.startswith("`") or raw.endswith("`") else ""
+    return f"{fence}{pad}{raw}{pad}{fence}"
 
 
 def encode_url(path: str) -> str:
@@ -272,6 +400,7 @@ def convert_body(
     result: Result,
     *,
     relative: bool,
+    delink_unresolved: bool,
 ) -> tuple[str, set[str]]:
     """Rewrite one body. Returns the new text and the targets it resolved to."""
     index = _md.parse_body(doc.body)
@@ -283,7 +412,8 @@ def convert_body(
         number = position + 1
         if number in skip or "[[" not in line:
             continue
-        scannable = mask_inline_code(line.rstrip("\r"))
+        raw = line.rstrip("\r")
+        scannable = mask_inline_code(raw)
         pieces: list[str] = []
         cursor = 0
         for match in _WIKILINK_RE.finditer(scannable):
@@ -291,10 +421,31 @@ def convert_body(
                 result.skips.append(Skip(member, number, line[match.start() : match.end()], "embed"))
                 continue
             raw_target = unmasked(line, match, "target") or ""
-            target = resolve(raw_target, bundle, by_stem)
-            if target is None:
-                result.skips.append(Skip(member, number, line[match.start() : match.end()], "unresolved"))
+            resolution = resolve_ladder(raw_target, bundle, by_stem)
+            if resolution is None:
+                original = line[match.start() : match.end()]
+                # Test the RAW (unmasked) line, not `scannable`: a paired code
+                # span's backticks have already been replaced by `mask_inline_code`,
+                # so testing `scannable` only ever catches a *stray* unpaired
+                # backtick and misses a *closed* span flush against the match --
+                # which merges just as badly (and, for a double-backtick span,
+                # destructively). A masked backtick in `scannable` means an
+                # adjacent code span too, so testing `raw` strictly subsumes the
+                # old guard.
+                adjacent_backtick = (match.start() > 0 and raw[match.start() - 1] == "`") or (
+                    match.end() < len(raw) and raw[match.end()] == "`"
+                )
+                if not delink_unresolved or adjacent_backtick:
+                    result.skips.append(Skip(member, number, original, "unresolved"))
+                    continue
+                rendered = delink(original)
+                pieces.append(line[cursor : match.start()])
+                pieces.append(rendered)
+                result.skips.append(Skip(member, number, original, "delinked"))
+                cursor = match.end()
                 continue
+            target = resolution.member
+            result.mapping.setdefault(raw_target, (target, resolution.step))
             resolved.add(target)
             alias = unmasked(line, match, "alias")
             # `all_members`, not `bundle.concept()`: `index.md` and `log.md` are
@@ -302,11 +453,19 @@ def convert_body(
             # link whose text should still come from the page it points at.
             text = alias if alias is not None else link_text(target, all_members.get(target))
             anchor = unmasked(line, match, "anchor")
+            if anchor and resolution.step == "demoted":
+                # Demotion swaps the destination for the item page; an anchor
+                # written against the original artifact almost never exists
+                # there. Demotion is already lossy -- drop the anchor too
+                # rather than emit a link to a heading that doesn't exist.
+                anchor = None
             url = destination(target, member, relative=relative)
             rendered = f"[{escape_text(text)}]({url}{'#' + anchor if anchor else ''})"
             pieces.append(line[cursor : match.start()])
             pieces.append(rendered)
-            result.conversions.append(Conversion(member, number, line[match.start() : match.end()], rendered))
+            result.conversions.append(
+                Conversion(member, number, line[match.start() : match.end()], rendered, resolution.step)
+            )
             cursor = match.end()
         if pieces:
             pieces.append(line[cursor:])
@@ -315,7 +474,7 @@ def convert_body(
     return "\n".join(lines), resolved
 
 
-def run(vault: Path, *, write: bool, relative: bool, backfill: bool) -> Result:
+def run(vault: Path, *, write: bool, relative: bool, backfill: bool, delink_unresolved: bool = False) -> Result:
     bundle = load_bundle(vault)
     all_members = members(bundle)
 
@@ -333,15 +492,22 @@ def run(vault: Path, *, write: bool, relative: bool, backfill: bool) -> Result:
         if doc.parse_error is not None:
             result.skips.append(Skip(member, 0, "", f"unparseable: {doc.parse_error.kind}"))
             continue
-        body, resolved = convert_body(member, doc, bundle, all_members, by_stem, result, relative=relative)
+        body, resolved = convert_body(
+            member,
+            doc,
+            bundle,
+            all_members,
+            by_stem,
+            result,
+            relative=relative,
+            delink_unresolved=delink_unresolved,
+        )
         # Reserved files are excluded: §12 permits `okf_version` on `index.md`
         # and `log.md` and nothing else, and this vault's `index.md` carries no
         # frontmatter at all -- so a `title:` here would not merely add a key,
         # it would staple a whole block onto a file the spec says must not have
         # one, and trip `reserved.index-frontmatter`.
-        needs_title |= {
-            t for t in resolved if t in all_members and not is_reserved(t) and not all_members[t].fm.title
-        }
+        needs_title |= {t for t in resolved if t in all_members and not is_reserved(t) and not all_members[t].fm.title}
         if body != doc.body:
             doc.set_body(body)
             result.changed.add(member)
@@ -387,6 +553,26 @@ def report(result: Result, *, write: bool) -> None:
         for member, name in result.titled:
             print(f"  {member}: {name!r}")
 
+    if result.mapping:
+        by_step: dict[str, list[str]] = defaultdict(list)
+        for raw in sorted(result.mapping):
+            by_step[result.mapping[raw][1]].append(raw)
+        print("\ntarget map (distinct targets, by ladder step):")
+        for step in ("exact", "item", "artifact", "demoted"):
+            for raw in by_step.get(step, []):
+                print(f"  [{step}] {raw} -> {result.mapping[raw][0]}")
+
+    delinked_targets: dict[str, list[str]] = defaultdict(list)
+    for skip in result.skips:
+        if skip.reason == "delinked":
+            delinked_targets[skip.raw].append(f"{skip.member}:{skip.line}")
+    if delinked_targets:
+        print("\nde-linked (rewritten as inline code):")
+        for raw in sorted(delinked_targets):
+            where = delinked_targets[raw]
+            shown = ", ".join(where[:3]) + (f", +{len(where) - 3} more" if len(where) > 3 else "")
+            print(f"  {raw}  -- {shown}")
+
     unresolved: dict[str, list[str]] = defaultdict(list)
     for skip in result.skips:
         if skip.reason == "unresolved":
@@ -412,6 +598,11 @@ def main(argv: list[str] | None = None) -> int:
         help="emit file-relative destinations instead of root-absolute ones",
     )
     parser.add_argument(
+        "--delink-unresolved",
+        action="store_true",
+        help="rewrite a target that names nothing as inline code instead of leaving it",
+    )
+    parser.add_argument(
         "--no-title-backfill",
         dest="backfill",
         action="store_false",
@@ -424,7 +615,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     report(
-        run(args.vault, write=args.write, relative=args.relative, backfill=args.backfill),
+        run(
+            args.vault,
+            write=args.write,
+            relative=args.relative,
+            backfill=args.backfill,
+            delink_unresolved=args.delink_unresolved,
+        ),
         write=args.write,
     )
     return 0

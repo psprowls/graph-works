@@ -37,6 +37,11 @@ LEGACY_EXCLUSIONS = (
     # retired `work/<YYYY-MM-DD>-.../NN-*.md` shape and its stage-document
     # filenames as literal strings. Stays until migrate_vault.py is retired.
     ROOT / "scripts" / "tests" / "test_migrate_vault.py",
+    # convert_wikilinks.py's ladder step 2 repairs legacy dated work-item
+    # slugs (`work/2026-08-11-epic-...`); its test suite necessarily spells
+    # out that retired shape as literal wikilink targets in fixtures. Stays
+    # until the legacy-slug repair step is retired.
+    ROOT / "scripts" / "tests" / "test_convert_wikilinks.py",
     # D-025/D-043: the relocated boundary test (`test_migration.py`'s
     # `_legacy_boundary_violations`) permanently scans package source for the
     # retired `workflow_status` key by AST identifier -- unlike the entries

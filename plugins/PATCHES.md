@@ -1535,6 +1535,27 @@ above in their place. The `next` entry point's invocation string became
 was already named `workflow`.
 See `work/tech-debt-codex-slash-command-gap`.
 
+**`auto-drive` §3 gained a placement read-back — 2026-08-29.** The coordinator
+previously knew only where it *asked* Orca to put a dispatch. Orca derives every
+branch it creates as `<host git user slug>/slugify(--name)` — unconditionally,
+with no branch control on any of `worker-start`, `orca worktree create`, or
+`orca worktree set` — so the planned `worktree.branch` is never the branch that
+exists, and a literal planned-vs-actual name diff (what
+`work/epic-auto-drive-dispatch-correctness/children/tech-debt-verify-branch-matches-dispatch`
+was originally titled for) would fire on every dispatch ever made. §3 instead
+gained a new step 3, between `worker-start` and the submission probe, that reads
+the landed worktree back — from `worker-start --json`'s `effects[]` when present,
+else `worker-show` plus `worktree show` — prints
+`dispatched <key> -> <path> on <branch>` for every dispatch, and asserts
+placement without consulting a name: path equality for `reuse`/`main`, and
+`git merge-base --is-ancestor <base_branch> HEAD` in the observed worktree for
+`fork-child`/`create-top-level`. A mismatch halts into §4.2's existing failure
+question and skips the probe; a `-N` uniquified worktree is a note, not a halt.
+The old steps 3-5 shifted to 4-6 and §2.1's cross-reference moved with them, and
+step 2's stale `--name`/branch live-validation item was replaced by the settled
+statement. Ours-side file, already claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-verify-branch-matches-dispatch`.
+
 ---
 
 ## Entry #20 — Declined vendoring: `writing-clearly-and-concisely`

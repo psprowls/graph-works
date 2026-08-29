@@ -1,9 +1,16 @@
 # Patches to vendored upstream files
 
 `plugins/graph-works/` is a verbatim `git subtree` of
-[pcvelz/superpowers](https://github.com/pcvelz/superpowers). Every deliberate divergence from
-upstream gets an entry here. The sync ritual in [`SYNC.md`](./SYNC.md) requires this file to be
-updated after every merge.
+[obra/superpowers](https://github.com/obra/superpowers), vendored at `v6.3.0` (`b36e0829`) per
+ADR-0019. Every deliberate divergence from upstream gets an entry here. The sync ritual in
+[`SYNC.md`](./SYNC.md) requires this file to be updated after every merge.
+
+**Two lineages appear in this file, and they are not interchangeable.** The tree is obra's. The
+*classification* below is keyed to the 2026-06-09 graft, whose base was
+[pcvelz/superpowers](https://github.com/pcvelz/superpowers) `v5.5.0` — a downstream fork of obra —
+and `just audit-delta` still reads its grafted file set from that tag (entry #0). So a bare `v5.5.0`
+or `v6.4.0` here names a pcvelz release, not an obra one; obra releases are named with their SHA.
+Entry #0 has the tag-resolution hazard this creates.
 
 The governing rule for every entry:
 
@@ -71,9 +78,23 @@ here matters as much as the result — it is the recovery path if subtree tracki
 
 | Role | Tree |
 |---|---|
-| **B — base** | `pcvelz/superpowers` **v5.5.0** |
+| **B — base** | `pcvelz/superpowers` **v5.5.0** (`2822989e58fda9c506d0d1cd0a948a983dfa3b02`) |
 | **O — ours** | `agent-research` @ `develop`, `plugins/graph-wiki/` |
-| **T — theirs** | v6.4.0, vendored at `plugins/graph-works` (split `7cb90bfc909442f5bb0d7aa6e39c12f28c925ced`) |
+| **T — theirs** | `pcvelz/superpowers` **v6.4.0**, vendored at `plugins/graph-works` (split `7cb90bfc909442f5bb0d7aa6e39c12f28c925ced`) |
+
+**Both of those tags are pcvelz refs, and that is a live hazard when resolving an obra tag.** The
+`upstream` remote is obra, which publishes neither `v5.5.0` nor `v6.4.0` — they survive here only as
+local objects from the pcvelz-era fetches. Restore them with
+`git fetch https://github.com/pcvelz/superpowers.git --tags` if a clone lacks the base object
+`just audit-delta` needs. The names that *do* exist on both sides are worse: 27 of this repo's 75
+local `v*` tags are pcvelz's and collide with an obra release of the same number, `v6.3.0` among
+them — the local tag is `43765d64` (pcvelz), the vendored obra release is `b36e0829`. `git fetch
+--tags` will not correct an existing tag, so **never resolve an obra release through a local tag
+name**; go through the remote:
+
+```bash
+git ls-remote upstream 'refs/tags/<tag>^{}'
+```
 
 **The evidence.** Each of the 65 grafted files was hashed and scored against every upstream tag by
 exact blob match:
@@ -395,41 +416,49 @@ patch rather than assuming this entry still covers it.
 
 ---
 
-## Entry #5 — The never-grafted upstream files (76 shipping)
+## Entry #5 — The never-grafted upstream files (140 shipping)
 
 *No `audit-delta` block: these files sit outside the grafted roots, so they are outside both of the
-checker's file-level checks. Listing 76 paths that must be hand-edited on every upstream release
+checker's file-level checks. Listing 140 paths that must be hand-edited on every upstream release
 would be friction with no signal.*
 
 **Disposition: keep verbatim.** The 2026-06-09 graft copied only `commands/`, `hooks/` and
-`skills/`. Everything else in upstream v5.5.0 — **87 files** — was never grafted at all: not
-reviewed, not copied, not touched. They arrived here for the first time with the v6.4.0 subtree add,
-and the tree today ships **76** of them (upstream's own file set outside those three roots shrank
-between the two releases).
+`skills/`. Everything else in the graft's base — **87 files** — was never grafted at all: not
+reviewed, not copied, not touched. They arrived here for the first time with the subtree add, and
+the tree today ships **140** files outside those three roots, every one of them obra's at `v6.3.0`
+(`b36e0829`). Obra carries a per-harness plugin surface pcvelz did not, which is most of the growth.
+Three further files out there are ours-side test additions, not upstream's:
+`tests/hooks/test-skill-doc-routing.sh` and `tests/test-entry-point-skills.sh`, both claimed by
+entry #19, and `tests/test-doc-layout-claims.sh`, which no entry claims — `just audit-delta` reports
+it as undocumented divergence.
 
-Every one of the 76 is upstream's, untouched, and therefore merges free forever — **except
-`.claude-plugin/plugin.json`**, which sits in this set but is patched under entry #1 and is
-explicitly *not* covered by the "untouched" claim here.
+These files merge free precisely because nothing of ours is in them — **but this entry no longer
+claims all 140 are untouched, and never claimed `.claude-plugin/plugin.json`** (patched under entry
+#1). A file out here that another entry names is that entry's, not this one's; the checker's
+coverage arithmetic runs over grafted paths only, so nothing mechanically reconciles the two. Before
+treating a file in this set as free, grep this ledger for its path.
 
-These are `README.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md`, `CODE_OF_CONDUCT.md`, `.gitattributes`,
-`.gitignore`, `.pre-commit-config.yaml`, `.version-bump.json`, `package.json`, `docs/`, `tests/`,
-`scripts/`, `assets/`, `.github/`, and `.claude-plugin/marketplace.json`. None of them has ever been
-reviewed by this fork.
+These are `README.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CODE_OF_CONDUCT.md`,
+`RELEASE-NOTES.md`, `.gitattributes`, `.gitignore`, `.pre-commit-config.yaml`, `.version-bump.json`,
+`package.json`, `gemini-extension.json`, `docs/`, `tests/`, `scripts/`, `assets/`, `.github/`, the
+harness-plugin roots (`.agents/`, `.codex-plugin/`, `.cursor-plugin/`, `.devin-plugin/`,
+`.hermes-plugin/`, `.kimi-plugin/`, `.opencode/`, `.pi/`), and `.claude-plugin/marketplace.json`.
+None of them has ever been reviewed by this fork.
 
 **Files that misattribute.** Named here, verified by reading, deliberately **not** acted on:
 
 | File | What it misattributes |
 |---|---|
-| `.github/FUNDING.yml` | Sponsorship handles `github: [pcvelz]` and `buy_me_a_coffee: pcvanvelzen` — a "Sponsor" click on this repo would route money to upstream's maintainer, not this fork. |
+| `.github/FUNDING.yml` | Sponsorship handle `github: [obra]` — a "Sponsor" click on this repo would route money to upstream's maintainer, not this fork. |
 | `.github/ISSUE_TEMPLATE/config.yml` | Support contact link points to `https://discord.gg/35wsABTejz`, upstream's own Discord, as this repo's help channel. |
-| `.claude-plugin/marketplace.json` | `owner.name`/`owner.email` and the listed plugin's `author.name`/`author.email` are all `pcvelz` / `pcvelz@users.noreply.github.com`, and the plugin entry names itself `superpowers-extended-cc` — none of which matches entry #1's patched `plugin.json` (`author.name: "Patrick Sprowls"`, plugin name `graph-works`). |
-| `README.md` | Opens "A community-maintained fork of [obra/superpowers]... specifically for Claude Code users" and describes itself throughout as *Superpowers Extended for Claude Code* — upstream's project identity, with no mention of graph-works or this fork's actual purpose. |
-| `package.json` | `name: "superpowers-extended-cc"` — no `author` or `repository` field to misattribute a person, but the package name itself disagrees with `plugin.json`'s `graph-works`. |
+| `.claude-plugin/marketplace.json` | The marketplace names itself `superpowers-dev`; `owner.name`/`owner.email` and the listed plugin's `author.name`/`author.email` are all `Jesse Vincent` / `jesse@fsck.com`, and the plugin entry names itself `superpowers` at `version` `6.3.0` — none of which matches entry #1's patched `plugin.json` (`author.name: "Patrick Sprowls"`, plugin name `graph-works`), nor the sibling harness manifests `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`, which *are* patched to the fork's identity — undocumented divergence this ledger does not yet carry an entry for. This is the one row where the inconsistency is internal to the tree rather than merely inherited. |
+| `README.md` | Opens "Superpowers is a complete software development methodology for your coding agents" and describes itself throughout as upstream's project, with no mention of graph-works or this fork's actual purpose. Same for `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `RELEASE-NOTES.md`. |
+| `package.json` | `name: "superpowers"` — no `author` or `repository` field to misattribute a person, but the package name itself disagrees with `plugin.json`'s `graph-works`. |
 
 **Why flagged and not fixed.** Whether any of this matters depends on the epic's open **Q8** —
 standalone repo versus subtree inside the monorepo. Under *subtree*, none of these files is ever
 served to anyone; `.claude-plugin/plugin.json` is the only one Claude Code reads, and it's already
-correct via entry #1. Editing the other 75 would buy a permanent delete-vs-modify merge tax, on
+correct via entry #1. Editing the rest would buy a permanent delete-vs-modify merge tax, on
 every future upstream release, against a problem — a stray sponsorship link, a wrong Discord invite
 — that may never surface. Under *standalone*, this table is the work-list: every row becomes an edit
 worth making the day the repo goes public on its own. Q8 is unresolved, so the honest move is to
@@ -447,9 +476,9 @@ file: commands/write-plan.md
 -->
 
 **The `D × ·` case.** Our side deleted all three at the graft. Upstream still ships all three,
-unchanged between v5.5.0 and v6.4.0. They are currently **present** in `plugins/graph-works/` —
-the subtree add restored them, and nothing has removed them since. All three are byte-identical to
-upstream's v6.4.0 text today.
+unchanged between v5.5.0 and v6.4.0. They were **present** in `plugins/graph-works/` at the v6.4.0
+subtree add, which restored them byte-identical to that release's text. They are absent from the
+tree today — see the obra supersession at the end of this entry.
 
 **What they do.** Each is a one-line dispatcher: `commands/brainstorm.md` invokes the
 `brainstorming` skill, `commands/execute-plan.md` invokes `executing-plans`, `commands/write-plan.md`
@@ -521,8 +550,10 @@ renamed the skill to `using-workflow` with near-identical content — three chan
 identity: `name: using-superpowers` → `name: using-workflow`, and two prose spots
 ("Superpowers skills override..." → "Graph-wiki's workflow skills override...") swapping the
 product name embedded in running text. Upstream kept the name `using-superpowers` and *modified* the
-body between v5.5.0 and v6.4.0 (`plugins/graph-works/skills/using-superpowers/SKILL.md` today is
-byte-identical to upstream's v6.4.0 — the graft never diverged it).
+body between v5.5.0 and v6.4.0 (when this entry was written,
+`plugins/graph-works/skills/using-superpowers/SKILL.md` was byte-identical to v6.4.0 — the graft
+never diverged it; the file carries the namespace substitution against obra's body today, per the
+reconcile note at the end of this entry).
 
 Git sees a delete on our side and a modify on theirs. Resolved naively — by keeping our side — the
 rename silently carries upstream's **v5.5.0** text forward forever, and every improvement upstream

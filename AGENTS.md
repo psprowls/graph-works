@@ -52,8 +52,8 @@ arguments.
 
 ## Commands
 
-Every `just` recipe is exactly what a future CI job will call (CI is deferred
-— no remote yet, ADR-0010).
+Every `just` recipe is exactly what a future CI job will call. No CI workflow
+exists yet — enforcement is local, by design (ADR-0010).
 
 | Command | What it does |
 |---|---|

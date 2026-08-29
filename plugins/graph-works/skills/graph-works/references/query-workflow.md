@@ -1,6 +1,6 @@
 # Query Workflow
 
-The flow the LLM follows when the user runs `/graph-works:query <question>` or dispatches the `graph-works:librarian` sub-agent.
+The flow the LLM follows when the user runs `/graph-works:query <question>`.
 
 ## Core principle
 

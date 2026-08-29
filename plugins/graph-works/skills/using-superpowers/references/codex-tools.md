@@ -26,21 +26,27 @@ This enables `spawn_agent`, `wait_agent`, and `close_agent` for skills like `dis
 
 ## Named agent dispatch
 
-Claude Code skills reference named agent types like `graph-works:code-reviewer`.
-Codex does not have a named agent registry — `spawn_agent` creates generic agents
-from built-in roles (`default`, `explorer`, `worker`).
+Codex does not have a named agent registry — `spawn_agent` creates generic
+agents from built-in roles (`default`, `explorer`, `worker`).
 
-When a skill says to dispatch a named agent type:
+This plugin defines no named agent types. Every entry point is a skill under
+`skills/`, and the four that prefer forked execution (`scan`, `ingest`,
+`query`, `lint`) say so in their own `## Dispatch` section, which also names
+the fallback: run the skill's body inline in the current context.
 
-1. Find the agent's prompt file (e.g., `agents/code-reviewer.md` or the skill's
-   local prompt template like `code-quality-reviewer-prompt.md`)
-2. Read the prompt content
-3. Fill any template placeholders (`{BASE_SHA}`, `{WHAT_WAS_IMPLEMENTED}`, etc.)
-4. Spawn a `worker` agent with the filled content as the `message`
+When a skill you are running says to dispatch a named agent type that does not
+resolve, do not invent one:
+
+1. Read the skill's own `## Dispatch` section, if it has one, and follow it.
+2. Otherwise look for a local prompt template in the skill's directory (e.g.
+   `code-quality-reviewer-prompt.md`), fill its placeholders (`{BASE_SHA}`,
+   `{WHAT_WAS_IMPLEMENTED}`, …), and spawn a `worker` agent with the filled
+   content as the `message`.
+3. If neither exists, run the work inline and say so.
 
 | Skill instruction | Codex equivalent |
 |-------------------|------------------|
-| `Agent` tool (graph-works:code-reviewer) | `spawn_agent(agent_type="worker", message=...)` with `code-reviewer.md` content |
+| `Agent` tool with a filled prompt template | `spawn_agent(agent_type="worker", message=...)` with the filled content |
 | `Agent` tool (general-purpose) with inline prompt | `spawn_agent(message=...)` with the same prompt |
 
 ### Message framing
@@ -52,7 +58,7 @@ for maximum instruction adherence:
 Your task is to perform the following. Follow the instructions below exactly.
 
 <agent-instructions>
-[filled prompt content from the agent's .md file]
+[filled prompt content]
 </agent-instructions>
 
 Execute this now. Output ONLY the structured response following the format
@@ -62,13 +68,6 @@ specified in the instructions above.
 - Use task-delegation framing ("Your task is...") rather than persona framing ("You are...")
 - Wrap instructions in XML tags — the model treats tagged blocks as authoritative
 - End with an explicit execution directive to prevent summarization of the instructions
-
-### When this workaround can be removed
-
-This approach compensates for Codex's plugin system not yet supporting an `agents`
-field in `plugin.json`. When `RawPluginManifest` gains an `agents` field, the
-plugin can symlink to `agents/` (mirroring the existing `skills/` symlink) and
-skills can dispatch named agent types directly.
 
 ## Legacy note
 

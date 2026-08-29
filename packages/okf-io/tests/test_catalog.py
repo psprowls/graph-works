@@ -149,11 +149,13 @@ def test_the_catalog_is_thirty_one_codes_across_nine_topics():
     assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 31
 
 
-@pytest.mark.parametrize("claude_md", [_REPO_ROOT / "CLAUDE.md", _PACKAGE_ROOT / "CLAUDE.md"], ids=["root", "okf-io"])
+@pytest.mark.parametrize("claude_md", [_REPO_ROOT / "AGENTS.MD", _PACKAGE_ROOT / "CLAUDE.md"], ids=["root", "okf-io"])
 def test_the_catalog_counts_the_agent_docs_quote_are_the_catalogs_own(claude_md) -> None:
-    """Both `CLAUDE.md` files state the catalog's size in prose, and both said
-    `19 rule functions, 29 codes` for the whole life of the rule that made it
-    twenty and thirty. Nothing read them, so nothing noticed.
+    """Both the root `AGENTS.MD` (which the root `CLAUDE.md` now just
+    `@`-imports) and the package `CLAUDE.md` state the catalog's size in
+    prose, and both said `19 rule functions, 29 codes` for the whole life of
+    the rule that made it twenty and thirty. Nothing read them, so nothing
+    noticed.
 
     Counted, not spelled: the assertion reads whatever number sits in front of
     each noun, so rewording the sentence keeps working and only the numbers are

@@ -167,6 +167,17 @@ unexpected_pattern='(^superpowers/|^\.agents/|^hooks/|package\.json$|^\.git|^\.p
 assert_not_matches "$archive_paths" "$unexpected_pattern" "archive excludes source-only paths"
 assert_contains "$archive_paths" ".codex-plugin/plugin.json" "archive includes Codex manifest"
 assert_contains "$archive_paths" "skills/brainstorming/SKILL.md" "archive includes skills"
+
+# Every entry point ships. This is the regression that motivated collapsing
+# commands/ and agents/ into skills/: the archive pathspec never listed those
+# two directories, so eleven of thirteen entry points reached no Codex install.
+# See work/tech-debt-codex-slash-command-gap.
+for entry_point in scan ingest query lint file archive log status regen-index \
+    proposals onboard workflow auto-drive; do
+    assert_contains "$archive_paths" "skills/$entry_point/SKILL.md" \
+        "archive includes the '$entry_point' entry point"
+done
+
 assert_contains "$archive_paths" "skills/brainstorming/agents/openai.yaml" "archive includes OpenAI skill metadata"
 assert_contains "$archive_paths" "assets/app-icon.png" "archive includes app icon"
 assert_contains "$archive_paths" "assets/superpowers-small.svg" "archive includes composer icon"

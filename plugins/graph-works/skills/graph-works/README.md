@@ -27,8 +27,7 @@ READMEs go stale. Architecture diagrams drift. Comments rot. This skill turns an
 | Piece | What it does |
 |---|---|
 | **SKILL.md** | Master skill — architecture, workflows, page categories, iron rules |
-| **4 sub-agents** | `graph-works:scanner`, `graph-works:ingestor`, `graph-works:librarian`, `graph-works:linter` |
-| **13 slash commands** | `/graph-works:onboard`, `/graph-works:scan`, `/graph-works:ingest`, `/graph-works:query`, `/graph-works:lint`, `/graph-works:log`, `/graph-works:file`, `/graph-works:archive`, `/graph-works:regen-index`, `/graph-works:status`, `/graph-works:next`, `/graph-works:proposals`, `/graph-works:auto-drive` |
+| **13 entry-point skills** | `onboard`, `scan`, `ingest`, `query`, `lint`, `log`, `file`, `archive`, `regen-index`, `status`, `workflow`, `proposals`, `auto-drive` — invoked `/graph-works:<name>` in Claude Code, `$<name>` in Codex |
 | **Substrate operations** | Via `gw`: `bootstrap`, `scan`, `ingest`, `query`, `wiki lint` (+ code-drift) |
 | **12 reference docs** | Schema, page formats, 4 workflows (scan/ingest/query/lint), Obsidian setup, cross-tool setup, monorepo principles, lifecycle rules, sidecar schema |
 | **Wiki templates** | `CLAUDE.md`, `AGENTS.md`, `cursorrules`, `index.md`, `log.md`, plus entity templates (`entity-repository`, `entity-package`, `entity-app`, `entity-agent-plugin`, `entity-dependency`, `entity-test-suite`) and curated-page templates (`concept`, `concept-pattern`, `concept-architecture`, `source`, `adr`, `dependency`, `work`, `index`) |
@@ -115,7 +114,7 @@ Only the schema loader file changes per tool. The scripts run identically everyw
     └── AGENTS.md                # same content for Codex/Cursor/Antigravity/OpenCode
 ```
 
-**Iron rule:** the code is the source of truth. Ingested material is never edited — the ingest flow (either `gw ingest`'s `--backend bedrock`/`vercel` pipeline, or the `claude_code`-mode ingestor sub-agent per `/graph-works:ingest`) copies it into `<workspace>/okf/sources/references/`, leaving the original untouched; all curated writes go under `<workspace>/okf/`. Work items live at `<workspace>/okf/work/` and are referenced from other pages via root-absolute markdown links (e.g. `[bug-flaky-healthkit-tests](/work/release-healthkit/children/epic-reliability/children/bug-flaky-healthkit-tests.md)`).
+**Iron rule:** the code is the source of truth. Ingested material is never edited — the ingest flow (either `gw ingest`'s `--backend bedrock`/`vercel` pipeline, or the `claude_code`-mode `ingest` skill per `/graph-works:ingest`) copies it into `<workspace>/okf/sources/references/`, leaving the original untouched; all curated writes go under `<workspace>/okf/`. Work items live at `<workspace>/okf/work/` and are referenced from other pages via root-absolute markdown links (e.g. `[bug-flaky-healthkit-tests](/work/release-healthkit/children/epic-reliability/children/bug-flaky-healthkit-tests.md)`).
 
 ## Four operations
 

@@ -120,7 +120,7 @@ def test_active_plugin_scan_covers_every_maintained_surface() -> None:
 
     assert {
         "plugins/graph-works/README.md",
-        "plugins/graph-works/agents/ingestor.md",
+        "plugins/graph-works/skills/ingest/SKILL.md",
         "plugins/graph-works/docs/testing.md",
         "plugins/graph-works/scripts/bump-version.sh",
         "plugins/graph-works/tests/brainstorm-server/auth.test.js",

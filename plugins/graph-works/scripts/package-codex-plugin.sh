@@ -34,6 +34,10 @@ Options:
                            seed skills/*/agents/openai.yaml.
                            Default: ../_tmp/sup-codex-packaging/superpowers,
                            falling back to superpowers.zip, then superpowers.tar.gz
+                           EVERY skills/ subdirectory needs an entry here or the
+                           run aborts. A skill added since the last official
+                           package has none: add skills/<name>/agents/openai.yaml
+                           to the metadata source before packaging.
   --ref REF                Git ref to package. Default: HEAD.
   --allow-dirty            Permit a dirty working tree. The archive still uses --ref.
   --keep-stage             Print and keep the temporary staging directory.

@@ -164,6 +164,7 @@ logs.db
 .devt/
 .gpteng/
 .ruff_cache
+.import_linter_cache/
 
 
 # Add any directories, files, or patterns you don't want to be tracked by version control

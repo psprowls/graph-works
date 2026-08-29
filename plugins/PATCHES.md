@@ -1366,23 +1366,6 @@ disposition directs.
 
 <!-- audit-delta
 state: patched
-file: agents/ingestor.md
-file: agents/librarian.md
-file: agents/linter.md
-file: agents/scanner.md
-file: commands/archive.md
-file: commands/auto-drive.md
-file: commands/file.md
-file: commands/ingest.md
-file: commands/lint.md
-file: commands/log.md
-file: commands/next.md
-file: commands/onboard.md
-file: commands/proposals.md
-file: commands/query.md
-file: commands/regen-index.md
-file: commands/scan.md
-file: commands/status.md
 file: hooks/examples/session-end-transcript-capture.sh
 file: skills/auto-drive/SKILL.md
 file: skills/finishing-relay/SKILL.md
@@ -1403,6 +1386,17 @@ file: skills/graph-works/references/wiki-schema.md
 file: skills/planning-epics/SKILL.md
 file: skills/reconciling-spec/SKILL.md
 file: skills/workflow/SKILL.md
+file: skills/archive/SKILL.md
+file: skills/file/SKILL.md
+file: skills/ingest/SKILL.md
+file: skills/lint/SKILL.md
+file: skills/log/SKILL.md
+file: skills/onboard/SKILL.md
+file: skills/proposals/SKILL.md
+file: skills/query/SKILL.md
+file: skills/regen-index/SKILL.md
+file: skills/scan/SKILL.md
+file: skills/status/SKILL.md
 file: skills/using-superpowers/references/codex-tools.md
 file: skills/using-superpowers/references/copilot-tools.md
 file: skills/using-superpowers/references/gemini-tools.md
@@ -1411,6 +1405,7 @@ file: skills/shared/resolve-workspace.test.sh
 file: hooks/skill-doc-routing
 file: tests/hooks/test-skill-doc-routing.sh
 file: tests/pi/test-pi-extension.mjs
+file: tests/test-entry-point-skills.sh
 -->
 
 **Why this entry exists.** `scripts/audit_delta.py` derives divergence from `git diff --name-status`
@@ -1492,6 +1487,22 @@ upstream ships at any of the three paths.
 
 **On merge.** These seven have no upstream counterpart, so there is nothing to reconcile against on a
 sync — they carry forward unchanged unless this fork itself revises them.
+
+**Amended for the commands/agents collapse — 2026-08-27.** Seventeen ours-side
+paths left this claim set: `agents/{ingestor,librarian,linter,scanner}.md` and
+the thirteen `commands/*.md`. They were not retired patches in the usual sense
+— upstream never had them — but ours-side additions we deleted, because neither
+directory was in `scripts/package-codex-plugin.sh`'s archive pathspec and
+neither is a directory a Codex plugin manifest can declare. Eleven of thirteen
+entry points therefore reached no Codex install at all. Every entry point is now
+a skill under `skills/`, which is the one directory every harness manifest
+declares, so the packaging omission is structurally impossible rather than
+merely fixed. The eleven new `skills/<name>/SKILL.md` files and the
+`tests/test-entry-point-skills.sh` guard that holds the invariant are claimed
+above in their place. The `next` entry point's invocation string became
+`/graph-works:workflow` in the same change — the skill carrying that behaviour
+was already named `workflow`.
+See `work/tech-debt-codex-slash-command-gap`.
 
 ---
 

@@ -3,7 +3,7 @@
 
 Watches every work item in the vault, and for each one whose next pipeline
 stage is automatable, dispatches a **fresh** background Claude Code session
-(`claude --bg`) running `/graph-works:next <work-path>`.
+(`claude --bg`) running `/graph-works:workflow <work-path>`.
 
 This mechanizes the invariant already stated in
 `plugins/graph-works/skills/workflow/SKILL.md`: *"One stage per invocation, by
@@ -449,7 +449,7 @@ class Dispatcher:
             str(self.workspace),
             "--append-system-prompt",
             UNATTENDED_PROMPT.format(owner=self.args.owner),
-            f"/graph-works:next {path}",
+            f"/graph-works:workflow {path}",
         ]
         if self.args.model:
             argv[1:1] = ["--model", self.args.model]

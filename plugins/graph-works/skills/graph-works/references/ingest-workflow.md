@@ -1,6 +1,6 @@
 # Ingest Workflow
 
-The detailed flow the LLM follows when the user runs `/graph-works:ingest <path>` or dispatches the `graph-works:ingestor` sub-agent.
+The detailed flow the LLM follows when the user runs `/graph-works:ingest <path>`.
 
 Sources in a graph-works bundle are one of the `source_kind` enum's seven values (`.gw/schema/Source.schema.json`): **spec**, **article**, **ticket**, **skill**, **doc**, **transcript**, **code-review**. The ingest flow is the same for all — only the summary's framing changes. (`skill` classifies but does not yet route to a guidance-page flow — see `work/epic-guidance-okf-port`.)
 

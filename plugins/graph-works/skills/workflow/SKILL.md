@@ -1,6 +1,6 @@
 ---
 name: workflow
-description: Use when driving a work item through its development pipeline — runs `gw work next` to compute the stage, dispatches the stage skill (brainstorming, reconciling-spec, systematic-debugging, writing-plans, subagent-driven-development, test-driven-development, finishing-a-development-branch), verifies the artifact, and advances the item with `gw work advance`. One stage per invocation; clear context between stages.
+description: Use when driving a work item through its development pipeline — runs `gw work next` to compute the stage, dispatches the stage skill (brainstorming, reconciling-spec, systematic-debugging, writing-plans, subagent-driven-development, test-driven-development, finishing-a-development-branch), verifies the artifact, and advances the item with `gw work advance`. One stage per invocation; clear context between stages. Pass `--descend` to auto-continue into the next actionable child leaf when an epic is waiting on children.
 ---
 
 # Work Item Workflow
@@ -73,7 +73,7 @@ read are unchanged from `gw work next`.
   through the normal steps — dispatch transition, stage skill, advance — all
   against the leaf path. If the descend itself reports a `--descend:` blocker,
   or no `--descend` was requested, report the blocker, list the open children
-  from `child_rollup.open_paths` suggesting `/graph-works:next <child-path>` for
+  from `child_rollup.open_paths` suggesting `/graph-works:workflow <child-path>` for
   each, and **stop** (nothing to advance).
 - Otherwise announce the dispatch: item title, kind, phase, and the stage skill
   from `action.skill`.
@@ -177,13 +177,13 @@ If the advance lands the item at `phase: done` and `work_status: resolved`, run
 ### 6. Hand off
 
 End with: "Phase advanced to `<phase>`. Clear context (`/clear`) and run
-`/graph-works:next <work-path>` to continue."
+`/graph-works:workflow <work-path>` to continue."
 
 **Relay no-advance hand-off.** For a `graph-works:finishing-relay` stage that
 reported `pr`, `hold`, or `discard`, the stock hand-off text above is wrong —
 nothing advanced. Say instead: "`<work-path>` stays at `phase: finish` pending an
 attended pass (relay outcome: `<pr|hold|discard>`). Clear context (`/clear`)
-and run `/graph-works:next <work-path>` when ready to continue attended."
+and run `/graph-works:workflow <work-path>` when ready to continue attended."
 
 (Items that have reached a terminal state are handled by **Terminal handling**
 below, not this hand-off.)

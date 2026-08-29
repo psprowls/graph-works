@@ -131,13 +131,13 @@ When the design is approved and you are about to write the spec (Checklist step 
 1. **Write the design artifact:** `<workspace>/okf/<work-path>/references/01-design.md` (the owned directory already exists because `gw work file` created it).
 2. **Advance the item:** `gw work advance <work-path> --effort <confirmed-effort>`. This is the same design-complete transition the `workflow` skill applies; it stamps the canonical `design` source and advances the phase.
 
-**Error fallback:** if `gw work advance` fails, report it. The design is already at the canonical path, so the user can recover with `/graph-works:next <work-path>`.
+**Error fallback:** if `gw work advance` fails, report it. The design is already at the canonical path, so the user can recover with `/graph-works:workflow <work-path>`.
 
 ### Step 4a — Terminal behavior (auto-file mode only)
 
 Once auto-filed, brainstorming follows pipeline rules: **STOP after the spec — do not invoke `writing-plans`.** End with the pipeline hand-off line:
 
-> "Phase advanced. Clear context (`/clear`) and run `/graph-works:next <work-path>` to continue."
+> "Phase advanced. Clear context (`/clear`) and run `/graph-works:workflow <work-path>` to continue."
 
 ## Checklist
 
@@ -174,7 +174,7 @@ your path and complete them in order.
 8. **User reviews written spec** — ask user to review the spec file before proceeding
 9. **Transition to implementation** — invoke writing-plans skill to create implementation plan
    - **(auto-file mode)** do NOT invoke writing-plans; STOP after the spec and emit the pipeline hand-off line yourself (Auto-file Mode → Step 4a)
-   - **(pipeline-dispatched)** do NOT invoke writing-plans; STOP after the spec — control returns to the `graph-works:workflow` skill, which advances the item and hands off for `/clear` + `/graph-works:next` (see Pipeline-stage guard below)
+   - **(pipeline-dispatched)** do NOT invoke writing-plans; STOP after the spec — control returns to the `graph-works:workflow` skill, which advances the item and hands off for `/clear` + `/graph-works:workflow` (see Pipeline-stage guard below)
 
 ## Process Flow
 
@@ -227,7 +227,7 @@ approval, implementation proceeds directly through the normal
 development workflow; no plan document. Spike: the terminal state is a
 reported recommendation.
 
-**Two exceptions on the Architectural path.** In auto-file mode the terminal state is writing the spec and emitting the `/graph-works:next` hand-off line yourself (see Auto-file Mode → Step 4a). When pipeline-dispatched, the terminal state is writing the spec and returning control to the `graph-works:workflow` skill, which advances the item and hands off for `/clear` + `/graph-works:next` (see the Pipeline-stage guard below). Outside those two cases obra's rule stands unchanged: the ONLY skill you invoke after brainstorming is writing-plans.
+**Two exceptions on the Architectural path.** In auto-file mode the terminal state is writing the spec and emitting the `/graph-works:workflow` hand-off line yourself (see Auto-file Mode → Step 4a). When pipeline-dispatched, the terminal state is writing the spec and returning control to the `graph-works:workflow` skill, which advances the item and hands off for `/clear` + `/graph-works:workflow` (see the Pipeline-stage guard below). Outside those two cases obra's rule stands unchanged: the ONLY skill you invoke after brainstorming is writing-plans.
 
 ## The Process
 

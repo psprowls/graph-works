@@ -1,16 +1,17 @@
 ---
 name: file
-description: Interactively file a new path-native work item — gathers title, kind, summary, and affects conversationally, then invokes `gw work file` with the assembled values. Usage /graph-works:file
+description: Invoked explicitly as /graph-works:file. Interactively files a new path-native work item — gathers title, kind, summary, and affects conversationally, estimates effort, then invokes `gw work file` with the assembled values and reports the canonical path. Explicit invocation only; do not trigger this from a natural-language description of work.
 ---
 
-# /graph-works:file
+# File a work item
 
 Interactively create a new work item in the workspace's OKF `work/` lane.
 
 ## Usage
 
 ```
-/graph-works:file
+/graph-works:file          # Claude Code
+$file                      # Codex
 ```
 
 Gathers required fields conversationally, then invokes `gw work file`.
@@ -54,8 +55,8 @@ gw work file \
 | `large` | weeks — multiple PRs, possibly an epic |
 | `xtra-large` | months — multi-epic, large team or quarter-long scope |
 
-## Skill Reference
+## Reference
 
-→ `graph-works/SKILL.md`
-→ `graph-works/references/wiki-schema.md`
-→ `graph-works/references/lifecycle-rules.md`
+→ `../graph-works/SKILL.md`
+→ `../graph-works/references/wiki-schema.md`
+→ `../graph-works/references/lifecycle-rules.md`

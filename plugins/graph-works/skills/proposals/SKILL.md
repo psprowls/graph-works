@@ -1,16 +1,17 @@
 ---
 name: proposals
-description: Review and dispose of curated-page proposals in `okf/proposals/` — accept / reject / supersede. Approving only flips status; this skill then fans out one subagent per accepted proposal to author the destination page, flips notes to `created`, regenerates indexes, and archives. Usage /graph-works:proposals [slug...]
+description: Invoked explicitly as /graph-works:proposals [slug...]. Reviews and disposes of curated-page proposals in okf/proposals/ — accept, reject, or supersede. Approving only flips a note's status; this skill then fans out one subagent per accepted proposal to author the destination page, flips notes to created, regenerates indexes, and archives. Mutates the workspace; explicit invocation only.
 ---
 
-# /graph-works:proposals
+# Dispose of curated-page proposals
 
 Dispose of the ADR/concept proposals the ingest pipeline drops into `<wiki>/proposals/`.
 
 ## Usage
 
 ```
-/graph-works:proposals
+/graph-works:proposals          # Claude Code
+$proposals                      # Codex
 /graph-works:proposals adr-index-repository-grouping concept-subagent-roles
 ```
 
@@ -32,8 +33,8 @@ full lifecycle, naming/numbering, supersession wiring, and index regeneration.
 5. Wire supersession on both pages (and mark the superseded page) yourself.
 6. Regenerate indexes (`update_index` one-liner), then `gw wiki lint` to verify, then `gw wiki archive` to sweep spent notes.
 
-## Skill Reference
+## Reference
 
-→ `graph-works/SKILL.md`
-→ `graph-works/references/proposal-disposition.md`
-→ `graph-works/references/page-formats.md`
+→ `../graph-works/SKILL.md`
+→ `../graph-works/references/proposal-disposition.md`
+→ `../graph-works/references/page-formats.md`

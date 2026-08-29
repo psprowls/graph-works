@@ -1,6 +1,6 @@
 # Lint Workflow
 
-Periodic health check the LLM runs when the user runs `/graph-works:lint` or dispatches the `graph-works:linter` sub-agent. Run weekly, after batch ingests, and always after a repo scan.
+Periodic health check the LLM runs when the user runs `/graph-works:lint`. Run weekly, after batch ingests, and always after a repo scan.
 
 ## Goal
 

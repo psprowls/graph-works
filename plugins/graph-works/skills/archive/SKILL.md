@@ -1,16 +1,17 @@
 ---
 name: archive
-description: Archive terminal-status work items (resolved/wontfix/superseded) — sweep mode by default, or target specific canonical paths. Presents the plan and asks for confirmation before executing. Invokes `gw work archive`. Usage /graph-works:archive [work-path...]
+description: Invoked explicitly as /graph-works:archive [work-path...]. Archives terminal-status work items (resolved/wontfix/superseded) via `gw work archive` — sweep mode with no arguments, targeted mode with canonical paths — presenting the plan and asking for confirmation before executing. Mutates the workspace; explicit invocation only, never on inference.
 ---
 
-# /graph-works:archive
+# Archive terminal work items
 
 Move terminal work items from their active lanes to the corresponding local `_archive/` lane.
 
 ## Usage
 
 ```
-/graph-works:archive
+/graph-works:archive          # Claude Code
+$archive                      # Codex
 /graph-works:archive work/release-r1/children/epic-e1/children/bug-parser
 ```
 
@@ -27,7 +28,7 @@ With canonical-path arguments: targeted mode — those items only.
 
 Terminal statuses: `resolved`, `wontfix`, `superseded`.
 
-## Skill Reference
+## Reference
 
-→ `graph-works/SKILL.md`
-→ `graph-works/references/lifecycle-rules.md`
+→ `../graph-works/SKILL.md`
+→ `../graph-works/references/lifecycle-rules.md`

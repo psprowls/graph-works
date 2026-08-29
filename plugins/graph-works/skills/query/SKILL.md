@@ -1,14 +1,34 @@
 ---
-name: librarian
-description: Dispatched sub-agent that answers queries against a Code Wiki. Reads index.md first, drills into 3-10 relevant pages across categories (concepts, entities, ADRs, sources, work), synthesizes an answer with inline root-absolute markdown links and `code-path:line` citations, and offers to file the answer back as a new concept page (choosing the kind). Spawn when the user asks a substantive question about the monorepo the wiki might answer.
-skills: [graph-works]
-domain: engineering
-model: sonnet
-tools: [Read, Write, Edit, Bash, Grep, Glob]
-context: fork
+name: query
+description: Use when the user asks a substantive question about the repo that the wiki might answer, or invokes /graph-works:query "<question>". Reads index.md first, drills into 3-10 relevant pages across categories (concepts, entities, ADRs, sources, work), synthesizes an answer with inline root-absolute markdown links and `code-path:line` citations, and offers to file the answer back as a new concept page (choosing the kind).
 ---
 
-# code-librarian
+# Query the wiki
+
+Ask the wiki a question. The librarian reads `index.md` first, picks relevant pages across categories, synthesizes an answer with citations (wikilinks + code paths), and offers to file the answer back so your explorations compound.
+
+## Usage
+
+```
+/graph-works:query "<your question>"          # Claude Code
+$query "<question>"                            # Codex
+/graph-works:query "which packages depend on common-context-node-ts?"
+/graph-works:query "how does GlobalContext get set up for a request?"
+/graph-works:query "what's the state of the ESM migration?"
+/graph-works:query "which packages use React 19?"
+/graph-works:query "compare zustand and redux — what do we use where and why?"
+/graph-works:query "what's blocking healthkit tests from being reliable?"
+```
+
+## Dispatch
+
+Prefer running this skill's body in a forked sub-agent with the tool set
+`Read, Write, Edit, Bash, Grep, Glob`. A query reads many pages to answer one
+question; its intermediate reading would flood a caller's context if run
+inline.
+
+On a harness without sub-agent dispatch, run it inline in the current
+context — the body below is written to work either way.
 
 ## Role
 
@@ -24,16 +44,27 @@ Spawned per-query.
 - The current state of `<workspace>/okf/` (especially `index.md`)
 - The repo's code (fallback when vault is insufficient)
 
+## Output formats
+
+| Question shape | Output |
+|---|---|
+| "What does X do" | Markdown explanation with citations |
+| "Who depends on X" | Table from package frontmatter + scan data |
+| "A vs B" | Comparison table |
+| "What's the state of X migration" | Summary of roadmap + recent log entries |
+| "Why does X fail / how do we work around Y" | Issue page content |
+| "Slide deck on X" | Not implemented — synthesize markdown and note that slide-deck export isn't available yet |
+
 ## Workflow
 
-Follow `references/query-workflow.md`. Summary:
+Follow `../graph-works/references/query-workflow.md`. Summary:
 
 ### 1. Read `index.md` first
 Also run the retrieval call:
 ```bash
 gw query --query "<question>" --json
 ```
-This is the `claude_code`-backend default — it returns a `top_pages` list, each with a `path`, an `excerpt`, and `search_scores`. Treat those paths as part of the starting candidate set alongside `index.md`, from the outset rather than only once the index comes up empty.
+This is the `claude_code`-backend default — it returns a `top_pages` list, each with a `path`, an `excerpt`, and `search_scores`. Treat those paths as part of the starting candidate set alongside `index.md`, from the outset rather than only once the index comes up empty. `--backend bedrock` / `--backend vercel` still run the full internal pipeline (an internal LLM call composes the answer) for workspaces that opt into it.
 
 Pick 3-10 pages across categories most likely to contain the answer:
 - `concepts/` — cross-cutting patterns and high-level syntheses (filter by `kind: architecture` for big-picture questions, `kind: pattern` for reusable patterns)
@@ -71,10 +102,10 @@ If yes, pick the right kind (see above), use the matching template (`concept-arc
 
 ## Rules
 
-- **Read the index first.** Do not grep the entire vault or code on every query.
-- **Every claim cites** — a vault page or a code path.
-- **If the vault doesn't know, say so.** Suggest a source to ingest or a concept page to create; don't invent content.
-- **Offer to file back** for substantive answers. Don't file trivial one-offs.
+- **Read the index first.** No grep-everything.
+- **Every claim cites** a vault page or code path.
+- **Offer to file back** — for substantive answers worth keeping.
+- **If the vault doesn't know**, say so and suggest a source to ingest or a concept page to create.
 - **Output format follows the question** — "A vs B" → table; "who depends on X" → list; "how does X work" → prose with citations.
 
 ## Red flags
@@ -83,3 +114,8 @@ If yes, pick the right kind (see above), use the matching template (`concept-arc
 - Citing only one page for a multi-package question → broaden
 - Inventing a concept not in the vault or code → stop, suggest creation
 - Filing a new page for a trivial question → don't pollute the vault
+
+## Reference
+
+→ `../graph-works/SKILL.md`
+→ `../graph-works/references/query-workflow.md`

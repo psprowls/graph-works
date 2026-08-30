@@ -89,6 +89,62 @@ still exists, altering it — em-dash included — breaks the suppression.
 
 ---
 
+## Rider: systematic-debugging
+
+**Provenance.** None, and that is the point. The fork never patched
+`skills/systematic-debugging/`, so there is no `plugins/PATCHES.md` entry and no
+`git diff` to re-derive. This rider is derived from reading the stock skill —
+which is what the keying rule above already says a rider is for: it describes
+what the *stage* needs, not what some earlier patch happened to cover.
+
+**The exemption this replaces was wrong on the facts.** The note below used to
+claim `systematic-debugging` "does not self-chain". Stock's **Phase 4** is
+implementation — *"Create Failing Test Case"*, *"Implement Single Fix"*,
+*"Verify Fix"* — and it names the execute-stage skills outright, telling the
+reader to use `superpowers:test-driven-development` for the failing test and
+`superpowers:verification-before-completion` before claiming success. It
+therefore self-chains harder than `brainstorming`, which merely *may* wander
+into `writing-plans` and carries a STOP line anyway. The `diagnosis` variant is
+design-only (`graph_works_core/workspace/pipeline.py:11`), so a Bug entering the
+pipeline lands here at `design` and is invited to implement in the same session.
+
+**The rider must be self-sufficient.** There is no patched copy to point at and
+there never was, so — as with `writing-plans` under stock — the brief line is the
+whole instruction and has to survive being read after upstream's own prose has
+spent a phase inviting the next step.
+
+**Phase 3 is the subtle half.** Its *"Test Minimally — make the SMALLEST possible
+change to test hypothesis"* is a legitimate part of root-cause work, but taken
+literally it mutates the tree during a stage whose only output is a document. The
+rider permits the investigation and bounds where it may leave marks.
+
+**Rider.**
+
+> You are running as the `design` stage of the graph-works work pipeline. Your
+> output is the design document named in this brief — the root cause, the
+> evidence for it, and the decisions that follow — not a fix.
+>
+> Work Phases 1-3 (Root Cause Investigation, Pattern Analysis, Hypothesis and
+> Testing) and write them up. Do **not** enter Phase 4: do not create the failing
+> test, do not implement the fix, and do not invoke `test-driven-development` or
+> `verification-before-completion`. Where Phase 3 calls for testing a hypothesis,
+> confine it to read-only probes and throwaway scripts, and leave the working
+> tree as you found it — an uncommitted fix is still a fix.
+>
+> Record what Phase 4 *should* do as part of the design, so the execute stage can
+> act on it. If the root cause turns out to be something other than the item
+> describes, say so in the design; correcting the report is design work, and
+> replacing it with a fix is not.
+>
+> STOP after writing the design — do not implement the fix. This is a single
+> pipeline stage; the workflow skill advances the item.
+
+**No byte-exact literal here.** Unlike the `brainstorming` and `writing-plans`
+riders, nothing keys off this wording — there is no patched copy quoting it — so
+it is free to be worded for the stage rather than for a guard.
+
+---
+
 ## Rider: writing-plans
 
 **Provenance.** `plugins/PATCHES.md` entry #18 (`skills/writing-plans/SKILL.md`).
@@ -294,8 +350,13 @@ relay override already routes auto-drive's finish stage to
 
 ## Stages with no rider
 
-`reconciling-spec`, `finishing-relay` and `systematic-debugging` get nothing.
-The first two are ours and carry their behavior in their own files;
-`systematic-debugging` does not self-chain and has no `MOVE-TO-BRIEF` behavior
-attached to it. A stage skill with no section here contributes no
+`reconciling-spec`, `epic-design` and `finishing-relay` get nothing. All three
+are ours and carry their behavior in their own files, so there is no stock
+document to steer. A stage skill with no section here contributes no
 `## Stage directives` block to the brief.
+
+Absence of a `MOVE-TO-BRIEF` provenance entry is **not** a reason to leave a
+stage out. Whether a stage needs a rider is decided by reading the stock skill
+and asking whether it runs past the stage boundary; the fork's patch inventory
+only ever recorded the subset someone had already noticed. `systematic-debugging`
+was exempted on that mistaken basis and now has a section of its own.

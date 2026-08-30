@@ -155,6 +155,7 @@ another stage, same as the stock skill it replaces.
 | Skill | Stage | Carries |
 |---|---|---|
 | `brainstorming` | design | `--project-dir <workspace>` for the visual companion, plus the spec STOP line |
+| `systematic-debugging` | design (bug) | A self-sufficient stop before stock Phase 4 (implementation) |
 | `writing-plans` | plan | A self-sufficient Execution-Handoff stop |
 | `planning-epics` | plan (epic) | Its STOP line |
 | `subagent-driven-development` | execute | Positive authorization + mandatory isolation |
@@ -163,8 +164,10 @@ another stage, same as the stock skill it replaces.
 
 <!-- rider-table:end -->
 
-  `reconciling-spec`, `epic-design`, `finishing-relay` and `systematic-debugging` have no
-  rider — they are ours, or they carry no `MOVE-TO-BRIEF` behavior.
+  `reconciling-spec`, `epic-design` and `finishing-relay` have no rider — they
+  are ours and carry their behavior in their own files. Having no
+  `MOVE-TO-BRIEF` provenance is not by itself a reason to omit a stage: the
+  question is whether the stock skill runs past the stage boundary.
 
 The stock skills honor user-preference path overrides; they stay unmodified.
 

@@ -114,7 +114,7 @@ plugin-contract *ARGS:
 # happens to pull `sync` in today. Without it the gate's result depends on the
 # order of this list: `types` before `cov` fails from a clean checkout, `cov`
 # before `types` passes, on identical code.
-check: sync subtree-base normalization lint types contracts cov test-plugin
+check: sync subtree-base normalization lint types contracts cov test-plugin test-plugin-native
 
 # Subtree merge-base guard -- the `git-subtree-split` note behind
 # `plugins/graph-works`.
@@ -212,6 +212,21 @@ test-plugin:
     cd tests/brainstorm-server
     [ -d node_modules ] || npm ci
     npm test
+
+# The Graph Works-native plugin's own suites -- `plugins/graph-works-native/`.
+#
+# ENFORCING, and part of `check`, for `test-plugin`'s reason: these are green
+# once written and go red only when a change actually breaks a hook or a
+# guard. Five suites, not six: the parent design's list counted
+# `test-sdd-workspace`, which is upstream's and stays with the subtree.
+#
+# Child 9 deletes `test-plugin` and renames this recipe to `test-plugin`.
+test-plugin-native:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd plugins/graph-works-native
+    echo "--- skills/shared/resolve-workspace"
+    bash skills/shared/resolve-workspace.test.sh
 
 # The vendored suite deliberately kept out of `check`.
 #

@@ -1417,6 +1417,7 @@ file: skills/graph-works/references/wiki-schema.md
 file: skills/planning-epics/SKILL.md
 file: skills/reconciling-spec/SKILL.md
 file: skills/workflow/SKILL.md
+file: skills/workflow/references/brief-riders.md
 file: skills/archive/SKILL.md
 file: skills/file/SKILL.md
 file: skills/ingest/SKILL.md
@@ -1473,6 +1474,13 @@ entry #7, and this entry cross-references it in prose instead of in a `file:` li
   coverage for a fork-only hook does not belong in a file being kept conflict-free. It reuses that
   suite's node JSON validator, widened for a bare allow that carries no context and for the two
   branches that carry a `systemMessage`.
+- `skills/workflow/references/brief-riders.md` — the stage-skill brief riders,
+  **added 2026-08-30** by `work/epic-unforked-plugin-skill-dispatch/children/feature-move-to-brief-behaviors`.
+  Each section carries the `git diff` against the upstream base that re-derives
+  it, so the behaviors stay auditable after the subtree they came from is
+  deleted. Upstream ships no file at this path. `skills/workflow/SKILL.md`
+  itself is already claimed by the `file:` line above it — this is a second
+  file, not a second claim on the same one.
 
 **Child 5 extends this entry.** This audit's grafted set covers only what the 2026-06-09 graft
 touched; the native surface still outside the grafted roots — 7 more skills, the commands, the hooks,

@@ -111,7 +111,7 @@ archive_paths="$(list_archive "$archive" | normalize_archive_paths)"
 unexpected_pattern='(^graph-works/|^\.agents/|^hooks/|package\.json$|^\.git|^\.pytest_cache|^\.ruff_cache|^scripts/|^tests/|^docs/|^evals/|^lib/|^\.claude|^\.pi|^AGENTS\.md$|^CLAUDE\.md$|^RELEASE-NOTES\.md$|^CHANGELOG\.md$)'
 assert_not_matches "$archive_paths" "$unexpected_pattern" "archive excludes source-only paths"
 assert_contains "$archive_paths" ".codex-plugin/plugin.json" "archive includes Codex manifest"
-assert_contains "$archive_paths" "skills/brainstorming/SKILL.md" "archive includes skills"
+assert_contains "$archive_paths" "skills/using-graph-works/SKILL.md" "archive includes skills"
 
 # Every entry point ships. This is the regression that motivated collapsing
 # commands/ and agents/ into skills/: the archive pathspec never listed those
@@ -146,7 +146,7 @@ else
   fail "archive ships at least one skill"
 fi
 
-if [[ -x "$extracted/skills/subagent-driven-development/scripts/task-brief" ]]; then
+if [[ -x "$extracted/skills/shared/resolve-workspace.sh" ]]; then
   pass "archive preserves executable script mode"
 else
   fail "archive preserves executable script mode"
@@ -172,7 +172,7 @@ extract_archive "$tar_archive" "$tar_extracted"
 tar_archive_paths="$(list_archive "$tar_archive" | normalize_archive_paths)"
 assert_equals "$tar_archive_paths" "$archive_paths" "zip and tar.gz archives contain the same paths"
 
-tar_task_brief_mode="$(tar -tzvf "$tar_archive" skills/subagent-driven-development/scripts/task-brief | awk '{print $1}')"
+tar_task_brief_mode="$(tar -tzvf "$tar_archive" skills/shared/resolve-workspace.sh | awk '{print $1}')"
 assert_equals "$tar_task_brief_mode" "-rwxr-xr-x" "tar.gz archive preserves executable script mode"
 
 tar_metadata_times="$(python3 - "$tar_archive" <<'PY'

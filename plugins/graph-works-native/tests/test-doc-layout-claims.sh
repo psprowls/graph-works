@@ -159,6 +159,13 @@ assert_riders_match
 assert_skill_dir "epic-design" \
     "the pipeline table's epic-design skill directory exists"
 
+# hooks/skill-doc-routing's auto-file clause points a standalone brainstorming
+# session at this section by name. A renamed or deleted section leaves the hook
+# naming a destination that is not there, and the failure would only show up as
+# a session quietly not filing anything.
+assert_contains "skills/file/SKILL.md" "## Auto-file mode (hook-triggered)" \
+    "the file skill carries the section the hook's auto-file clause names"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

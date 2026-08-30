@@ -1398,46 +1398,12 @@ disposition directs.
 <!-- audit-delta
 state: patched
 file: hooks/examples/session-end-transcript-capture.sh
-file: skills/auto-drive/SKILL.md
-file: skills/finishing-relay/SKILL.md
-file: skills/graph-works/README.md
-file: skills/graph-works/SKILL.md
-file: skills/graph-works/references/cross-tool-setup.md
-file: skills/graph-works/references/ingest-workflow.md
-file: skills/graph-works/references/lifecycle-rules.md
-file: skills/graph-works/references/lint-workflow.md
-file: skills/graph-works/references/monorepo-principles.md
-file: skills/graph-works/references/obsidian-setup.md
-file: skills/graph-works/references/page-formats.md
-file: skills/graph-works/references/proposal-disposition.md
-file: skills/graph-works/references/query-workflow.md
-file: skills/graph-works/references/scan-workflow.md
-file: skills/graph-works/references/sidecar-schema.md
-file: skills/graph-works/references/wiki-schema.md
-file: skills/planning-epics/SKILL.md
-file: skills/reconciling-spec/SKILL.md
-file: skills/workflow/SKILL.md
-file: skills/workflow/references/brief-riders.md
-file: skills/archive/SKILL.md
-file: skills/file/SKILL.md
-file: skills/ingest/SKILL.md
-file: skills/lint/SKILL.md
-file: skills/log/SKILL.md
-file: skills/onboard/SKILL.md
-file: skills/proposals/SKILL.md
-file: skills/query/SKILL.md
-file: skills/regen-index/SKILL.md
-file: skills/scan/SKILL.md
-file: skills/status/SKILL.md
+file: skills/shared/resolve-workspace.sh
+file: skills/shared/resolve-workspace.test.sh
 file: skills/using-superpowers/references/codex-tools.md
 file: skills/using-superpowers/references/copilot-tools.md
 file: skills/using-superpowers/references/gemini-tools.md
-file: skills/shared/resolve-workspace.sh
-file: skills/shared/resolve-workspace.test.sh
-file: hooks/skill-doc-routing
-file: tests/hooks/test-skill-doc-routing.sh
 file: tests/pi/test-pi-extension.mjs
-file: tests/test-entry-point-skills.sh
 -->
 
 **Why this entry exists.** `scripts/audit_delta.py` derives divergence from `git diff --name-status`
@@ -1454,6 +1420,12 @@ entry #7, and this entry cross-references it in prose instead of in a `file:` li
 
 **What the eight files are.**
 
+- `hooks/examples/session-end-transcript-capture.sh` — the Python-side session-transcript hook example
+  that `packages/graph-works-core` reads back at runtime (see the "Thirty-two claims" note below for
+  why it stays claimed here rather than moving to the native plugin).
+- `tests/pi/test-pi-extension.mjs` — one of the seven `file:` claims in this entry's audit-delta block,
+  but described in prose earlier in this document (the "kept, gated, and an upstream-contribution
+  candidate" paragraph above entry #19), not restated here to avoid duplication.
 - `skills/using-superpowers/references/{codex,copilot,gemini}-tools.md` — the three platform-adaptation
   reference files entry #7 re-adds a citation site for (its "Amendment" paragraph). Upstream deleted
   its own copies of these at v6.4.0, so there is no upstream file at these paths to diverge from and
@@ -1463,24 +1435,16 @@ entry #7, and this entry cross-references it in prose instead of in a `file:` li
   under `skills/using-workflow/`; now that the paths are populated on our side, they are ours-side
   additions and belong in this entry.
 - `skills/shared/resolve-workspace.sh` and its `skills/shared/resolve-workspace.test.sh` — the
-  workspace-resolution helper entries #11 and #12 shell out to (`shared/resolve-workspace.sh`,
-  `resolve-workspace.sh`-driven directory selection) and its test. Upstream has no equivalent script;
-  nothing here patches an upstream file.
-- `hooks/skill-doc-routing` — the hook entry #10 wires as the `PreToolUse`/`Skill` matcher's target,
-  "our one genuinely novel hook-point, upstream-side unmatched." Upstream ships no file at this path.
-- `tests/hooks/test-skill-doc-routing.sh` — that hook's own suite, **added 2026-08-20** by
-  `2026-08-20-tech-debt-hooks-workspace-plumbing`. A new file rather than an extension of
-  `tests/hooks/test-session-start.sh`, which entry #21's amendment restored to `state: verbatim`:
-  coverage for a fork-only hook does not belong in a file being kept conflict-free. It reuses that
-  suite's node JSON validator, widened for a bare allow that carries no context and for the two
-  branches that carry a `systemMessage`.
-- `skills/workflow/references/brief-riders.md` — the stage-skill brief riders,
-  **added 2026-08-30** by `work/epic-unforked-plugin-skill-dispatch/children/feature-move-to-brief-behaviors`.
-  Each section carries the `git diff` against the upstream base that re-derives
-  it, so the behaviors stay auditable after the subtree they came from is
-  deleted. Upstream ships no file at this path. `skills/workflow/SKILL.md`
-  itself is already claimed by the `file:` line above it — this is a second
-  file, not a second claim on the same one.
+  workspace-resolution helper entries #11 and #12 shell out to (`skills/using-git-worktrees/SKILL.md`,
+  `skills/finishing-a-development-branch/SKILL.md`) along with `skills/brainstorming/scripts/start-server.sh`,
+  and its test. Upstream has no equivalent script; nothing here patches an upstream file. **The Graph
+  Works-native plugin carries its own copy** at `plugins/graph-works-native/skills/shared/` — copied
+  rather than moved precisely because these three consumers stay in the subtree until the cutover. The
+  two copies are outside each other's reach: nothing reads across the boundary in either direction.
+  (`hooks/skill-doc-routing`, its `tests/hooks/test-skill-doc-routing.sh` suite, and
+  `skills/workflow/references/brief-riders.md` all moved the same way as the seventeen native
+  skill directories on 2026-08-30 — see the "Thirty-two claims" note below — and no longer carry a
+  claim in this entry's block.)
 
 **Child 5 extends this entry.** This audit's grafted set covers only what the 2026-06-09 graft
 touched; the native surface still outside the grafted roots — 7 more skills, the commands, the hooks,
@@ -1497,7 +1461,9 @@ dispatches a hook file that would not exist, and entries #11 and #12's workspace
 shells out to a script that would not exist. Landing the dependents without their dependencies would
 have left this child's own patches non-functional. Child 5's scope shrinks by exactly these three
 files — one less thing for it to port, one less place for it to duplicate a claim already made
-here.
+here. (`hooks/skill-doc-routing` itself has since moved on, again: as of `feature-native-plugin-scaffold`
+on 2026-08-30 it lives at `plugins/graph-works-native/`, not under this entry's prefix — see the
+"Thirty-two claims" note below.)
 
 **On `hooks/skill-doc-routing` and `hooks/session-start` — superseded 2026-08-20.** This entry
 previously read: "Both hooks invoke `workspace_io`, which the graph-works CLI epic has yet to deliver.
@@ -1515,7 +1481,10 @@ where it resolved at ~670 ms): it is the only form that works from the **install
 `~/.claude/plugins/.../graph-works/hooks`, where no uv project exists at any ancestor — the case the
 hook actually ships into, and one no choice of project root could have fixed. `tests/hooks/test-skill-doc-routing.sh` asserts the absence of both
 retired module names and of `uv run` in both hooks, so a reintroduction fails the gate rather than
-failing open.
+failing open. (Both `hooks/skill-doc-routing` and `tests/hooks/test-skill-doc-routing.sh` describe
+their state as of this checkout at the time of that supersession; as of `feature-native-plugin-scaffold`
+on 2026-08-30 both have moved to `plugins/graph-works-native/` and no longer live under this entry's
+prefix.)
 
 **`commands/onboard.md` replaced two claims on 2026-08-20.** `commands/bootstrap.md` and
 `commands/config-init.md` were two ours-side files covering one job — create the workspace, then
@@ -1524,7 +1493,15 @@ configure it — and `bootstrap.md` had gone stale in every claim it made about 
 ours-side additions, so this is one `file:` line replacing two, not a `state: removed` case: nothing
 upstream ships at any of the three paths.
 
-**On merge.** These eight have no upstream counterpart, so there is nothing to reconcile against on a
+**Thirty-two claims left this entry on 2026-08-30.** `feature-native-plugin-scaffold` moved the seventeen native skill directories, `hooks/skill-doc-routing`, `tests/hooks/test-skill-doc-routing.sh` and `tests/test-entry-point-skills.sh` out of this prefix and into `plugins/graph-works-native/`, a sibling directory that is not vendored and has no upstream to diverge from. Landing this branch onto the epic also carried `skills/workflow/references/brief-riders.md` — added to this entry by the sibling `feature-move-to-brief-behaviors` child after this branch's own base — the same way, since it lives alongside the `workflow/SKILL.md` this branch already relocated. `audit_delta.py`'s `PREFIX` is tree-scoped (`HEAD:plugins/graph-works`), not a string prefix, so the sibling is invisible to the checker — correctly. Their `file:` lines are removed here because a claim on a path that no longer diverges is reported as a *retired patch*, which is exactly what a moved-out file is not.
+
+`hooks/examples/session-end-transcript-capture.sh` did **not** move, and stays claimed in this entry, precisely because it has real Python-side consumers that hardcode its location under this prefix: `packages/graph-works-core`'s `pyproject.toml` sdist force-include and `hooks.py`'s fallback path both point at `plugins/graph-works/hooks/examples/session-end-transcript-capture.sh`. Child 9's eventual cutover (`git rm -r plugins/graph-works` then `git mv plugins/graph-works-native plugins/graph-works`) must relocate or repoint those two references before deleting this tree — not just move skill directories — or it silently breaks the sdist and `packages/graph-works-cli/tests/test_config_cli_hooks.py`.
+
+The `skills/graph-works/references/sidecar-schema.md` row went with them, for a different reason: that file has not existed in the tree for some time and the row was already reported as a retired patch before this change. It could not be left standing while the block it lives in was being rewritten. The six *undocumented* divergences remain untouched — those are `tech-debt-reconcile-fork-ledger`'s, and this change reduces them to five only because `tests/test-doc-layout-claims.sh` was one of them and has moved.
+
+Four entries that might look affected are not. Entries #7 (`using-superpowers` rename), #8 (`session-start`), #10 (`hooks.json`) and #21/#23 (the vendored test suites) all claim files still sitting at the paths they name: the native plugin authors its own manifest, `hooks.json`, `session-start` and `test-session-start.sh` fresh rather than moving upstream's. That is the whole reason for the "author fresh, never move an upstream-pathed file" rule this change followed.
+
+**On merge.** These seven have no upstream counterpart, so there is nothing to reconcile against on a
 sync — they carry forward unchanged unless this fork itself revises them.
 
 **Amended for the commands/agents collapse — 2026-08-27.** Seventeen ours-side

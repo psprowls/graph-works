@@ -103,6 +103,11 @@ cov:
 # A1 and A3 report `skipped (no plugin tree)` rather than passing vacuously.
 # In this fork the tree is `plugins/graph-works`, so naming it is what makes
 # all three assertions real.
+#
+# Stale as of `feature-native-plugin-scaffold`: `--plugin-tree` still points at
+# `plugins/graph-works`, which no longer holds the seventeen skills moved to
+# `plugins/graph-works-native/`. Advisory only, not in `check`, so left as-is
+# here -- it now covers only the vendored subtree's remaining skills.
 plugin-contract *ARGS:
     uv run python scripts/plugin_contract.py --contract-page "${GRAPH_WIKI_WORKSPACE}/wiki/concepts/graph-works-plugin-cli-contract.md" --plugin-tree plugins/graph-works {{ARGS}}
 
@@ -114,7 +119,7 @@ plugin-contract *ARGS:
 # happens to pull `sync` in today. Without it the gate's result depends on the
 # order of this list: `types` before `cov` fails from a clean checkout, `cov`
 # before `types` passes, on identical code.
-check: sync subtree-base normalization lint types contracts cov test-plugin
+check: sync subtree-base normalization lint types contracts cov test-plugin test-plugin-native
 
 # Subtree merge-base guard -- the `git-subtree-split` note behind
 # `plugins/graph-works`.
@@ -178,12 +183,6 @@ audit-delta:
 # (spike D2) and were removed with the dormant hook surface they covered.
 # Their names were pruned from the list below by C2, 2026-08-17 — the gate
 # still runs every suite that survives, and nothing is skipped silently.
-#
-# `hooks/test-skill-doc-routing` and `skills/shared/resolve-workspace.test.sh`
-# joined on 2026-08-20 for `tests/pi`'s reason, restated: the resolver suite was
-# reachable only by running the file by hand, so a divergence nothing executes
-# was not coverage. `uv` is a hard requirement of the resolver suite's parity
-# matrix, for the same reason node and npm are hard requirements below.
 test-plugin:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -194,14 +193,6 @@ test-plugin:
     done
     echo "--- hooks/test-session-start"
     bash tests/hooks/test-session-start.sh
-    echo "--- hooks/test-skill-doc-routing"
-    bash tests/hooks/test-skill-doc-routing.sh
-    echo "--- test-doc-layout-claims"
-    bash tests/test-doc-layout-claims.sh
-    echo "--- test-entry-point-skills"
-    bash tests/test-entry-point-skills.sh
-    echo "--- skills/shared/resolve-workspace"
-    bash skills/shared/resolve-workspace.test.sh
     echo "--- shell-lint/test-lint-shell"
     bash tests/shell-lint/test-lint-shell.sh
     echo "--- systematic-debugging/test-find-polluter"
@@ -212,6 +203,29 @@ test-plugin:
     cd tests/brainstorm-server
     [ -d node_modules ] || npm ci
     npm test
+
+# The Graph Works-native plugin's own suites -- `plugins/graph-works-native/`.
+#
+# ENFORCING, and part of `check`, for `test-plugin`'s reason: these are green
+# once written and go red only when a change actually breaks a hook or a
+# guard. Five suites, not six: the parent design's list counted
+# `test-sdd-workspace`, which is upstream's and stays with the subtree.
+#
+# Child 9 deletes `test-plugin` and renames this recipe to `test-plugin`.
+test-plugin-native:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd plugins/graph-works-native
+    echo "--- hooks/test-session-start"
+    bash tests/hooks/test-session-start.sh
+    echo "--- hooks/test-skill-doc-routing"
+    bash tests/hooks/test-skill-doc-routing.sh
+    echo "--- test-doc-layout-claims"
+    bash tests/test-doc-layout-claims.sh
+    echo "--- test-entry-point-skills"
+    bash tests/test-entry-point-skills.sh
+    echo "--- skills/shared/resolve-workspace"
+    bash skills/shared/resolve-workspace.test.sh
 
 # The vendored suite deliberately kept out of `check`.
 #

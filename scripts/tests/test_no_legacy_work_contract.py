@@ -18,6 +18,11 @@ FORBIDDEN_RUNTIME_TEXT = (
     "### `kind` (work)",
 )
 PLUGIN_ROOT = ROOT / "plugins" / "graph-works"
+# The Graph Works-native plugin — a sibling of the vendored subtree, not a
+# subdirectory of it, so `rglob` under PLUGIN_ROOT does not reach it. Both are
+# scanned until the cutover deletes the subtree, at which point this becomes
+# the only one.
+NATIVE_PLUGIN_ROOT = ROOT / "plugins" / "graph-works-native"
 ACTIVE_FILES = (
     ROOT / "scripts" / "gw_dispatch.py",
     ROOT / "scripts" / "gw-dispatch.md",
@@ -48,6 +53,11 @@ LEGACY_EXCLUSIONS = (
     # above, this exclusion does not retire with anything: the guard itself
     # must keep naming the token it guards against.
     ROOT / "packages" / "work-tracker-okf" / "tests" / "test_legacy_boundary.py",
+    # Same rationale one level up: the package's own AGENTS.md documents that
+    # boundary guard, and cannot describe which retired marker the guard scans
+    # for without naming it. Like the guard itself, this exclusion does not
+    # retire with anything.
+    ROOT / "packages" / "work-tracker-okf" / "AGENTS.md",
 )
 HARVESTED_LEGACY_FIXTURE = ROOT / "scripts" / "tests" / "fixtures" / "legacy_graph_wiki"
 
@@ -70,9 +80,9 @@ def _active_files() -> list[Path]:
     )
     plugin_files = (
         path
-        for path in PLUGIN_ROOT.rglob("*")
-        if path.is_file()
-        and "node_modules" not in path.relative_to(PLUGIN_ROOT).parts
+        for plugin_root in (PLUGIN_ROOT, NATIVE_PLUGIN_ROOT)
+        for path in plugin_root.rglob("*")
+        if path.is_file() and "node_modules" not in path.relative_to(plugin_root).parts
     )
     return sorted(
         {
@@ -120,11 +130,13 @@ def test_active_plugin_scan_covers_every_maintained_surface() -> None:
 
     assert {
         "plugins/graph-works/README.md",
-        "plugins/graph-works/skills/ingest/SKILL.md",
         "plugins/graph-works/docs/testing.md",
         "plugins/graph-works/scripts/bump-version.sh",
         "plugins/graph-works/tests/brainstorm-server/auth.test.js",
         "plugins/graph-works/tests/hooks/test-session-start.sh",
+        "plugins/graph-works-native/skills/ingest/SKILL.md",
+        "plugins/graph-works-native/skills/using-graph-works/SKILL.md",
+        "plugins/graph-works-native/hooks/session-start",
     } <= paths
 
 
@@ -141,7 +153,7 @@ def test_transcript_capture_resolves_the_active_canonical_path() -> None:
 def test_public_managed_artifact_payloads_do_not_use_legacy_doc_keys() -> None:
     paths = (
         ROOT / "packages" / "graph-works-cli" / "src" / "graph_works_cli" / "work_cli" / "rendering.py",
-        ROOT / "plugins" / "graph-works" / "skills" / "workflow" / "SKILL.md",
+        ROOT / "plugins" / "graph-works-native" / "skills" / "workflow" / "SKILL.md",
     )
     findings = [str(path.relative_to(ROOT)) for path in paths if "spec_doc" in path.read_text(encoding="utf-8")]
     findings += [str(path.relative_to(ROOT)) for path in paths if "plan_doc" in path.read_text(encoding="utf-8")]

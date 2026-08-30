@@ -1,10 +1,13 @@
 # graph-works
 
 A uv workspace for the graph-works tooling packages. The root is a workspace
-root only — it is not itself distributable. `plugins/graph-works` sits
-alongside it: a Claude Code plugin vendored verbatim as a `git subtree` of
+root only — it is not itself distributable. Two plugin trees sit alongside it,
+neither a workspace member and neither Python: `plugins/graph-works`, a Claude
+Code plugin vendored verbatim as a `git subtree` of
 [obra/superpowers](https://github.com/obra/superpowers) (see
-`plugins/SYNC.md`), not a workspace member and not Python.
+`plugins/SYNC.md`) — unregistered, kept for provenance until a future
+cutover — and `plugins/graph-works-native`, the plugin Claude Code actually
+installs and loads (name `graph-works`).
 
 ## Members
 
@@ -77,8 +80,9 @@ workflow exists yet — enforcement is local, by design (ADR-0010).
 | `just test` | `uv run pytest`, plus one run per non-okf-io/okf-ext package under `uv run --package <name>` |
 | `just cov` | branch coverage, gated per package (95% for most, 90% for `code-graph-io`) |
 | `just subtree-base` | asserts the `plugins/graph-works` subtree merge-base is intact |
-| `just test-plugin` | the offline, code-executing subset of the vendored plugin's own test suites |
-| `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
+| `just test-plugin` | the offline, code-executing subset of the **vendored subtree's** own test suites — not the only plugin suite; see `test-plugin-native` |
+| `just test-plugin-native` | the Graph Works-native plugin's own test suites, under `plugins/graph-works-native/` |
+| `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` + `test-plugin-native` — the full gate |
 
 A coverage failure reports only a global percentage per package; start with
 the lowest-covered module and read `term-missing`. `just audit-delta` and

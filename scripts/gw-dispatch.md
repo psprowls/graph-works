@@ -10,7 +10,7 @@ next stage is automatable, it dispatches a background session running
 
 ## Why background sessions and not subagents
 
-`plugins/graph-works/skills/workflow/SKILL.md` states the constraint this
+`plugins/graph-works-native/skills/workflow/SKILL.md` states the constraint this
 mechanizes:
 
 > One stage per invocation, by design. Never chain stages in a session — each

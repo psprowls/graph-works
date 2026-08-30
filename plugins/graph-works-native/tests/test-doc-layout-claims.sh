@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Guards against plugins/graph-works/ docs re-describing the pre-OKF
+# Guards against plugins/graph-works-native/ docs re-describing the pre-OKF
 # workspace layout (wiki/, raw/, entities/, knowledge/) that gw bootstrap no
 # longer builds. See work/tech-debt-plugin-docs-layout-claims.
 set -uo pipefail

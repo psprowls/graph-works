@@ -65,7 +65,7 @@ here (`Path(self.root).parents[1] / "plugins" / "graph-works" / "hooks" / "examp
 ### Module layout (three import-linter layers, per the package `__init__.py`)
 
 ```
-workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, pipeline, repos, config, context_seed, transactions
+workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, repos, config, context_seed, transactions
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
 ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : wiki_stats/ : work/    layer 2, independent verticals
 ```
@@ -73,7 +73,9 @@ ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : wiki_stats/ :
 Each layer-2 vertical owns one command entry point (`commands.py` when that
 name doesn't collide with the vertical's own name, otherwise a flat module
 like `lint_drift/lint.py`), its own prompts, and nothing else reaches across
-verticals except through `workspace/`.
+verticals except through `workspace/` — `orchestrate` is the exception,
+split across `commands.py` and `stage_advance.py` at its planner/stage-advance
+seam; see "The dispatch seam" in the README.
 
 ### The four things "what a workspace is" means concretely
 

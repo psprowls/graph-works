@@ -340,3 +340,11 @@ def test_split_topology_files_and_lints_clean(tmp_path: Path) -> None:
     payload = json.loads(lint_result.stdout)
     assert payload["ok"] is True, payload["findings"]
     assert not any(finding["code"] == "targets.affects-missing" for finding in payload["findings"])
+
+
+def test_return_refuses_an_item_that_is_not_at_finish(workspace: Path) -> None:
+    """The way home exists, and declines to invent one from an earlier phase."""
+    path = file_item(workspace, "Beta")
+    result = runner.invoke(app, ["work", "advance", path, "--return", "--workspace", str(workspace), "--json"])
+    assert result.exit_code != 0
+    assert "return-not-available" in result.stderr

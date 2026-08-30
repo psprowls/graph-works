@@ -224,6 +224,13 @@ contract, not code:
   planning, rather than discovering the gap when a `PlannedDispatch` that
   worked against one backend raises `WorktreeNotProvisioned` against another.
 
+`WorkerRecord.worktree_path` / `.worktree_branch` are read-back fields: what
+the worker *actually* runs on, as the backend learned it after launching —
+never what a planner asked for. Both default to `None`, which means "this
+backend did not learn it" and nothing else. Only `workflow-orca` populates
+them (Orca provisions worktrees and renames the branch as it does so);
+`workflow-local` provisions nothing and leaves both absent.
+
 Do not add an implementation of `DispatchBackend`/`DispatchSession` inside
 this package. If you find yourself importing `subprocess`, a worktree
 library, or anything Orca- or local-CLI-specific here, that code belongs in

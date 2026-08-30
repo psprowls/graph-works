@@ -58,12 +58,11 @@ def test_parent_archive_normalizes_terminal_descendants_before_moving_parent(tmp
 
     assert plan.ok, plan.refusals
     assert plan.path_mapping[epic] == "work/_archive/epic-migration"
-    assert "/children/_archive/" in plan.path_mapping[feature]
-    assert plan.path_mapping[feature].startswith("work/_archive/epic-migration/")
-    assert plan.path_mapping[archived_bug].startswith("work/_archive/epic-migration/")
+    assert plan.path_mapping[feature] == "work/_archive/epic-migration/children/feature-done"
+    assert plan.path_mapping[archived_bug] == "work/_archive/epic-migration/children/bug-old"
 
 
-def test_parent_archive_composes_local_normalization_at_every_depth(tmp_path: Path) -> None:
+def test_parent_archive_flattens_every_depth_under_one_archive_lane(tmp_path: Path) -> None:
     _release, epic, feature = _terminal_tree(tmp_path)
     nested = f"{feature}/children/bug-nested"
     write_item(tmp_path, nested, "type: Bug\nwork_status: resolved\n")
@@ -72,9 +71,7 @@ def test_parent_archive_composes_local_normalization_at_every_depth(tmp_path: Pa
     plan = plan_archive(bundle, load_items(bundle), epic)
 
     assert plan.ok, plan.refusals
-    assert plan.path_mapping[nested] == (
-        "work/_archive/epic-migration/children/_archive/feature-done/children/_archive/bug-nested"
-    )
+    assert plan.path_mapping[nested] == "work/_archive/epic-migration/children/feature-done/children/bug-nested"
 
 
 def test_default_archive_targets_skip_active_archived_and_terminal_descendants() -> None:
@@ -124,7 +121,7 @@ def test_archive_subtree_mapping_is_iterative_beyond_1080_edges() -> None:
     mapping = _archive_subtree_mapping(items, paths[0], "work/_archive/epic-root")
 
     assert len(mapping) == 1_082
-    assert mapping[paths[-1]].count("/_archive/") == 1_082
+    assert mapping[paths[-1]].count("/_archive/") == 1
 
 
 def test_parent_archive_refuses_a_nonterminal_descendant_without_effects(tmp_path: Path) -> None:
@@ -430,8 +427,8 @@ def test_archiving_a_root_parent_reprojects_its_whole_subtree(tmp_path: Path) ->
 
     reprojected = {item.path: item for item in load_items(load_bundle(tmp_path, ignore=IGNORE))}
     assert "work/_archive/epic-migration" in reprojected
-    moved_feature = "work/_archive/epic-migration/children/_archive/feature-done"
-    moved_nested = f"{moved_feature}/children/_archive/bug-nested"
+    moved_feature = "work/_archive/epic-migration/children/feature-done"
+    moved_nested = f"{moved_feature}/children/bug-nested"
     assert moved_feature in reprojected
     assert moved_nested in reprojected
 
@@ -455,7 +452,7 @@ def test_archiving_a_nested_parent_reprojects_its_child(tmp_path: Path) -> None:
 
     reprojected = {item.path: item for item in load_items(load_bundle(tmp_path, ignore=IGNORE))}
     moved_feature = f"{epic}/children/_archive/feature-done"
-    moved_nested = f"{moved_feature}/children/_archive/bug-nested"
+    moved_nested = f"{moved_feature}/children/bug-nested"
     assert reprojected[moved_nested].parent_path == moved_feature
     assert reprojected[moved_feature].parent_path == epic
     assert reprojected[moved_feature].archived and reprojected[moved_nested].archived
@@ -524,3 +521,56 @@ def test_a_non_canonical_destination_is_refused_before_any_write(tmp_path: Path)
     non_canonical = [refusal for refusal in plan.refusals if refusal.kind == "non-canonical-destination"]
     assert [refusal.path for refusal in non_canonical] == [epic]
     assert _snapshot(tmp_path) == before
+
+
+def test_default_targets_skip_a_terminal_child_under_a_live_ancestor() -> None:
+    epic = make_item("work/epic-live", type="Epic", work_status="open")
+    child = make_item(
+        "work/epic-live/children/bug-done",
+        work_status="resolved",
+        parent_path=epic.path,
+        ancestor_paths=(epic.path,),
+    )
+
+    assert _default_targets((epic, child)) == ()
+
+
+def test_targeted_archive_of_a_child_under_a_live_ancestor_is_refused(tmp_path: Path) -> None:
+    epic = "work/epic-live"
+    child = f"{epic}/children/bug-done"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: open\n")
+    write_item(tmp_path, child, "type: Bug\nwork_status: resolved\n")
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), (child,))
+
+    assert not plan.ok
+    assert "ancestor-not-terminal" in {refusal.kind for refusal in plan.refusals}
+    assert "archive the root instead" in " ".join(refusal.detail for refusal in plan.refusals)
+    assert plan.writes == plan.moves == plan.deletes == ()
+
+
+def test_archiving_a_root_flattens_active_and_already_archived_children_alike(tmp_path: Path) -> None:
+    epic = "work/epic-migration"
+    active_child = f"{epic}/children/feature-done"
+    archived_child = f"{epic}/children/_archive/bug-old"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: resolved\n")
+    write_item(tmp_path, active_child, "type: Feature\nwork_status: resolved\n")
+    write_item(tmp_path, archived_child, "type: Bug\nwork_status: resolved\n")
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), (epic,))
+
+    assert plan.ok, plan.refusals
+    assert plan.path_mapping[epic] == "work/_archive/epic-migration"
+    assert plan.path_mapping[active_child] == "work/_archive/epic-migration/children/feature-done"
+    assert plan.path_mapping[archived_child] == "work/_archive/epic-migration/children/bug-old"
+
+
+def test_flattened_destinations_still_parse_as_archived_by_ancestry(tmp_path: Path) -> None:
+    from work_tracker_okf.paths import parse_item_path
+
+    location = parse_item_path("work/_archive/epic-migration/children/feature-done")
+
+    assert location is not None
+    assert location.archived is True

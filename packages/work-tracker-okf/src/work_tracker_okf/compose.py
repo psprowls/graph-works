@@ -295,6 +295,7 @@ def advance_and_stamp(
     released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
+    return_: bool = False,
     dry_run: bool = True,
 ) -> AdvanceOutcome:
     """Advance *path*, stamp its artifact, ensure its plan row -- in **one save**.
@@ -335,6 +336,7 @@ def advance_and_stamp(
         released_at=released_at,
         worktree=worktree,
         branch=branch,
+        return_=return_,
     )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)

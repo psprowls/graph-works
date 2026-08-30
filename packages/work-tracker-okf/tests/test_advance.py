@@ -378,3 +378,46 @@ def test_advance_without_provenance_keywords_changes_nothing_extra() -> None:
 def test_advance_does_not_rewrite_an_unchanged_worktree() -> None:
     items = (make_item("x", type="Feature", work_status="open", phase="design", worktree="/tmp/wt/x"),)
     assert "worktree" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x"))
+
+
+# --- the way home ---------------------------------------------------------
+
+
+def test_returning_an_item_at_finish_plans_the_way_back_to_execute():
+    item = make_item("work/feature-a", phase="finish", work_status="in-progress")
+    plan = advance((item,), item.path, today=TODAY, return_=True)
+    assert plan.refusal is None
+    assert plan.transition == Transition(phase="execute", work_status="in-progress")
+    assert FieldChange("phase", "finish", "execute") in plan.changes
+
+
+def test_returning_an_item_that_is_not_at_finish_is_refused():
+    item = make_item("work/feature-a", phase="execute", work_status="in-progress")
+    plan = advance((item,), item.path, today=TODAY, return_=True)
+    assert plan.refusal == "return-not-available"
+    assert plan.changes == ()
+
+
+def test_returning_with_resolved_in_is_refused_rather_than_silently_ignored():
+    item = make_item("work/feature-a", phase="finish", work_status="in-progress")
+    plan = advance((item,), item.path, today=TODAY, return_=True, resolved_in="pr-1")
+    assert plan.refusal == "return-not-available"
+    assert "--resolved-in" in plan.detail
+
+
+def test_returning_does_not_stamp_a_source_or_sync_a_plan_row():
+    item = make_item("work/feature-a", phase="finish", work_status="in-progress")
+    plan = advance((item,), item.path, today=TODAY, return_=True)
+    assert plan.stamp_source is None
+    assert plan.sync_plan_table is False
+
+
+def test_the_refusal_vocabulary_carries_the_affects_coverage_reason() -> None:
+    # The vocabulary is the CLI's rendering contract: `advance_payload` emits
+    # `plan.refusal` verbatim, so a reason produced one band up must be a
+    # declared member here or `mypy --strict` refuses the gate's return.
+    import typing
+
+    from work_tracker_okf.advance import RefusalReason
+
+    assert "no-affects-touched" in typing.get_args(RefusalReason)

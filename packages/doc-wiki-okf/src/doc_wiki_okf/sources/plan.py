@@ -20,6 +20,7 @@ and binary material is not a special case in it.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, replace
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
@@ -127,18 +128,63 @@ def copy_target(page: str, material: Path) -> str:
     return str(page_path.parent / REFERENCES_DIRECTORY / f"{page_path.stem}{suffix}")
 
 
+#: A value that names a scheme is an identity of its own, never a path. Guards
+#: `normalize_origin` against turning `https://example.com/x` into a
+#: bundle-relative path by joining it to the root.
+_SCHEME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9+.-]*://")
+
+
+def normalize_origin(value: str, bundle_root: Path) -> str:
+    """*value* as a lane-independent identity for the material it names.
+
+    A path beneath *bundle_root* becomes its bundle-relative POSIX path with
+    every `_archive` segment removed; anything else -- a URL, a path outside
+    the vault, an empty string -- is returned unchanged, because it is already
+    its own identity.
+
+    **Why the `_archive` strip.** `origin` is what `_existing_source_with_origin`
+    dedupes re-ingests on, and archiving a work item moves its design artifact
+    from `work/<...>/references/01-design.md` to
+    `work/_archive/<...>/references/01-design.md`. Compared as a raw string the
+    two are different origins, so the re-ingest refusal silently stops firing
+    and a second `Source` page lands for material already recorded. Stripping
+    the lane makes the identity survive every archive move, including the
+    lane-flattening in `work_tracker_okf.archive`.
+
+    Bundle-relative alone would not do: it still changes when the item
+    archives, which is the exact failure being fixed.
+    """
+    if not value or _SCHEME_RE.match(value):
+        return value
+    root = Path(bundle_root).resolve()
+    candidate = Path(value)
+    candidate = (root / candidate if not candidate.is_absolute() else candidate).resolve()
+    try:
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return value
+    parts = tuple(part for part in relative.parts if part != "_archive")
+    if not parts:
+        return value
+    return PurePosixPath(*parts).as_posix()
+
+
 def _existing_source_with_origin(bundle: Bundle, origin: str) -> str | None:
     """The page path of an already-ingested `Source` carrying *origin*, or `None`.
 
-    `origin` is not one of `okf_io`'s spec-level `Frontmatter` fields, so a
-    document that carries it holds it in `.extra` -- confirmed via
-    `KNOWN_KEYS`/`_extra_of` in `okf_io.models`. A linear scan over
-    `bundle.concepts`, already held in memory by the one directory walk
-    `load_bundle` performed: no extra I/O, and trivial at this codebase's
-    target scale (a wiki's worth of `Source` pages).
+    Both sides are run through `normalize_origin` against the bundle root, so a
+    page stamped before its work item archived still matches the artifact at its
+    post-archive path. `origin` is not one of `okf_io`'s spec-level
+    `Frontmatter` fields, so a document that carries it holds it in `.extra`.
+    A linear scan over `bundle.concepts`, already held in memory by the one
+    directory walk `load_bundle` performed.
     """
+    wanted = normalize_origin(origin, bundle.root)
     for concept_id, document in bundle.concepts.items():
-        if document.fm.type == SOURCE_TYPE and document.fm.extra.get("origin") == origin:
+        if document.fm.type != SOURCE_TYPE:
+            continue
+        stored = document.fm.extra.get("origin")
+        if isinstance(stored, str) and normalize_origin(stored, bundle.root) == wanted:
             return f"{concept_id}.md"
     return None
 
@@ -260,6 +306,7 @@ __all__ = [
     "SOURCE_TYPE",
     "IngestPreflight",
     "copy_target",
+    "normalize_origin",
     "page_target",
     "plan_ingest",
     "preflight_ingest",

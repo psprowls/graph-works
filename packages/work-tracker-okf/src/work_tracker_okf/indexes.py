@@ -34,11 +34,24 @@ def render_entry(item: WorkItem) -> str:
 
 
 def _required_lanes(items: Sequence[WorkItem]) -> tuple[str, ...]:
+    """The lanes an index reconcile must cover.
+
+    The archived child lane is required only for a parent that **has** archived
+    children. Under the root-only archive policy an active parent can no longer
+    acquire one, so requiring it unconditionally would grow an empty
+    `children/_archive/index.md` under every new epic forever. Parents that
+    already hold archived children -- the legacy shape -- keep theirs.
+
+    Existing empty `children/_archive/index.md` files under parents with no
+    archived children become inert. Pruning them is a `regen-index` concern and
+    is deliberately out of scope; they are harmless.
+    """
     lanes = {"work", "work/_archive"}
     for item in items:
         if not item.archived and item.type in PARENT_TYPES:
             lanes.add(child_lane(item.path))
-            lanes.add(child_lane(item.path, archived=True))
+            if item.archived_child_paths:
+                lanes.add(child_lane(item.path, archived=True))
     return tuple(sorted(lanes))
 
 

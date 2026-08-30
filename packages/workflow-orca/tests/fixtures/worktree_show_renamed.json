@@ -1,0 +1,18 @@
+{
+  "id": "04891f6b-521b-4e90-a512-5e9afff9365d",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "a5d7cb85-fc68-4596-bffd-ecf75466124a::/Users/pat/orca/workspaces/graph-works/child",
+      "repoId": "a5d7cb85-fc68-4596-bffd-ecf75466124a",
+      "path": "/Users/pat/orca/workspaces/graph-works/child",
+      "head": "710dc797472c0fdaa3133210139c302725a3c495",
+      "branch": "refs/heads/psprowls/child",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "bug/child",
+      "baseRef": "epic/x",
+      "createdWithAgent": "claude"
+    }
+  }
+}

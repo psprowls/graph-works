@@ -37,7 +37,7 @@ def test_open_session_binds_or_creates_by_name(case, tmp_path):
     first.launch(make_dispatch("done:succeeded", worktree_path=str(tmp_path)))
     first.close()
     second = backend.open_session("s")
-    assert [w.key for w in second.workers()] == ["slug#plan"]
+    assert [w.key for w in second.workers()] == ["gw-plan-slug-00000000"]
     second.close()
 
 
@@ -68,14 +68,14 @@ def test_launch_refuses_an_unsupported_mode(case, session, tmp_path):
 
 def test_launch_enumerate_wait_done(session, tmp_path):
     record = session.launch(make_dispatch("heartbeat:planning", "done:succeeded", worktree_path=str(tmp_path)))
-    assert record.key == "slug#plan"
-    assert [w.key for w in session.workers()] == ["slug#plan"]
+    assert record.key == "gw-plan-slug-00000000"
+    assert [w.key for w in session.workers()] == ["gw-plan-slug-00000000"]
 
     events = drain(session, until=saw_done)
     done = next(e for e in events if isinstance(e, WorkerDone))
     assert done.outcome == "succeeded"
-    assert done.key == "slug#plan"
-    assert session.describe("slug#plan").state == "succeeded"
+    assert done.key == "gw-plan-slug-00000000"
+    assert session.describe("gw-plan-slug-00000000").state == "succeeded"
 
 
 def test_a_settled_key_stays_enumerable(session, tmp_path):
@@ -83,7 +83,7 @@ def test_a_settled_key_stays_enumerable(session, tmp_path):
     # exactly what the dedupe check needs to see.
     session.launch(make_dispatch("done:succeeded", worktree_path=str(tmp_path)))
     drain(session, until=saw_done)
-    assert [w.key for w in session.workers()] == ["slug#plan"]
+    assert [w.key for w in session.workers()] == ["gw-plan-slug-00000000"]
 
 
 def test_describe_is_none_for_a_key_never_launched(session):
@@ -103,8 +103,8 @@ def test_question_reply_done(session, tmp_path):
 def test_stop_settles_a_running_worker(session, tmp_path):
     session.launch(make_dispatch("question:forever", worktree_path=str(tmp_path)))
     drain(session, until=lambda evs: any(isinstance(e, WorkerQuestion) for e in evs))
-    session.stop("slug#plan")
-    assert session.describe("slug#plan").state == "stopped"
+    session.stop("gw-plan-slug-00000000")
+    assert session.describe("gw-plan-slug-00000000").state == "stopped"
 
 
 def test_an_unacked_event_is_redelivered_after_a_reopen(case, tmp_path):
@@ -131,7 +131,7 @@ def test_an_acked_event_is_not_redelivered_after_a_reopen(case, tmp_path):
 
     second = backend.open_session("s")
     assert second.wait(timeout_s=0.3) == []
-    assert second.describe("slug#plan").state in {"succeeded", "failed"}
+    assert second.describe("gw-plan-slug-00000000").state in {"succeeded", "failed"}
     second.close()
 
 
@@ -145,7 +145,7 @@ def test_every_state_a_backend_emits_is_in_the_vocabulary(session, tmp_path):
     for _ in range(40):
         session.wait(timeout_s=0.05)
         seen.update(w.state for w in session.workers())
-        if session.describe("slug#plan").state in {"succeeded", "failed"}:
+        if session.describe("gw-plan-slug-00000000").state in {"succeeded", "failed"}:
             break
     assert seen <= WORKER_STATES
     assert len(seen) >= 2, f"the lifecycle produced only {seen} — the assertion above would be near-vacuous"

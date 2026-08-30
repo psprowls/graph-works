@@ -14,7 +14,7 @@ declarations path from `layout.bundle_dir` as the standalone
 `work_tracker_okf.cli` does.
 
 `advance`, `archive` and `sync-children` are deliberately absent.
-`graph_works_core.orchestrate.commands.run_stage_advance` already composes
+`graph_works_core.orchestrate.stage_advance.run_stage_advance` already composes
 `work_tracker_okf.compose.advance_and_stamp` with worktree provenance and a
 results stub; `graph_works_core.archive.commands.run_archive` already composes
 `work_tracker_okf.archive`.
@@ -58,6 +58,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from code_wiki_okf.config import Config
+from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import load_sections
 from okf_io import Bundle, load_bundle, parse
@@ -92,7 +93,7 @@ from work_tracker_okf.paths import ArtifactRef, child_lane, item_page
 from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
 from work_tracker_okf.reparent import plan_release_adoption, plan_reparent
 from work_tracker_okf.sources import upsert
-from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID
+from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -272,6 +273,83 @@ def run_status(layout: WorkspaceLayout) -> StatusReport:
     """Count the active items and name the one worth resuming. Never writes."""
     items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
     return StatusReport(rollup=rollup(items), resume=select_resume(items))
+
+
+@dataclass(frozen=True, slots=True)
+class PendingIngest:
+    """One terminal item whose design spec has no ingested `Source` page."""
+
+    path: str
+    work_status: str
+    resource: str
+    origin: str
+
+
+@dataclass(frozen=True, slots=True)
+class IngestQueueReport:
+    """Every pending item, in canonical path order."""
+
+    pending: tuple[PendingIngest, ...]
+
+
+def _ingested_origins(bundle: Bundle) -> frozenset[str]:
+    """Every normalized `origin` some `Source` page in *bundle* already carries.
+
+    A `Source` page with **no** `origin` contributes nothing. It is not evidence
+    of anything -- only 10 of the live vault's Source pages populate the field
+    -- so its item stays queued. The queue therefore over-reports rather than
+    under-reports, which is the correct direction of error: a re-ingest is
+    idempotent (it appends a `## Re-ingest <date>` section) and costs a human
+    one "already done, skip", while an under-report silently loses a design
+    spec.
+    """
+    origins: set[str] = set()
+    for document in bundle.concepts.values():
+        if document.fm.type != SOURCE_TYPE:
+            continue
+        stored = document.fm.extra.get("origin")
+        if isinstance(stored, str) and stored:
+            origins.add(normalize_origin(stored, bundle.root))
+    return frozenset(origins)
+
+
+def run_ingest_queue(layout: WorkspaceLayout) -> IngestQueueReport:
+    """Terminal items whose `design` source is not yet recorded as ingested.
+    Never writes, and never reads the clock.
+
+    **Derived, never stored.** There is no frontmatter field, no migration and
+    no second source of truth that can drift from `sources[]`. The predicate is
+    exactly: terminal `work_status`, a `sources[]` entry with
+    `id: design`, and no `Source` page whose (normalized) `origin` identifies
+    that artifact.
+
+    **Band 3 by necessity.** It needs the item's `sources[]`
+    (`work-tracker-okf`) and the set of `Source` pages with their `origin`
+    (`doc-wiki-okf`, which owns `normalize_origin`). Band-2 packages may not
+    couple sideways, so the composition of two band-2 lanes belongs here --
+    the same reason `graph_works_core.archive.commands` holds the work-item and
+    wiki archive halves together.
+
+    Read-only for the same reason `run_next` is: a queue that mutates while you
+    look at it cannot be polled safely.
+    """
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    ingested = _ingested_origins(bundle)
+    pending: list[PendingIngest] = []
+    for item in load_items(bundle):
+        if item.work_status not in TERMINAL_STATUSES:
+            continue
+        resource = next(
+            (source.resource for source in item.sources if source.id == SPEC_SOURCE_ID and source.resource),
+            None,
+        )
+        if resource is None:
+            continue
+        origin = normalize_origin(str(layout.bundle_dir / resource.lstrip("/")), layout.bundle_dir)
+        if origin in ingested:
+            continue
+        pending.append(PendingIngest(path=item.path, work_status=item.work_status, resource=resource, origin=origin))
+    return IngestQueueReport(pending=tuple(sorted(pending, key=lambda entry: entry.path)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -523,12 +601,23 @@ class RegenIndexesResult:
 
 
 def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> Mapping[str, DirectoryPrecondition]:
-    """Retain ownership of lanes absent before the domain planner reads them."""
+    """Retain ownership of lanes absent before the domain planner reads them.
+
+    The lane set must equal `work_tracker_okf.indexes._required_lanes`' -- a
+    precondition on a lane the planner never plans is a claim on a directory
+    nothing creates. It is duplicated rather than imported for the same reason
+    `_work_only_ignore` duplicates the lane partition: the vertical stays
+    independent, and the copy stays small.
+
+    The archived child lane is claimed only for a parent that already has
+    archived children, matching the root-only archive policy.
+    """
     lanes = {"work", "work/_archive"}
     for item in items:
         if not item.archived and item.type in PARENT_TYPES:
             lanes.add(child_lane(item.path))
-            lanes.add(child_lane(item.path, archived=True))
+            if item.archived_child_paths:
+                lanes.add(child_lane(item.path, archived=True))
     conditions = {lane: DirectoryPrecondition(lane, None) for lane in sorted(lanes) if not os.path.lexists(root / lane)}
     return MappingProxyType(conditions)
 
@@ -1008,6 +1097,7 @@ __all__ = [
     "DependencyIssue",
     "DependencyParse",
     "FilingRun",
+    "IngestQueueReport",
     "NextApplication",
     "NextResult",
     "OverturnApplication",
@@ -1015,6 +1105,7 @@ __all__ = [
     "OverturnPlan",
     "OverturnResult",
     "PathMutationResult",
+    "PendingIngest",
     "RegenIndexesResult",
     "SourceNormalization",
     "StatusReport",
@@ -1026,6 +1117,7 @@ __all__ = [
     "run_decision_overturn",
     "run_decision_supersede",
     "run_file",
+    "run_ingest_queue",
     "run_lint",
     "run_next",
     "run_regen_indexes",

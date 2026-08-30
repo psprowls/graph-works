@@ -147,6 +147,24 @@ subtree-base:
 audit-delta:
     python3 scripts/audit_delta.py
 
+# Orca's coordinator->worker reply path -- P1 static (offline), P2 live round trip.
+#
+# ADVISORY, and deliberately not in `check`, for a different reason than
+# `audit-delta`'s: `check` must stay offline and Orca-free. P1 would be safe there,
+# but P2 needs a live Dispatch and a second party to answer, and a gate whose
+# second half is permanently `skipped` in CI reports green while covering the half
+# that matters.
+#
+# The filed correlation defect does NOT reproduce on orca 1.4.191 -- that was proved
+# live at design time. This is the standing guard on that fact, so the next
+# regression is found here rather than through a lost human answer.
+#
+# P2 runs only when `--from` and `--dispatch-capability` are passed through, from an
+# agent's own dispatch preamble:
+#   just orca-reply-probe --from term_... --dispatch-capability dcap_...
+orca-reply-probe *ARGS:
+    uv run python scripts/orca_reply_probe.py {{ARGS}}
+
 # Vendored upstream plugin suites -- the offline subset that executes code.
 #
 # ENFORCING, and part of `check`. This departs from how `audit-delta` and

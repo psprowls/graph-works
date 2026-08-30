@@ -45,10 +45,10 @@ _UNIT_SEP = "\x1f"
 def run_git(cwd: Path, *args: str) -> str | None:
     """Best-effort `git <args>` in *cwd*; stdout, or `None` on any failure.
 
-    Public because `commands/orchestrate.py`'s `default_base` needs it: this is
-    the only module in the package that runs git, and a second subprocess
-    helper over there would be a second timeout policy and a second degrade
-    contract to keep in step.
+    Public because callers outside this module run git through it: this is
+    the only module in the package that does, and a second subprocess helper
+    elsewhere would be a second timeout policy and a second degrade contract
+    to keep in step.
     """
     try:
         completed = subprocess.run(
@@ -124,6 +124,39 @@ def head_sha(repo: Path) -> str | None:
     return sha or None
 
 
+#: What `default_base` answers when git cannot. The repo's own default branch
+#: is the right answer and this is the fallback, not a preference.
+FALLBACK_BASE = "main"
+
+
+def default_base(repo: Path | None) -> str:
+    """*repo*'s default branch, best-effort; `FALLBACK_BASE` on any failure.
+
+    Lives here rather than in `orchestrate` because it runs git and this is the
+    only module in the package that does — and because `workspace.anchor`,
+    which sits below `orchestrate`, needs it to compute a merge base.
+    """
+    if repo is None:
+        return FALLBACK_BASE
+    out = run_git(repo, "symbolic-ref", "refs/remotes/origin/HEAD")
+    if out is None or not out.strip():
+        return FALLBACK_BASE
+    return out.strip().rsplit("/", 1)[-1]
+
+
+def merge_base(repo: Path, a: str, b: str) -> str | None:
+    """The best common ancestor of *a* and *b* in *repo*, or `None`.
+
+    Degrades like every other function here: an unknown ref, an unrelated
+    history, or a directory that is not a repository all answer `None` rather
+    than raising. `merge_base(default_base, HEAD)` on the base branch itself
+    answers `HEAD` — an empty range, which `results.render()` already flags.
+    """
+    out = run_git(repo, "merge-base", a, b)
+    sha = (out or "").strip()
+    return sha or None
+
+
 def spec_anchor_commit(repo: Path, spec_path: Path) -> str | None:
     """The most recent commit in *repo* touching *spec_path*.
 
@@ -166,6 +199,47 @@ def commits_touching(repo: Path, commit_range: str, paths: Sequence[Path | str])
         sha, subject = line.split(_UNIT_SEP, 1)
         rows.append((sha, subject))
     return tuple(rows)
+
+
+def dirty_paths(repo: Path, paths: Sequence[Path | str]) -> tuple[str, ...] | None:
+    """Paths under *paths* with uncommitted changes in *repo*, or `None`.
+
+    `()` means "evaluated, and the tree is clean under this scope"; `None`
+    means "could not be evaluated" -- an empty *paths*, a directory that is
+    not a repository, or a `git status` that failed. The caller must
+    distinguish them: the gate that reads this fails **open** on `None` and
+    refuses on a non-empty tuple, so collapsing the two would either silence
+    the gate or fire it on every non-repo workspace.
+
+    Empty *paths* declines rather than widening to the whole tree, matching
+    `commits_touching` and `results_facts` just above: an unscoped answer is
+    never what the caller means, and here it would refuse an advance over dirt
+    the item never claimed.
+
+    `-z` rather than the default quoting: porcelain v1 escapes a path with a
+    space or a non-ASCII byte into a C-quoted string, and a refusal that names
+    `"spaced name.txt"` with the quotes attached is a path the reader cannot
+    paste back into `git add`.
+    """
+    if not paths:
+        return None
+    out = run_git(repo, "status", "--porcelain", "-z", "--", *(str(path) for path in paths))
+    if out is None:
+        return None
+    fields = out.split("\0")
+    dirty: list[str] = []
+    index = 0
+    while index < len(fields):
+        entry = fields[index]
+        index += 1
+        if len(entry) < 4:
+            continue
+        status, name = entry[:2], entry[3:]
+        if status[0] in {"R", "C"}:
+            # A rename or copy carries its source in the very next field.
+            index += 1
+        dirty.append(name)
+    return tuple(dirty)
 
 
 def results_facts(
@@ -283,10 +357,14 @@ def clear_active_work(layout: WorkspaceLayout, paths: set[str]) -> bool:
 
 __all__ = [
     "ACTIVE_WORK_FILENAME",
+    "FALLBACK_BASE",
     "clear_active_work",
     "commit_exists",
     "commits_touching",
+    "default_base",
+    "dirty_paths",
     "head_sha",
+    "merge_base",
     "results_facts",
     "run_git",
     "spec_anchor_commit",

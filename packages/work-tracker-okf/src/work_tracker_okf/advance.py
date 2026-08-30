@@ -33,7 +33,21 @@ RefusalReason = Literal[
     "resolved-in-required",
     "children-open",
     "released-at-required",
+    "uncommitted-work",
+    "no-commits",
+    "return-not-available",
+    "no-affects-touched",
 ]
+
+#: The three reasons above that this module never produces itself. They are
+#: raised one band up, by the `execute -> finish` commit gate in
+#: `graph_works_core.orchestrate.stage_advance`, which cannot own the
+#: vocabulary: `RefusalReason` is the CLI's rendering contract
+#: (`rendering.advance_payload` reads `outcome.plan.refusal`), and a closed
+#: string vocabulary is band-legal here where a git observation is not.
+#: `return-not-available` sits between them in `RefusalReason` but is *not* a
+#: member: `advance()` raises that one itself.
+GATE_REFUSALS: frozenset[str] = frozenset({"uncommitted-work", "no-commits", "no-affects-touched"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +102,15 @@ def advance(
     released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
+    return_: bool = False,
 ) -> AdvancePlan:
     """Plan the next transition for *path*. Mutates nothing, reads no clock.
+
+    `return_=True` selects the table's `on_return` instead of
+    `on_dispatch or on_complete` -- the one backwards move, offered only at
+    `finish`. It is mutually exclusive with `resolved_in`: a return is not a
+    stage completion, and silently ignoring a `resolved_in` handed to one
+    would record nothing while looking like it had.
 
     Takes `(items, path)` rather than a pre-routed transition because routing,
     picking `on_dispatch or on_complete`, and refusing an unmet requirement are
@@ -103,9 +124,28 @@ def advance(
     result = route(state)
     if result.blockers:
         return _refused(path, result, None, "blocked", "; ".join(result.blockers))
-    transition = result.on_dispatch or result.on_complete
-    if transition is None:
-        return _refused(path, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
+    if return_:
+        if resolved_in is not None:
+            return _refused(
+                path,
+                result,
+                None,
+                "return-not-available",
+                "--return is mutually exclusive with --resolved-in: a return is not a stage completion",
+            )
+        transition = result.on_return
+        if transition is None:
+            return _refused(
+                path,
+                result,
+                None,
+                "return-not-available",
+                f"no return path from phase {item.phase!r}: --return applies to an item at phase 'finish'",
+            )
+    else:
+        transition = result.on_dispatch or result.on_complete
+        if transition is None:
+            return _refused(path, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
     # Two independent guards on the sentinel, because a leak writes an invalid
     # enum value into a real page.
     if "effort" in transition.requires or transition.phase == PLAN_OR_EXECUTE:
@@ -234,4 +274,4 @@ def apply(document: Document, plan: AdvancePlan) -> None:
         document.set(change.key, change.after)
 
 
-__all__ = ["AdvancePlan", "FieldChange", "RefusalReason", "advance", "apply"]
+__all__ = ["GATE_REFUSALS", "AdvancePlan", "FieldChange", "RefusalReason", "advance", "apply"]

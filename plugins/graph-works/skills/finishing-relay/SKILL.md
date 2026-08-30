@@ -103,11 +103,48 @@ orca orchestration ask --from <this session's --from> \
   --timeout-ms 600000
 ```
 
-`ask` blocks until the coordinator replies and prints the reply body — there
-is no separate poll/fetch step. **Live-validation item:** if the call times
-out or disconnects, the resume mechanism is not a documented flag in this
-session's own preamble; check `orca orchestration ask --help` for the real
-resume syntax before sending a second, duplicate question.
+`ask` blocks until the coordinator replies and prints the reply body — there is
+no separate poll/fetch step. It does **not** always come back answered, and the
+difference is fully decidable from its exit code and JSON.
+
+### Reading the ask outcome
+
+Run the ask with `--json` and read both the exit code and the payload. **Empty
+stdout is never an answer.**
+
+| Signal | Meaning | What to do |
+|---|---|---|
+| exit `0`, `answer` non-null | Answered | The only case that may proceed to R4 |
+| exit `1`, `timedOut: true` | No answer; the question stays **pending** | Resume (below) |
+| exit `1`, `cancelled: true` | Connection lost; the question stays pending | Resume (below) |
+| exit `75`, `legacyCompatibility.resumeRequired` | Committed but not waited on | Resume (below) |
+| `OrchestrationError: dispatch_inactive` | The question is closed — the dispatch is gone | Stop resuming; settle to `hold` |
+
+**Resuming.** The question is still pending, so **never re-send the same
+question** — that files a duplicate the human sees twice. Re-enter the wait with
+the message id the first call returned:
+
+```
+orca orchestration ask --from <this session's --from> \
+  --dispatch-capability <this session's --dispatch-capability> \
+  --resume <messageId from the first call> \
+  --timeout-ms 600000 --json
+```
+
+`--options` is rejected together with `--resume`; the options travelled with the
+original question and are still attached to it. Send a heartbeat
+(`--type heartbeat`, `--phase "waiting"`) roughly every 5 minutes across the
+whole wait, as this session's dispatch rules require.
+
+**Resume budget: 3.** One initial ask plus at most three resumes at 600,000 ms
+each — about 40 minutes of wall clock, deliberately matching the Escalation
+path's own bounded ~30-minute window rather than inventing a second cadence.
+
+**When the budget is spent, settle to `hold`** — go to R4's `hold` branch and
+carry into R5 the exact words **"no answer received"**, plus the number of
+resumes attempted and the pending question's message id so a human can answer it
+later. Never `merge`, never `pr`, never `discard`, and never a decision this
+session chose for itself: an unanswered question is not consent.
 
 The reply body is one of the option labels (`merge`, `pr`, `hold`,
 `discard`). Any other reply text: treat it as `hold` and note the verbatim
@@ -164,8 +201,12 @@ Send a second, option-less `ask` asking for exact confirmation:
 orca orchestration ask --from <this session's --from> \
   --dispatch-capability <this session's --dispatch-capability> \
   --question "Confirm discard of <work-path> branch <branch> (<N> commits: <list>). Reply exactly 'discard' to confirm, anything else cancels." \
-  --timeout-ms 600000
+  --timeout-ms 600000 --json
 ```
+
+Read its outcome with R3's **Reading the ask outcome** table — identically, and
+with the same resume budget of 3. This ask is the more dangerous of the two: an
+unanswered confirmation must never be read as a confirmation.
 
 - Reply is exactly `discard` → confirmed. **Discard is recorded, not
   executed**: delete nothing. Continue to R5 with the branch name and commit
@@ -173,6 +214,9 @@ orca orchestration ask --from <this session's --from> \
   Orca releases it (see Worktree & branch ownership, below).
 - Any other reply → downgrade to `hold`; say so explicitly in the R5 report
   (state the reply that caused the downgrade).
+- **Resume budget spent with no answer, or `dispatch_inactive`** → downgrade to
+  `hold` and report **"no answer received"** with the pending question's message
+  id. Silence is not confirmation, and the branch is left exactly as it is.
 
 ## R5 — Settle the item and report
 
@@ -218,9 +262,11 @@ failure):
    session's own dispatch rules require a heartbeat on this cadence
    whenever it's active and waiting, regardless of whether this particular
    coordinator wait path consumes it.
-   **Live-validation item:** confirm on the first real run which field of
-   the `check` output carries the reply body for an escalation reply — not
-   documented in `--help` output for this address form.
+   The reply arrives as an ordinary message row: read it from
+   `messages[].body`. That holds whether the coordinator sent it with
+   `reply --id` or with `auto-drive` §4.4's `send --to dispatch:<id>` — both
+   land in the same inbox, which is exactly why this path polls rather than
+   blocks.
 3. A reply with instructions (e.g. "fix the tests", "merge anyway") →
    follow it, then re-enter the flow at R1 so the checks re-run against the
    new state.

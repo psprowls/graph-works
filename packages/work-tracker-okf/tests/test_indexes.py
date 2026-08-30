@@ -5,6 +5,7 @@ from work_helpers import make_item
 from work_tracker_okf.indexes import (
     GENERATED_END,
     GENERATED_START,
+    _required_lanes,
     plan_indexes,
     reconcile_marked_index,
     render_entry,
@@ -67,7 +68,9 @@ def test_index_entries_are_sorted_by_filename() -> None:
     )
 
 
-def test_planner_covers_root_and_active_parent_child_lanes_including_empty_archives(tmp_path: Path) -> None:
+def test_planner_covers_root_and_active_parent_child_lanes_without_archives_for_parents_with_no_archived_children(
+    tmp_path: Path,
+) -> None:
     release = "work/release-cutover"
     epic = f"{release}/children/epic-migration"
     feature = f"{epic}/children/feature-import"
@@ -83,11 +86,8 @@ def test_planner_covers_root_and_active_parent_child_lanes_including_empty_archi
         "work",
         "work/_archive",
         f"{release}/children",
-        f"{release}/children/_archive",
         f"{epic}/children",
-        f"{epic}/children/_archive",
         f"{feature}/children",
-        f"{feature}/children/_archive",
     }
 
 
@@ -100,3 +100,29 @@ def test_render_entry_uses_the_direct_basename_and_visible_state() -> None:
         phase="execute",
     )
     assert render_entry(item) == "- [Feature: Import data](feature-import.md) — in-progress · execute"
+
+
+def test_an_active_parent_with_no_archived_children_requires_no_archive_lane() -> None:
+    epic = make_item("work/epic-new", type="Epic", work_status="open")
+
+    lanes = _required_lanes((epic,))
+
+    assert "work/epic-new/children" in lanes
+    assert "work/epic-new/children/_archive" not in lanes
+
+
+def test_an_active_parent_that_has_archived_children_still_requires_its_archive_lane() -> None:
+    epic = make_item(
+        "work/epic-legacy",
+        type="Epic",
+        work_status="open",
+        archived_child_paths=("work/epic-legacy/children/_archive/bug-old",),
+    )
+
+    lanes = _required_lanes((epic,))
+
+    assert "work/epic-legacy/children/_archive" in lanes
+
+
+def test_the_two_root_lanes_are_always_required() -> None:
+    assert set(_required_lanes(())) == {"work", "work/_archive"}

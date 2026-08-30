@@ -9,6 +9,12 @@ from work_helpers import lane_report, write_item
 TODAY = date(2026, 8, 3)
 
 
+def _findings(root: Path, today: date = TODAY) -> tuple:
+    """Helper to get all findings from a bundle."""
+    report = lane_report(root, today=today)
+    return report.findings
+
+
 def codes_for(tmp_path: Path, frontmatter: str, *, slug: str = "bug-x", body: str | None = None) -> set[str]:
     kwargs = {} if body is None else {"body": body}
     write_item(tmp_path, slug, frontmatter, **kwargs)  # type: ignore[arg-type]
@@ -161,6 +167,37 @@ def test_an_already_archived_terminal_item_is_silent(tmp_path: Path) -> None:
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text("---\ntitle: T\ndescription: D\ntype: Bug\nwork_status: resolved\n---\n", encoding="utf-8")
     assert lane_report(tmp_path, today=TODAY).by_code("state.archive-eligible") == ()
+
+
+def test_archive_eligible_is_suppressed_for_a_terminal_child_of_an_open_epic(tmp_path: Path) -> None:
+    epic = "work/epic-live"
+    child = f"{epic}/children/bug-done"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: open\n")
+    write_item(tmp_path, child, "type: Bug\nwork_status: resolved\nresolved_in: abc1234\n")
+
+    codes = {(finding.code, finding.path) for finding in _findings(tmp_path)}
+
+    assert ("state.archive-eligible", f"{child}.md") not in codes
+
+
+def test_archive_eligible_still_fires_for_a_terminal_root(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/bug-alone", "type: Bug\nwork_status: resolved\nresolved_in: abc1234\n")
+
+    codes = {(finding.code, finding.path) for finding in _findings(tmp_path)}
+
+    assert ("state.archive-eligible", "work/bug-alone.md") in codes
+
+
+def test_archive_eligible_still_fires_for_a_terminal_child_of_a_terminal_epic(tmp_path: Path) -> None:
+    """The epic itself is the sweep target; the child is reported with it."""
+    epic = "work/epic-done"
+    child = f"{epic}/children/bug-done"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: resolved\n")
+    write_item(tmp_path, child, "type: Bug\nwork_status: resolved\nresolved_in: abc1234\n")
+
+    codes = {(finding.code, finding.path) for finding in _findings(tmp_path)}
+
+    assert ("state.archive-eligible", f"{child}.md") in codes
 
 
 # --- the module's shape -----------------------------------------------------

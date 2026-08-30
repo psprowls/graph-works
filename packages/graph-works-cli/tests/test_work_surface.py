@@ -150,3 +150,9 @@ def test_exactly_three_verbs_guard_against_stale_routing() -> None:
         )
     }
     assert guarded == {"next_stage", "advance", "orchestrate"}
+
+
+def test_advance_declares_the_return_flag() -> None:
+    payload = json.loads(runner.invoke(app, ["help", "work", "advance", "--json"]).stdout)
+    opts = {opt for option in payload["options"] for opt in option["opts"]}
+    assert "--return" in opts

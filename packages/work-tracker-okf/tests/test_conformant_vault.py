@@ -170,14 +170,17 @@ def test_the_vault_validates_with_zero_errors_with_the_lane_rules(conformant_roo
     assert [f"{f.code} {f.path}: {f.message}" for f in report.errors] == []
 
 
-def test_the_lane_warns_on_the_conformant_vault_are_exactly_the_three_expected(conformant_root: Path) -> None:
-    """Design spec §7.3, verified item by item. These three are **correct**, not
+def test_the_lane_warns_on_the_conformant_vault_are_exactly_the_two_expected(conformant_root: Path) -> None:
+    """Design spec §7.3, verified item by item. These two are **correct**, not
     defects to design away:
 
     - `state.resolved-without-ref` on the resolved `Spike`, which has no `resolved_in`
-    - `state.archive-eligible` on that same `Spike` — terminal, still under `work/`
     - `decisions.ledger-missing` on the executing `Feature`, whose fixture omits
       a second decision ledger intentionally
+
+    The `Spike` does not fire `state.archive-eligible` because it is a child of an
+    open `Epic`, and the archive policy holds such children in place until the parent
+    is terminal.
 
     Staleness fires on nothing: `CONFORMANT_TODAY` is well inside both thresholds
     for every item in the vault. If this set ever grows, re-read the fixture
@@ -189,7 +192,6 @@ def test_the_lane_warns_on_the_conformant_vault_are_exactly_the_three_expected(c
     spike = f"{_SPIKE}.md"
     assert lane == {
         ("state.resolved-without-ref", spike),
-        ("state.archive-eligible", spike),
         ("decisions.ledger-missing", f"{_FEATURE}.md"),
     }
 

@@ -82,6 +82,22 @@ enforced here via a live Orca query rather than a local set.
   `create-top-level` → `new-top-level` + `--repo`), which is why
   `OrcaBackend.provisions_worktrees = True`: Orca itself creates the
   worktree, this backend does not.
+
+  **Orca's `--name` is a worktree display name, not a branch name.** There is
+  no branch flag anywhere on the CLI; Orca derives the branch as
+  `<host git user slug>/slugify(name)`, unconditionally — not on collision,
+  not only for slash-containing names. So a `fork-child` or `create-top-level`
+  launch costs **two more calls today** (`worker-show --dispatch <ctx>` for the
+  worker's `worktree_id`, then the top-level `orca worktree show --worktree
+  id:<id>`) — one, if the `worker-start` payload ever carries the id itself —
+  to record the real `worktree_path` / `worktree_branch` on the
+  returned `WorkerRecord`. `reuse`/`main` pay neither call: they report the
+  path they were handed and leave the branch `None`.
+
+  This is **read-back only** — `_resolve_worktree` never compares the result
+  against the plan, never warns, and degrades every failure to `None`,
+  because `launch()` has already started a real worker by then. Comparing
+  actual against planned is a caller's business and is tracked separately.
 - **enumerate** (`workers()`): costs `2 + L` CLI calls (`task-list`,
   `worker-list`, plus one `worker-show` per live worker) — read
   `WorkerRecord.last_heartbeat_at`'s and `workers()`'s docstrings in

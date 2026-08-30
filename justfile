@@ -228,6 +228,8 @@ test-plugin-native:
     bash tests/test-entry-point-skills.sh
     echo "--- skills/shared/resolve-workspace"
     bash skills/shared/resolve-workspace.test.sh
+    echo "--- pi/test-pi-extension (7 node)"
+    node --test tests/pi/test-pi-extension.mjs
 
 # The vendored suite deliberately kept out of `check`.
 #

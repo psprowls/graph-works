@@ -1412,7 +1412,6 @@ file: skills/graph-works/references/page-formats.md
 file: skills/graph-works/references/proposal-disposition.md
 file: skills/graph-works/references/query-workflow.md
 file: skills/graph-works/references/scan-workflow.md
-file: skills/graph-works/references/sidecar-schema.md
 file: skills/graph-works/references/wiki-schema.md
 file: skills/planning-epics/SKILL.md
 file: skills/reconciling-spec/SKILL.md
@@ -1437,6 +1436,7 @@ file: hooks/skill-doc-routing
 file: tests/hooks/test-skill-doc-routing.sh
 file: tests/pi/test-pi-extension.mjs
 file: tests/test-entry-point-skills.sh
+file: tests/test-doc-layout-claims.sh
 -->
 
 **Why this entry exists.** `scripts/audit_delta.py` derives divergence from `git diff --name-status`
@@ -1555,6 +1555,25 @@ The old steps 3-5 shifted to 4-6 and §2.1's cross-reference moved with them, an
 step 2's stale `--name`/branch live-validation item was replaced by the settled
 statement. Ours-side file, already claimed above — no `file:` line changes.
 See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-verify-branch-matches-dispatch`.
+
+**Amended for the fork ledger reconciliation — 2026-08-29.** Two changes to this entry's claim set,
+neither touching the tree, only the ledger's description of it.
+
+- **Added** `tests/test-doc-layout-claims.sh`. It is an ours-side addition with no upstream
+  counterpart — a fork-authored guard against stale pre-OKF layout claims — which is precisely what
+  this entry is for. `SYNC.md`'s gated-suite table already listed it under "`tests/`
+  (fork-authored)"; the ledger was the only place that had not caught up.
+- **Removed** `skills/graph-works/references/sidecar-schema.md`. `5723793c` deleted the file from the
+  tree. This is **not** a `state: removed` case: that state exists for files under the grafted set
+  (`commands/ hooks/ skills/` at `v5.5.0`, entry #0), where the coverage check reads the base rather
+  than the current tree, so dropping the `file:` line would convert a false "retired patch" into an
+  equally false "unclassified grafted file." `sidecar-schema.md` was checked against that set and is
+  not in it — it was an ours-side addition all along, the same as every other file in this entry, so
+  once the tree does not have it, nothing keeps claiming it. `commands/onboard.md`'s replacement of
+  `bootstrap.md` and `config-init.md`, recorded two amendments above, is exactly this precedent:
+  "one `file:` line replacing two, not a `state: removed` case."
+
+See `work/epic-unforked-plugin-skill-dispatch/children/tech-debt-reconcile-fork-ledger`.
 
 ---
 
@@ -1859,3 +1878,60 @@ fail-open in `hooks/session-start` is what hid four dead notice branches and a b
 unreachable by any runner, since upstream's `package.json` declares no scripts and nothing else named
 the directory — was the one arrangement not worth defending. `tests/pi` is now part of
 `just test-plugin`, so the test either passes or fails the gate.
+
+---
+
+## Entry #26 — the Codex packaging surface
+
+<!-- audit-delta
+state: patched
+file: .agents/plugins/marketplace.json
+file: .codex-plugin/plugin.json
+file: scripts/package-codex-plugin.sh
+file: tests/codex/test-marketplace-manifest.sh
+file: tests/codex/test-package-codex-plugin.sh
+-->
+
+**Why this entry exists.** These five landed across `d67bef63`, `af965b78` and `ea856bae` — the Codex
+identity rename, its monorepo fix, and the entry-point collapse — and none of the three amended this
+ledger. Naming all three commits here is what makes the omission legible as one pattern rather than
+six accidents (a sixth file, `tests/test-doc-layout-claims.sh`, was undocumented for an unrelated
+reason and is claimed under entry #19 below, not here).
+
+**Intent class: identity.** `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json` carry
+the same rename entry #1 makes for `.claude-plugin/plugin.json`: `superpowers` → `graph-works`, plus
+(for `plugin.json`) `description`, `author`, `homepage`, `repository`, `keywords`, and the five
+`interface` strings (`displayName`, `shortDescription`, `longDescription`, `developerName`,
+`websiteURL`). `version` is upstream's `6.3.0`, unpatched, on the same lineage-honesty grounds entry
+#1 states. `tests/codex/test-marketplace-manifest.sh` carries the matching two-line rename of the
+assertion that pins the plugin entry by name.
+
+**On merge (identity).** Re-apply only the renamed/rewritten strings named above. Take upstream's
+marketplace container `name` (`superpowers-dev`) and `interface.displayName` (`Superpowers Dev`)
+verbatim — those name the *installed namespace* the plugin lives inside, not the plugin itself, and
+`test-marketplace-manifest.sh` asserts both stay untouched. `.codex-plugin/plugin.json`'s `version`
+stays upstream's for the same reason entry #1 gives for `.claude-plugin/plugin.json`'s.
+
+**Intent class: harness-compat.** `scripts/package-codex-plugin.sh` and
+`tests/codex/test-package-codex-plugin.sh` exist because this plugin is a subtree inside a larger
+monorepo and upstream's is a repo root. `[[ -d "$REPO_ROOT/.git" ]]` is false for any subtree
+checkout — there is no `.git` at `plugins/graph-works` — so the check is replaced with
+`git -C "$REPO_ROOT" rev-parse --is-inside-work-tree`; and an unscoped `git status --porcelain` reads
+the whole monorepo's dirt as the plugin's, so it gains `-- .` to scope it to the subtree. Four comment
+lines document the metadata-source requirement (every `skills/` subdirectory needs a
+`skills/<name>/agents/openai.yaml` entry or the run aborts). The test file's dirty-worktree fixture
+clones the monorepo root (not the subtree, which has no `.git` of its own) and locates the plugin
+subtree inside it via `git rev-parse --show-prefix`; its own manifest assertion carries the renamed
+`graph-works` name; and a loop asserts all thirteen entry points reach the archive — the regression
+guard from `work/tech-debt-codex-slash-command-gap`, and a net addition upstream has no counterpart
+for.
+
+**On merge (harness-compat).** Re-apply both fixes on every sync; they do not expire until the
+cutover in epic child 9 deletes the subtree entirely. If upstream's surrounding text has moved, re-
+apply the *intent* — scope every repo-root check and every dirty-tree check to `$REPO_ROOT`
+specifically, not the ambient working directory — not the literal diff.
+
+**See also entry #24**, `scripts/sync-to-codex-plugin.sh`'s Codex-distribution config. That entry
+covers a different script in the same Codex surface; the split is by file, not by design intent, and
+this cross-reference is here so the Codex surface reads as two entries by design rather than as a
+split someone forgot to finish.

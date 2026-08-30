@@ -5,9 +5,10 @@ root only — it is not itself distributable. Two plugin trees sit alongside it,
 neither a workspace member and neither Python: `plugins/graph-works`, a Claude
 Code plugin vendored verbatim as a `git subtree` of
 [obra/superpowers](https://github.com/obra/superpowers) (see
-`plugins/SYNC.md`) — unregistered, kept for provenance until a future
-cutover — and `plugins/graph-works-native`, the plugin Claude Code actually
-installs and loads (name `graph-works`).
+`plugins/SYNC.md`) — kept for provenance and coexistence testing until a
+future cutover — and `plugins/graph-works-native`, the plugin Claude Code
+actually installs and loads (name `gw`; the vendored fork keeps the
+`graph-works` name for the coexistence window).
 
 ## Members
 

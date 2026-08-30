@@ -7,9 +7,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 A `uv` workspace (`members = ["packages/*"]`) for OKF tooling. The root is a
 workspace root only — not distributable, `package = false`. It holds thirteen
 packages today, plus two plugin trees (neither a workspace member, neither
-Python): the vendored subtree `plugins/graph-works` (unregistered, kept for
-provenance until a future cutover — see below) and `plugins/graph-works-native`,
-the actual plugin Claude Code loads (name `graph-works`).
+Python): the vendored subtree `plugins/graph-works` (kept for provenance and
+coexistence testing until a future cutover — see below) and
+`plugins/graph-works-native`, the actual plugin Claude Code loads. The
+marketplace registers both: the native plugin as `gw`, the vendored fork
+keeping the `graph-works` name for the coexistence window.
 
 The OKF v0.2 spec is **not** in this repository. Code and docs cite it by
 section (`§5.1`, `§11`) and expect you to reason from those citations.
@@ -273,7 +275,8 @@ no traceable reason. If a change belongs here, add or update its `PATCHES.md`
 entry in the same change.
 
 `plugins/graph-works-native/` exists as a sibling of this prefix — the actual
-plugin Claude Code installs and loads (name `graph-works`), authored fresh
+plugin Claude Code installs and loads (name `gw`; the `graph-works` name stays
+with the vendored fork during coexistence), authored fresh
 rather than derived from the subtree. The "do not hand-edit without a
 `PATCHES.md` entry" rule above scopes only to the vendored `plugins/graph-works/`
 prefix; it does **not** apply to `plugins/graph-works-native/`, which is

@@ -8,9 +8,16 @@ the fork used to carry as a patch survives without one.
 Each section below has two parts:
 
 - **Provenance** — which `plugins/PATCHES.md` entry the behavior descends from,
-  and the exact `git diff` that re-derives it. That command is what keeps a
-  rider auditable after the subtree it came from is deleted; it is the reason
-  the ledger's narrative is never the migration inventory.
+  and the exact `git diff` that re-derives it. Each command compares the
+  upstream file at the subtree base (`b36e0829c6d0`, the obra/superpowers
+  commit the fork was split from) against the fork's patched copy at
+  `f84fb842`, the last commit on `main` to carry the vendored subtree at
+  `plugins/graph-works/`. Both sides are pinned to commit SHAs on purpose:
+  the fork is deleted at cutover, so a `HEAD:`-relative path would stop
+  resolving, while a pinned object stays reachable for as long as the
+  history does. That is what keeps a rider auditable after the subtree is
+  gone; it is the reason the ledger's narrative is never the migration
+  inventory.
 - **Rider** — the verbatim text to inline. A rider is not a summary and not
   optional: the stage skill cannot be patched, so the rider text **is** the
   behavior.
@@ -40,9 +47,9 @@ already lived in `SKILL.md` step 3.
 
 ```bash
 git diff b36e0829c6d0:skills/brainstorming/scripts/start-server.sh \
-        HEAD:plugins/graph-works/skills/brainstorming/scripts/start-server.sh
+        f84fb842:plugins/graph-works/skills/brainstorming/scripts/start-server.sh
 git diff b36e0829c6d0:skills/brainstorming/visual-companion.md \
-        HEAD:plugins/graph-works/skills/brainstorming/visual-companion.md
+        f84fb842:plugins/graph-works/skills/brainstorming/visual-companion.md
 ```
 
 **This is a reduction, not a transplant.** The patch *deletes* `--project-dir`
@@ -88,7 +95,7 @@ still exists, altering it — em-dash included — breaks the suppression.
 
 ```bash
 git diff b36e0829c6d0:skills/writing-plans/SKILL.md \
-        HEAD:plugins/graph-works/skills/writing-plans/SKILL.md
+        f84fb842:plugins/graph-works/skills/writing-plans/SKILL.md
 ```
 
 **The change is the signal, not the guard.** Today's brief emits
@@ -153,7 +160,7 @@ there is no reason for two mechanisms.
 
 ```bash
 git diff b36e0829c6d0:skills/using-git-worktrees/SKILL.md \
-        HEAD:plugins/graph-works/skills/using-git-worktrees/SKILL.md
+        f84fb842:plugins/graph-works/skills/using-git-worktrees/SKILL.md
 ```
 
 **Inverted into a positive rider.** The patched gate is *"confirm a direct
@@ -214,7 +221,7 @@ paragraph appended here — not a code change.
 
 ```bash
 git diff b36e0829c6d0:skills/using-git-worktrees/SKILL.md \
-        HEAD:plugins/graph-works/skills/using-git-worktrees/SKILL.md
+        f84fb842:plugins/graph-works/skills/using-git-worktrees/SKILL.md
 ```
 
 The Rider text below is **byte-identical** to the
@@ -251,7 +258,7 @@ and omit it when either is absent.
 
 ```bash
 git diff b36e0829c6d0:skills/finishing-a-development-branch/SKILL.md \
-        HEAD:plugins/graph-works/skills/finishing-a-development-branch/SKILL.md
+        f84fb842:plugins/graph-works/skills/finishing-a-development-branch/SKILL.md
 ```
 
 **The on-trunk menu only (D-003).** That diff also carries a

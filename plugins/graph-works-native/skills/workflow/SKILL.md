@@ -95,14 +95,19 @@ may be owned by a different plugin — during the unfork coexistence window the 
 stage skills resolve as `superpowers:*` through a `workflow.pipeline.*.skill`
 override, and prefixing an already-qualified name would resolve to nothing.
 
-**Auto-drive relay override.** If `action.skill` is
+**Auto-drive relay override.** If `action.skill`'s unqualified name — the
+part after the last `:`, or the whole value if it carries no `:` — is
 `finishing-a-development-branch` **and** the dispatch prompt that launched
 this session contains an `Auto-drive context:` line, dispatch
-`graph-works:finishing-relay` instead of `finishing-a-development-branch` —
-the merge target is already embedded in that same line, so no extra
-forwarding is needed beyond the standard work-item brief below. This
-override needs no STOP line: `finishing-relay` doesn't self-chain into
-another stage, same as the stock skill it replaces.
+`graph-works:finishing-relay` instead of the `action.skill` value it would
+otherwise have invoked verbatim per the qualified-name rule above (so this
+override applies the same whether `action.skill` is the unqualified
+`finishing-a-development-branch` or, during the coexistence window, the
+qualified `superpowers:finishing-a-development-branch`) — the merge target
+is already embedded in that same line, so no extra forwarding is needed
+beyond the standard work-item brief below. This override needs no STOP
+line: `finishing-relay` doesn't self-chain into another stage, same as the
+stock skill it replaces.
 
 - title, kind, summary, `affects`, and effort from the item's frontmatter
 - links to the canonical `design` and `plan` entries in `sources[]` so the
@@ -123,7 +128,11 @@ another stage, same as the stock skill it replaces.
   matches). Surface any `guidance_warnings` to the user as plain notes.
 - when the dispatched `action.skill` is a chained-handoff skill, add the
   matching STOP line so its pipeline-stage guard fires (without it the skill
-  self-chains into the next stage, collapsing two stages into one session):
+  self-chains into the next stage, collapsing two stages into one session).
+  Match each bullet below against `action.skill`'s unqualified name (the part
+  after the last `:`, or the whole value if it carries no `:`) — a qualified
+  name such as `superpowers:brainstorming` still triggers the `brainstorming`
+  bullet:
   - dispatching `brainstorming` → add: *"STOP after writing the spec — do not
     invoke writing-plans. This is a single pipeline stage; the workflow skill
     advances the item."*

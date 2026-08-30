@@ -1,0 +1,155 @@
+#!/usr/bin/env bash
+# PreToolUse hook on Skill: point graph-works workflow spec/plan/guidance
+# artifacts at the per-item working directory. Mirrors hooks/session-start's
+# escaping and 3-way platform JSON branching. Fail-open: never blocks a Skill call.
+#
+# Resolution is pure bash, via skills/shared/resolve-workspace.sh, and the
+# projection is read with sed. Both are deliberate: this hook ships into the
+# installed plugin tree (~/.claude/plugins/.../graph-works/hooks), where there
+# is no uv project to run a Python stack in and no guarantee of jq.
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+allow() {
+    if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+        printf '{"additional_context": ""}\n'
+    else
+        printf '{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}}\n'
+    fi
+}
+
+# Fail-open on any unexpected error.
+trap 'allow; exit 0' ERR
+
+INPUT=$(cat)
+
+# Fast path: only the doc-writing / pipeline skills matter. Cheap match on the
+# raw payload — no jq, no workspace resolution for any other skill.
+# Match is deliberately payload-wide (not name-scoped): trading a rare spurious resolution for independence from the skill-id field name and namespacing.
+if ! printf '%s' "$INPUT" | grep -qE '(brainstorming|writing-plans|workflow|onboard)'; then
+    allow; exit 0
+fi
+
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"; s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"; s="${s//$'\r'/\\r}"; s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+# emit <context> <system-message>
+# Either may be empty. An empty context emits the bare allow shape — the same
+# body `allow` prints — so a branch with nothing to inject never advertises an
+# empty additionalContext key.
+emit() {
+    local context="$1" message="$2" body
+    if [ -n "$context" ]; then
+        local context_escaped
+        context_escaped=$(escape_for_json "$context")
+        # Cursor expects additional_context (snake_case); Claude Code expects nested
+        # hookSpecificOutput.additionalContext; Copilot/SDK expect top-level.
+        if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+            body=$(printf '"additional_context": "%s"' "$context_escaped")
+        elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ]; then
+            body=$(printf '"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow", "additionalContext": "%s"}' "$context_escaped")
+        else
+            body=$(printf '"additionalContext": "%s"' "$context_escaped")
+        fi
+    elif [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+        body='"additional_context": ""'
+    else
+        body='"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow"}'
+    fi
+
+    if [ -n "$message" ]; then
+        local message_escaped
+        message_escaped=$(escape_for_json "$message")
+        printf '{%s, "systemMessage": "%s"}\n' "$body" "$message_escaped"
+    else
+        printf '{%s}\n' "$body"
+    fi
+}
+
+# sha256 of a file, by whichever tool is present. Empty when none is — the
+# staleness check is then skipped rather than reported wrong.
+sha256_of() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" 2>/dev/null | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" 2>/dev/null | awk '{print $1}'
+    elif command -v openssl >/dev/null 2>&1; then
+        openssl dgst -sha256 "$1" 2>/dev/null | awk '{print $NF}'
+    else
+        printf ''
+    fi
+}
+
+WORKSPACE=$(bash "$SCRIPT_DIR/../skills/shared/resolve-workspace.sh" 2>/dev/null) || WORKSPACE=""
+
+# No workspace at all: a repository that has never had one set up is the
+# ordinary case, not a misconfiguration. Stay silent rather than warn on every
+# matching Skill call.
+if [ -z "$WORKSPACE" ]; then
+    allow; exit 0
+fi
+
+# A named root that is NOT a workspace is a real misconfiguration the user can
+# act on, so it keeps the systemMessage. The marker check lives here rather
+# than in the shared resolver, whose contract is "resolve the directory" and
+# whose other consumer depends on it not checking.
+#
+# The message names the missing marker and stops short of naming a verb that
+# creates it, because the `gw` on PATH before the cutover is still the donor
+# CLI, whose `bootstrap` builds a vault (`raw/` and `work/` siblings, an
+# out-of-repo workspace env var), not a `workspace.yaml`. graph-works-cli's own
+# `bootstrap` does write one — it wraps `graph_works_core.workspace.init` — so
+# the verb name `gw bootstrap` is correct on one side of the cutover and wrong
+# on the other, which is exactly why it cannot be named here. The marker file is
+# true on both. The tests assert the absence of all three candidate verbs so the
+# omission is deliberate and stays that way until the cutover epic makes one
+# `gw` unambiguous.
+if [ ! -f "$WORKSPACE/workspace.yaml" ]; then
+    emit "" "graph-works: $WORKSPACE is not a graph-works workspace — it has no workspace.yaml marker — so brainstorming/writing-plans/workflow output will NOT be routed to a per-item working directory. Point GRAPH_WORKS_DIR at a workspace that has one, or unset it to fall back to <repo>/.works discovery."
+    exit 0
+fi
+
+# The projection is the read surface for consumers that must not spawn Python.
+# `gw init` writes this file as of the .gw/ rename, so a freshly bootstrapped
+# workspace normally has one; it can still be absent on an older workspace
+# that has not re-run init, or when `gw config sync` has never run there —
+# both fall back to defaults below, same as before.
+#
+# The path is hardcoded rather than resolved, and that is a known limit: a
+# workspace overriding `layout.config_dir` (and, since it derives from that,
+# `layout.cache_dir`) keeps its projection somewhere else and this hook falls
+# back to the defaults for all of it. Resolving the override is circular — the
+# override lives in the manifest, and reading the manifest is the YAML parse
+# this hook exists to avoid.
+PROJECTION="$WORKSPACE/.gw/cache/config.json"
+BUNDLE_DIR="okf"
+STALE_NOTICE=""
+
+if [ -f "$PROJECTION" ]; then
+    # `bundle_dir` appears only under `layout` in the manifest catalog, and the
+    # file is machine-generated by json.dumps(indent=2), so its shape is stable.
+    # Known limit: a bundle_dir containing an escaped quote falls back to the
+    # default rather than parsing wrong.
+    projected_bundle=$(sed -n 's/.*"bundle_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$PROJECTION" 2>/dev/null | head -n 1)
+    if [ -n "$projected_bundle" ]; then
+        BUNDLE_DIR="$projected_bundle"
+    fi
+
+    # sha256, not _meta.source_mtime: mtime false-positives on every git
+    # checkout and needs its own stat portability shim regardless.
+    recorded_sha=$(sed -n 's/.*"source_sha256"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{64\}\)".*/\1/p' "$PROJECTION" 2>/dev/null | head -n 1)
+    actual_sha=$(sha256_of "$WORKSPACE/workspace.yaml")
+    if [ -n "$recorded_sha" ] && [ -n "$actual_sha" ] && [ "$recorded_sha" != "$actual_sha" ]; then
+        STALE_NOTICE="<graph-works-config-stale> The workspace manifest ($WORKSPACE/workspace.yaml) has changed since $PROJECTION was generated — likely a hand-edit. Hooks read the projection, so it is out of date. Run: \`gw config sync\`"
+    fi
+fi
+
+context="GRAPH-WORKS WORKSPACE ROUTING: graph-works workflow artifacts belong beneath each canonical work item's owned references directory. \`gw work file\` creates the owned directory. If pipeline-dispatched, use the exact \`artifact.path\` from the brief. In standalone auto-file mode, read \`path\` from \`gw work file --json\` and write design -> $WORKSPACE/$BUNDLE_DIR/<work-path>/references/01-design.md or plan -> $WORKSPACE/$BUNDLE_DIR/<work-path>/references/02-plan.md."
+
+emit "$context" "$STALE_NOTICE"
+exit 0

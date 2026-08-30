@@ -1,0 +1,24 @@
+{
+  "name": "graph-works",
+  "version": "0.1.0",
+  "description": "Graph Works skills and runtime bootstrap for coding agents",
+  "type": "module",
+  "license": "MIT",
+  "repository": "https://github.com/psprowls/graph-works",
+  "keywords": [
+    "pi-package",
+    "skills",
+    "tdd",
+    "debugging",
+    "collaboration",
+    "workflow"
+  ],
+  "pi": {
+    "extensions": [
+      "./.pi/extensions/graph-works.ts"
+    ],
+    "skills": [
+      "./skills"
+    ]
+  }
+}

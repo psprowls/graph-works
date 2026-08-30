@@ -6,6 +6,11 @@
     "plugins": [
         {
             "name": "graph-works",
+            "source": "./plugins/graph-works",
+            "description": "Fork of obra/superpowers carrying the graph-works workflow as a native plugin surface."
+        },
+        {
+            "name": "gw",
             "source": "./plugins/graph-works-native",
             "description": "The graph-works work-item pipeline as a native plugin surface."
         }

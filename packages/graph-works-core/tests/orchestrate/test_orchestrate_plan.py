@@ -73,7 +73,7 @@ def test_lone_item_dispatch_key_and_prompt_use_full_path() -> None:
     dispatch = result.dispatches[0]
     assert dispatch.key == f"{path}#plan"
     assert dispatch.slug == path
-    assert dispatch.prompt.splitlines()[0] == f"Run /graph-works:workflow {path}."
+    assert dispatch.prompt.splitlines()[0] == f"Run /gw:workflow {path}."
 
 
 def test_branch_name_keeps_basename_and_hashes_full_path() -> None:

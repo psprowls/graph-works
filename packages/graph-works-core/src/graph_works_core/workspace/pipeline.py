@@ -36,11 +36,13 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
 from config_io import PlainYamlStore, expand_wildcards, resolve_key
 
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import CATALOG as MANIFEST_CATALOG
 from graph_works_core.workspace.manifest import checked
@@ -95,6 +97,46 @@ PACKAGED_PIPELINE: Mapping[str, PipelineEntry] = MappingProxyType(
 )
 
 
+def is_valid_skill_name(value: str) -> bool:
+    """Whether *value* is a well-formed stage skill name.
+
+    A **bare** name -- no colon -- is valid and is used verbatim: user-level and
+    repo-local skills carry no plugin prefix, so requiring qualification would
+    make them unroutable. A colon nonetheless signals *qualification intent*, so
+    a malformed qualification (`a:`, `:b`, `a:b:c`) is still a refusable shape.
+
+    There is deliberately **no charset rule**. What three different harnesses
+    accept in a skill name is not something this repo knows, and inventing a
+    pattern would refuse valid names to guard against nothing observed.
+    """
+    if not value.strip():
+        return False
+    if ":" not in value:
+        return True
+    plugin, _, skill = value.partition(":")
+    return ":" not in skill and bool(plugin.strip()) and bool(skill.strip())
+
+
+def check_skill_name(value: object, *, key: str, source: Path) -> None:
+    """A well-formed stage skill name, or a refusal naming the key and the file.
+
+    Beside `manifest.checked()` and for the same reason: a hand-edited manifest
+    bypasses config-io's set-time checks, so a reader that trusts a stored value
+    trusts a file nothing validated. Placing it in `workspace_pipeline()` -- the
+    one place a manifest-sourced skill value enters the process -- is what makes
+    `pipeline_table(layout=...)`, and therefore auto-drive, guarded too.
+
+    Raises:
+        WorkspaceError: for an empty, whitespace-only or malformed-qualification
+            name, or a non-string one.
+    """
+    if not isinstance(value, str) or not is_valid_skill_name(value):
+        raise WorkspaceError(
+            f"{source}: {key}: expects a skill name — non-empty, optionally "
+            f"qualified as <plugin>:<skill> — got {value!r}"
+        )
+
+
 def workspace_pipeline(layout: WorkspaceLayout) -> dict[str, dict[str, Any]]:
     """The `workflow.pipeline.<variant>.<field>` overrides in this manifest.
 
@@ -126,6 +168,8 @@ def workspace_pipeline(layout: WorkspaceLayout) -> dict[str, dict[str, Any]]:
         )
         if value is None:
             continue
+        if field == "skill":
+            check_skill_name(value, key=key, source=layout.manifest_path)
         overrides.setdefault(variant, {})[field] = value
     return overrides
 
@@ -165,7 +209,9 @@ __all__ = [
     "PIPELINE_PREFIX",
     "RELAY_TAIL_SEED",
     "PipelineEntry",
+    "check_skill_name",
     "entry_for",
+    "is_valid_skill_name",
     "pipeline_table",
     "workspace_pipeline",
 ]

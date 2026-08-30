@@ -145,3 +145,62 @@ def test_the_packaged_branch_entry_stays_untailed():
     # The seed is a value the *workspace* owns. Shipping it in the packaged
     # table would make the `relay-untailed` blocker unreachable.
     assert pipeline.PACKAGED_PIPELINE["branch"].prompt_tail is None
+
+
+@pytest.mark.parametrize("name", ["brainstorming", "graph-works:brainstorming", "a:b"])
+def test_a_well_formed_skill_name_is_accepted(name):
+    # Bare names stay valid (D-002): user-level and repo-local skills carry no
+    # plugin prefix, so requiring qualification would make them unroutable.
+    assert pipeline.is_valid_skill_name(name)
+
+
+@pytest.mark.parametrize("name", ["", "   ", "a:", ":b", "a:b:c", "a: ", " :b"])
+def test_a_malformed_skill_name_is_rejected(name):
+    # A colon signals qualification *intent*, so a malformed qualification is
+    # still a refusable shape even though a bare name is not.
+    assert not pipeline.is_valid_skill_name(name)
+
+
+def test_check_skill_name_refuses_a_non_string(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    with pytest.raises(WorkspaceError, match="expects a skill name"):
+        pipeline.check_skill_name(3, key="workflow.pipeline.single.skill", source=tmp_path / "workspace.yaml")
+
+
+def test_a_malformed_override_skill_is_refused_at_read_time(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: 'a:b:c'\n")
+    with pytest.raises(WorkspaceError) as excinfo:
+        pipeline.pipeline_table(layout=layout)
+    assert "workflow.pipeline.single.skill" in str(excinfo.value)
+    assert str(layout.manifest_path) in str(excinfo.value)
+
+
+def test_an_empty_override_skill_is_refused_at_read_time(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: ''\n")
+    with pytest.raises(WorkspaceError, match="expects a skill name"):
+        pipeline.pipeline_table(layout=layout)
+
+
+def test_a_bare_override_skill_still_layers(tmp_path):
+    # The regression that catches a rule that over-refuses: D-002 keeps bare
+    # names routable, so this must resolve verbatim, not raise.
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: my-planner\n")
+    table = pipeline.pipeline_table(layout=layout)
+    assert table["single"] == pipeline.PipelineEntry(skill="my-planner", mode="autonomous", prompt_tail=None)
+
+
+def test_a_qualified_override_skill_still_layers(tmp_path):
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: acme:my-planner\n")
+    assert pipeline.pipeline_table(layout=layout)["single"].skill == "acme:my-planner"
+
+
+def test_every_packaged_skill_name_is_well_formed():
+    # `PACKAGED_PIPELINE` is a module constant, deliberately *not* checked at
+    # runtime -- a bad packaged value should fail the suite, not every command
+    # for every user. Same posture as the totality test above.
+    assert all(pipeline.is_valid_skill_name(entry.skill) for entry in pipeline.PACKAGED_PIPELINE.values())

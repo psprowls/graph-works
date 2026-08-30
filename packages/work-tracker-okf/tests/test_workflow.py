@@ -11,11 +11,14 @@ from work_tracker_okf.workflow import (
     route,
 )
 
-#: Epic §2.2's eight stage/variant pairs, written out rather than derived.
-EIGHT_PAIRS = {
+#: Epic §2.2's stage/variant pairs, written out rather than derived. Nine since
+#: `epic-design` joined the design stage — Epic and Release with no spec doc get
+#: their own design skill rather than sharing `exploration` with Features.
+NINE_PAIRS = {
     ("design", "exploration"),
     ("design", "diagnosis"),
     ("design", "reconcile"),
+    ("design", "epic-design"),
     ("plan", "decompose"),
     ("plan", "single"),
     ("execute", "planned"),
@@ -76,7 +79,7 @@ def test_route_never_raises_and_always_answers():
         )
 
 
-def test_the_table_produces_exactly_eight_distinct_pairs():
+def test_the_table_produces_exactly_nine_distinct_pairs():
     seen = set()
     for type_, status, phase, effort in _sweep():
         for has_plan in (False, True):
@@ -93,7 +96,7 @@ def test_the_table_produces_exactly_eight_distinct_pairs():
                 )
                 if result.dispatch is not None:
                     seen.add((result.dispatch.stage, result.dispatch.variant))
-    assert seen == EIGHT_PAIRS
+    assert seen == NINE_PAIRS
 
 
 def test_the_sentinel_phase_is_not_a_real_phase():
@@ -194,9 +197,11 @@ def test_entry_with_a_non_open_status_is_a_human_decision():
     assert result.blockers
 
 
-def test_entry_routes_a_bug_to_diagnosis_and_everything_else_to_exploration():
+def test_entry_routes_a_bug_to_diagnosis_an_epic_to_epic_design_and_the_rest_to_exploration():
     assert route(_state(type="Bug")).dispatch == Dispatch("design", "diagnosis")
-    for type_ in ("Feature", "Epic", "Spike", "TechDebt"):
+    for type_ in ("Epic", "Release"):
+        assert route(_state(type=type_)).dispatch == Dispatch("design", "epic-design"), type_
+    for type_ in ("Feature", "Spike", "TechDebt"):
         assert route(_state(type=type_)).dispatch == Dispatch("design", "exploration"), type_
 
 
@@ -217,6 +222,25 @@ def test_design_reentry_with_an_existing_spec_reconciles_rather_than_restarts():
 def test_design_reentry_without_a_spec_still_brainstorms_or_diagnoses():
     assert route(_state(type="Bug", phase="design")).dispatch == Dispatch("design", "diagnosis")
     assert route(_state(type="Feature", phase="design")).dispatch == Dispatch("design", "exploration")
+
+
+def test_design_reentry_for_an_epic_without_a_spec_uses_epic_design():
+    """An Epic or Release owns the whole design stage through its own skill:
+    the child index it produces is thin by construction, which is the shape
+    `planning-epics` consumes at the plan stage."""
+    for type_ in ("Epic", "Release"):
+        assert route(_state(type=type_, phase="design")).dispatch == Dispatch("design", "epic-design"), type_
+
+
+def test_a_pre_seeded_spec_beats_epic_design_for_an_epic():
+    """`reconcile` keeps precedence (D-002): an Epic filed from a template has
+    something to reconcile against, not a blank page. The `has_spec_doc` check
+    runs BEFORE the type check in `_design_variant`, deliberately."""
+    for type_ in ("Epic", "Release"):
+        assert route(_state(type=type_, has_spec_doc=True)).dispatch == Dispatch("design", "reconcile"), type_
+        assert route(_state(type=type_, phase="design", has_spec_doc=True)).dispatch == Dispatch(
+            "design", "reconcile"
+        ), type_
 
 
 def test_an_open_decision_blocks_design_redispatch():

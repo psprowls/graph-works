@@ -7,8 +7,8 @@ lands, structurally a sibling of `roles.py`: a packaged default, a manifest
 override layer, and no discovery call -- `layout` is an argument, `None` means
 packaged-only.
 
-Keyed on **`variant` alone**. The eight variants partition cleanly across the
-four stages (`exploration`/`diagnosis`/`reconcile` are design-only,
+Keyed on **`variant` alone**. The nine variants partition cleanly across the
+four stages (`exploration`/`diagnosis`/`reconcile`/`epic-design` are design-only,
 `decompose`/`single` plan-only, `planned`/`unplanned` execute-only, `branch`
 finish-only), so variant is already a total key -- and
 `config_io.expand_wildcards` supports exactly one `*` segment, so a
@@ -88,6 +88,7 @@ PACKAGED_PIPELINE: Mapping[str, PipelineEntry] = MappingProxyType(
         "exploration": PipelineEntry("superpowers:brainstorming", "attend", ATTEND_TAIL),
         "diagnosis": PipelineEntry("superpowers:systematic-debugging", "attend", ATTEND_TAIL),
         "reconcile": PipelineEntry("graph-works:reconciling-spec", "autonomous"),
+        "epic-design": PipelineEntry("graph-works:epic-design", "attend", ATTEND_TAIL),
         "decompose": PipelineEntry("graph-works:planning-epics", "autonomous"),
         "single": PipelineEntry("superpowers:writing-plans", "autonomous"),
         "planned": PipelineEntry("superpowers:subagent-driven-development", "autonomous"),
@@ -179,7 +180,7 @@ def pipeline_table(*, layout: WorkspaceLayout | None = None) -> Mapping[str, Pip
 
     An override for a variant the packaged table does not carry is **dropped**,
     not added: the key set is the closed `Variant` set, and letting a manifest
-    typo introduce an eighth entry would move the hole from "unmapped variant"
+    typo introduce a tenth entry would move the hole from "unmapped variant"
     to "variant nothing routes to".
     """
     if layout is None:

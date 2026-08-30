@@ -37,6 +37,7 @@ fail() {
 US=$'\037'
 
 MATCHING_PAYLOAD='{"tool_name":"Skill","tool_input":{"skill":"brainstorming"}}'
+NAMESPACED_PAYLOAD='{"tool_name":"Skill","tool_input":{"skill":"superpowers:brainstorming"}}'
 NON_MATCHING_PAYLOAD='{"tool_name":"Skill","tool_input":{"skill":"test-driven-development"}}'
 
 sha256_of() {
@@ -239,7 +240,7 @@ out="$(run_hook "$TEST_ROOT" "$NON_MATCHING_PAYLOAD" \
     CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$marked_ws")"
 assert_output \
     "non-matching skill: bare allow, no context, no resolution" \
-    "nested" "absent" "" "" "absent" "" \
+    "nested" "absent" "" "AUTO-FILE" "absent" "" \
     "$out"
 
 # --- 2. no workspace resolves -> allow, SILENT ----------------------------
@@ -262,6 +263,35 @@ assert_output \
     "nested" "required" \
     "$ws_default/okf/<work-path>/references/" \
     "wiki/<work-path>/references/${US}raw/" \
+    "absent" "" \
+    "$out"
+
+# --- 3b. namespaced payload carries the auto-file clause ------------------
+# After the cutover the stage skill is `superpowers:brainstorming` — a foreign
+# plugin's skill, reached through a namespaced id. The fast-path regex is
+# payload-wide so it still matches, but nothing asserted that until now, and
+# the spike flagged it as the untested load-bearing step.
+#
+# The three anchors are asserted individually rather than as one blob: each is
+# a separate instruction the session must be able to act on, and a clause that
+# silently lost one would still pass a single substring check.
+out="$(run_hook "$TEST_ROOT" "$NAMESPACED_PAYLOAD" \
+    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_default")"
+assert_output \
+    "namespaced brainstorming: routing context plus the auto-file clause" \
+    "nested" "required" \
+    "AUTO-FILE (standalone brainstorming only)${US}graph-works:file${US}gw work advance <work-path> --effort${US}do not invoke writing-plans${US}/graph-works:workflow <work-path>${US}$ws_default/okf/<work-path>/references/" \
+    "" \
+    "absent" "" \
+    "$out"
+
+# The mode check must be in the clause: a pipeline-dispatched session has to be
+# able to recognise itself and skip the whole thing.
+assert_output \
+    "namespaced brainstorming: the clause carries its own mode check" \
+    "nested" "required" \
+    "STOP after writing the spec${US}work-item brief" \
+    "" \
     "absent" "" \
     "$out"
 

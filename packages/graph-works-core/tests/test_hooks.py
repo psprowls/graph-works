@@ -374,6 +374,8 @@ def test_default_scripts_dir_resolves_every_wiring_script():
     from graph_works_core.hooks import _default_scripts_dir
 
     default_dir = _default_scripts_dir()
+    # A source checkout resolves to the native plugin, never the vendored fork.
+    assert default_dir.as_posix().endswith("/plugins/graph-works-native/hooks/examples")
     for wiring in HookWiring.for_feature("transcript"):
         assert (default_dir / wiring.script).is_file()
 

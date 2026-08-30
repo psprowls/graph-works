@@ -48,17 +48,18 @@ resolves to *this* `pyproject.toml`, not the workspace root's.
 ### `hatch_build.py`
 
 A custom wheel build hook, worth knowing about before touching packaging.
-The sdist stages `plugins/graph-works/hooks/examples` inside
+The sdist stages `plugins/graph-works-native/hooks/examples` inside
 `src/graph_works_core/_hook_scripts` (see `pyproject.toml`'s
 `sdist.force-include`). Building a wheel *directly from the source tree*
 (not from an sdist) would otherwise ship without those scripts, since they
 live outside `src/`. The hook checks whether `_hook_scripts` is already
 present (sdist path — nothing to do) and, if not, force-includes the
-canonical `plugins/graph-works/hooks/examples` directory into
+canonical `plugins/graph-works-native/hooks/examples` directory into
 `graph_works_core/_hook_scripts` for the wheel, raising `FileNotFoundError`
 if that canonical directory is missing. If you move or rename
-`plugins/graph-works/hooks/examples`, update the hardcoded relative path
-here (`Path(self.root).parents[1] / "plugins" / "graph-works" / "hooks" / "examples"`).
+`plugins/graph-works-native/hooks/examples`, update the hardcoded relative path
+here (`Path(self.root).parents[1] / "plugins" / "graph-works-native" / "hooks" / "examples"`)
+and `CANONICAL_SCRIPTS_DIR` in `hooks.py`.
 
 ## Architecture
 

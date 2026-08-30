@@ -21,7 +21,7 @@ class CustomBuildHook(BuildHookInterface):
         if packaged.is_dir():
             return
 
-        canonical = Path(self.root).parents[1] / "plugins" / "graph-works" / "hooks" / "examples"
+        canonical = Path(self.root).parents[1] / "plugins" / "graph-works-native" / "hooks" / "examples"
         if not canonical.is_dir():
             raise FileNotFoundError(f"canonical hook scripts not found: {canonical}")
         build_data["force_include"][str(canonical)] = "graph_works_core/_hook_scripts"

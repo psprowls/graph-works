@@ -224,6 +224,8 @@ test-plugin-native:
     bash tests/hooks/test-session-start.sh
     echo "--- hooks/test-skill-doc-routing"
     bash tests/hooks/test-skill-doc-routing.sh
+    echo "--- hooks/test-session-end-transcript-capture"
+    bash tests/hooks/test-session-end-transcript-capture.sh
     echo "--- test-doc-layout-claims"
     bash tests/test-doc-layout-claims.sh
     echo "--- test-entry-point-skills"

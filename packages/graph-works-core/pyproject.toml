@@ -51,7 +51,7 @@ vercel = ["models-io[vercel]"]
 packages = ["src/graph_works_core"]
 
 [tool.hatch.build.targets.sdist.force-include]
-"../../plugins/graph-works/hooks/examples" = "src/graph_works_core/_hook_scripts"
+"../../plugins/graph-works-native/hooks/examples" = "src/graph_works_core/_hook_scripts"
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"

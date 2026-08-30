@@ -77,15 +77,21 @@ class HooksResult:
     skipped: tuple[str, ...] = ()
 
 
+# Where the opt-in hook scripts live in a source checkout: the Graph Works-native
+# plugin's `hooks/examples/`. Packaging (`pyproject.toml`'s sdist force-include
+# and `hatch_build.py`) stages the same directory as `_hook_scripts`.
+CANONICAL_SCRIPTS_DIR = Path("plugins") / "graph-works-native" / "hooks" / "examples"
+
+
 def _default_scripts_dir() -> Path:
     packaged = Path(__file__).with_name("_hook_scripts")
     if packaged.is_dir():
         return packaged
     for candidate in Path(__file__).resolve().parents:
-        examples = candidate / "plugins" / "graph-works" / "hooks" / "examples"
+        examples = candidate / CANONICAL_SCRIPTS_DIR
         if examples.is_dir():
             return examples
-    raise HooksError("could not locate packaged hook scripts or plugins/graph-works/hooks/examples/")
+    raise HooksError(f"could not locate packaged hook scripts or {CANONICAL_SCRIPTS_DIR.as_posix()}/")
 
 
 def _settings_path(repo_root: Path) -> Path:

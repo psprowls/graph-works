@@ -196,10 +196,6 @@ test-plugin:
     bash tests/hooks/test-session-start.sh
     echo "--- hooks/test-skill-doc-routing"
     bash tests/hooks/test-skill-doc-routing.sh
-    echo "--- test-doc-layout-claims"
-    bash tests/test-doc-layout-claims.sh
-    echo "--- test-entry-point-skills"
-    bash tests/test-entry-point-skills.sh
     echo "--- skills/shared/resolve-workspace"
     bash skills/shared/resolve-workspace.test.sh
     echo "--- shell-lint/test-lint-shell"
@@ -227,6 +223,10 @@ test-plugin-native:
     cd plugins/graph-works-native
     echo "--- hooks/test-session-start"
     bash tests/hooks/test-session-start.sh
+    echo "--- test-doc-layout-claims"
+    bash tests/test-doc-layout-claims.sh
+    echo "--- test-entry-point-skills"
+    bash tests/test-entry-point-skills.sh
     echo "--- skills/shared/resolve-workspace"
     bash skills/shared/resolve-workspace.test.sh
 

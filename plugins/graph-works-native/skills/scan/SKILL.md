@@ -1,15 +1,15 @@
 ---
 name: scan
-description: Use when the user says "scan the monorepo", "update entity pages", "catch the wiki up to the code", or invokes /graph-works:scan. Walks the repo, builds the code graph, and writes one graph-derived page per admitted entity (repository, package, app, agent_plugin, dependency, test_suite) nested under repositories/<repo>/ (and dependencies/ for deps). Reports added/updated/deleted entities by URI and surfaces deletions for confirmation.
+description: Use when the user says "scan the monorepo", "update entity pages", "catch the wiki up to the code", or invokes /gw:scan. Walks the repo, builds the code graph, and writes one graph-derived page per admitted entity (repository, package, app, agent_plugin, dependency, test_suite) nested under repositories/<repo>/ (and dependencies/ for deps). Reports added/updated/deleted entities by URI and surfaces deletions for confirmation.
 ---
 # Scan the repository into the wiki
 
-Build the code graph and write one page per admitted entity nested under `repositories/<repo>/` (and `dependencies/` for deps). This is the **entry point** for a fresh wiki — run it right after `/graph-works:onboard`.
+Build the code graph and write one page per admitted entity nested under `repositories/<repo>/` (and `dependencies/` for deps). This is the **entry point** for a fresh wiki — run it right after `/gw:onboard`.
 
 ## Usage
 
 ```
-/graph-works:scan          # Claude Code
+/gw:scan          # Claude Code
 $scan                      # Codex
 ```
 
@@ -37,10 +37,10 @@ Spawned per scan, not long-running.
 
 ## When to run
 
-- Right after `/graph-works:onboard`
+- Right after `/gw:onboard`
 - After pulling main (new packages may have landed)
 - After a big refactor that added/removed/renamed packages
-- Before `/graph-works:lint` (so drift reports are accurate)
+- Before `/gw:lint` (so drift reports are accurate)
 
 ## Workflow
 
@@ -88,7 +88,7 @@ The emit step has already applied deletions. Do not let them pass silently:
 
 ### 7. Report
 
-Bulleted wikilinks to the changed entity pages. Suggest follow-ups (e.g. `/graph-works:lint` to catch drift, `/graph-works:ingest` on a README/spec to flesh out `## Narrative` and file-map descriptions).
+Bulleted wikilinks to the changed entity pages. Suggest follow-ups (e.g. `/gw:lint` to catch drift, `/gw:ingest` on a README/spec to flesh out `## Narrative` and file-map descriptions).
 
 > **Contract requirement.** The emit/apply pair must round-trip through `gw` as two subprocess
 > calls with a filesystem handoff (`worklist.json`, `briefs/`, `results/`). `gw scan --emit-worklist`

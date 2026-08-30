@@ -1,6 +1,6 @@
 ---
 name: regen-index
-description: Invoked explicitly as /graph-works:regen-index. Reconciles every path-native work-lane index against the filesystem via `gw work regen-index`, then reports the index paths and any warnings or refusals. Run after out-of-band work-item edits. Explicit invocation only.
+description: Invoked explicitly as /gw:regen-index. Reconciles every path-native work-lane index against the filesystem via `gw work regen-index`, then reports the index paths and any warnings or refusals. Run after out-of-band work-item edits. Explicit invocation only.
 ---
 
 # Reconcile the work-lane indexes
@@ -10,7 +10,7 @@ Reconcile the Markdown indexes at every active and archive work lane.
 ## Usage
 
 ```
-/graph-works:regen-index          # Claude Code
+/gw:regen-index          # Claude Code
 $regen-index                      # Codex
 ```
 

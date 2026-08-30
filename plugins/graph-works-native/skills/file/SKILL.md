@@ -1,6 +1,6 @@
 ---
 name: file
-description: Invoked explicitly as /graph-works:file. Interactively files a new path-native work item — gathers title, kind, summary, and affects conversationally, estimates effort, then invokes `gw work file` with the assembled values and reports the canonical path. Explicit invocation only, with one exception — the skill-doc-routing hook's auto-file clause invokes it for a standalone brainstorming session; do not otherwise trigger this from a natural-language description of work.
+description: Invoked explicitly as /gw:file. Interactively files a new path-native work item — gathers title, kind, summary, and affects conversationally, estimates effort, then invokes `gw work file` with the assembled values and reports the canonical path. Explicit invocation only, with one exception — the skill-doc-routing hook's auto-file clause invokes it for a standalone brainstorming session; do not otherwise trigger this from a natural-language description of work.
 ---
 
 # File a work item
@@ -10,7 +10,7 @@ Interactively create a new work item in the workspace's OKF `work/` lane.
 ## Usage
 
 ```
-/graph-works:file          # Claude Code
+/gw:file          # Claude Code
 $file                      # Codex
 ```
 
@@ -110,9 +110,9 @@ work item. Do not block the session.
 continue the brainstorming flow. Emit exactly:
 
 > "Filed as `<work-path>`. Clear context (`/clear`) and run
-> `/graph-works:workflow <work-path>` to continue."
+> `/gw:workflow <work-path>` to continue."
 
-The pipeline then dispatches `graph-works:epic-design`, which owns the design
+The pipeline then dispatches `gw:epic-design`, which owns the design
 stage for those two types. Letting a general brainstorming flow finish an epic
 design would produce exactly the shape `epic-design` exists to prevent — a
 per-child design instead of a thin child index. The cost is one `/clear` at a
@@ -135,7 +135,7 @@ default location:
 
 **Error fallback:** if `gw work advance` fails, report it. The design is already
 at the canonical path, so the user recovers with
-`/graph-works:workflow <work-path>`.
+`/gw:workflow <work-path>`.
 
 ### Anchor 3 — terminal
 
@@ -143,7 +143,7 @@ Once auto-filed, brainstorming follows pipeline rules: **STOP after the spec —
 not invoke `writing-plans`.** End with the pipeline hand-off line:
 
 > "Phase advanced. Clear context (`/clear`) and run
-> `/graph-works:workflow <work-path>` to continue."
+> `/gw:workflow <work-path>` to continue."
 
 ## Reference
 

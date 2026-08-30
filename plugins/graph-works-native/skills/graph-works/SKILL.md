@@ -92,27 +92,27 @@ test suites — is rendered as a single page nested under `repositories/<repo>/`
 #    The workspace resolves from --workspace, then GRAPH_WORKS_DIR, then a
 #    .git walk-up, defaulting to <repo>/.works. The OKF bundle lives at
 #    <workspace>/okf/.
-/graph-works:onboard
+/gw:onboard
 
 # 2. Scan the repo to render one repositories/<repo>/ page per admitted entity
-/graph-works:scan
+/gw:scan
 
 # 3. Ingest a source (article, spec, PR) from anywhere on disk
-/graph-works:ingest ~/Downloads/auth-migration.md
+/gw:ingest ~/Downloads/auth-migration.md
 
 # 4. Ask questions
-/graph-works:query "which packages depend on common-context-node-ts?"
+/gw:query "which packages depend on common-context-node-ts?"
 
 # 5. Health check (surfaces code-drift too)
-/graph-works:lint
+/gw:lint
 ```
 
 ## Entry points
 
 Every entry point is a skill under `skills/`. Claude Code namespaces plugin
-skills as `<plugin>:<name>`, so each is invoked `/graph-works:<name>`. Codex
+skills as `<plugin>:<name>`, so each is invoked `/gw:<name>`. Codex
 invokes skills with a `$` sigil and rejects unrecognised `/` tokens
-client-side, so there the form is `$<name>` — or `$graph-works:<name>` if your
+client-side, so there the form is `$<name>` — or `$gw:<name>` if your
 Codex build namespaces plugin skills rather than exposing them flat.
 
 | Skill | Purpose |
@@ -183,7 +183,7 @@ Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AG
 - `references/obsidian-setup.md` — Obsidian plugins, hotkeys, vault config
 - `references/cross-tool-setup.md` — per-tool setup (Codex, Cursor, Antigravity, etc.)
 - `references/monorepo-principles.md` — why this pattern works for code, how it differs from the generic LLM Wiki
-- `references/lifecycle-rules.md` — the work-layer lint catalog with severities and remediation, run by `/graph-works:lint` and `gw work lint`
+- `references/lifecycle-rules.md` — the work-layer lint catalog with severities and remediation, run by `/gw:lint` and `gw work lint`
 
 ## Templates (`assets/`)
 

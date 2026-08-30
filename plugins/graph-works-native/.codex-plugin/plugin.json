@@ -1,5 +1,5 @@
 {
-  "name": "graph-works",
+  "name": "gw",
   "version": "0.1.0",
   "description": "The Graph Works plugin: a path-native work-item pipeline plus a wiki scan/ingest/query/lint surface, driven through the gw CLI, alongside brainstorming, planning, TDD, debugging and delivery workflows for coding agents.",
   "author": {

@@ -1,6 +1,6 @@
 ---
 name: log
-description: Invoked explicitly as /graph-works:log [--last N] [--op scan|ingest|query|lint|...]. Shows recent entries from the workspace log at <workspace>/okf/log.md, which uses the standardized `## [YYYY-MM-DD] <op> | <title>` header format so grep plus tail works. Explicit invocation only.
+description: Invoked explicitly as /gw:log [--last N] [--op scan|ingest|query|lint|...]. Shows recent entries from the workspace log at <workspace>/okf/log.md, which uses the standardized `## [YYYY-MM-DD] <op> | <title>` header format so grep plus tail works. Explicit invocation only.
 ---
 
 # Show the wiki log
@@ -15,12 +15,12 @@ Show recent entries from `<workspace>/okf/log.md`. Every LLM operation on the wi
 ## Usage
 
 ```
-/graph-works:log                          # Claude Code — last 10 entries
+/gw:log                          # Claude Code — last 10 entries
 $log                                       # Codex — last 10 entries
-/graph-works:log --last 20
-/graph-works:log --op scan --last 10      # only scan entries
-/graph-works:log --op ingest              # recent ingests
-/graph-works:log --since 2026-04-01
+/gw:log --last 20
+/gw:log --op scan --last 10      # only scan entries
+/gw:log --op ingest              # recent ingests
+/gw:log --since 2026-04-01
 ```
 
 ## What it does
@@ -35,7 +35,7 @@ grep "^## \[" <workspace>/okf/log.md | tail -N
 
 ## Valid ops
 
-- `scan` — a `/graph-works:scan` pass ran
+- `scan` — a `/gw:scan` pass ran
 - `ingest` — a source was read and integrated
 - `query` — a question was answered (when filed back)
 - `lint` — a health check ran

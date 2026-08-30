@@ -110,7 +110,7 @@ fi
 # omission is deliberate and stays that way until the cutover epic makes one
 # `gw` unambiguous.
 if [ ! -f "$WORKSPACE/workspace.yaml" ]; then
-    emit "" "graph-works: $WORKSPACE is not a graph-works workspace — it has no workspace.yaml marker — so brainstorming/writing-plans/workflow output will NOT be routed to a per-item working directory. Point GRAPH_WORKS_DIR at a workspace that has one, or unset it to fall back to <repo>/.works discovery."
+    emit "" "gw: $WORKSPACE is not a graph-works workspace — it has no workspace.yaml marker — so brainstorming/writing-plans/workflow output will NOT be routed to a per-item working directory. Point GRAPH_WORKS_DIR at a workspace that has one, or unset it to fall back to <repo>/.works discovery."
     exit 0
 fi
 
@@ -159,7 +159,7 @@ context="GRAPH-WORKS WORKSPACE ROUTING: graph-works workflow artifacts belong be
 # thing at each of the three moments.
 context="$context
 
-AUTO-FILE (standalone brainstorming only). MODE CHECK FIRST: if this invocation carries a work-item brief (a title / kind / summary block) or the line \"STOP after writing the spec\", a work item already exists — ignore this clause entirely and run the ordinary flow. Otherwise this is standalone, and on the Architectural path only: (1) FILE NOW — before the clarifying questions, invoke the \`graph-works:file\` skill in auto-file mode (its \"Auto-file mode (hook-triggered)\" section) to file the item and capture its canonical path; (2) AT SPEC TIME — write the design to $WORKSPACE/$BUNDLE_DIR/<work-path>/references/01-design.md and run \`gw work advance <work-path> --effort <confirmed-effort>\`; (3) TERMINAL — STOP: do not invoke writing-plans; end with \"Phase advanced. Clear context (/clear) and run /graph-works:workflow <work-path> to continue.\" If the confirmed kind is Epic or Release, stop right after step (1) instead: emit \"Filed as <work-path>. Clear context (/clear) and run /graph-works:workflow <work-path> to continue.\" and do not continue the design."
+AUTO-FILE (standalone brainstorming only). MODE CHECK FIRST: if this invocation carries a work-item brief (a title / kind / summary block) or the line \"STOP after writing the spec\", a work item already exists — ignore this clause entirely and run the ordinary flow. Otherwise this is standalone, and on the Architectural path only: (1) FILE NOW — before the clarifying questions, invoke the \`gw:file\` skill in auto-file mode (its \"Auto-file mode (hook-triggered)\" section) to file the item and capture its canonical path; (2) AT SPEC TIME — write the design to $WORKSPACE/$BUNDLE_DIR/<work-path>/references/01-design.md and run \`gw work advance <work-path> --effort <confirmed-effort>\`; (3) TERMINAL — STOP: do not invoke writing-plans; end with \"Phase advanced. Clear context (/clear) and run /gw:workflow <work-path> to continue.\" If the confirmed kind is Epic or Release, stop right after step (1) instead: emit \"Filed as <work-path>. Clear context (/clear) and run /gw:workflow <work-path> to continue.\" and do not continue the design."
 
 emit "$context" "$STALE_NOTICE"
 exit 0

@@ -59,7 +59,7 @@ There is no `entities/` folder and no filename-prefix scheme.
 ## Iron rules
 
 1. **The code is the source of truth.** If the wiki disagrees with the code, update the wiki — never the other way around.
-2. **Ingested source material is never edited.** The ingest flow (either `gw ingest`'s `--backend bedrock`/`vercel` pipeline, or the `claude_code`-mode `ingest` skill per `/graph-works:ingest`) copies material into `<workspace>/okf/sources/references/` — the original file, wherever it lives, is left untouched. There is no staging inbox and no post-ingest move.
+2. **Ingested source material is never edited.** The ingest flow (either `gw ingest`'s `--backend bedrock`/`vercel` pipeline, or the `claude_code`-mode `ingest` skill per `/gw:ingest`) copies material into `<workspace>/okf/sources/references/` — the original file, wherever it lives, is left untouched. There is no staging inbox and no post-ingest move.
 3. **All curated writes go under `<workspace>/okf/`.** Work items use canonical paths below `<workspace>/okf/work/`. No exceptions.
 4. **Every scan or ingest updates ≥3 files:** the touched page(s), `index.md`, `log.md`. A typical ingest touches 5-15.
 5. **Every wiki page carries YAML frontmatter.** Without frontmatter, index maintenance and `lint_wiki.py` can't see it.
@@ -149,7 +149,7 @@ Concepts are cross-cutting technical patterns — naming conventions, middleware
 
 ### Dependency pages
 
-`/graph-works:scan` writes one graph-derived dependency page per dep into `dependencies/<ecosystem>/<name>.md`, using the scanner-owned shape from `entity-dependency.md` (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use` — no `category`, `provider`, or `load_bearing`). The `category: dependency` / `kind: package|service` shape below is a **legacy curated-page shape**, hand-authored and **currently checked by nothing** — the `dependency_layer` lint group that once gated it does not exist in graph-works-core, and `gw wiki lint` is a fixed pipeline with no group selection. It does not apply to scanner-generated `dependencies/<ecosystem>/<name>.md` pages. `load_bearing: true` is recorded on these legacy pages but has no reader today; whether the shape survives at all is open in `2026-08-20-tech-debt-revisit-dependency-layer-lint`.
+`/gw:scan` writes one graph-derived dependency page per dep into `dependencies/<ecosystem>/<name>.md`, using the scanner-owned shape from `entity-dependency.md` (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use` — no `category`, `provider`, or `load_bearing`). The `category: dependency` / `kind: package|service` shape below is a **legacy curated-page shape**, hand-authored and **currently checked by nothing** — the `dependency_layer` lint group that once gated it does not exist in graph-works-core, and `gw wiki lint` is a fixed pipeline with no group selection. It does not apply to scanner-generated `dependencies/<ecosystem>/<name>.md` pages. `load_bearing: true` is recorded on these legacy pages but has no reader today; whether the shape survives at all is open in `2026-08-20-tech-debt-revisit-dependency-layer-lint`.
 
 **`kind: package`** (e.g., `dependencies/npm/react.md`):
 
@@ -263,7 +263,7 @@ summary: Spec for moving from session tokens to JWTs; addresses compliance flags
 source_path: sources/references/auth-migration.md   # ingest's copy destination: sources/references/<YYYY-MM>-<slug>.<ext>, always — no in-repo-doc exception
 source_type: spec                # spec | article | pr | ticket | transcript | example | doc | note
 source_date: 2026-04-01
-last_sync_commit:                # set only for in-repo docs (source_type: doc) — full SHA at last ingest, used by /graph-works:lint to detect changes
+last_sync_commit:                # set only for in-repo docs (source_type: doc) — full SHA at last ingest, used by /gw:lint to detect changes
 last_sync_at:                    # YYYY-MM-DD when sync state was recorded
 authors: [@psprowls]
 ingested: 2026-04-20
@@ -271,7 +271,7 @@ updated: 2026-04-20
 ---
 ```
 
-In-repo docs (an in-repo `.md` passed to `/graph-works:ingest` by repo-relative path) use `source_type: doc`, set `source_path` to the repo-relative path, and record `last_sync_commit` and `last_sync_at`. PDF/DOCX/etc. are deferred — only `.md` is supported today.
+In-repo docs (an in-repo `.md` passed to `/gw:ingest` by repo-relative path) use `source_type: doc`, set `source_path` to the repo-relative path, and record `last_sync_commit` and `last_sync_at`. PDF/DOCX/etc. are deferred — only `.md` is supported today.
 
 ### Architecture pages (concept pages with `kind: architecture`)
 

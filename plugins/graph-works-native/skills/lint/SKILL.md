@@ -1,6 +1,6 @@
 ---
 name: lint
-description: Use when the user says "lint the wiki" or "check the wiki", weekly, after batch ingests, or after a scan — or when they invoke /graph-works:lint. Runs mechanical checks (orphans, broken links, stale pages, missing frontmatter, duplicate titles, log gaps, code drift), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), and the mechanical work-lifecycle catalog over every path-native item beneath the configured OKF bundle's work/ tree, then produces a markdown report with suggested actions.
+description: Use when the user says "lint the wiki" or "check the wiki", weekly, after batch ingests, or after a scan — or when they invoke /gw:lint. Runs mechanical checks (orphans, broken links, stale pages, missing frontmatter, duplicate titles, log gaps, code drift), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), and the mechanical work-lifecycle catalog over every path-native item beneath the configured OKF bundle's work/ tree, then produces a markdown report with suggested actions.
 ---
 
 # Health-check the wiki
@@ -9,12 +9,12 @@ Health-check the wiki. Includes **code-drift detection** on top of generic wiki 
 
 **Reports, doesn't silently fix.** You decide what to change.
 
-Run weekly, after every `/graph-works:scan`, and after batch ingests.
+Run weekly, after every `/gw:scan`, and after batch ingests.
 
 ## Usage
 
 ```
-/graph-works:lint          # Claude Code
+/gw:lint          # Claude Code
 $lint                      # Codex
 ```
 
@@ -46,7 +46,7 @@ Spawned per-lint-pass.
 | Trigger | Pass |
 |---|---|
 | Weekly | Mechanical only |
-| After `/graph-works:scan` | Full — catches drift |
+| After `/gw:scan` | Full — catches drift |
 | After batch ingest | Full |
 | Monthly | Full + structural review |
 | Before sharing the wiki | Full + extra review |
@@ -79,9 +79,9 @@ Any of the last five may fail-soft as `{"error": "<msg>"}` — report the error 
 
 **New check:** Beyond mono-wiki's mechanical and semantic checks, `gw wiki lint` runs `check_package_sync_drift`. Package sync drift is actionable: a package/app page whose source code has changed since its `last_sync_commit` should be re-scanned.
 
-- **Package sync drift** — package/app pages whose source code has changed since their `last_sync_commit`. Surface the count of changed files and one example path; suggest running `/graph-works:scan` on a clean main checkout.
-- **Never-synced packages** — pages with no `last_sync_commit` (legacy or freshly-created stub). The first clean-on-main `/graph-works:scan` will record one.
-- **Sync commit unreachable** — page records a `last_sync_commit` that isn't an ancestor of HEAD (typically means a feature-branch SHA, or main was rebased). Surface as: `<page>: last_sync_commit <sha> not reachable from HEAD`. Suggest re-running `/graph-works:scan` on a clean main checkout.
+- **Package sync drift** — package/app pages whose source code has changed since their `last_sync_commit`. Surface the count of changed files and one example path; suggest running `/gw:scan` on a clean main checkout.
+- **Never-synced packages** — pages with no `last_sync_commit` (legacy or freshly-created stub). The first clean-on-main `/gw:scan` will record one.
+- **Sync commit unreachable** — page records a `last_sync_commit` that isn't an ancestor of HEAD (typically means a feature-branch SHA, or main was rebased). Surface as: `<page>: last_sync_commit <sha> not reachable from HEAD`. Suggest re-running `/gw:scan` on a clean main checkout.
 
 ### Pass 2 — Residual semantic (read and think)
 
@@ -140,9 +140,9 @@ The report MUST be structured as:
 - <N> drift candidates reviewed: `<concept>` — <overtaken / still accurate, one line why>
 
 ### Suggested actions
-1. Run `/graph-works:scan` to stub <package> and <package>
-2. Re-run `/graph-works:scan` — it deletes the entity page for `<old-pkg>` automatically when its graph node is gone
-3. Re-run `/graph-works:scan` to refresh `repositories/<repo>/packages/<pkg>.md` graph-derived frontmatter from current code
+1. Run `/gw:scan` to stub <package> and <package>
+2. Re-run `/gw:scan` — it deletes the entity page for `<old-pkg>` automatically when its graph node is gone
+3. Re-run `/gw:scan` to refresh `repositories/<repo>/packages/<pkg>.md` graph-derived frontmatter from current code
 4. Revise the affected canonical `<work-path>` or update its `work_status`
 5. Create concept pages for: <names>
 6. Fix broken link in `[<page>](/<page>.md)`

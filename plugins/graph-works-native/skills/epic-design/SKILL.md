@@ -120,7 +120,7 @@ child index.
 
 This skill never chains into another skill. **Do not invoke `writing-plans`, do
 not invoke `planning-epics`, and do not invoke `brainstorming`.** It also never
-calls `gw work advance` itself: the `graph-works:workflow` skill that dispatched
+calls `gw work advance` itself: the `gw:workflow` skill that dispatched
 it runs `gw work advance <work-path>` in its own Step 5, uniformly, after every
 stage. `planning-epics` is dispatched on the NEXT `gw work next` call, by the
 routing table's own `design → plan` transition.

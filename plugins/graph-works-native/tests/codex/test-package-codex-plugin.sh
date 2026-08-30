@@ -137,7 +137,7 @@ for key in ("composerIcon", "logo"):
 assert_not_matches "$archive_paths" 'agents/openai\.yaml' "archive ships no OpenAI portal metadata"
 
 manifest_summary="$(read_archive_file "$archive" .codex-plugin/plugin.json | python3 -c 'import json,sys; d=json.load(sys.stdin); print("\t".join([d["name"], d["version"], d["skills"], str(d.get("hooks"))]))')"
-assert_equals "$manifest_summary" "graph-works	0.1.0	./skills/	{}" "archive manifest preserves source identity and empty hooks"
+assert_equals "$manifest_summary" "gw	0.1.0	./skills/	{}" "archive manifest preserves source identity and empty hooks"
 
 skill_count="$(find "$extracted/skills" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' ')"
 if [[ "$skill_count" -gt 0 ]]; then

@@ -70,7 +70,7 @@ This is the most important principle and the biggest difference from the generic
 
 The generic wiki treats ingested sources as authoritative. Code Wiki treats the code as authoritative. Sources are ingested as the **context around** the code — why something was built, what was proposed, what was decided — but a package's wiki page claim "exports X" is only as true as `packages/xxx/src/index.ts` says it is. The linter's **code-drift** pass mechanically checks this.
 
-Consequence: after major refactors, run `/graph-works:scan` and `/graph-works:lint` to surface the drift. Don't trust the wiki's claims about code without spot-checking.
+Consequence: after major refactors, run `/gw:scan` and `/gw:lint` to surface the drift. Don't trust the wiki's claims about code without spot-checking.
 
 ## When the wiki isn't enough
 

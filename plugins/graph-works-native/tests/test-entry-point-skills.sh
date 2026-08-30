@@ -93,13 +93,13 @@ done
 assert_no_match 'agents/(scanner|ingestor|librarian|linter)\.md' \
     "nothing points at a deleted agent file"
 
-assert_no_match '/graph-works:next' \
-    "no /graph-works:next reference survives — the skill is named workflow"
+assert_no_match '/gw:next' \
+    "no /gw:next reference survives — the skill is named workflow"
 
-assert_no_match 'graph-works:(code-reviewer|implementer|spec-reviewer|code-quality-reviewer)' \
+assert_no_match 'gw:(code-reviewer|implementer|spec-reviewer|code-quality-reviewer)' \
     "no reference to a reviewer/implementer agent this plugin does not define"
 
-assert_no_match 'graph-works:(scanner|ingestor|librarian|linter)' \
+assert_no_match 'gw:(scanner|ingestor|librarian|linter)' \
     "no reference to a deleted sub-agent by name"
 
 if [[ "$FAILURES" -gt 0 ]]; then

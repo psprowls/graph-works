@@ -1,6 +1,6 @@
 ---
 name: finishing-relay
-description: Use when the finish stage of a work item is dispatched under auto-drive with mode relay — sends one orca orchestration ask carrying the merge/PR/hold/discard decision instead of finishing-a-development-branch's interactive menu, executes the chosen outcome, and settles the item. Dispatched by the graph-works:workflow skill when the `Auto-drive context:` line appears in this session's own dispatch prompt; never invoked directly by a human.
+description: Use when the finish stage of a work item is dispatched under auto-drive with mode relay — sends one orca orchestration ask carrying the merge/PR/hold/discard decision instead of finishing-a-development-branch's interactive menu, executes the chosen outcome, and settles the item. Dispatched by the gw:workflow skill when the `Auto-drive context:` line appears in this session's own dispatch prompt; never invoked directly by a human.
 ---
 
 # Finishing a Development Branch — Relay Mode
@@ -19,7 +19,7 @@ choice → Settle the item and report.
 merge/PR/hold/discard decision for `<work-path>`."
 
 **Detection is the caller's job, not this skill's.** This skill is
-dispatched only when the `graph-works:workflow` skill (or `/graph-works:workflow`)
+dispatched only when the `gw:workflow` skill (or `/gw:workflow`)
 already found the `Auto-drive context:` line in this session's own dispatch
 prompt and routed here instead of `finishing-a-development-branch`. Nothing
 in this skill re-checks that condition.

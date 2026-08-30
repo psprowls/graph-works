@@ -152,6 +152,7 @@ def test_next_reports_a_malformed_stage_skill_as_a_blocker(workspace: Path) -> N
     payload = json.loads(result.stdout)
     assert result.exit_code == exit_codes.GENERIC
     assert payload["action"] is None
+    assert payload["on_dispatch"] is None
     assert any("workflow.pipeline.exploration.skill" in blocker for blocker in payload["blockers"])
     assert any("workspace.yaml" in blocker for blocker in payload["blockers"])
 

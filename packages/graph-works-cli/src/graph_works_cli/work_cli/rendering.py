@@ -262,9 +262,10 @@ def next_payload(
     action, normalized, child_rollup -- plus the donor-compatible additions
     `gw next` (C6) wraps.
 
-    A non-null *preflight* nulls `action`: the route still has a dispatch, but
-    the skill it names is unusable, and a caller reading `action` must not be
-    handed a name nothing should invoke.
+    A non-null *preflight* nulls `action` and `on_dispatch`: the route still
+    has a dispatch, but the skill it names is unusable, and a caller reading
+    either key must not be handed a name or a transition for a dispatch that
+    can never happen.
     """
     dispatch = result.route.dispatch
     return {
@@ -278,7 +279,7 @@ def next_payload(
             None if dispatch is None or preflight is not None else {"skill": skill, "reason": result.route.reason}
         ),
         "artifact": None if result.artifact is None else {"path": str(result.artifact.path(bundle_root))},
-        "on_dispatch": _transition(result.route.on_dispatch),
+        "on_dispatch": None if preflight is not None else _transition(result.route.on_dispatch),
         "on_complete": _transition(result.route.on_complete),
         "blockers": next_blockers(result, preflight=preflight),
         "child_rollup": _rollup(result.child_rollup),

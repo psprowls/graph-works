@@ -306,7 +306,7 @@ empty placeholders.
 ## 5. Scan — mode 3: emit → subagent fan-out → apply
 
 This is the interesting one — the three-phase pipeline the plugin drives for real
-(see `plugins/graph-works/skills/graph-works/references/scan-workflow.md`).
+(see `plugins/graph-works-native/skills/graph-works/references/scan-workflow.md`).
 
 **Phase 1 — emit:**
 

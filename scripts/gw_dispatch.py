@@ -6,7 +6,7 @@ stage is automatable, dispatches a **fresh** background Claude Code session
 (`claude --bg`) running `/graph-works:workflow <work-path>`.
 
 This mechanizes the invariant already stated in
-`plugins/graph-works/skills/workflow/SKILL.md`: *"One stage per invocation, by
+`plugins/graph-works-native/skills/workflow/SKILL.md`: *"One stage per invocation, by
 design. Never chain stages in a session -- each stage gets a fresh context
 window. The work item plus raw/ artifacts are the durable state between
 sessions; nothing depends on conversation memory."*

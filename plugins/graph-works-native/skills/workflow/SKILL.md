@@ -88,8 +88,12 @@ which transitions happen at dispatch time.
 
 ### 3. Dispatch the stage skill
 
-Invoke the stage skill named by `action.skill` via the Skill tool (namespaced
-`graph-works:<skill>`), prepending a work-item brief:
+Invoke the stage skill named by `action.skill` via the Skill tool, prepending a
+work-item brief. **A name that already carries a `<plugin>:` prefix is used
+verbatim**; an unqualified name is namespaced `graph-works:<skill>`. Stage skills
+may be owned by a different plugin — during the unfork coexistence window the six
+stage skills resolve as `superpowers:*` through a `workflow.pipeline.*.skill`
+override, and prefixing an already-qualified name would resolve to nothing.
 
 **Auto-drive relay override.** If `action.skill` is
 `finishing-a-development-branch` **and** the dispatch prompt that launched

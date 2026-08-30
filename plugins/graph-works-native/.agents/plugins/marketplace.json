@@ -9,7 +9,7 @@
   },
   "plugins": [
     {
-      "name": "graph-works",
+      "name": "gw",
       "source": {
         "source": "url",
         "url": "./"

@@ -33,8 +33,8 @@ plugins = marketplace.get("plugins")
 if not isinstance(plugins, list):
     raise AssertionError("plugins must be a list")
 
-matching_plugins = [plugin for plugin in plugins if plugin.get("name") == "graph-works"]
-assert_equal(len(matching_plugins), 1, "graph-works plugin entry count")
+matching_plugins = [plugin for plugin in plugins if plugin.get("name") == "gw"]
+assert_equal(len(matching_plugins), 1, "gw plugin entry count")
 assert_equal(len(plugins), 1, "marketplace ships exactly one plugin entry")
 
 plugin = matching_plugins[0]

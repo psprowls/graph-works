@@ -24,7 +24,7 @@ Usage:
 
 Options:
   --output PATH   Write archive to PATH.
-                  Default: ../_tmp/gw-codex-packaging/graph-works-VERSION.zip
+                  Default: ${TMPDIR:-/tmp}/gw-codex-packaging/graph-works-VERSION.zip
   --format FORMAT Archive format: zip or tar.gz. Default: zip.
                   If --output ends in .zip, .tar.gz, or .tgz, that extension is
                   used when --format is omitted.
@@ -153,8 +153,8 @@ VERSION="$(jq -r '.version // empty' "$STAGE/.codex-plugin/plugin.json")"
 
 if [[ -z "$OUTPUT" ]]; then
   case "$FORMAT" in
-    zip)    OUTPUT="$REPO_ROOT/../_tmp/gw-codex-packaging/graph-works-$VERSION.zip" ;;
-    tar.gz) OUTPUT="$REPO_ROOT/../_tmp/gw-codex-packaging/graph-works-$VERSION.tar.gz" ;;
+    zip)    OUTPUT="${TMPDIR:-/tmp}/gw-codex-packaging/graph-works-$VERSION.zip" ;;
+    tar.gz) OUTPUT="${TMPDIR:-/tmp}/gw-codex-packaging/graph-works-$VERSION.tar.gz" ;;
   esac
 fi
 mkdir -p "$(dirname "$OUTPUT")"
@@ -212,7 +212,7 @@ esac
 # silently unless it is added here. See the design's Risks section.
 unexpected_paths="$(
   printf '%s\n' "$archive_paths" |
-    grep -E '(^graph-works/|^\.agents/|^hooks/|package\.json$|^\.git|^\.pytest_cache|^\.ruff_cache|^scripts/|^tests/|^docs/|^evals/|^lib/|^\.claude|^\.pi|^AGENTS\.md$|^CLAUDE\.md$|^RELEASE-NOTES\.md$|^CHANGELOG\.md$)' || true
+    grep -E '(^graph-works/|^\.agents/|^hooks/|^package\.json$|^\.git|^\.pytest_cache|^\.ruff_cache|^scripts/|^tests/|^docs/|^evals/|^lib/|^\.claude|^\.pi|^AGENTS\.md$|^CLAUDE\.md$|^RELEASE-NOTES\.md$|^CHANGELOG\.md$)' || true
 )"
 if [[ -n "$unexpected_paths" ]]; then
   printf '%s\n' "$unexpected_paths" | sed 's/^/  /' >&2

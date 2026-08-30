@@ -108,7 +108,7 @@ assert_contains "$output" "SHA-256:" "reports archive checksum"
 extract_archive "$archive" "$extracted"
 
 archive_paths="$(list_archive "$archive" | normalize_archive_paths)"
-unexpected_pattern='(^graph-works/|^\.agents/|^hooks/|package\.json$|^\.git|^\.pytest_cache|^\.ruff_cache|^scripts/|^tests/|^docs/|^evals/|^lib/|^\.claude|^\.pi|^AGENTS\.md$|^CLAUDE\.md$|^RELEASE-NOTES\.md$|^CHANGELOG\.md$)'
+unexpected_pattern='(^graph-works/|^\.agents/|^hooks/|^package\.json$|^\.git|^\.pytest_cache|^\.ruff_cache|^scripts/|^tests/|^docs/|^evals/|^lib/|^\.claude|^\.pi|^AGENTS\.md$|^CLAUDE\.md$|^RELEASE-NOTES\.md$|^CHANGELOG\.md$)'
 assert_not_matches "$archive_paths" "$unexpected_pattern" "archive excludes source-only paths"
 assert_contains "$archive_paths" ".codex-plugin/plugin.json" "archive includes Codex manifest"
 assert_contains "$archive_paths" "skills/using-graph-works/SKILL.md" "archive includes skills"

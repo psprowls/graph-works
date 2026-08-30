@@ -58,6 +58,16 @@ EXCLUDES=(
   # Directories not shipped by canonical Codex plugins
   "/scripts/"
   "/tests/"
+  "/hooks/"
+
+  # Destination-protection rows: these paths do not exist at the source, but
+  # with RSYNC_ARGS=(-av --delete) and DEST_REL=".", the apply-phase rsync
+  # targets the fork repo root — so without a row here, --delete would erase
+  # a real .github/workflows/, .gitignore, or .gitattributes living in the
+  # fork. Never prune these on the theory that "the source doesn't have it".
+  "/.github/"
+  "/.gitignore"
+  "/.gitattributes"
 )
 
 # =============================================================================
@@ -87,6 +97,13 @@ ignored_directory_has_tracked_descendants() {
   [[ -n "$(git -C "$UPSTREAM" ls-files --cached -- "$path/")" ]]
 }
 
+# NOTE: paths from `git ls-files` are interpolated directly into
+# --exclude="/$path" below. rsync treats `[`, `*`, and `?` in a pattern as
+# wildcards, so a git-ignored path containing one of those characters could
+# in principle match more (or less) than the literal file it names. This is
+# a real gap only for adversarial or unusual filenames — none exist in this
+# repo's ignored paths today — so it is documented here rather than "fixed"
+# with an escaping scheme that would need its own tests to trust.
 append_git_ignored_directory_excludes() {
   local path
   local lookup_path
@@ -396,7 +413,7 @@ if [[ $BOOTSTRAP -eq 1 ]]; then
   COMMIT_TITLE="bootstrap graph-works v$UPSTREAM_VERSION from $UPSTREAM_BRANCH @ $UPSTREAM_SHORT"
   PR_BODY="Initial bootstrap of the Graph Works plugin from \`$UPSTREAM_BRANCH\` @ \`$UPSTREAM_SHORT\` (v$UPSTREAM_VERSION).
 
-Copies the tracked plugin files, including \`.codex-plugin/plugin.json\`, \`.agents/plugins/marketplace.json\`, \`assets/\`, \`skills/\`, and \`hooks/\`.
+Copies the tracked plugin files, including \`.codex-plugin/plugin.json\`, \`.agents/plugins/marketplace.json\`, \`assets/\`, and \`skills/\`.
 
 Run via: \`scripts/sync-to-codex-plugin.sh --bootstrap\`
 Source commit: https://github.com/psprowls/graph-works/commit/$UPSTREAM_SHA
@@ -406,7 +423,7 @@ else
   COMMIT_TITLE="sync graph-works v$UPSTREAM_VERSION from $UPSTREAM_BRANCH @ $UPSTREAM_SHORT"
   PR_BODY="Automated sync from \`$UPSTREAM_BRANCH\` @ \`$UPSTREAM_SHORT\` (v$UPSTREAM_VERSION).
 
-Copies the tracked plugin files, including the committed Codex manifest, the marketplace, assets, skills, and hooks.
+Copies the tracked plugin files, including the committed Codex manifest, the marketplace, assets, and skills.
 
 Run via: \`scripts/sync-to-codex-plugin.sh\`
 Source commit: https://github.com/psprowls/graph-works/commit/$UPSTREAM_SHA

@@ -1,6 +1,6 @@
 ---
 name: workflow
-description: Use when driving a work item through its development pipeline — runs `gw work next` to compute the stage, dispatches the stage skill (brainstorming, reconciling-spec, systematic-debugging, writing-plans, subagent-driven-development, test-driven-development, finishing-a-development-branch), verifies the artifact, and advances the item with `gw work advance`. One stage per invocation; clear context between stages. Pass `--descend` to auto-continue into the next actionable child leaf when an epic is waiting on children.
+description: Use when driving a work item through its development pipeline — runs `gw work next` to compute the stage, dispatches the stage skill (brainstorming, reconciling-spec, epic-design, systematic-debugging, writing-plans, planning-epics, subagent-driven-development, test-driven-development, finishing-a-development-branch), verifies the artifact, and advances the item with `gw work advance`. One stage per invocation; clear context between stages. Pass `--descend` to auto-continue into the next actionable child leaf when an epic is waiting on children.
 ---
 
 # Work Item Workflow
@@ -163,7 +163,7 @@ another stage, same as the stock skill it replaces.
 
 <!-- rider-table:end -->
 
-  `reconciling-spec`, `finishing-relay` and `systematic-debugging` have no
+  `reconciling-spec`, `epic-design`, `finishing-relay` and `systematic-debugging` have no
   rider — they are ours, or they carry no `MOVE-TO-BRIEF` behavior.
 
 The stock skills honor user-preference path overrides; they stay unmodified.

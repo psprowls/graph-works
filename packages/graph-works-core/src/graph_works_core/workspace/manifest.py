@@ -190,7 +190,7 @@ CATALOG: tuple[ConfigEntry, ...] = (
         description="Fan-out width for one role, read by the subagent pool's semaphore.",
     ),
     # The dispatch table override. Keyed on `variant` alone, not
-    # `(stage, variant)`: the eight variants partition cleanly across the four
+    # `(stage, variant)`: the nine variants partition cleanly across the four
     # stages, so variant is already a total key -- and `expand_wildcards`
     # supports exactly one `*` segment, so a two-wildcard shape would not
     # resolve at all.

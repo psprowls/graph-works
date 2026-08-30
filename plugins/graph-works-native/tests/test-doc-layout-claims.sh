@@ -36,6 +36,34 @@ is_allowlisted() {
     return 1
 }
 
+# Positive assertions: pointers that must not go stale. The denylist above
+# catches a doc describing a layout that no longer exists; these catch the
+# opposite — a doc or a table naming a destination that does not exist yet.
+assert_contains() {
+    local rel="$1" needle="$2" description="$3"
+    if [[ ! -f "$PLUGIN_ROOT/$rel" ]]; then
+        fail "$description"
+        echo "      missing file: $rel"
+        return
+    fi
+    if grep -Fq -- "$needle" "$PLUGIN_ROOT/$rel"; then
+        pass "$description"
+    else
+        fail "$description"
+        echo "      $rel does not contain: $needle"
+    fi
+}
+
+assert_skill_dir() {
+    local name="$1" description="$2"
+    if [[ -f "$PLUGIN_ROOT/skills/$name/SKILL.md" ]]; then
+        pass "$description"
+    else
+        fail "$description"
+        echo "      missing: skills/$name/SKILL.md"
+    fi
+}
+
 DENYLIST_PATTERN='workspace>/wiki|repo>/graph-works|wiki/entities|knowledge/|raw/|(^|[^a-zA-Z_.>/-])wiki/[a-z]'
 
 echo "doc-layout-claims guard test"
@@ -122,6 +150,21 @@ assert_riders_match() {
 }
 
 assert_riders_match
+
+# --- pointer-presence assertions -----------------------------------------
+# The packaged pipeline table (graph_works_core.workspace.pipeline) dispatches
+# the `epic-design` variant to a skill of this name. A table entry pointing at
+# a directory that does not exist fails only at dispatch time, in a worker
+# session, with no earlier signal — so assert the cheap half here.
+assert_skill_dir "epic-design" \
+    "the pipeline table's epic-design skill directory exists"
+
+# hooks/skill-doc-routing's auto-file clause points a standalone brainstorming
+# session at this section by name. A renamed or deleted section leaves the hook
+# naming a destination that is not there, and the failure would only show up as
+# a session quietly not filing anything.
+assert_contains "skills/file/SKILL.md" "## Auto-file mode (hook-triggered)" \
+    "the file skill carries the section the hook's auto-file clause names"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

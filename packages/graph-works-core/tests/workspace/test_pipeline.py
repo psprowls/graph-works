@@ -51,6 +51,16 @@ def test_packaged_only_resolution_needs_no_layout():
     )
 
 
+def test_the_epic_design_entry_is_attend_with_the_neutral_tail():
+    """An epic design is a human-in-the-room stage, same as `exploration`. The
+    skill name is asserted by suffix so this test survives child 5's
+    fully-qualified rename without becoming a second place to edit."""
+    entry = pipeline.PACKAGED_PIPELINE["epic-design"]
+    assert entry.skill.endswith("epic-design")
+    assert entry.mode == "attend"
+    assert entry.prompt_tail == pipeline.ATTEND_TAIL
+
+
 def test_one_override_replaces_one_field_and_nothing_else(tmp_path):
     layout = _workspace(
         tmp_path,

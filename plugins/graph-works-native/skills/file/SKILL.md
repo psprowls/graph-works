@@ -122,8 +122,8 @@ Anchors 2 and 3 below apply to every other kind.
 
 ### Anchor 2 — at spec time
 
-When the design is approved and you are about to write the spec, **before**
-writing it:
+When the design is approved, write the spec as follows instead of to any
+default location:
 
 1. **Write the design artifact** to
    `<workspace>/okf/<work-path>/references/01-design.md`. The owned directory

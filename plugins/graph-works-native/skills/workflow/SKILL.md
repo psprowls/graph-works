@@ -163,7 +163,7 @@ another stage, same as the stock skill it replaces.
 
 <!-- rider-table:end -->
 
-  `reconciling-spec`, `finishing-relay` and `systematic-debugging` have no
+  `reconciling-spec`, `epic-design`, `finishing-relay` and `systematic-debugging` have no
   rider — they are ours, or they carry no `MOVE-TO-BRIEF` behavior.
 
 The stock skills honor user-preference path overrides; they stay unmodified.

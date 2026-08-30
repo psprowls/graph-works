@@ -117,24 +117,39 @@ another stage, same as the stock skill it replaces.
 
   Omit this block entirely when `guidance` is empty (guidance skipped or no
   matches). Surface any `guidance_warnings` to the user as plain notes.
-- when the dispatched `action.skill` is a chained-handoff skill, add the
-  matching STOP line so its pipeline-stage guard fires (without it the skill
-  self-chains into the next stage, collapsing two stages into one session):
-  - dispatching `brainstorming` → add: *"STOP after writing the spec — do not
-    invoke writing-plans. This is a single pipeline stage; the workflow skill
-    advances the item."*
-    This prepended work-item brief and STOP line are the canonical "a work item
-    already exists" signal that `brainstorming` keys off of to suppress its
-    standalone auto-file path — no dispatch-logic change is needed here.
-  - dispatching `writing-plans` → add: *"STOP after writing the plan — do not
-    run the Execution Handoff. This is a single pipeline stage; the workflow
-    skill advances the item."*
-  - dispatching `planning-epics` → add: *"STOP after writing the plan artifact and
-    filing the children — do not advance the epic or start a child. This is a
-    single pipeline stage; the workflow skill advances the item."*
-  - `systematic-debugging`, `test-driven-development`,
-    `subagent-driven-development`, and `finishing-a-development-branch` need no
-    STOP line — they do not self-chain into the next stage.
+- **Stage directives (riders).** Look `action.skill` up in the rider table
+  below, keyed on its **last segment** — the part after the colon in a qualified
+  `superpowers:brainstorming`. If a rider exists, open
+  `references/brief-riders.md`, find the matching `## Rider: <name>` section, and
+  inline its **Rider** block into the brief **verbatim**, under a
+  `## Stage directives` heading. A rider is not a summary and not optional: the
+  stage skill is stock and cannot be patched, so the rider text *is* the
+  behavior. If `action.skill` has no rider, add nothing.
+
+  Substitute `<workspace>` with the resolved absolute workspace path and
+  `<work-path>` with the item's canonical path. Where a section documents a
+  **Conditional clause**, apply its condition against the item's frontmatter and
+  omit the clause when the condition does not hold.
+
+  Today's STOP lines live in this table too. They were always riders; there is
+  no reason for two mechanisms. Omitting one lets the skill self-chain into the
+  next stage, collapsing two stages into one session.
+
+<!-- rider-table:start -->
+
+| Skill | Stage | Carries |
+|---|---|---|
+| `brainstorming` | design | `--project-dir <workspace>` for the visual companion, plus the spec STOP line |
+| `writing-plans` | plan | A self-sufficient Execution-Handoff stop |
+| `planning-epics` | plan (epic) | Its STOP line |
+| `subagent-driven-development` | execute | Positive authorization + mandatory isolation |
+| `test-driven-development` | execute | Positive authorization + mandatory isolation |
+| `finishing-a-development-branch` | finish | The on-trunk two-option menu |
+
+<!-- rider-table:end -->
+
+  `reconciling-spec`, `finishing-relay` and `systematic-debugging` have no
+  rider — they are ours, or they carry no `MOVE-TO-BRIEF` behavior.
 
 The stock skills honor user-preference path overrides; they stay unmodified.
 

@@ -1420,6 +1420,12 @@ entry #7, and this entry cross-references it in prose instead of in a `file:` li
 
 **What the seven files are.**
 
+- `hooks/examples/session-end-transcript-capture.sh` — the Python-side session-transcript hook example
+  that `packages/graph-works-core` reads back at runtime (see the "Thirty-two claims" note below for
+  why it stays claimed here rather than moving to the native plugin).
+- `tests/pi/test-pi-extension.mjs` — one of the seven `file:` claims in this entry's audit-delta block,
+  but described in prose earlier in this document (the "kept, gated, and an upstream-contribution
+  candidate" paragraph above entry #19), not restated here to avoid duplication.
 - `skills/using-superpowers/references/{codex,copilot,gemini}-tools.md` — the three platform-adaptation
   reference files entry #7 re-adds a citation site for (its "Amendment" paragraph). Upstream deleted
   its own copies of these at v6.4.0, so there is no upstream file at these paths to diverge from and
@@ -1484,6 +1490,8 @@ ours-side additions, so this is one `file:` line replacing two, not a `state: re
 upstream ships at any of the three paths.
 
 **Thirty-two claims left this entry on 2026-08-30.** `feature-native-plugin-scaffold` moved the seventeen native skill directories, `hooks/skill-doc-routing`, `tests/hooks/test-skill-doc-routing.sh` and `tests/test-entry-point-skills.sh` out of this prefix and into `plugins/graph-works-native/`, a sibling directory that is not vendored and has no upstream to diverge from. `audit_delta.py`'s `PREFIX` is tree-scoped (`HEAD:plugins/graph-works`), not a string prefix, so the sibling is invisible to the checker — correctly. Their `file:` lines are removed here because a claim on a path that no longer diverges is reported as a *retired patch*, which is exactly what a moved-out file is not.
+
+`hooks/examples/session-end-transcript-capture.sh` did **not** move, and stays claimed in this entry, precisely because it has real Python-side consumers that hardcode its location under this prefix: `packages/graph-works-core`'s `pyproject.toml` sdist force-include and `hooks.py`'s fallback path both point at `plugins/graph-works/hooks/examples/session-end-transcript-capture.sh`. Child 9's eventual cutover (`git rm -r plugins/graph-works` then `git mv plugins/graph-works-native plugins/graph-works`) must relocate or repoint those two references before deleting this tree — not just move skill directories — or it silently breaks the sdist and `packages/graph-works-cli/tests/test_config_cli_hooks.py`.
 
 The `skills/graph-works/references/sidecar-schema.md` row went with them, for a different reason: that file has not existed in the tree for some time and the row was already reported as a retired patch before this change. It could not be left standing while the block it lives in was being rewritten. The six *undocumented* divergences remain untouched — those are `tech-debt-reconcile-fork-ledger`'s, and this change reduces them to five only because `tests/test-doc-layout-claims.sh` was one of them and has moved.
 

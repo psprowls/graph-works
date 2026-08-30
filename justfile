@@ -103,6 +103,11 @@ cov:
 # A1 and A3 report `skipped (no plugin tree)` rather than passing vacuously.
 # In this fork the tree is `plugins/graph-works`, so naming it is what makes
 # all three assertions real.
+#
+# Stale as of `feature-native-plugin-scaffold`: `--plugin-tree` still points at
+# `plugins/graph-works`, which no longer holds the seventeen skills moved to
+# `plugins/graph-works-native/`. Advisory only, not in `check`, so left as-is
+# here -- it now covers only the vendored subtree's remaining skills.
 plugin-contract *ARGS:
     uv run python scripts/plugin_contract.py --contract-page "${GRAPH_WIKI_WORKSPACE}/wiki/concepts/graph-works-plugin-cli-contract.md" --plugin-tree plugins/graph-works {{ARGS}}
 
@@ -178,12 +183,6 @@ audit-delta:
 # (spike D2) and were removed with the dormant hook surface they covered.
 # Their names were pruned from the list below by C2, 2026-08-17 — the gate
 # still runs every suite that survives, and nothing is skipped silently.
-#
-# `hooks/test-skill-doc-routing` and `skills/shared/resolve-workspace.test.sh`
-# joined on 2026-08-20 for `tests/pi`'s reason, restated: the resolver suite was
-# reachable only by running the file by hand, so a divergence nothing executes
-# was not coverage. `uv` is a hard requirement of the resolver suite's parity
-# matrix, for the same reason node and npm are hard requirements below.
 test-plugin:
     #!/usr/bin/env bash
     set -euo pipefail

@@ -6,8 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A `uv` workspace (`members = ["packages/*"]`) for OKF tooling. The root is a
 workspace root only — not distributable, `package = false`. It holds thirteen
-packages today, plus one vendored plugin subtree (`plugins/graph-works`, see
-below — not a workspace member, not Python).
+packages today, plus two plugin trees (neither a workspace member, neither
+Python): the vendored subtree `plugins/graph-works` (unregistered, kept for
+provenance until a future cutover — see below) and `plugins/graph-works-native`,
+the actual plugin Claude Code loads (name `graph-works`).
 
 The OKF v0.2 spec is **not** in this repository. Code and docs cite it by
 section (`§5.1`, `§11`) and expect you to reason from those citations.
@@ -57,7 +59,7 @@ exists yet — enforcement is local, by design (ADR-0010).
 
 | Command | What it does |
 |---|---|
-| `just` / `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
+| `just` / `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` + `test-plugin-native` — the full gate |
 | `just sync` | `uv sync --all-packages` — provisions every member's deps, not just the root's |
 | `just normalization` | Unicode-normalization check on tracked filenames (cheap, run first) |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
@@ -66,7 +68,8 @@ exists yet — enforcement is local, by design (ADR-0010).
 | `just test` | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package |
 | `just cov` | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing` |
 | `just subtree-base` | Asserts the `plugins/graph-works` subtree merge-base is reachable/recorded/prefix-rooted — see "The vendored plugin" below |
-| `just test-plugin` | The offline, code-executing subset of the vendored plugin's own test suites |
+| `just test-plugin` | The offline, code-executing subset of the **vendored subtree's** own test suites — not the only plugin suite; see `test-plugin-native` |
+| `just test-plugin-native` | The Graph Works-native plugin's own test suites, under `plugins/graph-works-native/` |
 | `just audit-delta` | Advisory, not in `check` — cross-checks `plugins/PATCHES.md` against the tree |
 | `just plugin-contract` | Advisory, not in `check` — the plugin CLI contract page assertions |
 | `just test-plugin-slow` | The one vendored plugin suite excluded from `check` (~150s) |
@@ -268,6 +271,13 @@ records it as patched.** An unrecorded edit silently becomes undocumented
 divergence, which the next upstream pull either clobbers or conflicts with for
 no traceable reason. If a change belongs here, add or update its `PATCHES.md`
 entry in the same change.
+
+`plugins/graph-works-native/` exists as a sibling of this prefix — the actual
+plugin Claude Code installs and loads (name `graph-works`), authored fresh
+rather than derived from the subtree. The "do not hand-edit without a
+`PATCHES.md` entry" rule above scopes only to the vendored `plugins/graph-works/`
+prefix; it does **not** apply to `plugins/graph-works-native/`, which is
+ordinary first-party code and edited like any other package in this repo.
 
 `plugins/SYNC.md` is the full ritual for pulling a new upstream release —
 read it before touching anything subtree-related; it is not optional

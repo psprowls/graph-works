@@ -24,6 +24,12 @@ The packaged table is **total over the closed `Variant` set**, which is what
 makes an override able to replace an entry but never leave a hole; `mode`
 carries `allowed=DISPATCH_MODES` in the catalog, so config-io refuses a bad
 value at set time rather than at dispatch time.
+
+**A skill name is used verbatim.** A colon-qualified value means
+`<plugin>:<skill>` and the dispatching skill invokes it as written; a bare
+name is equally valid and routes to a user-level or repo-local skill. There
+is no implicit plugin namespace and nothing prepends one -- which is why
+every packaged value here is qualified, and why a test asserts it.
 """
 
 from __future__ import annotations
@@ -77,14 +83,14 @@ class PipelineEntry:
 #: The packaged table. Read by `pipeline_table`, never mutated.
 PACKAGED_PIPELINE: Mapping[str, PipelineEntry] = MappingProxyType(
     {
-        "exploration": PipelineEntry("brainstorming", "attend", ATTEND_TAIL),
-        "diagnosis": PipelineEntry("systematic-debugging", "attend", ATTEND_TAIL),
-        "reconcile": PipelineEntry("reconciling-spec", "autonomous"),
-        "decompose": PipelineEntry("planning-epics", "autonomous"),
-        "single": PipelineEntry("writing-plans", "autonomous"),
-        "planned": PipelineEntry("subagent-driven-development", "autonomous"),
-        "unplanned": PipelineEntry("test-driven-development", "autonomous"),
-        "branch": PipelineEntry("finishing-a-development-branch", "relay"),
+        "exploration": PipelineEntry("superpowers:brainstorming", "attend", ATTEND_TAIL),
+        "diagnosis": PipelineEntry("superpowers:systematic-debugging", "attend", ATTEND_TAIL),
+        "reconcile": PipelineEntry("graph-works:reconciling-spec", "autonomous"),
+        "decompose": PipelineEntry("graph-works:planning-epics", "autonomous"),
+        "single": PipelineEntry("superpowers:writing-plans", "autonomous"),
+        "planned": PipelineEntry("superpowers:subagent-driven-development", "autonomous"),
+        "unplanned": PipelineEntry("superpowers:test-driven-development", "autonomous"),
+        "branch": PipelineEntry("superpowers:finishing-a-development-branch", "relay"),
     }
 )
 

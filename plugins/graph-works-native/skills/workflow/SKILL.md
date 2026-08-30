@@ -89,7 +89,7 @@ which transitions happen at dispatch time.
 ### 3. Dispatch the stage skill
 
 Invoke the stage skill named by `action.skill` via the Skill tool, prepending a
-work-item brief. **A name that already carries a `<plugin>:` prefix is used
+work-item brief: **A name that already carries a `<plugin>:` prefix is used
 verbatim**; an unqualified name is namespaced `graph-works:<skill>`. Stage skills
 may be owned by a different plugin — during the unfork coexistence window the six
 stage skills resolve as `superpowers:*` through a `workflow.pipeline.*.skill`

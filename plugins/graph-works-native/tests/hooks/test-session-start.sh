@@ -13,6 +13,7 @@ PLUGIN_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 HOOK="$PLUGIN_ROOT/hooks/session-start"
 WRAPPER="$PLUGIN_ROOT/hooks/run-hook.cmd"
 HOOKS_JSON="$PLUGIN_ROOT/hooks/hooks.json"
+PLUGIN_JSON="$PLUGIN_ROOT/.claude-plugin/plugin.json"
 BOOTSTRAP="$PLUGIN_ROOT/skills/using-graph-works/SKILL.md"
 
 FAILURES=0
@@ -96,6 +97,39 @@ if (!/run-hook\.cmd" session-start$/.test(entry.command)) {
     pass "hooks.json registers SessionStart with shell:bash dispatch"
 else
     fail "hooks.json registers SessionStart with shell:bash dispatch"
+fi
+
+if node -e '
+const hooks = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+const entry = hooks.hooks.PreToolUse[0].hooks[0];
+if (hooks.hooks.PreToolUse[0].matcher !== "Skill") {
+  console.error(`unexpected PreToolUse matcher: ${hooks.hooks.PreToolUse[0].matcher}`);
+  process.exit(1);
+}
+if (!/run-hook\.cmd" skill-doc-routing$/.test(entry.command)) {
+  console.error(`unexpected PreToolUse command shape: ${entry.command}`);
+  process.exit(1);
+}
+' "$HOOKS_JSON"; then
+    pass "hooks.json registers PreToolUse Skill routing"
+else
+    fail "hooks.json registers PreToolUse Skill routing"
+fi
+
+if node -e '
+const plugin = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+if (plugin.name !== "graph-works") {
+  console.error(`unexpected plugin.json name: ${plugin.name}`);
+  process.exit(1);
+}
+if (plugin.version !== "0.1.0") {
+  console.error(`unexpected plugin.json version: ${plugin.version}`);
+  process.exit(1);
+}
+' "$PLUGIN_JSON"; then
+    pass "plugin.json parses as valid JSON with name graph-works and version 0.1.0"
+else
+    fail "plugin.json parses as valid JSON with name graph-works and version 0.1.0"
 fi
 
 if [[ -f "$BOOTSTRAP" ]]; then

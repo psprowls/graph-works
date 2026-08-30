@@ -48,6 +48,11 @@ LEGACY_EXCLUSIONS = (
     # above, this exclusion does not retire with anything: the guard itself
     # must keep naming the token it guards against.
     ROOT / "packages" / "work-tracker-okf" / "tests" / "test_legacy_boundary.py",
+    # Same rationale one level up: the package's own AGENTS.md documents that
+    # boundary guard, and cannot describe which retired marker the guard scans
+    # for without naming it. Like the guard itself, this exclusion does not
+    # retire with anything.
+    ROOT / "packages" / "work-tracker-okf" / "AGENTS.md",
 )
 HARVESTED_LEGACY_FIXTURE = ROOT / "scripts" / "tests" / "fixtures" / "legacy_graph_wiki"
 

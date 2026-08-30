@@ -28,7 +28,7 @@ containing a markdown table. Rules:
 - Under each H3: a one-sentence paragraph describing the directory, then a markdown table with columns `Path | Kind | Description`. `Path` is relative to that section's root (e.g. `middleware/auth.ts` inside `### <name>/src/`). `Kind` is `file` or `dir`. `Description` starts as `— TODO` and is filled in by the agent later.
 - Nested files (depth ≥ 2) flatten into rows inside their depth-1 parent's table. Directories deeper than the cutoff (default `max_depth=4`) are listed as `dir` rows in their depth-1 parent's table instead of getting their own section.
 - The scanner pre-populates the tables via `git ls-files` (so `.gitignore` is respected) with `— TODO` Description placeholders. Per-row descriptions are filled in by the agent on a later pass.
-- `/graph-works:lint`'s file-map drift check flags rows whose Path is no longer on disk; new files showing up on disk do not fail lint, since `dir`-row summarization is allowed.
+- `/gw:lint`'s file-map drift check flags rows whose Path is no longer on disk; new files showing up on disk do not fail lint, since `dir`-row summarization is allowed.
 - **Legacy heading+bullet pages on disk** (pre-2026-05) are parsed gracefully: directory entries from H3 headers are still extracted, but file-row entries are dropped. The next scan re-emits the block in the new table format when the page still shows the unfilled-template signature.
 - **Prod vs testing split:** a package/app entity page's File map shows only **prod source + prod config**. Test files (any component named `tests/`, `__tests__/`, `test/`, or `spec/`), test config (`pytest.ini`, `tox.ini`, `conftest.py`, `jest.config.*`, `vitest.config.*`, `playwright.config.*`, `cypress.config.*`, `mocha.config.*`/`.mocharc.*`, `karma.conf.*`, `ava.config.*`), and test fixtures (typically under `tests/fixtures/`) do not appear here — they belong to that package's own `test_suite` entity page (see below). The prod/test split is implemented by `_is_test_path()` in `packages/wiki-io/src/wiki_io/scan_monorepo.py` — that helper is the single source of truth.
 - **Fixtures at non-test paths:** workspaces that put fixtures outside a `tests/`-prefixed path (e.g. a root-level `fixtures/` directory used at runtime too) are classified as prod by the scanner. Document them by hand in the `test_suite` entity page's `## Fixtures` section if they are test-only.
@@ -278,7 +278,7 @@ summary: Move from opaque session tokens to JWTs; driven by compliance, affects 
 source_path: sources/references/auth-migration.md
 source_type: spec                # spec | article | pr | ticket | transcript | example | doc | note
 source_date: 2026-04-01
-last_sync_commit:                # set only for in-repo docs (source_type: doc) — full SHA at last ingest, used by /graph-works:lint to detect changes
+last_sync_commit:                # set only for in-repo docs (source_type: doc) — full SHA at last ingest, used by /gw:lint to detect changes
 last_sync_at:                    # YYYY-MM-DD when sync state was recorded
 authors: [@psprowls]
 ingested: 2026-04-20
@@ -321,7 +321,7 @@ Two sentences max. What the source proposes / argues / reports.
 - [0014-jwt-sessions](/adrs/0014-jwt-sessions.md)
 ```
 
-`last_sync_commit` (40-char SHA) and `last_sync_at` (YYYY-MM-DD) record the repo commit this page was last verified against. `/graph-works:ingest` writes both when re-ingesting an in-repo doc (`source_type: doc`) with a clean working tree on `main`. `/graph-works:lint` compares HEAD against `last_sync_commit` to flag source files that have changed since the last ingest.
+`last_sync_commit` (40-char SHA) and `last_sync_at` (YYYY-MM-DD) record the repo commit this page was last verified against. `/gw:ingest` writes both when re-ingesting an in-repo doc (`source_type: doc`) with a clean working tree on `main`. `/gw:lint` compares HEAD against `last_sync_commit` to flag source files that have changed since the last ingest.
 
 ## 5. Architecture concept page (`kind: architecture`)
 
@@ -431,7 +431,7 @@ Adopt short-lived JWTs signed by Cognito. Validation in middleware; refresh on t
 
 ## 7. Dependency page
 
-`/graph-works:scan` writes one graph-derived dependency page per dep the monorepo touches into `dependencies/<ecosystem>/<name>.md`, using the scanner-owned `entity-dependency.md` template shape (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use`). The `kind: package | service` example below is a **legacy curated-page shape** that no lint group checks — the `dependency_layer` group it was gated behind does not exist in graph-works-core. It is not what the scanner writes, and its fate is open in `2026-08-20-tech-debt-revisit-dependency-layer-lint`. See `wiki-schema.md` for the `kind: service` variant.
+`/gw:scan` writes one graph-derived dependency page per dep the monorepo touches into `dependencies/<ecosystem>/<name>.md`, using the scanner-owned `entity-dependency.md` template shape (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use`). The `kind: package | service` example below is a **legacy curated-page shape** that no lint group checks — the `dependency_layer` group it was gated behind does not exist in graph-works-core. It is not what the scanner writes, and its fate is open in `2026-08-20-tech-debt-revisit-dependency-layer-lint`. See `wiki-schema.md` for the `kind: service` variant.
 
 ```markdown
 ---

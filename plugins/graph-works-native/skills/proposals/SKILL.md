@@ -1,6 +1,6 @@
 ---
 name: proposals
-description: Invoked explicitly as /graph-works:proposals [slug...]. Reviews and disposes of curated-page proposals in okf/proposals/ — accept, reject, or supersede. Approving only flips a note's status; this skill then fans out one subagent per accepted proposal to author the destination page, flips notes to created, regenerates indexes, and archives. Mutates the workspace; explicit invocation only.
+description: Invoked explicitly as /gw:proposals [slug...]. Reviews and disposes of curated-page proposals in okf/proposals/ — accept, reject, or supersede. Approving only flips a note's status; this skill then fans out one subagent per accepted proposal to author the destination page, flips notes to created, regenerates indexes, and archives. Mutates the workspace; explicit invocation only.
 ---
 
 # Dispose of curated-page proposals
@@ -10,9 +10,9 @@ Dispose of the ADR/concept proposals the ingest pipeline drops into `<wiki>/prop
 ## Usage
 
 ```
-/graph-works:proposals          # Claude Code
+/gw:proposals          # Claude Code
 $proposals                      # Codex
-/graph-works:proposals adr-index-repository-grouping concept-subagent-roles
+/gw:proposals adr-index-repository-grouping concept-subagent-roles
 ```
 
 Without arguments: review all open (`proposed`) notes. With slug arguments: just those.

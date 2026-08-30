@@ -43,7 +43,7 @@ Already done by the script (`index.md`, per-folder sub-indexes). No separate ste
 Already done by the script.
 
 ### 6. Report back
-Bulleted wikilinks; suggest `/graph-works:lint` and `/graph-works:ingest` to flesh out narratives.
+Bulleted wikilinks; suggest `/gw:lint` and `/gw:ingest` to flesh out narratives.
 
 ## Frontmatter contract
 

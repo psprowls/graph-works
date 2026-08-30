@@ -73,7 +73,7 @@ read are unchanged from `gw work next`.
   through the normal steps — dispatch transition, stage skill, advance — all
   against the leaf path. If the descend itself reports a `--descend:` blocker,
   or no `--descend` was requested, report the blocker, list the open children
-  from `child_rollup.open_paths` suggesting `/graph-works:workflow <child-path>` for
+  from `child_rollup.open_paths` suggesting `/gw:workflow <child-path>` for
   each, and **stop** (nothing to advance).
 - Otherwise announce the dispatch: item title, kind, phase, and the stage skill
   from `action.skill`.
@@ -109,7 +109,7 @@ that case unguarded.
 after the colon in a qualified `superpowers:finishing-a-development-branch` — is
 `finishing-a-development-branch`, **and** the dispatch prompt that launched
 this session contains an `Auto-drive context:` line, dispatch
-`graph-works:finishing-relay` instead of the configured skill —
+`gw:finishing-relay` instead of the configured skill —
 the merge target is already embedded in that same line, so no extra
 forwarding is needed beyond the standard work-item brief below. This
 override needs no STOP line: `finishing-relay` doesn't self-chain into
@@ -186,7 +186,7 @@ health check, not noise. If the command errors with *effort required*, ask the
 user to size the item as in step 1 — never pick an effort yourself — then retry.
 
 **Relay no-advance outcomes.** If the just-completed stage was
-`graph-works:finishing-relay`, skip this step's own `gw work advance` call
+`gw:finishing-relay`, skip this step's own `gw work advance` call
 entirely for **every** relay outcome, including `merge` — the relay skill
 already settled the item's state: for `merge`, its own R5 step already ran
 `gw work advance <work-path> --resolved-in <ref>`; for `pr`/`hold`/`discard`, R5
@@ -207,13 +207,13 @@ If the advance lands the item at `phase: done` and `work_status: resolved`, run
 ### 6. Hand off
 
 End with: "Phase advanced to `<phase>`. Clear context (`/clear`) and run
-`/graph-works:workflow <work-path>` to continue."
+`/gw:workflow <work-path>` to continue."
 
-**Relay no-advance hand-off.** For a `graph-works:finishing-relay` stage that
+**Relay no-advance hand-off.** For a `gw:finishing-relay` stage that
 reported `pr`, `hold`, or `discard`, the stock hand-off text above is wrong —
 nothing advanced. Say instead: "`<work-path>` stays at `phase: finish` pending an
 attended pass (relay outcome: `<pr|hold|discard>`). Clear context (`/clear`)
-and run `/graph-works:workflow <work-path>` when ready to continue attended."
+and run `/gw:workflow <work-path>` when ready to continue attended."
 
 (Items that have reached a terminal state are handled by **Terminal handling**
 below, not this hand-off.)
@@ -229,7 +229,7 @@ context window).
 1. **Ingest the design (resolved only).** If `work_status` is `resolved`, read
    `<workspace>/okf/<work-path>.md` and find the `sources[]` entry with
    `id: design`. If its root-absolute `resource` resolves beneath the OKF
-   bundle, dispatch the ingest skill (`graph-works:ingest`) on that artifact inline; the ingestor runs its own
+   bundle, dispatch the ingest skill (`gw:ingest`) on that artifact inline; the ingestor runs its own
    confirmation dialog and, on success, archives the source and repoints the
    pointer. Skip the ingest (announce "no design to ingest") when `work_status` is
    `wontfix`/`superseded`, when no `design` source exists, or when the resource is already gone
@@ -237,8 +237,8 @@ context window).
    ingest does not yet accept plan-type sources.
 
 2. **Offer to archive (any terminal status).** Ask the user "Archive `<work-path>`
-   now?" If yes, run `/graph-works:archive <work-path>`. If no, report that the item
-   stays in `work/` and can be archived later with `/graph-works:archive`.
+   now?" If yes, run `/gw:archive <work-path>`. If no, report that the item
+   stays in `work/` and can be archived later with `/gw:archive`.
 
 ### Detaching a child
 

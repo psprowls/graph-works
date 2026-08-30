@@ -61,7 +61,7 @@ if (shape === "nested") {
   context = payload[fields[shape]];
 }
 if (typeof context !== "string" || context.trim() === "") die("injected context was empty");
-if (!context.includes("graph-works:using-graph-works")) die("context does not label the bootstrap skill");
+if (!context.includes("gw:using-graph-works")) die("context does not label the bootstrap skill");
 if (!context.includes("gw work next")) die("context does not carry the bootstrap body");
 if (context.includes("using-superpowers")) die("context still references using-superpowers");
 '; then
@@ -118,7 +118,7 @@ fi
 
 if node -e '
 const plugin = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
-if (plugin.name !== "graph-works") {
+if (plugin.name !== "gw") {
   console.error(`unexpected plugin.json name: ${plugin.name}`);
   process.exit(1);
 }
@@ -127,9 +127,9 @@ if (plugin.version !== "0.1.0") {
   process.exit(1);
 }
 ' "$PLUGIN_JSON"; then
-    pass "plugin.json parses as valid JSON with name graph-works and version 0.1.0"
+    pass "plugin.json parses as valid JSON with name gw and version 0.1.0"
 else
-    fail "plugin.json parses as valid JSON with name graph-works and version 0.1.0"
+    fail "plugin.json parses as valid JSON with name gw and version 0.1.0"
 fi
 
 if [[ -f "$BOOTSTRAP" ]]; then

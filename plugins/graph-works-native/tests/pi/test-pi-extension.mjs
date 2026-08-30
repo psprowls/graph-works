@@ -48,7 +48,7 @@ function textOf(message) {
 test('package.json declares a pi package with skills and extension resources', async () => {
   const pkg = await readPackageJson();
 
-  assert.equal(pkg.name, 'graph-works');
+  assert.equal(pkg.name, 'gw');
   assert.equal(pkg.version, '0.1.0');
   assert.equal(pkg.main, undefined, 'package.json must not declare main');
   assert.ok(pkg.keywords.includes('pi-package'));

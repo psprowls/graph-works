@@ -3,7 +3,7 @@
 
 Watches every work item in the vault, and for each one whose next pipeline
 stage is automatable, dispatches a **fresh** background Claude Code session
-(`claude --bg`) running `/graph-works:workflow <work-path>`.
+(`claude --bg`) running `/gw:workflow <work-path>`.
 
 This mechanizes the invariant already stated in
 `plugins/graph-works-native/skills/workflow/SKILL.md`: *"One stage per invocation, by
@@ -196,7 +196,7 @@ UNATTENDED BACKGROUND RUN (dispatched by scripts/gw_dispatch.py).
 
 You are a single pipeline stage of the graph-works work workflow, running in a
 fresh background session with no human watching the terminal. Follow the
-graph-works:workflow skill exactly as written, with these standing answers so
+gw:workflow skill exactly as written, with these standing answers so
 you do not stall on routine questions:
 
 - Default work item owner is `{owner}`. If a dispatch transition requires
@@ -449,7 +449,7 @@ class Dispatcher:
             str(self.workspace),
             "--append-system-prompt",
             UNATTENDED_PROMPT.format(owner=self.args.owner),
-            f"/graph-works:workflow {path}",
+            f"/gw:workflow {path}",
         ]
         if self.args.model:
             argv[1:1] = ["--model", self.args.model]

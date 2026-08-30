@@ -51,12 +51,12 @@ ln -sf CLAUDE.md .cursorrules
 ### Claude Code
 
 ```bash
-cd <repo>             # /graph-works:onboard resolves the workspace via gw
+cd <repo>             # /gw:onboard resolves the workspace via gw
 claude
-> /graph-works:onboard            # if the workspace isn't initialized
-> /graph-works:scan          # detect packages
-> /graph-works:ingest ~/Downloads/auth-migration.md
-> /graph-works:query "which packages depend on common-context-node-ts?"
+> /gw:onboard            # if the workspace isn't initialized
+> /gw:scan          # detect packages
+> /gw:ingest ~/Downloads/auth-migration.md
+> /gw:query "which packages depend on common-context-node-ts?"
 ```
 
 ### Codex CLI

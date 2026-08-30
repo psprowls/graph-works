@@ -87,9 +87,9 @@ PACKAGED_PIPELINE: Mapping[str, PipelineEntry] = MappingProxyType(
     {
         "exploration": PipelineEntry("superpowers:brainstorming", "attend", ATTEND_TAIL),
         "diagnosis": PipelineEntry("superpowers:systematic-debugging", "attend", ATTEND_TAIL),
-        "reconcile": PipelineEntry("graph-works:reconciling-spec", "autonomous"),
-        "epic-design": PipelineEntry("graph-works:epic-design", "attend", ATTEND_TAIL),
-        "decompose": PipelineEntry("graph-works:planning-epics", "autonomous"),
+        "reconcile": PipelineEntry("gw:reconciling-spec", "autonomous"),
+        "epic-design": PipelineEntry("gw:epic-design", "attend", ATTEND_TAIL),
+        "decompose": PipelineEntry("gw:planning-epics", "autonomous"),
         "single": PipelineEntry("superpowers:writing-plans", "autonomous"),
         "planned": PipelineEntry("superpowers:subagent-driven-development", "autonomous"),
         "unplanned": PipelineEntry("superpowers:test-driven-development", "autonomous"),

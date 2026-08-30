@@ -1,6 +1,6 @@
 # Query Workflow
 
-The flow the LLM follows when the user runs `/graph-works:query <question>`.
+The flow the LLM follows when the user runs `/gw:query <question>`.
 
 ## Core principle
 

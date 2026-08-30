@@ -25,7 +25,7 @@ escape_for_json() {
 }
 
 bootstrap_escaped=$(escape_for_json "$bootstrap_content")
-session_context="<EXTREMELY_IMPORTANT>\nYou have graph-works workflows.\n\n**Below is the full content of your 'graph-works:using-graph-works' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${bootstrap_escaped}\n</EXTREMELY_IMPORTANT>"
+session_context="<EXTREMELY_IMPORTANT>\nYou have graph-works workflows.\n\n**Below is the full content of your 'gw:using-graph-works' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${bootstrap_escaped}\n</EXTREMELY_IMPORTANT>"
 
 # Emit exactly one context field — the one the current platform consumes.
 # Claude Code reads both additional_context and hookSpecificOutput without

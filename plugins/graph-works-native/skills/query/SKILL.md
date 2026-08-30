@@ -1,6 +1,6 @@
 ---
 name: query
-description: Use when the user asks a substantive question about the repo that the wiki might answer, or invokes /graph-works:query "<question>". Reads index.md first, drills into 3-10 relevant pages across categories (concepts, entities, ADRs, sources, work), synthesizes an answer with inline root-absolute markdown links and `code-path:line` citations, and offers to file the answer back as a new concept page (choosing the kind).
+description: Use when the user asks a substantive question about the repo that the wiki might answer, or invokes /gw:query "<question>". Reads index.md first, drills into 3-10 relevant pages across categories (concepts, entities, ADRs, sources, work), synthesizes an answer with inline root-absolute markdown links and `code-path:line` citations, and offers to file the answer back as a new concept page (choosing the kind).
 ---
 
 # Query the wiki
@@ -10,14 +10,14 @@ Ask the wiki a question. The librarian reads `index.md` first, picks relevant pa
 ## Usage
 
 ```
-/graph-works:query "<your question>"          # Claude Code
+/gw:query "<your question>"          # Claude Code
 $query "<question>"                            # Codex
-/graph-works:query "which packages depend on common-context-node-ts?"
-/graph-works:query "how does GlobalContext get set up for a request?"
-/graph-works:query "what's the state of the ESM migration?"
-/graph-works:query "which packages use React 19?"
-/graph-works:query "compare zustand and redux — what do we use where and why?"
-/graph-works:query "what's blocking healthkit tests from being reliable?"
+/gw:query "which packages depend on common-context-node-ts?"
+/gw:query "how does GlobalContext get set up for a request?"
+/gw:query "what's the state of the ESM migration?"
+/gw:query "which packages use React 19?"
+/gw:query "compare zustand and redux — what do we use where and why?"
+/gw:query "what's blocking healthkit tests from being reliable?"
 ```
 
 ## Dispatch

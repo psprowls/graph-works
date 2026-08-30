@@ -59,7 +59,7 @@ loss, not as parity.**
 
 **Do not carry the script path.** The patched copy rewrote the bare relative
 `scripts/start-server.sh` to a `${CLAUDE_PLUGIN_ROOT}`-absolute path. That
-literal must not appear in this rider: inside a `graph-works:workflow` session
+literal must not appear in this rider: inside a `gw:workflow` session
 `${CLAUDE_PLUGIN_ROOT}` names the *graph-works* plugin root, not superpowers'.
 The rider carries the flag; the stock document resolves the path.
 
@@ -117,7 +117,7 @@ The patch's other half — the save-path change from
 > `AskUserQuestion`, do **not** invoke `subagent-driven-development` or
 > `executing-plans`, do **not** begin implementing. After Task Persistence,
 > announce that the plan and `.tasks.json` are saved, and stop. Control returns
-> to the `graph-works:workflow` skill, which advances the item.
+> to the `gw:workflow` skill, which advances the item.
 >
 > STOP after writing the plan — do not run the Execution Handoff. This is a
 > single pipeline stage; the workflow skill advances the item.
@@ -281,7 +281,7 @@ reason: it is *not* that a worktree can never be on the base branch — a shared
 epic worktree is, which is exactly why `finishing-relay` needs its own trunk
 case. It is that the configuration only arises under auto-drive, and step 3's
 relay override already routes auto-drive's finish stage to
-`graph-works:finishing-relay` instead of here.
+`gw:finishing-relay` instead of here.
 
 ---
 

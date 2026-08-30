@@ -1,6 +1,6 @@
 # Lint Workflow
 
-Periodic health check the LLM runs when the user runs `/graph-works:lint`. Run weekly, after batch ingests, and always after a repo scan.
+Periodic health check the LLM runs when the user runs `/gw:lint`. Run weekly, after batch ingests, and always after a repo scan.
 
 ## Goal
 
@@ -28,7 +28,7 @@ Default report:
 - **Log gap** — no log entry in the last 14 days (tune via `--log-gap-days`)
 - **Code drift** (monorepo-specific) — packages/apps/agent_plugins on disk vs. their pages under `repositories/<repo>/` (matched by entity `kind` + `uri`; covers `kind: package`, `kind: app`, and `kind: agent_plugin`; legacy `packages/<slug>/` pages still recognized). Pages declaring `status: planned` in frontmatter are excluded from `orphaned_in_vault` and surfaced separately under `planned_in_vault`, so deliberately seeded pages don't drown the signal.
 - **Semantic** (JSON key `semantic`) — a real LLM pass `gw wiki lint` runs itself, not a script: an array of `{group, message, page, model}`, grouped `page_quality`, `adr_chain`, `stale_claims`. This already covers vault↔vault and vault↔code contradictions, stale-claim flags, and ADR chain health — Pass 2 reads and presents these findings rather than re-deriving them.
-- **`package_sync` drift** (`lint/package_sync.py`) — for legacy/ingest-tracked package/app pages, runs `git diff --name-only <last_sync_commit>..HEAD` against `package_path` / `app_path`. Graph-derived entity pages don't carry `last_sync_commit`, so code drift (above) is the entity-layout freshness signal; re-run `/graph-works:scan` to refresh them.
+- **`package_sync` drift** (`lint/package_sync.py`) — for legacy/ingest-tracked package/app pages, runs `git diff --name-only <last_sync_commit>..HEAD` against `package_path` / `app_path`. Graph-derived entity pages don't carry `last_sync_commit`, so code drift (above) is the entity-layout freshness signal; re-run `/gw:scan` to refresh them.
 - **`file_map` drift** (`lint/file_map.py`) — `## File map` entries that no longer exist on disk.
 - **Obsidian render** (`lint/obsidian_render.py`, JSON key `obsidian_render_findings`) — markdown that breaks Obsidian's renderer: bare angle-bracket placeholders, malformed callouts, malformed wikilinks/embeds, unescaped table pipes. Covers `index.md` files too.
 - **Guidance frontmatter** (`guidance_io.lint`, JSON key `guidance_lint_findings`) — invalid frontmatter, non-allowlisted tags, keyword shape, and topic placement for Diátaxis-lane pages.
@@ -36,7 +36,7 @@ Default report:
 - **Scanner heading drift** (`lint/scanner_heading.py`, JSON key `scanner_heading_drift`) — entity pages missing an expected deterministic section for their kind (e.g. a human renamed `## Referenced in wiki`).
 - **Source path drift** (JSON key `source_path_drift`) — `sources/` pages whose `sources/references/` copy no longer exists on disk.
 
-The last five run fail-soft: an unexpected per-check exception is reported as `{"error": "<msg>"}` under that JSON key instead of killing the pass. These keys give `/graph-works:lint` mechanical parity with `gw wiki lint`; the parity regression test lives in `packages/graph-works-core/tests/unit/test_lint_parity.py`.
+The last five run fail-soft: an unexpected per-check exception is reported as `{"error": "<msg>"}` under that JSON key instead of killing the pass. These keys give `/gw:lint` mechanical parity with `gw wiki lint`; the parity regression test lives in `packages/graph-works-core/tests/unit/test_lint_parity.py`.
 
 ### Other helpers
 
@@ -104,7 +104,7 @@ Present findings to the user as a single markdown report:
 - 2 drift candidates reviewed: `checkout-flow` — narrative overtaken by `payments-service` refactor; `auth-model` — still accurate
 
 ### Suggested actions
-1. Run `/graph-works:scan` to create stubs for missing packages
+1. Run `/gw:scan` to create stubs for missing packages
 2. Re-read the drifted packages
 3. Investigate orphans
 ```
@@ -114,6 +114,6 @@ Append a `lint` entry to `log.md` summarizing what was found and what was fixed.
 ## Frequency
 
 - **Weekly** — light pass, default groups only
-- **After every `/graph-works:scan`** — full code-drift pass
+- **After every `/gw:scan`** — full code-drift pass
 - **After batch ingests** — full pass with all `--check` groups enabled
 - **Before sharing the wiki with onboarding devs / agents** — full pass plus extra review

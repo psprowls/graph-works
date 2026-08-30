@@ -1,6 +1,6 @@
 ---
 name: ingest
-description: Use when the user says "ingest this", "add this spec/article/PR to the wiki", or invokes /graph-works:ingest <path>. Reads a source file from any path, proposes TL;DR and key claims, identifies which code entities and pages will be touched, flags contradictions with wiki or code, proposes ADRs when decisions are captured, and — after user confirmation — writes the source summary, links the relevant code entities via root-absolute markdown links, updates explanation/reference/ADR pages, regenerates the index, and logs the ingest.
+description: Use when the user says "ingest this", "add this spec/article/PR to the wiki", or invokes /gw:ingest <path>. Reads a source file from any path, proposes TL;DR and key claims, identifies which code entities and pages will be touched, flags contradictions with wiki or code, proposes ADRs when decisions are captured, and — after user confirmation — writes the source summary, links the relevant code entities via root-absolute markdown links, updates explanation/reference/ADR pages, regenerates the index, and logs the ingest.
 ---
 
 # Ingest a source into the wiki
@@ -14,12 +14,12 @@ A typical ingest touches **5-15 vault pages**. You're in the loop.
 ## Usage
 
 ```
-/graph-works:ingest <path>          # Claude Code
+/gw:ingest <path>          # Claude Code
 $ingest <path>                      # Codex
-/graph-works:ingest ~/Downloads/auth-migration.md
-/graph-works:ingest ~/Downloads/2026-04-react-19-blog.md
-/graph-works:ingest ~/Downloads/842-healthkit-retry.md
-/graph-works:ingest ~/Downloads/2026-04-arch-review.md
+/gw:ingest ~/Downloads/auth-migration.md
+/gw:ingest ~/Downloads/2026-04-react-19-blog.md
+/gw:ingest ~/Downloads/842-healthkit-retry.md
+/gw:ingest ~/Downloads/2026-04-arch-review.md
 ```
 
 ## Dispatch
@@ -38,7 +38,7 @@ You integrate a new source (spec, PR, article, ticket, transcript) into the `<wo
 
 ## Inputs
 
-- Path to a source file. Any filesystem path, or repo-relative for an in-repo doc (e.g. `docs/architecture.md`) passed directly to `/graph-works:ingest`.
+- Path to a source file. Any filesystem path, or repo-relative for an in-repo doc (e.g. `docs/architecture.md`) passed directly to `/gw:ingest`.
 - The current state of `<workspace>/okf/` (especially `index.md`)
 - The repo's code (for contradiction checks)
 - The bundle's `AGENTS.md` schema (`okf/AGENTS.md`) and `.gw/schema/Source.schema.json`
@@ -106,7 +106,7 @@ Required section headings per `.gw/sections/Source.yaml`: `## TL;DR`, `## Key cl
 Merge mode (page exists, per the brief's `merge_mode: true`): append a dated `## Re-ingest <date>` section at the bottom rather than overwriting the original summary.
 
 ### 5. Link the code entities (never edit entity pages)
-For each code entity (package, app, dependency) the source touches, add a root-absolute markdown link — `[<name>](/repositories/<repo>/<kind-folder>/<name>.md)` — under the source summary's `## Touches` section. Entity pages are scanner-owned — **do not edit them**. The scanner regenerates each entity's reciprocal reference from these forward-links on the next `/graph-works:scan`. Set the source page's `entity_uri:` frontmatter to the primary/canonical entity's URI from `entity_match.uri` in the brief (or `null` if none).
+For each code entity (package, app, dependency) the source touches, add a root-absolute markdown link — `[<name>](/repositories/<repo>/<kind-folder>/<name>.md)` — under the source summary's `## Touches` section. Entity pages are scanner-owned — **do not edit them**. The scanner regenerates each entity's reciprocal reference from these forward-links on the next `/gw:scan`. Set the source page's `entity_uri:` frontmatter to the primary/canonical entity's URI from `entity_match.uri` in the brief (or `null` if none).
 
 ### 6. Update explanation / reference / dependency pages
 For each cross-cutting idea the source mentions: update the relevant `explanations/` page's claims (why-shaped syntheses and reusable patterns both live there) or the relevant `references/` page's facts (what-is-true-of-a-thing), add a citation, or create a stub page in the appropriate Diátaxis lane — see `okf/AGENTS.md`'s lane table for the full set (`explanations/`, `references/`, `how-tos/`, `tutorials/`). Dependency pages are graph-derived at `dependencies/<ecosystem>/*` and are scanner-owned — never hand-edited.
@@ -152,7 +152,7 @@ Bulleted markdown links to every touched page, plus contradictions flagged and A
 - **Entity pages are scanner-owned.** Add root-absolute markdown links under `## Touches` on the source page; never edit entity pages.
 - **Flag contradictions** on both sides.
 - **Propose ADRs** for captured decisions — don't just bury them in a source summary.
-- **Md only for now.** PDF/DOCX/HTML auto-discovery is deferred. Direct `/graph-works:ingest <path>` works for any format `gw ingest` understands.
+- **Md only for now.** PDF/DOCX/HTML auto-discovery is deferred. Direct `/gw:ingest <path>` works for any format `gw ingest` understands.
 
 ## Red flags
 

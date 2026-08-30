@@ -280,7 +280,7 @@ out="$(run_hook "$TEST_ROOT" "$NAMESPACED_PAYLOAD" \
 assert_output \
     "namespaced brainstorming: routing context plus the auto-file clause" \
     "nested" "required" \
-    "AUTO-FILE (standalone brainstorming only)${US}graph-works:file${US}gw work advance <work-path> --effort${US}do not invoke writing-plans${US}/graph-works:workflow <work-path>${US}$ws_default/okf/<work-path>/references/${US}Filed as <work-path>" \
+    "AUTO-FILE (standalone brainstorming only)${US}gw:file${US}gw work advance <work-path> --effort${US}do not invoke writing-plans${US}/gw:workflow <work-path>${US}$ws_default/okf/<work-path>/references/${US}Filed as <work-path>" \
     "" \
     "absent" "" \
     "$out"

@@ -97,7 +97,7 @@ LAUNCH = [
     (("worker-start",), "worker_start"),
 ]
 
-PROMPT = "Run /graph-works:workflow my-slug.\nDispatch key: my-slug#execute\nSend worker_done when done."
+PROMPT = "Run /gw:workflow my-slug.\nDispatch key: my-slug#execute\nSend worker_done when done."
 
 
 def planned(**overrides):

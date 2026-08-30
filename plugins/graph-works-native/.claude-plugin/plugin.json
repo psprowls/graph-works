@@ -1,5 +1,5 @@
 {
-  "name": "graph-works",
+  "name": "gw",
   "description": "The graph-works work-item pipeline as a native plugin surface: wiki scan/ingest/query/lint plus the work-item pipeline and auto-drive, all driven through the gw CLI.",
   "version": "0.1.0",
   "author": {

@@ -1,6 +1,6 @@
 ---
 name: auto-drive
-description: Use when driving a work item's full pipeline unattended via Orca-supervised workers — an epic's entire dependency graph or a lone item's phase sequence — instead of walking one /graph-works:workflow stage at a time by hand. Runs a stateless plan/act/wait coordinator loop over `gw work orchestrate` and the Orca orchestration CLI — binds a Run, dispatches ready stages as supervised workers, handles the design (attend) and finish (relay) human gates, processes worker_done/question/escalation, and resumes cleanly after a crash or restart by re-deriving everything from Orca + the vault.
+description: Use when driving a work item's full pipeline unattended via Orca-supervised workers — an epic's entire dependency graph or a lone item's phase sequence — instead of walking one /gw:workflow stage at a time by hand. Runs a stateless plan/act/wait coordinator loop over `gw work orchestrate` and the Orca orchestration CLI — binds a Run, dispatches ready stages as supervised workers, handles the design (attend) and finish (relay) human gates, processes worker_done/question/escalation, and resumes cleanly after a crash or restart by re-deriving everything from Orca + the vault.
 ---
 
 # Auto-Drive Coordinator
@@ -61,7 +61,7 @@ that rule is about *Run/task* state, not static repo identity.
 
 The Run's objective string is the stable join key for this path:
 `auto-drive:<work-path>`. Nothing else maps path → Run — this lookup **is** the
-entire resume mechanism. Re-running `/graph-works:auto-drive <work-path>` always
+entire resume mechanism. Re-running `/gw:auto-drive <work-path>` always
 re-derives the Run this way; there is no separate `--resume` flag.
 
 1. `orca orchestration run-list --json` and scan for an entry whose
@@ -292,7 +292,7 @@ After either call:
    one of its children — so it will never appear in this root's `dispatches[]`
    or `blocked[]`. Say so: "filed `<follow-up-path>` — it's a peer item, not
    wired into this run; drive it separately, e.g. a fresh
-   `/graph-works:auto-drive <follow-up-path>`." Otherwise it reads as having
+   `/gw:auto-drive <follow-up-path>`." Otherwise it reads as having
    silently vanished.
 3. **Restart the cycle at §2.1** — the same rule §2.4 applies after
    `advances[]`. The ledger just changed, and the routing layer recomputes its
@@ -674,7 +674,7 @@ wait-timeout.
 
 ## 5. Resume & wrap-up
 
-**Resume** is just re-running `/graph-works:auto-drive <work-path>` (§1 re-binds
+**Resume** is just re-running `/gw:auto-drive <work-path>` (§1 re-binds
 the same Run by objective). Cycle 1's live-derivation (§2.1) classifies
 every existing task — live, settled, or dead — before anything else
 happens; dead dispatches enter the failure flow immediately. Nothing is

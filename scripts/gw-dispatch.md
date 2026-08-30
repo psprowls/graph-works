@@ -6,7 +6,7 @@ foreground while filed items advance on their own.
 
 `scripts/gw_dispatch.py` watches every work item in the vault. When an item's
 next stage is automatable, it dispatches a background session running
-`/graph-works:workflow <path>`, then tracks that session to completion.
+`/gw:workflow <path>`, then tracks that session to completion.
 
 ## Why background sessions and not subagents
 
@@ -99,7 +99,7 @@ pre-answered:
   yourself"*, and the dispatcher does not override that. An item missing effort
   surfaces as `waiting` and is never dispatched. Set it during design;
   `brainstorming/SKILL.md:73` already instructs the design stage to do so
-  precisely so `/graph-works:workflow` is not blocked later.
+  precisely so `/gw:workflow` is not blocked later.
 
 ## How completion is judged
 

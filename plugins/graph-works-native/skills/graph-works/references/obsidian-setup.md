@@ -42,7 +42,7 @@ Recommended Obsidian configuration for a Code Wiki. None of this is strictly req
 
 ## Recommended community plugins
 
-- **Obsidian Web Clipper** — clip articles to a local folder, then run `/graph-works:ingest <path>` to bring them into `sources/`
+- **Obsidian Web Clipper** — clip articles to a local folder, then run `/gw:ingest <path>` to bring them into `sources/`
 - **Dataview** — query over frontmatter. Dynamic tables like "all package pages where `language: typescript`".
 - **Marp for Obsidian** — render any markdown with `marp: true` frontmatter as a slide deck.
 - **Advanced Tables** — easier markdown table editing

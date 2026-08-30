@@ -1,6 +1,6 @@
 ---
 name: onboard
-description: Invoked explicitly as /graph-works:onboard. Locates or creates the graph-works workspace, then configures it — one guided walk covering workspace location, topic, the repository it catalogs, and optional session transcript capture. Writes the workspace manifest and repo settings through `gw`; explicit invocation only, never on inference.
+description: Invoked explicitly as /gw:onboard. Locates or creates the graph-works workspace, then configures it — one guided walk covering workspace location, topic, the repository it catalogs, and optional session transcript capture. Writes the workspace manifest and repo settings through `gw`; explicit invocation only, never on inference.
 ---
 
 # Onboard a graph-works workspace

@@ -36,7 +36,7 @@ Work is tracked as **path-native work items** in a graph-works workspace, driven
 through the `gw` CLI. `gw work next <work-path>` computes which pipeline stage an
 item is at and which skill runs it; `gw work advance <work-path>` moves it on.
 
-`/graph-works:workflow <work-path>` drives **exactly one stage per session**. That
+`/gw:workflow <work-path>` drives **exactly one stage per session**. That
 is the design, not a limitation: each stage gets a fresh context window, and the
 work item plus the artifacts under its owned `references/` directory are the only
 durable state between stages. Never chain two stages in one session. Clear context

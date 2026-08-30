@@ -1,6 +1,6 @@
 ---
 name: archive
-description: Invoked explicitly as /graph-works:archive [work-path...]. Archives terminal-status work items (resolved/wontfix/superseded) via `gw work archive` — sweep mode with no arguments, targeted mode with canonical paths — presenting the plan and asking for confirmation before executing. Mutates the workspace; explicit invocation only, never on inference.
+description: Invoked explicitly as /gw:archive [work-path...]. Archives terminal-status work items (resolved/wontfix/superseded) via `gw work archive` — sweep mode with no arguments, targeted mode with canonical paths — presenting the plan and asking for confirmation before executing. Mutates the workspace; explicit invocation only, never on inference.
 ---
 
 # Archive terminal work items
@@ -10,9 +10,9 @@ Move terminal work items from their active lanes to the corresponding local `_ar
 ## Usage
 
 ```
-/graph-works:archive          # Claude Code
+/gw:archive          # Claude Code
 $archive                      # Codex
-/graph-works:archive work/release-r1/children/epic-e1/children/bug-parser
+/gw:archive work/release-r1/children/epic-e1/children/bug-parser
 ```
 
 Without arguments: sweep mode — all terminal-status items.

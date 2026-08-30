@@ -177,8 +177,8 @@ When `artifact.path` is set, check the file exists after the stage completes.
 The brainstorming and writing-plans skills' own stock locations are already
 the pipeline path — `<work-path>/references/01-design.md` and `02-plan.md`
 respectively — the same path `artifact.path` points to, so the file should
-already be there. If the skill instead wrote elsewhere, move the file (and
-any `.tasks.json` companion) to `artifact.path` and say so.
+already be there. If the skill instead wrote elsewhere, move the file to
+`artifact.path` and say so.
 
 ### 5. Advance
 

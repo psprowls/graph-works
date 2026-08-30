@@ -178,12 +178,22 @@ The patch's other half — the save-path change from
 > You are running as the `plan` stage of the graph-works work pipeline. When you
 > reach the `## Execution Handoff` section, skip it entirely: do **not** call
 > `AskUserQuestion`, do **not** invoke `subagent-driven-development` or
-> `executing-plans`, do **not** begin implementing. After Task Persistence,
-> announce that the plan and `.tasks.json` are saved, and stop. Control returns
-> to the `gw:workflow` skill, which advances the item.
+> `executing-plans`, do **not** begin implementing. Announce that the plan is
+> saved and stop. Control returns to the `gw:workflow` skill, which advances the
+> item.
 >
 > STOP after writing the plan — do not run the Execution Handoff. This is a
 > single pipeline stage; the workflow skill advances the item.
+
+**No `.tasks.json`, and no Task Persistence step.** Both were the fork's, from
+an older `writing-plans` that wrote native Claude task files alongside the plan.
+Stock `writing-plans` has neither — its skill directory holds only `SKILL.md`
+and `plan-document-reviewer-prompt.md` — so a rider naming them sent the stage
+looking for a section that does not exist. The pipeline's durable state is the
+plan artifact at `artifact.path`; nothing reads a task file. (The legacy-vault
+migration in `scripts/` still *moves* a `.tasks.json` it finds beside an old
+plan — relocating what an old workspace already holds is not the same as
+writing new ones.)
 
 **The last sentence pair is a byte-exact literal.** The patched
 `skills/writing-plans/SKILL.md` guard paragraph quotes

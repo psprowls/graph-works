@@ -124,6 +124,14 @@ exist because a hand-edited manifest bypasses config-io's set-time
 validation — only `origin == "manifest"` values get re-checked against the
 catalog's declared type/`allowed`; env and default origins are trusted.
 
+A manifest-sourced `workflow.pipeline.<variant>.skill` is shape-checked at read
+time by `pipeline.check_skill_name`, beside `manifest.checked()` and for the
+same reason. A **bare** name is valid and used verbatim (user-level and
+repo-local skills carry no plugin prefix); empty, whitespace-only and
+malformed-qualification values (`a:`, `:b`, `a:b:c`) raise `WorkspaceError`.
+There is no charset rule. `PACKAGED_PIPELINE` is not checked at runtime — its
+shape is pinned by `test_pipeline.py` instead.
+
 **4. Init (`workspace/init.py`)** — `plan_init` / `apply_init`, a
 plan-then-apply pair with **no `dry_run` flag** (not calling `apply_init` is
 the dry run, matching six other shipped writers across the workspace). In

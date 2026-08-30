@@ -96,6 +96,15 @@ as-is; a bare name is passed as-is and resolves to a user-level or repo-local
 skill. **Never prepend a namespace** — there is no implicit plugin, and
 prefixing a qualified name produces a name that resolves to nothing.
 
+**Preflight — confirm the skill resolves.** Before invoking, check that the name
+you are about to invoke — `action.skill` after the namespacing above — appears
+in this harness's available-skills listing. If it does not, **stop** and report
+that name, and, when it is qualified (`<plugin>:<skill>`), the plugin that is
+missing. Do not substitute a similar skill, and do not perform the stage
+yourself. This applies to bare and qualified names alike: a bare name is a valid
+configured value, so checking only qualified ones would leave exactly that case
+unguarded.
+
 **Auto-drive relay override.** If `action.skill`'s **last segment** — the part
 after the colon in a qualified `superpowers:finishing-a-development-branch` — is
 `finishing-a-development-branch`, **and** the dispatch prompt that launched

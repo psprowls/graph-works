@@ -3,6 +3,10 @@
   "interface": {
     "displayName": "Graph Works"
   },
+  "owner": {
+    "name": "Patrick Sprowls",
+    "url": "https://github.com/psprowls"
+  },
   "plugins": [
     {
       "name": "graph-works",

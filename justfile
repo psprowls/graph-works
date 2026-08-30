@@ -216,6 +216,8 @@ test-plugin-native:
     #!/usr/bin/env bash
     set -euo pipefail
     cd plugins/graph-works-native
+    echo "--- codex/test-marketplace-manifest"
+    bash tests/codex/test-marketplace-manifest.sh
     echo "--- hooks/test-session-start"
     bash tests/hooks/test-session-start.sh
     echo "--- hooks/test-skill-doc-routing"

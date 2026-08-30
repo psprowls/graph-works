@@ -1807,3 +1807,41 @@ fail-open in `hooks/session-start` is what hid four dead notice branches and a b
 unreachable by any runner, since upstream's `package.json` declares no scripts and nothing else named
 the directory — was the one arrangement not worth defending. `tests/pi` is now part of
 `just test-plugin`, so the test either passes or fails the gate.
+
+---
+
+## Entry #26 — `auto-drive`'s plan-shape vocabularies, realigned onto the ported decision engine
+
+**Intent class: graph-works pipeline.** `skills/auto-drive/SKILL.md` described the `gw work
+orchestrate` plan against `agent-research`'s pre-port `work_io.orchestrate`. The engine has since
+landed in this repo as `packages/graph-works-core/src/graph_works_core/orchestrate/commands.py`
+(band 3, per its own `__init__.py`: "Layer 2 — independent of every other vertical; imports only
+`workspace`"), and the skill's three vocabularies drifted from it in the move.
+
+**It carries no `file:` line**, for entry #22's reason: `skills/auto-drive/SKILL.md` is already
+claimed by entry #19 as an ours-side addition with no upstream counterpart, and this is further
+editing of a file entry #19 already owns. A second `file:` claim would land the path in
+`scripts/audit_delta.py`'s `duplicated` set and turn `just audit-delta` red.
+
+**What changed.**
+
+- §2.2's `dispatches[].worktree.action` union gains `main` — the fourth value `_resolve_worktree`
+  has always been typed for and now emits.
+- §2.2's `blocked[].kind` list gains `relay-untailed` and `worktree-unsupported`, bringing it to the
+  ten members of `BLOCKED_KINDS`; the bullet now names that constant as the source of truth and tells
+  the coordinator to treat an unlisted kind as this skill being stale rather than as a plan error.
+- §2.5 gains handling for both new kinds as a fourth class beside self-resolving / human-decision /
+  in-loop: configuration faults that recur every cycle, so they are reported once and not waited on.
+  `relay-untailed` names its own fix (`workflow.pipeline.<variant>.prompt_tail`).
+  `worktree-unsupported` is noted as unreachable through the CLI today — `gw work orchestrate` passes
+  `provisions_worktrees=True` and exposes no flag to change it — so its arrival is itself the finding.
+- §3's `main` mapping loses entry #22's "**Known and accepted:** the fork's CLI cannot emit this
+  action yet" paragraph and its pointer to `agent-research/packages/work-io/`, replaced with where the
+  behaviour actually lives: `_resolve_worktree` choosing `main` over `reuse` when the resolved
+  worktree equals the code repo's own checkout, and `_prompt` appending the worker's
+  record-the-worktree line. The flag mapping itself is unchanged.
+- "Out of scope" now names `graph_works_core.orchestrate.commands` (`plan()` and the
+  `_resolve_worktree` ladder) as where a wrong-looking plan gets fixed, alongside the existing
+  file-it-against-the-decision-engine instruction.
+
+**On merge.** No upstream counterpart (entry #19) — nothing to reconcile on a sync.

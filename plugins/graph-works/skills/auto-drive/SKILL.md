@@ -121,14 +121,18 @@ Run — there's nothing live yet). The result:
 - `dispatches[]` — each entry: `key` (`<work-path>#<phase>`), `path`, `phase`,
   `kind`, `effort`, `skill`, `mode` (`autonomous` | `attend` | `relay`),
   `model` (`null` = inherit, omit `--model`), `reasoning_effort`,
-  `worktree` (`action`: `reuse` | `fork-child` | `create-top-level`, `path`,
-  `branch`, `base_branch`, `exists`), `merge_target`, `prompt`.
+  `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main`,
+  `path`, `branch`, `base_branch`, `exists`), `merge_target`, `prompt`.
 - `advances[]` — each: `path`, `reason`, `worktree`/`branch` (the epic's
   already-known worktree, when one exists — `null` otherwise, e.g. before any
   worker has ever been dispatched for this epic).
 - `blocked[]` — each: `path`, `kind` (one of exactly `deps`, `capacity`,
   `affects-overlap`, `effort-required`, `decisions`, `human`,
-  `worktree-pending`, `invalid`), `reason`.
+  `relay-untailed`, `worktree-pending`, `worktree-unsupported`, `invalid`),
+  `reason`. The closed vocabulary is `BLOCKED_KINDS` in
+  `graph_works_core.orchestrate.commands` — if a `kind` arrives that isn't in
+  this list, treat it as this skill being out of date, print it, and act on
+  nothing.
 - `warnings[]` — plain strings (e.g. a stale `--live` key matching nothing, or
   a malformed decisions-ledger entry). Print these as notes; they are not
   blockers.
@@ -171,14 +175,26 @@ you know is out of date).
   (xtra-small / small / medium / large / xtra-large). Run
   `gw work advance <work-path> --effort <value>`, then restart the cycle at §2.1.
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
-  `human`, `worktree-pending`, `invalid`): print one line each
+  `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
+  `invalid`): print one line each
   (`blocked <work-path> (<kind>): <reason>`) and take no action. `capacity` and
   `worktree-pending` resolve themselves next cycle as slots/worktrees free
   up; `deps`, `affects-overlap`, `human`, and `invalid` need a human decision
   outside this loop; `decisions` is a third case — it neither self-resolves
   nor needs a decision outside this loop, it's resolved *inside* this loop
   by the coordinator's own CLI call, but only once the user tells you to —
-  see §2.5.1. Note: `affects-overlap`
+  see §2.5.1. `relay-untailed` and `worktree-unsupported` are a fourth: both
+  are configuration faults that will recur every cycle until someone edits
+  something outside this loop, so report them once and don't wait on them.
+  `relay-untailed` means a relay-mode variant has no `prompt_tail`, so a
+  dispatched worker would drop into an interactive menu unattended — the fix
+  is `workflow.pipeline.<variant>.prompt_tail` in the manifest, and the
+  reason string names the variant. `worktree-unsupported` means the plan
+  needs a worktree provisioned and the target backend can't; `gw work
+  orchestrate` passes `provisions_worktrees=True` today and exposes no flag
+  to change it, so this kind should not reach this skill through the CLI —
+  if one arrives, say so rather than working around it. Note:
+  `affects-overlap`
   fires both on a real overlap
   *and* on an item with an empty `affects` list (declaring `affects` is what
   unlocks parallel dispatch) — don't report an empty-`affects` block to the
@@ -368,12 +384,12 @@ For each planned-but-undispatched entry from §2.6:
      worker to pass `--worktree`/`--branch` explicitly on its own
      `gw work advance` calls, since it is running directly in the main
      checkout and cwd-based worktree inference cannot detect that case.
-     **Known and accepted:** the fork's CLI cannot emit this action yet —
-     `packages/work-tracker-okf/` has no `orchestrate` module; `action` typed
-     `"reuse" | "fork-child" | "create-top-level" | "main"` still lives only
-     in `agent-research/packages/work-io/src/work_io/orchestrate.py`. This
-     mapping documents the surface ahead of the port, consistent with the
-     rest of this section.
+     The decision engine emits this for real: `_resolve_worktree` in
+     `packages/graph-works-core/src/graph_works_core/orchestrate/commands.py`
+     chooses `main` over `reuse` whenever the resolved worktree equals the
+     code repo's own checkout, and `_prompt` in the same module appends the
+     extra "record the worktree as … and the branch as …" line the worker
+     needs.
    - **Live-validation item:** `worktree.branch` values are slash-containing
      (e.g. `epic/orca-auto-drive-pipeline`); confirm `--name` accepts that
      verbatim as the git branch name rather than treating it as a display
@@ -593,9 +609,11 @@ before exiting — same mechanics as the failure question's Stop branch
 
 - Any dispatch-decision logic — readiness, worktree choice, model, prompt
   assembly, parallelism caps, `affects` serialization — all owned by
-  `gw work orchestrate`. A wrong-looking plan (bad worktree action, a
-  missing blocker kind, a bad prompt) gets filed against the decision-engine
-  work item; never patched around in this skill's prose.
+  `gw work orchestrate`, whose engine is
+  `graph_works_core.orchestrate.commands` (`plan()` and the `_resolve_worktree`
+  ladder it calls). A wrong-looking plan (bad worktree action, a
+  missing blocker kind, a bad prompt) gets fixed there, or filed against the
+  decision-engine work item; never patched around in this skill's prose.
 - Finish-stage relay behavior *inside* the worker — deciding what the
   merge/PR/hold/discard options mean and sending the `ask` — child 5's
   scope. This skill only mirrors the `question` it receives (§4.3).

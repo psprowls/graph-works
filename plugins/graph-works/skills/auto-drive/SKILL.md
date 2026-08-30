@@ -108,7 +108,7 @@ crash/compaction resume the same code path as a normal cycle.
 4. Build the `--live` key list for §2.2 from every task classified live.
    `worker-show --dispatch <dispatch_id> --json` is now a targeted
    follow-up for one dispatch's `result.dispatch.last_heartbeat_at` (used by
-   §3 step 3's probe), not an N-call sweep over every task.
+   §3 step 4's probe), not an N-call sweep over every task.
 
 ### 2.2 Plan
 
@@ -390,10 +390,16 @@ For each planned-but-undispatched entry from §2.6:
      code repo's own checkout, and `_prompt` in the same module appends the
      extra "record the worktree as … and the branch as …" line the worker
      needs.
-   - **Live-validation item:** `worktree.branch` values are slash-containing
-     (e.g. `epic/orca-auto-drive-pipeline`); confirm `--name` accepts that
-     verbatim as the git branch name rather than treating it as a display
-     name with a derived branch. Adjust this mapping if not.
+   - **Settled** (was a live-validation item): `--name` is a *display*
+     name, not a branch name. Orca derives the git branch itself as
+     `<host git user slug>/slugify(name)` — unconditionally, for every
+     `--name`, on every creation — and `worker-start`, `orca worktree
+     create` and `orca worktree set` expose no branch control at all. A
+     slash-containing `worktree.branch` is therefore never the branch Orca
+     creates. Do not compare the two; see
+     [orca worker-start silently renames the dispatch branch](/work/epic-auto-drive-dispatch-correctness/children/bug-silently-renames-branch-collision/references/01-design.md)
+     for the probes that established this, and step 3 below for what is
+     verified instead.
    - The plan's top-level `permission_mode` (default `bypassPermissions`) is
      the intended permission mode for the launched agent — state it as
      context, not a flag; `worker-start` has no `--permission-mode` flag
@@ -402,7 +408,101 @@ For each planned-but-undispatched entry from §2.6:
      failed dispatch: go straight to the failure flow (§4.2) — surface the
      JSON's `stage`/`failedStage`/`recovery` hints to the user, don't
      silently retry.
-3. **Confirm the prompt was actually submitted.** *Workaround for a runtime
+3. **Read back where the dispatch actually landed.** Do this *before* the
+   submission probe: nudging a worker that is sitting in the wrong worktree
+   only makes it produce work nobody will look for. A failed placement never
+   reaches step 4.
+
+   **Where the truth comes from** — prefer the response already in hand:
+
+   1. `worker-start --json`'s `effects[]`. A worktree effect reads
+      `{kind: "worktree", action: "created_child" | …, id: "<repoId>::<path>"}`.
+      When that entry is present the path is the segment after `::`, and
+      **no extra Orca call is made.**
+   2. Otherwise `orca orchestration worker-show --dispatch <dispatch_id> --json`
+      → `result.worker.worktree_id` (the full `<repoId>::<path>` value).
+   3. Then `orca worktree show --worktree id:<worktree_id> --json` for the
+      fields the assertion needs: `path`, `branch`, `displayName`,
+      `parentWorktreeId`, `isMainWorktree`.
+
+   `branch` comes back fully qualified (`refs/heads/<name>`). **Strip
+   `refs/heads/` before printing it** — a raw paste reads as a different
+   name than the one the human will see in `git branch`.
+
+   **The assertion — never a branch-name comparison.** The upstream slug
+   transform is undocumented and unversioned; an assertion built on it would
+   keep passing against a formula that no longer describes reality the day
+   Orca changes it. Nothing below consults a branch name.
+
+   | Planned `worktree.action` | Assertion |
+   |---|---|
+   | `reuse`, `main` | The observed `path` equals the planned `worktree.path`, compared after resolving symlinks on both sides. No worktree was created, so nothing else is checked. |
+   | `fork-child` | `parentWorktreeId` is non-null; the observed `path` is not one already claimed by another dispatch this Run; and `worktree.base_branch` resolves in the observed worktree and is an ancestor of its HEAD — one `git -C <observed path> merge-base --is-ancestor <base_branch> HEAD`. |
+   | `create-top-level` | `isMainWorktree` is false; the observed `path` is unclaimed this Run; and the same base-branch ancestry check. |
+
+   The ancestry check is what replaces the branch-name comparison: it asks
+   the question the name was only ever a proxy for — *is this worker forked
+   off the work it was supposed to be forked off* — and it asks git, which
+   cannot drift.
+
+   `displayName` preserves the requested `--name` verbatim and is the only
+   place the plan's intent survives on the Orca side. **Report it; assert
+   nothing on it** — Orca may truncate or uniquify a display name, and doing
+   so does not mean the placement is wrong.
+
+   **Always print the placement line**, mismatch or not, for every dispatch:
+
+   ```
+   dispatched <key> -> <observed path> on <observed branch>
+   ```
+
+   The branch Orca actually created has been invisible all along — the
+   coordinator knew only its own wish. One line means a human reading the
+   scrollback hours later can find the branch a stage's work is on without
+   reconstructing anything.
+
+   **Do not substitute the observed values downstream.** §2.4's
+   `gw work advance --worktree/--branch` and §5's merge-back summary keep
+   using the planner's values; reconciling the two is the planner lane's
+   work, not this read-back's.
+
+   **On assertion failure, halt into §4.2.** Print the mismatch loudly:
+
+   ```
+   PLACEMENT MISMATCH <key>: planned <action> at <planned path>,
+     actual <observed path> on <observed branch>
+   ```
+
+   then go directly to the failure question — the same three options
+   (*retry* / *skip this item* / *stop the run*) every other dead-or-wrong
+   dispatch gets — and **skip step 4's submission probe entirely** for this
+   dispatch. This is a halt, not a raise: it routes into an existing
+   human-decision path, so a false positive costs one question, not a lost
+   run.
+
+   **A `-N` suffixed duplicate worktree is a note, not a halt.** Dispatching
+   a stage for an item whose earlier worktree still exists makes Orca create
+   a suffixed duplicate (`…-2`) rather than reusing or refusing. Such a
+   worktree passes the assertion — it is new, correctly based, and the work
+   in it is real — and it is now findable, because the placement line
+   printed its actual path. Report it and continue:
+
+   ```
+   note <key>: worktree name uniquified by Orca (requested "<displayName>",
+     landed at <path>) — see bug-orchestrate-misplaces-dispatch
+   ```
+
+   Halting here would block legitimate dispatches over a cosmetic surprise;
+   the underlying selection defect belongs to
+   [orchestrate can place a dispatch where the work isn't](/work/epic-auto-drive-dispatch-correctness/children/bug-orchestrate-misplaces-dispatch.md).
+
+   **Live-validation item:** confirm on the first real run that
+   `worker-start --json` carries the worktree `effects[]` entry for
+   `new-child`/`new-top-level` starts (so path 1 is the normal case and
+   `worktree show` is reached only on dispatches lacking it), and that
+   `worker-show`'s `worker.worktree_id` is populated when it is not.
+
+4. **Confirm the prompt was actually submitted.** *Workaround for a runtime
    defect — delete this step once `worker-start` submits reliably or grows a
    flag for it. It has none today; the defect is filed upstream against
    Orca.*
@@ -467,7 +567,7 @@ For each planned-but-undispatched entry from §2.6:
    5. Re-run step 2. Non-empty transcript ⇒ recovered, continue normally.
       Two failed nudges → failure flow (§4.2), same three options.
 
-4. **Attend dispatches only** (`mode: attend` — the design stage), after a
+5. **Attend dispatches only** (`mode: attend` — the design stage), after a
    successful start:
    - `orca worktree set --worktree <same worktree selector used above> --workspace-status in-review --comment "auto-drive: <work-path> design stage waiting for you — join <agent_terminal_handle>"`.
    - Print the same join instruction directly in this session — the human
@@ -475,7 +575,7 @@ For each planned-but-undispatched entry from §2.6:
    - Remember this dispatch's key as attend-pending for this Run, so its
      `worker_done` (§4.1) triggers the flip-back to `in-progress`.
    - This is the one piece of session-local state in this skill — if the session crashes before `worker_done` arrives, flip the worktree back manually with `orca worktree set --worktree <selector> --workspace-status in-progress` if it looks stuck at `in-review` after a resume.
-5. `orca orchestration task-update --id <task_id> --status dispatched --run <run_id>`
+6. `orca orchestration task-update --id <task_id> --status dispatched --run <run_id>`
    so the next cycle's `task-list` (§2.1) reflects it as an existing task.
    (Valid `--status` values are `pending, ready, dispatched, completed,
    failed, blocked` — `in_progress` is not one of them; `dispatched` is the

@@ -4,9 +4,8 @@
 vendored verbatim. Every file under that prefix comes from upstream unchanged, except the ones
 recorded in [`PATCHES.md`](./PATCHES.md).
 
-This document tracked [pcvelz/superpowers](https://github.com/pcvelz/superpowers) as the subtree
-remote until the 2026-08-17 ledger row below; as of that row it tracks `obra/superpowers` directly,
-per ADR-0019 (track obra/superpowers as the plugin upstream).
+The tracked remote is `obra/superpowers`, per ADR-0019 (track obra/superpowers as the plugin
+upstream). The vendored release is `v6.3.0` (`b36e0829`), the last row of the merge ledger below.
 
 This document is the whole ritual for pulling a new upstream release. Follow it exactly. The two
 hard rules below are not style preferences — breaking either one destroys the merge base *silently*,
@@ -33,17 +32,29 @@ and the damage surfaces one release later as a whole-tree conflict rather than a
 
 - You have picked a **tag**, not a branch. Pulling `main` vendors an arbitrary mid-flight commit and
   makes the ledger row meaningless.
-- **Resolve that tag to a SHA and keep it.** Tags are mutable, and upstream has moved one in
-  practice: `v6.5.0` was published and retracted within an hour on 2026-08-14, its content
-  re-released as `v6.4.1`. Merging a tag that is later deleted leaves a ledger row pointing at a
-  commit nobody can fetch.
+- **Resolve that tag to a SHA and keep it.** Tags are mutable, and a tracked upstream has moved one
+  in practice: pcvelz's `v6.5.0` was published and retracted within an hour on 2026-08-14, its
+  content re-released as `v6.4.1`. Merging a tag that is later deleted leaves a ledger row pointing
+  at a commit nobody can fetch. (The `v6.4.x` and `v6.5.x` numbers throughout this document are that
+  fork's; obra's line reaches `v6.3.0`.)
 
   ```bash
   git fetch upstream --tags
-  git rev-parse <tag>^{commit}    # record this; it is what the ledger row must name
+  git ls-remote upstream 'refs/tags/<tag>^{}'   # record this; it is what the ledger row must name
   ```
 
   Re-resolve if any significant time passes between checking and merging.
+
+- **Resolve the tag through the remote, not through a local tag name.** This repo's tag namespace
+  is not obra's alone: 27 of its 75 local `v*` tags were fetched from `pcvelz/superpowers`, the
+  fork the 2026-06-09 graft came from, and collide by number with an obra release. `v6.3.0` is one
+  of them — `git rev-parse v6.3.0^{commit}` answers `43765d64` (pcvelz), while the release actually
+  vendored here is `b36e0829` (obra). `git fetch --tags` will not correct an existing tag, so a
+  bare `rev-parse` silently hands you the wrong tree, and `git subtree pull upstream <tag>` merges
+  a fork this repo stopped tracking. Two tags in `PATCHES.md` — `v5.5.0` and `v6.4.0`, the graft's
+  base and the first vendored release — are pcvelz-only and exist here as local objects the
+  `upstream` remote cannot restore; `git fetch https://github.com/pcvelz/superpowers.git --tags`
+  brings them back if a clone needs them for `just audit-delta`.
 
 ## The invocation
 
@@ -154,39 +165,56 @@ After any merge, diff each auto-merged file in this set against both parents bef
 ## The vendored test suites
 
 The subtree brought upstream's own test suites in with it. `just test-plugin` runs the offline
-subset that **executes code**, as an enforcing part of `just check`. Everything else is excluded on
-purpose, and every exclusion is listed below — an unrun suite that nobody chose is the state work
-item `2026-08-14-spike-vendored-plugin-test-gate` was filed to end.
+subset that **executes code**, as an enforcing part of `just check`. Every suite outside that set is
+accounted for below, in one of two tables: excluded on purpose, or arrived with the obra vendor and
+never chosen either way. An unrun suite that nobody chose is the state work item
+`2026-08-14-spike-vendored-plugin-test-gate` was filed to end.
 
-**Gated — 20 files, ~469 assertions, ~45s.** `just test-plugin`.
+**Gated — 18 files, ~30s.** `just test-plugin`.
 
 | Group | Files |
 | --- | --- |
-| `tests/claude-code/` hook behavior | `test-effort-enforcement-e2e`, `test-effort-routing-hook`, `test-handoff-guard`, `test-model-routing-hook`, `test-taskcreate-commit-strategy-hook`, `test-taskcreate-tier-hook`, `test-user-gate-hooks`, `test-sdd-workspace` |
-| `tests/hooks/` | `test-session-start.sh` |
+| `tests/claude-code/` | `test-sdd-workspace.sh` |
+| `tests/hooks/` | `test-session-start.sh`, `test-skill-doc-routing.sh` |
+| `tests/` (fork-authored) | `test-doc-layout-claims.sh`, `test-entry-point-skills.sh` |
+| `skills/shared/` | `resolve-workspace.test.sh` |
 | `tests/shell-lint/` | `test-lint-shell.sh` |
 | `tests/systematic-debugging/` | `test-find-polluter.sh` |
+| `tests/pi/` node | `test-pi-extension.mjs` |
 | `tests/brainstorm-server/` node | `ws-protocol`, `helper`, `browser-launcher`, `auth`, `branding`, `server`, `lifecycle` |
 | `tests/brainstorm-server/` bash | `start-server.test.sh`, `stop-server.test.sh` |
 
 That set is a near-exact match for the files `PATCHES.md` records as `state: patched`. A failure in
-it is *our* bug, not imported upstream red.
+it is *our* bug, not imported upstream red. The eight `tests/claude-code/` hook-behavior suites this
+table used to name went with the dormant user-gate hook surface they covered — they were the graft
+lineage's, obra ships none of them, and `PATCHES.md` entry #25 records them as `state: removed`.
 
-**node and npm are hard requirements**, not a soft skip. The `brainstorm-server` group needs one
-`npm ci` in `tests/brainstorm-server/` installing a single package (`ws`). A gate that silently
-skipped 133 assertions when a toolchain went missing would report green while covering nothing.
+**node, npm and `uv` are hard requirements**, not a soft skip. The `brainstorm-server` group needs
+one `npm ci` in `tests/brainstorm-server/` installing a single package (`ws`); `test-pi-extension`
+needs Node's built-in TypeScript stripping (Node 22+); the resolver suite's parity matrix needs
+`uv`. A gate that silently skipped `brainstorm-server`'s 134 assertions when a toolchain went
+missing would report green while covering nothing.
 
 **Excluded, deliberately.**
 
 | Excluded | Reason |
 | --- | --- |
-| `tests/claude-code/test-fork-validation.sh` | Documentation grep. It asserts `plugin.json` declares `superpowers-extended-cc` — i.e. that the fork never happened. Gating it taxes the fork's own identity. |
 | `tests/claude-code/test-worktree-path-policy.sh` | Documentation grep — six `grep -Fq` calls over two `SKILL.md` files, executing nothing. It broke because our patch *improved* the sentence it string-matches. Gating it makes every legitimate rewording a test edit. |
 | `tests/brainstorm-server/windows-lifecycle.test.sh` | ~150s of hard `sleep 75` calls; skips 3 of 12 checks off Windows. Runs from `just test-plugin-slow` — see the checklist below. |
 | `tests/claude-code/test-subagent-driven-development.sh`, `…-integration.sh`, `test-worktree-native-preference.sh`, `run-skill-tests.sh` | Invoke a live model through `run_claude`. Non-deterministic, 10–30 minutes, billed per run. |
-| `tests/explicit-skill-requests/` (5 runners, 9 prompts) | Prompt-driven against a live model. Same reason. |
+| `tests/explicit-skill-requests/` (4 runners plus `run-all.sh`, 9 prompts) | Prompt-driven against a live model. Same reason. |
 | `tests/claude-code/test-helpers.sh` | A shared library, not a suite. |
 | `tests/claude-code/analyze-token-usage.py` | A reporting tool, not a test. |
+
+**Unreviewed, not chosen — the obra vendor's other harness suites.** `tests/antigravity/`,
+`tests/codex/`, `tests/codex-plugin-sync/`, `tests/devin/`, `tests/hermes/` (pytest),
+`tests/kimi/`, `tests/opencode/`, `tests/version-bump/` and `tests/writing-skills/` arrived with
+obra `v6.3.0` and cover harness surfaces this fork does not ship or has not looked at. Nobody has
+decided for or against gating them, which is precisely the state
+`2026-08-14-spike-vendored-plugin-test-gate` was filed to end; note that `tests/codex/` and
+`tests/codex-plugin-sync/` cover files this fork *does* patch — `.codex-plugin/plugin.json`,
+`scripts/package-codex-plugin.sh`, and entry #24's `scripts/sync-to-codex-plugin.sh` — so they are
+the first ones worth a decision.
 
 `run-skill-tests.sh` deserves a note: upstream's own runner names only three test files, two of
 which need a live model. It was never a route to the offline coverage, which is why `test-plugin`

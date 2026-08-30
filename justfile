@@ -171,7 +171,7 @@ audit-delta:
 # coverage. It needs Node's built-in TypeScript stripping to import
 # `.pi/extensions/superpowers.ts` (Node 22+; developed against v24).
 #
-# node and npm are hard requirements. A gate that silently skips 133 assertions
+# node and npm are hard requirements. A gate that silently skips 134 assertions
 # when a toolchain is missing reports green while covering nothing.
 #
 # Eight pcvelz-only `tests/claude-code/test-*.sh` suites were drop-list rows

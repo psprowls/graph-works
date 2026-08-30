@@ -225,6 +225,8 @@ test-plugin-native:
     #!/usr/bin/env bash
     set -euo pipefail
     cd plugins/graph-works-native
+    echo "--- hooks/test-session-start"
+    bash tests/hooks/test-session-start.sh
     echo "--- skills/shared/resolve-workspace"
     bash skills/shared/resolve-workspace.test.sh
 

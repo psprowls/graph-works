@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# SessionStart hook for the graph-works plugin.
+#
+# Injects skills/using-graph-works/SKILL.md as session context. That file is
+# ours; the subtree's hook read skills/using-superpowers/SKILL.md, which is
+# upstream's and is the coupling this plugin exists to remove.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+bootstrap_content=$(cat "${PLUGIN_ROOT}/skills/using-graph-works/SKILL.md" 2>&1 || echo "Error reading using-graph-works skill")
+
+# Escape for JSON embedding via bash parameter substitution. Each ${s//old/new}
+# is a single C-level pass — orders of magnitude faster than a per-character loop.
+escape_for_json() {
+    local s="$1"
+    s="${s//\\/\\\\}"
+    s="${s//\"/\\\"}"
+    s="${s//$'\n'/\\n}"
+    s="${s//$'\r'/\\r}"
+    s="${s//$'\t'/\\t}"
+    printf '%s' "$s"
+}
+
+bootstrap_escaped=$(escape_for_json "$bootstrap_content")
+session_context="<EXTREMELY_IMPORTANT>\nYou have graph-works workflows.\n\n**Below is the full content of your 'graph-works:using-graph-works' skill - your introduction to using skills. For all other skills, use the 'Skill' tool:**\n\n${bootstrap_escaped}\n</EXTREMELY_IMPORTANT>"
+
+# Emit exactly one context field — the one the current platform consumes.
+# Claude Code reads both additional_context and hookSpecificOutput without
+# deduplicating, so emitting more than one double-injects.
+#
+# printf rather than a heredoc: bash 5.3+ hangs on the heredoc form.
+# See https://github.com/obra/superpowers/issues/571
+if [ -n "${CURSOR_PLUGIN_ROOT:-}" ]; then
+  printf '{\n  "additional_context": "%s"\n}\n' "$session_context" | cat
+elif [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ -z "${COPILOT_CLI:-}" ]; then
+  printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$session_context" | cat
+else
+  printf '{\n  "additionalContext": "%s"\n}\n' "$session_context" | cat
+fi
+
+exit 0

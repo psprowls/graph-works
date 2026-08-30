@@ -756,8 +756,15 @@ class _WindowsAnchor:
         Windows opens files by path without difficulty, which is why the
         landed `Anchor` never wrapped file descriptors.  `O_NOFOLLOW` is
         already absent from `flags` here via `nofollow_flag()` -- see Task 9.
+
+        Always ORs in `os.O_BINARY`: every caller in this engine reads and
+        writes raw bytes it already encoded itself, but the Windows CRT
+        defaults a descriptor opened without `O_BINARY` to *text* mode, which
+        silently rewrites every `\\n` byte in an `os.write` call to `\\r\\n` --
+        corrupting content no caller here asked to have translated, with no
+        exception raised to say so.
         """
-        return os.open(self._revalidate() / name, flags, mode)
+        return os.open(self._revalidate() / name, flags | os.O_BINARY, mode)
 
     def chmod_child_directory(self, name: str, mode: int) -> None:
         """chmod a child directory.

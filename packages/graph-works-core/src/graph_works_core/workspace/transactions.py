@@ -252,6 +252,17 @@ def _complete_record(
 
 
 def _fsync_directory(path: Path) -> None:
+    """Flush *path*'s directory entry, honoring `anchors.DIRECTORY_FSYNC_HONORED`.
+
+    Opening a directory with `O_RDONLY` and calling `os.fsync` on it raises
+    `OSError: [Errno 9] Bad file descriptor` on Windows -- `_commit()` (what
+    `os.fsync` maps to there) cannot flush a directory handle. `_WindowsAnchor.fsync`
+    already documents this as a no-op contract for the windows-revalidated tier;
+    this free function -- called with a bare `Path`, not an `Anchor` -- had not
+    been gated to match.
+    """
+    if not anchors.DIRECTORY_FSYNC_HONORED:
+        return
     descriptor = os.open(path, os.O_RDONLY)
     try:
         os.fsync(descriptor)
@@ -446,6 +457,20 @@ def _file_flags() -> int:
     return flags
 
 
+def _fsync_file_flags() -> int:
+    """Flags for opening a file that will only be `os.fsync`ed.
+
+    `O_RDWR`, not `_file_flags`'s `O_RDONLY`: on Windows, `_commit()` (what
+    `os.fsync` maps to there) raises `OSError: [Errno 9] Bad file descriptor`
+    for a handle opened without write access. See `_fsync_entry`'s docstring
+    for the same gap on the `pathlib.Path.open` side.
+    """
+    flags = os.O_RDWR
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    return flags
+
+
 def _open_parent(
     root: Anchor,
     member: str,
@@ -527,7 +552,7 @@ def _readlink_at(root: Anchor, member: str) -> str:
 def _fsync_live_file(root: Anchor, member: str) -> None:
     parent, name = _open_parent(root, member)
     try:
-        descriptor = parent.open_file(name, _file_flags())
+        descriptor = parent.open_file(name, _fsync_file_flags())
         try:
             os.fsync(descriptor)
         finally:
@@ -546,10 +571,18 @@ def _assert_root_identity(root: Path, anchor: Anchor) -> None:
 
 
 def _fsync_entry(path: Path) -> None:
+    """Fsync *path* (or, recursively, every non-symlink file beneath it).
+
+    Opens each file `"r+b"` rather than `"rb"`: on Windows, `_commit()` (what
+    `os.fsync` maps to there) raises `OSError: [Errno 9] Bad file descriptor`
+    for a handle opened without write access, even though nothing here is
+    written -- these are freshly copied backups this process already owns, so
+    reopening read-write costs nothing and Windows accepts the fsync.
+    """
     if path.is_symlink():
         return
     if not path.is_dir():
-        with path.open("rb") as stream:
+        with path.open("r+b") as stream:
             os.fsync(stream.fileno())
         return
     pending = [path]
@@ -563,7 +596,7 @@ def _fsync_entry(path: Path) -> None:
             if entry.is_dir():
                 pending.append(entry)
             else:
-                with entry.open("rb") as stream:
+                with entry.open("r+b") as stream:
                     os.fsync(stream.fileno())
     for directory in reversed(directories):
         _fsync_directory(directory)

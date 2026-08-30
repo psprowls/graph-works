@@ -1451,7 +1451,9 @@ dispatches a hook file that would not exist, and entries #11 and #12's workspace
 shells out to a script that would not exist. Landing the dependents without their dependencies would
 have left this child's own patches non-functional. Child 5's scope shrinks by exactly these three
 files — one less thing for it to port, one less place for it to duplicate a claim already made
-here.
+here. (`hooks/skill-doc-routing` itself has since moved on, again: as of `feature-native-plugin-scaffold`
+on 2026-08-30 it lives at `plugins/graph-works-native/`, not under this entry's prefix — see the
+"Thirty-two claims" note below.)
 
 **On `hooks/skill-doc-routing` and `hooks/session-start` — superseded 2026-08-20.** This entry
 previously read: "Both hooks invoke `workspace_io`, which the graph-works CLI epic has yet to deliver.
@@ -1469,7 +1471,10 @@ where it resolved at ~670 ms): it is the only form that works from the **install
 `~/.claude/plugins/.../graph-works/hooks`, where no uv project exists at any ancestor — the case the
 hook actually ships into, and one no choice of project root could have fixed. `tests/hooks/test-skill-doc-routing.sh` asserts the absence of both
 retired module names and of `uv run` in both hooks, so a reintroduction fails the gate rather than
-failing open.
+failing open. (Both `hooks/skill-doc-routing` and `tests/hooks/test-skill-doc-routing.sh` describe
+their state as of this checkout at the time of that supersession; as of `feature-native-plugin-scaffold`
+on 2026-08-30 both have moved to `plugins/graph-works-native/` and no longer live under this entry's
+prefix.)
 
 **`commands/onboard.md` replaced two claims on 2026-08-20.** `commands/bootstrap.md` and
 `commands/config-init.md` were two ours-side files covering one job — create the workspace, then
@@ -1478,7 +1483,7 @@ configure it — and `bootstrap.md` had gone stale in every claim it made about 
 ours-side additions, so this is one `file:` line replacing two, not a `state: removed` case: nothing
 upstream ships at any of the three paths.
 
-**Thirty-one claims left this entry on 2026-08-30.** `feature-native-plugin-scaffold` moved the seventeen native skill directories, `hooks/skill-doc-routing`, `tests/hooks/test-skill-doc-routing.sh` and `tests/test-entry-point-skills.sh` out of this prefix and into `plugins/graph-works-native/`, a sibling directory that is not vendored and has no upstream to diverge from. `audit_delta.py`'s `PREFIX` is tree-scoped (`HEAD:plugins/graph-works`), not a string prefix, so the sibling is invisible to the checker — correctly. Their `file:` lines are removed here because a claim on a path that no longer diverges is reported as a *retired patch*, which is exactly what a moved-out file is not.
+**Thirty-two claims left this entry on 2026-08-30.** `feature-native-plugin-scaffold` moved the seventeen native skill directories, `hooks/skill-doc-routing`, `tests/hooks/test-skill-doc-routing.sh` and `tests/test-entry-point-skills.sh` out of this prefix and into `plugins/graph-works-native/`, a sibling directory that is not vendored and has no upstream to diverge from. `audit_delta.py`'s `PREFIX` is tree-scoped (`HEAD:plugins/graph-works`), not a string prefix, so the sibling is invisible to the checker — correctly. Their `file:` lines are removed here because a claim on a path that no longer diverges is reported as a *retired patch*, which is exactly what a moved-out file is not.
 
 The `skills/graph-works/references/sidecar-schema.md` row went with them, for a different reason: that file has not existed in the tree for some time and the row was already reported as a retired patch before this change. It could not be left standing while the block it lives in was being rewritten. The six *undocumented* divergences remain untouched — those are `tech-debt-reconcile-fork-ledger`'s, and this change reduces them to five only because `tests/test-doc-layout-claims.sh` was one of them and has moved.
 

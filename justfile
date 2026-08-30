@@ -232,6 +232,8 @@ test-plugin-native:
     bash skills/shared/resolve-workspace.test.sh
     echo "--- pi/test-pi-extension (7 node)"
     node --test tests/pi/test-pi-extension.mjs
+    echo "--- lint-shell"
+    bash scripts/lint-shell.sh --all --strict
 
 # The vendored suite deliberately kept out of `check`.
 #

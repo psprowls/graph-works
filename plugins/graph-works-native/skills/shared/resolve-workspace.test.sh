@@ -177,7 +177,7 @@ else
     index=$((index + 1))
 
     if [[ -n "$env_value" ]]; then
-      bash_out="$(cd "$cwd" 2>/dev/null || cd "$TMP"; GRAPH_WORKS_DIR="$env_value" bash "$RESOLVER" ${arg:+"$arg"} 2>/dev/null)"
+      bash_out="$(cd "$cwd" 2>/dev/null || cd "$TMP" || exit; GRAPH_WORKS_DIR="$env_value" bash "$RESOLVER" ${arg:+"$arg"} 2>/dev/null)"
     else
       bash_out="$(cd "${cwd:-$TMP}" && env -u GRAPH_WORKS_DIR bash "$RESOLVER" ${arg:+"$arg"} 2>/dev/null)"
     fi

@@ -127,7 +127,7 @@ gw config set layout.cache_dir .gw/cache
 gw config set layout.worktrees_dir .gw/worktrees
 
 # Per-variant pipeline dispatch overrides
-gw config set workflow.pipeline.<variant>.skill <skill-name>
+gw config set workflow.pipeline.<variant>.skill <[plugin:]skill>
 gw config set workflow.pipeline.<variant>.mode <mode>
 gw config set workflow.pipeline.<variant>.prompt_tail "<line>"
 

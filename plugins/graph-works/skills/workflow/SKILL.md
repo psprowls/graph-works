@@ -88,13 +88,19 @@ which transitions happen at dispatch time.
 
 ### 3. Dispatch the stage skill
 
-Invoke the stage skill named by `action.skill` via the Skill tool (namespaced
-`graph-works:<skill>`), prepending a work-item brief:
+Invoke the stage skill named by `action.skill` via the Skill tool, using the
+value **verbatim**, prepending a work-item brief.
 
-**Auto-drive relay override.** If `action.skill` is
-`finishing-a-development-branch` **and** the dispatch prompt that launched
+`action.skill` is the complete name. A qualified `<plugin>:<skill>` is passed
+as-is; a bare name is passed as-is and resolves to a user-level or repo-local
+skill. **Never prepend a namespace** — there is no implicit plugin, and
+prefixing a qualified name produces a name that resolves to nothing.
+
+**Auto-drive relay override.** If `action.skill`'s **last segment** — the part
+after the colon in a qualified `superpowers:finishing-a-development-branch` — is
+`finishing-a-development-branch`, **and** the dispatch prompt that launched
 this session contains an `Auto-drive context:` line, dispatch
-`graph-works:finishing-relay` instead of `finishing-a-development-branch` —
+`graph-works:finishing-relay` instead of the configured skill —
 the merge target is already embedded in that same line, so no extra
 forwarding is needed beyond the standard work-item brief below. This
 override needs no STOP line: `finishing-relay` doesn't self-chain into

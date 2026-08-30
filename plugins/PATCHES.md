@@ -1452,7 +1452,7 @@ additions, not patches to something upstream ships.
 `just audit-delta` treats as an error, not redundancy — so it stays claimed in exactly one place,
 entry #7, and this entry cross-references it in prose instead of in a `file:` line.
 
-**What the seven files are.**
+**What the eight files are.**
 
 - `skills/using-superpowers/references/{codex,copilot,gemini}-tools.md` — the three platform-adaptation
   reference files entry #7 re-adds a citation site for (its "Amendment" paragraph). Upstream deleted
@@ -1524,7 +1524,7 @@ configure it — and `bootstrap.md` had gone stale in every claim it made about 
 ours-side additions, so this is one `file:` line replacing two, not a `state: removed` case: nothing
 upstream ships at any of the three paths.
 
-**On merge.** These seven have no upstream counterpart, so there is nothing to reconcile against on a
+**On merge.** These eight have no upstream counterpart, so there is nothing to reconcile against on a
 sync — they carry forward unchanged unless this fork itself revises them.
 
 **Amended for the commands/agents collapse — 2026-08-27.** Seventeen ours-side

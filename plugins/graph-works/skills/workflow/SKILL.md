@@ -97,7 +97,7 @@ skill. **Never prepend a namespace** — there is no implicit plugin, and
 prefixing a qualified name produces a name that resolves to nothing.
 
 **Preflight — confirm the skill resolves.** Before invoking, check that the name
-you are about to invoke — `action.skill` after the namespacing above — appears
+you are about to invoke — `action.skill`, used verbatim — appears
 in this harness's available-skills listing. If it does not, **stop** and report
 that name, and, when it is qualified (`<plugin>:<skill>`), the plugin that is
 missing. Do not substitute a similar skill, and do not perform the stage

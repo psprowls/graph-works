@@ -54,6 +54,75 @@ if [[ "$FAILURES" -eq 0 ]]; then
     pass "no stale layout claims outside the allowlist"
 fi
 
+# --- Rider-presence assertion (work/epic-unforked-plugin-skill-dispatch/
+# children/feature-move-to-brief-behaviors, D-004) ---
+#
+# The brief riders are instruction, and nothing here measures whether a stage
+# skill obeys them — epic decision 3 keeps that risk named, not mitigated. What
+# this does catch is the cheaper failure: a rider silently going missing, or the
+# lookup table in SKILL.md drifting out of sync with the sidecar, which would
+# make the composed brief quietly stop carrying a behavior with no symptom until
+# a stage misbehaves.
+
+RIDER_SKILL="$PLUGIN_ROOT/skills/workflow/SKILL.md"
+RIDER_DOC="$PLUGIN_ROOT/skills/workflow/references/brief-riders.md"
+
+assert_riders_match() {
+    local table_names sidecar_names only_table only_sidecar
+
+    if [[ ! -f "$RIDER_SKILL" ]]; then
+        fail "rider table: skills/workflow/SKILL.md exists"
+        return
+    fi
+    if [[ ! -f "$RIDER_DOC" ]]; then
+        fail "rider table: skills/workflow/references/brief-riders.md exists"
+        return
+    fi
+
+    # Table rows live between the fence markers; a row is  | `name` | ... |
+    table_names="$(awk '
+        /^<!-- rider-table:start -->$/ { inside = 1; next }
+        /^<!-- rider-table:end -->$/   { inside = 0; next }
+        inside && match($0, /^\| `[^`]+`/) {
+            row = substr($0, RSTART, RLENGTH)
+            gsub(/^\| `/, "", row); gsub(/`$/, "", row)
+            print row
+        }
+    ' "$RIDER_SKILL" | sort -u)"
+
+    sidecar_names="$(sed -n 's/^## Rider: \(.*\)$/\1/p' "$RIDER_DOC" | sort -u)"
+
+    if [[ -z "$table_names" ]]; then
+        fail "rider table: SKILL.md names at least one rider"
+        echo "      no rows found between the rider-table fence markers"
+        return
+    fi
+    if [[ -z "$sidecar_names" ]]; then
+        fail "rider table: brief-riders.md defines at least one rider"
+        echo "      no '## Rider: <skill-name>' headings found"
+        return
+    fi
+
+    only_table="$(comm -23 <(printf '%s\n' "$table_names") <(printf '%s\n' "$sidecar_names"))"
+    only_sidecar="$(comm -13 <(printf '%s\n' "$table_names") <(printf '%s\n' "$sidecar_names"))"
+
+    if [[ -n "$only_table" ]]; then
+        fail "every skill in SKILL.md's rider table has a section in brief-riders.md"
+        printf '%s\n' "$only_table" | sed 's/^/      missing rider: /'
+    else
+        pass "every skill in SKILL.md's rider table has a section in brief-riders.md"
+    fi
+
+    if [[ -n "$only_sidecar" ]]; then
+        fail "every section in brief-riders.md is named by SKILL.md's rider table"
+        printf '%s\n' "$only_sidecar" | sed 's/^/      orphaned rider: /'
+    else
+        pass "every section in brief-riders.md is named by SKILL.md's rider table"
+    fi
+}
+
+assert_riders_match
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

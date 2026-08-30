@@ -218,6 +218,8 @@ test-plugin-native:
     cd plugins/graph-works-native
     echo "--- codex/test-marketplace-manifest"
     bash tests/codex/test-marketplace-manifest.sh
+    echo "--- codex/test-package-codex-plugin"
+    bash tests/codex/test-package-codex-plugin.sh
     echo "--- hooks/test-session-start"
     bash tests/hooks/test-session-start.sh
     echo "--- hooks/test-skill-doc-routing"

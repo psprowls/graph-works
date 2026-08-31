@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import posixpath
-import re
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import PurePosixPath
@@ -11,7 +10,7 @@ from pathlib import PurePosixPath
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, items
-from work_tracker_okf.indexes import GENERATED_END, GENERATED_START, plan_indexes
+from work_tracker_okf.indexes import GENERATED_END, GENERATED_START, parse_entry, plan_indexes
 from work_tracker_okf.items import WorkItem, item_index
 from work_tracker_okf.paths import child_lane, parse_item_path
 from work_tracker_okf.vocabulary import PARENT_TYPES, ROOT_ONLY_TYPES, SLUG_PREFIXES
@@ -29,10 +28,10 @@ CODES: tuple[str, ...] = (
     "structure.index-entry-stale",
     "structure.index-entry-duplicate",
     "structure.index-entry-non-direct",
+    "structure.index-entry-unreadable",
 )
 
 _SPEC = "work_tracker_okf._rules.structure"
-_ENTRY_RE = re.compile(r"^\s*-\s+\[[^]]*]\(([^)]+)\)")
 
 
 def _finding(code: str, severity: Severity, item: WorkItem, message: str) -> Finding:
@@ -145,17 +144,29 @@ def sources(ctx: RuleContext) -> Iterable[Finding]:
                 )
 
 
-def _region_targets(text: str) -> tuple[str, ...]:
+def _region_entries(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Targets parsed from the generated region, and the lines that would not parse.
+
+    An unparseable line used to be dropped in silence, which is what let a
+    writer/reader disagreement present as `index-entry-missing` for months.
+    Blank lines are not lines: the region body opens with a newline, so
+    `splitlines` always yields a leading empty string.
+    """
     start = text.find(GENERATED_START)
     end = text.find(GENERATED_END, start + len(GENERATED_START)) if start >= 0 else -1
     if start < 0 or end < 0:
-        return ()
+        return (), ()
     targets: list[str] = []
+    unreadable: list[str] = []
     for line in text[start + len(GENERATED_START) : end].splitlines():
-        match = _ENTRY_RE.match(line)
-        if match is not None:
-            targets.append(match.group(1))
-    return tuple(targets)
+        if not line.strip():
+            continue
+        target = parse_entry(line)
+        if target is None:
+            unreadable.append(line.strip())
+        else:
+            targets.append(target)
+    return tuple(targets), tuple(unreadable)
 
 
 def _target_page(lane: str, target: str) -> str:
@@ -176,7 +187,7 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
             if (location := parse_item_path(item.path)) is not None and location.lane == plan.lane
         }
         document = ctx.bundle.indexes.get(plan.lane)
-        targets = () if document is None else _region_targets(document.raw_text)
+        targets, unreadable = ((), ()) if document is None else _region_entries(document.raw_text)
         pages = tuple(_target_page(plan.lane, target) for target in targets)
         counts = Counter(pages)
         for page in sorted(expected - set(pages)):
@@ -184,6 +195,15 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
                 code="structure.index-entry-missing",
                 severity="warn",
                 message=f"generated index region does not list direct item `{page}`",
+                spec=_SPEC,
+                path=f"{plan.lane}/index.md",
+                line=None,
+            )
+        for line in unreadable:
+            yield Finding(
+                code="structure.index-entry-unreadable",
+                severity="warn",
+                message=f"generated index region line is not a readable entry: {line!r}",
                 spec=_SPEC,
                 path=f"{plan.lane}/index.md",
                 line=None,

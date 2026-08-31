@@ -6,6 +6,7 @@ from work_tracker_okf.indexes import (
     GENERATED_END,
     GENERATED_START,
     _required_lanes,
+    parse_entry,
     plan_indexes,
     reconcile_marked_index,
     render_entry,
@@ -126,3 +127,79 @@ def test_an_active_parent_that_has_archived_children_still_requires_its_archive_
 
 def test_the_two_root_lanes_are_always_required() -> None:
     assert set(_required_lanes(())) == {"work", "work/_archive"}
+
+
+def test_parse_entry_reads_the_shapes_a_title_can_take() -> None:
+    # Balanced brackets are valid CommonMark link text and must be read back.
+    assert parse_entry("- [TechDebt: plain](target.md) — open · execute") == "target.md"
+    assert parse_entry("- [TechDebt: Replace [[entities/x]] syntax](target.md) — open · done") == "target.md"
+    assert parse_entry("- [Bug: fix [gw work] parsing](target.md) — open · design") == "target.md"
+    # Backslash-escaped brackets are what `render_entry` emits after Task 2.
+    assert parse_entry(r"- [Bug: fix a\] title](target.md) — open · design") == "target.md"
+    assert parse_entry(r"- [Bug: a \]\( b](target.md) — open · design") == "target.md"
+    # Indented and multi-space bullets stay readable.
+    assert parse_entry("  -   [Bug: indented](target.md) — open · design") == "target.md"
+
+
+def test_parse_entry_declines_what_is_not_an_entry() -> None:
+    assert parse_entry("") is None
+    assert parse_entry("Just prose.") is None
+    assert parse_entry("- not a link at all") is None
+    assert parse_entry("- [unterminated link text](target.md") is None
+    assert parse_entry("- [no destination]") is None
+    assert parse_entry("- [empty destination]()") is None
+    # An unbalanced `]` is not a link under CommonMark, so it is not an entry.
+    assert parse_entry("- [Bug: fix a] title](target.md) — open · design") is None
+    assert parse_entry("- [abc") is None  # no `]` at all
+    assert parse_entry("- [abc\\") is None  # trailing escape runs off the end
+
+
+def test_render_entry_escapes_brackets_so_the_line_is_always_a_link() -> None:
+    item = make_item("work/bug-bracket", type="Bug", title=r"fix a] title \ here")
+    line = render_entry(item)
+    assert r"\]" in line
+    assert r"\\" in line
+    assert parse_entry(line) == "bug-bracket.md"
+
+
+def test_render_entry_round_trips_through_parse_entry() -> None:
+    titles = (
+        "plain title",
+        "Replace [[entities/x]] syntax",
+        "fix [gw work] parsing",
+        "fix a] title",
+        "fix a[ title",
+        "a ]( b",
+        r"a \ backslash",
+    )
+    for title in titles:
+        item = make_item("work/bug-round-trip", type="Bug", title=title)
+        assert parse_entry(render_entry(item)) == "bug-round-trip.md", title
+
+
+def test_render_entry_leaves_a_readable_title_unescaped() -> None:
+    item = make_item("work/bug-code-span", type="TechDebt", title="Replace `[[entities/x]]` syntax")
+    line = render_entry(item)
+    assert "\\[" not in line and "\\]" not in line
+    assert parse_entry(line) == "bug-code-span.md"
+
+
+def test_render_entry_produces_a_readable_line_for_every_title() -> None:
+    # Every line `render_entry` produces is readable: the plain form is used
+    # whenever it already reads back correctly, and escaping only kicks in
+    # when it does not. Covers a plain title, a code-span title, balanced
+    # brackets, an unbalanced `]`, an unbalanced `[`, a literal `](`, and a
+    # backslash.
+    titles = (
+        "plain title",
+        "Replace `[[entities/x]]` syntax",
+        "Replace [[entities/x]] syntax",
+        "fix a] title",
+        "fix a[ title",
+        "a ]( b",
+        r"a \ backslash",
+    )
+    for title in titles:
+        item = make_item("work/bug-readable", type="Bug", title=title)
+        line = render_entry(item)
+        assert parse_entry(line) == "bug-readable.md", title

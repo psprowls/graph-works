@@ -141,3 +141,45 @@ def test_index_reports_missing_stale_duplicate_and_non_direct_entries(tmp_path: 
         "structure.index-entry-duplicate",
         "structure.index-entry-non-direct",
     } <= codes
+
+
+def test_a_bracketed_title_is_not_reported_missing(path_native_root: Path) -> None:
+    """D1: a balanced bracket in a title is valid link text the rule must read."""
+    from work_tracker_okf.indexes import GENERATED_END, GENERATED_START
+
+    write_item(
+        path_native_root,
+        "work/bug-bracket-title",
+        "type: Bug\ntitle: 'Replace [[entities/x]] syntax'\nwork_status: open\n",
+    )
+    lane_index = path_native_root / "work" / "index.md"
+    entry = "- [Bug: Replace [[entities/x]] syntax](bug-bracket-title.md) — open · not started"
+    lane_index.write_text(f"{GENERATED_START}\n{entry}\n{GENERATED_END}\n", encoding="utf-8")
+
+    codes = [f.code for f in lane_report(path_native_root).findings if "bug-bracket-title" in (f.message or "")]
+    assert "structure.index-entry-missing" not in codes
+
+
+def test_an_unreadable_region_line_is_reported_not_dropped(path_native_root: Path) -> None:
+    from work_tracker_okf.indexes import GENERATED_END, GENERATED_START
+
+    lane_index = path_native_root / "work" / "index.md"
+    lane_index.write_text(
+        f"{GENERATED_START}\n- [Bug: a] broken](nowhere.md) — open · design\n{GENERATED_END}\n",
+        encoding="utf-8",
+    )
+
+    codes = [f.code for f in lane_report(path_native_root).findings]
+    assert "structure.index-entry-unreadable" in codes
+
+
+def test_a_blank_line_in_the_region_is_not_reported(path_native_root: Path) -> None:
+    """The region body starts with a newline, so `splitlines` always yields a
+    leading empty string. Reporting it would fire on every well-formed index."""
+    from work_tracker_okf.indexes import GENERATED_END, GENERATED_START
+
+    lane_index = path_native_root / "work" / "index.md"
+    lane_index.write_text(f"{GENERATED_START}\n\n{GENERATED_END}\n", encoding="utf-8")
+
+    codes = [f.code for f in lane_report(path_native_root).findings]
+    assert "structure.index-entry-unreadable" not in codes

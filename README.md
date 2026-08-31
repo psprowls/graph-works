@@ -95,6 +95,9 @@ workflow exists yet — enforcement is local, by design (ADR-0010).
 |---|---|
 | `just sync` | `uv sync --all-packages` — provisions every member's own deps, not just the root's |
 | `just normalization` | Unicode-normalization check on tracked filenames |
+| `just text-io` | implicit text-IO defaults in shipped source — a missing `encoding=` on any text read/write, or a missing `newline=` on any text write |
+| `just line-endings` | a tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true` |
+| `just platform-declared` | a package that reaches a POSIX-only module or process primitive with no `## Platform` section declaring it (ADR-0021 rule 3a) |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
 | `just types` | `uv run mypy --strict`, once per package |
 | `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
@@ -102,7 +105,7 @@ workflow exists yet — enforcement is local, by design (ADR-0010).
 | `just cov` | branch coverage, gated per package (95% for most, 90% for `code-graph-io`) |
 | `just subtree-base` | asserts the `plugins/graph-works` subtree merge-base is intact |
 | `just test-plugin` | the offline, code-executing subset of the vendored plugin's own test suites |
-| `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
+| `just check` | `sync` + `subtree-base` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
 
 A coverage failure reports only a global percentage per package; start with
 the lowest-covered module and read `term-missing`. `just audit-delta` and
@@ -110,6 +113,34 @@ the lowest-covered module and read `term-missing`. `just audit-delta` and
 explicitly rather than gated — see `plugins/SYNC.md`.
 
 If `just` is not installed, run the commands from the `justfile` directly.
+
+### On Windows, run these from Git Bash
+
+`just`'s default shell is `sh -cu` on every platform, Windows included — it does
+not fall back to `cmd.exe`. Git for Windows puts only `C:\Program Files\Git\cmd`
+on the Windows `PATH`, and that directory holds `git.exe`, not `sh.exe`. So a
+launch from cmd.exe or PowerShell cannot resolve a shell at all, and every recipe
+fails identically, before its body runs:
+
+```
+error: recipe `sync` could not be run because just could not find the shell `sh`: program not found
+```
+
+From **Git Bash** `sh` resolves to `/usr/bin/sh`, so every recipe runs **bare** —
+no `--shell` flags, and no `set windows-shell` line in the `justfile`. That the
+shell resolves is all this note claims; which recipes are actually *green* on
+native Windows is what `docs/windows-verification.md` measures, and the
+`## Platform` table above is the standing answer.
+
+This is a fact about which shell you launch from, not a defect in the `justfile`,
+which is why nothing here is fixed by editing it. `set windows-shell` would
+hardcode an install path that scoop, winget and any custom target directory get
+wrong, and it *overrides* shell resolution — so committing it would break the Git
+Bash launch that works today on every box where Git lives somewhere else.
+
+A future Windows CI job must therefore set `shell: bash` on the step. ADR-0010
+means no such job exists yet; this note is what stops the next person writing one
+on the runner's default PowerShell.
 
 ## Versioning and release (dormant)
 

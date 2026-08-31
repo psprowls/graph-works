@@ -246,37 +246,48 @@ eyeballing a merged transcript.
 
 **Gate:** none.
 
-**Command:** from **cmd.exe**, at the clone's root:
+**Command:** run **bare**, from **Git Bash**, at the clone's root:
 
-```bat
+```bash
 just --version
 just sync
-echo rc=%ERRORLEVEL%
+echo rc=$?
 ```
 
-**Expected — and read this carefully: the answer is itself the finding.** The
-recipes assume a POSIX shell: several chain with `&&`, and `test-plugin` carries
-a `#!/usr/bin/env bash` shebang, `cd`s, and hard-requires `bash`, `node` and
-`npm`. `just` on Windows defaults to `cmd.exe` unless told otherwise.
+**Expected: `PASS, unmodified`.** The recipes assume a POSIX shell — several chain
+with `&&`, and `test-plugin` carries a `#!/usr/bin/env bash` shebang, `cd`s, and
+hard-requires `bash`, `node` and `npm` — and from Git Bash they get one. `just`'s
+default shell is `sh -cu` on every platform, Windows included; under Git Bash `sh`
+resolves to `/usr/bin/sh` and no flags are needed.
+
+**cmd.exe and PowerShell are recorded known-failing launchers.** Do not run this
+checkpoint from either. Git for Windows puts only `C:\Program Files\Git\cmd` on
+the Windows `PATH`, and that holds `git.exe`, not `sh.exe`, so `just` cannot
+resolve a shell and every recipe fails identically before its body runs:
+
+```
+error: recipe `sync` could not be run because just could not find the shell `sh`: program not found
+```
+
+That is the expected behaviour of the wrong launcher, not a red. It is recorded
+here so the next runner recognises it instead of re-deriving it. The root
+`README.md`'s `## Checks` section states the same prerequisite for humans.
 
 Record in the evidence one of:
 
 - **PASS, unmodified** — `just sync` completes and `rc=0` with no changes to the
-  checkout.
-- **PASS, with a documented prerequisite** — it works once `just` is pointed at
-  Git Bash. Record the exact mechanism used, verbatim: the `--shell` flags, or
-  the `set windows-shell := [...]` line that would have to be added to the
-  `justfile`. **Do not commit that line as part of this run** — recording what
-  it would be is this checkpoint's deliverable; adding it is a separate child's.
+  checkout. This is the expected outcome from Git Bash.
+- **PASS, with a documented prerequisite** — bare invocation from Git Bash did
+  *not* suffice and some mechanism had to be supplied. Record it verbatim.
 - **FAIL** — not invocable by any means you tried. Record what you tried.
 
 A `FAIL` here is a **red with an owner**, not a blocked run: continue to
 B1–B9 by invoking each recipe's underlying commands directly from Git Bash
 (they are listed verbatim in the `justfile`) and say so in the record.
 
-**If it fails:** Owner: a **new child** under `epic-native-windows-support` —
-either a `set windows-shell` line in the `justfile` or a documented prerequisite
-in the root README.
+**If it fails:** Owner: a **new child** under `epic-native-windows-support`. Note
+that the shell prerequisite itself is already settled — see the routing table
+below — so a red here is a *new* finding, not a rediscovery of that one.
 
 #### B1–B9 — recipe by recipe
 
@@ -1321,7 +1332,7 @@ duplicate.
 |---|---|
 | A1, A2 | reopens `bug-enforce-lf-line-endings` |
 | A3 (`run-hook.cmd` mis-parse) | **new child** — flatten the batch half's `if` blocks, keep LF |
-| B0 (`just check` not natively invocable) | **new child** — a `set windows-shell` line or a documented prerequisite |
+| B0 (`just check` not natively invocable) | **settled** by `tech-debt-just-windows-shell-prerequisite` (D-022): the shell is a documented prerequisite — run bare from Git Bash; the `justfile` deliberately does not change. A red here now means something *other* than shell resolution, and is a **new child** |
 | B1–B3, B9 | **new child** scoped to the failing guard script |
 | B4–B6, B8 | **new child** scoped to the failing check |
 | B7 | transaction/anchor failure reopens `feature-windows-anchor-and-tier-adr`; anything else is a **new child** |

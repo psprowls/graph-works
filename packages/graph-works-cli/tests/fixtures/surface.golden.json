@@ -1794,6 +1794,7 @@
         "archive",
         "decision",
         "file",
+        "ingest-queue",
         "lint",
         "next",
         "orchestrate",
@@ -1875,7 +1876,7 @@
     },
     {
       "name": "gw work advance",
-      "help": "Apply the routing table's next transition for PATH.\n\nThe pipeline's single mutation point. An explicit `--worktree`/`--branch`\npair is applied unconditionally -- it is the caller's own resolved\ndecision, which is what lets an item be evicted out of a shared main\ncheckout; without the pair, provenance falls back to cwd inference.",
+      "help": "Apply the routing table's next transition for PATH.\n\nThe pipeline's single mutation point. An explicit `--worktree`/`--branch`\npair is applied unconditionally -- it is the caller's own resolved\ndecision, which is what lets an item be evicted out of a shared main\ncheckout; without the pair, provenance falls back to cwd inference.\n\n`--start-sha` names where the phase being completed began. Out of `execute`\nit is optional \u2014 core derives one from the worktree's merge base against the\ndefault branch, then from the spec's own anchors. Out of `finish` there is no\nderivation: a guessed range there would sweep in the whole execute range, so\nthe stub is written only when this flag is given.\n\n`--return` is the way home: it walks the routing table's one backwards\ntransition, `finish` -> `execute`, for an item that reached `finish`\nbefore the commit gate existed, that the relay put on hold, or that a\nlater stage-gate sends back. It is refused from any other phase, and is\nmutually exclusive with `--resolved-in`.",
       "short_help": "Apply the routing table's next transition for PATH.",
       "usage": [
         "[OPTIONS]",
@@ -1954,6 +1955,28 @@
           "required": false,
           "default": "",
           "is_flag": false
+        },
+        {
+          "name": "start_sha",
+          "opts": [
+            "--start-sha"
+          ],
+          "secondary_opts": [],
+          "help": "Where this phase started; required for a finish-stage results stub.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "return_",
+          "opts": [
+            "--return"
+          ],
+          "secondary_opts": [],
+          "help": "Send an item at `finish` back to `execute`.",
+          "required": false,
+          "default": false,
+          "is_flag": true
         },
         {
           "name": "dry_run",
@@ -2822,6 +2845,44 @@
       ]
     },
     {
+      "name": "gw work ingest-queue",
+      "help": "List terminal work items whose design spec has not been ingested.\n\nDerived from `sources[]` and the ingested `Source` pages' `origin` \u2014 never\nstored, and never written. Drain it with `/graph-works:ingest <resource>`;\nthe ingest itself is what clears an entry.",
+      "short_help": "List terminal work items whose design spec has not been ingested.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the queue as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "ingest-queue"
+      ]
+    },
+    {
       "name": "gw work lint",
       "help": "Report work-lane conformance. Never writes.\n\nThe fast, synchronous, LLM-free work-lane check -- a sibling of\n`gw wiki lint`, not a subset of it.",
       "short_help": "Report work-lane conformance.",
@@ -2948,7 +3009,7 @@
             "--live"
           ],
           "secondary_opts": [],
-          "help": "Comma-separated running dispatch keys (<path>#<phase>).",
+          "help": "Comma-separated running dispatch keys (session names, gw-<phase>-<slug>).",
           "required": false,
           "default": "",
           "is_flag": false

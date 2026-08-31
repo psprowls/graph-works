@@ -81,9 +81,8 @@ def split_lines(body: str) -> tuple[str, ...]:
 class Section:
     """One heading and the lines it owns. **Spans, not text.**
 
-    `wiki_io.find_section` returns a *copy* of the section body, which is
-    enough to read and useless to write back into: everything downstream of a
-    splice needs to know where.
+    A *copy* of the section body would be enough to read and useless to write
+    back into: everything downstream of a splice needs to know where.
 
     `stop` is inclusive and is **not** trimmed back past trailing blank lines
     -- the splice needs to know which blank line belongs to whom. A section

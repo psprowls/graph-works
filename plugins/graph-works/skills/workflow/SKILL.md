@@ -1,6 +1,6 @@
 ---
 name: workflow
-description: Use when driving a work item through its development pipeline — runs `gw work next` to compute the stage, dispatches the stage skill (brainstorming, reconciling-spec, systematic-debugging, writing-plans, subagent-driven-development, test-driven-development, finishing-a-development-branch), verifies the artifact, and advances the item with `gw work advance`. One stage per invocation; clear context between stages.
+description: Use when driving a work item through its development pipeline — runs `gw work next` to compute the stage, dispatches the stage skill (brainstorming, reconciling-spec, systematic-debugging, writing-plans, subagent-driven-development, test-driven-development, finishing-a-development-branch), verifies the artifact, and advances the item with `gw work advance`. One stage per invocation; clear context between stages. Pass `--descend` to auto-continue into the next actionable child leaf when an epic is waiting on children.
 ---
 
 # Work Item Workflow
@@ -73,7 +73,7 @@ read are unchanged from `gw work next`.
   through the normal steps — dispatch transition, stage skill, advance — all
   against the leaf path. If the descend itself reports a `--descend:` blocker,
   or no `--descend` was requested, report the blocker, list the open children
-  from `child_rollup.open_paths` suggesting `/graph-works:next <child-path>` for
+  from `child_rollup.open_paths` suggesting `/graph-works:workflow <child-path>` for
   each, and **stop** (nothing to advance).
 - Otherwise announce the dispatch: item title, kind, phase, and the stage skill
   from `action.skill`.
@@ -117,6 +117,22 @@ another stage, same as the stock skill it replaces.
 
   Omit this block entirely when `guidance` is empty (guidance skipped or no
   matches). Surface any `guidance_warnings` to the user as plain notes.
+- when the dispatched stage is **execute** (`action.skill` is
+  `subagent-driven-development` or `test-driven-development`), add the coverage
+  obligation:
+
+  *"Before you advance, write `<workspace>/okf/<work-path>/references/03-execute-coverage.md`:
+  one markdown task-list line per item in this stage's design spec `## Acceptance` section, each line
+  `- [x]` when delivered or `- [ ]` when not, each with a one-line justification. Where the spec
+  has no `## Acceptance` section, enumerate its `## Scope` / `## What this design changes`
+  headings instead and say in the file that you did. Mark honestly — an unchecked box is a
+  normal, expected outcome; an inaccurate checked box is not."*
+
+  This is the same obligation the auto-drive dispatch prompt carries as
+  `EXECUTE_TAIL` (`graph_works_core.workspace.pipeline`), stated here for the
+  attended path, which has no dispatch prompt. The file is **reported, not
+  enforced**: `gw work advance` registers it into `sources[]` when it is present
+  and is unchanged when it is not.
 - when the dispatched `action.skill` is a chained-handoff skill, add the
   matching STOP line so its pipeline-stage guard fires (without it the skill
   self-chains into the next stage, collapsing two stages into one session):
@@ -135,6 +151,22 @@ another stage, same as the stock skill it replaces.
   - `systematic-debugging`, `test-driven-development`,
     `subagent-driven-development`, and `finishing-a-development-branch` need no
     STOP line — they do not self-chain into the next stage.
+- when the JSON's `phase` is **`execute`** — either route,
+  `subagent-driven-development` (planned) or `test-driven-development`
+  (unplanned) — add the commit obligation verbatim:
+
+  > Commit your work before reporting completion. The execute stage owns its
+  > commit: on the planned path the plan's own final commit task satisfies
+  > this, and on the unplanned (no-plan) path you commit the stage's full
+  > output yourself. Report the resulting commit SHA(s) in your completion
+  > summary. An execute stage that ends with uncommitted changes under this
+  > item's `affects` paths will be refused at `execute -> finish`.
+
+  This is a positive obligation, not a reminder. The unplanned path has no
+  plan and therefore no final commit task, so without this line nobody owns
+  the commit and the stage's whole output sits uncommitted in the worktree
+  while the item advances anyway. Naming the gate is deliberate: the worker
+  learns the consequence at dispatch time rather than at refusal time.
 
 The stock skills honor user-preference path overrides; they stay unmodified.
 
@@ -147,6 +179,13 @@ respectively — the same path `artifact.path` points to, so the file should
 already be there. If the skill instead wrote elsewhere, move the file (and
 any `.tasks.json` companion) to `artifact.path` and say so.
 
+For an **execute** stage, also check that
+`<workspace>/okf/<work-path>/references/03-execute-coverage.md` exists and read it. If it is
+absent, note that to the user and continue — the obligation is unenforced. If any line is
+`- [ ]`, surface those lines and ask whether to send the stage back (see the `auto-drive`
+skill's §4.1 for the unattended equivalent) before advancing; an unchecked box is information,
+not a refusal.
+
 ### 5. Advance
 
 Run `gw work advance <work-path>` with whatever flags the stage produced
@@ -154,6 +193,25 @@ Run `gw work advance <work-path>` with whatever flags the stage produced
 the finish stage). Report the lint findings it returns — they are the item's
 health check, not noise. If the command errors with *effort required*, ask the
 user to size the item as in step 1 — never pick an effort yourself — then retry.
+
+**The `execute -> finish` commit gate.** Completing an execute stage is refused
+with `uncommitted-work` when files under the item's `affects` are dirty, with
+`no-commits` when an explicit `--start-sha` names a range holding none, and
+with `no-affects-touched` when that range holds commits but none of them
+touched anything under the item's declared `affects`. Nothing is written on a
+refusal and the item stays at `phase: execute`. The recovery is to commit the
+stage's output (or stash what does not belong to this item) and run the
+advance again — never to hand-edit the item's frontmatter past the gate. An
+`execute -> finish gate not evaluated: …` warning means the gate could not see
+a repo, the item declares no `affects`, or no explicit `--start-sha` was
+given — the last is the common case, since nothing in this repo passes that
+flag; the advance proceeds, and the warning names which input was missing.
+
+**Sending an item back.** `gw work advance <work-path> --return` moves an item
+at `phase: finish` back to `execute` with `work_status: in-progress` — for one
+that reached `finish` before the gate existed, or that the relay left on hold.
+It is refused from any other phase, and is mutually exclusive with
+`--resolved-in`.
 
 **Relay no-advance outcomes.** If the just-completed stage was
 `graph-works:finishing-relay`, skip this step's own `gw work advance` call
@@ -177,13 +235,13 @@ If the advance lands the item at `phase: done` and `work_status: resolved`, run
 ### 6. Hand off
 
 End with: "Phase advanced to `<phase>`. Clear context (`/clear`) and run
-`/graph-works:next <work-path>` to continue."
+`/graph-works:workflow <work-path>` to continue."
 
 **Relay no-advance hand-off.** For a `graph-works:finishing-relay` stage that
 reported `pr`, `hold`, or `discard`, the stock hand-off text above is wrong —
 nothing advanced. Say instead: "`<work-path>` stays at `phase: finish` pending an
 attended pass (relay outcome: `<pr|hold|discard>`). Clear context (`/clear`)
-and run `/graph-works:next <work-path>` when ready to continue attended."
+and run `/graph-works:workflow <work-path>` when ready to continue attended."
 
 (Items that have reached a terminal state are handled by **Terminal handling**
 below, not this hand-off.)
@@ -199,12 +257,24 @@ context window).
 1. **Ingest the design (resolved only).** If `work_status` is `resolved`, read
    `<workspace>/okf/<work-path>.md` and find the `sources[]` entry with
    `id: design`. If its root-absolute `resource` resolves beneath the OKF
-   bundle, dispatch the ingest skill (`graph-works:ingest`) on that artifact inline; the ingestor runs its own
-   confirmation dialog and, on success, archives the source and repoints the
-   pointer. Skip the ingest (announce "no design to ingest") when `work_status` is
-   `wontfix`/`superseded`, when no `design` source exists, or when the resource is already gone
-   (already ingested). Plan-artifact ingest is a deferred future extension —
-   ingest does not yet accept plan-type sources.
+   bundle, dispatch the ingest skill (`graph-works:ingest`) on that artifact
+   inline; the ingestor runs its own confirmation dialog and, on success,
+   **copies** the material to `sources/references/` and writes a `Source` page
+   beside it. The design artifact stays exactly where it is and the item's
+   `sources[]` is untouched — nothing is moved, and no pointer is repointed.
+   Skip the ingest (announce "no design to ingest") when `work_status` is
+   `wontfix`/`superseded`, or when no `design` source exists. Plan-artifact
+   ingest is a deferred future extension — ingest does not yet accept
+   plan-type sources.
+
+   **Items this step never reached** — anything settled under auto-drive, where
+   nobody walks Terminal handling — are listed by `gw work ingest-queue`. It is
+   read-only and derived: a terminal item with a `design` source and no `Source`
+   page carrying a matching `origin`. Run it periodically and drain it with
+   `/graph-works:ingest <resource>`; the ingest itself is what clears an entry.
+   It over-reports for specs ingested before `origin` was stamped, which costs
+   one "already done, skip" — a re-ingest appends a `## Re-ingest <date>`
+   section rather than overwriting.
 
 2. **Offer to archive (any terminal status).** Ask the user "Archive `<work-path>`
    now?" If yes, run `/graph-works:archive <work-path>`. If no, report that the item

@@ -609,3 +609,30 @@ def test_symlink_escape_refuses_the_whole_subtree(tmp_path: Path) -> None:
     assert not plan.ok
     assert "symlink-escape" in {refusal.kind for refusal in plan.refusals}
     assert plan.writes == plan.moves == plan.deletes == ()
+
+
+def test_reparent_moves_the_execute_coverage_artifact(tmp_path: Path) -> None:
+    # The point is that `_CANONICAL_FILENAMES` needs no per-file branch: a new
+    # managed artifact must move -- and have its links repaired -- with zero new
+    # code. An artifact absent from that frozenset is a file that silently stays
+    # behind on a reparent.
+    release, epic, feature = _tree(tmp_path)
+    references = tmp_path / epic / "references"
+    references.mkdir(parents=True)
+    (references / "03-execute-coverage.md").write_text(
+        f"- [x] one -- see [the feature](/{feature}.md).\n", encoding="utf-8"
+    )
+    bundle = load_bundle(tmp_path, ignore=("*/references/*",))
+
+    plan = plan_reparent(bundle, load_items(bundle), epic, release)
+
+    assert plan.move_plan is not None
+    move = next(
+        candidate
+        for candidate in plan.move_plan.moves
+        if candidate.source.endswith("/references/03-execute-coverage.md")
+    )
+    assert not move.opaque
+    assert move.dest == f"{release}/children/epic-migration/references/03-execute-coverage.md"
+    moved = next(write for write in plan.writes if write.member == move.dest).after.decode()
+    assert f"/{release}/children/epic-migration/children/feature-import.md" in moved

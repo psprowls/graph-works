@@ -174,6 +174,24 @@ subtree-base:
 audit-delta:
     python3 scripts/audit_delta.py
 
+# Orca's coordinator->worker reply path -- P1 static (offline), P2 live round trip.
+#
+# ADVISORY, and deliberately not in `check`, for a different reason than
+# `audit-delta`'s: `check` must stay offline and Orca-free. P1 would be safe there,
+# but P2 needs a live Dispatch and a second party to answer, and a gate whose
+# second half is permanently `skipped` in CI reports green while covering the half
+# that matters.
+#
+# The filed correlation defect does NOT reproduce on orca 1.4.191 -- that was proved
+# live at design time. This is the standing guard on that fact, so the next
+# regression is found here rather than through a lost human answer.
+#
+# P2 runs only when `--from` and `--dispatch-capability` are passed through, from an
+# agent's own dispatch preamble:
+#   just orca-reply-probe --from term_... --dispatch-capability dcap_...
+orca-reply-probe *ARGS:
+    uv run python scripts/orca_reply_probe.py {{ARGS}}
+
 # Vendored upstream plugin suites -- the offline subset that executes code.
 #
 # ENFORCING, and part of `check`. This departs from how `audit-delta` and
@@ -198,7 +216,7 @@ audit-delta:
 # coverage. It needs Node's built-in TypeScript stripping to import
 # `.pi/extensions/superpowers.ts` (Node 22+; developed against v24).
 #
-# node and npm are hard requirements. A gate that silently skips 133 assertions
+# node and npm are hard requirements. A gate that silently skips 134 assertions
 # when a toolchain is missing reports green while covering nothing.
 #
 # Eight pcvelz-only `tests/claude-code/test-*.sh` suites were drop-list rows
@@ -225,6 +243,8 @@ test-plugin:
     bash tests/hooks/test-skill-doc-routing.sh
     echo "--- test-doc-layout-claims"
     bash tests/test-doc-layout-claims.sh
+    echo "--- test-entry-point-skills"
+    bash tests/test-entry-point-skills.sh
     echo "--- skills/shared/resolve-workspace"
     bash skills/shared/resolve-workspace.test.sh
     echo "--- shell-lint/test-lint-shell"

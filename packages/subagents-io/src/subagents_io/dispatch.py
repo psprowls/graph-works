@@ -46,7 +46,7 @@ class WorktreeAction:
 class PlannedDispatch:
     """One worker to launch, fully resolved."""
 
-    key: str  # "<slug>#<phase>"
+    key: str  # the worker's name, e.g. "gw-execute-feature-x-2f1a9c3d"; opaque to backends
     slug: str
     phase: str
     kind: str

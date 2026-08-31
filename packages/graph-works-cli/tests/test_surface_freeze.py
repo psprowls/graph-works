@@ -81,5 +81,6 @@ def test_the_golden_pins_every_verb_this_item_shipped() -> None:
         ("util", "tokens"),
         ("util", "trace"),
         ("work", "adopt"),
+        ("work", "ingest-queue"),
         ("work", "reparent"),
     } <= paths

@@ -18,10 +18,6 @@ FORBIDDEN_RUNTIME_TEXT = (
     "### `kind` (work)",
 )
 PLUGIN_ROOT = ROOT / "plugins" / "graph-works"
-ACTIVE_FILES = (
-    ROOT / "scripts" / "gw_dispatch.py",
-    ROOT / "scripts" / "gw-dispatch.md",
-)
 SOURCE_SUFFIXES = {".json", ".md", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"}
 LEGACY_DATE_WORK_PATH = re.compile(
     r"(?:wiki/)?work/(?:[a-z0-9_.-]+/)*(?:19|20)\d{2}-\d{2}-\d{2}[-/]",
@@ -48,6 +44,11 @@ LEGACY_EXCLUSIONS = (
     # above, this exclusion does not retire with anything: the guard itself
     # must keep naming the token it guards against.
     ROOT / "packages" / "work-tracker-okf" / "tests" / "test_legacy_boundary.py",
+    # Same rationale one level up: the package's own AGENTS.md documents that
+    # boundary guard, and cannot describe which retired marker the guard scans
+    # for without naming it. Like the guard itself, this exclusion does not
+    # retire with anything.
+    ROOT / "packages" / "work-tracker-okf" / "AGENTS.md",
 )
 HARVESTED_LEGACY_FIXTURE = ROOT / "scripts" / "tests" / "fixtures" / "legacy_graph_wiki"
 
@@ -76,7 +77,6 @@ def _active_files() -> list[Path]:
     )
     return sorted(
         {
-            *ACTIVE_FILES,
             *(path for path in package_files if path.suffix in SOURCE_SUFFIXES),
             *script_files,
             *plugin_files,
@@ -120,7 +120,7 @@ def test_active_plugin_scan_covers_every_maintained_surface() -> None:
 
     assert {
         "plugins/graph-works/README.md",
-        "plugins/graph-works/agents/ingestor.md",
+        "plugins/graph-works/skills/ingest/SKILL.md",
         "plugins/graph-works/docs/testing.md",
         "plugins/graph-works/scripts/bump-version.sh",
         "plugins/graph-works/tests/brainstorm-server/auth.test.js",

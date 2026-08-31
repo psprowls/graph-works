@@ -131,3 +131,33 @@ def test_the_packaged_branch_entry_stays_untailed():
     # The seed is a value the *workspace* owns. Shipping it in the packaged
     # table would make the `relay-untailed` blocker unreachable.
     assert pipeline.PACKAGED_PIPELINE["branch"].prompt_tail is None
+
+
+def test_both_execute_variants_carry_the_coverage_obligation():
+    table = pipeline.pipeline_table()
+    assert table["planned"] == pipeline.PipelineEntry(
+        skill="subagent-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
+    )
+    assert table["unplanned"] == pipeline.PipelineEntry(
+        skill="test-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
+    )
+
+
+def test_the_execute_tail_names_the_artifact_and_its_placeholders():
+    # The tail is substituted by `_prompt` with `str.replace` over a fixed
+    # placeholder set; a tail naming a placeholder outside that set would ship
+    # a literal brace to a worker.
+    assert "03-execute-coverage.md" in pipeline.EXECUTE_TAIL
+    assert "{workspace}" in pipeline.EXECUTE_TAIL
+    assert "{path}" in pipeline.EXECUTE_TAIL
+    assert "## Acceptance" in pipeline.EXECUTE_TAIL
+
+
+def test_a_workspace_may_still_override_the_execute_tail(tmp_path):
+    layout = _workspace(
+        tmp_path,
+        'version: 1\nworkflow:\n  pipeline:\n    unplanned:\n      prompt_tail: "ours"\n',
+    )
+    table = pipeline.pipeline_table(layout=layout)
+    assert table["unplanned"].prompt_tail == "ours"
+    assert table["planned"].prompt_tail == pipeline.EXECUTE_TAIL

@@ -143,7 +143,7 @@ def test_render_agent_plugin_formats_all_six_component_lists() -> None:
         commands=[{"id": "command:1", "name": "next", "description": "advance a work item"}],
         agents=[{"id": "agent:1", "name": "ingestor", "description": "", "model": "", "tools": []}],
         skills=[{"id": "skill:1", "name": "brainstorming", "description": "design before code"}],
-        scripts=[{"id": "script:1", "path": "scripts/gw_dispatch.py", "lang": "python"}],
+        scripts=[{"id": "script:1", "path": "scripts/audit_delta.py", "lang": "python"}],
         hooks=[{"id": "hook:1", "event": "PreToolUse", "matchers": ["Skill"]}],
         mcp_servers=[{"id": "mcp:1", "name": "context7", "command": "npx"}],
     )
@@ -152,7 +152,7 @@ def test_render_agent_plugin_formats_all_six_component_lists() -> None:
     assert render.sections.keys() == {"Commands", "Agents", "Skills", "Scripts", "Hooks", "MCP servers"}
     assert "next" in render.sections["Commands"]
     assert "advance a work item" in render.sections["Commands"]
-    assert "scripts/gw_dispatch.py" in render.sections["Scripts"]
+    assert "scripts/audit_delta.py" in render.sections["Scripts"]
     assert "(python)" in render.sections["Scripts"]
     assert "PreToolUse" in render.sections["Hooks"]
     assert "Skill" in render.sections["Hooks"]

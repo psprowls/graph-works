@@ -6,14 +6,11 @@
 # the catalog drifted in the first place. Seven roles serve harnesses this
 # package does not ship (skill_planner, skill_synthesizer, user_simulator,
 # judge_a, judge_b, guidance_classifier, guidance_orchestrator); they belong
-# with their harnesses if those arrive. Two more — preflight and scanner — had
-# no consumer anywhere, including in the predecessor package, and were carried
-# across verbatim; they return when something binds them.
+# with their harnesses if those arrive. Two more — preflight and scanner — have
+# never had a consumer at all; they return when something binds them.
 #
 # And no role carries `sweep_candidates`: that is an eval-harness concept with
-# no consumer here. The candidate sets were chosen in a dated tuning session
-# (2026-05-30, post-Haiku-purge) and remain recoverable from `agent-research`,
-# which is read-only, not deleted.
+# no consumer here.
 #
 # Every value here is a default. `roles.<name>.<field>` in `workspace.yaml`
 # overrides any subset of it, field by field.

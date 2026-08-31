@@ -1791,10 +1791,7 @@ def metadata(conn: sqlite3.Connection, key: str) -> str | None:
 
 
 def node_count(conn: sqlite3.Connection) -> int:
-    """Total node count.
-
-    Source: graph_wiki_core/commands/query.py + graph.py (`SELECT COUNT(*) FROM nodes`).
-    """
+    """Total node count."""
     return int(conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0])
 
 
@@ -1830,11 +1827,7 @@ def languages(conn: sqlite3.Connection) -> list[str]:
 
 
 def file_paths(conn: sqlite3.Connection) -> list[str]:
-    """Sorted paths of all `file` nodes.
-
-    Source: graph_wiki_core/commands/guidance_scan.py `_enumerate_files`
-    (`SELECT path FROM nodes WHERE kind='file' AND path IS NOT NULL`).
-    """
+    """Sorted paths of all `file` nodes."""
     rows = conn.execute("SELECT path FROM nodes WHERE kind='file' AND path IS NOT NULL").fetchall()
     return sorted(r[0] for r in rows)
 
@@ -1842,8 +1835,8 @@ def file_paths(conn: sqlite3.Connection) -> list[str]:
 def file_paths_in_package(conn: sqlite3.Connection, name: str) -> list[str]:
     """Sorted file paths contained by the package/app named `name` (case-insensitive).
 
-    Source: graph_wiki_core/commands/guidance_scan.py `_enumerate_files`
-    (package branch) — SQL and `sorted({...})` set-dedup ported VERBATIM.
+    Deduplicated through a set before sorting: a file reachable by more than
+    one `contains` edge must still appear once.
     """
     rows = conn.execute(
         "SELECT f.path FROM nodes p "
@@ -1858,10 +1851,8 @@ def file_paths_in_package(conn: sqlite3.Connection, name: str) -> list[str]:
 def file_attrs(conn: sqlite3.Connection, path: str) -> dict[str, Any] | None:
     """Parsed `attrs_json` for the `file` node at `path`, or None.
 
-    Source: graph_wiki_core/commands/guidance_signals.py `_derive_path_languages`
-    (`SELECT attrs_json FROM nodes WHERE kind='file' AND path=? LIMIT 1`). Returns
-    None when no row, empty attrs, or unparseable JSON (matching the call site's
-    `json.loads(...)` with `ValueError` guard).
+    Returns None when there is no row, when attrs are empty, and when the JSON
+    does not parse — a malformed `attrs_json` reads as absent, never raises.
     """
     row = conn.execute("SELECT attrs_json FROM nodes WHERE kind='file' AND path=? LIMIT 1", (path,)).fetchone()
     if not row or not row[0]:
@@ -1896,9 +1887,7 @@ def symbol_names_under_files(
 ) -> list[str]:
     """Names of `kinds` symbols contained by any file in `file_ids`.
 
-    Source: graph_wiki_core/commands/guidance_signals.py `_package_signal_inputs`
-    (the symbol-haystack query) — SQL and `_SYMBOL_KINDS` default ported VERBATIM.
-    Returns [] for empty `file_ids` (no SQL issued).
+    Returns [] for empty `file_ids`, issuing no SQL at all.
     """
     ids = list(file_ids)
     if not ids:

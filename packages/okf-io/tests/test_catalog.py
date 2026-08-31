@@ -149,11 +149,19 @@ def test_the_catalog_is_thirty_one_codes_across_nine_topics():
     assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 31
 
 
-@pytest.mark.parametrize("claude_md", [_REPO_ROOT / "CLAUDE.md", _PACKAGE_ROOT / "CLAUDE.md"], ids=["root", "okf-io"])
+@pytest.mark.parametrize("claude_md", [_PACKAGE_ROOT / "AGENTS.md"], ids=["okf-io"])
 def test_the_catalog_counts_the_agent_docs_quote_are_the_catalogs_own(claude_md) -> None:
-    """Both `CLAUDE.md` files state the catalog's size in prose, and both said
-    `19 rule functions, 29 codes` for the whole life of the rule that made it
-    twenty and thirty. Nothing read them, so nothing noticed.
+    """`packages/okf-io/AGENTS.md` — the file an agent working in this package
+    reads first, and the one its `CLAUDE.md` just `@`-imports — states the
+    catalog's size in prose, and it said `19 rule functions, 29 codes` for the
+    whole life of the rule that made it twenty and thirty. Nothing read it, so
+    nothing noticed.
+
+    Only that file is pinned. The root `AGENTS.md` deliberately quotes no
+    number: it delegates to this one in as many words ("check there rather
+    than trusting a number restated here, since it has drifted before without
+    anything noticing"), and asserting a count there would contradict the
+    instruction the file itself gives.
 
     Counted, not spelled: the assertion reads whatever number sits in front of
     each noun, so rewording the sentence keeps working and only the numbers are

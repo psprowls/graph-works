@@ -15,4 +15,5 @@ Human catalog note preserved outside the generated region.
 - [Epic: The ledger at finish](epic-ledger-at-finish.md) — in-progress · finish
 - [Nested child](spike-wrong-parent-type/children/feature-accepted-no-plan.md) — accepted · design
 - [Gone](gone.md) — open · not started
+- [Bug: an unbalanced ] in link text](bug-unreadable-entry.md) — open · not started
 <!-- graph-works:work-items:end -->

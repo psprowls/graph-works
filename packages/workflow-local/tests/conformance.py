@@ -62,14 +62,16 @@ CASES = (
 def make_dispatch(
     *program: str,
     worktree_path: str | None,
-    key: str = "slug#plan",
+    key: str = "gw-plan-slug-00000000",
+    slug: str = "work/feature-slug",
+    phase: str = "plan",
     mode: str = "autonomous",
 ) -> PlannedDispatch:
     """A dispatch whose `prompt` IS the program both backends interpret."""
     return PlannedDispatch(
         key=key,
-        slug=key.partition("#")[0],
-        phase=key.partition("#")[2],
+        slug=slug,
+        phase=phase,
         kind="feature",
         effort="medium",
         skill="writing-plans",

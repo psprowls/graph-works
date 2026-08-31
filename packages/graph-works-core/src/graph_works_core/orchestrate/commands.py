@@ -7,7 +7,7 @@ a worker -- `subagents-io` ships the dispatch value types and no execution
 backend, and choosing one is a separate work item.
 
 The frontier walk generalizes `hierarchy.descend()` from pick-one-leaf to
-collect-all, **reusing** its `child_gated_node` predicate, `PICK_ORDER` and
+collect-all, **reusing** its `child_gated` predicate, `PICK_ORDER` and
 `WALK_DEPTH_CAP` rather than restating them. `--descend` and auto-drive
 disagreeing about the same item is exactly the failure that reuse prevents, and
 `test_orchestrate_plan.py` pins the agreement as a property.
@@ -20,26 +20,19 @@ vendor-neutral; the one place a vendor command may appear is a variant's
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from datetime import date
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any
+from typing import Any, Literal
 
 from config_io import PlainYamlStore, dotted
 from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from subagents_io.routing import resolve_model, validate_rules
 from work_tracker_okf import decisions as _decisions
-from work_tracker_okf.advance import apply as apply_advance
-from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
-from work_tracker_okf.hierarchy import PICK_ORDER, child_gated_node, nearest_parent
+from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, nearest_parent
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
-from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
-from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
-from work_tracker_okf.results import render as render_results
-from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import (
     EFFORTS,
     PHASES,
@@ -49,14 +42,12 @@ from work_tracker_okf.vocabulary import (
 )
 from work_tracker_okf.workflow import RouteResult, route, state_for
 
-from graph_works_core.workspace import provenance
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.manifest import checked_int, checked_str
+from graph_works_core.workspace.manifest import checked_bool, checked_int, checked_str
 from graph_works_core.workspace.pipeline import PipelineEntry, pipeline_table
-from graph_works_core.workspace.provenance import run_git
+from graph_works_core.workspace.provenance import default_base, run_git
 from graph_works_core.workspace.repos import resolve_repo
-from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 WALK_DEPTH_CAP = 10_000
 
@@ -68,9 +59,10 @@ _UNKNOWN_TYPE_SEGMENT = "work"
 #: The phases a stage can be dispatched at. `done` is terminal.
 DISPATCH_PHASES: frozenset[str] = frozenset(PHASES - {"done"})
 
-#: The plugin command a dispatched worker runs. Named rather than inlined so the
-#: namespace has one grep-able home when the fork lands.
-DISPATCH_COMMAND = "/graph-works:next"
+#: The plugin skill a dispatched worker runs. Named rather than inlined so the
+#: namespace has one grep-able home when the fork lands. It is a skill, not a
+#: command: `commands/` did not ship to Codex, so every entry point is a skill.
+DISPATCH_COMMAND = "/graph-works:workflow"
 
 #: The workspace pointer a dispatched session reads at startup.
 WORKSPACE_VAR = "GRAPH_WORKS_DIR"
@@ -98,6 +90,8 @@ BLOCKED_KINDS: frozenset[str] = frozenset(
         "relay-untailed",
         "worktree-pending",
         "worktree-unsupported",
+        "worktree-unprovable",
+        "worktree-ambiguous",
         "decisions",
         "invalid",
     }
@@ -106,13 +100,17 @@ BLOCKED_KINDS: frozenset[str] = frozenset(
 
 @dataclass(frozen=True, slots=True)
 class PlannedAdvance:
-    """A node with nothing to dispatch but a satisfied completion transition --
-    an epic whose children are all terminal. The coordinator applies it itself."""
+    """A node with nothing to dispatch but a transition the coordinator applies
+    itself: `mode == "advance"` for a satisfied completion (an epic whose
+    children are all terminal), `mode == "return"` for a repair (an epic at
+    `finish` reopened by a child filed afterwards) -- never a transition
+    `advance()` would refuse with `children-open`."""
 
     path: str
     reason: str
     worktree: str | None = None
     branch: str | None = None
+    mode: Literal["advance", "return"] = "advance"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,17 +121,56 @@ class BlockedItem:
 
 
 @dataclass(frozen=True, slots=True)
+class _Refusal:
+    """`_resolve_worktree` declining to place a dispatch, rather than guessing.
+
+    Distinct from the `None` return, which means "the epic worktree is being
+    created by another dispatch this batch" -- a condition that self-resolves
+    next cycle. A refusal never self-resolves: both its kinds need a human to
+    say where the work is.
+    """
+
+    kind: str  # one of BLOCKED_KINDS
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class OrchestratePlan:
     path: str
     terminal: bool
     max_parallel: int
     permission_mode: str
+    supervise_merges: bool
     live: tuple[str, ...]
     slots_free: int
     dispatches: tuple[PlannedDispatch, ...]
     advances: tuple[PlannedAdvance, ...]
     blocked: tuple[BlockedItem, ...]
     warnings: tuple[str, ...]
+
+
+#: The character budget for a session name. Orca renders it in a task row and
+#: a worker card; longer than this and the row elides the part that identifies
+#: the item. The eight-hex tail is never what gets cut (see `session_name`).
+SESSION_NAME_MAX = 64
+
+
+def _stable_stem(path: str, type_: str) -> str:
+    """`"<basename minus its type prefix>-<sha256(path)[:8]>"`.
+
+    The shared middle of `branch_name` and `session_name`. Extracted so a
+    branch and the session that runs on it cannot drift apart: they are the
+    same stem under two different prefixes.
+    """
+    segment = SLUG_PREFIXES.get(type_) or _UNKNOWN_TYPE_SEGMENT
+    basename = PurePosixPath(path).name
+    stripped = basename
+    if segment != "epic" and stripped.startswith("epic-"):
+        stripped = stripped[len("epic-") :]
+    if stripped.startswith(f"{segment}-"):
+        stripped = stripped[len(segment) + 1 :]
+    suffix = hashlib.sha256(path.encode("utf-8")).hexdigest()[:8]
+    return f"{stripped}-{suffix}"
 
 
 def branch_name(path: str, type_: str) -> str:
@@ -146,14 +183,69 @@ def branch_name(path: str, type_: str) -> str:
         feature-work-pipeline-x (Feature) -> feature/work-pipeline-x
     """
     segment = SLUG_PREFIXES.get(type_) or _UNKNOWN_TYPE_SEGMENT
-    basename = PurePosixPath(path).name
-    stripped = basename
-    if segment != "epic" and stripped.startswith("epic-"):
-        stripped = stripped[len("epic-") :]
-    if stripped.startswith(f"{segment}-"):
-        stripped = stripped[len(segment) + 1 :]
-    suffix = hashlib.sha256(path.encode("utf-8")).hexdigest()[:8]
-    return f"{segment}/{stripped}-{suffix}"
+    return f"{segment}/{_stable_stem(path, type_)}"
+
+
+def session_name(path: str, type_: str, phase: str) -> str:
+    """The one name a dispatched worker is known by, everywhere.
+
+        work/epic-a/children/tech-debt-x  (TechDebt, design)
+            -> gw-design-x-2f1a9c3d
+
+    A sibling of `branch_name` by construction -- same stem, different
+    prefix -- so the branch a worker runs on and the session it runs in are
+    visibly the same work. The kind lives in the branch segment; the phase
+    lives here. Neither repeats the other.
+
+    Capped at `SESSION_NAME_MAX`. When the cap bites it is the *word* part
+    that is truncated and the eight-hex tail that survives: the tail is the
+    only thing making two same-basename siblings distinguishable, so
+    trimming it would trade away exactly the property it exists to provide.
+    """
+    stem = _stable_stem(path, type_)
+    head = f"gw-{phase}-"
+    budget = SESSION_NAME_MAX - len(head)
+    if len(stem) > budget:
+        words, _, tail = stem.rpartition("-")
+        keep = max(0, budget - len(tail) - 1)
+        stem = f"{words[:keep].rstrip('-')}-{tail}" if keep else tail
+    return f"{head}{stem}"
+
+
+def session_index(items: Iterable[WorkItem]) -> tuple[dict[str, WorkItem], tuple[str, ...]]:
+    """`session_name -> item`, over every (item, dispatchable phase) pair.
+
+    The reverse of `session_name`, and the only reverse there is: the name
+    carries a hash, so nothing recovers a path by parsing one. A few hundred
+    items times four phases, computed once per plan -- cheap enough that
+    caching it would be the more complicated thing.
+
+    **Ambiguity is detected, never resolved by guessing.** Two pairs can
+    collide only through an eight-hex `sha256` prefix collision or a
+    `session_name` truncation collision. Either way the entry is dropped and
+    a warning is returned: a `--live` key that names it then reports
+    `matches no known item`, which is a true statement, where binding it to
+    whichever item happened to be enumerated first would be a false one.
+    """
+    index: dict[str, WorkItem] = {}
+    collisions: dict[str, list[str]] = {}
+    for item in items:
+        for phase in sorted(DISPATCH_PHASES):
+            name = session_name(item.path, item.type, phase)
+            prior = index.get(name)
+            if prior is not None and prior.path != item.path:
+                collisions.setdefault(name, [prior.path]).append(item.path)
+                continue
+            if name in collisions:
+                collisions[name].append(item.path)
+                continue
+            index[name] = item
+    warnings: list[str] = []
+    for name in sorted(collisions):
+        index.pop(name, None)
+        paths = ", ".join(sorted(collisions[name]))
+        warnings.append(f"session name {name!r} is ambiguous ({paths}); dropped")
+    return index, tuple(warnings)
 
 
 def _fork_branch(path: str, type_: str, *, base: str, phase: str) -> str:
@@ -193,9 +285,14 @@ def _frontier(
 ) -> tuple[list[tuple[WorkItem, RouteResult]], list[PlannedAdvance], list[BlockedItem]]:
     """Every actionable node at or below *root*. Cycle-safe and depth-capped.
 
-    Recurses through a `child_gated_node` into its non-terminal children and
-    routes every non-gated node it lands on. A terminal child is skipped
-    silently: a resolved child is a satisfied input, not a blocked item.
+    Recurses through `child_gated` into its non-terminal children and routes
+    every non-gated node it lands on. A terminal child is skipped only when it
+    has no open descendants of its own -- a resolved child with nothing open
+    beneath it is a satisfied input, not a blocked item, but a resolved child
+    hiding an open grandchild is walked into instead of dropped (design's axis
+    2). A node whose route repairs stale state (an epic at `finish` reopened
+    by a child filed afterwards) is checked *before* the `child_gated` branch,
+    so the widened gate never swallows the repair.
     """
     by_path = {item.path: item for item in items}
     if root not in by_path:
@@ -225,9 +322,16 @@ def _frontier(
             )
             continue
         children = children_of.get(path, [])
-        if child_gated_node(node, children):
+        state = state_for(items, path, has_open_decision=path in held_decisions)
+        if state is None:  # pragma: no cover -- `path` came out of `by_path`
+            continue
+        result = route(state)
+        if result.repair is not None:
+            advances.append(PlannedAdvance(path=path, reason=result.reason, mode="return"))
+            continue
+        if child_gated(items, node):
             for child in children:
-                if child.work_status in TERMINAL_STATUSES:
+                if child.work_status in TERMINAL_STATUSES and not active_nonterminal_descendants(items, child.path):
                     continue
                 if child.path in visited:
                     blocked.append(
@@ -241,10 +345,6 @@ def _frontier(
                 visited.add(child.path)
                 stack.append((child.path, depth + 1))
             continue
-        state = state_for(items, path, has_open_decision=path in held_decisions)
-        if state is None:  # pragma: no cover -- `path` came out of `by_path`
-            continue
-        result = route(state)
         if result.dispatch is not None and not result.blockers:
             candidates.append((node, result))
         elif result.on_complete is not None and not result.blockers:
@@ -297,6 +397,69 @@ def _epic_stamp(items: Sequence[WorkItem], root_item: WorkItem) -> tuple[str, st
     return chosen.worktree, chosen.branch
 
 
+def _adopt(item: WorkItem, *, inventory: Mapping[str, str]) -> tuple[str, str] | _Refusal | None:
+    """`(path, branch)` of the worktree holding this item's work, if findable.
+
+    Four steps, every one an **exact** match, tried in order: the planned
+    branch; a branch whose last segment equals the planned branch flattened to
+    hyphens; a worktree directory whose basename equals the item's slug.
+    Two or more matches at a step refuses; nothing at any step answers `None`.
+
+    No prefix matching appears here, deliberately, and the two reasons are
+    worth keeping in view because the idea reads as an obvious improvement:
+
+    * A renamed branch does not *start* with the planned name. Orca replaces
+      the first slash segment with the git username and flattens the rest
+      (`bug/x-1a2b3c4d` -> `psprowls/bug-x-1a2b3c4d`), so the planned name ends
+      up in the middle. Step 2 matches the **last segment**, which the
+      substitution never touches, so no username lookup -- and no network call
+      -- is needed.
+    * A prefix-matched directory finds the decoy. Orca appends `-2` on a
+      genuine directory collision, and the suffixed directory is the empty one:
+      clean, at the base commit, no work in it. Step 3 therefore demands
+      basename equality; a lone `<slug>-2` adopts nothing, which is correct,
+      because it means the real worktree is gone.
+    """
+    planned = branch_name(item.path, item.type)
+    if planned in inventory:
+        return inventory[planned], planned
+
+    flattened = planned.replace("/", "-")
+    renamed = [(path, branch) for branch, path in inventory.items() if branch.rsplit("/", 1)[-1] == flattened]
+    if len(renamed) == 1:
+        return renamed[0]
+    if renamed:
+        return _Refusal(
+            kind="worktree-ambiguous",
+            reason=(
+                f"{len(renamed)} worktrees carry a branch ending {flattened!r}: "
+                + ", ".join(sorted(path for path, _ in renamed))
+            ),
+        )
+
+    slug = PurePosixPath(item.path).name
+    by_dir = [(path, branch) for branch, path in inventory.items() if PurePosixPath(path).name == slug]
+    if len(by_dir) == 1:
+        return by_dir[0]
+    if by_dir:
+        return _Refusal(
+            kind="worktree-ambiguous",
+            reason=(f"{len(by_dir)} worktrees are named {slug!r}: " + ", ".join(sorted(path for path, _ in by_dir))),
+        )
+    return None
+
+
+#: The phases whose stages write only into the vault. A stage in this set
+#: cannot produce a commit, so it must not acquire the placement stamp that
+#: decides where later commits land -- the governing invariant of this
+#: module's placement policy. Deliberately spelled out here rather than
+#: imported as the complement of `stage_advance.RESULTS_PHASES`: the two
+#: halves of `orchestrate` share no module-level symbol by design (D-001),
+#: and `test_the_read_only_and_results_phases_are_complements` pins them
+#: against each other instead.
+READ_ONLY_PHASES: frozenset[str] = frozenset({"design", "plan"})
+
+
 def _resolve_worktree(
     item: WorkItem,
     *,
@@ -308,11 +471,20 @@ def _resolve_worktree(
     worktree_exists: Mapping[str, bool | None],
     default_base: str,
     phase: str,
+    is_root: bool,
     repo_path: str | None,
-) -> tuple[WorktreeAction | None, bool]:
+    inventory: Mapping[str, str],
+) -> tuple[WorktreeAction | _Refusal | None, bool]:
     """The four rules, in order: reuse the item's own stamp; else reuse the epic
-    worktree when unoccupied; else fork a child branch off it; else start one --
-    in the main checkout when a repo path is known, top-level otherwise.
+    worktree when unoccupied and this dispatch is entitled to it; else fork a
+    child branch off it; else mint the epic worktree -- which only the subtree
+    root may do.
+
+    Rule 2's entitlement is `is_root or phase in READ_ONLY_PHASES`. A stage
+    that writes no code may share the anchor because it cannot collide there;
+    a descendant that *does* commit gets its own fork instead, so it has a
+    branch of its own to review and merge. There is no opportunistic
+    main-checkout placement at any phase: `default_base` is trunk.
 
     Returns `(action, claims_the_epic_slot)`. `action` is `None` only for the
     worktree-pending case -- the epic worktree is being created by another
@@ -328,6 +500,15 @@ def _resolve_worktree(
     their own base: rule 1's base is the item's stamped branch (or `default_base`
     when evicting out of the main checkout) and rule 2/3's is the epic branch,
     and either can already equal the item's derived name.
+
+    A `_Refusal` is the third return shape: the placement could not be proved
+    and no worktree was findable to adopt (`worktree-unprovable`), or more than
+    one matched (`worktree-ambiguous`). Neither self-resolves. The governing
+    policy is that when the planner cannot prove where an item's prior work
+    lives it searches for it and blocks if the search fails -- it never
+    guesses, because a plan naming the wrong directory is well-formed and
+    silent, and the three reproductions behind this rule were all caught only
+    because a human happened to look.
     """
 
     def _occupied(path: str) -> bool:
@@ -337,6 +518,44 @@ def _resolve_worktree(
         # between a dispatch and its own advance. Its own stamp must never read
         # as "held by someone else", or it forks off itself.
         return bool(live_worktree_owners.get(path, set()) - {item.path}) or path in accepted_worktrees
+
+    def _adopted_action(reason: str) -> tuple[WorktreeAction | _Refusal, bool]:
+        """Search for the item's real worktree; the action to take, or a refusal."""
+        found = _adopt(item, inventory=inventory)
+        if isinstance(found, _Refusal):
+            return found, False
+        if found is None:
+            return _Refusal(kind="worktree-unprovable", reason=reason), False
+        path, branch = found
+        if worktree_exists.get(path) is False:
+            # Adopted a path the inventory names, but it is provably gone too
+            # (e.g. a prunable-but-not-yet-pruned worktree). Adopting it would
+            # report a placement as proven when it cannot be verified at all.
+            return _Refusal(kind="worktree-unprovable", reason=reason), False
+        if _occupied(path):
+            # Adopted, but someone else is in it this batch: fork off the
+            # branch we just proved holds the work, rather than sharing.
+            return (
+                WorktreeAction(
+                    action="fork-child",
+                    path=None,
+                    branch=_fork_branch(item.path, item.type, base=branch, phase=phase),
+                    base_branch=branch,
+                    exists=None,
+                ),
+                False,
+            )
+        is_main = repo_path is not None and path == repo_path
+        return (
+            WorktreeAction(
+                action="main" if is_main else "reuse",
+                path=path,
+                branch=branch,
+                base_branch=None,
+                exists=worktree_exists.get(path, True),
+            ),
+            is_main,
+        )
 
     if item.worktree and item.branch:
         if repo_path is not None and item.worktree == repo_path:
@@ -365,6 +584,14 @@ def _resolve_worktree(
                 False,
             )
         if not _occupied(item.worktree):
+            if worktree_exists.get(item.worktree) is False:
+                # The stamp names a directory that is no longer on disk.
+                # `reuse` here produces `--worktree path:<gone>`, which fails
+                # far from this decision; search instead.
+                return _adopted_action(
+                    f"stamped worktree {item.worktree!r} no longer exists and no worktree "
+                    "in the inventory matches this item"
+                )
             return (
                 WorktreeAction(
                     action="reuse",
@@ -392,7 +619,20 @@ def _resolve_worktree(
             False,
         )
     if epic_worktree_path is not None:
-        if not _occupied(epic_worktree_path):
+        # The epic anchor is a *read* context for a descendant's vault-only
+        # stage and a *work* context for the root. A descendant at a code
+        # phase must not land in it: two workers committing in one directory
+        # is the hazard rule 3 exists for, and a child that commits on the
+        # epic branch leaves nothing of its own to review or merge. It falls
+        # through to the fork below instead.
+        reuses_anchor = is_root or phase in READ_ONLY_PHASES
+        if reuses_anchor and not _occupied(epic_worktree_path):
+            if worktree_exists.get(epic_worktree_path) is False:
+                # The epic anchor can be stale for the same reason a stamp can.
+                return _adopted_action(
+                    f"epic worktree {epic_worktree_path!r} no longer exists and no worktree "
+                    "in the inventory matches this item"
+                )
             # Same "main" vs "reuse" split as above: a child inheriting the
             # epic's stamp is still just cd'd into the main checkout when that
             # stamp is the repo path itself.
@@ -419,21 +659,50 @@ def _resolve_worktree(
         )
     if epic_worktree_claimed:
         return None, False
-    if repo_path is not None:
-        # Cold start, opportunistic: the common case is one solo session, so
-        # run in the checkout that already exists rather than paying for a
-        # worktree nobody else is contending for. Claims the epic slot exactly
-        # as `create-top-level` does.
-        return (
-            WorktreeAction(
-                action="main",
-                path=repo_path,
-                branch=default_base,
-                base_branch=None,
-                exists=worktree_exists.get(repo_path),
-            ),
-            True,
+    # Cold start: no stamp of the item's own, and no epic anchor to inherit.
+    # Only the subtree root may mint the anchor here, so the refusal reason a
+    # descendant gets names that remedy rather than asking for a directory
+    # nobody can supply.
+    cold_reason = (
+        f"no worktree is recorded for this item at phase {phase!r} and none in the "
+        "inventory matches it; say where the prior work is"
+        if is_root
+        else (
+            f"no worktree is recorded for this item at phase {phase!r}, none in the inventory "
+            "matches it, and this epic's subtree root has no recorded worktree to anchor "
+            "against; dispatch the subtree root first"
         )
+    )
+    if item.phase is not None and phase != "design":
+        # At `plan()`'s own call site this is equivalent to
+        # `item.phase not in (None, "design")`, since the resolved `phase`
+        # argument always equals `item.phase` when the latter is set. The
+        # two-clause form only diverges for a direct caller (e.g. a test)
+        # that passes a `phase` different from `item.phase` -- keep both
+        # clauses; collapsing them changes that contract.
+        # Cold start, but the item has advanced at least once and is not at
+        # design: it has run before, so its work is somewhere. Dispatching
+        # the finish stage with nothing to merge is worse than not
+        # dispatching it. `item.phase is None` excludes a never-advanced item
+        # (e.g. a freshly filed TestGap routed straight to execute or plan)
+        # -- its first-ever dispatch has no prior work to find, so it is not
+        # held to this rule. Deliberately ahead of the descendant refusal
+        # below: a descendant whose real worktree is findable is placed in
+        # it, and only an unfindable one blocks.
+        return _adopted_action(cold_reason)
+    if not is_root:
+        # A descendant reached cold start, so it is dispatching before its own
+        # subtree root ever did. Minting the anchor here would mean stamping
+        # the epic worktree onto a *child*, which is the exact leak this rule
+        # exists to close -- `_epic_stamp`'s descendant-scan fallback would
+        # then read that child's stamp back as "the epic worktree". Block
+        # instead: a visible refusal beats a silent misplacement.
+        return _Refusal(kind="worktree-unprovable", reason=cold_reason), False
+    # The subtree root's first dispatch mints the epic worktree. There is no
+    # opportunistic main-checkout placement: `default_base` is trunk, and a
+    # stage dispatched onto trunk commits onto trunk. `claimed=True` is what
+    # makes the next item in this same batch return the `worktree-pending`
+    # blocker above rather than minting a second one.
     return (
         WorktreeAction(
             action="create-top-level",
@@ -455,6 +724,7 @@ def _prompt(
     merge_target: str,
     tail: str | None,
     worktree: WorktreeAction,
+    is_root: bool,
 ) -> str:
     """Four vendor-neutral lines, plus the variant's tail.
 
@@ -469,12 +739,20 @@ def _prompt(
     emission in this package names the legacy `graph-wiki` plugin or
     `GRAPH_WIKI_WORKSPACE` any more.
 
-    A `"main"` action appends one further line. It is hardcoded rather than
-    workspace-authored because the `prompt_tail` table is keyed per pipeline
-    *variant*, while this fact is per *dispatch* -- resolved from the worktree
-    action -- so no variant tail can express it. It is appended after the tail
-    so authored prose cannot swallow it, and it names no CLI flag because this
-    package ships none.
+    A `"main"` action appends one further line, and so does a dispatch of the
+    subtree **root**, for two different reasons that produce the same
+    instruction. The `"main"` case is a detection gap: git reports no worktree
+    for the main checkout, so the worker genuinely cannot find its own. The
+    root case is an anchoring one: `_epic_stamp` prefers the root's own stamp
+    over its unstable descendant-scan fallback, and asking every root worker to
+    record its placement is what gets that stamp written -- once, on the epic's
+    first dispatch, after which the anchor never moves again. Both are per
+    *dispatch* rather than per pipeline *variant*, so no workspace-authored
+    `prompt_tail` could express either; both are appended after the tail so
+    authored prose cannot swallow them. Neither is appended for a read-only
+    **descendant** dispatch: a `design` or `plan` stage writes no code, so the
+    placement it happens to occupy is not a fact worth recording -- and recording
+    it would pin the item's later code phases to it.
     """
     lines = [
         f"Run {DISPATCH_COMMAND} {path}.",
@@ -492,12 +770,37 @@ def _prompt(
         ):
             tail = tail.replace(placeholder, value)
         lines.append(tail)
-    if worktree.action == "main":
-        lines.append(
-            f"This stage runs in the main checkout on `{worktree.branch}`; no dedicated worktree "
-            f"exists. Record the worktree as `{worktree.path}` and the branch as `{worktree.branch}` "
-            "explicitly when you advance — it cannot be detected from where you are."
-        )
+    # A read-only *descendant* is told nothing: it is sitting in the epic
+    # worktree (or the checkout) purely to read, and a stamp acquired there
+    # would pin its own later code phases to a directory a vault-only stage
+    # happened to occupy. The root keeps the line at every phase -- its stamp
+    # is the epic anchor every descendant resolves against, and an epic's
+    # `execute` dispatches children rather than a worker for itself, so a root
+    # that skipped `design`/`plan` would never stamp at all.
+    if is_root or (worktree.action == "main" and phase not in READ_ONLY_PHASES):
+        if worktree.action == "main":
+            line = (
+                f"This stage runs in the main checkout on `{worktree.branch}`; no dedicated worktree "
+                f"exists. Record the worktree as `{worktree.path}` and the branch as `{worktree.branch}` "
+                "explicitly when you advance — it cannot be detected from where you are."
+            )
+        elif worktree.path is None:
+            # A pathless root action (`create-top-level` or `fork-child`): the
+            # epic's first-ever dispatch has no stamp yet and no known worktree
+            # to name, so ask for whatever the worker ends up in instead of
+            # rendering the literal `None`.
+            line = (
+                f"Record the worktree you end up in, and the branch as `{worktree.branch}`, "
+                "explicitly when you advance — this is the subtree root, and its stamp is what "
+                "every later dispatch in this epic resolves its placement against."
+            )
+        else:
+            line = (
+                f"Record the worktree as `{worktree.path}` and the branch as `{worktree.branch}` "
+                "explicitly when you advance — this is the subtree root, and its stamp is what "
+                "every later dispatch in this epic resolves its placement against."
+            )
+        lines.append(line)
     return "\n".join(lines)
 
 
@@ -509,6 +812,7 @@ def plan(
     auto_drive: Mapping[str, Any],
     max_parallel: int,
     permission_mode: str,
+    supervise_merges: bool = False,
     live: tuple[str, ...] = (),
     worktree_exists: Mapping[str, bool | None] | None = None,
     held_decisions: frozenset[str] = frozenset(),
@@ -516,6 +820,7 @@ def plan(
     workspace: str,
     default_base: str,
     repo_path: str | None = None,
+    worktree_inventory: Mapping[str, str] | None = None,
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
@@ -536,14 +841,29 @@ def plan(
     time, into a `worktree-unsupported` blocker computed here, at plan time.
 
     `repo_path` is the resolved code repository's own checkout, when the caller
-    knows it. Supplying it turns cold start and repo-root-stamped items into
-    `"main"` actions that run there directly instead of provisioning a
-    worktree. `None` -- the default -- reproduces the previous behaviour
-    exactly, so no existing caller changes until it opts in.
+    knows it. It labels an item whose *stamp* (rule 1), inherited epic anchor
+    (rule 2) or adopted worktree is that checkout as a `"main"` action rather
+    than a `"reuse"`, because a worker there cannot detect its own worktree and
+    `_prompt` owes it an explicit instruction. It no longer influences cold
+    start: a cold start mints the epic worktree whether or not a checkout is
+    known.
+
+    `worktree_inventory` is `branch -> worktree path` as git sees it, resolved
+    by `run_orchestrate` from `git worktree list --porcelain`. It is what lets
+    the placement rules *find* an item's prior work instead of assuming it,
+    and it defaults to `{}` -- with no inventory the rules that would search
+    refuse instead, which is still an improvement on naming a directory that
+    holds nothing, but adoption is the point.
     """
     exists = worktree_exists or {}
+    inventory = worktree_inventory or {}
     by_path = {item.path: item for item in items}
-    warnings = [f"live key {key!r} matches no known item" for key in live if key.split("#", 1)[0] not in by_path]
+    # A session name carries a hash, so nothing recovers a path by parsing
+    # one -- `session_index` is the only reverse there is, and its own
+    # ambiguity warnings ride the same channel.
+    by_session, warnings_list = session_index(items)
+    warnings = [*warnings_list]
+    warnings += [f"live key {key!r} matches no known item" for key in live if key not in by_session]
 
     root_item = by_path.get(root)
     if root_item is not None and (root_item.work_status in TERMINAL_STATUSES or root_item.phase == "done"):
@@ -552,6 +872,7 @@ def plan(
             terminal=True,
             max_parallel=max_parallel,
             permission_mode=permission_mode,
+            supervise_merges=supervise_merges,
             live=tuple(live),
             slots_free=0,
             dispatches=(),
@@ -577,7 +898,7 @@ def plan(
     live_affects: set[str] = set()
     live_worktree_owners: dict[str, set[str]] = {}
     for key in live:
-        item = by_path.get(key.split("#", 1)[0])
+        item = by_session.get(key)
         if item is None:
             continue
         live_affects.update(item.affects)
@@ -657,6 +978,7 @@ def plan(
             )
             continue
 
+        is_root = item.path == root
         action, claimed_now = _resolve_worktree(
             item,
             epic_worktree_path=epic_worktree_path,
@@ -667,8 +989,15 @@ def plan(
             worktree_exists=exists,
             default_base=default_base,
             phase=phase,
+            is_root=is_root,
             repo_path=repo_path,
+            inventory=inventory,
         )
+        if isinstance(action, _Refusal):
+            # Consumes no slot and claims no worktree: a refused item is not a
+            # dispatch that failed, it is a dispatch that was never made.
+            blocked.append(BlockedItem(path=item.path, kind=action.kind, reason=action.reason))
+            continue
         if action is None:
             blocked.append(
                 BlockedItem(
@@ -691,7 +1020,18 @@ def plan(
             )
             continue
         epic_worktree_claimed = epic_worktree_claimed or claimed_now
-        if action.path:
+        # Same entitlement as `_resolve_worktree`'s rule 2: a read-only
+        # descendant (design/plan) inheriting the *epic anchor* writes no
+        # code, so its `reuse` has nothing to protect and must not occupy the
+        # slot for anyone else -- doing so was the bug that forced a second
+        # read-only dispatch off the shared anchor into a needless fork. An
+        # item reusing its *own* recorded stamp (rule 1) always claims,
+        # regardless of phase: that path is the specific hazard rule 1's own
+        # occupancy check exists to serialize (two items provenance-stamped
+        # onto the same directory), unrelated to the epic-anchor-sharing
+        # exemption. The root always claims too.
+        own_stamp = bool(item.worktree and item.branch)
+        if action.path and (own_stamp or is_root or phase not in READ_ONLY_PHASES):
             accepted_worktrees.add(action.path)
 
         merge_target = epic_branch if item.path != root else default_base
@@ -700,7 +1040,7 @@ def plan(
             {"phase": phase, "kind": item.type, "effort": item.effort},
             default_key="phase",
         )
-        key = f"{item.path}#{phase}"
+        key = session_name(item.path, item.type, phase)
         dispatches.append(
             PlannedDispatch(
                 key=key,
@@ -722,6 +1062,7 @@ def plan(
                     merge_target=merge_target,
                     tail=entry.prompt_tail,
                     worktree=action,
+                    is_root=item.path == root,
                 ),
             )
         )
@@ -731,6 +1072,7 @@ def plan(
         terminal=False,
         max_parallel=max_parallel,
         permission_mode=permission_mode,
+        supervise_merges=supervise_merges,
         live=tuple(live),
         slots_free=slots_free,
         dispatches=tuple(dispatches),
@@ -745,10 +1087,6 @@ def plan(
 #: mappings, and no `ConfigEntry` type expresses either. The catalog owns the
 #: two scalars beside it; `validate_rules` owns the rest.
 AUTO_DRIVE_KEY = "workflow.auto_drive"
-
-#: What `default_base` answers when git cannot. The repo's own default branch is
-#: the right answer and this is the fallback, not a preference.
-FALLBACK_BASE = "main"
 
 
 @dataclass(frozen=True, slots=True)
@@ -790,6 +1128,10 @@ class OrchestrateResult:
         return self.plan.permission_mode
 
     @property
+    def supervise_merges(self) -> bool:
+        return self.plan.supervise_merges
+
+    @property
     def slots_free(self) -> int:
         return self.plan.slots_free
 
@@ -808,20 +1150,6 @@ class OrchestrateResult:
     @property
     def blocked(self) -> tuple[BlockedItem, ...]:
         return self.plan.blocked
-
-
-def default_base(repo: Path | None) -> str:
-    """*repo*'s default branch, best-effort; `FALLBACK_BASE` on any failure.
-
-    Uses `graph_works_core.workspace.provenance`'s git runner rather than a second
-    subprocess helper -- one module in this package runs git.
-    """
-    if repo is None:
-        return FALLBACK_BASE
-    out = run_git(repo, "symbolic-ref", "refs/remotes/origin/HEAD")
-    if out is None or not out.strip():
-        return FALLBACK_BASE
-    return out.strip().rsplit("/", 1)[-1]
 
 
 def _routing_rules(layout: WorkspaceLayout) -> Mapping[str, Any]:
@@ -872,6 +1200,50 @@ def _stat_worktrees(items: Sequence[WorkItem], repo_path: str | None = None) -> 
         except OSError:
             stats[path] = None
     return stats
+
+
+def _worktree_inventory(repo: Path | None) -> dict[str, str]:
+    """`branch -> worktree path`, from `git worktree list --porcelain`.
+
+    The key is the branch with its `refs/heads/` prefix stripped, so it is
+    comparable to a `branch_name()` result. Detached and bare entries carry no
+    branch and are omitted -- an entry the planner cannot name is an entry it
+    cannot adopt.
+
+    A `prunable <reason>` line means the worktree's directory is gone but
+    `git worktree prune` hasn't run yet -- porcelain keeps listing it anyway.
+    `prunable` appears *after* the record's `branch` line, so the branch is
+    provisionally inserted and then removed once `prunable` arrives; a blank
+    line separates records and resets tracking for the next one.
+
+    `{}` on any failure, `_stat_worktrees`'s own degrade contract: an absent
+    inventory reproduces the pre-adoption behaviour rather than raising.
+    """
+    if repo is None:
+        return {}
+    out = run_git(repo, "worktree", "list", "--porcelain")
+    if not out:
+        return {}
+    inventory: dict[str, str] = {}
+    current: str | None = None
+    current_branch: str | None = None
+    for line in out.splitlines():
+        if line.startswith("worktree "):
+            current = line[len("worktree ") :].strip()
+            current_branch = None
+        elif line.startswith("branch ") and current is not None:
+            ref = line[len("branch ") :].strip()
+            branch = ref[len("refs/heads/") :] if ref.startswith("refs/heads/") else ref
+            if branch:
+                inventory[branch] = current
+                current_branch = branch
+        elif line.startswith("prunable") and current_branch is not None:
+            del inventory[current_branch]
+            current_branch = None
+        elif not line:
+            current = None
+            current_branch = None
+    return inventory
 
 
 @dataclass(frozen=True, slots=True)
@@ -962,6 +1334,7 @@ def run_orchestrate(
     # above already refuses a hand-edited manifest for the same threat.
     max_parallel = checked_int(layout, "workflow.auto_drive.max_parallel")
     permission_mode = checked_str(layout, "workflow.auto_drive.permission_mode")
+    supervise_merges = checked_bool(layout, "workflow.auto_drive.supervise_merges")
 
     repo_note: str | None = None
     resolved_repo = repo
@@ -982,6 +1355,7 @@ def run_orchestrate(
         auto_drive=rules,
         max_parallel=max_parallel,
         permission_mode=permission_mode,
+        supervise_merges=supervise_merges,
         live=live,
         worktree_exists=_stat_worktrees(items, repo_path),
         held_decisions=_held_decisions(items, bundle.root),
@@ -989,6 +1363,7 @@ def run_orchestrate(
         workspace=str(layout.root),
         default_base=default_base(resolved_repo),
         repo_path=repo_path,
+        worktree_inventory=_worktree_inventory(resolved_repo),
     )
 
     decisions = _resolve_decisions(items, bundle.root, path)
@@ -1003,237 +1378,18 @@ def run_orchestrate(
     )
 
 
-#: The phases whose *completion* produces a results stub. A design or plan
-#: stage leaves an artifact of its own; only the two that touch code leave a
-#: commit range worth summarizing.
-RESULTS_PHASES: frozenset[str] = frozenset({"execute", "finish"})
-
-
-@dataclass(frozen=True, slots=True)
-class StageAdvance:
-    """What one stage completion did: the advance, plus its provenance.
-
-    `results_path` and `pointer_path` are `None` for a dry run, for a refusal,
-    when the stage produced nothing to capture (a non-code phase for
-    `results_path`, a `done` landing for `pointer_path`), and whenever the
-    corresponding capture degraded -- provenance never fails an advance, so
-    "nothing was written" is a normal outcome, not an error.
-
-    `repo_note` carries `resolve_repo`'s note: the reason no code repo was
-    resolved. Named for exactly that and not for a general provenance log --
-    when it is set, every git-derived field above it is `None` for one known
-    reason rather than for an unknown one.
-    """
-
-    outcome: AdvanceOutcome
-    results_path: Path | None = None
-    pointer_path: Path | None = None
-    repo_note: str | None = None
-    application: MutationApplication | None = None
-
-    @property
-    def changed(self) -> bool:
-        return self.outcome.changed
-
-
-def run_stage_advance(
-    layout: WorkspaceLayout,
-    path: str,
-    *,
-    today: date,
-    effort: str | None = None,
-    owner: str | None = None,
-    resolved_in: str | None = None,
-    released_at: date | None = None,
-    worktree: str | None = None,
-    branch: str | None = None,
-    cwd: Path | None = None,
-    repo: Path | None = None,
-    repo_name: str | None = None,
-    start_sha: str | None = None,
-    dry_run: bool = True,
-) -> StageAdvance:
-    """Complete one stage: advance the item and capture what the stage left.
-
-    Worktree provenance has two paths. An explicit `worktree`/`branch` pair is
-    the caller's own resolved `plan()` decision -- main-mode eviction,
-    fork-child, cold start -- never a guess, so it is applied unconditionally
-    and overwrites an already-valid recorded stamp. That is what lets an item
-    be evicted out of a shared main checkout: a stamp that is still a live
-    directory could otherwise never be repointed. Without the pair, provenance
-    falls back to cwd inference under the original conservative guard -- stamp
-    only when the recorded path is unset or gone -- so an advance run from an
-    unrelated cwd cannot silently repoint a live item. Inference also cannot
-    see the main checkout at all (`provenance.worktree_state` answers `None`
-    when `--git-dir` and `--git-common-dir` agree), which is why a main-mode
-    worker is told to pass the pair explicitly.
-
-    `start_sha` is a **caller argument**, not a frontmatter field. The reference
-    implementation stamped a `phase_started_commit` key; adding one here is a
-    schema change this item's spec does not take (it takes exactly two
-    provenance fields, 3.3), so the caller that knows where the phase started
-    supplies it. Without it, no stub is written.
-
-    `repo` defaults to `resolve_repo(layout, repo_name=repo_name)` rather than
-    to the layout's `repo_root`: in a split topology -- the workspace and the
-    code in different git repositories -- the walk-up resolves to the
-    workspace's own repo, and both `worktree_state` and `results_facts` then
-    degrade to `None` without a word. An explicit `repo` wins and skips the
-    config read. `repo_name` selects among several declared repositories and
-    is ignored when `repo` is given.
-
-    `dry_run=True` is okf-io's writer default throughout this workspace: the
-    call plans and writes nothing -- not the page, not the stub, not the
-    pointer.
-    """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    items = load_items(bundle)
-    item = next((candidate for candidate in items if candidate.path == path), None)
-    old_phase = item.phase if item is not None else None
-    repo_note: str | None = None
-    resolved_repo = repo
-    if resolved_repo is None:
-        resolved_repo, repo_note = resolve_repo(layout, repo_name=repo_name)
-
-    stamped_worktree: str | None = None
-    stamped_branch: str | None = None
-    if worktree and branch:
-        stamped_worktree, stamped_branch = worktree, branch
-    elif item is not None and resolved_repo is not None:
-        recorded = item.worktree
-        if not recorded or not Path(recorded).is_dir():
-            detected = provenance.worktree_state(cwd or Path.cwd(), resolved_repo)
-            if detected is not None:
-                stamped_worktree, stamped_branch = detected
-
-    outcome = advance_and_stamp(
-        bundle,
-        path,
-        today=today,
-        effort=effort,
-        owner=owner,
-        resolved_in=resolved_in,
-        released_at=released_at,
-        worktree=stamped_worktree,
-        branch=stamped_branch,
-        dry_run=True,
-    )
-    if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
-        return StageAdvance(outcome=outcome, repo_note=repo_note)
-
-    new_phase = outcome.plan.transition.phase or old_phase
-
-    assert item is not None
-    document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
-    apply_advance(document, outcome.plan)
-    if outcome.stamped is not None and outcome.stamp_title is not None:
-        upsert(document, outcome.stamped, title=outcome.stamp_title)
-        if outcome.plan.sync_plan_table:
-            ensure_plan_row(document, outcome.stamped)
-
-    results_path: Path | None = None
-    result_member: str | None = None
-    result_bytes: bytes | None = None
-    facts_root = _facts_root(item, stamped_worktree, resolved_repo)
-    if (
-        facts_root is not None
-        and start_sha
-        and item is not None
-        and old_phase in RESULTS_PHASES
-        and new_phase != old_phase
-    ):
-        facts = provenance.results_facts(
-            facts_root, phase=old_phase, start_sha=start_sha, paths=item.affects, opened=item.opened
-        )
-        if facts is not None:
-            key = f"{facts.phase}-results"
-            ref = artifact_ref(path, MANAGED_ARTIFACTS[key])
-            result_member = ref.rel
-            result_bytes = render_results(facts).encode("utf-8")
-            upsert(document, ref, title=f"{facts.phase.capitalize()} results")
-
-    page_member = item_page(path).rel
-    page_before = (bundle.root / page_member).read_bytes()
-    writes = [PlannedWrite(page_member, hashlib.sha256(page_before).hexdigest(), document.serialize().encode("utf-8"))]
-    mkdirs: tuple[str, ...] = ()
-    conditions: tuple[DirectoryPrecondition, ...] = ()
-    if result_member is not None and result_bytes is not None:
-        result_path = bundle.root / result_member
-        try:
-            result_before = result_path.read_bytes()
-        except FileNotFoundError:
-            result_before = None
-        writes.append(
-            PlannedWrite(
-                result_member,
-                hashlib.sha256(result_before).hexdigest() if result_before is not None else None,
-                result_bytes,
-            )
-        )
-        parent = Path(result_member).parent.as_posix()
-        mkdirs = (parent,)
-        if not (bundle.root / parent).exists():
-            conditions = (DirectoryPrecondition(parent, None),)
-    mutation = WorkMutationPlan(
-        root=bundle.root,
-        operation="file",
-        path_mapping=MappingProxyType({}),
-        move_plan=None,
-        moves=(),
-        writes=tuple(writes),
-        deletes=(),
-        mkdirs=mkdirs,
-        warnings=(),
-        refusals=(),
-        validate_paths=(path,),
-        directory_preconditions=conditions,
-    )
-    application = apply_mutation(layout, mutation, repo_root=resolved_repo)
-    if application.ok:
-        outcome = replace(outcome, written=True)
-        if result_member is not None:
-            results_path = bundle.root / result_member
-
-    pointer_path: Path | None = None
-    if application.ok and new_phase is not None and new_phase != "done":
-        pointer_path = provenance.write_active_work(layout, path, new_phase, updated=today.isoformat())
-    return StageAdvance(
-        outcome=outcome,
-        results_path=results_path,
-        pointer_path=pointer_path,
-        repo_note=repo_note,
-        application=application,
-    )
-
-
-def _facts_root(item: WorkItem | None, worktree: str | None, repo: Path | None) -> Path | None:
-    """Where the stage's commits actually landed: the worktree this call
-    detected, then the item's recorded one, then the repo. A stub gathered from
-    the main checkout when the work happened in a worktree is a stub of the
-    wrong range."""
-    for candidate in (worktree, item.worktree if item is not None else None):
-        if candidate and Path(candidate).is_dir():
-            return Path(candidate)
-    return repo
-
-
 __all__ = [
     "AUTO_DRIVE_KEY",
     "BLOCKED_KINDS",
     "DISPATCH_COMMAND",
     "DISPATCH_PHASES",
-    "FALLBACK_BASE",
-    "RESULTS_PHASES",
     "ROUTING_VOCABULARIES",
     "WORKSPACE_VAR",
     "BlockedItem",
     "OrchestratePlan",
     "OrchestrateResult",
     "PlannedAdvance",
-    "StageAdvance",
     "branch_name",
-    "default_base",
     "plan",
     "run_orchestrate",
-    "run_stage_advance",
 ]

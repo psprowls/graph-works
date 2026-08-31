@@ -46,10 +46,10 @@ def test_app_uri_shape() -> None:
 
 def test_subpkg_uri_preserves_dotted_path() -> None:
     # Lock: dotted Python import path, NOT slash-separated FS path
-    result = subpkg_uri(RepoContext("local", "agent-research"), "agent-workspace-cli", "graph_wiki_cli.graph_cli")
-    assert result == "subpkg:local/agent-research/agent-workspace-cli/graph_wiki_cli.graph_cli"
-    assert "graph_wiki_cli.graph_cli" in result
-    assert "graph_wiki_cli/graph_cli" not in result
+    result = subpkg_uri(RepoContext("local", "graph-works"), "graph-works-cli", "graph_works_cli.graph_cli")
+    assert result == "subpkg:local/graph-works/graph-works-cli/graph_works_cli.graph_cli"
+    assert "graph_works_cli.graph_cli" in result
+    assert "graph_works_cli/graph_cli" not in result
 
 
 def test_file_uri_preserves_forward_slashes() -> None:
@@ -93,11 +93,11 @@ def test_dependency_uri_npm() -> None:
 @pytest.mark.parametrize(
     "url,expected",
     [
-        ("git@github.com:pat/agent-research.git", ("pat", "agent-research")),
-        ("git@github.com:pat/agent-research", ("pat", "agent-research")),
-        ("https://github.com/pat/agent-research.git", ("pat", "agent-research")),
-        ("https://github.com/pat/agent-research", ("pat", "agent-research")),
-        ("https://github.com/pat/agent-research/", ("pat", "agent-research")),
+        ("git@github.com:pat/graph-works.git", ("pat", "graph-works")),
+        ("git@github.com:pat/graph-works", ("pat", "graph-works")),
+        ("https://github.com/pat/graph-works.git", ("pat", "graph-works")),
+        ("https://github.com/pat/graph-works", ("pat", "graph-works")),
+        ("https://github.com/pat/graph-works/", ("pat", "graph-works")),
         ("https://gitlab.com/group/subgroup/repo", None),
         ("git@gitlab.com:group/subgroup/repo.git", None),
         ("git@gitlab.com:group/subgroup/repo", None),

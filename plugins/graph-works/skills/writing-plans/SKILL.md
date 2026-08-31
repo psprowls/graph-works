@@ -152,7 +152,7 @@ If you find issues, fix them inline. No need to re-review — just fix and move 
 
 ## Execution Handoff
 
-**Pipeline-stage guard — check FIRST.** If your dispatch brief states you are running as the `plan` stage of the graph-works work pipeline (it will contain the line *"STOP after writing the plan — do not run the Execution Handoff"*), then SKIP this entire Execution Handoff section: do **not** call `AskUserQuestion`, do **not** invoke `subagent-driven-development` or `executing-plans`. After Task Persistence, announce that the plan and `.tasks.json` are saved and STOP. Control returns to the `graph-works:workflow` skill, which advances the item and hands off for `/clear` + `/graph-works:next`.
+**Pipeline-stage guard — check FIRST.** If your dispatch brief states you are running as the `plan` stage of the graph-works work pipeline (it will contain the line *"STOP after writing the plan — do not run the Execution Handoff"*), then SKIP this entire Execution Handoff section: do **not** call `AskUserQuestion`, do **not** invoke `subagent-driven-development` or `executing-plans`. After Task Persistence, announce that the plan and `.tasks.json` are saved and STOP. Control returns to the `graph-works:workflow` skill, which advances the item and hands off for `/clear` + `/graph-works:workflow`.
 
 After saving the plan, offer execution choice:
 

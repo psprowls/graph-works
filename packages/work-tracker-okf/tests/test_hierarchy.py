@@ -4,7 +4,8 @@ from work_tracker_okf.graph import cycle_nodes
 from work_tracker_okf.hierarchy import (
     ChildRollup,
     active_nonterminal_descendants,
-    child_gated_node,
+    archive_held_by_ancestor,
+    child_gated,
     child_rollup,
     descend,
     nearest_epic,
@@ -103,9 +104,114 @@ def test_dispatch_helpers_cover_gating_unknown_edges_and_blocked_descent() -> No
     items = (release, feature)
 
     assert unknown_depends_on(items, (edge,)) == {"work/missing": None}
-    assert child_gated_node(release, (feature,))
-    assert not child_gated_node(feature, (make_item("work/done", work_status="resolved"),))
+    assert child_gated(items, release)
+    assert not child_gated(items, feature)
     assert descend(items, "work/unknown").blocked_at == "work/unknown"
     result = descend(items, release.path)
     assert result.leaf is None
     assert result.blocked_at == release.path
+
+
+def test_child_gated_sees_open_grandchildren_beneath_a_terminal_child() -> None:
+    epic = make_item(
+        "work/epic",
+        type="Epic",
+        phase="execute",
+        active_child_paths=("work/epic/children/feat",),
+    )
+    feat = make_item(
+        "work/epic/children/feat",
+        type="Feature",
+        work_status="resolved",
+        parent_path=epic.path,
+        active_child_paths=("work/epic/children/feat/children/gc",),
+    )
+    grandchild = make_item(
+        "work/epic/children/feat/children/gc",
+        type="Bug",
+        work_status="open",
+        parent_path=feat.path,
+    )
+    items = (epic, feat, grandchild)
+
+    assert child_gated(items, epic)
+
+
+def test_child_gated_admits_the_finish_phase_window_for_epics() -> None:
+    epic = make_item(
+        "work/epic",
+        type="Epic",
+        phase="finish",
+        active_child_paths=("work/epic/children/late",),
+    )
+    late = make_item(
+        "work/epic/children/late",
+        type="Bug",
+        work_status="open",
+        parent_path=epic.path,
+    )
+    items = (epic, late)
+
+    assert child_gated(items, epic)
+
+
+def test_a_resolved_child_of_an_open_epic_is_held() -> None:
+    epic = make_item("work/epic-live", type="Epic", work_status="open")
+    child = make_item(
+        "work/epic-live/children/bug-done",
+        work_status="resolved",
+        parent_path=epic.path,
+        ancestor_paths=(epic.path,),
+    )
+
+    assert archive_held_by_ancestor((epic, child), child) is True
+
+
+def test_a_resolved_child_of_a_resolved_epic_is_not_held() -> None:
+    epic = make_item("work/epic-done", type="Epic", work_status="resolved")
+    child = make_item(
+        "work/epic-done/children/bug-done",
+        work_status="resolved",
+        parent_path=epic.path,
+        ancestor_paths=(epic.path,),
+    )
+
+    assert archive_held_by_ancestor((epic, child), child) is False
+
+
+def test_a_root_with_no_ancestor_is_never_held() -> None:
+    root = make_item("work/bug-alone", work_status="resolved")
+
+    assert archive_held_by_ancestor((root,), root) is False
+
+
+def test_an_archived_ancestor_is_skipped_and_the_next_one_decides() -> None:
+    """An archived ancestor is frozen; it neither holds nor releases."""
+    epic = make_item("work/epic-live", type="Epic", work_status="open")
+    feature = make_item(
+        "work/epic-live/children/_archive/feature-old",
+        work_status="resolved",
+        archived=True,
+        parent_path=epic.path,
+        ancestor_paths=(epic.path,),
+    )
+    child = make_item(
+        "work/epic-live/children/_archive/feature-old/children/bug-x",
+        work_status="resolved",
+        archived=True,
+        parent_path=feature.path,
+        ancestor_paths=(epic.path, feature.path),
+    )
+
+    assert archive_held_by_ancestor((epic, feature, child), child) is True
+
+
+def test_an_unknown_ancestor_does_not_hold() -> None:
+    orphan = make_item(
+        "work/epic-missing/children/bug-x",
+        work_status="resolved",
+        parent_path="work/epic-missing",
+        ancestor_paths=("work/epic-missing",),
+    )
+
+    assert archive_held_by_ancestor((orphan,), orphan) is False

@@ -164,6 +164,7 @@ logs.db
 .devt/
 .gpteng/
 .ruff_cache
+.import_linter_cache/
 
 
 # Add any directories, files, or patterns you don't want to be tracked by version control
@@ -183,7 +184,10 @@ worktrees
 .sfdx/
 *.orig
 *.tasks.json
-# Fixture required by scripts/tests/test_migrate_vault_work.py — do not re-ignore.
+# Test fixtures are content, not generated artifacts: the legacy-vault migration
+# suite asserts a `.tasks.json` companion moves alongside its plan, so the file
+# has to be tracked. Without this the fixture is silently uncommitted and the
+# suite passes only in checkouts holding a stale untracked copy.
 !scripts/tests/fixtures/**/*.tasks.json
 .syncthing.*
 

@@ -58,7 +58,7 @@ Three environment variables are set on every child, and nothing else:
 |---|---|
 | `SUBAGENT_EVENT_LOG` | absolute path the child **appends** JSONL events to |
 | `SUBAGENT_REPLY_LOG` | absolute path the child **reads** JSONL replies from |
-| `SUBAGENT_DISPATCH_KEY` | this worker's `PlannedDispatch.key`, `"<slug>#<phase>"` |
+| `SUBAGENT_DISPATCH_KEY` | this worker's `PlannedDispatch.key` — its name, e.g. `gw-execute-feature-x-2f1a9c3d` |
 
 A child that writes no events still settles — see *The reaper* below — so the
 contract is opt-in per capability rather than all-or-nothing.

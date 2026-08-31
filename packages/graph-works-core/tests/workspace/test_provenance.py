@@ -370,3 +370,77 @@ def test_a_subject_carrying_separators_survives_intact(repo):
     _git(repo, "commit", "-m", subject)
     rows = provenance.commits_touching(repo, f"{base}..HEAD", ["in.txt"])
     assert [s for _, s in rows] == [subject]
+
+
+def test_merge_base_finds_the_fork_point(repo, tmp_path):
+    _git(repo, "checkout", "-b", "feature/x")
+    (repo / "b.txt").write_text("two\n", encoding="utf-8")
+    _git(repo, "add", "b.txt")
+    _git(repo, "commit", "-m", "second")
+    base = provenance.merge_base(repo, "main", "HEAD")
+    assert base is not None
+    assert (
+        base
+        == subprocess.run(
+            ["git", "rev-parse", "main"], cwd=repo, capture_output=True, text=True, check=True
+        ).stdout.strip()
+    )
+
+
+def test_merge_base_on_the_base_branch_is_head(repo):
+    # The honest main-mode degrade: an empty range, which `results.render()`
+    # already warns about, rather than a wrong one.
+    assert provenance.merge_base(repo, "main", "HEAD") == provenance.head_sha(repo)
+
+
+def test_merge_base_outside_a_repo_is_none(tmp_path):
+    assert provenance.merge_base(tmp_path, "main", "HEAD") is None
+
+
+def test_merge_base_with_an_unknown_ref_is_none(repo):
+    assert provenance.merge_base(repo, "no-such-branch", "HEAD") is None
+
+
+def test_default_base_falls_back_when_there_is_no_origin(repo):
+    # A local repo with no remote has no `refs/remotes/origin/HEAD`.
+    assert provenance.default_base(repo) == provenance.FALLBACK_BASE
+
+
+def test_default_base_of_no_repo_is_the_fallback():
+    assert provenance.default_base(None) == provenance.FALLBACK_BASE
+
+
+def test_default_base_reads_the_origin_head_symref(repo, tmp_path):
+    _git(repo, "remote", "add", "origin", str(tmp_path / "nowhere"))
+    _git(repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+    assert provenance.default_base(repo) == "trunk"
+
+
+def test_dirty_paths_reports_an_untracked_file_in_scope(repo):
+    (repo / "b.txt").write_text("new\n", encoding="utf-8")
+    assert provenance.dirty_paths(repo, ["b.txt"]) == ("b.txt",)
+
+
+def test_dirty_paths_reports_a_modified_tracked_file_in_scope(repo):
+    (repo / "a.txt").write_text("two\n", encoding="utf-8")
+    assert provenance.dirty_paths(repo, ["a.txt"]) == ("a.txt",)
+
+
+def test_dirty_paths_ignores_dirt_outside_the_declared_scope(repo):
+    (repo / "elsewhere").mkdir()
+    (repo / "elsewhere/x.txt").write_text("new\n", encoding="utf-8")
+    assert provenance.dirty_paths(repo, ["a.txt"]) == ()
+
+
+def test_dirty_paths_declines_an_unscoped_read(repo):
+    (repo / "b.txt").write_text("new\n", encoding="utf-8")
+    assert provenance.dirty_paths(repo, []) is None
+
+
+def test_dirty_paths_degrades_outside_a_repo(tmp_path):
+    assert provenance.dirty_paths(tmp_path, ["a.txt"]) is None
+
+
+def test_dirty_paths_unquotes_a_path_git_would_escape(repo):
+    (repo / "spaced name.txt").write_text("new\n", encoding="utf-8")
+    assert provenance.dirty_paths(repo, ["spaced name.txt"]) == ("spaced name.txt",)

@@ -309,8 +309,7 @@ def _callouts(
         # A blockquote nested in a list item (`- > [!note ...`) is not
         # recognised as a callout attempt: this reads the raw source line, not
         # the blockquote token's own content, so the leading `- ` survives the
-        # lstrip and `first` never starts with `>`. Ported behaviour, matching
-        # `wiki_io/lint/obsidian_render.py`.
+        # lstrip and `first` never starts with `>`.
         if first.startswith(">"):
             first = first[1:].lstrip()
         if not _CALLOUT_ATTEMPT_RE.match(first):

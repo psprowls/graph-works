@@ -146,21 +146,21 @@ def test_format_repo_spine() -> None:
     from code_graph_io.queries import RepoDescription
 
     desc = RepoDescription(
-        name="agent-research",
-        uri="repo://agent-research",
+        name="graph-works",
+        uri="repo://graph-works",
         owner="pat",
         url="git@x",
         default_branch="develop",
         package_count=11,
     )
     human = render.format_repo(desc, fmt="human")
-    assert human.startswith("repository agent-research\n  uri: repo://agent-research")
+    assert human.startswith("repository graph-works\n  uri: repo://graph-works")
     assert "  owner:" in human and "pat" in human
     assert "package_count:" in human and "11" in human
     assert "→ gw graph list --kind package" in human
     assert "→ gw graph list --kind app" in human
     parsed = json.loads(render.format_repo(desc, fmt="json"))
-    assert parsed["uri"] == "repo://agent-research"
+    assert parsed["uri"] == "repo://graph-works"
     assert parsed["attributes"]["package_count"] == 11
 
 

@@ -22,6 +22,7 @@ warn	structure.index-entry-duplicate	work/index.md	work_tracker_okf._rules.struc
 warn	structure.index-entry-missing	work/index.md	work_tracker_okf._rules.structure	generated index region does not list direct item `work/tech-debt-in-progress.md`
 warn	structure.index-entry-non-direct	work/index.md	work_tracker_okf._rules.structure	generated index entry `work/spike-wrong-parent-type/children/feature-accepted-no-plan.md` is not a direct descendant of this lane
 warn	structure.index-entry-stale	work/index.md	work_tracker_okf._rules.structure	generated index entry `work/gone.md` names no work item
+warn	structure.index-entry-unreadable	work/index.md	work_tracker_okf._rules.structure	generated index region line is not a readable entry: '- [Bug: an unbalanced ] in link text](bug-unreadable-entry.md) — open · not started'
 warn	state.archive-eligible	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` is terminal; the item is still under `work/`
 warn	state.resolved-without-ref	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` with no `resolved_in`
 error	structure.children-on-leaf	work/spike-wrong-parent-type.md	work_tracker_okf._rules.structure	`type: Spike` may not own the child lane `work/spike-wrong-parent-type/children`

@@ -51,6 +51,10 @@ stable catalog to the responsible repair.
 - `structure.index-entry-missing`, `structure.index-entry-stale`,
   `structure.index-entry-duplicate`, `structure.index-entry-non-direct` — run
   `gw work regen-index`; never hand-author a filesystem projection.
+- `structure.index-entry-unreadable` — `gw work regen-index` does fix this,
+  but an unreadable line often means someone hand-authored inside the
+  generated region; read the line and understand what it was trying to say
+  before regenerating it away.
 
 ## Targets
 

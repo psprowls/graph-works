@@ -1,9 +1,8 @@
 """File one proposal: resolve the lane, build the renderer, hand off the merge.
 
-The replacement for `wiki_io/file_proposal.py`. Of its 90 lines, the argparse
-shim became `doc_wiki_okf.cli`, the `kind` validation became the lane lookup's
-own `KeyError`, and the `slugify` call moved into `LaneSet.target_for`. What is
-left is the composition, and it is short because the capability does the work.
+Only the composition lives here, and it is short because the capability does
+the work: argument parsing is `doc_wiki_okf.cli`'s, `kind` validation is the
+lane lookup's own `KeyError`, and slugification is `LaneSet.target_for`'s.
 
 **It writes nothing.** A plan is inspectable and inert until the caller applies
 it, which is `okf_ext.proposals`' posture and this inherits it rather than

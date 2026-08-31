@@ -34,15 +34,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from okf_io import load_bundle
-from work_tracker_okf import anchors
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.decisions import ledger_ref
 from work_tracker_okf.hierarchy import nearest_parent
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
-from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
-from work_tracker_okf.vocabulary import SPEC_SOURCE_ID, TERMINAL_STATUSES
+from work_tracker_okf.paths import item_page
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 from graph_works_core.workspace import provenance
+from graph_works_core.workspace.anchor import resolve_anchor, spec_ref
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repo
 
@@ -149,49 +149,6 @@ def _landed_siblings(items: Sequence[WorkItem], item: WorkItem) -> tuple[LandedS
     return tuple(selected.values())
 
 
-def _spec_ref(item: WorkItem) -> str:
-    """*item*'s design spec, bundle-relative.
-
-    `sources[]` first: it is where an adopted or relocated spec is recorded,
-    and the conventional path computed unconditionally would miss it. The
-    `archived=` flag on the fallback is what makes an archived item's spec
-    findable at all — without it the lookup reads the active lane for a page
-    that has moved.
-    """
-    for source in item.sources:
-        if source.id == SPEC_SOURCE_ID and source.resource:
-            return source.resource.lstrip("/")
-    return artifact_ref(item.path, MANAGED_ARTIFACTS[SPEC_SOURCE_ID]).rel
-
-
-def _resolve_anchor(repo: Path | None, spec_path: Path, spec_text: str) -> tuple[str | None, str]:
-    """`(anchor_sha, anchor_source)`. Three arms, decreasing directness.
-
-    The spec's own git history is the anchor whenever the spec is tracked in
-    the repository being diffed. In a split topology the workspace is a
-    separate directory and the spec has no history there at all, so the anchor
-    falls back to the code-repo shas a previous pass stamped into the spec:
-    the head of its most recent `## Reconciled` heading, then its
-    `**Baseline commit:**` line.
-
-    **Every fallback sha is verified with `commit_exists` before use**, so a
-    stale or foreign sha degrades to "no range" rather than producing a bogus
-    one.
-    """
-    if repo is None:
-        return None, "none"
-    tracked = provenance.spec_anchor_commit(repo, spec_path)
-    if tracked:
-        return tracked, "spec-git-history"
-    for candidate, source in (
-        (anchors.last_reconciled_head(spec_text), "last-reconciled-heading"),
-        (anchors.baseline_commit(spec_text), "baseline-commit"),
-    ):
-        if candidate and provenance.commit_exists(repo, candidate):
-            return candidate, source
-    return None, "none"
-
-
 def run_reconcile_context(
     layout: WorkspaceLayout,
     path: str,
@@ -231,12 +188,12 @@ def run_reconcile_context(
     if owner_path is None:
         warnings.append(f"no decision owner for {path!r}; ledger drift unavailable")
 
-    spec_path = bundle.root / _spec_ref(item)
+    spec_path = bundle.root / spec_ref(item)
     spec_text = spec_path.read_text(encoding="utf-8") if spec_path.exists() else ""
     if not spec_text:
         warnings.append(f"no design spec at {spec_path}; nothing to reconcile against")
 
-    anchor, anchor_source = _resolve_anchor(repo, spec_path, spec_text)
+    anchor, anchor_source = resolve_anchor(repo, spec_path, spec_text)
     if anchor is None and repo is not None:
         warnings.append(
             "could not resolve an anchor commit (spec untracked here, no `## Reconciled` heading, "

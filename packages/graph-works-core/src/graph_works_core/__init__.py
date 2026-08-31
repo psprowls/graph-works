@@ -160,11 +160,10 @@ from graph_works_core.orchestrate.commands import (
     OrchestratePlan,
     OrchestrateResult,
     PlannedAdvance,
-    StageAdvance,
     run_orchestrate,
-    run_stage_advance,
 )
 from graph_works_core.orchestrate.commands import plan as orchestrate_plan
+from graph_works_core.orchestrate.stage_advance import StageAdvance, run_stage_advance
 from graph_works_core.query.adapters import LOOP_REGISTRY, REGISTRY
 from graph_works_core.scan.commands import (
     ScanResult,

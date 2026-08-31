@@ -5,13 +5,11 @@ whether that page already exists. The clock is an argument (`today=`, required)
 and the code graph is two optional callables -- `okf_io.validate`'s rule for
 `today=` and this package's rule for its siblings.
 
-`as_data()` returns the dict `wiki_io.ingest_source.build_ingest_brief` returned
-with two documented departures: `word_count` uses corrected computation (the
-legacy formula and test fixtures were internally inconsistent -- this port fixes
-a latent bug rather than reproducing it), and the classification key is
-`source_kind` rather than `source_type`, which is K-A's rename away from the
-collision with OKF's own `type:`. `in_repo_doc` is not here at all: it had no
-production consumer, and K-G deleted it rather than repairing its computation.
+`as_data()`'s dict shape is pinned key-for-key by
+`test_as_data_is_the_legacy_dict`. The classification key is `source_kind`, not
+`source_type`, which is K-A's rename away from the collision with OKF's own
+`type:`. There is no `in_repo_doc` key: it had no production consumer, and K-G
+dropped it rather than repairing its computation.
 """
 
 from __future__ import annotations

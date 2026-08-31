@@ -1,8 +1,7 @@
 # Re-pointing `gw wiki proposals` — the key mapping
 
-**Nothing in this repository re-points `gw wiki proposals`.** Those commands live in
-`agent-research`, whose `graph_wiki_core.commands.proposals` imports `wiki_io.proposals` directly,
-and `/graph-wiki:proposals` keeps working against the old ledger until the cutover epic
+**Nothing in this repository re-points `gw wiki proposals`.** Those commands are not part of this
+package, and `/graph-wiki:proposals` keeps working against the old ledger until the cutover epic
 (`2026-08-11-epic-cutover-live-migration`) does the work. This file is what that epic needs: the
 honest mapping, with the places there is no honest alias called out rather than papered over.
 

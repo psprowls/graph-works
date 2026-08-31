@@ -1,7 +1,6 @@
 """Hardcoded model pricing for Bedrock models. Update manually when AWS changes prices.
 
 Prices are USD per million tokens, current as of 2026-05-14.
-Ported from lattice-evals/pricing.py and extended with Bedrock model IDs.
 
 2026-05-29 additions from bedrock-models-considering.json: new sweep candidates and
 updated judge model (Mistral Large 3). Cache keys omitted for non-Claude Bedrock models.
@@ -19,7 +18,7 @@ class UnknownModelError(KeyError):
 # USD per 1M tokens; verified against AWS pricing page and Anthropic pricing on 2026-05-14.
 # Bedrock non-Claude models (Nova, Qwen) do not support prompt caching — no cache keys.
 PRICES: dict[str, dict[str, float]] = {
-    # Claude models via direct Anthropic API (from lattice-evals port, cache keys included)
+    # Claude models via direct Anthropic API — these support prompt caching, so they carry cache keys.
     "claude-opus-4-7": {
         "input": 15.0,
         "output": 75.0,

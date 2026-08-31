@@ -45,6 +45,15 @@ _ORCA = ("orca", "orchestration")
 #: on a page that already held the answer.
 _RUN_PAGE = 50
 
+#: Orca reports a fully-qualified ref; every consumer of a branch name here
+#: wants the short form.
+_REF_PREFIX = "refs/heads/"
+
+
+def _short_branch(ref: str) -> str:
+    """`refs/heads/psprowls/x` -> `psprowls/x`; anything else, verbatim."""
+    return ref[len(_REF_PREFIX) :] if ref.startswith(_REF_PREFIX) else ref
+
 
 class OrcaBackend:
     """The Orca implementation of `subagents_io.backend.DispatchBackend`."""
@@ -153,7 +162,8 @@ class OrcaSession:
         return unwrap(full, self._run(full))
 
     def _call_top_level(self, argv: Sequence[str]) -> dict[str, Any]:
-        """For `orca terminal …`, which is not an `orchestration` subcommand."""
+        """For top-level `orca …` commands (`terminal`, `worktree`), which
+        are not `orchestration` subcommands and take no `--run`."""
         full = ["orca", *argv, "--json"]
         return unwrap(full, self._run(full))
 
@@ -180,8 +190,13 @@ class OrcaSession:
                 dispatch.prompt,
                 "--task-title",
                 dispatch.key,
+                # One identifier, not two. `--task-title` is load-bearing --
+                # `_refresh_keys` rebuilds the `task_id -> key` ledger by reading
+                # it back out of `task-list` -- and `--display-name` is what a
+                # human reads. Sending anything else here means the string on
+                # screen is not the string anything looks up.
                 "--display-name",
-                f"{dispatch.slug} · {dispatch.phase}",
+                dispatch.key,
             ]
         )
         raw_task_id = (created.get("task") or created).get("id")
@@ -208,12 +223,15 @@ class OrcaSession:
             raise BackendError(f"{self.name}: worker-start for {dispatch.key!r} returned no dispatchId")
         handle = str(raw_handle)
         self._unreleased.add(handle)
+        worktree_path, worktree_branch = self._resolve_worktree(dispatch.worktree, started, handle)
         return WorkerRecord(
             key=dispatch.key,
             handle=handle,
             state=worker_state(started.get("workerState")),
             last_heartbeat_at=None,
             detail=started.get("dispatchStatus"),
+            worktree_path=worktree_path,
+            worktree_branch=worktree_branch,
         )
 
     #: The states that mean a worker might still be talking, and so the ones
@@ -412,6 +430,65 @@ class OrcaSession:
                 self._repo_selector,
             ]
         raise BackendError(f"{self.name}: unknown worktree action {worktree.action!r}")
+
+    #: The two actions where Orca provisions the worktree, and so the only
+    #: ones with anything to read back. `reuse`/`main` point at a checkout
+    #: that already existed before this dispatch.
+    _PROVISIONING_ACTIONS = frozenset({"fork-child", "create-top-level"})
+
+    def _resolve_worktree(
+        self, worktree: WorktreeAction, started: dict[str, Any], handle: str
+    ) -> tuple[str | None, str | None]:
+        """What Orca actually provisioned: `(path, short branch)`.
+
+        Read-back only. Orca's `--name` is a worktree display name and Orca
+        derives the branch from it by its own rule, so the planned and actual
+        names differ routinely — that divergence is data here, never an error,
+        and nothing in this method compares, warns, or corrects.
+
+        Every failure degrades to `None`. `launch()` has already started a
+        real worker by the time this runs, and a read that could undo a write
+        would be the worse bug: `None` means "not learned", which is exactly
+        what happened.
+        """
+        if worktree.action not in self._PROVISIONING_ACTIONS:
+            # Nothing was created, so there is nothing to ask Orca about. The
+            # path is the concrete one `_worktree_flags` just validated; the
+            # branch stays unknown rather than being copied from the plan,
+            # since the plan is the thing this field exists not to trust.
+            return worktree.path, None
+        worktree_id = self._worktree_id(started, handle)
+        if worktree_id is None:
+            return None, None
+        try:
+            shown = self._call_top_level(["worktree", "show", "--worktree", f"id:{worktree_id}"])
+        except OrcaCliError:
+            return None, None
+        row = shown.get("worktree") or {}
+        path = row.get("path")
+        branch = row.get("branch")
+        return (
+            str(path) if path else None,
+            _short_branch(str(branch)) if branch else None,
+        )
+
+    def _worktree_id(self, started: dict[str, Any], handle: str) -> str | None:
+        """The `<repoId>::<path>` id of the worktree this dispatch got.
+
+        The captured `worker-start` response does not carry it and
+        `worker-show`'s `worker` block does, so the start payload is checked
+        first purely so the extra call disappears on the day Orca adds the
+        field — not because any response is known to carry it today.
+        """
+        direct = started.get("worktreeId") or (started.get("worker") or {}).get("worktree_id")
+        if direct:
+            return str(direct)
+        try:
+            shown = self._call_unscoped(["worker-show", "--dispatch", handle])
+        except OrcaCliError:
+            return None
+        found = (shown.get("worker") or {}).get("worktree_id")
+        return str(found) if found else None
 
     def ack(self, event: WorkerEvent) -> None:
         """Acknowledge a delivery, and — on a `WorkerDone` only — settle.

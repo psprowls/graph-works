@@ -1,8 +1,7 @@
 """graph_works_core.hooks -- the `.claude/settings.local.json` hooks merge/remove primitive.
 
-Ports `run_config_hooks` (agent-research's `graph_wiki_core/commands/config.py`,
-lines 139-307) as a typed, sync module generalized off the legacy
-`graph_wiki`/`graph-wiki` naming. Top-level, not under `workspace/`: this
+Typed and sync, and carrying no `graph_wiki`/`graph-wiki` naming. Top-level,
+not under `workspace/`: this
 merges entries into a repo-level Claude Code settings file, unrelated to the
 workspace manifest/layout `workspace/` owns, and never touches a
 `WorkspaceLayout`. Per ADR-0013, `repo_root` is a plain argument -- this

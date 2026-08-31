@@ -1,9 +1,16 @@
 # Patches to vendored upstream files
 
 `plugins/graph-works/` is a verbatim `git subtree` of
-[pcvelz/superpowers](https://github.com/pcvelz/superpowers). Every deliberate divergence from
-upstream gets an entry here. The sync ritual in [`SYNC.md`](./SYNC.md) requires this file to be
-updated after every merge.
+[obra/superpowers](https://github.com/obra/superpowers), vendored at `v6.3.0` (`b36e0829`) per
+ADR-0019. Every deliberate divergence from upstream gets an entry here. The sync ritual in
+[`SYNC.md`](./SYNC.md) requires this file to be updated after every merge.
+
+**Two lineages appear in this file, and they are not interchangeable.** The tree is obra's. The
+*classification* below is keyed to the 2026-06-09 graft, whose base was
+[pcvelz/superpowers](https://github.com/pcvelz/superpowers) `v5.5.0` — a downstream fork of obra —
+and `just audit-delta` still reads its grafted file set from that tag (entry #0). So a bare `v5.5.0`
+or `v6.4.0` here names a pcvelz release, not an obra one; obra releases are named with their SHA.
+Entry #0 has the tag-resolution hazard this creates.
 
 The governing rule for every entry:
 
@@ -71,9 +78,23 @@ here matters as much as the result — it is the recovery path if subtree tracki
 
 | Role | Tree |
 |---|---|
-| **B — base** | `pcvelz/superpowers` **v5.5.0** |
+| **B — base** | `pcvelz/superpowers` **v5.5.0** (`2822989e58fda9c506d0d1cd0a948a983dfa3b02`) |
 | **O — ours** | `agent-research` @ `develop`, `plugins/graph-wiki/` |
-| **T — theirs** | v6.4.0, vendored at `plugins/graph-works` (split `7cb90bfc909442f5bb0d7aa6e39c12f28c925ced`) |
+| **T — theirs** | `pcvelz/superpowers` **v6.4.0**, vendored at `plugins/graph-works` (split `7cb90bfc909442f5bb0d7aa6e39c12f28c925ced`) |
+
+**Both of those tags are pcvelz refs, and that is a live hazard when resolving an obra tag.** The
+`upstream` remote is obra, which publishes neither `v5.5.0` nor `v6.4.0` — they survive here only as
+local objects from the pcvelz-era fetches. Restore them with
+`git fetch https://github.com/pcvelz/superpowers.git --tags` if a clone lacks the base object
+`just audit-delta` needs. The names that *do* exist on both sides are worse: 27 of this repo's 75
+local `v*` tags are pcvelz's and collide with an obra release of the same number, `v6.3.0` among
+them — the local tag is `43765d64` (pcvelz), the vendored obra release is `b36e0829`. `git fetch
+--tags` will not correct an existing tag, so **never resolve an obra release through a local tag
+name**; go through the remote:
+
+```bash
+git ls-remote upstream 'refs/tags/<tag>^{}'
+```
 
 **The evidence.** Each of the 65 grafted files was hashed and scored against every upstream tag by
 exact blob match:
@@ -395,41 +416,49 @@ patch rather than assuming this entry still covers it.
 
 ---
 
-## Entry #5 — The never-grafted upstream files (76 shipping)
+## Entry #5 — The never-grafted upstream files (140 shipping)
 
 *No `audit-delta` block: these files sit outside the grafted roots, so they are outside both of the
-checker's file-level checks. Listing 76 paths that must be hand-edited on every upstream release
+checker's file-level checks. Listing 140 paths that must be hand-edited on every upstream release
 would be friction with no signal.*
 
 **Disposition: keep verbatim.** The 2026-06-09 graft copied only `commands/`, `hooks/` and
-`skills/`. Everything else in upstream v5.5.0 — **87 files** — was never grafted at all: not
-reviewed, not copied, not touched. They arrived here for the first time with the v6.4.0 subtree add,
-and the tree today ships **76** of them (upstream's own file set outside those three roots shrank
-between the two releases).
+`skills/`. Everything else in the graft's base — **87 files** — was never grafted at all: not
+reviewed, not copied, not touched. They arrived here for the first time with the subtree add, and
+the tree today ships **140** files outside those three roots, every one of them obra's at `v6.3.0`
+(`b36e0829`). Obra carries a per-harness plugin surface pcvelz did not, which is most of the growth.
+Three further files out there are ours-side test additions, not upstream's:
+`tests/hooks/test-skill-doc-routing.sh` and `tests/test-entry-point-skills.sh`, both claimed by
+entry #19, and `tests/test-doc-layout-claims.sh`, which no entry claims — `just audit-delta` reports
+it as undocumented divergence.
 
-Every one of the 76 is upstream's, untouched, and therefore merges free forever — **except
-`.claude-plugin/plugin.json`**, which sits in this set but is patched under entry #1 and is
-explicitly *not* covered by the "untouched" claim here.
+These files merge free precisely because nothing of ours is in them — **but this entry no longer
+claims all 140 are untouched, and never claimed `.claude-plugin/plugin.json`** (patched under entry
+#1). A file out here that another entry names is that entry's, not this one's; the checker's
+coverage arithmetic runs over grafted paths only, so nothing mechanically reconciles the two. Before
+treating a file in this set as free, grep this ledger for its path.
 
-These are `README.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md`, `CODE_OF_CONDUCT.md`, `.gitattributes`,
-`.gitignore`, `.pre-commit-config.yaml`, `.version-bump.json`, `package.json`, `docs/`, `tests/`,
-`scripts/`, `assets/`, `.github/`, and `.claude-plugin/marketplace.json`. None of them has ever been
-reviewed by this fork.
+These are `README.md`, `LICENSE`, `AGENTS.md`, `CLAUDE.md`, `GEMINI.md`, `CODE_OF_CONDUCT.md`,
+`RELEASE-NOTES.md`, `.gitattributes`, `.gitignore`, `.pre-commit-config.yaml`, `.version-bump.json`,
+`package.json`, `gemini-extension.json`, `docs/`, `tests/`, `scripts/`, `assets/`, `.github/`, the
+harness-plugin roots (`.agents/`, `.codex-plugin/`, `.cursor-plugin/`, `.devin-plugin/`,
+`.hermes-plugin/`, `.kimi-plugin/`, `.opencode/`, `.pi/`), and `.claude-plugin/marketplace.json`.
+None of them has ever been reviewed by this fork.
 
 **Files that misattribute.** Named here, verified by reading, deliberately **not** acted on:
 
 | File | What it misattributes |
 |---|---|
-| `.github/FUNDING.yml` | Sponsorship handles `github: [pcvelz]` and `buy_me_a_coffee: pcvanvelzen` — a "Sponsor" click on this repo would route money to upstream's maintainer, not this fork. |
+| `.github/FUNDING.yml` | Sponsorship handle `github: [obra]` — a "Sponsor" click on this repo would route money to upstream's maintainer, not this fork. |
 | `.github/ISSUE_TEMPLATE/config.yml` | Support contact link points to `https://discord.gg/35wsABTejz`, upstream's own Discord, as this repo's help channel. |
-| `.claude-plugin/marketplace.json` | `owner.name`/`owner.email` and the listed plugin's `author.name`/`author.email` are all `pcvelz` / `pcvelz@users.noreply.github.com`, and the plugin entry names itself `superpowers-extended-cc` — none of which matches entry #1's patched `plugin.json` (`author.name: "Patrick Sprowls"`, plugin name `graph-works`). |
-| `README.md` | Opens "A community-maintained fork of [obra/superpowers]... specifically for Claude Code users" and describes itself throughout as *Superpowers Extended for Claude Code* — upstream's project identity, with no mention of graph-works or this fork's actual purpose. |
-| `package.json` | `name: "superpowers-extended-cc"` — no `author` or `repository` field to misattribute a person, but the package name itself disagrees with `plugin.json`'s `graph-works`. |
+| `.claude-plugin/marketplace.json` | The marketplace names itself `superpowers-dev`; `owner.name`/`owner.email` and the listed plugin's `author.name`/`author.email` are all `Jesse Vincent` / `jesse@fsck.com`, and the plugin entry names itself `superpowers` at `version` `6.3.0` — none of which matches entry #1's patched `plugin.json` (`author.name: "Patrick Sprowls"`, plugin name `graph-works`), nor the sibling harness manifests `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json`, which *are* patched to the fork's identity — undocumented divergence this ledger does not yet carry an entry for. This is the one row where the inconsistency is internal to the tree rather than merely inherited. |
+| `README.md` | Opens "Superpowers is a complete software development methodology for your coding agents" and describes itself throughout as upstream's project, with no mention of graph-works or this fork's actual purpose. Same for `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and `RELEASE-NOTES.md`. |
+| `package.json` | `name: "superpowers"` — no `author` or `repository` field to misattribute a person, but the package name itself disagrees with `plugin.json`'s `graph-works`. |
 
 **Why flagged and not fixed.** Whether any of this matters depends on the epic's open **Q8** —
 standalone repo versus subtree inside the monorepo. Under *subtree*, none of these files is ever
 served to anyone; `.claude-plugin/plugin.json` is the only one Claude Code reads, and it's already
-correct via entry #1. Editing the other 75 would buy a permanent delete-vs-modify merge tax, on
+correct via entry #1. Editing the rest would buy a permanent delete-vs-modify merge tax, on
 every future upstream release, against a problem — a stray sponsorship link, a wrong Discord invite
 — that may never surface. Under *standalone*, this table is the work-list: every row becomes an edit
 worth making the day the repo goes public on its own. Q8 is unresolved, so the honest move is to
@@ -447,9 +476,9 @@ file: commands/write-plan.md
 -->
 
 **The `D × ·` case.** Our side deleted all three at the graft. Upstream still ships all three,
-unchanged between v5.5.0 and v6.4.0. They are currently **present** in `plugins/graph-works/` —
-the subtree add restored them, and nothing has removed them since. All three are byte-identical to
-upstream's v6.4.0 text today.
+unchanged between v5.5.0 and v6.4.0. They were **present** in `plugins/graph-works/` at the v6.4.0
+subtree add, which restored them byte-identical to that release's text. They are absent from the
+tree today — see the obra supersession at the end of this entry.
 
 **What they do.** Each is a one-line dispatcher: `commands/brainstorm.md` invokes the
 `brainstorming` skill, `commands/execute-plan.md` invokes `executing-plans`, `commands/write-plan.md`
@@ -521,8 +550,10 @@ renamed the skill to `using-workflow` with near-identical content — three chan
 identity: `name: using-superpowers` → `name: using-workflow`, and two prose spots
 ("Superpowers skills override..." → "Graph-wiki's workflow skills override...") swapping the
 product name embedded in running text. Upstream kept the name `using-superpowers` and *modified* the
-body between v5.5.0 and v6.4.0 (`plugins/graph-works/skills/using-superpowers/SKILL.md` today is
-byte-identical to upstream's v6.4.0 — the graft never diverged it).
+body between v5.5.0 and v6.4.0 (when this entry was written,
+`plugins/graph-works/skills/using-superpowers/SKILL.md` was byte-identical to v6.4.0 — the graft
+never diverged it; the file carries the namespace substitution against obra's body today, per the
+reconcile note at the end of this entry).
 
 Git sees a delete on our side and a modify on theirs. Resolved naively — by keeping our side — the
 rename silently carries upstream's **v5.5.0** text forward forever, and every improvement upstream
@@ -1366,23 +1397,6 @@ disposition directs.
 
 <!-- audit-delta
 state: patched
-file: agents/ingestor.md
-file: agents/librarian.md
-file: agents/linter.md
-file: agents/scanner.md
-file: commands/archive.md
-file: commands/auto-drive.md
-file: commands/file.md
-file: commands/ingest.md
-file: commands/lint.md
-file: commands/log.md
-file: commands/next.md
-file: commands/onboard.md
-file: commands/proposals.md
-file: commands/query.md
-file: commands/regen-index.md
-file: commands/scan.md
-file: commands/status.md
 file: hooks/examples/session-end-transcript-capture.sh
 file: skills/auto-drive/SKILL.md
 file: skills/finishing-relay/SKILL.md
@@ -1398,11 +1412,21 @@ file: skills/graph-works/references/page-formats.md
 file: skills/graph-works/references/proposal-disposition.md
 file: skills/graph-works/references/query-workflow.md
 file: skills/graph-works/references/scan-workflow.md
-file: skills/graph-works/references/sidecar-schema.md
 file: skills/graph-works/references/wiki-schema.md
 file: skills/planning-epics/SKILL.md
 file: skills/reconciling-spec/SKILL.md
 file: skills/workflow/SKILL.md
+file: skills/archive/SKILL.md
+file: skills/file/SKILL.md
+file: skills/ingest/SKILL.md
+file: skills/lint/SKILL.md
+file: skills/log/SKILL.md
+file: skills/onboard/SKILL.md
+file: skills/proposals/SKILL.md
+file: skills/query/SKILL.md
+file: skills/regen-index/SKILL.md
+file: skills/scan/SKILL.md
+file: skills/status/SKILL.md
 file: skills/using-superpowers/references/codex-tools.md
 file: skills/using-superpowers/references/copilot-tools.md
 file: skills/using-superpowers/references/gemini-tools.md
@@ -1412,6 +1436,8 @@ file: hooks/skill-doc-routing
 file: tests/hooks/test-skill-doc-routing.sh
 file: tests/pi/test-pi-extension.mjs
 file: PLATFORM.md
+file: tests/test-entry-point-skills.sh
+file: tests/test-doc-layout-claims.sh
 -->
 
 **`PLATFORM.md` — added 2026-08-27** by
@@ -1501,6 +1527,109 @@ upstream ships at any of the three paths.
 
 **On merge.** These seven have no upstream counterpart, so there is nothing to reconcile against on a
 sync — they carry forward unchanged unless this fork itself revises them.
+
+**Amended for the commands/agents collapse — 2026-08-27.** Seventeen ours-side
+paths left this claim set: `agents/{ingestor,librarian,linter,scanner}.md` and
+the thirteen `commands/*.md`. They were not retired patches in the usual sense
+— upstream never had them — but ours-side additions we deleted, because neither
+directory was in `scripts/package-codex-plugin.sh`'s archive pathspec and
+neither is a directory a Codex plugin manifest can declare. Eleven of thirteen
+entry points therefore reached no Codex install at all. Every entry point is now
+a skill under `skills/`, which is the one directory every harness manifest
+declares, so the packaging omission is structurally impossible rather than
+merely fixed. The eleven new `skills/<name>/SKILL.md` files and the
+`tests/test-entry-point-skills.sh` guard that holds the invariant are claimed
+above in their place. The `next` entry point's invocation string became
+`/graph-works:workflow` in the same change — the skill carrying that behaviour
+was already named `workflow`.
+See `work/tech-debt-codex-slash-command-gap`.
+
+**`auto-drive` §3 gained a placement read-back — 2026-08-29.** The coordinator
+previously knew only where it *asked* Orca to put a dispatch. Orca derives every
+branch it creates as `<host git user slug>/slugify(--name)` — unconditionally,
+with no branch control on any of `worker-start`, `orca worktree create`, or
+`orca worktree set` — so the planned `worktree.branch` is never the branch that
+exists, and a literal planned-vs-actual name diff (what
+`work/epic-auto-drive-dispatch-correctness/children/tech-debt-verify-branch-matches-dispatch`
+was originally titled for) would fire on every dispatch ever made. §3 instead
+gained a new step 3, between `worker-start` and the submission probe, that reads
+the landed worktree back — from `worker-start --json`'s `effects[]` when present,
+else `worker-show` plus `worktree show` — prints
+`dispatched <key> -> <path> on <branch>` for every dispatch, and asserts
+placement without consulting a name: path equality for `reuse`/`main`, and
+`git merge-base --is-ancestor <base_branch> HEAD` in the observed worktree for
+`fork-child`/`create-top-level`. A mismatch halts into §4.2's existing failure
+question and skips the probe; a `-N` uniquified worktree is a note, not a halt.
+The old steps 3-5 shifted to 4-6 and §2.1's cross-reference moved with them, and
+step 2's stale `--name`/branch live-validation item was replaced by the settled
+statement. Ours-side file, already claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-verify-branch-matches-dispatch`.
+
+**`workflow` gained the execute-stage commit obligation — 2026-08-30.** Step 3's
+dispatch brief now carries a positive rule for the execute stage, both routes:
+the stage owns its commit, the planned path satisfies it through the plan's own
+final commit task, and the unplanned (no-plan) path commits the stage's full
+output itself. This replaces a *retired prohibition* rather than adding a new
+rule — `workflow.commit_strategy` used to tell implementer subagents explicitly
+not to commit, and its retirement (recorded at the config-surface entry above)
+removed the prohibition without ever adding an obligation, so on the unplanned
+path nothing instructed the worker to commit and nothing observed that it had
+not. Three recorded reproductions each left files dirty in a worktree with zero
+commits while the item advanced to `finish` anyway. Step 5 gained the matching
+reader's half: what the new `uncommitted-work` / `no-commits` refusals at
+`execute -> finish` mean, what an unevaluable-gate warning means, and the
+`gw work advance --return` way home for an item already past the gate. The
+enforcement itself lives in `graph_works_core.orchestrate.stage_advance`, not
+in the skill — a notice with nothing backing it is what failed here. Ours-side
+file, already claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/bug-at-end-commit-no-plan`.
+
+**`workflow` and `auto-drive` gained the execute-coverage obligation — 2026-08-29.**
+`skills/workflow/SKILL.md` and `skills/auto-drive/SKILL.md` — both already listed above; this
+note records what the **spec-coverage** change added to each, so a later reader does not have
+to diff to find out. `workflow` gained an execute-stage brief bullet stating the
+`03-execute-coverage.md` obligation for the *attended* path (which has no dispatch prompt), plus
+a step-4 check that reads the file back. `auto-drive` gained the §4.1 **coverage read**: on an
+`execute` dispatch settling `succeeded`, read that file, surface it verbatim, and — when any
+line is `- [ ]` — raise a three-option question (send back / retry / accept anyway). Both state
+the same obligation the packaged `EXECUTE_TAIL` carries
+(`graph_works_core.workspace.pipeline`), for the two audiences that do not see the dispatch
+prompt. Neither is enforced: no transition is gated on the file. Ours-side files, already
+claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/bug-execute-stage-unverified-against-spec`.
+
+**Amended for the fork ledger reconciliation — 2026-08-29.** Two changes to this entry's claim set,
+neither touching the tree, only the ledger's description of it.
+
+- **Added** `tests/test-doc-layout-claims.sh`. It is an ours-side addition with no upstream
+  counterpart — a fork-authored guard against stale pre-OKF layout claims — which is precisely what
+  this entry is for. `SYNC.md`'s gated-suite table already listed it under "`tests/`
+  (fork-authored)"; the ledger was the only place that had not caught up.
+- **Removed** `skills/graph-works/references/sidecar-schema.md`. `5723793c` deleted the file from the
+  tree. This is **not** a `state: removed` case: that state exists for files under the grafted set
+  (`commands/ hooks/ skills/` at `v5.5.0`, entry #0), where the coverage check reads the base rather
+  than the current tree, so dropping the `file:` line would convert a false "retired patch" into an
+  equally false "unclassified grafted file." `sidecar-schema.md` was checked against that set and is
+  not in it — it was an ours-side addition all along, the same as every other file in this entry, so
+  once the tree does not have it, nothing keeps claiming it. `commands/onboard.md`'s replacement of
+  `bootstrap.md` and `config-init.md`, recorded two amendments above, is exactly this precedent:
+  "one `file:` line replacing two, not a `state: removed` case."
+
+See `work/epic-unforked-plugin-skill-dispatch/children/tech-debt-reconcile-fork-ledger`.
+
+**`workflow` and `archive` gained the ingest-queue and root-only archive rules — 2026-08-30.**
+`skills/workflow/SKILL.md` and `skills/archive/SKILL.md` — both already listed above; this note
+records what changed so a later reader does not have to diff. `workflow`'s Terminal handling step 1
+had claimed the ingestor "archives the source and repoints the pointer"; neither half was ever true
+(`skills/graph-works/references/ingest-workflow.md` is explicit that the original is never moved and
+the item's `sources[]` is never touched), so the step now states what ingest actually does and names
+the new read-only `gw work ingest-queue` as the way to find items an unattended finish never brought
+through this step at all. `archive` gained a **Root-only** section: sweep selects only outermost
+terminal roots, a targeted child under a live ancestor is refused with `ancestor-not-terminal`, and
+archiving a root flattens every descendant into `children/<basename>` with no per-level `_archive`
+lane. The enforcement lives in `work_tracker_okf.archive`, not in the skill. Ours-side files,
+already claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-merge-ingest-root-archive`.
 
 ---
 
@@ -1805,3 +1934,283 @@ fail-open in `hooks/session-start` is what hid four dead notice branches and a b
 unreachable by any runner, since upstream's `package.json` declares no scripts and nothing else named
 the directory — was the one arrangement not worth defending. `tests/pi` is now part of
 `just test-plugin`, so the test either passes or fails the gate.
+
+---
+
+## Entry #26 — the Codex packaging surface
+
+<!-- audit-delta
+state: patched
+file: .agents/plugins/marketplace.json
+file: .codex-plugin/plugin.json
+file: scripts/package-codex-plugin.sh
+file: tests/codex/test-marketplace-manifest.sh
+file: tests/codex/test-package-codex-plugin.sh
+-->
+
+**Why this entry exists.** These five landed across `d67bef63`, `af965b78` and `ea856bae` — the Codex
+identity rename, its monorepo fix, and the entry-point collapse — and none of the three amended this
+ledger. Naming all three commits here is what makes the omission legible as one pattern rather than
+six accidents (a sixth file, `tests/test-doc-layout-claims.sh`, was undocumented for an unrelated
+reason and is claimed under entry #19 below, not here).
+
+**Intent class: identity.** `.agents/plugins/marketplace.json` and `.codex-plugin/plugin.json` carry
+the same rename entry #1 makes for `.claude-plugin/plugin.json`: `superpowers` → `graph-works`, plus
+(for `plugin.json`) `description`, `author`, `homepage`, `repository`, `keywords`, and the five
+`interface` strings (`displayName`, `shortDescription`, `longDescription`, `developerName`,
+`websiteURL`). `version` is upstream's `6.3.0`, unpatched, on the same lineage-honesty grounds entry
+#1 states. `tests/codex/test-marketplace-manifest.sh` carries the matching two-line rename of the
+assertion that pins the plugin entry by name.
+
+**On merge (identity).** Re-apply only the renamed/rewritten strings named above. Take upstream's
+marketplace container `name` (`superpowers-dev`) and `interface.displayName` (`Superpowers Dev`)
+verbatim — those name the *installed namespace* the plugin lives inside, not the plugin itself, and
+`test-marketplace-manifest.sh` asserts both stay untouched. `.codex-plugin/plugin.json`'s `version`
+stays upstream's for the same reason entry #1 gives for `.claude-plugin/plugin.json`'s.
+
+**Intent class: harness-compat.** `scripts/package-codex-plugin.sh` and
+`tests/codex/test-package-codex-plugin.sh` exist because this plugin is a subtree inside a larger
+monorepo and upstream's is a repo root. `[[ -d "$REPO_ROOT/.git" ]]` is false for any subtree
+checkout — there is no `.git` at `plugins/graph-works` — so the check is replaced with
+`git -C "$REPO_ROOT" rev-parse --is-inside-work-tree`; and an unscoped `git status --porcelain` reads
+the whole monorepo's dirt as the plugin's, so it gains `-- .` to scope it to the subtree. Four comment
+lines document the metadata-source requirement (every `skills/` subdirectory needs a
+`skills/<name>/agents/openai.yaml` entry or the run aborts). The test file's dirty-worktree fixture
+clones the monorepo root (not the subtree, which has no `.git` of its own) and locates the plugin
+subtree inside it via `git rev-parse --show-prefix`; its own manifest assertion carries the renamed
+`graph-works` name; and a loop asserts all thirteen entry points reach the archive — the regression
+guard from `work/tech-debt-codex-slash-command-gap`, and a net addition upstream has no counterpart
+for.
+
+**On merge (harness-compat).** Re-apply both fixes on every sync; they do not expire until the
+cutover in epic child 9 deletes the subtree entirely. If upstream's surrounding text has moved, re-
+apply the *intent* — scope every repo-root check and every dirty-tree check to `$REPO_ROOT`
+specifically, not the ambient working directory — not the literal diff.
+
+**See also entry #24**, `scripts/sync-to-codex-plugin.sh`'s Codex-distribution config. That entry
+covers a different script in the same Codex surface; the split is by file, not by design intent, and
+this cross-reference is here so the Codex surface reads as two entries by design rather than as a
+split someone forgot to finish.
+
+---
+
+## Entry #27 — the ask-outcome safety branch and the relay delivery assertion
+
+**Intent class: graph-works pipeline.** Filed as
+`work/epic-auto-drive-dispatch-correctness/children/bug-reply-never-reaches-asking-worker`
+against a correlation defect in Orca's ask/reply path. That defect **does not
+reproduce on orca 1.4.191** — the design stage proved a full round trip live
+(`ask msg_f44dd45e94e5` → `reply` → answer returned, `timedOut: false`) — so
+nothing here attempts a correlation fix. What survives the refutation is the
+*fail-open shape*: a worker whose `ask` times out found nothing in the skill
+telling it what to do, and substituted its own judgement for a human's
+("after ~30 min unanswered, proceeded and committed it"); and a coordinator
+whose `reply` took the generic message branch got `ok: true` either way. Both
+are ours to close, and both are closed here in prose.
+
+**It carries no `file:` line.** `skills/finishing-relay/SKILL.md` and
+`skills/auto-drive/SKILL.md` are both already claimed by entry #19 as ours-side
+additions with no upstream counterpart. `scripts/audit_delta.py:183` collects a
+path named by more than one entry into `duplicated`, and a non-empty
+`duplicated` makes `just audit-delta` non-ok — so this entry follows entry #22's
+precedent exactly: prose only, cross-referencing #19, claiming nothing twice.
+
+**What changed.**
+
+- `skills/finishing-relay/SKILL.md` — R3's "Live-validation item" TODO is struck
+  and replaced with a *Reading the ask outcome* decision table (exit 0 answered /
+  exit 1 `timedOut` / exit 1 `cancelled` / exit 75 `resumeRequired` /
+  `dispatch_inactive`) plus a bounded `--resume` loop (budget 3, 600,000 ms per
+  call, matching the Escalation path's existing ~30-minute window). A spent
+  budget settles to `hold` with the words "no answer received" — never `merge`,
+  `pr` or `discard`. `--resume <message_id>` is a documented flag on
+  `orca orchestration ask`, which is what let the TODO be answered rather than
+  deferred again.
+- `skills/finishing-relay/SKILL.md` (second site) — R4's `discard` confirmation
+  ask carries the identical outcome branch, with silence downgrading to `hold`
+  rather than reading as confirmation; the Escalation path's remaining
+  live-validation item is answered in place (`messages[].body`, for a reply sent
+  by either `reply --id` or §4.4's `send --to dispatch:<id>`).
+- `skills/auto-drive/SKILL.md` — §4.3 now replies with `--json` and asserts
+  `question.status == "answered"` before reporting the relay complete; an absent
+  `question` key means the reply took `orchestration.reply`'s generic
+  message branch and never reached the blocked worker, which the coordinator now
+  says out loud instead of reporting success. The step's old explanation of
+  delivery ("`reply` addresses whatever handle the original message was sent
+  *from*") described that generic branch, not the question-thread branch a
+  `question` actually takes — corrected in the same edit, since that distinction
+  is the whole difference between §4.3 working and §4.4 needing its workaround.
+
+**On merge.** Both files have no upstream counterpart (entry #19) — nothing to
+reconcile on a sync.
+
+---
+
+## Entry #28 — `auto-drive`'s blocker vocabulary, re-synced to the CLI
+
+**Intent class: graph-works pipeline.** `BLOCKED_KINDS` in
+`graph_works_core/orchestrate/commands.py` is a closed vocabulary the coordinator loop reads and
+branches on, and §2.2's list of it had drifted: it omitted `relay-untailed` and
+`worktree-unsupported`, both already emitted, and this change adds two more —
+`worktree-unprovable` and `worktree-ambiguous`, the refusals the planner now returns rather than
+naming a worktree it cannot prove holds the item's work. A coordinator meeting an unlisted kind had
+no defined behaviour, so §2.2 also gains the instruction to treat one as evidence the skill is stale
+and stop, rather than improvising a handling.
+
+**It carries no `file:` line.** `skills/auto-drive/SKILL.md` is already claimed by entry #19 as an
+ours-side addition with no upstream counterpart. `scripts/audit_delta.py:183` collects any path named
+by more than one entry into `duplicated`, and a non-empty `duplicated` makes `just audit-delta`
+non-ok, so a second `file:` claim would turn it red. Entry #22 establishes this convention for
+exactly this situation and this entry follows it.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §2.2 — the `blocked[].kind` list gains `relay-untailed`,
+  `worktree-unsupported`, `worktree-unprovable` and `worktree-ambiguous`, plus a sentence
+  instructing the coordinator to stop on an unlisted kind.
+- `skills/auto-drive/SKILL.md` §2.5 — the "every other kind" parenthetical gains the same four, and
+  the self-resolution prose places both new kinds in the needs-a-human-outside-this-loop group,
+  with one clause each on what the planner actually failed to do.
+
+**Why not `convert-to-sibling`** (the disposition every entry in this ledger must assess, per entry
+#12's precedent). Not applicable: the file has no upstream counterpart to diverge from. It is
+ours-side content under entry #19, and this is further editing of a file that entry already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The only
+maintenance this entry implies is a fork-internal one: if `BLOCKED_KINDS` gains another member,
+§2.2 and §2.5 must gain it in the same change.
+
+---
+
+## Entry #29 — `auto-drive`'s `advances[]` gains a `mode`, for the return-to-execute repair
+
+**Intent class: graph-works pipeline.** `graph_works_core.orchestrate.commands.PlannedAdvance`
+gained a `mode: Literal["advance", "return"]` field: an epic at `finish` reopened by a child filed
+after it left `execute` now plans as a `mode == "return"` advance (a repair) instead of either
+resolving the epic (wrong — its children are not all terminal) or silently dropping the new child
+(the reported bug). §2.2 and §2.4 had no way to describe or act on this distinction.
+
+**It carries no `file:` line**, for the same reason entry #28 gives: `skills/auto-drive/SKILL.md`
+is already claimed by entry #19 as an ours-side addition, and a second `file:` claim would make
+`just audit-delta`'s `duplicated` check non-empty. This entry follows entry #22's/#28's convention.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §2.2 — the `advances[]` bullet gains `mode` (`advance` | `return`),
+  with a one-clause explanation of what `return` means and a forward reference to §2.4.
+- `skills/auto-drive/SKILL.md` §2.4 — branches on `entry.mode`: `return` runs
+  `gw work advance <path> --return` (no `--worktree`/`--branch`, since a return touches no
+  provenance field); `advance` keeps the existing plain-advance behaviour unchanged.
+
+**Why not `convert-to-sibling`.** Not applicable: the file has no upstream counterpart to diverge
+from. It is ours-side content under entry #19, and this is further editing of a file that entry
+already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The only
+fork-internal maintenance this implies: if `PlannedAdvance.mode` gains a third value, §2.2 and §2.4
+must gain it in the same change.
+See `work/epic-auto-drive-dispatch-correctness/children/bug-orchestrate-drops-post-finish-children`.
+
+---
+
+## Entry #30 — `auto-drive` answers a clean child's finish merge itself
+
+**Intent class: graph-works pipeline.** Every child of an epic ends its pipeline at the `finish`
+stage in `relay` mode, and §4.3 mirrored that worker's one `ask` to the human unconditionally — so
+an epic with a dozen children blocked a human a dozen times to collect a dozen foregone `merge`
+answers. The merge target for a non-root child is the epic's *own* integration branch, not a
+release base; assembling the epic is not the review the human is there for, and the review that
+matters happens once, at the root item's own finish stage. §4.3 now answers `merge` itself for that
+one structurally identified case, and mirrors everything else exactly as before.
+
+**It carries no `file:` line**, for the reason entries #22, #28 and #29 give:
+`skills/auto-drive/SKILL.md` is already claimed by entry #19 as an ours-side addition, and
+`scripts/audit_delta.py`'s `duplicated` check turns `just audit-delta` non-ok on a second `file:`
+claim for one path.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §4.3 — a new **step 0** ahead of the mirror step, carrying three
+  guards (`supervise_merges` false; the sending dispatch's `path` is not the plan's own `path`;
+  `merge` is among the question's options), the rule that `pr`/`hold`/`discard` are never
+  auto-answered, a §2.5.1 cross-reference explaining why a standing published policy is not the
+  coordinator guessing an answer, and the one notice line printed per auto-answer. The auto path
+  rejoins the existing steps 2 and 3 unchanged — same `reply --json` call, same landed-assertion.
+  Guard 2's prose also carries a fourth fail-safe clause: when the sending dispatch cannot be
+  resolved to a `dispatches[]`/task-mirror entry with certainty, the coordinator falls through to
+  mirroring rather than guessing — an unattributable question is not a structurally identified
+  case.
+- `skills/auto-drive/SKILL.md` §4.3 opening — "this coordinator only relays it, it does not
+  interpret the question" became false under the above and is restated precisely.
+- `skills/auto-drive/SKILL.md` §4.3 step 4 — the discard-confirmation ask is stated as never
+  auto-answered (it is option-less, so guard 3 excludes it structurally too).
+- `skills/auto-drive/SKILL.md` §2.2 — the field list gains `supervise_merges` (bool, default
+  `false`), new in the `gw work orchestrate --json` payload.
+- `skills/auto-drive/SKILL.md` Wrap-up step 2 — the run summary reports auto-answered merges as
+  their own line item, distinct from human-answered ones.
+- `skills/auto-drive/SKILL.md` Out of scope — the finish-relay bullet is amended so it no longer
+  reads as disclaiming the coordinator half this change adds.
+
+**The core half.** `workflow.auto_drive.supervise_merges` (bool, default `false`) is a new manifest
+key, read via a new `checked_bool` helper, carried on `OrchestratePlan` / `OrchestrateResult` and
+emitted in the orchestrate JSON. `finishing-relay` and every prompt-assembly path
+(`orchestrate/commands.py::_prompt`, `workspace/pipeline.py::RELAY_TAIL_SEED`) are untouched: the
+worker still sends its one `ask`; what changed is who answers it.
+
+**Why not `convert-to-sibling`.** Not applicable: the file has no upstream counterpart to diverge
+from. It is ours-side content under entry #19, and this is further editing of a file that entry
+already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The fork-internal
+maintenance this implies: if the guard set in §4.3 step 0 changes, or if `supervise_merges` is
+renamed or gains a third state, §2.2, §4.3 and the Wrap-up must move together.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-auto-merge-child-finish`.
+
+---
+
+## Entry #31 — one identifier per worker: the dispatch key is a session name
+
+**Intent class: graph-works pipeline.** A dispatched worker had two identifiers and neither was a
+name: `--task-title` carried `<work-path>#<phase>` (104 characters for a nested child) and
+`--display-name` carried a second, cosmetic `<work-path> · <phase>` string that nothing looked up.
+`PlannedDispatch.key` is now a **session name** — `gw-<phase>-<slug>-<8 hex>`, capped at 64
+characters, a sibling of `branch_name`'s output by construction — and both Orca name flags carry
+that one string. The skill's own description of the ledger it derives moves with it.
+
+**It carries no `file:` line**, for the reason entries #22, #28, #29 and #30 give:
+`skills/auto-drive/SKILL.md` is already claimed by entry #19 as an ours-side addition, and
+`scripts/audit_delta.py`'s `duplicated` check turns `just audit-delta` non-ok on a second `file:`
+claim for one path.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §2.1 step 1 — the task-title format is restated as a session name,
+  with the rule that a key is **opaque** (it carries a hash; nothing recovers a path by parsing
+  one), the instruction to match by equality and read `dispatches[].path` for the path, and the
+  hard-cutover note that a Run created under the old format cannot be resumed.
+- `skills/auto-drive/SKILL.md` §2.2 — the `dispatches[].key` field description names the new format
+  and states that the plan is itself the `key -> path` mapping.
+- `skills/auto-drive/SKILL.md` §3 step 1 — `--display-name` takes the same `<key>` as
+  `--task-title`, with the one-identifier rationale.
+- `skills/auto-drive/SKILL.md` §4.1 Coverage read — the phase is still read off the key (second
+  segment), but the **path** is not in the key any more; a stateless stem-match against the current
+  cycle's `dispatches[]` / `advances[]` / `blocked[]` resolves it, and an unmatched stem is reported
+  in one line rather than guessed at.
+
+**The core half.** `graph_works_core.orchestrate.commands` gains `_stable_stem` (extracted from
+`branch_name`, whose output is byte-identical before and after), `session_name`, `SESSION_NAME_MAX`
+and `session_index`. `PlannedDispatch.key` becomes the session name; `slug` still holds the full
+canonical path. The two `--live` call sites that recovered an item by `key.split("#", 1)[0]` are
+rewritten against `session_index`, which drops an ambiguous name and warns on the plan's existing
+`warnings` channel rather than binding to the wrong item. `workflow_orca.backend.launch` sends
+`dispatch.key` to both name flags.
+
+**Why not `convert-to-sibling`.** Not applicable: the file has no upstream counterpart to diverge
+from. It is ours-side content under entry #19, and this is further editing of a file that entry
+already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The fork-internal
+maintenance this implies: if the session-name format or `SESSION_NAME_MAX` changes, §2.1, §2.2, §3
+and §4.1's Coverage read must move in the same change, and so must
+`graph_works_cli`'s `--live` help text and its frozen surface golden.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-session-name-standardization`.

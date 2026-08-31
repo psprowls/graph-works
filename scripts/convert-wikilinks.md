@@ -21,9 +21,9 @@ The vault is a git repo, so review with `git diff` before committing. Always rea
 a dry run first — especially the unresolved list, which is where a vault tells you
 about its dead links.
 
-Run it through `uv run` from the repo root. Unlike `gw_dispatch.py` this script is
-not stdlib-only — it imports `okf_io` for the bundle load, the markdown parse and
-the byte-preserving write — so invoking it directly gets a
+Run it through `uv run` from the repo root. This script is not stdlib-only — it
+imports `okf_io` for the bundle load, the markdown parse and the byte-preserving
+write — so invoking it directly gets a
 `ModuleNotFoundError: No module named 'okf_io'`.
 
 ## Options

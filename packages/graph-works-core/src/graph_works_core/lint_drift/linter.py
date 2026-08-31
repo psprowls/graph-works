@@ -4,12 +4,10 @@
 package's shared fragments plus its own check set, with an optional
 `project_context` block inserted after the role intro (CTX-03).
 
-One block is **re-derived rather than ported**: the stale-claims checks read
-the old `source_path` / `package_path` frontmatter keys, which the rebuild does
-not have. Provenance in OKF v0.2 is native `sources[]`, so that is what the
-prompt names. The consequence is recorded in the design spec's §9 — this
-group's output is not comparable to the reference implementation's, and no
-diff against `agent-research` can check it.
+The stale-claims checks name `sources[]`, not the `source_path` /
+`package_path` frontmatter keys: provenance in OKF v0.2 is native `sources[]`,
+and those keys do not exist here. The consequence is recorded in the design
+spec's §9 — this group's output has no reference output to diff against.
 """
 
 from __future__ import annotations

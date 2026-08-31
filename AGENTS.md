@@ -303,8 +303,7 @@ outside a test asserting the old name is rejected, that reference is stale.)
 
 Work items are driven stage-by-stage with `/graph-works:workflow <path>` (one
 stage per session, fresh context between stages; renamed from
-`/graph-works:next`). `scripts/gw_dispatch.py` automates the plan/execute
-stages in background `claude --bg` sessions — see `scripts/gw-dispatch.md`.
-`scripts/` is repo tooling, excluded from ruff and not part of any package.
+`/graph-works:next`). `scripts/` is repo tooling, excluded from ruff and not
+part of any package.
 
 Feature work runs in git worktrees under `.claude/worktrees/` (gitignored).

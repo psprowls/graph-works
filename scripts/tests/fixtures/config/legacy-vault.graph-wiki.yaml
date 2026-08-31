@@ -1,6 +1,6 @@
 version: 2
 initialized_at: '2026-06-05'
-topic: agent-research
+topic: legacy-vault
 plugins:
 - name: graph-wiki
   installed_version: 0.1.1

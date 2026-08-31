@@ -2,11 +2,10 @@
 `graph_works_core.prompts.project_context` reads for its `## Style` and
 `## Log format` sections.
 
-Ports `workspace_io.render`'s three-case renderer (first render, marker-bounded
-re-render, marker-deleted append) for this package's layout and installer
-roster: the auto block lists the installed verticals by top-level module name
-rather than a `.graph-wiki.yaml` plugin list, since `plan_init(installers=...)`
-is this package's equivalent per-workspace roster.
+Three cases, and no others: first render, marker-bounded re-render, and
+marker-deleted append. The auto block lists the installed verticals by
+top-level module name, since `plan_init(installers=...)` is this package's
+per-workspace roster.
 """
 
 from __future__ import annotations

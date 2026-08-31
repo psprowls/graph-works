@@ -1,8 +1,7 @@
 """One file in, a fact sheet out — and the legacy dict out of `as_data()`.
 
-The parity cases are ported from `wiki-io`'s `test_ingest_source_prep.py`. That
-suite reached a real sqlite code graph to produce an entity match; here the
-matcher is a stub, because the graph is a seam now (design spec §5.2).
+The entity matcher is a stub rather than a real sqlite code graph, because the
+graph is a seam (design spec §5.2).
 """
 
 import json

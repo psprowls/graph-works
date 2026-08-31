@@ -1,6 +1,5 @@
 """`context_seed`'s three-case renderer: first-create, marker refresh, and
-marker-deleted append -- ported from `workspace_io.render`'s own suite for
-this package's layout and installer roster."""
+marker-deleted append."""
 
 from __future__ import annotations
 

@@ -41,8 +41,8 @@ def _split_cells(line: str) -> tuple[str, ...]:
 
     Stripped **structurally** -- one leading and one trailing `|` -- rather
     than by dropping empty cells afterwards, which would also swallow a
-    legitimately empty first or last cell (`wiki_io._split_pipes`'s documented
-    reason). A leading `|` cannot itself be escaped, since nothing precedes
+    legitimately empty first or last cell. A leading `|` cannot itself be
+    escaped, since nothing precedes
     it; a trailing one can, so `\\|` at the end is content, not structure.
 
     Cells are stripped of surrounding whitespace and `\\|` is decoded; the

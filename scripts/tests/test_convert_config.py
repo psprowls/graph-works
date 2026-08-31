@@ -6,7 +6,7 @@ is unaffected -- the arrangement `convert-wikilinks.md` already documents.
 
 Every case is a named regression from the design spec, drawn from the three real
 v2 manifests in `fixtures/config/`. agent-workspace is the conversion target;
-agent-research and mono-repo exist so the drop and refusal paths are exercised
+legacy-vault and mono-repo exist so the drop and refusal paths are exercised
 against `plugin.*`, `state_gate.*` and `.graph-wiki.local.yaml` -- keys
 agent-workspace does not carry.
 """
@@ -62,12 +62,12 @@ def test_reads_the_live_agent_workspace_manifest(tmp_path: Path) -> None:
 def test_local_overlay_wins_over_the_tracked_file(tmp_path: Path) -> None:
     root = workspace(
         tmp_path,
-        "agent-research.graph-wiki.yaml",
-        local="agent-research.graph-wiki.local.yaml",
+        "legacy-vault.graph-wiki.yaml",
+        local="legacy-vault.graph-wiki.local.yaml",
     )
     raw = read_v2(root)
-    # The tracked agent-research file carries no `repo-directory`; the local one does.
-    assert raw["repo-directory"] == "/Users/pat/Personal/agent-research"
+    # The tracked legacy-vault file carries no `repo-directory`; the local one does.
+    assert raw["repo-directory"] == "/Users/pat/Personal/legacy-vault"
     assert raw["state_gate"]["enabled"] is False
 
 
@@ -234,9 +234,9 @@ def test_state_gate_carries_when_present(tmp_path: Path) -> None:
     root.mkdir()
     (root / "wiki").mkdir()
     (root / ".graph-wiki.yaml").write_bytes(
-        (FIXTURES / "agent-research.graph-wiki.yaml").read_bytes()
+        (FIXTURES / "legacy-vault.graph-wiki.yaml").read_bytes()
     )
-    repo = tmp_path / "agent-research"
+    repo = tmp_path / "legacy-vault"
     repo.mkdir()
     conversion = dispose(read_v2(root), root=root, options=Options(repo_path=str(repo)))
     assert by_target(conversion, "state_gate.enabled").value is False

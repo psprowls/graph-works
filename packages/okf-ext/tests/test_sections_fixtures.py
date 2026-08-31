@@ -52,8 +52,8 @@ def test_declarations_need_not_live_inside_the_bundle_they_describe():
 
 def test_the_nine_work_io_kinds_load_as_one_set():
     """The 'cheaper proving ground' work-io §7.6 asked for. Downstream adoption
-    is its own item in `agent-research`, as `tables` did for its three consumer
-    shapes -- this proves the format carries the shape, nothing more."""
+    is its own item, as `tables` did for its three consumer shapes -- this
+    proves the format carries the shape, nothing more."""
     section_set = load_sections(WORK_BODIES)
     assert set(section_set.type_names) == set(WORK_BODY_HEADINGS)
 

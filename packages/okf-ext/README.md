@@ -498,9 +498,8 @@ them would make every future rule import the parser through a rule module.
 
 **Downstream adoption is out of scope here.** The work item's "wire the entity
 lane's file maps and the work lane's plan tables to one implementation" is not
-done in this repository: `wiki-io` and `work-io` live in `agent-research`. This
-package ships the primitive and proves it against vendored samples of all three
-consumer shapes; each lane's adoption is its own item in its own repository.
+done here. This package ships the primitive and proves it against vendored
+samples of all three consumer shapes; each lane's adoption is its own item.
 
 **No lane vocabulary ships.** There is no `PLAN_TABLE` or `FILE_MAP` constant. A
 `TableSpec` is data a caller constructs; shipping one lane's column names in a

@@ -1,28 +1,25 @@
 """The review artifact a proposal carries while it is `proposed`.
 
-`wiki_io.proposals.render_proposal_body`'s seven sections, rebuilt to read
-`sources[]` rather than `origins[]` and injected into
-`okf_ext.proposals.plan_propose` as its `render=`. The capability still computes
-the merge; this still writes the body, and it is called with the merged result.
+Seven sections, reading `sources[]`, injected into
+`okf_ext.proposals.plan_propose` as its `render=`. The capability computes the
+merge; this writes the body, and it is called with the merged result.
 
-Three deliberate differences from the legacy render:
+Three properties worth stating outright:
 
-**Suggested Action derives its verb.** The legacy read `mode: create_new |
-update_existing` out of stored frontmatter. Mode now comes from whether the
-target is already a bundle member, matching the capability's own stance that
-nothing which is not written down can drift from reality.
+**Suggested Action derives its verb.** Mode comes from whether the target is
+already a bundle member rather than from a stored `mode:` frontmatter key,
+matching the capability's own stance that nothing which is not written down can
+drift from reality.
 
-**Links are root-absolute markdown, never wikilinks.** `_wikilink_if_page`
-built `[[sources/...]]`; the vault is converting to `[/sources/...](...)`, and
-no new tooling constructs a wikilink.
+**Links are root-absolute markdown, never wikilinks.** The vault is converting
+to `[/sources/...](...)`, and no new tooling constructs a `[[sources/...]]`.
 
 **Byte-stable by construction.** No clock, no set iteration, no hash-dependent
 ordering -- the precondition the capability's byte-stability guarantee rests on
 once a renderer is injected.
 
 `description` is accepted because `BodyRenderer` declares it and is deliberately
-not rendered: the frontmatter directly above the body already carries it, and
-the legacy artifact this restates carried it there too.
+not rendered: the frontmatter directly above the body already carries it.
 """
 
 from __future__ import annotations

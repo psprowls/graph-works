@@ -18,10 +18,6 @@ FORBIDDEN_RUNTIME_TEXT = (
     "### `kind` (work)",
 )
 PLUGIN_ROOT = ROOT / "plugins" / "graph-works"
-ACTIVE_FILES = (
-    ROOT / "scripts" / "gw_dispatch.py",
-    ROOT / "scripts" / "gw-dispatch.md",
-)
 SOURCE_SUFFIXES = {".json", ".md", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"}
 LEGACY_DATE_WORK_PATH = re.compile(
     r"(?:wiki/)?work/(?:[a-z0-9_.-]+/)*(?:19|20)\d{2}-\d{2}-\d{2}[-/]",
@@ -81,7 +77,6 @@ def _active_files() -> list[Path]:
     )
     return sorted(
         {
-            *ACTIVE_FILES,
             *(path for path in package_files if path.suffix in SOURCE_SUFFIXES),
             *script_files,
             *plugin_files,

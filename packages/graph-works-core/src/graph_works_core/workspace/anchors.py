@@ -45,7 +45,7 @@ from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Protocol, runtime_checkable
+from typing import NoReturn, Protocol, runtime_checkable
 
 from okf_ext.locking import locked
 
@@ -91,6 +91,39 @@ NOFOLLOW_AVAILABLE = hasattr(os, "O_NOFOLLOW")
 DIRECTORY_FSYNC_HONORED = sys.platform != "win32"
 
 
+def _posix_only(symbol: str) -> NoReturn:
+    """Refuse a POSIX-only primitive on a host that does not have it.
+
+    Two jobs in one line. At runtime it turns an `AttributeError` naming a
+    stdlib module into a refusal naming the *tier mistake* that produced it.
+    At type-check time the `NoReturn` is what makes every statement below the
+    call unreachable under `mypy --platform win32`, so the POSIX branch is
+    skipped rather than reported -- the same effect a literal `raise` has, and
+    the mechanism this whole module now leans on.
+    """
+    raise UnsupportedAnchorPlatform(f"{symbol} is POSIX-only and does not exist on win32")
+
+
+def _flock_exclusive(descriptor: int) -> None:
+    """`fcntl.flock(LOCK_EX)`.  The import stays inside the body: a module-scope
+    `import fcntl` here kills `import transactions` on native Windows before
+    argv is parsed, and four tests assert that structurally."""
+    if sys.platform == "win32":
+        _posix_only("fcntl.flock")
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+
+def _flock_release(descriptor: int) -> None:
+    """`fcntl.flock(LOCK_UN)`.  See `_flock_exclusive`."""
+    if sys.platform == "win32":
+        _posix_only("fcntl.flock")
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
 def nofollow_flag() -> int:
     """`O_NOFOLLOW` where the platform has it, `0` where it does not.
 
@@ -100,14 +133,33 @@ def nofollow_flag() -> int:
     and refuses a link explicitly.  That is weaker: a check, not a kernel
     guarantee, so a swap between the check and the syscall is not caught.
     ADR-0042 records this as the tier's largest security difference.
+
+    This one degrades rather than refusing, unlike `directory_flags` below,
+    because a real replacement exists.  The `sys.platform` guard is what lets
+    `mypy` skip the `os.O_NOFOLLOW` reference on a win32 pass;
+    `NOFOLLOW_AVAILABLE` is a `bool` and narrows nothing.
     """
+    if sys.platform == "win32":
+        return 0
     return os.O_NOFOLLOW if NOFOLLOW_AVAILABLE else 0
 
 
 def directory_flags() -> int:
-    # os.O_DIRECTORY is POSIX-only and unguarded here on purpose: this
-    # function is only ever called from _PosixAnchor, and Task 5's selector
-    # means a Windows run never reaches it.
+    """Open flags for a directory descriptor on the strong tier.
+
+    Refuses rather than degrading: there is no Windows substitute for a
+    directory descriptor, and a caller that reaches this has landed on
+    `_PosixAnchor` by mistake -- almost always a test forcing
+    `platform_name="linux"` on a Windows host.  Saying so is worth more than
+    `AttributeError: module 'os' has no attribute 'O_DIRECTORY'`, which is
+    what 96 failures in one Windows run looked like.
+
+    The guard replaced a comment claiming the omission was safe because
+    "a Windows run never reaches it".  True of production and silent about
+    type-checking, which was exactly the gap.
+    """
+    if sys.platform == "win32":
+        _posix_only("os.O_DIRECTORY")
     flags = os.O_RDONLY | os.O_DIRECTORY
     if NOFOLLOW_AVAILABLE:
         flags |= os.O_NOFOLLOW
@@ -388,19 +440,17 @@ class _PosixAnchor:
         immune to the path being swapped underneath -- which is why this does
         not route through any path-based lock helper.
         """
-        import fcntl  # POSIX-only, imported at the point of use
-
         if not stat.S_ISDIR(self.self_stat().st_mode):
             raise NotADirectoryError("bundle root descriptor is not a directory")
-        locked = False
+        held = False
         try:
-            fcntl.flock(self.descriptor, fcntl.LOCK_EX)
-            locked = True
+            _flock_exclusive(self.descriptor)
+            held = True
             yield
         finally:
-            if locked:
+            if held:
                 with suppress(OSError):
-                    fcntl.flock(self.descriptor, fcntl.LOCK_UN)
+                    _flock_release(self.descriptor)
 
     @contextmanager
     def lock_file(self, name: str, *, assert_identity: bool) -> Iterator[None]:
@@ -409,26 +459,24 @@ class _PosixAnchor:
         `assert_identity=False` is exercised only by unit tests; the engine
         always passes `True` (see `transactions._executor_lock:275`).
         """
-        import fcntl  # POSIX-only, imported at the point of use
-
         descriptor = os.open(
             name,
             os.O_RDWR | os.O_CREAT | nofollow_flag(),
             0o600,
             dir_fd=self.descriptor,
         )
-        locked = False
+        held = False
         try:
             require_regular_file(descriptor, "executor lock")
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
-            locked = True
+            _flock_exclusive(descriptor)
+            held = True
             if assert_identity:
                 _assert_regular_entry_identity(self, name, descriptor, "executor lock")
             yield
         finally:
-            if locked:
+            if held:
                 with suppress(OSError):
-                    fcntl.flock(descriptor, fcntl.LOCK_UN)
+                    _flock_release(descriptor)
             os.close(descriptor)
 
     # -- tier contract --------------------------------------------------------
@@ -757,14 +805,24 @@ class _WindowsAnchor:
         landed `Anchor` never wrapped file descriptors.  `O_NOFOLLOW` is
         already absent from `flags` here via `nofollow_flag()` -- see Task 9.
 
-        Always ORs in `os.O_BINARY`: every caller in this engine reads and
-        writes raw bytes it already encoded itself, but the Windows CRT
+        ORs in `os.O_BINARY` **on Windows**: every caller in this engine reads
+        and writes raw bytes it already encoded itself, but the Windows CRT
         defaults a descriptor opened without `O_BINARY` to *text* mode, which
         silently rewrites every `\\n` byte in an `os.write` call to `\\r\\n` --
         corrupting content no caller here asked to have translated, with no
         exception raised to say so.
+
+        The `sys.platform` guard is not cosmetic.  `os.O_BINARY` exists only
+        on Windows, so an unconditional reference broke this method on every
+        POSIX host -- where the weak tier is *simulated* for the whole of
+        D-001's cross-tier coverage.  It is the exact mirror of the
+        `O_DIRECTORY` defect, in the opposite direction, and it stayed
+        invisible for the same reason: a one-platform type gate.
         """
-        return os.open(self._revalidate() / name, flags | os.O_BINARY, mode)
+        target = self._revalidate() / name
+        if sys.platform == "win32":
+            return os.open(target, flags | os.O_BINARY, mode)
+        return os.open(target, flags, mode)
 
     def chmod_child_directory(self, name: str, mode: int) -> None:
         """chmod a child directory.

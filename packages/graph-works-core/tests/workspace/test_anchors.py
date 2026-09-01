@@ -341,3 +341,27 @@ def test_workspace_engine_imports_with_fcntl_absent(monkeypatch: pytest.MonkeyPa
         monkeypatch.delitem(sys.modules, name, raising=False)
     monkeypatch.setitem(sys.modules, "fcntl", None)  # a None entry makes `import fcntl` raise
     importlib.import_module("graph_works_core.workspace.transactions")
+
+
+def test_directory_flags_refuses_by_name_where_o_directory_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`AttributeError: module 'os' has no attribute 'O_DIRECTORY'` is what 96
+    Windows test failures looked like. A named refusal says which primitive is
+    missing and which tier the caller landed on by mistake."""
+    monkeypatch.setattr(anchors.sys, "platform", "win32", raising=False)
+    with pytest.raises(anchors.UnsupportedAnchorPlatform, match="O_DIRECTORY"):
+        anchors.directory_flags()
+
+
+def test_nofollow_flag_is_zero_where_the_kernel_has_no_o_nofollow(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`nofollow_flag` degrades to 0 rather than refusing -- unlike
+    `directory_flags` -- because `_WindowsAnchor.open_child` supplies a real
+    (weaker) replacement check. ADR-0042 records the difference."""
+    monkeypatch.setattr(anchors.sys, "platform", "win32", raising=False)
+    assert anchors.nofollow_flag() == 0
+
+
+def test_flock_helpers_refuse_by_name_where_fcntl_is_absent(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(anchors.sys, "platform", "win32", raising=False)
+    for helper in (anchors._flock_exclusive, anchors._flock_release):
+        with pytest.raises(anchors.UnsupportedAnchorPlatform, match=r"fcntl\.flock"):
+            helper(0)

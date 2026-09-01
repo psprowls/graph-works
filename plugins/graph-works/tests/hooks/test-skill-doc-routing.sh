@@ -100,6 +100,10 @@ assert_output() {
     local description="$1" shape="$2" context_mode="$3" contains="$4"
     local not_contains="$5" sysmsg_mode="$6" sysmsg_contains="$7" output="$8"
 
+    # MSYS rewrites POSIX-looking env values on their way into a native
+    # Windows process, so node would receive C:/Users/.../Temp/... while the
+    # hook output under test still says /tmp/... . Keep both sides in the
+    # shell's vocabulary. Ignored on POSIX.
     if printf '%s' "$output" | \
         EXPECT_SHAPE="$shape" \
         EXPECT_CONTEXT="$context_mode" \
@@ -107,6 +111,7 @@ assert_output() {
         EXPECT_NOT_CONTAINS="$not_contains" \
         EXPECT_SYSMSG="$sysmsg_mode" \
         EXPECT_SYSMSG_CONTAINS="$sysmsg_contains" \
+        MSYS2_ENV_CONV_EXCL='EXPECT_CONTAINS;EXPECT_NOT_CONTAINS;EXPECT_SYSMSG_CONTAINS' \
         node -e '
 const fs = require("fs");
 

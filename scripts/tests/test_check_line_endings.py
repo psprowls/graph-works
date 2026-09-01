@@ -67,7 +67,7 @@ def test_an_unguarded_crlf_script_is_reported(tmp_path: Path) -> None:
 
 def test_the_same_files_are_clean_once_the_blanket_rule_applies(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8")
+    (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8", newline="")
     _write_crlf(root / "run.sh", "#!/usr/bin/env bash\necho hi\n")
     _commit_crlf_as_is(root)
 
@@ -77,7 +77,7 @@ def test_the_same_files_are_clean_once_the_blanket_rule_applies(tmp_path: Path) 
 def test_a_crlf_file_under_an_allowlisted_text_prefix_is_clean(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / ".gitattributes").write_text(
-        "packages/okf-io/tests/fixtures/** -text\n", encoding="utf-8"
+        "packages/okf-io/tests/fixtures/** -text\n", encoding="utf-8", newline=""
     )
     _write_crlf(root / "packages/okf-io/tests/fixtures/edge/crlf.md", "line\n")
     _commit_crlf_as_is(root)
@@ -88,7 +88,7 @@ def test_a_crlf_file_under_an_allowlisted_text_prefix_is_clean(tmp_path: Path) -
 def test_a_crlf_file_under_a_non_allowlisted_text_prefix_is_reported(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / ".gitattributes").write_text(
-        "some/other/tree/** -text\n", encoding="utf-8"
+        "some/other/tree/** -text\n", encoding="utf-8", newline=""
     )
     _write_crlf(root / "some/other/tree/crlf.md", "line\n")
     _commit_crlf_as_is(root)
@@ -105,7 +105,7 @@ def test_a_binary_declared_asset_outside_the_allowlist_is_not_a_violation(tmp_pa
     assertion 2 exists for, and must not be flagged just for living outside
     the fixture-tree allowlist."""
     root = _repo(tmp_path)
-    (root / ".gitattributes").write_text("*.png binary\n", encoding="utf-8")
+    (root / ".gitattributes").write_text("*.png binary\n", encoding="utf-8", newline="")
     (root / "icon.png").write_bytes(b"\x89PNG\r\n\x1a\n" + b"binarydata")
     _commit_crlf_as_is(root)
 
@@ -115,9 +115,11 @@ def test_a_binary_declared_asset_outside_the_allowlist_is_not_a_violation(tmp_pa
 def test_an_empty_file_and_an_allowlisted_binary_file_are_both_clean(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     (root / ".gitattributes").write_text(
-        "* text=auto eol=lf\npackages/okf-io/tests/fixtures/** -text\n", encoding="utf-8"
+        "* text=auto eol=lf\npackages/okf-io/tests/fixtures/** -text\n",
+        encoding="utf-8",
+        newline="",
     )
-    (root / "empty.txt").write_text("", encoding="utf-8")
+    (root / "empty.txt").write_text("", encoding="utf-8", newline="")
     (root / "packages/okf-io/tests/fixtures").mkdir(parents=True)
     (root / "packages/okf-io/tests/fixtures/blob.bin").write_bytes(b"\x00\x01\x02binary")
     _commit_crlf_as_is(root)
@@ -135,7 +137,7 @@ def test_main_exits_nonzero_and_reports_on_a_violation(tmp_path: Path) -> None:
 
 def test_main_exits_zero_on_a_clean_tree(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8")
+    (root / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8", newline="")
     _write_crlf(root / "run.sh", "#!/usr/bin/env bash\necho hi\n")
     _commit_crlf_as_is(root)
 

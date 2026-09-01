@@ -45,8 +45,8 @@ def make_repo(tmp_path: Path) -> Path:
     run("init", "-q", "-b", "main", str(repo), cwd=tmp_path)
     run("config", "user.email", "t@example.com", cwd=repo)
     run("config", "user.name", "T", cwd=repo)
-    (repo / "justfile").write_text("default:\n")
-    (repo / PREFIX / "SKILL.md").write_text("vendored\n")
+    (repo / "justfile").write_text("default:\n", encoding="utf-8", newline="")
+    (repo / PREFIX / "SKILL.md").write_text("vendored\n", encoding="utf-8", newline="")
     run("add", "-A", cwd=repo)
     run("commit", "-qm", "root", cwd=repo)
     return repo
@@ -55,7 +55,7 @@ def make_repo(tmp_path: Path) -> Path:
 def add_squash(repo: Path, split: str, subject: str) -> str:
     """A commit carrying the subtree trailers, as `git subtree` writes them."""
     message = f"{subject}\n\ngit-subtree-dir: {PREFIX}\ngit-subtree-split: {split}\n"
-    (repo / PREFIX / "SKILL.md").write_text(f"vendored {split[:7]}\n")
+    (repo / PREFIX / "SKILL.md").write_text(f"vendored {split[:7]}\n", encoding="utf-8", newline="")
     run("add", "-A", cwd=repo)
     run("commit", "-qm", message, cwd=repo)
     return run("rev-parse", "HEAD", cwd=repo)
@@ -66,7 +66,9 @@ def write_sync(repo: Path, sha: str) -> None:
     (repo / "plugins" / "SYNC.md").write_text(
         "# Sync\n\n## Merge ledger\n\n| Date | Tag | Split | Merge |\n"
         "|---|---|---|---|\n"
-        f"| 2026-08-17 | v6.3.0 | `{sha}` | `deadbeef` |\n"
+        f"| 2026-08-17 | v6.3.0 | `{sha}` | `deadbeef` |\n",
+        encoding="utf-8",
+        newline="",
     )
 
 

@@ -56,7 +56,7 @@ def page(tmp_path: Path, *blocks: str) -> str:
     for block in blocks:
         body.append(f"### {block.splitlines()[0].partition(': ')[2]}\n\n<!-- cli-contract\n{block}\n-->")
     path = tmp_path / "contract.md"
-    path.write_text("\n\n".join(body), encoding="utf-8")
+    path.write_text("\n\n".join(body), encoding="utf-8", newline="")
     return str(path)
 
 
@@ -65,7 +65,7 @@ def tree(tmp_path: Path, **files: str) -> str:
     for name, text in files.items():
         target = root / name.replace("__", "/")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+        target.write_text(text, encoding="utf-8", newline="")
     root.mkdir(parents=True, exist_ok=True)
     return str(root)
 
@@ -139,6 +139,7 @@ def test_the_prose_example_blocks_are_not_verbs(tmp_path, capsys):
     path.write_text(
         "## How to read an entry\n\n<!-- cli-contract\nverb: work example-verb\nflags: --owner\n-->\n",
         encoding="utf-8",
+        newline="",
     )
     code, out = run_main(capsys, contract=str(path))
     assert code == 0

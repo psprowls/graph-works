@@ -103,7 +103,13 @@ def test_posix_anchor_opens_creates_and_lists_children(tmp_path: Path) -> None:
         anchor.close()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="constructs _PosixAnchor, which needs os.O_DIRECTORY")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "open_anchor() with no platform_name defaults to the host tier; on Windows that's "
+        "_WindowsAnchor, whose symlink() always refuses"
+    ),
+)
 def test_posix_anchor_entry_operations_cover_links_unlink_and_identity(tmp_path: Path) -> None:
     (tmp_path / "payload").write_text("bytes", encoding="utf-8")
     anchor = anchors.open_anchor(tmp_path)
@@ -137,7 +143,13 @@ def test_posix_anchor_open_file_returns_a_plain_descriptor(tmp_path: Path) -> No
         anchor.close()
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="constructs _PosixAnchor, which needs os.O_DIRECTORY")
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "open_anchor() with no platform_name defaults to the host tier; on Windows that's "
+        "_WindowsAnchor, whose chmod_child_directory only sets NTFS's read-only bit, not POSIX mode bits"
+    ),
+)
 def test_posix_anchor_chmods_a_child_directory(tmp_path: Path) -> None:
     (tmp_path / "child").mkdir(mode=0o755)
     anchor = anchors.open_anchor(tmp_path)
@@ -213,7 +225,6 @@ def test_open_absolute_anchor_rejects_a_relative_path_and_walks_an_absolute_one(
         anchors.open_absolute_anchor(tmp_path / "absent")
 
 
-@pytest.mark.skipif(sys.platform == "win32", reason="constructs _PosixAnchor, which needs os.O_DIRECTORY")
 def test_exclusive_lock_refuses_a_descriptor_that_is_not_a_directory(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_text("x", encoding="utf-8")

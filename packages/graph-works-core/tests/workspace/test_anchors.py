@@ -434,6 +434,10 @@ def test_set_mode_uses_the_descriptor_where_os_fchmod_exists(tmp_path: Path) -> 
     assert not after & stat.S_IWRITE
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32" and sys.version_info < (3, 13),
+    reason="the fallback branch is taken there, so the path is resolved by design",
+)
 def test_set_mode_does_not_resolve_the_path_when_the_descriptor_branch_is_used(tmp_path: Path) -> None:
     """Finding 3: `set_mode`'s path argument may be a lazy callable, and the
     descriptor (`os.fchmod`) branch must never call it -- calling it eagerly

@@ -103,7 +103,8 @@ $ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc12
 ## Testing
 
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests -v
-    uv run --package graph-works-cli mypy --strict packages/graph-works-cli/src
+    uv run --package graph-works-cli mypy --strict --platform linux packages/graph-works-cli/src
+    uv run --package graph-works-cli mypy --strict --platform win32 packages/graph-works-cli/src
 
 ## Configuration
 

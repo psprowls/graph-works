@@ -87,7 +87,8 @@ Every other package resolves its own dependency closure and runs under
 ```bash
 uv run --package graph-works-cli pytest packages/graph-works-cli/tests -k work
 uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests
-uv run --package code-graph-io mypy --strict packages/code-graph-io/src
+uv run --package code-graph-io mypy --strict --platform linux packages/code-graph-io/src
+uv run --package code-graph-io mypy --strict --platform win32 packages/code-graph-io/src
 ```
 
 `uv run mypy --strict` on its own only resolves the root's dependencies —

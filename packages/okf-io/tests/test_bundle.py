@@ -224,6 +224,10 @@ def test_bundle_walk_is_iterative_beyond_the_python_recursion_limit(tmp_path):
     assert "/".join((*parts, "leaf")) in loaded.concepts
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="opens a directory descriptor with os.O_DIRECTORY, which does not exist on Windows",
+)
 def test_descriptor_rooted_load_matches_path_load_and_leaves_caller_fd_open(tmp_path):
     write(tmp_path, "concept.md", CONCEPT)
     write(tmp_path, "nested/index.md", "# Nested\n")
@@ -266,6 +270,10 @@ def test_descriptor_rooted_load_rejects_a_non_directory_without_closing_it(tmp_p
         os.close(descriptor)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="opens a directory descriptor with os.O_DIRECTORY, which does not exist on Windows",
+)
 def test_descriptor_rooted_per_entry_lstat_failure_matches_path_classification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -304,6 +312,10 @@ def test_descriptor_rooted_per_entry_lstat_failure_matches_path_classification(
         os.close(descriptor)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="opens a directory descriptor with os.O_DIRECTORY, which does not exist on Windows",
+)
 def test_descriptor_rooted_follow_stat_failure_matches_path_symlink_classification(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -343,6 +355,10 @@ def test_descriptor_rooted_follow_stat_failure_matches_path_symlink_classificati
         os.close(descriptor)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="opens a directory descriptor with os.O_DIRECTORY, which does not exist on Windows",
+)
 def test_descriptor_rooted_file_open_failure_matches_path_unreadable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -511,3 +527,16 @@ def test_load_wires_a_real_collision_into_the_public_canonical_collisions_field(
 
     cid = f"concepts/{_NFC}.md"
     assert loaded.canonical_collisions == {cid: (f"concepts/{_NFD}.md", f"concepts/{_NFC}.md")}
+
+
+def test_descriptor_rooted_open_refuses_on_windows_rather_than_reporting_unreadable(monkeypatch):
+    """The refusal must NOT be an `OSError`.
+
+    `_files_at` catches `OSError` from this helper and records it in
+    `unreadable`, so an `OSError` here would turn "this platform has no
+    `O_DIRECTORY`" into "this directory could not be read" -- a silent,
+    plausible-looking wrong answer for every member of the bundle.
+    """
+    monkeypatch.setattr(bundle.sys, "platform", "win32", raising=False)
+    with pytest.raises(NotImplementedError, match="O_DIRECTORY"):
+        bundle._open_relative_directory(0, "")

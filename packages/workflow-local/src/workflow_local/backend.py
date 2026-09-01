@@ -402,6 +402,14 @@ class LocalSession:
                 break
             time.sleep(0.02)
         else:
+            if sys.platform == "win32":
+                # Unreachable: `LocalBackend` refuses win32 at construction with a
+                # BackendError naming workflow-orca. Narrowed anyway, because the
+                # type gate now checks both platform arms from either host and an
+                # unreachable line is still a checked line -- `signal.SIGKILL` does
+                # not exist here, and the `SIGTERM` above is already the hard kill
+                # that `TerminateProcess` gives.
+                return
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
         if proc is not None:

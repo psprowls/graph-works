@@ -37,4 +37,4 @@ base="$root/.superpowers/sdd"
 dir="$base/$slug"
 mkdir -p "$dir"
 printf '*\n' > "$base/.gitignore"
-cd "$dir" && pwd
+printf '%s\n' "$dir"

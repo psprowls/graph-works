@@ -241,6 +241,7 @@ def test_a_child_anchor_inherits_the_long_path_answer(tmp_path: Path) -> None:
         anchor.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs the strong tier, which needs os.O_DIRECTORY")
 def test_refused_members_is_empty_on_the_strong_tier(tmp_path: Path) -> None:
     anchor = anchors.open_anchor(tmp_path, platform_name="linux")
     try:
@@ -419,6 +420,13 @@ def test_lock_file_serializes_the_executor_lock(tmp_path: Path) -> None:
         anchor.close()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "swaps the lock file's inode while held via unlink+recreate; Windows' mandatory locking "
+        "raises PermissionError on the unlink of a locked, open file, unlike POSIX advisory locking"
+    ),
+)
 def test_lock_file_detects_a_swapped_lock_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """`assert_identity=True` is what the engine always passes.  Parity with
     the POSIX arm's `_assert_regular_entry_identity` call: the file is
@@ -466,6 +474,7 @@ def test_the_windows_tier_still_refuses_a_symlinked_ancestor_without_o_nofollow(
         anchor.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs the strong tier, which needs os.O_DIRECTORY")
 def test_directory_fsync_is_honored_only_on_the_strong_tier(tmp_path: Path) -> None:
     posix = anchors.open_anchor(tmp_path, platform_name="linux")
     windows = anchors.open_anchor(tmp_path, platform_name="win32")
@@ -503,6 +512,7 @@ def test_an_internal_moved_symlink_is_accepted_on_the_windows_tier(tmp_path: Pat
         anchor.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs the strong tier, which needs os.O_DIRECTORY")
 def test_both_tiers_agree_on_the_same_projection(tmp_path: Path) -> None:
     """The strongest form of this test: the two anchors must not disagree
     about whether a given symlink escapes."""
@@ -521,6 +531,7 @@ def test_both_tiers_agree_on_the_same_projection(tmp_path: Path) -> None:
         windows.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs the strong tier, which needs os.O_DIRECTORY")
 def test_both_tiers_agree_on_the_same_projection_when_the_target_exists(tmp_path: Path) -> None:
     """Same claim as above, but for the `.resolve(strict=True)` SUCCESS arm.
 
@@ -595,6 +606,10 @@ def test_the_strong_tier_refuses_no_plan_shapes() -> None:
     assert tier.nofollow_protection is True
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="the constants read the real host's sys.platform; this check is meaningful on a POSIX host only",
+)
 def test_the_posix_tier_record_traces_to_the_module_constants_it_claims_to_mirror() -> None:
     """`DurabilityTier`'s docstring claims every field derives from a module constant.
     `directory_fsync`/`nofollow_protection` are literals, not live references (see the

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
@@ -97,7 +98,13 @@ def _forced_tier(platform_name: str) -> Iterator[None]:
     than `anchors`' own functions, because `transactions._open_root` and
     `_open_absolute_directory` resolve those names through `transactions`'
     globals -- the same reason the `:290-305` delegator layer exists.
+
+    Skips rather than failing when a POSIX tier is forced on Windows: see the
+    `tier` fixture in `test_transactions.py` for why that direction is
+    impossible rather than merely untested.
     """
+    if platform_name != "win32" and sys.platform == "win32":
+        pytest.skip("the strong tier needs openat/flock/os.O_DIRECTORY, none of which exist on Windows")
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(
             transactions,

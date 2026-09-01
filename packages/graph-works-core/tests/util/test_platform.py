@@ -48,6 +48,7 @@ def test_a_posix_only_module_is_unavailable_on_win32() -> None:
     assert module_available("fcntl", "win32") is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="asserts fcntl is importable on the running host")
 def test_a_posix_only_module_is_available_on_the_running_posix_host() -> None:
     assert module_available("fcntl", sys.platform) is True
 
@@ -87,6 +88,7 @@ def test_a_probe_result_records_whether_it_agrees() -> None:
     assert result.agrees_with_declared is False
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="asserts the running host declares posix-strong")
 def test_the_durability_tier_is_available_on_posix() -> None:
     capability = DurabilityTierProvider().declare(sys.platform)
 
@@ -224,6 +226,7 @@ def test_an_unlaunchable_orca_probes_unavailable_rather_than_raising() -> None:
     assert result.status == "unavailable"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="asserts the running host's lock primitive is fcntl.flock")
 def test_the_file_lock_is_flock_on_posix() -> None:
     capability = FileLockProvider().declare(sys.platform)
 
@@ -263,6 +266,10 @@ def test_the_file_lock_probe_takes_and_releases_a_real_lock(tmp_path) -> None:
     assert result.agrees_with_declared is True
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="constructs an unwritable directory with chmod(0o500); NTFS honours only the read-only bit",
+)
 def test_the_file_lock_probe_reports_rather_than_raises_when_the_cache_is_unwritable(tmp_path) -> None:
     layout = layout_for(tmp_path / ".works")
     unwritable = layout.cache_dir
@@ -278,6 +285,10 @@ def test_the_file_lock_probe_reports_rather_than_raises_when_the_cache_is_unwrit
     assert result.agrees_with_declared is False
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="asserts the running host supports workflow-local's SIGKILL escalation",
+)
 def test_process_control_is_available_on_posix() -> None:
     capability = ProcessControlProvider().declare(sys.platform)
 

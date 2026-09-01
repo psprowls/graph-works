@@ -41,11 +41,21 @@ def tier(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str
     primitive as their SUBJECT are xfailed via `_xfail_on_weak_tier`, and
     ADR-0042 names every one of them.
 
+    The parametrization is unidirectional by construction, and the `skipif`
+    below is that asymmetry made explicit rather than left to fail as an
+    `AttributeError`.  The weak tier is pure path logic and runs anywhere; the
+    strong tier needs `openat`, `flock` and `os.O_DIRECTORY`, which Windows
+    does not have at all.  Forcing the weak tier from POSIX works.  Forcing
+    the strong tier from Windows cannot -- not an oversight, an absence.  A
+    POSIX host still runs both arms exactly as D-001 intended.
+
     The two delegators patched here are the ones `transactions`' own call
     sites resolve through this module's globals -- the same property the
     `transactions.py:290-305` comment block exists to protect.  Patching
     `anchors.open_anchor` instead would NOT bite.
     """
+    if request.param == "posix" and sys.platform == "win32":
+        pytest.skip("the strong tier needs openat/flock/os.O_DIRECTORY, none of which exist on Windows")
     platform_name = "win32" if request.param == "windows" else "linux"
     monkeypatch.setattr(
         transactions,
@@ -2168,6 +2178,10 @@ def test_validation_reads_anchored_root_when_configured_name_swaps_during_load(
     assert page.read_bytes() == before
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="monkeypatches fcntl.flock to swap the lock file mid-acquire; Windows locks via msvcrt.locking",
+)
 def test_executor_lock_name_swap_never_redirects_lock_io_into_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2543,6 +2557,7 @@ def test_transaction_path_helpers_create_ancestors_and_hash_entry_kinds(tmp_path
     transactions._fsync_entry(tmp_path / "tree/link")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fifo semantics")
 def test_transaction_snapshot_and_copy_helpers_cover_nested_entries_and_special_files(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     plan = _plan(
@@ -2741,6 +2756,7 @@ def test_rollback_restores_a_backed_up_directory_tree_with_nested_content(
     assert not (restored / "clobbered.bin").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fifo semantics")
 def test_rollback_refuses_a_backup_holding_an_unsupported_entry_type(tmp_path: Path) -> None:
     """A preimage graph-works cannot faithfully reproduce must raise, not be
     silently skipped -- a skipped entry is a rollback reported as complete with

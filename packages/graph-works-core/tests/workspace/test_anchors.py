@@ -23,6 +23,7 @@ from graph_works_core.util.platform import POSIX_ONLY_MODULES
 from graph_works_core.workspace import anchors
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs _PosixAnchor, which needs os.O_DIRECTORY")
 def test_open_anchor_selects_the_posix_implementation_and_reports_its_tier(tmp_path: Path) -> None:
     anchor = anchors.open_anchor(tmp_path, platform_name="linux")
     try:
@@ -102,6 +103,7 @@ def test_posix_anchor_opens_creates_and_lists_children(tmp_path: Path) -> None:
         anchor.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs _PosixAnchor, which needs os.O_DIRECTORY")
 def test_posix_anchor_entry_operations_cover_links_unlink_and_identity(tmp_path: Path) -> None:
     (tmp_path / "payload").write_text("bytes", encoding="utf-8")
     anchor = anchors.open_anchor(tmp_path)
@@ -135,6 +137,7 @@ def test_posix_anchor_open_file_returns_a_plain_descriptor(tmp_path: Path) -> No
         anchor.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs _PosixAnchor, which needs os.O_DIRECTORY")
 def test_posix_anchor_chmods_a_child_directory(tmp_path: Path) -> None:
     (tmp_path / "child").mkdir(mode=0o755)
     anchor = anchors.open_anchor(tmp_path)
@@ -210,6 +213,7 @@ def test_open_absolute_anchor_rejects_a_relative_path_and_walks_an_absolute_one(
         anchors.open_absolute_anchor(tmp_path / "absent")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="constructs _PosixAnchor, which needs os.O_DIRECTORY")
 def test_exclusive_lock_refuses_a_descriptor_that_is_not_a_directory(tmp_path: Path) -> None:
     file = tmp_path / "file"
     file.write_text("x", encoding="utf-8")
@@ -234,6 +238,7 @@ def test_exclusive_lock_and_lock_file_round_trip(tmp_path: Path) -> None:
         anchor.close()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="monkeypatches fcntl.flock; fcntl does not exist on Windows")
 def test_lock_file_detects_a_lock_swapped_between_open_and_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -292,6 +297,10 @@ def test_lock_path_windows_arm_delegates_to_the_portable_primitive(
     assert calls == [target]
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="opens a directory with os.open, which Windows refuses with PermissionError",
+)
 def test_require_regular_file_rejects_a_directory(tmp_path: Path) -> None:
     descriptor = os.open(tmp_path, os.O_RDONLY)
     try:

@@ -6,7 +6,7 @@ import shutil
 from types import MappingProxyType
 
 import pytest
-from ext_helpers import SECTIONS_DIR, sectioned_copy, write_bundle
+from ext_helpers import SECTIONS_DIR, sectioned_copy, write, write_bundle
 from okf_ext.body import split_lines
 from okf_ext.sections import TypeSections, apply, load_sections, plan_sections, render_skeleton
 from okf_ext.sections.model import SectionPlan, SectionSet, SectionSpec, SectionSplice
@@ -257,7 +257,7 @@ def test_reserved_members_are_not_reported_as_unreadable(tmp_path):
     root = tmp_path / "kb"
     root.mkdir()
     (root / "index.md").write_bytes(b"\xff\xfe")
-    (root / "a.md").write_text(doc("## Summary\n\nR.\n\n## Plan\n\n| a |\n"), encoding="utf-8")
+    write(root / "a.md", doc("## Summary\n\nR.\n\n## Plan\n\n| a |\n"))
     assert plan_sections(load_bundle(root), FEATURE_SET).skipped == ()
 
 
@@ -298,9 +298,7 @@ def test_a_stale_digest_is_refused_as_kind_stale(tmp_path):
     section_set = load_sections(SECTIONS_DIR)
     bundle = load_bundle(root, ignore=("sections/*",))
     plan = plan_sections(bundle, section_set)
-    (root / "missing.md").write_text(
-        "---\ntype: Feature\ntitle: T\ndescription: D\n---\n\nsomething else entirely\n", encoding="utf-8"
-    )
+    write(root / "missing.md", "---\ntype: Feature\ntitle: T\ndescription: D\n---\n\nsomething else entirely\n")
     result = apply(load_bundle(root, ignore=("sections/*",)), plan)
     assert [(f.path, f.kind) for f in result.failed] == [("missing.md", "stale")]
 
@@ -329,7 +327,7 @@ def test_a_splice_naming_a_concept_absent_from_this_bundle_is_reported(tmp_path)
 
 def test_a_hand_built_splice_over_a_parse_error_concept_is_refused(tmp_path):
     root = sectioned_copy(tmp_path)
-    (root / "broken.md").write_text("---\ntype: [\n---\n\n# Broken\n", encoding="utf-8")
+    write(root / "broken.md", "---\ntype: [\n---\n\n# Broken\n")
     before = (root / "broken.md").read_bytes()
     bundle = load_bundle(root, ignore=("sections/*",))
     splice = SectionSplice(concept_id="broken", path="broken.md", inserts=(), digest="d", after="x")

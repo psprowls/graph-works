@@ -13,6 +13,7 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
+from ext_helpers import write
 from okf_ext.logs import append_entry, atomic_replace, locked_log
 
 TODAY = date(2026, 8, 19)
@@ -28,9 +29,9 @@ LOG = """# Log
 def _bundle(tmp_path: Path, log: str | None = LOG) -> Path:
     root = tmp_path / "okf"
     root.mkdir()
-    (root / "index.md").write_text("# Index\n", encoding="utf-8")
+    write(root / "index.md", "# Index\n")
     if log is not None:
-        (root / "log.md").write_text(log, encoding="utf-8")
+        write(root / "log.md", log)
     return root
 
 
@@ -108,7 +109,7 @@ def test_a_log_that_disappears_inside_the_lock_is_refused(tmp_path, monkeypatch)
 
 def test_atomic_replace_keeps_the_existing_file_mode(tmp_path):
     target = tmp_path / "log.md"
-    target.write_text("before\n", encoding="utf-8")
+    write(target, "before\n")
     target.chmod(0o640)
 
     atomic_replace(target, b"after\n")

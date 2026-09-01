@@ -908,7 +908,7 @@ def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int) -> 
             with os.fdopen(os.dup(source_fd), "rb") as source, destination.open("wb") as target:
                 shutil.copyfileobj(source, target)
                 target.flush()
-                os.fchmod(target.fileno(), stat.S_IMODE(mode))
+                anchors.set_mode(target.fileno(), destination, stat.S_IMODE(mode))
                 os.fsync(target.fileno())
         finally:
             os.close(source_fd)
@@ -1080,7 +1080,7 @@ def _copy_backup_file(root: Anchor, source: Path, member: str, mode: int) -> Non
             with source.open("rb") as incoming, os.fdopen(os.dup(descriptor), "wb") as outgoing:
                 shutil.copyfileobj(incoming, outgoing)
                 outgoing.flush()
-            os.fchmod(descriptor, stat.S_IMODE(mode))
+            anchors.set_mode(descriptor, parent.resolve_descendant(name), stat.S_IMODE(mode))
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -1239,7 +1239,7 @@ def _stage_writes(plan: WorkMutationPlan, transaction_dir: Path, root: Anchor | 
                 stream.write(write.after)
                 if write.before_digest is not None:
                     preimage_mode = _lstat_at(root, write.source_member or write.member).st_mode
-                    os.fchmod(stream.fileno(), stat.S_IMODE(preimage_mode))
+                    anchors.set_mode(stream.fileno(), path, stat.S_IMODE(preimage_mode))
                 stream.flush()
                 os.fsync(stream.fileno())
             staged[write.member] = path
@@ -1332,7 +1332,7 @@ def _live_temporary(parent: Anchor, target_name: str, staged: Path) -> str:
     try:
         with staged.open("rb") as stream:
             _write_all(descriptor, stream)
-        os.fchmod(descriptor, mode)
+        anchors.set_mode(descriptor, parent.resolve_descendant(temporary), mode)
         os.fsync(descriptor)
     finally:
         os.close(descriptor)

@@ -392,3 +392,32 @@ def test_flock_helpers_refuse_by_name_where_fcntl_is_absent(monkeypatch: pytest.
     for helper in (anchors._flock_exclusive, anchors._flock_release):
         with pytest.raises(anchors.UnsupportedAnchorPlatform, match=r"fcntl\.flock"):
             helper(0)
+
+
+def test_set_mode_uses_the_descriptor_where_os_fchmod_exists(tmp_path: Path) -> None:
+    target = tmp_path / "page.md"
+    target.write_text("x\n", encoding="utf-8")
+    descriptor = os.open(target, os.O_RDWR)
+    try:
+        anchors.set_mode(descriptor, target, 0o600)
+    finally:
+        os.close(descriptor)
+    assert stat.S_IMODE(target.stat().st_mode) & stat.S_IWRITE
+
+
+def test_set_mode_falls_back_to_a_path_chmod_on_windows_below_3_13(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`os.fchmod` gained Windows support in CPython 3.13; the workspace floor
+    is 3.12, where it does not exist. Bumping mypy's `python_version` would
+    silence the error and leave the crash (D-3), so the branch is real."""
+    target = tmp_path / "page.md"
+    target.write_text("x\n", encoding="utf-8")
+    seen: list[tuple[Path, int]] = []
+    monkeypatch.setattr(anchors.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(anchors.sys, "version_info", (3, 12, 0, "final", 0), raising=False)
+    monkeypatch.setattr(Path, "chmod", lambda self, mode: seen.append((self, mode)))
+
+    anchors.set_mode(-1, target, 0o600)  # -1: an invalid descriptor proves it was not used
+
+    assert seen == [(target, 0o600)]

@@ -124,6 +124,29 @@ def _flock_release(descriptor: int) -> None:
     fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
+def set_mode(descriptor: int, path: Path, mode: int) -> None:
+    """chmod through *descriptor* where the platform has `os.fchmod`, by *path* where it does not.
+
+    A capability branch, not a platform branch, and the difference matters.
+    `os.fchmod` gained Windows support in **CPython 3.13**; this workspace
+    declares `requires-python = ">=3.12"`, so on the floor these calls raise
+    `AttributeError` on Windows and work by accident of a newer local
+    interpreter everywhere else.  Raising `mypy`'s `python_version` to 3.13
+    would clear the error and leave the crash, which is why design decision
+    D-3 rejects it.
+
+    The fallback loses the descriptor's guarantee that the mode lands on the
+    object the caller opened rather than on whatever holds that name now, and
+    it loses the paired `os.fsync`.  Both are recorded in ADR-0042 as L7.  On
+    NTFS `chmod` honours only the read-only bit in any case, so the mode
+    assertions this engine makes are meaningful on the POSIX pass only.
+    """
+    if sys.platform == "win32" and sys.version_info < (3, 13):
+        path.chmod(mode)
+        return
+    os.fchmod(descriptor, mode)
+
+
 def nofollow_flag() -> int:
     """`O_NOFOLLOW` where the platform has it, `0` where it does not.
 
@@ -415,9 +438,16 @@ class _PosixAnchor:
         return os.open(name, flags, mode, dir_fd=self.descriptor)
 
     def chmod_child_directory(self, name: str, mode: int) -> None:
-        """From transactions.py:1026 -- chmod a child *directory* via its own descriptor."""
+        """From transactions.py:1026 -- chmod a child *directory* via its own descriptor.
+
+        Refuses on `win32` rather than falling back: reaching this at all means
+        a caller landed on the strong tier on a host that has no directory
+        descriptors, and `_WindowsAnchor` supplies the path-chmod equivalent.
+        """
         descriptor = os.open(name, directory_flags(), dir_fd=self.descriptor)
         try:
+            if sys.platform == "win32":
+                _posix_only("os.fchmod")
             os.fchmod(descriptor, mode)
             os.fsync(descriptor)
         finally:
@@ -828,12 +858,13 @@ class _WindowsAnchor:
         """chmod a child directory.
 
         `_PosixAnchor` opens the child, `os.fchmod`es it and `os.fsync`es the
-        descriptor.  `os.fchmod` does not exist on Windows and a directory
-        cannot be fsynced there, so this is a path chmod with no flush -- a
-        sixth loss the design's table did not enumerate, recorded in ADR-0042.
-        On NTFS `chmod` honours only the read-only bit; the mode bits the
-        engine sets are preserved on the POSIX coverage pass, which is where
-        the mode assertions actually run.
+        descriptor.  This tier has no directory descriptor to do either
+        through -- `os.O_DIRECTORY` is what it lacks, not `os.fchmod`, which
+        Windows gained in CPython 3.13 -- so this is a path chmod with no
+        flush, a sixth loss the design's table did not enumerate, recorded in
+        ADR-0042 as L6.  On NTFS `chmod` honours only the read-only bit; the
+        mode bits the engine sets are preserved on the POSIX coverage pass,
+        which is where the mode assertions actually run.
         """
         (self._revalidate() / name).chmod(mode)
 
@@ -1117,4 +1148,5 @@ __all__ = [
     "open_absolute_anchor",
     "open_anchor",
     "require_regular_file",
+    "set_mode",
 ]

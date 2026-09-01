@@ -971,25 +971,26 @@ def lock_path(path: Path) -> Iterator[None]:
     Windows has no descriptor-based flock to be faithful to in the first
     place, so its arm is a straight call onto `okf_ext.locking.locked` --
     the portable primitive, not the workspace-wide path lock this docstring
-    otherwise disclaims.
+    otherwise disclaims.  The POSIX path's own bookkeeping flag is `held`,
+    not `locked`: the two names collided, and because Python binds locals per
+    function rather than per branch, the collision made the Windows arm raise
+    `UnboundLocalError` on every workspace mutation.
     """
-    if sys.platform == "win32":  # pragma: no cover -- native Windows only
+    if sys.platform == "win32":
         with locked(path):
             yield
         return
-    import fcntl  # POSIX-only, imported at the point of use
-
     descriptor = os.open(path, os.O_RDWR | os.O_CREAT | nofollow_flag(), 0o600)
-    locked = False
+    held = False
     try:
         require_regular_file(descriptor, "executor lock")
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
-        locked = True
+        _flock_exclusive(descriptor)
+        held = True
         yield
     finally:
-        if locked:
+        if held:
             with suppress(OSError):
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                _flock_release(descriptor)
         os.close(descriptor)
 
 

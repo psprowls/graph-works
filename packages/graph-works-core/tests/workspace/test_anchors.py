@@ -14,6 +14,8 @@ import importlib.util
 import os
 import stat
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -263,6 +265,31 @@ def test_lock_path_locks_an_absolute_regular_file(tmp_path: Path) -> None:
     (tmp_path / "directory").mkdir()
     with pytest.raises((ValueError, IsADirectoryError, OSError)), anchors.lock_path(tmp_path / "directory"):
         pass
+
+
+def test_lock_path_windows_arm_delegates_to_the_portable_primitive(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Windows arm carried `# pragma: no cover` and an `UnboundLocalError`
+    behind it for as long as it existed: the module-level `locked` import was
+    shadowed for the whole function by a local of the same name on the POSIX
+    path, so the branch raised before it ever reached the lock. No coverage
+    gate saw it, because the pragma said not to look."""
+    calls: list[Path] = []
+
+    @contextmanager
+    def record(path: Path) -> Iterator[None]:
+        calls.append(path)
+        yield
+
+    monkeypatch.setattr(anchors.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(anchors, "locked", record)
+
+    target = tmp_path / "executor.lock"
+    with anchors.lock_path(target):
+        pass
+
+    assert calls == [target]
 
 
 def test_require_regular_file_rejects_a_directory(tmp_path: Path) -> None:

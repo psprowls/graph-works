@@ -2214,3 +2214,51 @@ maintenance this implies: if the session-name format or `SESSION_NAME_MAX` chang
 and §4.1's Coverage read must move in the same change, and so must
 `graph_works_cli`'s `--live` help text and its frozen surface golden.
 See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-session-name-standardization`.
+
+---
+
+## Entry #32 — `sdd-workspace`'s path vocabulary on Git Bash
+
+<!-- audit-delta
+state: patched
+file: skills/subagent-driven-development/scripts/sdd-workspace
+-->
+
+**Intent class: portability.** The first entry in this ledger that is neither an identity rename nor
+a harness-compat fix. The governing rule — *patch only the lines identity requires* — does not
+reach it; its authority is **ADR-0021 rule 3b**, *"obra's inherited Windows machinery is maintained,
+not dropped."* Maintaining that machinery includes fixing it where it is broken on the platform the
+rule exists to protect.
+
+**The patch, in full:**
+
+```diff
+-cd "$dir" && pwd
++printf '%s\n' "$dir"
+```
+
+**Why.** The script derives `root=$(git rev-parse --show-toplevel)` — `git.exe` answers in Win32
+form (`C:/Users/…`) — builds `dir` from it, creates the directory, and then discards that string to
+re-derive the path through bash's `pwd`, which answers in MSYS form (`/tmp/…`). The two name the
+same directory; only one of them resolves for the native-Windows process that reads
+`sdd-workspace`'s stdout, which is the whole point of a script whose output is pasted into an
+implementer subagent's brief.
+
+**On POSIX this is a byte-for-byte no-op.** `git rev-parse --show-toplevel` returns a physical,
+symlink-resolved, normalised absolute path, and `.superpowers/sdd/<slug>` is created by `mkdir -p`
+immediately above, so no component can be a symlink and `cd "$dir" && pwd` cannot differ from
+`$dir`. The `cd` was not serving as an existence check either — `mkdir -p` runs one line earlier
+under `set -euo pipefail`.
+
+**Upstream.** The bug is present at obra HEAD; this fork has not pre-empted a fix. Filing it
+upstream is tracked as a follow-up on
+`work/epic-native-windows-support/children/bug-test-plugin-path-shape-git-bash`, not as a blocker.
+
+**On merge.** The patched line is the last line of a short file upstream rarely touches. Re-apply by
+locating `cd "$dir" && pwd` in upstream's current text and re-substituting. If upstream ever adopts
+the fix this entry becomes retirable, and `just audit-delta` will say so by reporting it as a
+*retired patch*.
+
+**Not claimed here:** `skills/subagent-driven-development/scripts/task-brief` and
+`review-package` are untouched. Both read `sdd-workspace`'s stdout and inherit the corrected shape
+without changing, which is why fixing one line fixed three of the suite's four assertions.

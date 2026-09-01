@@ -6,7 +6,7 @@ import json
 from pathlib import Path
 
 import pytest
-from ext_helpers import SECTIONS_BAD
+from ext_helpers import SECTIONS_BAD, write
 from okf_ext.sections import (
     DEFAULT_IGNORE,
     DEFAULT_SECTIONS_DIRNAME,
@@ -49,7 +49,7 @@ sections:
 def write_set(root: Path, **files: str) -> Path:
     root.mkdir(parents=True, exist_ok=True)
     for name, body in files.items():
-        (root / name.replace("__", ".")).write_text(body, encoding="utf-8")
+        write(root / name.replace("__", "."), body)
     return root
 
 
@@ -211,7 +211,7 @@ def test_a_directory_of_fragments_alone_is_a_set_with_no_types(tmp_path):
 
 def test_a_non_declaration_file_is_ignored(tmp_path):
     root = write_set(tmp_path / "sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
-    (root / "README.md").write_text("not a declaration\n", encoding="utf-8")
+    write(root / "README.md", "not a declaration\n")
     assert load_sections(root).type_names == ("feature",)
 
 
@@ -224,5 +224,5 @@ def test_a_subdirectory_is_not_walked(tmp_path):
 
 def test_a_file_named_exactly_dot_yaml_claims_no_type(tmp_path):
     root = write_set(tmp_path / "sections", **{"feature__yaml": FEATURE, "_common__yaml": COMMON})
-    (root / ".yaml").write_text("sections: []\n", encoding="utf-8")
+    write(root / ".yaml", "sections: []\n")
     assert load_sections(root).type_names == ("feature",)

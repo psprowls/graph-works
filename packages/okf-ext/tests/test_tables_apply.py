@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from ext_helpers import TABLED, read, snapshot, tabled_copy
+from ext_helpers import TABLED, read, snapshot, tabled_copy, write
 from okf_ext.tables import Column, RowSplice, SplicePlan, TableSpec, apply, plan_row
 from okf_io import load_bundle
 from okf_io.document import Document
@@ -112,9 +112,7 @@ def test_a_stale_body_is_refused_per_document_and_its_siblings_still_land(tmp_pa
     root = tabled_copy(tmp_path)
     bundle = load_bundle(root)
     plan = _plan(bundle, ["plan_ok", "plan_empty"])
-    (root / "plan_ok.md").write_text(
-        "---\ntype: Reference\ntitle: T\ndescription: D\n---\n\n## Plan\n\nchanged\n", encoding="utf-8"
-    )
+    write(root / "plan_ok.md", "---\ntype: Reference\ntitle: T\ndescription: D\n---\n\n## Plan\n\nchanged\n")
     result = apply(load_bundle(root), plan)
     assert result.written == ("plan_empty.md",)
     assert [(f.path, f.kind) for f in result.failed] == [("plan_ok.md", "stale")]
@@ -160,7 +158,7 @@ def test_a_plan_naming_a_concept_absent_from_this_bundle_is_reported(tmp_path):
 
 def test_a_hand_built_plan_over_a_parse_error_concept_is_refused(tmp_path):
     root = tabled_copy(tmp_path)
-    (root / "broken.md").write_text("---\ntype: [\n---\n\n# Broken\n", encoding="utf-8")
+    write(root / "broken.md", "---\ntype: [\n---\n\n# Broken\n")
     before = (root / "broken.md").read_bytes()
     bundle = load_bundle(root)
     splice = RowSplice(

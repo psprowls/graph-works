@@ -122,8 +122,9 @@ def test_a_stale_body_is_refused(tmp_path):
         by=BY,
         at=AT,
     )
-    (bundle.root / "proposals/live.md").write_text(
-        (bundle.root / "proposals/live.md").read_text(encoding="utf-8") + "\ndrift\n", encoding="utf-8"
+    ext_helpers.write(
+        bundle.root / "proposals/live.md",
+        (bundle.root / "proposals/live.md").read_text(encoding="utf-8") + "\ndrift\n",
     )
     result = apply(load_bundle(bundle.root), plan)
     assert [(f.path, f.kind) for f in result.failed] == [("proposals/live.md", "stale")]

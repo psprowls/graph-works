@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ext_helpers
 import pytest
 from ext_helpers import BAD_DANGLING, BAD_VERSION, VOCABULARY
 from okf_ext.tags.vocabulary import VocabularyError, load_vocabulary
@@ -7,7 +8,7 @@ from okf_ext.tags.vocabulary import VocabularyError, load_vocabulary
 
 def write(tmp_path, text):
     target = tmp_path / "tags.yaml"
-    target.write_text(text, encoding="utf-8")
+    ext_helpers.write(target, text)
     return target
 
 

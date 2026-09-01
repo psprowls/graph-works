@@ -25,8 +25,9 @@ backends, which the one-package-per-backend rule forbids.
 Root `justfile` recipes run this package under `uv run --package workflow-local`:
 
 ```bash
-# types (strict)
-uv run --package workflow-local mypy --strict packages/workflow-local/src
+# types (strict) -- `just types` runs both platform arms
+uv run --package workflow-local mypy --strict --platform linux packages/workflow-local/src
+uv run --package workflow-local mypy --strict --platform win32 packages/workflow-local/src
 
 # full test suite for this package
 uv run --package workflow-local pytest packages/workflow-local/tests

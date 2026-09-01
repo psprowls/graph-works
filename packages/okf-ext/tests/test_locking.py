@@ -151,8 +151,9 @@ def test_forcing_the_posix_arm_on_windows_refuses_by_name(tmp_path: Path, monkey
     """`platform_name="linux"` is answerable from any host for `primitive_for`,
     but it is not *runnable* on a host with no `fcntl` -- and the refusal must
     say which primitive is missing rather than surfacing a bare ImportError."""
-    from okf_ext.locking import UnsupportedLockPlatform, _flock_exclusive
+    from okf_ext.locking import UnsupportedLockPlatform, _flock_exclusive, _flock_release
 
     monkeypatch.setattr(sys, "platform", "win32", raising=False)
-    with pytest.raises(UnsupportedLockPlatform, match=r"fcntl\.flock"):
-        _flock_exclusive(0)
+    for helper in (_flock_exclusive, _flock_release):
+        with pytest.raises(UnsupportedLockPlatform, match=r"fcntl\.flock"):
+            helper(0)

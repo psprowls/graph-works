@@ -20,14 +20,17 @@ vertical pull in every other vertical through the front door).
 ## Commands specific to this package
 
 ```bash
-uv run --package graph-works-core mypy --strict packages/graph-works-core/src
+uv run --package graph-works-core mypy --strict --platform linux packages/graph-works-core/src
+uv run --package graph-works-core mypy --strict --platform win32 packages/graph-works-core/src
 uv run --package graph-works-core pytest packages/graph-works-core/tests
 uv run --package graph-works-core pytest packages/graph-works-core/tests \
   --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
 These are exactly the root `justfile`'s `types`/`test`/`cov` recipe lines for
-this package — not a generic `uv run pytest`. Run `just sync` first if
+this package — not a generic `uv run pytest`. `types` runs twice, once per
+`--platform` arm, so a POSIX host still sees a Windows-only `mypy --strict`
+failure and vice versa. Run `just sync` first if
 `mypy --strict` reports the tier-3 `typer`-decorated commands (from
 `code-wiki-okf`/`work-tracker-okf`) as untyped; a bare `uv run` only installs
 the *root* workspace's own dependencies, not member packages'.

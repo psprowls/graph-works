@@ -11,7 +11,8 @@ that the workspace root does not install, so every root `just` recipe runs it
 under `--package` rather than a bare `uv run`:
 
 ```bash
-uv run --package code-graph-io mypy --strict packages/code-graph-io/src
+uv run --package code-graph-io mypy --strict --platform linux packages/code-graph-io/src
+uv run --package code-graph-io mypy --strict --platform win32 packages/code-graph-io/src
 uv run --package code-graph-io pytest packages/code-graph-io/tests
 uv run --package code-graph-io pytest packages/code-graph-io/tests \
   --cov=code_graph_io --cov-branch --cov-report=term-missing --cov-fail-under=90

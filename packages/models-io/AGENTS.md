@@ -28,10 +28,12 @@ Because the provider stacks are optional extras, plain `uv run pytest` /
 `uv run mypy` from the repo root will not see `langchain_aws`,
 `langchain_openai`, etc. Both extras must be requested explicitly, and the
 `--package` flag is what makes `uv` resolve this member's own extras rather
-than the workspace root's. This is exactly what the root `justfile` does:
+than the workspace root's. This is exactly what the root `justfile` does
+(`types` twice, once per `--platform` arm):
 
 ```bash
-uv run --package models-io --extra bedrock --extra vercel mypy --strict packages/models-io/src
+uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform linux packages/models-io/src
+uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform win32 packages/models-io/src
 uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests
 uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests \
     --cov=models_io --cov-branch --cov-report=term-missing --cov-fail-under=95

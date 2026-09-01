@@ -99,7 +99,7 @@ workflow exists yet — enforcement is local, by design (ADR-0010).
 | `just line-endings` | a tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true` |
 | `just platform-declared` | a package that reaches a POSIX-only module or process primitive with no `## Platform` section declaring it (ADR-0021 rule 3a) |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
-| `just types` | `uv run mypy --strict`, once per package |
+| `just types` | `uv run mypy --strict`, twice per package — once per `--platform` arm (`linux`, `win32`), 24 invocations total |
 | `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
 | `just test` | `uv run pytest`, plus one run per non-okf-io/okf-ext package under `uv run --package <name>` |
 | `just cov` | branch coverage, gated per package (95% for most, 90% for `code-graph-io`) |

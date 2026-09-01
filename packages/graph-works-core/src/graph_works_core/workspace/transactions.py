@@ -1080,7 +1080,7 @@ def _copy_backup_file(root: Anchor, source: Path, member: str, mode: int) -> Non
             with source.open("rb") as incoming, os.fdopen(os.dup(descriptor), "wb") as outgoing:
                 shutil.copyfileobj(incoming, outgoing)
                 outgoing.flush()
-            anchors.set_mode(descriptor, parent.resolve_descendant(name), stat.S_IMODE(mode))
+            anchors.set_mode(descriptor, lambda: parent.resolve_descendant(name), stat.S_IMODE(mode))
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -1332,7 +1332,7 @@ def _live_temporary(parent: Anchor, target_name: str, staged: Path) -> str:
     try:
         with staged.open("rb") as stream:
             _write_all(descriptor, stream)
-        anchors.set_mode(descriptor, parent.resolve_descendant(temporary), mode)
+        anchors.set_mode(descriptor, lambda: parent.resolve_descendant(temporary), mode)
         os.fsync(descriptor)
     finally:
         os.close(descriptor)

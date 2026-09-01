@@ -61,7 +61,7 @@ exists yet — enforcement is local, by design (ADR-0010).
 | `just sync` | `uv sync --all-packages` — provisions every member's deps, not just the root's |
 | `just normalization` | Unicode-normalization check on tracked filenames (cheap, run first) |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
-| `just types` | `uv run mypy --strict`, once per package, via `uv run --package <name> mypy --strict packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`) |
+| `just types` | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, then `win32`), 24 invocations total — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa |
 | `just contracts` | `uv run lint-imports` — okf-ext's internal capability-boundary contract |
 | `just test` | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package |
 | `just cov` | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing` |

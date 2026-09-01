@@ -100,6 +100,10 @@ def locked(path: Path, *, platform_name: str = sys.platform) -> Iterator[None]:
     *path* so a caller sees what happened and that a retry is possible,
     rather than a bare `OSError` after ten silent seconds. POSIX's
     `fcntl.flock(LOCK_EX)` blocks indefinitely and is unchanged.
+
+    Raises `UnsupportedLockPlatform` when *platform_name* names a primitive
+    the running host does not have -- e.g. `platform_name="linux"` on a
+    win32 host, which has no `fcntl`.
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)

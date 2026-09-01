@@ -23,12 +23,14 @@ correctly wired against the workspace lock):
 
 ```bash
 uv run --package subagents-io pytest packages/subagents-io/tests
-uv run --package subagents-io mypy --strict packages/subagents-io/src
+uv run --package subagents-io mypy --strict --platform linux packages/subagents-io/src
+uv run --package subagents-io mypy --strict --platform win32 packages/subagents-io/src
 uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
 These are exactly the root `justfile`'s `test`, `types`, and `cov` recipe
 lines for this package — see `/Users/pat/Personal/graph-works/justfile`.
+`types` runs twice, once per `--platform` arm.
 
 Subset examples:
 

@@ -41,7 +41,7 @@ import errno
 import os
 import stat
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -124,7 +124,7 @@ def _flock_release(descriptor: int) -> None:
     fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
-def set_mode(descriptor: int, path: Path, mode: int) -> None:
+def set_mode(descriptor: int, path: Path | Callable[[], Path], mode: int) -> None:
     """chmod through *descriptor* where the platform has `os.fchmod`, by *path* where it does not.
 
     A capability branch, not a platform branch, and the difference matters.
@@ -136,13 +136,22 @@ def set_mode(descriptor: int, path: Path, mode: int) -> None:
     D-3 rejects it.
 
     The fallback loses the descriptor's guarantee that the mode lands on the
-    object the caller opened rather than on whatever holds that name now, and
-    it loses the paired `os.fsync`.  Both are recorded in ADR-0042 as L7.  On
-    NTFS `chmod` honours only the read-only bit in any case, so the mode
-    assertions this engine makes are meaningful on the POSIX pass only.
+    object the caller opened rather than on whatever holds that name now.
+    That is recorded in ADR-0042 as L7.  On NTFS `chmod` honours only the
+    read-only bit in any case, so the mode assertions this engine makes are
+    meaningful on the POSIX pass only.
+
+    *path* may be a `Path` or a zero-argument callable producing one. Some
+    callers (`transactions._copy_backup_file`, `transactions._live_temporary`)
+    can only name the path via `Anchor.resolve_descendant`, which re-`lstat`s
+    (and, on darwin, makes an `fcntl` call) and can raise. Accepting a
+    callable lets those callers defer that work into this function, so it
+    runs only on the branch that actually needs the path -- never on POSIX,
+    and never on win32 at 3.13+.
     """
     if sys.platform == "win32" and sys.version_info < (3, 13):
-        path.chmod(mode)
+        resolved = path() if callable(path) else path
+        resolved.chmod(mode)
         return
     os.fchmod(descriptor, mode)
 
@@ -447,6 +456,11 @@ class _PosixAnchor:
         descriptor = os.open(name, directory_flags(), dir_fd=self.descriptor)
         try:
             if sys.platform == "win32":
+                # Unreachable: `directory_flags()` above already refused under
+                # this identical condition, so `os.open` never returns on
+                # win32. This branch exists only so mypy can see `os.fchmod`
+                # below is unreached on a platform where it does not exist --
+                # it cannot see that `directory_flags()` already refused.
                 _posix_only("os.fchmod")
             os.fchmod(descriptor, mode)
             os.fsync(descriptor)

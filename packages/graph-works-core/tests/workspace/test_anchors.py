@@ -415,14 +415,42 @@ def test_flock_helpers_refuse_by_name_where_fcntl_is_absent(monkeypatch: pytest.
 
 
 def test_set_mode_uses_the_descriptor_where_os_fchmod_exists(tmp_path: Path) -> None:
+    """`write_text` leaves the file writable (`S_IWRITE` set under a normal
+    umask, and always set on NTFS for a freshly created file), so a mode
+    with `S_IWRITE` set proves nothing on its own -- it would hold whether
+    `set_mode` ran or was a no-op. `0o400` clears the bit instead: NTFS
+    honours only that bit, so this is the one mode change observable on
+    both hosts, and it is a real assertion on Windows too."""
+    target = tmp_path / "page.md"
+    target.write_text("x\n", encoding="utf-8")
+    before = stat.S_IMODE(target.stat().st_mode)
+    descriptor = os.open(target, os.O_RDWR)
+    try:
+        anchors.set_mode(descriptor, target, 0o400)
+    finally:
+        os.close(descriptor)
+    after = stat.S_IMODE(target.stat().st_mode)
+    assert before & stat.S_IWRITE
+    assert not after & stat.S_IWRITE
+
+
+def test_set_mode_does_not_resolve_the_path_when_the_descriptor_branch_is_used(tmp_path: Path) -> None:
+    """Finding 3: `set_mode`'s path argument may be a lazy callable, and the
+    descriptor (`os.fchmod`) branch must never call it -- calling it eagerly
+    would add a POSIX-observable `Anchor.resolve_descendant` (an `lstat`, and
+    on darwin an `fcntl` call) to every caller, even when the descriptor path
+    is taken. A callable that raises if invoked proves it never is."""
+
+    def _must_not_be_called() -> Path:
+        raise AssertionError("set_mode resolved the path on the descriptor branch")
+
     target = tmp_path / "page.md"
     target.write_text("x\n", encoding="utf-8")
     descriptor = os.open(target, os.O_RDWR)
     try:
-        anchors.set_mode(descriptor, target, 0o600)
+        anchors.set_mode(descriptor, _must_not_be_called, 0o600)
     finally:
         os.close(descriptor)
-    assert stat.S_IMODE(target.stat().st_mode) & stat.S_IWRITE
 
 
 def test_set_mode_falls_back_to_a_path_chmod_on_windows_below_3_13(
@@ -440,4 +468,26 @@ def test_set_mode_falls_back_to_a_path_chmod_on_windows_below_3_13(
 
     anchors.set_mode(-1, target, 0o600)  # -1: an invalid descriptor proves it was not used
 
+    assert seen == [(target, 0o600)]
+
+
+def test_set_mode_resolves_a_lazy_path_on_the_fallback_branch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The counterpart to the descriptor-branch laziness test: the fallback
+    branch is exactly the one place the callable must be resolved."""
+    target = tmp_path / "page.md"
+    target.write_text("x\n", encoding="utf-8")
+    seen: list[tuple[Path, int]] = []
+    calls = 0
+    monkeypatch.setattr(anchors.sys, "platform", "win32", raising=False)
+    monkeypatch.setattr(anchors.sys, "version_info", (3, 12, 0, "final", 0), raising=False)
+    monkeypatch.setattr(Path, "chmod", lambda self, mode: seen.append((self, mode)))
+
+    def _resolve() -> Path:
+        nonlocal calls
+        calls += 1
+        return target
+
+    anchors.set_mode(-1, _resolve, 0o600)
+
+    assert calls == 1
     assert seen == [(target, 0o600)]

@@ -12,6 +12,12 @@ Imports stdlib only, and imports its platform-specific primitive (`fcntl` or
 that is what lets this module import cleanly on native Windows and fail, if
 at all, only when a lock is actually taken.
 
+The POSIX arm additionally routes through `_flock_exclusive` /
+`_flock_release`, which guard on `sys.platform`.  That is a type-checking
+requirement, not a second runtime guard: `mypy` narrows a literal
+`sys.platform` comparison and eliminates the arm, and narrows nothing at all
+from `platform_name`.
+
 `locked()` always locks a *dedicated* lock file beside the data it
 serializes, never the data itself: the ledger may not exist yet, a replace
 changes inode, and a bundle can be swapped wholesale between checks. That
@@ -30,7 +36,45 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-__all__ = ["locked", "primitive_for"]
+__all__ = ["UnsupportedLockPlatform", "locked", "primitive_for"]
+
+
+class UnsupportedLockPlatform(RuntimeError):
+    """A locking primitive was reached on a platform that does not have it.
+
+    Raised rather than allowed to surface as `ImportError` or `AttributeError`
+    so a caller that forced `platform_name` to a foreign value learns which
+    primitive is missing, not merely that an import failed.
+    """
+
+
+def _flock_exclusive(descriptor: int) -> None:
+    """`fcntl.flock(LOCK_EX)`, guarded on `sys.platform` rather than on the
+    caller's `platform_name`.
+
+    The two are deliberately different questions. `platform_name` is policy
+    and stays injectable, because forcing the POSIX arm from a POSIX host is
+    how the Windows arm gets tested and vice versa (D-001). `sys.platform` is
+    the real host, and it is the only form `mypy` narrows: a parameter, a
+    module constant, or a `hasattr()` result carries no platform meaning to
+    the checker, which is why these four `fcntl` attributes were 4 of the 26
+    errors a Windows `mypy --strict` reported.
+    """
+    if sys.platform == "win32":
+        raise UnsupportedLockPlatform("fcntl.flock is POSIX-only and does not exist on win32")
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_EX)
+
+
+def _flock_release(descriptor: int) -> None:
+    """`fcntl.flock(LOCK_UN)`.  See `_flock_exclusive` for why the guard is
+    on `sys.platform` and not on `platform_name`."""
+    if sys.platform == "win32":
+        raise UnsupportedLockPlatform("fcntl.flock is POSIX-only and does not exist on win32")
+    import fcntl
+
+    fcntl.flock(descriptor, fcntl.LOCK_UN)
 
 
 def primitive_for(platform_name: str) -> str:
@@ -63,12 +107,19 @@ def locked(path: Path, *, platform_name: str = sys.platform) -> Iterator[None]:
         if platform_name == "win32":
             # typeshed's msvcrt stub is itself gated on `sys.platform ==
             # "win32"`, so mypy running on any other host sees a moduleless
-            # `msvcrt` here regardless of this branch's runtime guard.
+            # `msvcrt` here regardless of this branch's runtime guard -- hence
+            # the ignore. `unused-ignore` rides along because on a win32 mypy
+            # pass the stub IS populated and the ignore would otherwise be
+            # reported as unused: one comment, valid under both arms of the
+            # two-platform gate. This branch is NOT narrowed on `sys.platform`
+            # on purpose -- three tests force it from a POSIX host with a fake
+            # `msvcrt` in `sys.modules`, and a `sys.platform` guard here would
+            # make that branch unreachable at runtime, not merely unchecked.
             import msvcrt
 
             os.lseek(descriptor, 0, os.SEEK_SET)
             try:
-                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined]
+                msvcrt.locking(descriptor, msvcrt.LK_LOCK, 1)  # type: ignore[attr-defined,unused-ignore]
             except OSError as exc:
                 raise OSError(
                     f"could not acquire the lock at {path}: another process holds it; the operation can be retried"
@@ -77,14 +128,12 @@ def locked(path: Path, *, platform_name: str = sys.platform) -> Iterator[None]:
                 yield
             finally:
                 os.lseek(descriptor, 0, os.SEEK_SET)
-                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
+                msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined,unused-ignore]
         else:
-            import fcntl
-
-            fcntl.flock(descriptor, fcntl.LOCK_EX)
+            _flock_exclusive(descriptor)
             try:
                 yield
             finally:
-                fcntl.flock(descriptor, fcntl.LOCK_UN)
+                _flock_release(descriptor)
     finally:
         os.close(descriptor)

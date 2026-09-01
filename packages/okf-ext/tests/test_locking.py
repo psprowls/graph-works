@@ -7,6 +7,7 @@ Windows branch is exercised from this POSIX box by forcing
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
@@ -44,6 +45,10 @@ def test_locked_creates_the_lock_file_and_its_parent_on_demand(tmp_path: Path):
     assert lock.is_file()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="forces the POSIX arm and probes it with fcntl.flock(LOCK_NB); fcntl does not exist on Windows",
+)
 def test_locked_serializes_a_posix_writer(tmp_path: Path):
     import fcntl
     import os
@@ -59,6 +64,10 @@ def test_locked_serializes_a_posix_writer(tmp_path: Path):
             os.close(descriptor)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="forces the POSIX arm and probes it with fcntl.flock(LOCK_NB); fcntl does not exist on Windows",
+)
 def test_locked_releases_on_exception(tmp_path: Path):
     import fcntl
     import os
@@ -132,7 +141,18 @@ def test_locked_windows_branch_names_the_lock_path_on_retry_exhaustion(tmp_path:
     fake = _FakeMsvcrt(fail_lock=True)
     monkeypatch.setitem(sys.modules, "msvcrt", fake)
 
-    with pytest.raises(OSError, match=str(lock)), locked(lock, platform_name="win32"):
+    with pytest.raises(OSError, match=re.escape(str(lock))), locked(lock, platform_name="win32"):
         pass
 
     assert fake.calls == [(fake.LK_LOCK, 0)]
+
+
+def test_forcing_the_posix_arm_on_windows_refuses_by_name(tmp_path: Path, monkeypatch):
+    """`platform_name="linux"` is answerable from any host for `primitive_for`,
+    but it is not *runnable* on a host with no `fcntl` -- and the refusal must
+    say which primitive is missing rather than surfacing a bare ImportError."""
+    from okf_ext.locking import UnsupportedLockPlatform, _flock_exclusive
+
+    monkeypatch.setattr(sys, "platform", "win32", raising=False)
+    with pytest.raises(UnsupportedLockPlatform, match=r"fcntl\.flock"):
+        _flock_exclusive(0)

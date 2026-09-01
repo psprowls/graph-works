@@ -25,9 +25,10 @@ normalization:
 # translating writer on Windows becomes CR CR LF, one stray CR per line, and
 # non-idempotently. See work/epic-native-windows-support/children/bug-explicit-encoding-newline.
 #
-# Scope is shipped source (`packages/*/src`, `scripts` minus `scripts/tests`).
-# Test trees write to `tmp_path`; the instrument for those is a suite run on
-# Windows, which is child 9's job.
+# Scope is shipped source (`packages/*/src`, `scripts`) plus the three test
+# trees whose assertions are byte-exact (`okf-io`, `okf-ext`, `scripts/tests`);
+# `fixtures/` is excluded everywhere. The other nine test trees still rely on a
+# suite run (see work/epic-native-windows-support/children/bug-test-fixtures-assume-lf-on-write).
 text-io:
     uv run python scripts/check_text_io_explicit.py .
 

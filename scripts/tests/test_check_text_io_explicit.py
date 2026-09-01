@@ -43,14 +43,40 @@ def _tracked(root: Path, relative: str, source: str) -> Path:
     return target
 
 
-def test_shipped_source_is_in_scope_and_tests_are_not():
+def test_shipped_source_and_the_three_byte_exact_test_trees_are_in_scope():
     assert in_scope("packages/okf-io/src/okf_io/document.py")
     assert in_scope("scripts/migrate_vault.py")
     assert in_scope("scripts/gw-smoke/stub_results.py")
-    assert not in_scope("packages/okf-io/tests/test_document.py")
-    assert not in_scope("scripts/tests/test_check_text_io_explicit.py")
+    assert in_scope("packages/okf-io/tests/test_document.py")
+    assert in_scope("packages/okf-ext/tests/ext_helpers.py")
+    assert in_scope("scripts/tests/test_check_text_io_explicit.py")
+
+
+def test_the_other_nine_test_trees_are_still_out_of_scope():
+    """Widening stops at the trees this item remediated.
+
+    The other nine packages' test trees hold ~1,298 violations that do not
+    fail: nothing there is byte-exact. Folding them in would be a remediation
+    debt, not a correctness fix -- see the design's Scope section.
+    """
+    assert not in_scope("packages/code-graph-io/tests/test_store.py")
+    assert not in_scope("packages/graph-works-core/tests/test_layout.py")
     assert not in_scope("plugins/graph-works/hooks/x.py")
     assert not in_scope("packages/okf-io/src/okf_io/py.typed")
+
+
+def test_fixture_directories_are_never_scanned():
+    """`fixtures/` is content, not source, and some of it is vendored.
+
+    `packages/okf-io/tests/fixtures/bundles/` is vendored verbatim from
+    `GoogleCloudPlatform/knowledge-catalog` at a pinned commit and carries
+    three tracked `.py` files; re-vendoring must never be able to turn the
+    gate red, and we may not edit them to make it green. ruff already
+    excludes `**/fixtures/**` for the same reason.
+    """
+    assert not in_scope("packages/okf-io/tests/fixtures/bundles/acme_retail/attesters/sql_equality.py")
+    assert not in_scope("packages/okf-io/tests/fixtures/edge/_check.py")
+    assert not in_scope("scripts/tests/fixtures/thing.py")
 
 
 _CLEAN = '''\
@@ -173,10 +199,22 @@ def test_a_pragma_on_any_line_the_call_spans_exempts_it(tmp_path):
 def test_out_of_scope_trees_are_not_scanned(tmp_path):
     root = _repo(tmp_path)
     bad = "from pathlib import Path\nPath('a').write_text('x')\n"
-    _tracked(root, "scripts/tests/test_x.py", bad)
-    _tracked(root, "packages/p/tests/test_y.py", bad)
+    _tracked(root, "packages/code-graph-io/tests/test_y.py", bad)
+    _tracked(root, "packages/okf-io/tests/fixtures/edge/gen.py", bad)
     _tracked(root, "plugins/z.py", bad)
     assert find_violations(root) == []
+
+
+def test_a_guarded_test_tree_is_scanned(tmp_path):
+    root = _repo(tmp_path)
+    bad = "from pathlib import Path\nPath('a').write_text('x', encoding='utf-8')\n"
+    _tracked(root, "packages/okf-io/tests/test_y.py", bad)
+    _tracked(root, "scripts/tests/test_z.py", bad)
+    violations = find_violations(root)
+    assert [(v.path, v.line, v.missing) for v in violations] == [
+        ("packages/okf-io/tests/test_y.py", 2, "newline"),
+        ("scripts/tests/test_z.py", 2, "newline"),
+    ]
 
 
 def test_main_exits_zero_on_a_clean_tree(tmp_path, capsys):

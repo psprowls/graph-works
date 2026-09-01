@@ -16,9 +16,16 @@ round-trip adds another. That breaks `okf-io`'s central contract.
 No lint rule expresses this. `ruff`'s PLW1514 is preview-only, covers
 `encoding=` alone, and `scripts` and `plugins` are in ruff's `exclude`.
 
-Scope is shipped source: `packages/<pkg>/src/**` and `scripts/**` except
-`scripts/tests/**`. Test trees write to `tmp_path` and are covered by running
-the suite on Windows, which is child 9's job, not this guard's.
+Scope is shipped source -- `packages/<pkg>/src/**` and `scripts/**` -- plus the
+three test trees whose assertions are byte-exact: `packages/okf-io/tests`,
+`packages/okf-ext/tests` and `scripts/tests`. A translating fixture write in
+those trees fails visibly, and did: the Windows verification run found 49 such
+failures. `fixtures/` is excluded everywhere -- it is content, not source, and
+part of it is vendored verbatim.
+
+The other nine packages' test trees are deliberately out. They hold ~1,298 of
+the same calls and none of them fail: nothing there compares bytes. Their
+instrument is still a suite run, not this guard.
 
 To exempt a call deliberately, put `# text-io-ok: <reason>` on any line the
 call spans. A bare pragma with no reason is itself an error.
@@ -59,14 +66,33 @@ class Violation:
         return f"  {self.path}:{self.line}: {self.call} is missing {self.missing}= -- {why}"
 
 
+#: Test trees whose assertions are byte-exact, and which this repo has
+#: remediated. `okf-io`'s round-trip contract is byte fidelity and `okf-ext`
+#: inherits it, so a translating fixture write fails visibly there. The other
+#: nine packages' test trees hold ~1,298 of the same calls and do not fail;
+#: they are a remediation debt, not a correctness one.
+_GUARDED_TEST_PACKAGES = frozenset({"okf-io", "okf-ext"})
+
+
 def in_scope(relative: str) -> bool:
-    """Shipped source only. See the module docstring for why tests are out."""
+    """Shipped source, plus the three byte-exact test trees.
+
+    `fixtures/` is excluded everywhere: it is content, not source, and
+    `packages/okf-io/tests/fixtures/bundles/` is vendored verbatim -- a
+    re-vendor must not be able to turn the gate red on code we may not edit.
+    """
     if not relative.endswith(".py"):
         return False
     parts = PurePosixPath(relative).parts
+    if "fixtures" in parts:
+        return False
     if parts[:1] == ("scripts",):
-        return parts[1:2] != ("tests",)
-    return len(parts) > 3 and parts[0] == "packages" and parts[2] == "src"
+        return True
+    if len(parts) > 3 and parts[0] == "packages":
+        if parts[2] == "src":
+            return True
+        return parts[2] == "tests" and parts[1] in _GUARDED_TEST_PACKAGES
+    return False
 
 
 def _tracked_files(root: Path) -> list[str]:

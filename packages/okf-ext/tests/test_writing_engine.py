@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import pytest
+from ext_helpers import write
 from okf_ext.writing import ApplyResult, PendingWrite, Skipped, WriteFailure, write_all
 
 
 def pending(tmp_path, name, text="new\n", commits=None):
     target = tmp_path / name
-    target.write_text("old\n", encoding="utf-8")
+    write(target, "old\n")
     return PendingWrite(
         member=name,
         path=target,
@@ -38,8 +39,8 @@ def test_every_write_lands_and_on_written_runs_once_each(tmp_path):
     items = [pending(tmp_path, "a.md", "A\n", commits), pending(tmp_path, "b.md", "B\n", commits)]
     result = write_all(items)
     assert result.written == ("a.md", "b.md")
-    assert (tmp_path / "a.md").read_text() == "A\n"
-    assert (tmp_path / "b.md").read_text() == "B\n"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "A\n"
+    assert (tmp_path / "b.md").read_text(encoding="utf-8") == "B\n"
     assert commits == ["a.md", "b.md"]
 
 
@@ -52,7 +53,7 @@ def test_an_unwritable_target_blocks_the_whole_batch(tmp_path):
         items[1].path.chmod(0o644)
     assert result.written == ()
     assert [(f.path, f.kind) for f in result.failed] == [("b.md", "unwritable")]
-    assert (tmp_path / "a.md").read_text() == "old\n"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "old\n"
 
 
 def test_a_missing_target_is_reported_as_unwritable(tmp_path):
@@ -75,7 +76,7 @@ def test_a_staging_failure_aborts_the_batch_and_leaves_no_temp_file(tmp_path, mo
     result = write_all(items)
     assert result.written == ()
     assert [(f.path, f.kind) for f in result.failed] == [("b.md", "stage-error")]
-    assert (tmp_path / "a.md").read_text() == "old\n"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "old\n"
     assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
 
 
@@ -108,7 +109,7 @@ def test_a_commit_failure_is_isolated_and_its_temp_file_is_cleaned_up(tmp_path, 
     assert result.written == ("a.md", "c.md")
     assert [(f.path, f.kind) for f in result.failed] == [("b.md", "commit-error")]
     assert commits == ["a.md", "c.md"]
-    assert (tmp_path / "b.md").read_text() == "old\n"
+    assert (tmp_path / "b.md").read_text(encoding="utf-8") == "old\n"
     assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
 
 
@@ -131,18 +132,18 @@ def test_an_on_written_failure_propagates_and_cleans_up_queued_temp_files(tmp_pa
         raise RuntimeError("caller bug")
 
     b = PendingWrite(member="b.md", path=tmp_path / "b.md", rendered="B\n", on_written=boom)
-    (tmp_path / "b.md").write_text("old\n", encoding="utf-8")
+    write(tmp_path / "b.md", "old\n")
 
     with pytest.raises(RuntimeError, match="caller bug"):
         write_all([a, b, c])
 
     assert commits == ["a.md"]
-    assert (tmp_path / "a.md").read_text() == "A\n"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "A\n"
     # b's own bytes land -- the rename that precedes the callback already
     # succeeded -- even though the callback itself blew up.
-    assert (tmp_path / "b.md").read_text() == "B\n"
+    assert (tmp_path / "b.md").read_text(encoding="utf-8") == "B\n"
     # c was never reached by the commit loop, so its content is untouched...
-    assert (tmp_path / "c.md").read_text() == "old\n"
+    assert (tmp_path / "c.md").read_text(encoding="utf-8") == "old\n"
     # ...but its staged temp file must not survive the abandoned batch.
     assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
 
@@ -174,7 +175,7 @@ def test_write_all_commits_in_the_order_it_is_given(tmp_path):
     pending_list = []
     for member in order:
         target = tmp_path / member
-        target.write_text("before\n", encoding="utf-8")
+        write(target, "before\n")
         pending_list.append(PendingWrite(member=member, path=target, rendered="after\n", on_written=lambda: None))
 
     result = write_all(pending_list)
@@ -210,9 +211,9 @@ def test_a_create_write_onto_an_existing_target_is_stale_and_aborts_the_batch(tm
     re-planning. All-or-nothing, because a create that lost its race says the
     bundle is not what the plan was computed against."""
     occupied = tmp_path / "taken.md"
-    occupied.write_text("original\n", encoding="utf-8")
+    write(occupied, "original\n")
     sibling = tmp_path / "other.md"
-    sibling.write_text("untouched\n", encoding="utf-8")
+    write(sibling, "untouched\n")
 
     result = write_all(
         [
@@ -232,7 +233,7 @@ def test_a_create_write_whose_parent_cannot_be_made_is_a_mkdir_error(tmp_path):
     already in `FailureKind` -- `moves` emits it for the same condition -- so
     this widens no union."""
     blocker = tmp_path / "pages"
-    blocker.write_text("i am a file\n", encoding="utf-8")
+    write(blocker, "i am a file\n")
 
     result = write_all(
         [
@@ -254,7 +255,7 @@ def test_creates_and_updates_commit_together_in_the_order_given(tmp_path):
     """One batch, both regimes. The order contract `moves` depends on holds
     across the mix: `written` comes back exactly as handed in."""
     existing = tmp_path / "ledger.md"
-    existing.write_text("before\n", encoding="utf-8")
+    write(existing, "before\n")
     fresh = tmp_path / "pages" / "fresh.md"
 
     result = write_all(
@@ -312,7 +313,7 @@ def test_a_batch_mixing_str_and_bytes_commits_in_the_order_given(tmp_path):
 
     assert result.written == ("a.md", "b.pdf")
     assert commits == ["a.md", "b.pdf"]
-    assert (tmp_path / "a.md").read_text() == "A\n"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "A\n"
     assert binary_target.read_bytes() == PDF
 
 
@@ -335,6 +336,6 @@ def test_a_staging_failure_on_a_bytes_item_aborts_the_batch(tmp_path, monkeypatc
 
     assert result.written == ()
     assert [(f.path, f.kind) for f in result.failed] == [("b.pdf", "stage-error")]
-    assert (tmp_path / "a.md").read_text() == "old\n"
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "old\n"
     assert binary_target.read_bytes() == b"old"
     assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+from ext_helpers import write
 from okf_ext.schemas import CODES, TOPIC, load_schemas, schema_rule
 from okf_io import Finding, load_bundle, validate
 
@@ -38,12 +39,12 @@ def build(tmp_path, **concepts):
     """A bundle plus a schema set beside it, never inside it."""
     schema_dir = tmp_path / "schema"
     schema_dir.mkdir()
-    (schema_dir / "_base.schema.yaml").write_text(BASE, encoding="utf-8")
-    (schema_dir / "Metric.schema.yaml").write_text(METRIC, encoding="utf-8")
+    write(schema_dir / "_base.schema.yaml", BASE)
+    write(schema_dir / "Metric.schema.yaml", METRIC)
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir()
     for name, text in concepts.items():
-        (bundle_dir / f"{name}.md").write_text(text, encoding="utf-8")
+        write(bundle_dir / f"{name}.md", text)
     return load_bundle(bundle_dir), load_schemas(schema_dir)
 
 
@@ -133,12 +134,10 @@ def test_dates_reach_the_schema_as_iso_strings(tmp_path):
     `format: date` and `type: string` misfire."""
     schema_dir = tmp_path / "schema"
     schema_dir.mkdir()
-    (schema_dir / "metric.schema.yaml").write_text(
-        "type: object\nproperties:\n  updated: {type: string}\n", encoding="utf-8"
-    )
+    write(schema_dir / "metric.schema.yaml", "type: object\nproperties:\n  updated: {type: string}\n")
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir()
-    (bundle_dir / "d.md").write_text("---\ntype: metric\ntitle: T\nupdated: 2026-08-04\n---\n\n# T\n", encoding="utf-8")
+    write(bundle_dir / "d.md", "---\ntype: metric\ntitle: T\nupdated: 2026-08-04\n---\n\n# T\n")
     schema_set = load_schemas(schema_dir)
     report = validate(load_bundle(bundle_dir), today=TODAY, extra_rules=[schema_rule(schema_set)])
     assert [f for f in report.findings if f.code.startswith("schemas.")] == []
@@ -149,13 +148,13 @@ def test_additional_properties_false_sees_unknown_keys(tmp_path):
     document carries. The typed `Frontmatter` view is not involved."""
     schema_dir = tmp_path / "schema"
     schema_dir.mkdir()
-    (schema_dir / "metric.schema.yaml").write_text(
+    write(
+        schema_dir / "metric.schema.yaml",
         "type: object\nproperties:\n  type: {type: string}\nadditionalProperties: false\n",
-        encoding="utf-8",
     )
     bundle_dir = tmp_path / "bundle"
     bundle_dir.mkdir()
-    (bundle_dir / "d.md").write_text("---\ntype: metric\nhouse_key: yes\n---\n\n# T\n", encoding="utf-8")
+    write(bundle_dir / "d.md", "---\ntype: metric\nhouse_key: yes\n---\n\n# T\n")
     report = validate(load_bundle(bundle_dir), today=TODAY, extra_rules=[schema_rule(load_schemas(schema_dir))])
     found = [f for f in report.findings if f.code == "schemas.invalid"]
     assert found and "house_key" in found[0].message

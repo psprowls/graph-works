@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-from ext_helpers import VOCABULARY, tagged_bundle
+from ext_helpers import VOCABULARY, tagged_bundle, write
 from okf_ext.context import DEFAULT_NORMALIZATION, ExtContext
 from okf_ext.tags.vocabulary import CODES, TOPIC, load_vocabulary, vocabulary_rule
 from okf_io import Finding, validate
@@ -101,9 +101,9 @@ def test_a_conformant_bundle_stays_conformant_with_house_rule(tmp_path):
 
     # Build a valid, conformant bundle that violates the vocabulary
     target = tmp_path / "valid.md"
-    target.write_text(
+    write(
+        target,
         "---\ntype: Metric\ntitle: Valid\ndescription: Good frontmatter\ntags: [unknown_tag, kpi]\n---\n\n# Valid\n",
-        encoding="utf-8",
     )
     vocab = load_vocabulary(VOCABULARY)
     result = validate(load_bundle(tmp_path), today=TODAY, extra_rules=[vocabulary_rule(vocab)])
@@ -150,10 +150,7 @@ def test_findings_are_shape_identical_to_built_ins():
 
 def test_a_duplicated_tag_is_reported_once_per_concept(tmp_path):
     target = tmp_path / "a.md"
-    target.write_text(
-        "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [ga4, ga4]\n---\n\n# T\n",
-        encoding="utf-8",
-    )
+    write(target, "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [ga4, ga4]\n---\n\n# T\n")
     from okf_io import load_bundle
 
     vocab = load_vocabulary(VOCABULARY)
@@ -199,17 +196,11 @@ def test_probe_deprecated_with_no_replacement(tmp_path):
 
     # Create a vocabulary with a deprecated tag that has no replacement
     vocab_file = tmp_path / "tags.yaml"
-    vocab_file.write_text(
-        "version: 1\ntags:\n  - name: legacy\n    deprecated: true\n",
-        encoding="utf-8",
-    )
+    write(vocab_file, "version: 1\ntags:\n  - name: legacy\n    deprecated: true\n")
 
     # Create a document using the deprecated tag
     doc_file = tmp_path / "doc.md"
-    doc_file.write_text(
-        "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [legacy]\n---\n\n# T\n",
-        encoding="utf-8",
-    )
+    write(doc_file, "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [legacy]\n---\n\n# T\n")
 
     vocab = load_vocabulary(vocab_file)
     result = validate(load_bundle(tmp_path), today=TODAY, extra_rules=[vocabulary_rule(vocab)])
@@ -255,20 +246,20 @@ def test_probe_non_canonical_suppression_boundary_all_cases(tmp_path):
 
     # Test first four cases with YAML fixture
     vocab_file = tmp_path / "tags.yaml"
-    vocab_file.write_text(
+    write(
+        vocab_file,
         "version: 1\ntags:\n"
         "  - name: metric\n"
         "  - name: data-quality\n"
         "  - name: kpi\n"
         "    deprecated: true\n"
         "    replaced_by: metric\n",
-        encoding="utf-8",
     )
 
     doc_file = tmp_path / "doc.md"
-    doc_file.write_text(
+    write(
+        doc_file,
         "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [Data Quality, KPI, E-Commerce, kpi]\n---\n\n# T\n",
-        encoding="utf-8",
     )
 
     vocab = load_vocabulary(vocab_file)
@@ -299,10 +290,7 @@ def test_probe_non_canonical_suppression_boundary_all_cases(tmp_path):
     )
 
     doc3_file = tmp_path / "doc3.md"
-    doc3_file.write_text(
-        "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [KPI]\n---\n\n# T\n",
-        encoding="utf-8",
-    )
+    write(doc3_file, "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [KPI]\n---\n\n# T\n")
 
     result3 = validate(
         load_bundle(tmp_path),
@@ -355,16 +343,13 @@ def test_probe_unknown_suggestion_can_be_deprecated(tmp_path):
 
     # Create a vocabulary where the suggested match is deprecated
     vocab_file = tmp_path / "tags.yaml"
-    vocab_file.write_text(
+    write(
+        vocab_file,
         "version: 1\ntags:\n  - name: metric\n  - name: kpi\n    deprecated: true\n    replaced_by: metric\n",
-        encoding="utf-8",
     )
 
     doc_file = tmp_path / "doc.md"
-    doc_file.write_text(
-        "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [kpis]\n---\n\n# T\n",
-        encoding="utf-8",
-    )
+    write(doc_file, "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [kpis]\n---\n\n# T\n")
 
     vocab = load_vocabulary(vocab_file)
     result = validate(load_bundle(tmp_path), today=TODAY, extra_rules=[vocabulary_rule(vocab)])

@@ -3,6 +3,7 @@
 import sys
 from datetime import date
 
+from ext_helpers import write
 from okf_ext.bundle import SCAFFOLD_MEMBERS, apply, plan_scaffold
 
 _TODAY = date(2026, 1, 1)
@@ -51,7 +52,7 @@ def test_an_unparseable_index_is_a_foreign_content_refusal_not_a_crash(tmp_path)
     root = tmp_path / "bundle"
     root.mkdir()
     content = "---\nfoo: [1, 2\n---\n"
-    (root / "index.md").write_text(content, encoding="utf-8")
+    write(root / "index.md", content)
 
     plan = plan_scaffold(root, today=_TODAY)
     assert not plan.ok
@@ -72,7 +73,7 @@ def test_an_unparseable_index_is_a_foreign_content_refusal_not_a_crash(tmp_path)
 def test_an_index_without_okf_version_is_not_a_bundle_root(tmp_path):
     root = tmp_path / "bundle"
     root.mkdir()
-    (root / "index.md").write_text("# Some other directory\n", encoding="utf-8")
+    write(root / "index.md", "# Some other directory\n")
 
     plan = plan_scaffold(root, today=_TODAY)
     refusal = next(f for f in plan.refusals if f.path == "index.md")
@@ -86,7 +87,7 @@ def test_a_log_with_real_entries_is_skipped_never_compared(tmp_path):
     root = tmp_path / "bundle"
     apply(plan_scaffold(root, today=_TODAY))
     lived_in = (root / "log.md").read_text(encoding="utf-8") + "\n- a later entry\n"
-    (root / "log.md").write_text(lived_in, encoding="utf-8")
+    write(root / "log.md", lived_in)
 
     plan = plan_scaffold(root, today=_TODAY)
     assert plan.ok and plan.is_empty
@@ -97,7 +98,7 @@ def test_a_log_with_real_entries_is_skipped_never_compared(tmp_path):
 def test_a_malformed_tags_file_is_refused_but_a_list_shaped_one_names_its_shape(tmp_path):
     root = tmp_path / "bundle"
     root.mkdir()
-    (root / "tags.yaml").write_text("- one\n- two\n", encoding="utf-8")
+    write(root / "tags.yaml", "- one\n- two\n")
 
     plan = plan_scaffold(root, today=_TODAY)
     refusal = next(f for f in plan.refusals if f.path == "tags.yaml")
@@ -131,7 +132,7 @@ def test_the_scaffold_log_entry_names_no_package(tmp_path):
 def test_genuinely_malformed_tags_yaml_is_refused(tmp_path):
     root = tmp_path / "bundle"
     root.mkdir()
-    (root / "tags.yaml").write_text("tags: {a: 1", encoding="utf-8")
+    write(root / "tags.yaml", "tags: {a: 1")
 
     plan = plan_scaffold(root, today=_TODAY)
     refusal = next(f for f in plan.refusals if f.path == "tags.yaml")
@@ -147,7 +148,7 @@ def test_deeply_nested_tags_yaml_does_not_crash(tmp_path):
     # frames ruamel spends per level.
     depth = sys.getrecursionlimit() * 3
     pathological = "tags: " + "[" * depth + "]" * depth
-    (root / "tags.yaml").write_text(pathological, encoding="utf-8")
+    write(root / "tags.yaml", pathological)
 
     plan = plan_scaffold(root, today=_TODAY)
     assert not plan.ok
@@ -159,7 +160,7 @@ def test_deeply_nested_tags_yaml_does_not_crash(tmp_path):
 def test_unparseable_log_is_refused(tmp_path):
     root = tmp_path / "bundle"
     root.mkdir()
-    (root / "log.md").write_text("---\nfoo: [1, 2\n---\n", encoding="utf-8")
+    write(root / "log.md", "---\nfoo: [1, 2\n---\n")
 
     plan = plan_scaffold(root, today=_TODAY)
     refusal = next(f for f in plan.refusals if f.path == "log.md")

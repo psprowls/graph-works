@@ -21,7 +21,7 @@ def run(bundle, *, today=TODAY, severity="warn", log_gap_days=14, strict=False):
 
 def build(tmp_path, **members):
     for name, text in members.items():
-        (tmp_path / f"{name.replace('_', '-')}.md").write_text(text, encoding="utf-8")
+        ext_helpers.write(tmp_path / f"{name.replace('_', '-')}.md", text)
     return load_bundle(tmp_path)
 
 
@@ -49,8 +49,8 @@ def test_a_concept_cited_only_by_an_index_is_still_uncited(tmp_path):
     enumerating its own directory is a table of contents, not a citation. That
     is a deliberate divergence from wiki-io's `orphans`, and it is why this code
     is named `uncited` rather than `orphan`."""
-    (tmp_path / "index.md").write_text("---\ntype: Index\ntitle: I\n---\n\n- [Solo](solo.md)\n", encoding="utf-8")
-    (tmp_path / "solo.md").write_text("---\ntype: Note\ntitle: Solo\n---\n\n# Solo\n", encoding="utf-8")
+    ext_helpers.write(tmp_path / "index.md", "---\ntype: Index\ntitle: I\n---\n\n- [Solo](solo.md)\n")
+    ext_helpers.write(tmp_path / "solo.md", "---\ntype: Note\ntitle: Solo\n---\n\n# Solo\n")
     found = [f for f in run(load_bundle(tmp_path)) if f.code == "health.uncited"]
     assert [f.path for f in found] == ["solo.md"]
 
@@ -105,8 +105,8 @@ def test_a_log_inside_the_threshold_is_silent():
 
 
 def test_a_log_with_no_dated_section_reports_with_no_line(tmp_path):
-    (tmp_path / "log.md").write_text(
-        "---\ntype: Log\ntitle: L\n---\n\n# History\n\n## Not a date\n\n- Something.\n", encoding="utf-8"
+    ext_helpers.write(
+        tmp_path / "log.md", "---\ntype: Log\ntitle: L\n---\n\n# History\n\n## Not a date\n\n- Something.\n"
     )
     found = [f for f in run(load_bundle(tmp_path)) if f.code == "health.log-gap"]
     assert len(found) == 1
@@ -122,18 +122,18 @@ def test_a_bundle_with_no_logs_is_silent_not_an_error(tmp_path):
 def test_undated_sections_are_ignored_rather_than_reported(tmp_path):
     """`reserved.log-heading-not-date` already reports a log heading that is not
     a date. The newest *dated* section is what this rule reads."""
-    (tmp_path / "log.md").write_text(
+    ext_helpers.write(
+        tmp_path / "log.md",
         "---\ntype: Log\ntitle: L\n---\n\n# History\n\n## Unreleased\n\n- x\n\n## 2026-08-01\n\n- y\n",
-        encoding="utf-8",
     )
     assert not [f for f in run(load_bundle(tmp_path)) if f.code == "health.log-gap"]
 
 
 def test_the_newest_dated_section_wins_regardless_of_document_order(tmp_path):
     """`parse_log` returns sections in document order, not sorted by date."""
-    (tmp_path / "log.md").write_text(
+    ext_helpers.write(
+        tmp_path / "log.md",
         "---\ntype: Log\ntitle: L\n---\n\n# History\n\n## 2026-01-01\n\n- old\n\n## 2026-08-01\n\n- new\n",
-        encoding="utf-8",
     )
     assert not [f for f in run(load_bundle(tmp_path)) if f.code == "health.log-gap"]
 
@@ -157,8 +157,8 @@ def test_two_today_values_produce_different_log_gap_output():
 def test_a_parse_error_is_skipped_by_every_code(tmp_path):
     """One habit per module: okf-io already emitted `frontmatter.unparseable`,
     and a bundle with an unparseable log has a bigger problem than a stale one."""
-    (tmp_path / "broken.md").write_text("---\ntype: [unclosed\n---\n\n# B\n", encoding="utf-8")
-    (tmp_path / "log.md").write_text("---\ntitle: [unclosed\n---\n\n## 2020-01-01\n\n- old\n", encoding="utf-8")
+    ext_helpers.write(tmp_path / "broken.md", "---\ntype: [unclosed\n---\n\n# B\n")
+    ext_helpers.write(tmp_path / "log.md", "---\ntitle: [unclosed\n---\n\n## 2020-01-01\n\n- old\n")
     assert run(load_bundle(tmp_path)) == []
 
 

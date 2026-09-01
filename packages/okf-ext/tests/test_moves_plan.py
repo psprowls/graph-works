@@ -84,14 +84,14 @@ def test_a_directory_move_rebases_a_reference_between_two_moved_members(linked):
 
 
 def test_extra_list_mapping_path_repairs_by_resolved_identity(tmp_path):
-    (tmp_path / "index.md").write_text("---\nokf_version: 0.2\n---\n# T\n", encoding="utf-8")
+    ext_helpers.write(tmp_path / "index.md", "---\nokf_version: 0.2\n---\n# T\n")
     work = tmp_path / "work"
     work.mkdir()
-    (work / "feature-old.md").write_text("---\ntitle: Old\ndescription: D\ntype: Feature\n---\n", encoding="utf-8")
-    (work / "feature-referrer.md").write_text(
+    ext_helpers.write(work / "feature-old.md", "---\ntitle: Old\ndescription: D\ntype: Feature\n---\n")
+    ext_helpers.write(
+        work / "feature-referrer.md",
         "---\ntitle: R\ndescription: D\ntype: Feature\n"
         "depends_on:\n  - path: work/feature-old\n    blocks: execute\n    needs: resolved\n---\n",
-        encoding="utf-8",
     )
     bundle = load_bundle(tmp_path)
     plan = plan_move_many(
@@ -134,8 +134,8 @@ def test_reserved_source_is_not_refused_in_repair_mode(tmp_path):
     """
     root = tmp_path / "b"
     root.mkdir()
-    (root / "index.md").write_text("# Index\n\n- [a](./a.md)\n", encoding="utf-8")
-    (root / "a.md").write_text("---\ntitle: A\n---\n\n# A\n\nBack to [index](./index.md).\n", encoding="utf-8")
+    ext_helpers.write(root / "index.md", "# Index\n\n- [a](./a.md)\n")
+    ext_helpers.write(root / "a.md", "---\ntitle: A\n---\n\n# A\n\nBack to [index](./index.md).\n")
     load_bundle(root)  # sanity: builds cleanly before the external rename
 
     (root / "concepts").mkdir()
@@ -432,12 +432,12 @@ def test_reference_link_with_trailing_parenthetical_is_a_false_positive(tmp_path
     """
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
+    ext_helpers.write(
+        root / "a.md",
         "---\ntitle: A\n---\n\n# A\n\nA reference-style link: [a][ref](notlink.md)\n\n[ref]: target.md\n",
-        encoding="utf-8",
     )
-    (root / "target.md").write_text("---\ntitle: Target\n---\n\n# Target\n", encoding="utf-8")
-    (root / "notlink.md").write_text("---\ntitle: Notlink\n---\n\n# Notlink\n", encoding="utf-8")
+    ext_helpers.write(root / "target.md", "---\ntitle: Target\n---\n\n# Target\n")
+    ext_helpers.write(root / "notlink.md", "---\ntitle: Notlink\n---\n\n# Notlink\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "notlink.md", "moved/notlink.md")
@@ -452,8 +452,8 @@ def test_an_untouched_parse_error_document_does_not_refuse(tmp_path):
     """A bundle with one broken unrelated file must still be movable."""
     root = tmp_path / "b"
     (root / "sub").mkdir(parents=True)
-    (root / "a.md").write_text("---\ntitle: A\n---\n\n# A\n", encoding="utf-8")
-    (root / "sub" / "unrelated.md").write_text("---\ntitle: X\n\n# X\n", encoding="utf-8")
+    ext_helpers.write(root / "a.md", "---\ntitle: A\n---\n\n# A\n")
+    ext_helpers.write(root / "sub" / "unrelated.md", "---\ntitle: X\n\n# X\n")
     bundle = load_bundle(root)
     plan = plan_move(bundle, "a.md", "moved/a.md")
     assert plan.ok, plan.refusals
@@ -472,10 +472,7 @@ def test_a_moved_members_climb_out_of_the_bundle_is_reported_not_rewritten(tmp_p
     broken reference elsewhere in the file is not this move's problem)."""
     root = tmp_path / "b"
     (root / "sub").mkdir(parents=True)
-    (root / "sub" / "a.md").write_text(
-        "---\ntitle: A\n---\n\n# A\n\nA broken climb: [gone](../../outside.md).\n",
-        encoding="utf-8",
-    )
+    ext_helpers.write(root / "sub" / "a.md", "---\ntitle: A\n---\n\n# A\n\nA broken climb: [gone](../../outside.md).\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "sub/a.md", "moved/a.md")
@@ -492,10 +489,7 @@ def test_a_moved_members_reference_to_a_non_member_is_reported_not_rewritten(tmp
     case, for the same reason: reported, not rewritten, plan still ok."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
-        "---\ntitle: A\n---\n\n# A\n\nA dangling reference: [gone](./missing.md).\n",
-        encoding="utf-8",
-    )
+    ext_helpers.write(root / "a.md", "---\ntitle: A\n---\n\n# A\n\nA dangling reference: [gone](./missing.md).\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "a.md", "deep/a.md")
@@ -515,10 +509,7 @@ def test_a_moved_members_frontmatter_climb_out_of_the_bundle_is_reported_not_rew
     guards against."""
     root = tmp_path / "b"
     (root / "sub").mkdir(parents=True)
-    (root / "sub" / "a.md").write_text(
-        "---\ntitle: A\nresource: ../../outside.md\n---\n\n# A\n",
-        encoding="utf-8",
-    )
+    ext_helpers.write(root / "sub" / "a.md", "---\ntitle: A\nresource: ../../outside.md\n---\n\n# A\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "sub/a.md", "moved/a.md")
@@ -537,10 +528,7 @@ def test_a_moved_members_frontmatter_reference_to_a_non_member_is_reported_not_r
     silently dropping this."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
-        "---\ntitle: A\nresource: ./missing.md\n---\n\n# A\n",
-        encoding="utf-8",
-    )
+    ext_helpers.write(root / "a.md", "---\ntitle: A\nresource: ./missing.md\n---\n\n# A\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "a.md", "deep/a.md")
@@ -564,9 +552,8 @@ def test_a_fragment_only_reference_is_not_a_candidate_in_either_form(tmp_path):
     agreement is visible in one place."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
-        "---\ntitle: A\nresource: '#section'\n---\n\n# A\n\nAn anchor: [here](#section).\n",
-        encoding="utf-8",
+    ext_helpers.write(
+        root / "a.md", "---\ntitle: A\nresource: '#section'\n---\n\n# A\n\nAn anchor: [here](#section).\n"
     )
     bundle = load_bundle(root)
 
@@ -589,7 +576,7 @@ def test_a_within_bounds_climb_in_a_mapping_path_is_collapsed(tmp_path):
     unusual."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "alpha.md").write_text("---\ntitle: A\n---\n\n# A\n", encoding="utf-8")
+    ext_helpers.write(root / "alpha.md", "---\ntitle: A\n---\n\n# A\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "alpha.md", "notes/sub/../moved.md")
@@ -635,11 +622,10 @@ def test_an_external_body_destination_is_skipped_by_the_locator_walk(tmp_path):
     exercised."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "other.md").write_text(
-        "---\ntitle: Other\n---\n\n# Other\n\nAn external link: [x](https://example.com).\n",
-        encoding="utf-8",
+    ext_helpers.write(
+        root / "other.md", "---\ntitle: Other\n---\n\n# Other\n\nAn external link: [x](https://example.com).\n"
     )
-    (root / "target.md").write_text("---\ntitle: Target\n---\n\n# Target\n", encoding="utf-8")
+    ext_helpers.write(root / "target.md", "---\ntitle: Target\n---\n\n# Target\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "target.md", "moved/target.md")
@@ -659,11 +645,10 @@ def test_an_already_broken_reference_in_an_unmoved_document_is_ignored(tmp_path)
     after it, silently."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "other.md").write_text(
-        "---\ntitle: Other\n---\n\n# Other\n\nAlready broken: [gone](../../outside.md).\n",
-        encoding="utf-8",
+    ext_helpers.write(
+        root / "other.md", "---\ntitle: Other\n---\n\n# Other\n\nAlready broken: [gone](../../outside.md).\n"
     )
-    (root / "target.md").write_text("---\ntitle: Target\n---\n\n# Target\n", encoding="utf-8")
+    ext_helpers.write(root / "target.md", "---\ntitle: Target\n---\n\n# Target\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "target.md", "moved/target.md")
@@ -683,10 +668,7 @@ def test_a_moved_members_root_absolute_dangling_reference_is_not_reported(tmp_pa
     breakage is not this capability's problem to surface."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
-        "---\ntitle: A\n---\n\n# A\n\nAlready broken: [gone](/somewhere/missing.md).\n",
-        encoding="utf-8",
-    )
+    ext_helpers.write(root / "a.md", "---\ntitle: A\n---\n\n# A\n\nAlready broken: [gone](/somewhere/missing.md).\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "a.md", "deep/a.md")
@@ -705,10 +687,10 @@ def test_a_parse_error_documents_external_and_unrelated_references_are_skipped(t
     normal, parseable document would be."""
     root = tmp_path / "b"
     (root / "sub").mkdir(parents=True)
-    (root / "a.md").write_text("---\ntitle: A\n---\n\n# A\n", encoding="utf-8")
-    (root / "sub" / "unrelated.md").write_text(
+    ext_helpers.write(root / "a.md", "---\ntitle: A\n---\n\n# A\n")
+    ext_helpers.write(
+        root / "sub" / "unrelated.md",
         "---\ntitle: X\n\nAn external one: [x](https://example.com) and an unrelated one: [y](./unrelated-target.md)\n",
-        encoding="utf-8",
     )
     bundle = load_bundle(root)
 
@@ -725,11 +707,11 @@ def test_an_external_reference_definition_is_skipped(tmp_path):
     skipped specifically, not that the whole scan was never reached."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
+    ext_helpers.write(
+        root / "a.md",
         '---\ntitle: A\n---\n\n# A\n\nA real link: [real](./target.md)\n\n[ext]: https://example.com/x "Ext"\n',
-        encoding="utf-8",
     )
-    (root / "target.md").write_text("---\ntitle: Target\n---\n\n# Target\n", encoding="utf-8")
+    ext_helpers.write(root / "target.md", "---\ntitle: Target\n---\n\n# Target\n")
     bundle = load_bundle(root)
 
     plan = plan_move(bundle, "target.md", "moved/target.md")
@@ -826,11 +808,10 @@ def test_a_non_path_resource_is_untouched(tmp_path):
     §5.1 scope descriptor; neither resolves to a member."""
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
-        "---\ntitle: A\nresource: bigquery://project.dataset.table\n---\n\n# A\n\n[t](./t.md)\n",
-        encoding="utf-8",
+    ext_helpers.write(
+        root / "a.md", "---\ntitle: A\nresource: bigquery://project.dataset.table\n---\n\n# A\n\n[t](./t.md)\n"
     )
-    (root / "t.md").write_text("---\ntitle: T\n---\n\n# T\n", encoding="utf-8")
+    ext_helpers.write(root / "t.md", "---\ntitle: T\n---\n\n# T\n")
     bundle = load_bundle(root)
     plan = plan_move(bundle, "t.md", "moved/t.md")
     assert plan.ok
@@ -840,11 +821,10 @@ def test_a_non_path_resource_is_untouched(tmp_path):
 def test_the_nested_executor_and_attester_keys_repair(tmp_path):
     root = tmp_path / "b"
     root.mkdir()
-    (root / "a.md").write_text(
-        "---\ntitle: A\nexecutor:\n  resource: ./t.md\nattester:\n  resource: ./t.md\n---\n\n# A\n",
-        encoding="utf-8",
+    ext_helpers.write(
+        root / "a.md", "---\ntitle: A\nexecutor:\n  resource: ./t.md\nattester:\n  resource: ./t.md\n---\n\n# A\n"
     )
-    (root / "t.md").write_text("---\ntitle: T\n---\n\n# T\n", encoding="utf-8")
+    ext_helpers.write(root / "t.md", "---\ntitle: T\n---\n\n# T\n")
     bundle = load_bundle(root)
     plan = plan_move(bundle, "t.md", "moved/t.md")
     keys = {e.key for e in plan.edits if e.where == "frontmatter"}
@@ -906,7 +886,7 @@ def _with_wikilink(tmp_path, member, sentence):
     """A writable copy of the clean corpus with *sentence* appended to *member*."""
     root = ext_helpers.linked_copy(tmp_path)
     target = root / member
-    target.write_text(target.read_text(encoding="utf-8") + sentence, encoding="utf-8")
+    ext_helpers.write(target, target.read_text(encoding="utf-8") + sentence)
     return load_bundle(root)
 
 
@@ -972,7 +952,7 @@ def test_the_stranded_line_number_is_document_relative(tmp_path):
     root = ext_helpers.linked_copy(tmp_path)
     target = root / "notes" / "gamma.md"
     original = target.read_text(encoding="utf-8")
-    target.write_text(original + "\nSee [[concepts/beta]] for the rest.\n", encoding="utf-8")
+    ext_helpers.write(target, original + "\nSee [[concepts/beta]] for the rest.\n")
     expected = original.count("\n") + 2
     plan = plan_move_many(load_bundle(root), {"concepts/beta.md": "pages/beta.md"})
     assert plan.stranded[0].line == expected

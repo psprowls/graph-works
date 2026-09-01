@@ -89,6 +89,14 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 [tool.mypy]
 python_version = "3.12"
 strict = true
+# Host-independent by construction. Without this, `mypy` narrows `sys.platform`
+# against whatever machine it happens to run on, so `just types` means a
+# different thing on each developer's box: 26 errors on Windows, 1 on POSIX,
+# and each host structurally blind to the arm it is not compiled for. That is
+# the feedback loop that let `os.O_DIRECTORY` and `os.O_BINARY` both land
+# unseen, in opposite directions. `just types` overrides this per pass with an
+# explicit `--platform`; this value is what a bare `uv run mypy` means.
+platform = "linux"
 
 # botocore ships no py.typed and botocore-stubs is a large dev dependency for
 # one `except` clause and one `.response` read. models-io subclasses nothing

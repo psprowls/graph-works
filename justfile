@@ -62,21 +62,43 @@ lint:
     uv run ruff check .
     uv run ruff format --check .
 
-# Static types, strict — every package. Depends on `sync`: this is the recipe
-# that fails without it.
+# Static types, strict — every package, ONCE PER PLATFORM ARM.
+#
+# Two passes, not one. A single-platform gate structurally cannot see the arm it
+# is not compiled for: the win32 pass is blind to every POSIX branch and the
+# linux pass is blind to every Windows branch. Running only the host's arm is
+# what let `os.O_DIRECTORY` sit unguarded on the POSIX side and `os.O_BINARY`
+# sit unguarded on the Windows side, each invisible to whoever was looking.
+# Roughly double the runtime, and strictly more coverage on every machine.
+#
+# `--platform` overrides `[tool.mypy] platform` in pyproject.toml.
+#
+# Depends on `sync`: this is the recipe that fails without it.
 types: sync
-    uv run mypy --strict packages/okf-io/src packages/okf-ext/src
-    uv run --package code-graph-io mypy --strict packages/code-graph-io/src
-    uv run --package code-wiki-okf mypy --strict packages/code-wiki-okf/src
-    uv run --package work-tracker-okf mypy --strict packages/work-tracker-okf/src
-    uv run --package config-io mypy --strict packages/config-io/src
-    uv run --package models-io --extra bedrock --extra vercel mypy --strict packages/models-io/src
-    uv run --package subagents-io mypy --strict packages/subagents-io/src
-    uv run --package doc-wiki-okf mypy --strict packages/doc-wiki-okf/src
-    uv run --package graph-works-core mypy --strict packages/graph-works-core/src
-    uv run --package workflow-local mypy --strict packages/workflow-local/src
-    uv run --package workflow-orca mypy --strict packages/workflow-orca/src
-    uv run --package graph-works-cli mypy --strict packages/graph-works-cli/src
+    uv run mypy --strict --platform linux packages/okf-io/src packages/okf-ext/src
+    uv run --package code-graph-io mypy --strict --platform linux packages/code-graph-io/src
+    uv run --package code-wiki-okf mypy --strict --platform linux packages/code-wiki-okf/src
+    uv run --package work-tracker-okf mypy --strict --platform linux packages/work-tracker-okf/src
+    uv run --package config-io mypy --strict --platform linux packages/config-io/src
+    uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform linux packages/models-io/src
+    uv run --package subagents-io mypy --strict --platform linux packages/subagents-io/src
+    uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
+    uv run --package graph-works-core mypy --strict --platform linux packages/graph-works-core/src
+    uv run --package workflow-local mypy --strict --platform linux packages/workflow-local/src
+    uv run --package workflow-orca mypy --strict --platform linux packages/workflow-orca/src
+    uv run --package graph-works-cli mypy --strict --platform linux packages/graph-works-cli/src
+    uv run mypy --strict --platform win32 packages/okf-io/src packages/okf-ext/src
+    uv run --package code-graph-io mypy --strict --platform win32 packages/code-graph-io/src
+    uv run --package code-wiki-okf mypy --strict --platform win32 packages/code-wiki-okf/src
+    uv run --package work-tracker-okf mypy --strict --platform win32 packages/work-tracker-okf/src
+    uv run --package config-io mypy --strict --platform win32 packages/config-io/src
+    uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform win32 packages/models-io/src
+    uv run --package subagents-io mypy --strict --platform win32 packages/subagents-io/src
+    uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
+    uv run --package graph-works-core mypy --strict --platform win32 packages/graph-works-core/src
+    uv run --package workflow-local mypy --strict --platform win32 packages/workflow-local/src
+    uv run --package workflow-orca mypy --strict --platform win32 packages/workflow-orca/src
+    uv run --package graph-works-cli mypy --strict --platform win32 packages/graph-works-cli/src
 
 # Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
 # exists: nothing enforces this but the person who runs it.

@@ -88,7 +88,7 @@ def test_refuses_a_workspace_with_no_v2_manifest(tmp_path: Path) -> None:
 def test_refuses_a_foreign_version(tmp_path: Path, version: str) -> None:
     root = tmp_path / "ws"
     root.mkdir()
-    (root / ".graph-wiki.yaml").write_text(f"version: {version}\ntopic: x\n", encoding="utf-8")
+    (root / ".graph-wiki.yaml").write_text(f"version: {version}\ntopic: x\n", encoding="utf-8", newline="")
     with pytest.raises(ConversionRefused, match="version"):
         read_v2(root)
 
@@ -96,14 +96,14 @@ def test_refuses_a_foreign_version(tmp_path: Path, version: str) -> None:
 def test_refuses_an_unknown_top_level_key(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     root.mkdir()
-    (root / ".graph-wiki.yaml").write_text("version: 2\nnobody_decided_this: 1\n", encoding="utf-8")
+    (root / ".graph-wiki.yaml").write_text("version: 2\nnobody_decided_this: 1\n", encoding="utf-8", newline="")
     with pytest.raises(ConversionRefused, match="nobody_decided_this"):
         read_v2(root)
 
 
 def test_refuses_an_unknown_key_in_the_local_overlay(tmp_path: Path) -> None:
     root = workspace(tmp_path, "agent-workspace.graph-wiki.yaml")
-    (root / ".graph-wiki.local.yaml").write_text("surprise: 1\n", encoding="utf-8")
+    (root / ".graph-wiki.local.yaml").write_text("surprise: 1\n", encoding="utf-8", newline="")
     with pytest.raises(ConversionRefused, match="surprise"):
         read_v2(root)
 
@@ -271,7 +271,7 @@ def test_workspace_directory_is_dropped_and_reported(tmp_path: Path) -> None:
         (FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes()
     )
     (root / ".graph-wiki.local.yaml").write_text(
-        "workspace-directory: /somewhere/else\n", encoding="utf-8"
+        "workspace-directory: /somewhere/else\n", encoding="utf-8", newline=""
     )
     repo = tmp_path / "graph-works"
     repo.mkdir()
@@ -286,7 +286,7 @@ def test_refuses_when_no_repo_path_can_be_determined(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     root.mkdir()
     (root / "wiki").mkdir()
-    (root / ".graph-wiki.yaml").write_text("version: 2\ntopic: x\n", encoding="utf-8")
+    (root / ".graph-wiki.yaml").write_text("version: 2\ntopic: x\n", encoding="utf-8", newline="")
     conversion = dispose(read_v2(root), root=root, options=Options())
     assert not conversion.ok
     assert any("repo" in refusal for refusal in conversion.refusals)
@@ -305,7 +305,7 @@ def written(tmp_path: Path, body: str, *, repo: bool = True) -> object:
     (root / "wiki").mkdir(exist_ok=True)
     if repo:
         (tmp_path / "graph-works").mkdir(exist_ok=True)
-    (root / "workspace.yaml").write_text(body, encoding="utf-8")
+    (root / "workspace.yaml").write_text(body, encoding="utf-8", newline="")
     return layout_for(root, bundle_dir="wiki")
 
 
@@ -448,7 +448,7 @@ def test_projection_refuses_a_stale_projection(tmp_path: Path) -> None:
     create_control_plane(layout)
     sync_projection(layout, gw=DEFAULT_GW)
     # A hand-edit after the sync is exactly the drift the hook warns about.
-    layout.manifest_path.write_text(good_body() + 'topic: "changed"\n', encoding="utf-8")
+    layout.manifest_path.write_text(good_body() + 'topic: "changed"\n', encoding="utf-8", newline="")
     with pytest.raises(ConversionRefused, match="sha256"):
         _assert_projection_fresh(layout)
 
@@ -493,7 +493,7 @@ def test_bad_workspace_exits_two(tmp_path: Path) -> None:
 def test_refusal_exits_one(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     root.mkdir()
-    (root / ".graph-wiki.yaml").write_text("version: 3\n", encoding="utf-8")
+    (root / ".graph-wiki.yaml").write_text("version: 3\n", encoding="utf-8", newline="")
     assert main([str(root)]) == 1
 
 
@@ -522,7 +522,7 @@ def test_write_is_idempotent(tmp_path: Path) -> None:
 
 def test_write_refuses_a_different_existing_manifest(tmp_path: Path) -> None:
     root = live_workspace(tmp_path)
-    (root / "workspace.yaml").write_text("version: 1\ntopic: hand-written\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text("version: 1\ntopic: hand-written\n", encoding="utf-8", newline="")
     assert main([str(root), "--repo-name", "graph-works", "--write"]) == 1
     # Never an overwrite: the live workspace is not a file to clobber.
     assert "hand-written" in (root / "workspace.yaml").read_text(encoding="utf-8")

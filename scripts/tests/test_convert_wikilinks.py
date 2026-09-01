@@ -25,7 +25,7 @@ from convert_wikilinks import mask_inline_code, report, run, strip_entity_prefix
 def page(vault: Path, path: str, body: str, *, frontmatter: str = "") -> Path:
     target = vault / path
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(f"---\n{frontmatter}---\n\n{body}", encoding="utf-8")
+    target.write_text(f"---\n{frontmatter}---\n\n{body}", encoding="utf-8", newline="")
     return target
 
 
@@ -268,7 +268,7 @@ def test_reserved_index_does_not_gain_frontmatter(vault: Path) -> None:
     """§12 permits only `okf_version` on `index.md`; this vault's has no
     frontmatter at all, so a backfilled `title:` would staple a whole block on
     and trip `reserved.index-frontmatter`."""
-    (vault / "index.md").write_text("# Index\n\nCatalog.\n", encoding="utf-8")
+    (vault / "index.md").write_text("# Index\n\nCatalog.\n", encoding="utf-8", newline="")
     page(vault, "notes.md", "See [[index]].\n")
     convert(vault, read="notes.md")
     text = (vault / "index.md").read_text(encoding="utf-8")
@@ -277,7 +277,7 @@ def test_reserved_index_does_not_gain_frontmatter(vault: Path) -> None:
 
 
 def test_reserved_log_does_not_gain_frontmatter(vault: Path) -> None:
-    (vault / "log.md").write_text("# Log\n\n## [2026-08-06] note | x\n", encoding="utf-8")
+    (vault / "log.md").write_text("# Log\n\n## [2026-08-06] note | x\n", encoding="utf-8", newline="")
     page(vault, "notes.md", "See [[log]].\n")
     convert(vault, read="notes.md")
     assert not (vault / "log.md").read_text(encoding="utf-8").startswith("---")
@@ -285,7 +285,7 @@ def test_reserved_log_does_not_gain_frontmatter(vault: Path) -> None:
 
 def test_link_into_reserved_file_still_converts(vault: Path) -> None:
     """Excluding reserved files from *backfill* must not exclude them as targets."""
-    (vault / "index.md").write_text("# Index\n\nCatalog.\n", encoding="utf-8")
+    (vault / "index.md").write_text("# Index\n\nCatalog.\n", encoding="utf-8", newline="")
     page(vault, "notes.md", "See [[index]].\n")
     assert "[Index](/index.md)" in convert(vault, read="notes.md")
 

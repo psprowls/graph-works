@@ -3,18 +3,14 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
-from helpers import BUNDLES
+from helpers import BUNDLES, write_tree
 from okf_io import bundle, links
 
 CONCEPT = "---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n"
 
 
 def make(tmp_path: Path, files: dict[str, str]) -> bundle.Bundle:
-    for rel, text in files.items():
-        target = tmp_path / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    return bundle.load(tmp_path)
+    return bundle.load(write_tree(tmp_path, files))
 
 
 def targets(graph: links.LinkGraph) -> list[str | None]:

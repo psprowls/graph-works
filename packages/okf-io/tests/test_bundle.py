@@ -5,6 +5,7 @@ import sys
 import unicodedata
 from pathlib import Path
 
+import helpers
 import pytest
 from helpers import BUNDLES
 from okf_io import bundle
@@ -19,8 +20,7 @@ def acme():
 
 def write(root: Path, rel: str, text: str) -> Path:
     target = root / rel
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
+    helpers.write(target, text)
     return target
 
 
@@ -213,7 +213,7 @@ def test_bundle_walk_is_iterative_beyond_the_python_recursion_limit(tmp_path):
         parts.append(part)
         cursor /= part
         cursor.mkdir()
-    (cursor / "leaf.md").write_text(CONCEPT, encoding="utf-8")
+    helpers.write(cursor / "leaf.md", CONCEPT)
     previous_limit = sys.getrecursionlimit()
     try:
         sys.setrecursionlimit(250)

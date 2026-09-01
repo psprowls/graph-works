@@ -6,6 +6,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from helpers import write_tree
 from okf_io import bundle
 from okf_io.validate import Finding, Report, RuleContext, Severity, _registry, validate
 
@@ -14,11 +15,7 @@ CONCEPT = "---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n# Definition\n"
 
 
 def make(tmp_path: Path, files: dict[str, str]) -> bundle.Bundle:
-    for rel, text in files.items():
-        target = tmp_path / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    return bundle.load(tmp_path)
+    return bundle.load(write_tree(tmp_path, files))
 
 
 def finding(code: str, severity: Severity = "warn", path: str = "a.md", line: int | None = None):

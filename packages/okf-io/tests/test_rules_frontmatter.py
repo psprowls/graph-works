@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 from typing import ClassVar
 
+from helpers import write_tree
 from okf_io import bundle
 from okf_io.validate import validate
 
@@ -11,10 +12,7 @@ TODAY = date(2026, 8, 3)
 
 
 def codes(tmp_path: Path, files: dict[str, str], raw: dict[str, bytes] | None = None):
-    for rel, text in files.items():
-        target = tmp_path / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
+    write_tree(tmp_path, files)
     for rel, payload in (raw or {}).items():
         target = tmp_path / rel
         target.parent.mkdir(parents=True, exist_ok=True)

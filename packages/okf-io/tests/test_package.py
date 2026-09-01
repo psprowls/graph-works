@@ -4,6 +4,7 @@ import importlib.metadata
 from datetime import date
 
 import okf_io
+from helpers import write
 
 
 def test_version_is_static():
@@ -144,7 +145,7 @@ def test_the_public_surface_alone_is_sufficient(tmp_path):
         ]
     )
     target = tmp_path / "revenue.md"
-    target.write_text(src, encoding="utf-8")
+    write(target, src)
 
     doc = okf_io.load(target)
     assert isinstance(doc, okf_io.Document)
@@ -169,13 +170,8 @@ def test_the_public_surface_alone_is_sufficient(tmp_path):
 
 def test_the_public_surface_reaches_a_whole_bundle(tmp_path):
     """Walk, graph, validate -- using only names from `__all__`."""
-    (tmp_path / "a.md").write_text(
-        "---\ntype: Metric\ntitle: Revenue\ndescription: D\n---\n\n[t](./t.md)\n",
-        encoding="utf-8",
-    )
-    (tmp_path / "t.md").write_text(
-        "---\ntype: Table\ntitle: Orders\ndescription: D\n---\n\n# Schema\n", encoding="utf-8"
-    )
+    write(tmp_path / "a.md", "---\ntype: Metric\ntitle: Revenue\ndescription: D\n---\n\n[t](./t.md)\n")
+    write(tmp_path / "t.md", "---\ntype: Table\ntitle: Orders\ndescription: D\n---\n\n# Schema\n")
 
     loaded = okf_io.load_bundle(tmp_path)
     assert isinstance(loaded, okf_io.Bundle)

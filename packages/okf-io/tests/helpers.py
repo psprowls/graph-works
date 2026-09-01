@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 
 from okf_io import _yaml
@@ -24,6 +25,32 @@ MALFORMED = frozenset(
 def read(path: Path) -> str:
     """Read without newline translation, so CRLF and BOM survive."""
     return path.read_bytes().decode("utf-8")
+
+
+def write(path: Path, text: str) -> None:
+    """Write without newline translation, so the string's own endings survive.
+
+    The write half of `read`, and the reason it exists: `Path.write_text` with
+    no `newline=` translates every LF to `os.linesep`, so on Windows a fixture
+    written from an LF string lands as CRLF. The document layer then reads the
+    file's real bytes and the round-trip assertion compares that CRLF payload
+    against an LF `read_text`, which un-translates on the way back in. Every
+    fixture writer in this suite goes through here.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="")
+
+
+def write_tree(root: Path, files: Mapping[str, str]) -> Path:
+    """Write a `{bundle-relative posix path: text}` mapping under *root*.
+
+    The loop that thirteen modules had each re-implemented inline, each copy
+    re-introducing the translating default. Returns *root* so callers can
+    write `bundle.load(write_tree(tmp_path, files))`.
+    """
+    for relative, text in files.items():
+        write(root / relative, text)
+    return root
 
 
 def all_concept_files() -> list[Path]:

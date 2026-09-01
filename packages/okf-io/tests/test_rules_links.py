@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from helpers import write_tree
 from okf_io import bundle
 from okf_io.validate import validate
 
@@ -11,11 +12,7 @@ CONCEPT = "---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n"
 
 
 def report_for(tmp_path: Path, files: dict[str, str], **kwargs):
-    for rel, text in files.items():
-        target = tmp_path / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    return validate(bundle.load(tmp_path), today=TODAY, **kwargs)
+    return validate(bundle.load(write_tree(tmp_path, files)), today=TODAY, **kwargs)
 
 
 def test_a_missing_target_warns(tmp_path):

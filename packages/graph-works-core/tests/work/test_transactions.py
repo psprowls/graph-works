@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
-from _transaction_helpers import _plan, _snapshot, _workspace
+from _transaction_helpers import _plan, _snapshot, _workspace, representable_mode
 from graph_works_core.work import MutationApplication, apply_mutation
 from graph_works_core.work import transactions as public_transactions
 from graph_works_core.workspace import anchors, transactions
@@ -562,7 +562,7 @@ def test_successful_write_preserves_the_effective_preimage_mode(tmp_path: Path) 
 
     assert result.ok is True
     assert target.read_bytes() == b"after"
-    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert stat.S_IMODE(target.stat().st_mode) == representable_mode(0o640, directory=False)
 
 
 def test_distinct_source_member_supplies_final_bytes_precondition_and_mode(tmp_path: Path) -> None:
@@ -595,7 +595,7 @@ def test_distinct_source_member_supplies_final_bytes_precondition_and_mode(tmp_p
     destination = layout.bundle_dir / "work/destination/page.md"
     assert result.ok is True
     assert destination.read_bytes() == b"composed final bytes"
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    assert stat.S_IMODE(destination.stat().st_mode) == representable_mode(0o600, directory=False)
     assert not source_directory.exists()
 
 
@@ -1309,12 +1309,50 @@ def test_real_reparent_preserves_mapped_nested_and_empty_directory_modes(tmp_pat
 
     destination = layout.bundle_dir / release / "children/bug-source"
     assert result.ok is True
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o700
-    assert stat.S_IMODE(destination.joinpath("nested").stat().st_mode) == 0o710
-    assert stat.S_IMODE(destination.joinpath("nested/empty").stat().st_mode) == 0o750
+    assert stat.S_IMODE(destination.stat().st_mode) == representable_mode(0o700, directory=True)
+    assert stat.S_IMODE(destination.joinpath("nested").stat().st_mode) == representable_mode(0o710, directory=True)
+    assert stat.S_IMODE(destination.joinpath("nested/empty").stat().st_mode) == representable_mode(
+        0o750, directory=True
+    )
 
 
 def test_mapped_directory_mode_change_after_snapshot_refuses_before_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = _workspace(tmp_path)
+    release = "work/release-cutover"
+    source = "work/bug-source"
+    _write_item(layout.bundle_dir, release, type="Release")
+    _write_item(layout.bundle_dir, source, type="Bug")
+    source_root = layout.bundle_dir / source
+    source_root.mkdir()
+    source_root.chmod(0o500)
+    (layout.bundle_dir / release / "children").mkdir(parents=True)
+    (layout.bundle_dir / release / "children/_archive").mkdir()
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    plan = plan_reparent(bundle, load_items(bundle), source, release)
+    real_snapshot = transactions._create_snapshot
+
+    def chmod_after_snapshot(*args: object, **kwargs: object):
+        snapshot = real_snapshot(*args, **kwargs)
+        source_root.chmod(0o755)
+        return snapshot
+
+    monkeypatch.setattr(transactions, "_create_snapshot", chmod_after_snapshot)
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is False
+    assert result.rolled_back is False
+    assert "directory mode changed since planning" in result.failures[0]
+    assert stat.S_IMODE(source_root.stat().st_mode) == representable_mode(0o755, directory=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="0o700 -> 0o755 is invisible on NTFS, which resolves both to S_IWRITE set -- see ADR-0042 L8",
+)
+def test_mapped_directory_mode_change_refuses_a_drift_the_platform_can_only_represent_on_posix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     layout = _workspace(tmp_path)
@@ -1343,7 +1381,7 @@ def test_mapped_directory_mode_change_after_snapshot_refuses_before_effects(
     assert result.ok is False
     assert result.rolled_back is False
     assert "directory mode changed since planning" in result.failures[0]
-    assert stat.S_IMODE(source_root.stat().st_mode) == 0o755
+    assert stat.S_IMODE(source_root.stat().st_mode) == representable_mode(0o755, directory=True)
 
 
 def test_rollback_is_not_reported_complete_when_snapshot_verification_fails(

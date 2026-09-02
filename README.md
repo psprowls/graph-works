@@ -142,6 +142,17 @@ A future Windows CI job must therefore set `shell: bash` on the step. ADR-0010
 means no such job exists yet; this note is what stops the next person writing one
 on the runner's default PowerShell.
 
+### Argument encoding across the Git Bash boundary
+
+Do not pass an argument containing a double quote from Python's `subprocess` into a Git Bash /
+MSYS-linked executable (anything under `Git\usr\bin`). Native Windows has no argv array:
+`list2cmdline` flattens the list into one command line, escaping each `"` as `\"`, and the MSYS2
+runtime re-splits it under different rules. An argument containing whitespace happens to survive;
+one without it loses its first quote to a backslash. `MSYS2_ARG_CONV_EXCL` does not help — that
+governs path conversion, not re-parsing. Put the quotes in a file the tool reads (`sed -f`), or do
+the work in Python. Native binaries — `git.exe`, `node.exe`, `python.exe` — are unaffected. See
+work/epic-native-windows-support/children/bug-subprocess-argv-quote-mangling-msys.
+
 ## Versioning and release (dormant)
 
 Per ADR-0007, packages version independently with **static** `version` fields —

@@ -63,6 +63,12 @@ if that canonical directory is missing. If you move or rename
 `plugins/graph-works/hooks/examples`, update the hardcoded relative path
 here (`Path(self.root).parents[1] / "plugins" / "graph-works" / "hooks" / "examples"`).
 
+The command `gw config hooks enable` writes binds the interpreter that ran
+it as the first argv token (no shell, no `VAR=value` prefix) and renders it
+with `subprocess.list2cmdline` on win32 or `shlex`-equivalent quoting
+elsewhere (`graph_works_core.hooks._quote_command`) — never hand-roll a
+shell-syntax command string here.
+
 ## Architecture
 
 ### Module layout (three import-linter layers, per the package `__init__.py`)

@@ -355,7 +355,7 @@ wheels = [
 
 [[package]]
 name = "doc-wiki-okf"
-version = "0.3.2"
+version = "0.3.3"
 source = { editable = "packages/doc-wiki-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },
@@ -2127,7 +2127,7 @@ wheels = [
 
 [[package]]
 name = "work-tracker-okf"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "packages/work-tracker-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },

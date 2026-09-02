@@ -17,7 +17,7 @@ def manifest() -> dict[str, Any]:
 def test_version() -> None:
     import doc_wiki_okf
 
-    assert doc_wiki_okf.__version__ == "0.3.2"
+    assert doc_wiki_okf.__version__ == "0.3.3"
 
 
 def test_dependencies_are_exactly_the_three_the_spec_declares() -> None:
@@ -33,8 +33,8 @@ def test_the_console_script_names_the_module_that_exists() -> None:
     that installs the wheel, so this asserts the module imports."""
     import importlib
 
-    assert manifest()["project"]["scripts"] == {"doc-wiki-okf": "doc_wiki_okf.cli:app"}
-    assert importlib.import_module("doc_wiki_okf.cli").app is not None
+    assert manifest()["project"]["scripts"] == {"doc-wiki-okf": "doc_wiki_okf.cli:main"}
+    assert importlib.import_module("doc_wiki_okf.cli").main is not None
 
 
 def test_the_module_root_is_flat_and_singular() -> None:

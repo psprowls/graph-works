@@ -18,6 +18,7 @@ const assert = require('assert');
 const SERVER = path.join(__dirname, '../../skills/brainstorming/scripts/server.cjs');
 const START = path.join(__dirname, '../../skills/brainstorming/scripts/start-server.sh');
 const STOP = path.join(__dirname, '../../skills/brainstorming/scripts/stop-server.sh');
+const { isRetryableBindError } = require(SERVER);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function waitForExit(child, timeoutMs = 2000) {
@@ -54,7 +55,11 @@ async function waitForFile(file, timeoutMs = 3000) {
 }
 
 function firstServerStarted(out) {
-  return JSON.parse(out.trim().split('\n').find(l => l.includes('server-started')));
+  const line = out.trim().split('\n').find(l => l.includes('server-started'));
+  if (line === undefined) {
+    throw new Error(`no server-started line in output: ${JSON.stringify(out)}`);
+  }
+  return JSON.parse(line);
 }
 
 function openCaptureCommand(dir, marker) {
@@ -84,7 +89,7 @@ function isWindowsLikeShell() {
     !!process.env.MSYSTEM;
 }
 
-async function waitForStartedOutput(child, timeoutMs = 5000) {
+async function waitForStartedOutput(child, label = 'child process', timeoutMs = 5000) {
   let stdout = '';
   let stderr = '';
   child.stdout.on('data', d => { stdout += d.toString(); });
@@ -96,7 +101,7 @@ async function waitForStartedOutput(child, timeoutMs = 5000) {
   }
 
   if (!stdout.includes('server-started')) {
-    throw new Error(`start-server.sh did not report server-started. exit=${child.exitCode} stdout=${stdout} stderr=${stderr}`);
+    throw new Error(`${label} did not report server-started. exit=${child.exitCode} stdout=${stdout} stderr=${stderr}`);
   }
   return stdout;
 }
@@ -130,9 +135,8 @@ async function runTests() {
   await test('server-info reports the configured idle_timeout_ms', async () => {
     const dir = fs.mkdtempSync('/tmp/bs-life-');
     const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3401, BRAINSTORM_DIR: dir, BRAINSTORM_IDLE_TIMEOUT_MS: 1234567 } });
-    let out = ''; srv.stdout.on('data', d => out += d.toString());
-    for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
     try {
+      const out = await waitForStartedOutput(srv, 'raw node server.cjs (idle_timeout_ms test)');
       const info = firstServerStarted(out);
       assert.strictEqual(info.idle_timeout_ms, 1234567, 'idle_timeout_ms should reflect the env override');
     } finally {
@@ -144,9 +148,8 @@ async function runTests() {
   await test('idle shutdown closes an open WebSocket and the process exits', async () => {
     const dir = fs.mkdtempSync('/tmp/bs-life-');
     const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3402, BRAINSTORM_DIR: dir, BRAINSTORM_TOKEN: 'lifetoken', BRAINSTORM_IDLE_TIMEOUT_MS: 200, BRAINSTORM_LIFECYCLE_CHECK_MS: 100 } });
-    let out = ''; srv.stdout.on('data', d => out += d.toString());
     let exited = false, code = null; srv.on('exit', c => { exited = true; code = c; });
-    for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
+    await waitForStartedOutput(srv, 'raw node server.cjs (idle shutdown test)');
 
     const ws = new WebSocket('ws://localhost:3402/?key=lifetoken');
     await new Promise((res, rej) => { ws.on('open', res); ws.on('error', rej); });
@@ -174,7 +177,7 @@ async function runTests() {
     try {
       if (isWindowsLikeShell()) {
         startProcess = spawn('bash', [START, '--project-dir', dir, '--idle-timeout-minutes', '5']);
-        info = firstServerStarted(await waitForStartedOutput(startProcess));
+        info = firstServerStarted(await waitForStartedOutput(startProcess, 'start-server.sh'));
       } else {
         const out = execFileSync('bash', [START, '--project-dir', dir, '--idle-timeout-minutes', '5', '--background'], { encoding: 'utf8' });
         info = firstServerStarted(out);
@@ -203,9 +206,8 @@ async function runTests() {
         BRAINSTORM_LIFECYCLE_CHECK_MS: 100000
       }
     });
-    let out = ''; srv.stdout.on('data', d => out += d.toString());
     try {
-      for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
+      const out = await waitForStartedOutput(srv, 'raw node server.cjs (ipv6 url test)');
       const info = firstServerStarted(out);
       assert.strictEqual(info.url, 'http://[::1]:3421/?key=ipv6token');
     } finally {
@@ -221,8 +223,7 @@ async function runTests() {
     const env = { ...process.env, BRAINSTORM_PORT_FILE: portFile, BRAINSTORM_TOKEN_FILE: tokenFile, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 };
 
     const a = spawn('node', [SERVER], { env: { ...env, BRAINSTORM_DIR: path.join(dir, 's1') } });
-    let outA = ''; a.stdout.on('data', d => outA += d.toString());
-    for (let i = 0; i < 60 && !outA.includes('server-started'); i++) await sleep(50);
+    const outA = await waitForStartedOutput(a, 'raw node server.cjs (persist test, server A)');
     const infoA = firstServerStarted(outA);
     const keyA = new URL(infoA.url).searchParams.get('key');
     assert(fs.existsSync(portFile) && fs.existsSync(tokenFile), 'should write the port and token files');
@@ -231,8 +232,7 @@ async function runTests() {
     assert(await exitedA, 'first server should exit before restart binds its port');
 
     const b = spawn('node', [SERVER], { env: { ...env, BRAINSTORM_DIR: path.join(dir, 's2') } });
-    let outB = ''; b.stdout.on('data', d => outB += d.toString());
-    for (let i = 0; i < 60 && !outB.includes('server-started'); i++) await sleep(50);
+    const outB = await waitForStartedOutput(b, 'raw node server.cjs (persist test, server B)');
     const infoB = firstServerStarted(outB);
     const keyB = new URL(infoB.url).searchParams.get('key');
     await killAndWait(b);
@@ -262,8 +262,7 @@ async function runTests() {
           BRAINSTORM_LIFECYCLE_CHECK_MS: 100000
         }
       });
-      let out = ''; srv.stdout.on('data', d => out += d.toString());
-      for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
+      const out = await waitForStartedOutput(srv, 'raw node server.cjs (token permissions test)');
       assert(out.includes('server-started'), 'server should start with persisted token');
 
       if (process.platform !== 'win32') {
@@ -287,8 +286,7 @@ async function runTests() {
 
     try {
       a = spawn('node', [SERVER], { env: { ...env, BRAINSTORM_DIR: path.join(dir, 's1') } });
-      let outA = ''; a.stdout.on('data', d => outA += d.toString());
-      for (let i = 0; i < 60 && !outA.includes('server-started'); i++) await sleep(50);
+      const outA = await waitForStartedOutput(a, 'raw node server.cjs (reconnect test, server A)');
       const infoA = firstServerStarted(outA);
       const keyA = new URL(infoA.url).searchParams.get('key');
       const exitedA = waitForExit(a);
@@ -297,8 +295,7 @@ async function runTests() {
       a = null;
 
       b = spawn('node', [SERVER], { env: { ...env, BRAINSTORM_DIR: path.join(dir, 's2') } });
-      let outB = ''; b.stdout.on('data', d => outB += d.toString());
-      for (let i = 0; i < 60 && !outB.includes('server-started'); i++) await sleep(50);
+      const outB = await waitForStartedOutput(b, 'raw node server.cjs (reconnect test, server B)');
       const infoB = firstServerStarted(outB);
 
       ws = new WebSocket(`ws://localhost:${infoB.port}/?key=${keyA}`, {
@@ -325,13 +322,11 @@ async function runTests() {
     const portFile = path.join(dir, '.last-port');
 
     const a = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_DIR: path.join(dir, 'a'), BRAINSTORM_PORT: 3415, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
-    let outA = ''; a.stdout.on('data', d => outA += d.toString());
-    for (let i = 0; i < 60 && !outA.includes('server-started'); i++) await sleep(50);
+    await waitForStartedOutput(a, 'raw node server.cjs (port-taken test, server A)');
 
     fs.writeFileSync(portFile, '3415'); // preferred port, but it's taken by A
     const b = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_DIR: path.join(dir, 'b'), BRAINSTORM_PORT_FILE: portFile, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
-    let outB = ''; b.stdout.on('data', d => outB += d.toString());
-    for (let i = 0; i < 60 && !outB.includes('server-started'); i++) await sleep(50);
+    const outB = await waitForStartedOutput(b, 'raw node server.cjs (port-taken test, server B)');
     const portB = firstServerStarted(outB).port;
     const persisted = fs.readFileSync(portFile, 'utf8').trim();
 
@@ -363,8 +358,7 @@ async function runTests() {
           BRAINSTORM_LIFECYCLE_CHECK_MS: 100000
         }
       });
-      let outA = ''; a.stdout.on('data', d => outA += d.toString());
-      for (let i = 0; i < 60 && !outA.includes('server-started'); i++) await sleep(50);
+      const outA = await waitForStartedOutput(a, 'raw node server.cjs (persisted-token fallback test, server A)');
       assert(outA.includes('server-started'), 'preferred-port server should start');
 
       fs.writeFileSync(portFile, '3422');
@@ -379,8 +373,7 @@ async function runTests() {
           BRAINSTORM_LIFECYCLE_CHECK_MS: 100000
         }
       });
-      let outB = ''; b.stdout.on('data', d => outB += d.toString());
-      for (let i = 0; i < 60 && !outB.includes('server-started'); i++) await sleep(50);
+      const outB = await waitForStartedOutput(b, 'raw node server.cjs (persisted-token fallback test, server B)');
       const infoB = firstServerStarted(outB);
       const fallbackKey = new URL(infoB.url).searchParams.get('key');
       const persistedAfter = fs.readFileSync(tokenFile, 'utf8').trim();
@@ -444,13 +437,58 @@ async function runTests() {
     }
   });
 
+  await test('firstServerStarted throws a descriptive error instead of JSON.parse(undefined)', async () => {
+    assert.throws(
+      () => firstServerStarted('some other line\nno matching marker here'),
+      /no server-started line in output.*some other line/s
+    );
+  });
+
+  await test('waitForStartedOutput reports exit code, stdout, and stderr on failed startup, labelled', async () => {
+    const dir = fs.mkdtempSync('/tmp/bs-life-');
+    // Preferred port taken by A with an explicit BRAINSTORM_TOKEN, so B's fallback
+    // refuses to bind at all and exits without ever printing server-started.
+    const explicitToken = 'fefefefefefefefefefefefefefefef';
+    const a = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_DIR: path.join(dir, 'a'), BRAINSTORM_PORT: 3424, BRAINSTORM_TOKEN: explicitToken, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
+    await waitForStartedOutput(a, 'raw node server.cjs (diagnostic test, server A)');
+
+    const portFile = path.join(dir, '.last-port');
+    fs.writeFileSync(portFile, '3424');
+    const b = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_DIR: path.join(dir, 'b'), BRAINSTORM_PORT_FILE: portFile, BRAINSTORM_TOKEN: explicitToken, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
+
+    try {
+      let threw = null;
+      try {
+        await waitForStartedOutput(b, 'raw node server.cjs (b)', 2000);
+      } catch (e) {
+        threw = e;
+      }
+      assert(threw, 'waitForStartedOutput must throw when the child never reports server-started');
+      assert.match(threw.message, /^raw node server\.cjs \(b\) did not report server-started\. exit=/);
+      assert.match(threw.message, /stderr=.*BRAINSTORM_TOKEN/s);
+    } finally {
+      await killAndWait(a);
+      await killAndWait(b);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  await test('isRetryableBindError treats EADDRINUSE as retryable on any platform', async () => {
+    assert.strictEqual(isRetryableBindError({ code: 'EADDRINUSE' }, 'win32'), true);
+    assert.strictEqual(isRetryableBindError({ code: 'EADDRINUSE' }, 'linux'), true);
+  });
+
+  await test('isRetryableBindError treats EACCES as retryable only on win32', async () => {
+    assert.strictEqual(isRetryableBindError({ code: 'EACCES' }, 'win32'), true);
+    assert.strictEqual(isRetryableBindError({ code: 'EACCES' }, 'linux'), false);
+  });
+
   await test('auto-opens the browser once, on the first screen', async () => {
     const dir = fs.mkdtempSync('/tmp/bs-open-');
     const marker = path.join(dir, 'opened.log');
     const openCmd = openCaptureCommand(dir, marker); // capture the launch instead of opening a browser
     const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3417, BRAINSTORM_DIR: dir, BRAINSTORM_OPEN: '1', BRAINSTORM_OPEN_CMD: openCmd, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
-    let out = ''; srv.stdout.on('data', d => out += d.toString());
-    for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
+    await waitForStartedOutput(srv, 'raw node server.cjs (auto-open test)');
 
     // First screen, with no browser connected -> should auto-open.
     fs.writeFileSync(path.join(dir, 'content', 'first.html'), '<h2>First</h2>');
@@ -480,8 +518,7 @@ async function runTests() {
     const openCmd = openCaptureCommand(dir, marker);
     // BRAINSTORM_OPEN intentionally NOT set — auto-open must stay off.
     const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3418, BRAINSTORM_DIR: dir, BRAINSTORM_OPEN_CMD: openCmd, BRAINSTORM_LIFECYCLE_CHECK_MS: 100000 } });
-    let out = ''; srv.stdout.on('data', d => out += d.toString());
-    for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
+    await waitForStartedOutput(srv, 'raw node server.cjs (no-auto-open test)');
     fs.writeFileSync(path.join(dir, 'content', 'first.html'), '<h2>First</h2>');
     await sleep(700);
     await killAndWait(srv);
@@ -493,9 +530,8 @@ async function runTests() {
   await test('unauthenticated requests do not defeat the idle timeout', async () => {
     const dir = fs.mkdtempSync('/tmp/bs-life-');
     const srv = spawn('node', [SERVER], { env: { ...process.env, BRAINSTORM_PORT: 3419, BRAINSTORM_DIR: dir, BRAINSTORM_TOKEN: 'authtok', BRAINSTORM_IDLE_TIMEOUT_MS: 400, BRAINSTORM_LIFECYCLE_CHECK_MS: 100 } });
-    let out = ''; srv.stdout.on('data', d => out += d.toString());
     let exited = false; srv.on('exit', () => { exited = true; });
-    for (let i = 0; i < 60 && !out.includes('server-started'); i++) await sleep(50);
+    await waitForStartedOutput(srv, 'raw node server.cjs (idle-flood test)');
 
     // Flood with UNAUTHENTICATED (keyless → 403) requests. These must NOT count
     // as activity, so the idle timeout still fires and the process exits.

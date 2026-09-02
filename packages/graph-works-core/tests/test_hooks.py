@@ -391,7 +391,9 @@ def test_enable_over_a_legacy_sh_registration_replaces_it(tmp_path):
                         "hooks": [
                             {
                                 "type": "command",
-                                "command": 'GRAPH_WORKS_PYTHON=/usr/bin/python3 bash "/x/session-end-transcript-capture.sh"',
+                                "command": (
+                                    'GRAPH_WORKS_PYTHON=/usr/bin/python3 bash "/x/session-end-transcript-capture.sh"'
+                                ),
                             }
                         ],
                     }
@@ -424,8 +426,14 @@ def test_enable_when_current_already_present_ignores_a_stale_legacy_entry(tmp_pa
         {
             "hooks": {
                 "SessionEnd": [
-                    {"matcher": "", "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}]},
-                    {"matcher": "", "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}]},
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}],
+                    },
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
+                    },
                 ]
             }
         },
@@ -448,8 +456,14 @@ def test_disable_removes_both_current_and_legacy_registrations(tmp_path):
         {
             "hooks": {
                 "SessionEnd": [
-                    {"matcher": "", "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}]},
-                    {"matcher": "", "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}]},
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}],
+                    },
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
+                    },
                 ]
             }
         },

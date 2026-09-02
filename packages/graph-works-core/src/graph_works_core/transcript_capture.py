@@ -22,7 +22,7 @@ import shutil
 import tempfile
 import traceback
 from collections.abc import Mapping
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TextIO
 
@@ -45,7 +45,7 @@ def _trace(env: Mapping[str, str], session: str, event: str, reason: str = "") -
     log_path = Path(env.get(TRACE_LOG_ENV) or _default_trace_log())
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        stamp = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         suffix = f" | {reason}" if reason else ""
         with log_path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(f"{stamp} | session-end-transcript-capture | session={session} | {event}{suffix}\n")
@@ -54,9 +54,10 @@ def _trace(env: Mapping[str, str], session: str, event: str, reason: str = "") -
 
 
 def _copy_transcript(env: Mapping[str, str], session: str, transcript_path: Path) -> None:
+    from work_tracker_okf.paths import parse_item_path
+
     from graph_works_core.workspace.discovery import resolve
     from graph_works_core.workspace.provenance import ACTIVE_WORK_FILENAME
-    from work_tracker_okf.paths import parse_item_path
 
     layout = resolve(cwd=Path.cwd(), environ=env)
     pointer_path = layout.cache_dir / ACTIVE_WORK_FILENAME

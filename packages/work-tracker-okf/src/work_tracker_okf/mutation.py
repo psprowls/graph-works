@@ -947,7 +947,7 @@ def _plan_path_mutation(
         all_refusals.append(MutationRefusal("", "materialize-error", str(exc)))
     if effects is not None:
         rebased_writes = dict(effects.writes)
-        for source, destination in frozen_mapping.items():
+        for destination in frozen_mapping.values():
             page_member = f"{destination}.md"
             if page_member not in rebased_writes or parse_item_path(destination) is None:
                 continue

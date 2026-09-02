@@ -502,31 +502,48 @@ def test_track_canonical_is_a_no_op_with_no_collision():
     assert collisions == {}
 
 
+def _stand_up_canonical_collision(root: Path, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Make *root* hold an NFC/NFD collision, however this filesystem allows.
+
+    Returns which mechanism was used, so the assertion below is readable in a
+    failure report on any host.
+    """
+    write(root, f"concepts/{_NFC}.md", CONCEPT)
+    if (root / "concepts" / f"{_NFD}.md").exists():
+        # Normalisation-insensitive volume (APFS, HFS+): one directory entry,
+        # and both spellings open it. Two real siblings cannot be created, so
+        # stand two `Path`s in for the walk -- both opens succeed by the same
+        # folding property, and `_load` runs its real collision tracking.
+        def fake_files(root: Path, *, unreadable: dict[str, str]):
+            yield root / "concepts" / f"{_NFD}.md"
+            yield root / "concepts" / f"{_NFC}.md"
+
+        monkeypatch.setattr(bundle, "_files", fake_files)
+        return "folded"
+    # Byte-exact volume (NTFS, ext4, XFS, btrfs): two NFC-equal, byte-different
+    # names are simply two files. Build the collision for real and let the
+    # actual walk find it.
+    write(root, f"concepts/{_NFD}.md", CONCEPT)
+    return "two-entries"
+
+
 def test_load_wires_a_real_collision_into_the_public_canonical_collisions_field(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """`_load`'s final `canonical_collisions=MappingProxyType(...)`
-    construction is otherwise only ever exercised against an empty
-    `collisions` dict: two real *simultaneous* sibling files that are
-    NFC-equal but byte-different can't be committed and checked out here --
-    APFS folds them into one directory entry. Monkeypatching `_files` -- the
-    walk `_load` consumes when `root_fd is None`, exactly the path
-    `bundle.load()` takes -- stands two differently-spelled `Path`s in for a
-    real collision without needing two files: APFS resolves either spelling
-    to the one file written on disk, so both opens succeed and `_load` runs
-    its real collision-tracking code end to end, asserted on the public
-    `Bundle` `load()` returns."""
-    write(tmp_path, f"concepts/{_NFC}.md", CONCEPT)
+    """`_load`'s final `canonical_collisions=MappingProxyType(...)` construction
+    is otherwise only ever exercised against an empty `collisions` dict. Which
+    way this fixture can be stood up depends on whether the host filesystem
+    folds NFC and NFD, so it asks rather than assumes -- see
+    `_stand_up_canonical_collision`. Either way `_load` runs its real
+    collision-tracking code end to end, asserted on the public `Bundle`."""
+    mechanism = _stand_up_canonical_collision(tmp_path, monkeypatch)
 
-    def fake_files(root: Path, *, unreadable: dict[str, str]):
-        yield root / "concepts" / f"{_NFD}.md"
-        yield root / "concepts" / f"{_NFC}.md"
-
-    monkeypatch.setattr(bundle, "_files", fake_files)
     loaded = bundle.load(tmp_path)
 
     cid = f"concepts/{_NFC}.md"
     assert loaded.canonical_collisions == {cid: (f"concepts/{_NFD}.md", f"concepts/{_NFC}.md")}
+    if mechanism == "two-entries":
+        assert loaded.unreadable == {}  # both spellings were really opened
 
 
 def test_descriptor_rooted_open_refuses_on_windows_rather_than_reporting_unreadable(monkeypatch):

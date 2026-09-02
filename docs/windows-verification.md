@@ -1022,6 +1022,29 @@ this epic exists to ship actually drive its own pipeline on Windows?**
 F1 and F2 create the scratch workspace and item that C4–C7, D1b and E4 reuse, so
 run them before those.
 
+**First, make `gw` be the tree under test.** Every checkpoint in this group runs
+the *installed* `gw`, not this checkout. A `uv tool install` / `pipx` layout
+copies the sources at install time, so an install made before the commit you are
+measuring silently measures that older build — and the whole group's verdicts
+then describe a tree nobody is shipping, while the record names the commit you
+are sitting on. Reinstall from this checkout, then prove the copy matches:
+
+```bash
+uv tool install --force --reinstall packages/graph-works-cli
+SP="$APPDATA/uv/tools/graph-works-cli/Lib/site-packages"
+for m in okf_io okf_ext work_tracker_okf graph_works_core graph_works_cli; do
+  d="packages/$(echo $m | tr _ -)/src/$m"
+  [ -d "$d" ] || continue
+  echo "=== $m"; diff -rq "$d" "$SP/$m" 2>&1 | grep -v __pycache__
+done
+```
+
+**Expected:** no output per module except `Only in ...: _hook_scripts`, which is
+generated at build time. **Record that you ran this and what it reported** — it
+is a precondition of every F verdict, not a convenience. On 2026-09-02 skipping
+it produced a false `FAIL` on F7 that reversed to `PASS` at the very same commit
+once the install was refreshed.
+
 #### F1 — `gw bootstrap` a scratch workspace
 
 **Gate:** none.
@@ -1053,7 +1076,9 @@ dir /b /s C:\gw-verify\ws\okf\work
 ```
 
 **Expected:** `rc=0`; the JSON reports the canonical path
-`work/scratch-windows-verification`; on disk there is both
+`work/tech-debt-scratch-windows-verification` — filing prefixes the kind, so the
+unprefixed form this page writes elsewhere is shorthand for that same item,
+not a second one; on disk there is both
 `C:\gw-verify\ws\okf\work\scratch-windows-verification.md` **and** the owned
 directory `C:\gw-verify\ws\okf\work\scratch-windows-verification\references\`,
 containing a `.gitkeep`. The owned directory existing is the checkpoint — the

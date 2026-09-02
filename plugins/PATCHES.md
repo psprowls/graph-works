@@ -1403,7 +1403,7 @@ disposition directs.
 
 <!-- audit-delta
 state: patched
-file: hooks/examples/session-end-transcript-capture.sh
+file: hooks/examples/session-end-transcript-capture.py
 file: skills/auto-drive/SKILL.md
 file: skills/finishing-relay/SKILL.md
 file: skills/graph-works/README.md

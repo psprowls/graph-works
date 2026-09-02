@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import shlex
+from pathlib import Path, PurePath
 
 import typer
 from graph_works_cli import exit_codes
@@ -101,7 +102,18 @@ def test_enable_transcript_uses_the_real_default_script(tmp_path: Path) -> None:
     settings = json.loads(settings_path.read_text(encoding="utf-8"))
     command = settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
     assert "GRAPH_WORKS_PYTHON=" in command
-    assert command.endswith("/plugins/graph-works/hooks/examples/session-end-transcript-capture.sh")
+    # The command is POSIX-quoted argv, so shlex.split recovers the script path
+    # verbatim on every host; compare it as a path, not as a byte suffix, because
+    # str(Path) is backslash-separated on Windows and the property under test is
+    # path identity.
+    script = PurePath(shlex.split(command)[-1])
+    assert script.parts[-5:] == (
+        "plugins",
+        "graph-works",
+        "hooks",
+        "examples",
+        "session-end-transcript-capture.sh",
+    )
 
 
 def test_malformed_settings_prints_error_and_uses_schema_mismatch_exit(tmp_path: Path) -> None:

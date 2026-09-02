@@ -453,6 +453,12 @@ GW_AVAILABLE = subprocess.run(
 ).returncode == 0
 needs_gw = pytest.mark.skipif(not GW_AVAILABLE, reason="the graph-works CLI is not runnable here")
 
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+HOOK = REPO_ROOT / "plugins" / "graph-works" / "hooks" / "skill-doc-routing"
+# The hook's own extractor, verbatim from skill-doc-routing:138. Asserted, not just
+# claimed -- see test_hook_extractor_constant_is_still_verbatim_in_the_hook_source.
+HOOK_EXTRACTOR = r's/.*"bundle_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
+
 
 @needs_gw
 def test_projection_is_written_and_fresh(tmp_path: Path) -> None:
@@ -467,6 +473,12 @@ def test_projection_is_written_and_fresh(tmp_path: Path) -> None:
     assert payload["_meta"]["source_sha256"] == expected
 
 
+def test_hook_extractor_constant_is_still_verbatim_in_the_hook_source() -> None:
+    if not HOOK.exists():
+        pytest.skip("plugins/graph-works subtree not checked out")
+    assert HOOK_EXTRACTOR in HOOK.read_text(encoding="utf-8")
+
+
 @needs_gw
 def test_projection_carries_bundle_dir_for_the_routing_hook(tmp_path: Path) -> None:
     layout = written(tmp_path, good_body())
@@ -476,8 +488,17 @@ def test_projection_carries_bundle_dir_for_the_routing_hook(tmp_path: Path) -> N
     assert payload["layout"]["bundle_dir"] == "wiki"
     # The hook's own extractor, verbatim from skill-doc-routing:138. Without the
     # explicit seed this returns nothing and BUNDLE_DIR stays at its `okf` default.
+    #
+    # Passed as a `-f` program file, not an argv element: a quote-bearing argument with
+    # no whitespace is corrupted crossing from native-Windows subprocess into MSYS sed
+    # (list2cmdline escapes `"` as `\"`; MSYS2 only honours that escape inside an
+    # already-quoted region, which list2cmdline only opens when the argument has
+    # whitespace) -- see
+    # work/epic-native-windows-support/children/bug-subprocess-argv-quote-mangling-msys.
+    program = tmp_path / "extractor.sed"
+    program.write_text(HOOK_EXTRACTOR + "\n", encoding="utf-8", newline="\n")
     extracted = subprocess.run(
-        ["sed", "-n", r's/.*"bundle_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p', str(projection)],
+        ["sed", "-n", "-f", str(program), str(projection)],
         capture_output=True,
         text=True,
         check=True,

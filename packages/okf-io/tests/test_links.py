@@ -3,6 +3,8 @@ from __future__ import annotations
 import unicodedata
 from pathlib import Path
 
+import helpers
+import pytest
 from helpers import BUNDLES, write_tree
 from okf_io import bundle, links
 
@@ -87,8 +89,12 @@ def test_an_escaped_hash_coexists_with_a_real_fragment(tmp_path):
 
 
 def test_an_escaped_colon_is_a_path_not_a_scheme(tmp_path):
-    """RFC 3986 §3.1: a scheme is never percent-encoded, so `a%3Ab.md` is a path."""
-    loaded = make(
+    """RFC 3986 §3.1: a scheme is never percent-encoded, so `a%3Ab.md` is a path.
+
+    `a:b.md` is unwritable on Windows (colon is the drive separator), so the fixture is
+    loaded through the unwritable-name helper rather than written directly.
+    """
+    loaded = helpers.load_tree_admitting_unwritable_names(
         tmp_path,
         {"x.md": CONCEPT + "[a](a%3Ab.md)\n", "a:b.md": CONCEPT + "# A\n"},
     )
@@ -96,6 +102,51 @@ def test_an_escaped_colon_is_a_path_not_a_scheme(tmp_path):
     assert [link.external for link in graph.links] == [False]
     assert targets(graph) == ["a:b.md"]
     assert graph.broken == ()
+
+
+def test_a_name_the_host_can_hold_is_written_and_one_it_cannot_is_injected(tmp_path):
+    """A directory occupying a name blocks the write on every platform, standing in for
+    a genuinely unwritable name (D-039/D-041) without depending on host-specific rules."""
+    (tmp_path / "occupied.md").mkdir()
+
+    loaded = helpers.load_tree_admitting_unwritable_names(
+        tmp_path,
+        {"b.md": CONCEPT + "# B\n", "occupied.md": CONCEPT + "# U\n"},
+    )
+
+    assert (tmp_path / "b.md").is_file()
+    assert loaded.concept("b") is not None
+    assert loaded.concept("occupied") is not None
+    assert loaded.concept("occupied").fm.title == "T"
+
+
+def test_non_ascii_unwritable_member_is_refused(tmp_path):
+    """D-045: a non-ASCII member that could not be written is refused, not injected --
+    injecting it would desynchronise `Bundle._canonical`, which this helper does not
+    maintain; the NFC/NFD collision case has its own dedicated fixture."""
+    name = "café.md"
+    (tmp_path / name).mkdir()
+
+    with pytest.raises(ValueError, match="not ASCII"):
+        helpers.load_tree_admitting_unwritable_names(tmp_path, {name: CONCEPT + "# C\n"})
+
+
+def test_silent_mangle_is_refused(tmp_path, monkeypatch):
+    """D-047: a write that reports success but lands under a name the walk disagrees
+    with must be caught loudly, not laundered into a bundle holding both a stray real
+    file and an injected virtual member under the requested id."""
+    name = "mangled.md"
+    real_member_id = bundle.Bundle.member_id
+
+    def disagreeing_member_id(self: bundle.Bundle, path: str) -> str | None:
+        if path == name:
+            return None
+        return real_member_id(self, path)
+
+    monkeypatch.setattr(bundle.Bundle, "member_id", disagreeing_member_id)
+
+    with pytest.raises(ValueError, match="mangle"):
+        helpers.load_tree_admitting_unwritable_names(tmp_path, {name: CONCEPT + "# M\n"})
 
 
 def test_dot_segments_normalize(tmp_path):

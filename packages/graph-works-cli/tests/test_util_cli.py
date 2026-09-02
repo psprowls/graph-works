@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Mapping, Sequence
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 from typing import Any as _Any
 
@@ -170,8 +170,10 @@ def test_log_json_carries_the_seven_result_keys(monkeypatch: pytest.MonkeyPatch,
     )
 
     assert result.exit_code == 0
-    assert json.loads(result.stdout) == {
-        "path": "/w/wiki/log.md",
+    payload = json.loads(result.stdout)
+    assert set(payload) == {"path", "day", "op", "title", "detail", "entry", "written"}
+    assert PurePath(payload["path"]).parts == PurePath("/w/wiki/log.md").parts
+    assert {k: v for k, v in payload.items() if k != "path"} == {
         "day": "2026-08-19",
         "op": "note",
         "title": "Wave 2 kickoff",

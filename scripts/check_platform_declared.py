@@ -167,7 +167,7 @@ def find_violations(root: Path) -> list[Violation]:
                 Violation(
                     package=pkg_dir.name,
                     construct=construct,
-                    file=str(py_file.relative_to(root)),
+                    file=py_file.relative_to(root).as_posix(),
                     line=line,
                 )
             )

@@ -147,11 +147,18 @@ default (confirm with `git config --get core.autocrlf` → `true`):
 ```bash
 git clone <repo-url> gw-a1
 cd gw-a1
-git ls-files --eol | grep -c 'w/crlf'
+git ls-files --eol | grep 'w/crlf' | grep -v 'attr/-text'
 ```
 
-**Expected:** `0`. Record the full `git ls-files --eol | grep 'w/crlf'` output
-(empty on a pass) in the evidence record.
+**Expected:** empty output. Record it in the evidence record.
+
+The `attr/-text` exclusion is load-bearing: this checkpoint asks whether any file
+picked up CRLF *accidentally*, and the repo deliberately pins a handful of
+byte-exact CRLF regression fixtures with `-text`. Counting raw `w/crlf` lines
+would report those as failures — the corpus was 1 file when this page was
+written and is 4 today, so a literal `-c ... == 0` expectation records a FAIL on
+a correct tree. The cross-check below asserts one of those pins is still CRLF,
+so the two halves must agree about the exemption.
 
 Cross-check that the fixture corpus is *deliberately* exempt and did not get
 normalized either:
@@ -579,15 +586,44 @@ rollback contract is wrong; a **new child** otherwise.
 
 **Gate:** group gate. This is loss **L2** of the Windows tier.
 
+**First, establish which process name to kill.** `gw` is an entry point, and how
+it is installed decides its image name. A `uv tool install` / `pipx` layout ships
+a native launcher that hosts Python in-process, so the running process is
+`gw.exe` and **`taskkill /IM python.exe` never touches it** — the mutation runs
+to completion untouched and the checkpoint silently measures nothing. A
+`pip install --user` layout can genuinely be `python.exe`. Do not assume; look:
+
+```powershell
+Start-Process gw -ArgumentList 'work','next','<item>','--workspace','C:\gw-verify\ws'
+Get-Process | Where-Object { $_.ProcessName -match 'gw|python' } | Select-Object Id,ProcessName
+```
+
+Record the image name you found; the rest of this checkpoint writes it as
+`<gw-image>`.
+
 **Command:** in one window start *the mutation*; in a second, kill it mid-commit:
 
 ```bat
-taskkill /F /IM python.exe
+taskkill /F /IM <gw-image>
 ```
 
 Postcondition validation costs several seconds per mutation, so the window is
-real, but hitting it may take repeats. **Repeat until the kill lands mid-commit**
-— confirmed by the transaction journal lacking a terminal record:
+real, but hitting it may take repeats. Timing the kill by hand is unreliable —
+interpreter start-up and imports are a large fraction of a short mutation, and a
+kill that lands there creates no transaction directory at all, which looks
+identical to not having run the checkpoint. Fire the kill off the transaction
+directory appearing instead:
+
+```powershell
+$d = "C:\gw-verify\ws\.gw\cache\work-mutations"
+$n = (Get-ChildItem $d).Count
+while ((Get-ChildItem $d).Count -le $n) { Start-Sleep -Milliseconds 50 }
+taskkill /F /IM <gw-image>
+```
+
+Start that watcher **first**, then run the mutation in the other window.
+**Repeat until the kill lands mid-commit** — confirmed by the transaction
+journal lacking a terminal record:
 
 ```bat
 dir /b /o-d C:\gw-verify\ws\.gw\cache\work-mutations
@@ -606,7 +642,8 @@ findstr /b "phase:" C:\gw-verify\ws\okf\work\scratch-windows-verification.md
 half — and `journal.jsonl` records what happened. Paste the whole journal into
 the evidence record; it is short and it is the evidence.
 
-`taskkill /F /IM python.exe` kills *every* Python process on the box. Close the
+`taskkill /F /IM <gw-image>` kills *every* process of that name on the box — and
+where `<gw-image>` is `python.exe`, that is every Python process. Close the
 PowerShell window from C4 and any editor language server first, and do not run
 this checkpoint while B7 is still going.
 
@@ -832,7 +869,7 @@ p = Path(r'C:\gw-verify\ws\okf\work\d3-encoding-probe.md')
 b = p.read_bytes()
 print('utf8 em dash', b'\xe2\x80\x94' in b)
 print('utf8 CJK    ', b'\xe6\xbc\xa2\xe5\xad\x97' in b)
-print('cp1252 dash ', b'\x97' in b.replace(b'\xe2\x80\x94', b''))
+print('cp1252 dash ', '\x97' in b.decode('utf-8', 'replace'))
 print('decodes     ', bool(b.decode('utf-8')))
 "
 ```
@@ -845,6 +882,14 @@ utf8 CJK     True
 cp1252 dash  False
 decodes      True
 ```
+
+**The `cp1252 dash` line tests the decoded text, not raw bytes, and must stay
+that way.** A cp1252 em dash that survived into the file appears as the control
+character `U+0097` once decoded, which is what this looks for. Scanning the raw
+bytes for `0x97` instead — as this page did until 2026-09-02 — false-positives
+on the CJK half of the very title chosen to defeat cp1252: `漢` is `U+6F22`,
+UTF-8 `E5 AD 97`, whose third byte *is* `0x97`. That reports a mangled encoding
+on a perfectly encoded file.
 
 The shell must hand those characters through unmangled before the checkpoint
 means anything. If the cmd.exe code page mangles them at the prompt (a `?` in the

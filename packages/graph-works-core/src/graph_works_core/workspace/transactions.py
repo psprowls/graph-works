@@ -1275,6 +1275,16 @@ def _mapped_directory_modes(plan: WorkMutationPlan, root: Anchor) -> tuple[_Dire
 
 
 def _verify_directory_modes(root: Anchor, modes: Sequence[_DirectoryMode]) -> None:
+    """Refuse if a mapped source directory's mode drifted since planning.
+
+    Compares each captured `S_IMODE` against the directory's current one and
+    raises before the first live effect on any mismatch. On the strong
+    (POSIX) tier this resolves every mode bit; on the weak (Windows) tier it
+    resolves only `S_IWRITE`, since that is the only bit NTFS's `chmod`
+    honours -- see ADR-0042 L8. `_apply_directory_modes` restores the
+    captured mode onto the destination after the effects land, at the same
+    per-tier resolution.
+    """
     for captured in modes:
         try:
             current = _lstat_at(root, captured.source)
@@ -1806,6 +1816,7 @@ def _commit_effect(
 
 
 def _apply_directory_modes(root: Anchor, modes: Sequence[_DirectoryMode], touched: set[str]) -> None:
+    """Restore each captured mode onto its destination. See `_verify_directory_modes`."""
     for captured in sorted(modes, key=lambda item: item.destination.count("/"), reverse=True):
         current = _lstat_at(root, captured.destination)
         if not stat.S_ISDIR(current.st_mode):

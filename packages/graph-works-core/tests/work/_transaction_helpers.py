@@ -90,6 +90,24 @@ def _plan(
     )
 
 
+def representable_mode(mode: int, *, directory: bool) -> int:
+    """What *mode* reads back as after a chmod on this host.
+
+    POSIX keeps every bit.  NTFS keeps only S_IWRITE, reporting 0o777/0o555 for
+    a directory and 0o666/0o444 for a file (measured, not inferred -- see this
+    item's design).  Tests assert preservation against this rather than against
+    the mode they requested, so the assertion stays meaningful on both hosts
+    instead of being skipped on one -- D-025's "whatever the platform can
+    represent" contract, applied to the engine's own tests.
+    """
+    if sys.platform != "win32":
+        return mode
+    writable = mode & stat.S_IWRITE
+    if directory:
+        return 0o777 if writable else 0o555
+    return 0o666 if writable else 0o444
+
+
 @contextmanager
 def _forced_tier(platform_name: str) -> Iterator[None]:
     """Run the engine on a named tier.

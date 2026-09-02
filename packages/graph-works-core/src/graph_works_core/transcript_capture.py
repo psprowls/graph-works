@@ -47,7 +47,7 @@ def _trace(env: Mapping[str, str], session: str, event: str, reason: str = "") -
         log_path.parent.mkdir(parents=True, exist_ok=True)
         stamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         suffix = f" | {reason}" if reason else ""
-        with log_path.open("a", encoding="utf-8") as handle:
+        with log_path.open("a", encoding="utf-8", newline="\n") as handle:
             handle.write(f"{stamp} | session-end-transcript-capture | session={session} | {event}{suffix}\n")
     except OSError:
         pass

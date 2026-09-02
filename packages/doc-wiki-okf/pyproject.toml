@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "doc-wiki-okf"
-version = "0.3.2"
+version = "0.3.3"
 description = "The documentation-wiki lane over OKF v0.2: source reading, ingest briefs, and proposals."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-doc-wiki-okf = "doc_wiki_okf.cli:app"
+doc-wiki-okf = "doc_wiki_okf.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/doc_wiki_okf"]

@@ -13,7 +13,9 @@ stored, so an honest alias cannot be written. See
 
 from __future__ import annotations
 
+import io
 import json
+import sys
 from datetime import UTC, date, datetime, time
 from pathlib import Path
 from typing import Any, cast
@@ -803,3 +805,33 @@ def source_add(
         typer.echo(f"{root}: {exc}", err=True)
         raise typer.Exit(code=1) from exc
     _report(plan, dry_run=dry_run, bundle=bundle, json_output=json_output)
+
+
+def force_lf_newlines(*streams: object) -> None:
+    """Pin the process's own text streams to LF.
+
+    `sys.stdout` is built by the interpreter with `newline=None`, which translates every
+    `"\n"` written through it to `os.linesep` -- CRLF on Windows. Every `typer.echo` in
+    this module therefore emits CRLF there, `--json` payloads included, which breaks byte
+    comparison even though the content is identical. No `open()` call is involved, so
+    `scripts/check_text_io_explicit.py` cannot see this site; it is fixed once here
+    instead of at every echo.
+
+    The `isinstance` narrowing is load-bearing twice over: `TextIO` has no `reconfigure`
+    in typeshed (so `sys.stdout.reconfigure(...)` fails `mypy --strict` on both platform
+    arms), and a substituted stream -- pytest capture, `CliRunner`, `pythonw`'s `None` --
+    is left untouched rather than crashed on.
+    """
+    for stream in streams:
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(newline="\n")
+
+
+def main() -> None:  # pragma: no cover -- crosses a process boundary; see test_stdout_newlines.py
+    """The console script. Configures the process, then hands off to Typer."""
+    force_lf_newlines(sys.stdout, sys.stderr)
+    app()
+
+
+if __name__ == "__main__":  # pragma: no cover -- exercised via the console script
+    main()

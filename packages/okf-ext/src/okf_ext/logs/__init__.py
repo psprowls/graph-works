@@ -26,9 +26,10 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 import tempfile
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import date
 from pathlib import Path
 
@@ -59,7 +60,15 @@ def locked_log(log_path: Path) -> Iterator[None]:
 
 
 def atomic_replace(path: Path, data: bytes) -> None:
-    """Replace *path* atomically without changing its existing file mode."""
+    """Replace *path* atomically.
+
+    On POSIX, the existing file's full mode is preserved. On Windows, only
+    the read-only bit is representable: a read-only destination is cleared
+    just before the replace so the write is never silently refused, then the
+    captured mode -- carried onto the temp file -- restores it. A failed
+    replace never leaves a temp file behind, and the caller sees the
+    exception the replace raised, not one from cleanup.
+    """
     mode = stat.S_IMODE(path.stat().st_mode)
     descriptor, temporary_name = tempfile.mkstemp(
         dir=path.parent,
@@ -67,14 +76,34 @@ def atomic_replace(path: Path, data: bytes) -> None:
         suffix=".tmp",
     )
     temporary = Path(temporary_name)
+    cleared_destination_readonly = False
     try:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(data)
         temporary.chmod(mode)
+        if sys.platform == "win32" and not mode & stat.S_IWRITE:
+            path.chmod(stat.S_IMODE(path.stat().st_mode) | stat.S_IWRITE)
+            cleared_destination_readonly = True
         temporary.replace(path)
     except BaseException:
-        temporary.unlink(missing_ok=True)
+        _cleanup_after_failed_replace(path, temporary, cleared_destination_readonly)
         raise
+
+
+def _cleanup_after_failed_replace(path: Path, temporary: Path, cleared_destination_readonly: bool) -> None:
+    """Best-effort: restore a cleared read-only bit and remove the temp file.
+
+    Runs inside `atomic_replace`'s `except BaseException`, so any `OSError`
+    raised here must be suppressed -- it would otherwise replace the
+    original exception as the one the caller sees.
+    """
+    if cleared_destination_readonly:
+        with suppress(OSError):
+            path.chmod(stat.S_IMODE(path.stat().st_mode) & ~stat.S_IWRITE)
+    with suppress(OSError):
+        if sys.platform == "win32":
+            temporary.chmod(stat.S_IMODE(temporary.stat().st_mode) | stat.S_IWRITE)
+        temporary.unlink(missing_ok=True)
 
 
 def append_entry(root: Path, entry: str, *, on: date) -> str | None:

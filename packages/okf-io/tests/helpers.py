@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import dataclasses
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 
 from okf_io import _yaml
+from okf_io import bundle as _bundle
+from okf_io.document import Document
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BUNDLES = FIXTURES / "bundles"
@@ -51,6 +55,69 @@ def write_tree(root: Path, files: Mapping[str, str]) -> Path:
     for relative, text in files.items():
         write(root / relative, text)
     return root
+
+
+def load_tree_admitting_unwritable_names(root: Path, files: Mapping[str, str]) -> _bundle.Bundle:
+    """Load *files* as a `Bundle`, admitting names the host filesystem cannot hold.
+
+    A member the host cannot write is not skipped: it is injected into the loaded
+    `Bundle` as a virtual member -- the same object `bundle._load` would have produced
+    from that text -- so a test keyed on that member's content keeps running on a host
+    where the name itself is unwritable. This is a probe, not a predicate (D-041): the
+    helper attempts the write and treats `OSError` as "this host cannot hold this
+    name," rather than encoding a second, driftable copy of `graph-works-core`'s
+    name-shape rules -- which okf-io, a band-1 package, may not import anyway.
+
+    Two refusals, both raising `ValueError`:
+    - a member that could not be written and is not ASCII (D-045) -- an injected
+      non-ASCII member would desynchronise `Bundle._canonical`, which this helper does
+      not maintain; the NFC/NFD collision case has its own dedicated fixture.
+    - a member that WAS written but whose id the walk disagrees with (D-047) -- proof
+      the host silently mangled the name (e.g. stripping a trailing dot or space)
+      rather than failing loudly, which would otherwise leave both a stray real file
+      and an injected virtual member claiming the same id.
+    """
+    unwritable: dict[str, str] = {}
+    for relative, text in files.items():
+        try:
+            write(root / relative, text)
+        except OSError:
+            unwritable[relative] = text
+
+    loaded = _bundle.load(root)
+
+    for relative in files:
+        if relative in unwritable:
+            continue
+        if loaded.member_id(relative) != relative:
+            raise ValueError(f"{relative!r} was written but the walk silently mangled it (D-047)")
+
+    concepts = dict(loaded.concepts)
+    indexes = dict(loaded.indexes)
+    logs = dict(loaded.logs)
+    assets = set(loaded.assets)
+
+    for relative, text in unwritable.items():
+        if not relative.isascii():
+            raise ValueError(f"{relative!r} is not ASCII and cannot be admitted as a virtual member (D-045)")
+        pure = PurePosixPath(relative)
+        directory = "" if pure.parent.as_posix() == "." else pure.parent.as_posix()
+        if pure.name == _bundle.INDEX_NAME:
+            indexes[directory] = Document.parse(text)
+        elif pure.name == _bundle.LOG_NAME:
+            logs[directory] = Document.parse(text)
+        elif pure.suffix == ".md":
+            concepts[relative[: -len(".md")]] = Document.parse(text)
+        else:
+            assets.add(relative)
+
+    return dataclasses.replace(
+        loaded,
+        concepts=MappingProxyType(dict(sorted(concepts.items()))),
+        indexes=MappingProxyType(dict(sorted(indexes.items()))),
+        logs=MappingProxyType(dict(sorted(logs.items()))),
+        assets=frozenset(assets),
+    )
 
 
 def all_concept_files() -> list[Path]:

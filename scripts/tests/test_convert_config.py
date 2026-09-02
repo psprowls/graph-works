@@ -9,11 +9,16 @@ v2 manifests in `fixtures/config/`. agent-workspace is the conversion target;
 legacy-vault and mono-repo exist so the drop and refusal paths are exercised
 against `plugin.*`, `state_gate.*` and `.graph-wiki.local.yaml` -- keys
 agent-workspace does not carry.
+
+The three fixtures are the real v2 manifests with their `repo-directory` values
+neutralised to workspace-relative form, so the suite depends on no directory
+outside `tmp_path`.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -52,10 +57,9 @@ def test_reads_the_live_agent_workspace_manifest(tmp_path: Path) -> None:
     raw = read_v2(workspace(tmp_path, "agent-workspace.graph-wiki.yaml"))
     assert raw["version"] == 2
     assert raw["topic"] == "agent-workspace"
-    # The live repo-directory has already been corrected post-C3 rename (it no
-    # longer points at the old agent-workspace path); the plan's assumption
-    # that this fixture would still be stale no longer holds.
-    assert raw["repo-directory"] == "/Users/pat/Personal/graph-works"
+    # `repo-directory` is neutralised to a workspace-root-relative value -- see the module
+    # docstring -- so no absolute host path is checked in.
+    assert raw["repo-directory"] == "../../graph-works"
     assert raw["workflow"]["auto_drive"]["models"]["design"] == "opus"
 
 
@@ -67,7 +71,7 @@ def test_local_overlay_wins_over_the_tracked_file(tmp_path: Path) -> None:
     )
     raw = read_v2(root)
     # The tracked legacy-vault file carries no `repo-directory`; the local one does.
-    assert raw["repo-directory"] == "/Users/pat/Personal/legacy-vault"
+    assert raw["repo-directory"] == "../../legacy-vault"
     assert raw["state_gate"]["enabled"] is False
 
 
@@ -180,6 +184,52 @@ def test_repo_directory_becomes_a_workspace_relative_named_scan_target(tmp_path:
 def test_repo_name_defaults_to_the_repo_basename_and_is_overridable(tmp_path: Path) -> None:
     conversion = convert_agent_workspace(tmp_path, repo_name="renamed")
     assert by_target(conversion, "repositories.renamed.path")
+
+
+def test_relative_repo_directory_resolves_against_the_workspace_root_not_the_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fails today: `_workspace_relative` hands a relative value straight to
+    # `os.path.relpath`, which resolves it against the process CWD, not the manifest's
+    # own directory -- the same mechanism that let a POSIX-absolute fixture value silently
+    # half-inherit a drive on Windows.
+    root = tmp_path / "workspaces" / "graph-works"
+    root.mkdir(parents=True)
+    (root / "wiki").mkdir()
+    repo = tmp_path / "graph-works"
+    repo.mkdir()
+    (root / ".graph-wiki.yaml").write_bytes((FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes())
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    monkeypatch.chdir(elsewhere)
+    conversion = dispose(read_v2(root), root=root, options=Options())
+    assert by_target(conversion, "repositories.graph-works.path").value == "../../graph-works"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a driveless root-anchored path is absolute on POSIX")
+def test_driveless_root_anchored_repo_directory_is_refused_on_windows(tmp_path: Path) -> None:
+    root = tmp_path / "ws"
+    root.mkdir()
+    raw = {"version": 2, "repo-directory": "/Users/pat/Personal/graph-works"}
+    with pytest.raises(ConversionRefused, match="carries no drive"):
+        dispose(raw, root=root, options=Options())
+
+
+def test_cross_drive_repo_directory_is_refused_not_crashed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Drive letters aren't manufacturable under `tmp_path`, so this asserts the handling of
+    # the `ValueError` CPython's `os.path.relpath` raises for a cross-drive target, not the
+    # platform's ability to produce one.
+    import convert_config
+
+    def fake_relpath(path: object, start: object) -> str:
+        raise ValueError("path is on mount 'C:', start on mount 'D:'")
+
+    monkeypatch.setattr(convert_config.os.path, "relpath", fake_relpath)
+    root = tmp_path / "ws"
+    root.mkdir()
+    raw = {"version": 2, "repo-directory": "D:/some/graph-works"}
+    with pytest.raises(ConversionRefused, match="different drive"):
+        dispose(raw, root=root, options=Options())
 
 
 def test_auto_drive_scalars_carry(tmp_path: Path) -> None:

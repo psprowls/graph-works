@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 
 import pytest
@@ -574,3 +575,33 @@ def test_flattened_destinations_still_parse_as_archived_by_ancestry(tmp_path: Pa
 
     assert location is not None
     assert location.archived is True
+
+
+def test_archive_succeeds_for_an_item_whose_stamped_design_artifact_was_never_written(
+    tmp_path: Path,
+) -> None:
+    from okf_io import validate
+    from work_tracker_okf.rules import lane_rules
+
+    write_item(
+        tmp_path,
+        "work/bug-dangling",
+        "type: Bug\nwork_status: resolved\nphase: execute\n"
+        "sources:\n"
+        "  - id: design\n"
+        "    resource: /work/bug-dangling/references/01-design.md\n"
+        "    title: Design\n",
+    )
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), ("work/bug-dangling",))
+    assert plan.ok, plan.refusals
+
+    _apply_mutation(plan)
+
+    assert (tmp_path / "work/_archive/bug-dangling.md").exists()
+    assert not (tmp_path / "work/bug-dangling.md").exists()
+    moved_bundle = load_bundle(tmp_path, ignore=IGNORE)
+    report = validate(moved_bundle, today=date(2026, 9, 2), extra_rules=lane_rules(repo_root=None))
+    escapes = report.by_code("structure.source-escape")
+    assert not escapes, escapes

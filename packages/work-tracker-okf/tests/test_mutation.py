@@ -3,7 +3,7 @@ from types import MappingProxyType
 
 import pytest
 from okf_io import load_bundle
-from work_helpers import make_item
+from work_helpers import load_written_items, make_item, write_item
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
     MutationRefusal,
@@ -16,6 +16,9 @@ from work_tracker_okf.mutation import (
     _lane_mapping,
     _member_mapping,
     _opaque_warnings,
+    _plan_path_mutation,
+    _prefix_rebase,
+    _rebase_item_sources,
     _resolved_inside,
     _restore_reserved_text,
     _subtree_items,
@@ -187,3 +190,158 @@ def test_warning_resolution_and_reserved_text_helpers(tmp_path: Path) -> None:
         )
         == "dir/index.md index.md index"
     )
+
+
+def test_prefix_rebase_rewrites_a_dangling_root_absolute_resource() -> None:
+    mapping = {"work/bug-old": "work/_archive/bug-old"}
+
+    result = _prefix_rebase("/work/bug-old/references/01-design.md", mapping)
+
+    assert result == "/work/_archive/bug-old/references/01-design.md"
+
+
+def test_prefix_rebase_matches_on_path_boundaries() -> None:
+    mapping = {"work/bug-a": "work/_archive/bug-a"}
+
+    assert _prefix_rebase("/work/bug-alpha/references/01-design.md", mapping) is None
+
+
+def test_prefix_rebase_prefers_the_deepest_mapping() -> None:
+    mapping = {
+        "work/epic": "work/_archive/epic",
+        "work/epic/children/bug": "work/_archive/epic/children/bug",
+    }
+
+    result = _prefix_rebase("/work/epic/children/bug/references/01-design.md", mapping)
+
+    assert result == "/work/_archive/epic/children/bug/references/01-design.md"
+
+
+def test_prefix_rebase_returns_none_for_relative_and_external_resources() -> None:
+    mapping = {"work/bug-old": "work/_archive/bug-old"}
+
+    assert _prefix_rebase("references/01-design.md", mapping) is None
+    assert _prefix_rebase("https://example.com/x", mapping) is None
+    assert _prefix_rebase("report:v2.sql", mapping) is None
+
+
+def test_prefix_rebase_returns_none_when_already_correct() -> None:
+    mapping = {"work/bug-old": "work/_archive/bug-old"}
+
+    assert _prefix_rebase("/work/_archive/bug-old/references/01-design.md", mapping) is None
+
+
+def test_prefix_rebase_returns_none_for_an_exact_item_page_match_outside_mapping() -> None:
+    mapping = {"work/bug-old": "work/_archive/bug-old"}
+
+    assert _prefix_rebase("/work/other-bug.md", mapping) is None
+
+
+_PAGE_WITH_DANGLING_SOURCE = (
+    b"---\n"
+    b"type: Bug\n"
+    b"title: T\n"
+    b"description: D\n"
+    b"sources:\n"
+    b"  - id: design\n"
+    b"    resource: /work/bug-old/references/01-design.md\n"
+    b"    title: Design\n"
+    b"status: stable\n"
+    b"work_status: open\n"
+    b"opened: 2026-08-31\n"
+    b"updated: 2026-08-31\n"
+    b"phase: execute\n"
+    b"---\n"
+    b"\n## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n"
+)
+
+
+def test_rebase_item_sources_rewrites_a_dangling_pointer() -> None:
+    mapping = {"work/bug-old": "work/_archive/bug-old"}
+
+    after = _rebase_item_sources(_PAGE_WITH_DANGLING_SOURCE, mapping)
+
+    assert b"/work/_archive/bug-old/references/01-design.md" in after
+    assert b"/work/bug-old/references/01-design.md" not in after
+
+
+def test_rebase_item_sources_is_a_byte_identity_no_op_when_nothing_matches() -> None:
+    mapping = {"work/some-other-item": "work/_archive/some-other-item"}
+
+    after = _rebase_item_sources(_PAGE_WITH_DANGLING_SOURCE, mapping)
+
+    assert after == _PAGE_WITH_DANGLING_SOURCE
+
+
+def test_rebase_item_sources_leaves_unrelated_frontmatter_untouched() -> None:
+    mapping = {"work/bug-old": "work/_archive/bug-old"}
+
+    after = _rebase_item_sources(_PAGE_WITH_DANGLING_SOURCE, mapping)
+
+    assert b"title: T\n" in after
+    assert b"phase: execute\n" in after
+
+
+def test_dangling_stamped_resource_is_rebased_by_the_planner(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        "work/bug-dangling",
+        "type: Bug\nwork_status: resolved\nphase: execute\n"
+        "sources:\n"
+        "  - id: design\n"
+        "    resource: /work/bug-dangling/references/01-design.md\n"
+        "    title: Design\n",
+    )
+    bundle = load_bundle(tmp_path)
+    items = load_written_items(tmp_path)
+
+    plan = _plan_path_mutation(
+        bundle,
+        items,
+        "archive",
+        {"work/bug-dangling": "work/_archive/bug-dangling"},
+        roots=("work/bug-dangling",),
+    )
+
+    assert plan.ok, plan.refusals
+    page_write = next(write for write in plan.writes if write.member == "work/_archive/bug-dangling.md")
+    assert b"/work/_archive/bug-dangling/references/01-design.md" in page_write.after
+    assert b"/work/bug-dangling/references/01-design.md" not in page_write.after
+
+
+def test_planned_bytes_match_whether_or_not_the_artifact_exists(tmp_path: Path) -> None:
+    frontmatter = (
+        "type: Bug\nwork_status: resolved\nphase: execute\n"
+        "sources:\n"
+        "  - id: design\n"
+        "    resource: /work/bug-dangling/references/01-design.md\n"
+        "    title: Design\n"
+    )
+    write_item(tmp_path, "work/bug-dangling", frontmatter)
+    bundle = load_bundle(tmp_path)
+    items = load_written_items(tmp_path)
+    plan_without_artifact = _plan_path_mutation(
+        bundle,
+        items,
+        "archive",
+        {"work/bug-dangling": "work/_archive/bug-dangling"},
+        roots=("work/bug-dangling",),
+    )
+
+    (tmp_path / "work/bug-dangling/references").mkdir(parents=True)
+    (tmp_path / "work/bug-dangling/references/01-design.md").write_text(
+        "---\ntitle: T\ndescription: D\n---\n", encoding="utf-8"
+    )
+    bundle_with_artifact = load_bundle(tmp_path)
+    items_with_artifact = load_written_items(tmp_path)
+    plan_with_artifact = _plan_path_mutation(
+        bundle_with_artifact,
+        items_with_artifact,
+        "archive",
+        {"work/bug-dangling": "work/_archive/bug-dangling"},
+        roots=("work/bug-dangling",),
+    )
+
+    page_without = next(w for w in plan_without_artifact.writes if w.member == "work/_archive/bug-dangling.md")
+    page_with = next(w for w in plan_with_artifact.writes if w.member == "work/_archive/bug-dangling.md")
+    assert page_without.after == page_with.after

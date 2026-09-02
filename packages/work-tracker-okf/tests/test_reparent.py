@@ -636,3 +636,43 @@ def test_reparent_moves_the_execute_coverage_artifact(tmp_path: Path) -> None:
     assert move.dest == f"{release}/children/epic-migration/references/03-execute-coverage.md"
     moved = next(write for write in plan.writes if write.member == move.dest).after.decode()
     assert f"/{release}/children/epic-migration/children/feature-import.md" in moved
+
+
+def test_reparent_rebases_a_dangling_stamped_resource(tmp_path: Path) -> None:
+    from datetime import date
+
+    from okf_io import validate
+    from work_tracker_okf.rules import lane_rules
+
+    write_item(tmp_path, "work/epic-a", "type: Epic\nwork_status: open\n")
+    (tmp_path / "work/epic-a/children").mkdir(parents=True)
+    write_item(tmp_path, "work/epic-b", "type: Epic\nwork_status: open\n")
+    (tmp_path / "work/epic-b/children").mkdir(parents=True)
+    write_item(
+        tmp_path,
+        "work/epic-a/children/bug-dangling",
+        "type: Bug\nwork_status: open\nphase: execute\n"
+        "sources:\n"
+        "  - id: design\n"
+        "    resource: /work/epic-a/children/bug-dangling/references/01-design.md\n"
+        "    title: Design\n",
+    )
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_reparent(
+        bundle,
+        load_items(bundle),
+        "work/epic-a/children/bug-dangling",
+        "work/epic-b",
+    )
+    assert plan.ok, plan.refusals
+
+    _apply_mutation(plan)
+
+    moved_page = (tmp_path / "work/epic-b/children/bug-dangling.md").read_text(encoding="utf-8")
+    assert "/work/epic-b/children/bug-dangling/references/01-design.md" in moved_page
+    assert "/work/epic-a/children/bug-dangling/references/01-design.md" not in moved_page
+
+    moved_bundle = load_bundle(tmp_path, ignore=IGNORE)
+    report = validate(moved_bundle, today=date(2026, 9, 2), extra_rules=lane_rules(repo_root=None))
+    assert not report.by_code("structure.source-escape")

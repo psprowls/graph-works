@@ -29,7 +29,7 @@ def _write_script(scripts_dir: Path, name: str) -> None:
 
 def _transcript_scripts_dir(tmp_path: Path) -> Path:
     scripts = tmp_path / "scripts"
-    _write_script(scripts, "session-end-transcript-capture.sh")
+    _write_script(scripts, "session-end-transcript-capture.py")
     return scripts
 
 
@@ -62,7 +62,7 @@ def test_enable_uses_packaged_default_script_directory(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     result = apply("enable", "transcript", repo_root)
-    assert result.added == ("session-end-transcript-capture.sh",)
+    assert result.added == ("session-end-transcript-capture.py",)
 
 
 def test_settings_read_oserror_is_wrapped(tmp_path: Path, monkeypatch) -> None:
@@ -90,7 +90,7 @@ def test_enable_registers_the_feature_hook_under_its_event(tmp_path):
     result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
 
     assert result.changed is True
-    assert result.added == ("session-end-transcript-capture.sh",)
+    assert result.added == ("session-end-transcript-capture.py",)
     assert result.removed == ()
     assert result.skipped == ()
 
@@ -101,7 +101,7 @@ def test_enable_registers_the_feature_hook_under_its_event(tmp_path):
     session_end = settings["hooks"]["SessionEnd"]
     assert len(session_end) == 1
     assert session_end[0]["matcher"] == ""
-    assert "session-end-transcript-capture.sh" in session_end[0]["hooks"][0]["command"]
+    assert "session-end-transcript-capture.py" in session_end[0]["hooks"][0]["command"]
 
 
 def test_double_enable_is_idempotent(tmp_path):
@@ -115,7 +115,7 @@ def test_double_enable_is_idempotent(tmp_path):
     assert first.changed is True
     assert second.changed is False
     assert second.added == ()
-    assert second.skipped == ("session-end-transcript-capture.sh",)
+    assert second.skipped == ("session-end-transcript-capture.py",)
 
 
 def test_disable_removes_exactly_what_enable_added(tmp_path):
@@ -147,7 +147,7 @@ def test_disable_trims_a_mixed_hooks_entry_and_leaves_other_events_alone(tmp_pat
                     {
                         "matcher": "",
                         "hooks": [
-                            {"type": "command", "command": 'bash "/x/session-end-transcript-capture.sh"'},
+                            {"type": "command", "command": "python /x/session-end-transcript-capture.py"},
                             {"type": "command", "command": 'bash "/x/unrelated.sh"'},
                         ],
                     }
@@ -159,7 +159,7 @@ def test_disable_trims_a_mixed_hooks_entry_and_leaves_other_events_alone(tmp_pat
 
     result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
 
-    assert "session-end-transcript-capture.sh" in result.removed
+    assert "session-end-transcript-capture.py" in result.removed
     settings = _settings(repo_root)
     session_end = settings["hooks"]["SessionEnd"]
     assert len(session_end) == 1
@@ -198,7 +198,7 @@ def test_a_user_owned_permissions_deny_survives_a_write(tmp_path):
                 "SessionEnd": [
                     {
                         "matcher": "",
-                        "hooks": [{"type": "command", "command": 'bash "/x/session-end-transcript-capture.sh"'}],
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
                     }
                 ]
             },
@@ -210,7 +210,7 @@ def test_a_user_owned_permissions_deny_survives_a_write(tmp_path):
     result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
 
     assert result.changed is True
-    assert result.removed == ("session-end-transcript-capture.sh",)
+    assert result.removed == ("session-end-transcript-capture.py",)
     settings = _settings(repo_root)
     assert settings["permissions"]["deny"] == ["EnterPlanMode"]
 
@@ -315,7 +315,7 @@ def test_unrelated_existing_settings_content_round_trips_through_enable(tmp_path
     ]
     assert settings["permissions"] == {"allow": ["Read"]}
     assert settings["env"] == {"FOO": "bar"}
-    assert "session-end-transcript-capture.sh" in settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
+    assert "session-end-transcript-capture.py" in settings["hooks"]["SessionEnd"][0]["hooks"][0]["command"]
 
 
 def test_disable_leaves_an_unrelated_entry_on_the_same_event_untouched(tmp_path):
@@ -332,7 +332,7 @@ def test_disable_leaves_an_unrelated_entry_on_the_same_event_untouched(tmp_path)
                     },
                     {
                         "matcher": "",
-                        "hooks": [{"type": "command", "command": 'bash "/x/session-end-transcript-capture.sh"'}],
+                        "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}],
                     },
                 ]
             },
@@ -344,7 +344,7 @@ def test_disable_leaves_an_unrelated_entry_on_the_same_event_untouched(tmp_path)
 
     result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
 
-    assert "session-end-transcript-capture.sh" in result.removed
+    assert "session-end-transcript-capture.py" in result.removed
     settings = _settings(repo_root)
     assert settings["hooks"]["SessionEnd"] == [
         {
@@ -378,6 +378,117 @@ def test_default_scripts_dir_resolves_every_wiring_script():
         assert (default_dir / wiring.script).is_file()
 
 
+def test_enable_over_a_legacy_sh_registration_replaces_it(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {
+                        "matcher": "",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": 'GRAPH_WORKS_PYTHON=/usr/bin/python3 bash "/x/session-end-transcript-capture.sh"',
+                            }
+                        ],
+                    }
+                ]
+            }
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is True
+    assert result.removed == ("session-end-transcript-capture.sh",)
+    assert result.added == ("session-end-transcript-capture.py",)
+    assert result.skipped == ()
+    settings = _settings(repo_root)
+    session_end = settings["hooks"]["SessionEnd"]
+    assert len(session_end) == 1
+    commands = [h["command"] for entry in session_end for h in entry["hooks"]]
+    assert len(commands) == 1
+    assert "session-end-transcript-capture.py" in commands[0]
+    assert "session-end-transcript-capture.sh" not in commands[0]
+
+
+def test_enable_when_current_already_present_ignores_a_stale_legacy_entry(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {"matcher": "", "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}]},
+                    {"matcher": "", "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}]},
+                ]
+            }
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("enable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is False
+    assert result.skipped == ("session-end-transcript-capture.py",)
+    assert result.added == ()
+    assert result.removed == ()
+
+
+def test_disable_removes_both_current_and_legacy_registrations(tmp_path):
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    _seed_settings(
+        repo_root,
+        {
+            "hooks": {
+                "SessionEnd": [
+                    {"matcher": "", "hooks": [{"type": "command", "command": "bash /x/session-end-transcript-capture.sh"}]},
+                    {"matcher": "", "hooks": [{"type": "command", "command": "python /x/session-end-transcript-capture.py"}]},
+                ]
+            }
+        },
+    )
+    scripts = _transcript_scripts_dir(tmp_path)
+
+    result = apply("disable", "transcript", repo_root, scripts_dir=scripts)
+
+    assert result.changed is True
+    assert set(result.removed) == {"session-end-transcript-capture.sh", "session-end-transcript-capture.py"}
+    settings = _settings(repo_root)
+    assert "hooks" not in settings
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "expected"),
+    [
+        ("win32", '"C:\\Program Files\\Python\\python.exe" "C:\\repo\\hook script.py"'),
+        ("linux", "/usr/bin/python3 '/repo/hook script.py'"),
+        ("darwin", "/usr/bin/python3 '/repo/hook script.py'"),
+    ],
+)
+def test_quote_command_renders_per_platform(platform_name, expected):
+    if platform_name == "win32":
+        argv = ["C:\\Program Files\\Python\\python.exe", "C:\\repo\\hook script.py"]
+    else:
+        argv = ["/usr/bin/python3", "/repo/hook script.py"]
+
+    assert hooks._quote_command(argv, platform_name=platform_name) == expected
+
+
+def test_hook_command_binds_the_running_interpreter_and_quotes_for_this_platform(tmp_path):
+    script = tmp_path / "hook.py"
+
+    command = hooks._hook_command(script)
+
+    assert command == hooks._quote_command([sys.executable, str(script)])
+
+
 def _assert_wheel_enables_every_hook(wheel: Path, tmp_path: Path) -> None:
     site_packages = tmp_path / "site-packages"
     with zipfile.ZipFile(wheel) as archive:
@@ -388,10 +499,11 @@ def _assert_wheel_enables_every_hook(wheel: Path, tmp_path: Path) -> None:
     smoke = """
 import json
 import os
+import shlex
 import subprocess
 import sys
 from datetime import date
-from pathlib import Path
+from pathlib import Path, PurePath
 
 from graph_works_core import apply_init, plan_init
 from graph_works_core.hooks import apply
@@ -405,10 +517,15 @@ commands = [
     for entry in entries
     for hook in entry["hooks"]
 ]
-assert transcript.added == ("session-end-transcript-capture.sh",)
+assert transcript.added == ("session-end-transcript-capture.py",)
 assert len(commands) == 1
-assert all("graph_works_core/_hook_scripts/" in command for command in commands)
-assert all("GRAPH_WORKS_PYTHON=" in command for command in commands)
+command = commands[0]
+if sys.platform == "win32":
+    tokens = [t.strip('"') for t in shlex.split(command, posix=False)]
+else:
+    tokens = shlex.split(command)
+assert tokens[0] == sys.executable
+assert PurePath(tokens[-1]).parts[-2:] == ("_hook_scripts", "session-end-transcript-capture.py")
 
 layout = apply_init(plan_init(repo_root / ".works", today=date(2026, 8, 23), topic="Hook test")).layout
 work_path = "work/feature-installed-hook"

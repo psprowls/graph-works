@@ -78,7 +78,7 @@ Gotchas that span several files:
   (currently 3) gates whether the on-disk DB shape matches what this build's
   code expects at all — a mismatch raises `SchemaMismatchError` and refuses
   to open unless `full=True`, which drops and recreates `code.db`.
-  `schema.DERIVER_VERSION` (currently 10) tracks *derivation logic* changes
+  `schema.DERIVER_VERSION` (currently 11) tracks *derivation logic* changes
   (classification rules, derived-edge rules, new attrs) that don't change the
   table shape but do make existing rows stale; a mismatch there silently
   forces `full=True` on the next `run_workspace()` call instead of raising.

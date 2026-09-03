@@ -5,7 +5,7 @@ from __future__ import annotations
 import io
 import sqlite3
 import time
-from contextlib import redirect_stderr
+from contextlib import closing, redirect_stderr
 from pathlib import Path
 
 import pytest
@@ -87,7 +87,7 @@ def _seed_v1_db(repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     conn.close()
     monkeypatch.undo()
     # Sanity: confirm it really is v1 on disk.
-    with sqlite3.connect(db_path) as probe:
+    with closing(sqlite3.connect(db_path)) as probe:
         row = probe.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
     assert row == ("1",), row
     return db_path
@@ -117,7 +117,7 @@ def test_update_full_rebuilds_v1_db_to_current(tmp_path: Path, monkeypatch: pyte
     # is fine; we only assert the main DB was rebuilt (mtime after test start).
     assert db_path.stat().st_mtime >= started
 
-    with sqlite3.connect(db_path) as probe:
+    with closing(sqlite3.connect(db_path)) as probe:
         row = probe.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
     assert row == (str(schema.SCHEMA_VERSION),)
 

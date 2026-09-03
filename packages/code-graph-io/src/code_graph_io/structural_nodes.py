@@ -22,6 +22,7 @@ import fnmatch
 import json
 import os
 import sqlite3
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -297,11 +298,16 @@ def _is_type_only(name: str) -> bool:
 
 def _is_executable(path: Path, name: str) -> bool:
     """True if OS exec bit set OR (eligible extension AND shebang first line)."""
-    try:
-        if os.access(path, os.X_OK) and path.is_file():
-            return True
-    except OSError:
-        pass
+    # NTFS has no execute bit: Windows' os.access(..., X_OK) answers True for
+    # every readable file, which would make is_executable unconditionally True
+    # for every file node. Consult it only where it carries information, and let
+    # Windows fall through to the shebang/extension heuristic below.
+    if sys.platform != "win32":
+        try:
+            if os.access(path, os.X_OK) and path.is_file():
+                return True
+        except OSError:
+            pass
     ext = Path(name).suffix
     if ext not in _SHEBANG_EXTENSIONS:
         return False

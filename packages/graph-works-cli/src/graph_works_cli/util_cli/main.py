@@ -11,6 +11,7 @@ from typer.models import CommandInfo
 
 from graph_works_cli.util_cli.archive import archive
 from graph_works_cli.util_cli.describe import describe_surface
+from graph_works_cli.util_cli.line_endings import line_endings
 from graph_works_cli.util_cli.log import log
 from graph_works_cli.util_cli.platform import platform
 from graph_works_cli.util_cli.tokens import tokens
@@ -19,10 +20,11 @@ from graph_works_cli.work_cli.main import work_app
 
 util_app = typer.Typer(
     name="util",
-    help="Diagnostics: platform/log/tokens/trace and the surface freeze.",
+    help="Diagnostics: platform/log/line-endings/tokens/trace and the surface freeze.",
     no_args_is_help=True,
 )
 util_app.command(name="describe-surface")(describe_surface)
+util_app.command(name="line-endings")(line_endings)
 util_app.command(name="log")(log)
 util_app.command(name="platform")(platform)
 util_app.command(name="tokens")(tokens)

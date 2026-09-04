@@ -10,6 +10,7 @@ import stat
 import sys
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -17,8 +18,9 @@ from _transaction_helpers import _plan, _snapshot, _workspace, representable_mod
 from graph_works_core.work import MutationApplication, apply_mutation
 from graph_works_core.work import transactions as public_transactions
 from graph_works_core.workspace import anchors, transactions
-from okf_ext.moves import Move
-from okf_io import load_bundle
+from okf_ext.moves import Move, MovePlan
+from okf_ext.writing import body_digest
+from okf_io import load_bundle, parse
 from work_tracker_okf.indexes import plan_indexes as path_plan_indexes
 from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.mutation import (
@@ -2712,6 +2714,113 @@ def test_anchored_preflight_rejects_each_stale_write_and_move_shape(tmp_path: Pa
                 transactions._preflight_anchored(plan, root_anchor, tmp_path / f"scratch-{index}")
     finally:
         root_anchor.close()
+
+
+def test_write_preimage_stale_refusal_names_line_endings_when_crlf_recovers_the_digest(
+    tmp_path: Path,
+) -> None:
+    """§B/D-095: LF was planned, CRLF is on disk -- git status sees no change."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    (root / "existing").write_bytes(b"line one\r\nline two\r\n")
+    root_anchor = transactions._open_root(root)
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite("existing", _digest(b"line one\nline two\n"), b"new"),),
+    )
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    message = str(excinfo.value)
+    assert "existing" in message
+    assert "line ending" in message.lower()
+    assert "git status" in message.lower()
+    assert "gw util line-endings --fix" in message
+
+
+def test_write_preimage_stale_refusal_names_line_endings_when_lf_recovers_the_digest(
+    tmp_path: Path,
+) -> None:
+    """Bidirectional: CRLF was planned, LF is on disk."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    (root / "existing").write_bytes(b"line one\nline two\n")
+    root_anchor = transactions._open_root(root)
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite("existing", _digest(b"line one\r\nline two\r\n"), b"new"),),
+    )
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    message = str(excinfo.value)
+    assert "existing" in message
+    assert "line ending" in message.lower()
+    assert "gw util line-endings --fix" in message
+
+
+def test_write_preimage_stale_refusal_is_byte_identical_when_content_actually_differs(
+    tmp_path: Path,
+) -> None:
+    """A real content change must get the unchanged, bare message -- no false diagnosis."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    (root / "existing").write_bytes(b"old")
+    root_anchor = transactions._open_root(root)
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite("existing", _digest(b"different"), b"new"),),
+    )
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    assert str(excinfo.value) == "existing: changed since planning; re-plan"
+
+
+def test_move_plan_body_stale_refusal_names_line_endings_when_crlf_recovers_the_digest(
+    tmp_path: Path,
+) -> None:
+    """§B/D-095 at the second site: the move-plan body-digest check."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    member = "existing.md"
+    planned_text = "---\ntype: Explanation\ntitle: Existing\n---\n\nBody line.\n"
+    planned_document = parse(planned_text, path=root / member)
+    on_disk_text = planned_text.replace("\n", "\r\n")
+    (root / member).write_bytes(on_disk_text.encode("utf-8"))
+    root_anchor = transactions._open_root(root)
+    move_plan = MovePlan(
+        root=root,
+        moves=(),
+        edits=(),
+        refusals=(),
+        unrebased=(),
+        digests={member: body_digest(planned_document.body)},
+    )
+    plan = replace(_plan(layout), move_plan=move_plan)
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    message = str(excinfo.value)
+    assert member in message
+    assert "line ending" in message.lower()
+    assert "gw util line-endings --fix" in message
 
 
 def test_copy_entry_handles_top_level_files_and_symlinks(tmp_path: Path) -> None:

@@ -12,6 +12,8 @@ rule the whole band inherits.
 
 from __future__ import annotations
 
+import os
+import tempfile
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
@@ -60,6 +62,85 @@ class TokenStamp:
 class SkippedPage:
     page: str
     reason: SkipReason
+
+
+#: A NUL in the first `_BINARY_SNIFF_BYTES` bytes marks a member as binary --
+#: the same heuristic git itself uses, and cheap enough to run over the whole
+#: bundle on every invocation.
+_BINARY_SNIFF_BYTES = 8192
+
+
+@dataclass(frozen=True, slots=True)
+class LineEndingFinding:
+    """One bundle member whose on-disk bytes contain CRLF."""
+
+    member: str
+    crlf_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class LineEndingsReport:
+    """What one `gw util line-endings` call found, sorted by member.
+
+    `fixed` records whether `fix=True` was passed -- `findings` always lists
+    what was found *before* any repair, so a `--fix` run's report still shows
+    what it just fixed.
+    """
+
+    findings: tuple[LineEndingFinding, ...]
+    fixed: bool
+
+
+def _is_binary(data: bytes) -> bool:
+    return b"\x00" in data[:_BINARY_SNIFF_BYTES]
+
+
+def run_line_endings(layout: WorkspaceLayout, *, fix: bool = False) -> LineEndingsReport:
+    """Detect (and, with `fix=True`, repair) CRLF reaccumulation in the bundle.
+
+    `.gitattributes` declares every tracked bundle member LF-in-worktree, but
+    git enforces that only at checkout -- nothing enforces it on write, and
+    `git status` cannot see a violation because it compares normalised
+    content. This is the re-runnable detector for that gap; `fix=True` makes
+    it a repairer too.
+
+    A non-binary member (no NUL in its first 8 KiB) whose bytes contain CRLF
+    is a finding. `fix=True` rewrites each finding's file to LF via a temp
+    file in the same directory plus `os.replace`, so the mutation is
+    content-preserving and idempotent by construction -- a crash mid-sweep
+    leaves a partially-normalised bundle that a re-run finishes, and it
+    deliberately does not route through `WorkMutationPlan`: that engine plans
+    digests over exactly the bytes whose instability is being repaired, so
+    its own preflight would refuse this repair.
+    """
+    findings: list[LineEndingFinding] = []
+    for path in sorted(layout.bundle_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        data = path.read_bytes()
+        if _is_binary(data):
+            continue
+        crlf_count = data.count(b"\r\n")
+        if crlf_count == 0:
+            continue
+        member = path.relative_to(layout.bundle_dir).as_posix()
+        findings.append(LineEndingFinding(member=member, crlf_count=crlf_count))
+        if fix:
+            fixed_bytes = data.replace(b"\r\n", b"\n")
+            fd, tmp_name = tempfile.mkstemp(dir=path.parent)
+            tmp_path = Path(tmp_name)
+            try:
+                with os.fdopen(fd, "wb") as handle:
+                    handle.write(fixed_bytes)
+                tmp_path.replace(path)
+            except BaseException:
+                tmp_path.unlink()
+                raise
+
+    return LineEndingsReport(
+        findings=tuple(sorted(findings, key=lambda finding: finding.member)),
+        fixed=fix,
+    )
 
 
 @dataclass(frozen=True, slots=True)

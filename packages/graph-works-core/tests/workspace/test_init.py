@@ -61,6 +61,26 @@ def test_a_root_that_is_a_file_is_caller_error(tmp_path):
         plan_init(path, today=TODAY)
 
 
+def test_plan_init_refuses_without_hard_link_support(tmp_path, monkeypatch):
+    from graph_works_core.workspace import anchors
+
+    monkeypatch.setattr(anchors, "hard_links_supported", lambda path: False)
+    root = tmp_path / "works"
+    with pytest.raises(InitError) as caught:
+        plan_init(root, today=TODAY)
+    assert str(caught.value) == anchors._hard_link_refusal_message(root.resolve())
+
+
+def test_plan_init_creates_nothing_when_hard_links_are_unsupported(tmp_path, monkeypatch):
+    from graph_works_core.workspace import anchors
+
+    monkeypatch.setattr(anchors, "hard_links_supported", lambda path: False)
+    root = tmp_path / "works"
+    with pytest.raises(InitError):
+        plan_init(root, today=TODAY)
+    assert not root.exists()
+
+
 # --- act 1: directories -----------------------------------------------------
 
 

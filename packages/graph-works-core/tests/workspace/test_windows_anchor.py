@@ -241,6 +241,29 @@ def test_a_child_anchor_inherits_the_long_path_answer(tmp_path: Path) -> None:
         anchor.close()
 
 
+def test_the_windows_anchor_refuses_construction_without_hard_link_support(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="hard link support"):
+        anchors._WindowsAnchor(tmp_path, hard_links=False)
+
+
+def test_the_hard_link_refusal_names_the_path_and_the_alternative(tmp_path: Path) -> None:
+    with pytest.raises(ValueError) as caught:
+        anchors._WindowsAnchor(tmp_path, hard_links=False)
+    message = str(caught.value)
+    assert str(tmp_path.resolve()) in message
+    assert "exFAT" in message
+    assert "WSL" in message
+    assert message == anchors._hard_link_refusal_message(tmp_path.resolve())
+
+
+def test_the_windows_anchor_constructs_normally_with_hard_link_support(tmp_path: Path) -> None:
+    anchor = anchors._WindowsAnchor(tmp_path, hard_links=True)
+    try:
+        assert anchor._hard_links is True
+    finally:
+        anchor.close()
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="constructs the strong tier, which needs os.O_DIRECTORY")
 def test_refused_members_is_empty_on_the_strong_tier(tmp_path: Path) -> None:
     anchor = anchors.open_anchor(tmp_path, platform_name="linux")
@@ -643,3 +666,131 @@ def test_the_declared_refusals_match_what_the_anchor_actually_refuses(tmp_path: 
     declared = anchors.durability_tier("win32").refused_plan_shapes
     assert any("reserved device name" in shape for shape in declared)
     assert "reserved device name" in refusals[0].reason
+
+
+def test_hard_links_are_unconditionally_available_off_windows() -> None:
+    assert anchors.hard_links_supported(Path("/nonexistent/anywhere")) is True
+
+
+def test_the_hard_link_refusal_message_names_the_requirement_and_the_path(tmp_path: Path) -> None:
+    message = anchors._hard_link_refusal_message(tmp_path)
+    assert "hard link support" in message
+    assert str(tmp_path) in message
+    assert "exFAT" in message
+    assert "WSL" in message
+    assert "posix-strong" in message
+
+
+def test_a_child_anchor_inherits_the_hard_link_answer(tmp_path: Path) -> None:
+    """Mirrors test_a_child_anchor_inherits_the_long_path_answer: open_child
+    must not re-probe and must not silently re-enable what the parent refused."""
+    (tmp_path / "lane").mkdir()
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+        child = anchor.open_child("lane")
+        try:
+            assert child._hard_links is True
+        finally:
+            child.close()
+    finally:
+        anchor.close()
+
+
+def test_a_duplicate_anchor_inherits_the_hard_link_answer(tmp_path: Path) -> None:
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+        copy = anchor.duplicate()
+        try:
+            assert copy._hard_links is True
+        finally:
+            copy.close()
+    finally:
+        anchor.close()
+
+
+def test_open_child_does_not_reprobe_hard_link_support(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "lane").mkdir()
+    calls: list[Path] = []
+    original = anchors.hard_links_supported
+
+    def _spy(path: Path) -> bool:
+        calls.append(path)
+        return original(path)
+
+    monkeypatch.setattr(anchors, "hard_links_supported", _spy)
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+        calls.clear()
+        child = anchor.open_child("lane")
+        try:
+            assert calls == []
+        finally:
+            child.close()
+    finally:
+        anchor.close()
+
+
+def test_link_translates_error_invalid_function_into_the_named_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_invalid_function(*args: object, **kwargs: object) -> None:
+            raise OSError(0, "Incorrect function", None, anchors.ERROR_INVALID_FUNCTION)
+
+        monkeypatch.setattr(anchors.os, "link", _raise_invalid_function)
+        with pytest.raises(ValueError) as caught:
+            anchor.link("source.txt", "dest.txt")
+        assert str(caught.value) == anchors._hard_link_refusal_message(anchor.root)
+    finally:
+        anchor.close()
+
+
+def test_link_translates_error_not_supported_into_the_named_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_not_supported(*args: object, **kwargs: object) -> None:
+            raise OSError(0, "Not supported", None, anchors.ERROR_NOT_SUPPORTED)
+
+        monkeypatch.setattr(anchors.os, "link", _raise_not_supported)
+        with pytest.raises(ValueError) as caught:
+            anchor.link("source.txt", "dest.txt")
+        assert str(caught.value) == anchors._hard_link_refusal_message(anchor.root)
+    finally:
+        anchor.close()
+
+
+def test_link_lets_file_exists_error_propagate_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_exists(*args: object, **kwargs: object) -> None:
+            raise FileExistsError(17, "File exists")
+
+        monkeypatch.setattr(anchors.os, "link", _raise_exists)
+        with pytest.raises(FileExistsError):
+            anchor.link("source.txt", "dest.txt")
+    finally:
+        anchor.close()
+
+
+def test_link_lets_unrelated_oserrors_propagate_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_other(*args: object, **kwargs: object) -> None:
+            raise OSError(0, "Access is denied", None, 5)  # ERROR_ACCESS_DENIED
+
+        monkeypatch.setattr(anchors.os, "link", _raise_other)
+        with pytest.raises(OSError, match="Access is denied"):
+            anchor.link("source.txt", "dest.txt")
+    finally:
+        anchor.close()

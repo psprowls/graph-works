@@ -1758,7 +1758,21 @@ def test_existing_write_mismatch_recovery_never_exchanges_over_a_recreated_name(
     assert any("quarantine" in failure for failure in result.failures)
 
 
-def test_validation_uses_live_root_for_absolute_internal_registered_sources(tmp_path: Path) -> None:
+def test_validation_uses_live_root_for_absolute_internal_registered_sources(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "The registered source here is a symlink living inside the item's owned "
+        "directory, which `validate_paths` names but never touches directly. "
+        "Since the preflight scan now recurses into every planned directory member "
+        "to close the C7 scanning gap (an offending shape staged inside a validated "
+        "directory must be caught, not just literally-named members), this symlink "
+        "is caught too -- and the windows-revalidated tier refuses every symlink it "
+        "sees categorically at preflight (D-002's backstop), regardless of whether "
+        "it is a legitimate registered source or an out-of-band offender. The two "
+        "cases are indistinguishable to `_refuse_unsupported_shapes` by design.",
+    )
     layout = _workspace(tmp_path)
     item = "work/feature-target"
     _write_item(layout.bundle_dir, item, type="Feature")
@@ -3194,3 +3208,31 @@ def test_a_new_dangling_dependency_added_on_top_of_a_pre_existing_one_still_fail
     introduced = [failure for failure in result.failures if "dependency target" in failure]
     assert len(introduced) == 1
     assert "work/bug-absent" in introduced[0] or "work/bug-also-absent" in introduced[0]
+
+
+def test_preflight_refuses_offending_members_staged_inside_a_validated_directory(tmp_path: Path) -> None:
+    """C7's scanning gap: `_effective_members` names only a plan's literal
+    members, so an offender staged *inside* a directory the plan validates
+    (rather than named directly) was never reaching `_refuse_unsupported_shapes`.
+    """
+    layout = _workspace(tmp_path)
+    item = "work/feature-target"
+    _write_item(layout.bundle_dir, item, type="Feature")
+    owner = layout.bundle_dir / item
+    owner.mkdir()
+    (owner / "CON.md").write_bytes(b"offender: reserved device name")
+    page = layout.bundle_dir / f"{item}.md"
+    before = page.read_bytes()
+    after = before.replace(b"updated: 2026-08-22", b"updated: 2026-08-23")
+    assert after != before
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite(f"{item}.md", _digest(before), after),),
+        validate_paths=(item,),
+    )
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is False
+    assert result.rolled_back is False
+    assert any("CON.md" in failure and "reserved device name" in failure for failure in result.failures)

@@ -736,6 +736,42 @@ def _projected_symlink_is_internal(root: Anchor, destination: str, link: PurePos
     return resolved_target.is_relative_to(resolved_root)
 
 
+def _expand_directory_members(root: Anchor, effect_paths: dict[str, Path]) -> tuple[str, ...]:
+    """Every planned member, plus every existing descendant of a planned member that is a directory.
+
+    `_effective_members` names only the plan's own literal members -- it has
+    no reason to know what already lives inside a directory it mkdirs,
+    deletes, or validates. An offending name (a reserved device name, a
+    trailing-dot/space name, a symlink) staged inside such a directory is
+    otherwise invisible to `_refuse_unsupported_shapes`, which only inspects
+    the names it is given. This closes that gap without changing what
+    `_effective_members` itself means.
+    """
+    scan: set[str] = set(effect_paths)
+    pending = list(effect_paths)
+    while pending:
+        member = pending.pop()
+        if not _lexists_at(root, member):
+            continue
+        if not stat.S_ISDIR(_lstat_at(root, member).st_mode):
+            continue
+        parent, name = _open_parent(root, member)
+        try:
+            directory = parent.open_child(name)
+            try:
+                names = directory.listdir()
+            finally:
+                directory.close()
+        finally:
+            parent.close()
+        for entry_name in names:
+            child = f"{member}/{entry_name}"
+            if child not in scan:
+                scan.add(child)
+                pending.append(child)
+    return tuple(sorted(scan))
+
+
 def _preflight(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
@@ -761,7 +797,8 @@ def _preflight(
         manifest_scratch = layout.cache_dir / "work-mutations" / f".preflight-{uuid.uuid4().hex}"
     effect_paths = {member: plan.root.joinpath(*_lexical_member(member).parts) for member in _effective_members(plan)}
     try:
-        _refuse_unsupported_shapes(root, tuple(effect_paths))
+        scan_members = _expand_directory_members(root, effect_paths)
+        _refuse_unsupported_shapes(root, scan_members)
         for member in effect_paths:
             _validate_ancestor_chain(root, member)
 

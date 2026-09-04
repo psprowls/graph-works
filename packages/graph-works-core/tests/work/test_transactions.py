@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import threading
 from contextlib import contextmanager
@@ -41,7 +42,14 @@ def tier(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str
     POSIX -- so the weak tier gets continuous logic coverage here even though
     no Windows CI exists (D-001).  Cases needing a genuinely POSIX-only
     primitive as their SUBJECT are xfailed via `_xfail_on_weak_tier`, and
-    ADR-0042 names every one of them.
+    ADR-0042 names every one of them -- with one documented exception:
+    `test_validation_uses_live_root_for_absolute_internal_registered_sources`
+    is an 8th `_xfail_on_weak_tier` case that ADR-0042 does not yet name. It
+    was added when closing the C7 scanning gap (Defect B) made the weak
+    tier's categorical symlink refusal also catch a legitimate registered
+    symlink source (see that test's own xfail reason for the full trade-off).
+    This is a known gap in ADR-0042's coverage, pending the ADR being updated
+    upstream -- not a claim that the invariant above holds without exception.
 
     The parametrization is unidirectional by construction, and the `skipif`
     below is that asymmetry made explicit rather than left to fail as an
@@ -80,6 +88,21 @@ def _xfail_on_weak_tier(request: pytest.FixtureRequest, reason: str) -> None:
 
 def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _normalize_link_target(link: Path) -> Path:
+    """Strip Windows' `\\\\?\\` extended-length-path prefix from a symlink target.
+
+    `Path.readlink()` on win32 can return the target `\\\\?\\`-prefixed even
+    when the link was created with an unprefixed absolute path -- a
+    representation difference, not a tier-behavior difference (see
+    work/epic-native-windows-support/children/
+    bug-graph-works-core-suite-fails-on.md, Cause 3).
+    """
+    raw = str(link.readlink())
+    if raw.startswith("\\\\?\\"):
+        raw = raw[4:]
+    return Path(raw)
 
 
 def test_public_work_transaction_surface_reexports_the_workspace_executor() -> None:
@@ -124,6 +147,7 @@ def _write_item(
         "| Action | Done when | Rationale |\n"
         "| --- | --- | --- |\n",
         encoding="utf-8",
+        newline="",
     )
 
 
@@ -303,6 +327,17 @@ def test_executor_lock_serializes_snapshot_through_terminal_state(
     assert all(result.ok for result in results)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "renaming a lock file the tier holds open is refused by Windows itself "
+        "(PermissionError: WinError 32) before the tier under test is ever "
+        "reached -- this scenario is not constructible on Windows. Coverage "
+        "gap: inode replacement under a held lock is untested on win32. "
+        "See work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md, Cause 2."
+    ),
+)
 def test_bundle_root_lock_survives_executor_lock_inode_replacement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -732,7 +767,7 @@ def test_targeted_index_validation_failure_restores_original_index(tmp_path: Pat
     _write_item(layout.bundle_dir, "work/feature-target", type="Feature")
     (work / "feature-target").mkdir()
     index = work / "index.md"
-    index.write_text("# Human prose\n", encoding="utf-8")
+    index.write_text("# Human prose\n", encoding="utf-8", newline="")
     before = _snapshot(layout.bundle_dir)
     plan = _plan(
         layout,
@@ -756,7 +791,7 @@ def test_targeted_index_validation_reads_the_anchored_bundle(tmp_path: Path, mon
     _write_item(layout.bundle_dir, "work/feature-target", type="Feature")
     (work / "feature-target").mkdir()
     index = work / "index.md"
-    index.write_text("# Human prose\n", encoding="utf-8")
+    index.write_text("# Human prose\n", encoding="utf-8", newline="")
     decoy = layout.bundle_dir.with_name("okf-index-decoy")
     held = layout.bundle_dir.with_name("okf-index-held")
     shutil.copytree(layout.bundle_dir, decoy, symlinks=True)
@@ -918,6 +953,104 @@ def test_rollback_failure_reports_original_and_recovery_errors(tmp_path: Path, m
     assert _states(result.journal) == ["planned", "applying", "rolling-back", "rolled-back"]
     final_record = json.loads(result.journal.read_text(encoding="utf-8").splitlines()[-1])
     assert final_record["complete"] is False
+
+
+def test_snapshotting_a_read_only_file_does_not_lock_the_backup_before_fsync(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/page.md"
+    target.parent.mkdir()
+    target.write_bytes(b"before")
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is True
+        assert target.read_bytes() == b"after"
+        assert stat.S_IMODE(target.stat().st_mode) == representable_mode(stat.S_IREAD, directory=False)
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_rolling_back_a_committed_read_only_write_restores_the_original_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read-only member's mutation can now succeed and leave the published
+    file read-only (Task 5's `_stamp_live_mode`). If a LATER failure -- here a
+    forced postcondition failure -- routes into `_restore_snapshot` after that
+    write has already committed, rollback must be able to remove the
+    now-read-only live file (`_remove_live_entry`, Finding C1) and restore the
+    backup onto the live filesystem (`_copy_backup_file`, Finding C2) without
+    Windows refusing either operation with `PermissionError`.
+    """
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/page.md"
+    target.parent.mkdir()
+    target.write_bytes(b"before")
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
+        monkeypatch.setattr(transactions, "_validate_postconditions", lambda *_args: ("forced validation failure",))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is False
+        assert result.rolled_back is True
+        assert target.read_bytes() == b"before"
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_deleting_a_read_only_directory_via_a_mutation_plan_clears_the_attribute_first(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/readonly-dir"
+    target.mkdir(parents=True)
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, deletes=("work/readonly-dir",))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is True
+        assert not target.exists()
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_deleting_a_read_only_directory_clears_the_attribute_first(tmp_path: Path) -> None:
+    """`_remove_live_entry` (the `_restore_snapshot` rollback path) must clear
+    a directory's read-only attribute before `rmdir`, exactly like the
+    quarantine-delete path `_commit_effect`/`_take_custody` already does.
+
+    Exercised directly against `_remove_live_entry` rather than through a
+    full `apply_mutation` plan: a single-member `deletes` entry in
+    `WorkMutationPlan` maps to one `_Effect("delete", ...)` that assumes the
+    directory is already empty (`_commit_effect` calls a bare
+    `parent.rmdir(quarantine)`, not a recursive walk) -- a directory
+    containing `child.md` fails there with `ERROR_DIR_NOT_EMPTY` regardless
+    of this fix, for a reason outside `_remove_live_entry`'s scope. Calling
+    the target function directly is the same pattern already used elsewhere
+    in this module (e.g. `transactions._open_root` /
+    `transactions._capture_validation_state` above) and isolates the
+    regression to the function this task actually changes.
+    """
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/doomed"
+    target.mkdir(parents=True)
+    (target / "child.md").write_bytes(b"content")
+    target.chmod(stat.S_IREAD)
+
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        transactions._remove_live_entry(root, "work/doomed")
+    finally:
+        root.close()
+
+    assert not target.exists()
 
 
 def test_complete_journal_failure_rolls_back_live_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1664,7 +1797,37 @@ def test_existing_write_mismatch_recovery_never_exchanges_over_a_recreated_name(
     assert any("quarantine" in failure for failure in result.failures)
 
 
-def test_validation_uses_live_root_for_absolute_internal_registered_sources(tmp_path: Path) -> None:
+def test_validation_uses_live_root_for_absolute_internal_registered_sources(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "This is a real, examined trade-off the controller accepted when closing "
+        "the C7 scanning gap (Defect B), not a proven impossibility. The registered "
+        "source here is a symlink living inside the item's owned directory, which "
+        "`validate_paths` names but never touches directly. Closing C7 means "
+        "`_expand_directory_members` now recurses into every directory a plan "
+        "touches or validates -- including validate_paths-only directories -- and "
+        "scans everything it finds (see "
+        "`test_preflight_refuses_offending_members_staged_inside_a_validated_directory`, "
+        "whose offender is staged inside exactly such a directory). That expanded "
+        "scan necessarily also surfaces this symlink, and the windows-revalidated "
+        "tier refuses every symlink it sees categorically at preflight (D-002's "
+        "backstop) -- it has no way to distinguish 'a source explicitly registered "
+        "in this item's frontmatter' from 'an out-of-band offender' at the "
+        "preflight-scan level, because that distinction lives in a different layer "
+        "(the item's `sources:` frontmatter) that `_preflight` deliberately does "
+        "not read. Narrowing the scan to skip validate_paths-only directories was "
+        "considered as a way to avoid this xfail, and rejected: it would exempt "
+        "exactly the directory shape "
+        "`test_preflight_refuses_offending_members_staged_inside_a_validated_directory` "
+        "exists to cover, silently reopening the C7 gap this task closed. So a "
+        "legitimate registered symlink source pays the same categorical-refusal "
+        "price as an illegitimate one on this tier, accepted as the cost of closing "
+        "C7 -- see `Anchor.refused_members`'s docstring for the tier's symlink "
+        "backstop, and the strong POSIX tier (or WSL) for a durability tier that "
+        "does not have this limitation.",
+    )
     layout = _workspace(tmp_path)
     item = "work/feature-target"
     _write_item(layout.bundle_dir, item, type="Feature")
@@ -1690,7 +1853,7 @@ def test_validation_uses_live_root_for_absolute_internal_registered_sources(tmp_
     result = apply_mutation(layout, plan)
 
     assert result.ok is True
-    assert registered.readlink() == actual
+    assert _normalize_link_target(registered) == actual
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fifo semantics")
@@ -2031,7 +2194,7 @@ def test_absolute_external_symlink_move_is_refused_before_live_effects(tmp_path:
     # live effect, which is the guarantee under test.
     assert "escape the bundle root" in result.failures[0] or "is a symlink" in result.failures[0]
     assert source.is_symlink()
-    assert source.readlink() == external
+    assert _normalize_link_target(source) == external
     assert not (layout.bundle_dir / "work/destination").exists()
     assert external.read_bytes() == b"external"
 
@@ -2264,6 +2427,16 @@ def test_executor_lock_name_swap_never_redirects_lock_io_into_bundle(
     assert held_lock.is_file()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "renaming journal.jsonl while the tier holds it open is refused by "
+        "Windows itself before the tier under test is ever reached -- this "
+        "scenario is not constructible on Windows. Coverage gap: the journal "
+        "name swap is untested on win32. See work/epic-native-windows-support/"
+        "children/bug-graph-works-core-suite-fails-on.md, Cause 2."
+    ),
+)
 def test_journal_name_swap_never_redirects_journal_io_into_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2445,6 +2618,16 @@ def test_relative_moved_symlink_projection_follows_destination_ancestor_links(
         assert not moved.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "descriptor-leak counting relies on /proc/self/fd (or darwin's "
+        "/dev/fd), which does not exist on win32 -- no Windows-native "
+        "equivalent exists. Coverage gap: the cache-descriptor leak property "
+        "is untested on win32. See work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md, Cause 4."
+    ),
+)
 def test_work_mutations_open_failure_does_not_leak_cache_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2499,7 +2682,7 @@ def test_transaction_journal_helpers_reject_malformed_histories_and_support_anch
         parent.close()
 
 
-def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures(tmp_path: Path) -> None:
+def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures() -> None:
     assert not transactions._json_values_equal(True, 1)
     assert not transactions._json_values_equal({"a": 1}, {"b": 1})
     assert not transactions._json_values_equal([1], [1, 2])
@@ -2510,13 +2693,21 @@ def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures
     with pytest.raises(ValueError, match="non-finite JSON"):
         transactions._finite_json_float("1e999")
 
-    directory_fd = os.open(tmp_path, os.O_RDONLY)
-    try:
-        with pytest.raises(ValueError, match="not a regular file"):
-            transactions._require_regular_file(directory_fd, "directory")
-    finally:
-        os.close(directory_fd)
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "unlinking a file while a read-only descriptor is still open on it "
+        "is refused by Windows (PermissionError: WinError 32) -- CPython's "
+        "os.open() requests no delete-sharing, and POSIX's unlink-keeps-the-fd-"
+        "valid semantics have no Windows equivalent. Coverage gap: "
+        "_assert_regular_entry_identity's stale-descriptor detection via "
+        "unlink-while-open is untested on win32. See "
+        "work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md."
+    ),
+)
+def test_assert_regular_entry_identity_detects_unlink_while_open(tmp_path: Path) -> None:
     entry = tmp_path / "entry"
     entry.write_text("one", encoding="utf-8")
     parent = transactions._open_absolute_directory(tmp_path)
@@ -2529,6 +2720,25 @@ def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures
     finally:
         os.close(entry_fd)
         parent.close()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "os.open() on a directory with O_RDONLY is refused by Windows -- "
+        "there is no Windows-native way to obtain a directory descriptor "
+        "this way. Coverage gap: _require_regular_file's directory-rejection "
+        "guard is untested on win32. See work/epic-native-windows-support/"
+        "children/bug-graph-works-core-suite-fails-on.md, Cause 4."
+    ),
+)
+def test_require_regular_file_rejects_a_directory_descriptor(tmp_path: Path) -> None:
+    directory_fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        with pytest.raises(ValueError, match="not a regular file"):
+            transactions._require_regular_file(directory_fd, "directory")
+    finally:
+        os.close(directory_fd)
 
 
 def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) -> None:
@@ -3053,3 +3263,70 @@ def test_a_new_dangling_dependency_added_on_top_of_a_pre_existing_one_still_fail
     introduced = [failure for failure in result.failures if "dependency target" in failure]
     assert len(introduced) == 1
     assert "work/bug-absent" in introduced[0] or "work/bug-also-absent" in introduced[0]
+
+
+def test_preflight_refuses_offending_members_staged_inside_a_validated_directory(tmp_path: Path) -> None:
+    """C7's scanning gap: `_effective_members` names only a plan's literal
+    members, so an offender staged *inside* a directory the plan validates
+    (rather than named directly) was never reaching `_refuse_unsupported_shapes`.
+    """
+    layout = _workspace(tmp_path)
+    item = "work/feature-target"
+    _write_item(layout.bundle_dir, item, type="Feature")
+    owner = layout.bundle_dir / item
+    owner.mkdir()
+    (owner / "CON.md").write_bytes(b"offender: reserved device name")
+    page = layout.bundle_dir / f"{item}.md"
+    before = page.read_bytes()
+    after = before.replace(b"updated: 2026-08-22", b"updated: 2026-08-23")
+    assert after != before
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite(f"{item}.md", _digest(before), after),),
+        validate_paths=(item,),
+    )
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is False
+    assert result.rolled_back is False
+    assert any("CON.md" in failure and "reserved device name" in failure for failure in result.failures)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="directory junctions are an NTFS/Windows-only reparse-point shape")
+def test_expand_directory_members_refuses_to_recurse_into_a_junction_cycle(tmp_path: Path) -> None:
+    """`stat.S_ISDIR` is true for a directory junction, and `stat.S_ISLNK`
+    never catches it -- a junction is not a symlink. Left unguarded,
+    `_expand_directory_members` would follow a junction that points back at
+    one of its own ancestors and loop forever (or, pointed elsewhere, walk
+    an arbitrarily large external tree). This proves the walk terminates
+    when a junction inside a scanned directory points back at that
+    directory's own ancestor, and that the junction itself is still part of
+    the scanned member set -- only its contents are never visited. Note
+    that this does NOT mean the junction is safely handled: `refused_members`
+    only tests `is_symlink()`, which is `False` for a junction, so the
+    junction passes through the scan with no refusal at all. Closing that
+    content-safety gap is out of scope here; this test covers traversal
+    safety only.
+    """
+    layout = _workspace(tmp_path)
+    item = "work/feature-target"
+    _write_item(layout.bundle_dir, item, type="Feature")
+    owner = layout.bundle_dir / item
+    owner.mkdir()
+    nested = owner / "nested"
+    nested.mkdir()
+    loop = nested / "loop"
+    # A junction inside `nested` pointing back at `owner`: recursing into it
+    # would revisit `owner`, then `nested`, then `loop` again, forever.
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(loop), str(owner)], check=True, capture_output=True)
+
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        expanded = transactions._expand_directory_members(root, {item: owner})
+    finally:
+        root.close()
+
+    assert f"{item}/nested" in expanded
+    assert f"{item}/nested/loop" in expanded
+    assert not any(member.startswith(f"{item}/nested/loop/") for member in expanded)

@@ -947,6 +947,23 @@ def test_rollback_failure_reports_original_and_recovery_errors(tmp_path: Path, m
     assert final_record["complete"] is False
 
 
+def test_snapshotting_a_read_only_file_does_not_lock_the_backup_before_fsync(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/page.md"
+    target.parent.mkdir()
+    target.write_bytes(b"before")
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is True
+        assert target.read_bytes() == b"after"
+    finally:
+        target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
 def test_complete_journal_failure_rolls_back_live_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout = _workspace(tmp_path)
     target = layout.bundle_dir / "work/page.bin"

@@ -31,6 +31,7 @@ import math
 import os
 import shutil
 import stat
+import sys
 import uuid
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
@@ -944,7 +945,7 @@ def _copy_entry(source: Path, destination: Path) -> None:
             shutil.copystat(source_directory, destination_directory, follow_symlinks=False)
 
 
-def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int) -> None:
+def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int, *, apply_mode: bool = True) -> None:
     parent, name = _open_parent(root, member)
     try:
         source_fd = parent.open_file(name, _file_flags())
@@ -952,7 +953,8 @@ def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int) -> 
             with os.fdopen(os.dup(source_fd), "rb") as source, destination.open("wb") as target:
                 shutil.copyfileobj(source, target)
                 target.flush()
-                anchors.set_mode(target.fileno(), destination, stat.S_IMODE(mode))
+                if apply_mode:
+                    anchors.set_mode(target.fileno(), destination, stat.S_IMODE(mode))
                 os.fsync(target.fileno())
         finally:
             os.close(source_fd)
@@ -960,13 +962,13 @@ def _copy_live_file(root: Anchor, member: str, destination: Path, mode: int) -> 
         parent.close()
 
 
-def _copy_live_entry(root: Anchor, member: str, destination: Path) -> None:
+def _copy_live_entry(root: Anchor, member: str, destination: Path, *, apply_mode: bool = True) -> None:
     root_info = _lstat_at(root, member)
     if stat.S_ISLNK(root_info.st_mode):
         destination.symlink_to(_readlink_at(root, member))
         return
     if stat.S_ISREG(root_info.st_mode):
-        _copy_live_file(root, member, destination, root_info.st_mode)
+        _copy_live_file(root, member, destination, root_info.st_mode, apply_mode=apply_mode)
         return
     if not stat.S_ISDIR(root_info.st_mode):
         raise ValueError(f"unsupported filesystem entry type at {member}")
@@ -992,15 +994,46 @@ def _copy_live_entry(root: Anchor, member: str, destination: Path) -> None:
             if stat.S_ISLNK(entry_mode):
                 destination_entry.symlink_to(_readlink_at(root, source_entry))
             elif stat.S_ISREG(entry_mode):
-                _copy_live_file(root, source_entry, destination_entry, entry_mode)
+                _copy_live_file(root, source_entry, destination_entry, entry_mode, apply_mode=apply_mode)
             elif stat.S_ISDIR(entry_mode):
                 destination_entry.mkdir(mode=0o700)
                 directories.append((source_entry, destination_entry, stat.S_IMODE(entry_mode)))
                 pending.append((source_entry, destination_entry))
             else:
                 raise ValueError(f"unsupported filesystem entry type at {source_entry}")
-    for _, directory, mode in reversed(directories):
-        directory.chmod(mode)
+    if apply_mode:
+        for _, directory, mode in reversed(directories):
+            directory.chmod(mode)
+
+
+def _apply_captured_mode(root: Anchor, member: str, backup: Path) -> None:
+    """Stamp the live member's mode onto its already-fsynced backup.
+
+    Called after `_fsync_entry`, never before -- see `_copy_live_file`'s
+    `apply_mode` flag. A read-only source must not become a read-only
+    backup until after this process is done writing (and fsyncing) it.
+    """
+    info = _lstat_at(root, member)
+    if stat.S_ISLNK(info.st_mode):
+        return
+    if stat.S_ISREG(info.st_mode):
+        with backup.open("r+b") as stream:
+            anchors.set_mode(stream.fileno(), backup, stat.S_IMODE(info.st_mode))
+        return
+    pending = [(member, backup)]
+    while pending:
+        source_directory, destination_directory = pending.pop()
+        for entry in sorted(destination_directory.iterdir(), key=lambda entry: os.fsencode(entry.name)):
+            source_entry = f"{source_directory}/{entry.name}"
+            entry_info = _lstat_at(root, source_entry)
+            if stat.S_ISLNK(entry_info.st_mode):
+                continue
+            if stat.S_ISDIR(entry_info.st_mode):
+                pending.append((source_entry, entry))
+            else:
+                with entry.open("r+b") as stream:
+                    anchors.set_mode(stream.fileno(), entry, stat.S_IMODE(entry_info.st_mode))
+        destination_directory.chmod(stat.S_IMODE(_lstat_at(root, source_directory).st_mode))
 
 
 def _create_snapshot(
@@ -1021,8 +1054,9 @@ def _create_snapshot(
                 continue
             backup = backup_root / f"{index:06d}"
             fingerprint = _entry_fingerprint_at(root, member)
-            _copy_live_entry(root, member, backup)
+            _copy_live_entry(root, member, backup, apply_mode=False)
             _fsync_entry(backup)
+            _apply_captured_mode(root, member, backup)
             backup_root_anchor = _open_root(backup_root)
             try:
                 backup_fingerprint = _entry_fingerprint_at(backup_root_anchor, backup.name)
@@ -1380,18 +1414,48 @@ def _write_all(descriptor: int, stream: IO[bytes]) -> None:
 
 
 def _live_temporary(parent: Anchor, target_name: str, staged: Path) -> str:
+    """Write the staged bytes to a fresh, writable sibling of *target_name*.
+
+    *staged*'s mode may carry a read-only bit copied from the live member's own
+    preimage (`_stage_writes`). Stamping that mode onto this temporary file --
+    whether at creation or immediately after the write -- leaves the temporary
+    (and, once linked, the published member sharing its inode) read-only before
+    `_commit_write` gets a chance to `_fsync_live_file` the published name, which
+    needs a fresh write-capable reopen of it. Stay writable here; the caller
+    stamps the captured mode only after that final fsync succeeds (`_commit_write`
+    -> `_stamp_live_mode`) -- the same reordering `_apply_captured_mode` applies on
+    the snapshot/backup path, one level up.
+    """
     temporary = f".{target_name}.{uuid.uuid4().hex}.tmp"
     mode = stat.S_IMODE(staged.stat().st_mode)
-    descriptor = parent.open_file(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+    descriptor = parent.open_file(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode | stat.S_IWRITE)
     try:
         with staged.open("rb") as stream:
             _write_all(descriptor, stream)
-        anchors.set_mode(descriptor, lambda: parent.resolve_descendant(temporary), mode)
         os.fsync(descriptor)
     finally:
         os.close(descriptor)
     _fsync_live_directory(parent)
     return temporary
+
+
+def _stamp_live_mode(root: Anchor, member: str, mode: int) -> None:
+    """Stamp *member*'s final captured mode, once it is safe to (after its last fsync).
+
+    Reopens with write access deliberately: on this tier `anchors.set_mode`
+    prefers `os.fchmod` (Python 3.13+), which needs a handle already carrying
+    write-attribute access, not a read-only one -- see `_clear_read_only_before_unlink`'s
+    docstring for the same fchmod/read-only chicken-and-egg on the delete path.
+    """
+    parent, name = _open_parent(root, member)
+    try:
+        descriptor = parent.open_file(name, os.O_RDWR)
+        try:
+            anchors.set_mode(descriptor, lambda: parent.resolve_descendant(name), mode)
+        finally:
+            os.close(descriptor)
+    finally:
+        parent.close()
 
 
 def _digest_in_directory(parent: Anchor, name: str) -> str:
@@ -1479,6 +1543,36 @@ def _identity_at(parent: Anchor, name: str) -> tuple[int, int]:
     return parent.identity(name)
 
 
+def _clear_read_only_before_unlink(parent: Anchor, name: str) -> None:
+    """Clear a Windows-only read-only attribute before deleting a file this process already owns.
+
+    `_take_custody` renames a live member aside to its quarantine name before
+    this engine inspects or discards it, but renaming does not clear
+    `FILE_ATTRIBUTE_READONLY` -- so a read-only source's quarantined preimage
+    is itself still read-only, and Windows refuses `unlink()` on it. The same
+    species of bug `_apply_captured_mode` guards against on the snapshot
+    path, here on the live-commit quarantine-cleanup path instead. POSIX
+    permission bits never block `unlink()` (the containing directory's
+    permissions govern, not the file's own mode), so this is a no-op there.
+
+    Deliberately a direct path `chmod`, not `anchors.set_mode` -- `set_mode`
+    prefers `os.fchmod` on Python 3.13+, but `fchmod` needs a handle opened
+    with write-attribute access, and a still-read-only file refuses exactly
+    that access (the same chicken-and-egg `_apply_captured_mode` sidesteps by
+    only ever running on a backup this process just wrote, never a live file
+    that started out read-only). `chmod_child_directory` already uses this
+    same direct-path-chmod approach for directories on this tier -- see its
+    docstring: NTFS `chmod` only ever honours the read-only bit here anyway.
+    """
+    if sys.platform != "win32":
+        return
+    info = parent.lstat(name)
+    mode = stat.S_IMODE(info.st_mode)
+    if mode & stat.S_IWRITE:
+        return
+    parent.resolve_descendant(name).chmod(mode | stat.S_IWRITE)
+
+
 def _entry_identity(info: os.stat_result) -> _EntryIdentity:
     return _EntryIdentity(
         device=info.st_dev,
@@ -1555,10 +1649,13 @@ def _commit_write(
                 raise _preserve_conflict(
                     effect.member, quarantine_member, protected, "installed name changed during commit"
                 )
+            _clear_read_only_before_unlink(parent, quarantine)
             parent.unlink(quarantine)
         _fsync_live_file(root, effect.member)
+        _stamp_live_mode(root, effect.member, stat.S_IMODE(effect.staged.stat().st_mode))
     finally:
         with suppress(FileNotFoundError):
+            _clear_read_only_before_unlink(parent, temporary)
             parent.unlink(temporary)
         _fsync_live_directory(parent)
         parent.close()
@@ -1843,6 +1940,7 @@ def _commit_effect(
                 if stat.S_ISDIR(info.st_mode):
                     parent.rmdir(quarantine)
                 else:
+                    _clear_read_only_before_unlink(parent, quarantine)
                     parent.unlink(quarantine)
             except OSError as exc:
                 _restore_custody_or_raise(

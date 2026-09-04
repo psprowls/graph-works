@@ -12,7 +12,7 @@ raises. `work-io` raised `ValueError` for all seven cases.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal
@@ -26,6 +26,7 @@ from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition, 
 
 RefusalReason = Literal[
     "unknown-path",
+    "unreadable-member",
     "blocked",
     "nothing-to-advance",
     "effort-required",
@@ -45,8 +46,8 @@ RefusalReason = Literal[
 #: vocabulary: `RefusalReason` is the CLI's rendering contract
 #: (`rendering.advance_payload` reads `outcome.plan.refusal`), and a closed
 #: string vocabulary is band-legal here where a git observation is not.
-#: `return-not-available` sits between them in `RefusalReason` but is *not* a
-#: member: `advance()` raises that one itself.
+#: `return-not-available` and `unreadable-member` sit between them in
+#: `RefusalReason` but are *not* members: `advance()` produces both itself.
 GATE_REFUSALS: frozenset[str] = frozenset({"uncommitted-work", "no-commits", "no-affects-touched"})
 
 
@@ -103,6 +104,7 @@ def advance(
     worktree: str | None = None,
     branch: str | None = None,
     return_: bool = False,
+    unreadable: Mapping[str, str] | None = None,
 ) -> AdvancePlan:
     """Plan the next transition for *path*. Mutates nothing, reads no clock.
 
@@ -116,10 +118,19 @@ def advance(
     picking `on_dispatch or on_complete`, and refusing an unmet requirement are
     one decision -- splitting them across a CLI is how `work-io` ended up with
     the gate messages living away from the table that produces them.
+
+    `unreadable` is `Bundle.unreadable`, keyed by bundle-relative `.md` path:
+    when *path* is missing from `items` because its page could not be read
+    (a locked handle, an encoding failure) rather than because it never
+    existed, this distinguishes the two so the refusal names the member and
+    the OS reason instead of collapsing into `unknown-path`.
     """
     item = next((candidate for candidate in items if candidate.path == path), None)
     state = state_for(items, path, effort=effort)
     if item is None or state is None:
+        detail = (unreadable or {}).get(f"{path}.md")
+        if detail is not None:
+            return _refused(path, None, None, "unreadable-member", f"{path}.md {detail}")
         return _refused(path, None, None, "unknown-path", f"unknown path {path!r}")
     result = route(state)
     if result.blockers:

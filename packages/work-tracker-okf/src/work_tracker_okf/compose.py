@@ -337,6 +337,7 @@ def advance_and_stamp(
         worktree=worktree,
         branch=branch,
         return_=return_,
+        unreadable=bundle.unreadable,
     )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)

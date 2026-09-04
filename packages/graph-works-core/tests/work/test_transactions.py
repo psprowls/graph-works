@@ -960,8 +960,26 @@ def test_snapshotting_a_read_only_file_does_not_lock_the_backup_before_fsync(tmp
 
         assert result.ok is True
         assert target.read_bytes() == b"after"
+        assert stat.S_IMODE(target.stat().st_mode) == representable_mode(stat.S_IREAD, directory=False)
     finally:
         target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_deleting_a_read_only_directory_via_a_mutation_plan_clears_the_attribute_first(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/readonly-dir"
+    target.mkdir(parents=True)
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, deletes=("work/readonly-dir",))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is True
+        assert not target.exists()
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
 
 
 def test_complete_journal_failure_rolls_back_live_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

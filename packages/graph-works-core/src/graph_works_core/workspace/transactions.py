@@ -1020,6 +1020,12 @@ def _apply_captured_mode(root: Anchor, member: str, backup: Path) -> None:
         with backup.open("r+b") as stream:
             anchors.set_mode(stream.fileno(), backup, stat.S_IMODE(info.st_mode))
         return
+    # Mirror `_copy_live_entry`'s bottom-up ordering: collect (destination, mode)
+    # pairs while walking, and apply every directory chmod only after the whole
+    # walk has completed, deepest-first. Chmodding a directory as it is popped
+    # (top-down, during the walk) can strip the owner-execute/read bits the
+    # walk still needs to `iterdir()` into that directory's own children.
+    directories: list[tuple[Path, int]] = [(backup, stat.S_IMODE(info.st_mode))]
     pending = [(member, backup)]
     while pending:
         source_directory, destination_directory = pending.pop()
@@ -1029,11 +1035,13 @@ def _apply_captured_mode(root: Anchor, member: str, backup: Path) -> None:
             if stat.S_ISLNK(entry_info.st_mode):
                 continue
             if stat.S_ISDIR(entry_info.st_mode):
+                directories.append((entry, stat.S_IMODE(entry_info.st_mode)))
                 pending.append((source_entry, entry))
             else:
                 with entry.open("r+b") as stream:
                     anchors.set_mode(stream.fileno(), entry, stat.S_IMODE(entry_info.st_mode))
-        destination_directory.chmod(stat.S_IMODE(_lstat_at(root, source_directory).st_mode))
+    for directory, mode in reversed(directories):
+        directory.chmod(mode)
 
 
 def _create_snapshot(
@@ -1544,25 +1552,28 @@ def _identity_at(parent: Anchor, name: str) -> tuple[int, int]:
 
 
 def _clear_read_only_before_unlink(parent: Anchor, name: str) -> None:
-    """Clear a Windows-only read-only attribute before deleting a file this process already owns.
+    """Clear a Windows-only read-only attribute before deleting an entry this process already owns.
 
     `_take_custody` renames a live member aside to its quarantine name before
     this engine inspects or discards it, but renaming does not clear
     `FILE_ATTRIBUTE_READONLY` -- so a read-only source's quarantined preimage
-    is itself still read-only, and Windows refuses `unlink()` on it. The same
-    species of bug `_apply_captured_mode` guards against on the snapshot
-    path, here on the live-commit quarantine-cleanup path instead. POSIX
-    permission bits never block `unlink()` (the containing directory's
-    permissions govern, not the file's own mode), so this is a no-op there.
+    is itself still read-only, and Windows refuses `unlink()`/`rmdir()` on it.
+    The same species of bug `_apply_captured_mode` guards against on the
+    snapshot path, here on the live-commit quarantine-cleanup path instead.
+    POSIX permission bits never block `unlink()`/`rmdir()` (the containing
+    directory's permissions govern, not the entry's own mode), so this is a
+    no-op there.
 
-    Deliberately a direct path `chmod`, not `anchors.set_mode` -- `set_mode`
-    prefers `os.fchmod` on Python 3.13+, but `fchmod` needs a handle opened
-    with write-attribute access, and a still-read-only file refuses exactly
-    that access (the same chicken-and-egg `_apply_captured_mode` sidesteps by
-    only ever running on a backup this process just wrote, never a live file
-    that started out read-only). `chmod_child_directory` already uses this
-    same direct-path-chmod approach for directories on this tier -- see its
-    docstring: NTFS `chmod` only ever honours the read-only bit here anyway.
+    Dispatches on entry kind: a file gets a direct path `chmod`, not
+    `anchors.set_mode` -- `set_mode` prefers `os.fchmod` on Python 3.13+, but
+    `fchmod` needs a handle opened with write-attribute access, and a
+    still-read-only file refuses exactly that access (the same
+    chicken-and-egg `_apply_captured_mode` sidesteps by only ever running on
+    a backup this process just wrote, never a live file that started out
+    read-only). A directory instead goes through `Anchor.chmod_child_directory`,
+    which already carries the per-tier direct-path-chmod approach for
+    directories -- see its docstring: NTFS `chmod` only ever honours the
+    read-only bit here anyway.
     """
     if sys.platform != "win32":
         return
@@ -1570,7 +1581,10 @@ def _clear_read_only_before_unlink(parent: Anchor, name: str) -> None:
     mode = stat.S_IMODE(info.st_mode)
     if mode & stat.S_IWRITE:
         return
-    parent.resolve_descendant(name).chmod(mode | stat.S_IWRITE)
+    if stat.S_ISDIR(info.st_mode):
+        parent.chmod_child_directory(name, mode | stat.S_IWRITE)
+    else:
+        parent.resolve_descendant(name).chmod(mode | stat.S_IWRITE)
 
 
 def _entry_identity(info: os.stat_result) -> _EntryIdentity:
@@ -1651,6 +1665,16 @@ def _commit_write(
                 )
             _clear_read_only_before_unlink(parent, quarantine)
             parent.unlink(quarantine)
+        # `temporary` and `name` are hard-linked to the same inode at this point,
+        # and NTFS's FILE_ATTRIBUTE_READONLY is shared across hard links -- so the
+        # temp name must be unlinked (and, since it is a name this process still
+        # owns, cleared of read-only first) BEFORE `_stamp_live_mode` stamps the
+        # captured mode onto the published name below. Clearing read-only via the
+        # temp name *after* the stamp would silently clear it right back off the
+        # published name too. `_fsync_live_file` also needs a write-capable reopen
+        # of the published name, so it stays after this unlink as well.
+        _clear_read_only_before_unlink(parent, temporary)
+        parent.unlink(temporary)
         _fsync_live_file(root, effect.member)
         _stamp_live_mode(root, effect.member, stat.S_IMODE(effect.staged.stat().st_mode))
     finally:
@@ -1937,10 +1961,10 @@ def _commit_effect(
                     effect.member, quarantine_member, protected, "name was recreated during custody verification"
                 )
             try:
+                _clear_read_only_before_unlink(parent, quarantine)
                 if stat.S_ISDIR(info.st_mode):
                     parent.rmdir(quarantine)
                 else:
-                    _clear_read_only_before_unlink(parent, quarantine)
                     parent.unlink(quarantine)
             except OSError as exc:
                 _restore_custody_or_raise(

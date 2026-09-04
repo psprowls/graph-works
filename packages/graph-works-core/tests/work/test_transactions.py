@@ -124,6 +124,7 @@ def _write_item(
         "| Action | Done when | Rationale |\n"
         "| --- | --- | --- |\n",
         encoding="utf-8",
+        newline="",
     )
 
 
@@ -732,7 +733,7 @@ def test_targeted_index_validation_failure_restores_original_index(tmp_path: Pat
     _write_item(layout.bundle_dir, "work/feature-target", type="Feature")
     (work / "feature-target").mkdir()
     index = work / "index.md"
-    index.write_text("# Human prose\n", encoding="utf-8")
+    index.write_text("# Human prose\n", encoding="utf-8", newline="")
     before = _snapshot(layout.bundle_dir)
     plan = _plan(
         layout,
@@ -756,7 +757,7 @@ def test_targeted_index_validation_reads_the_anchored_bundle(tmp_path: Path, mon
     _write_item(layout.bundle_dir, "work/feature-target", type="Feature")
     (work / "feature-target").mkdir()
     index = work / "index.md"
-    index.write_text("# Human prose\n", encoding="utf-8")
+    index.write_text("# Human prose\n", encoding="utf-8", newline="")
     decoy = layout.bundle_dir.with_name("okf-index-decoy")
     held = layout.bundle_dir.with_name("okf-index-held")
     shutil.copytree(layout.bundle_dir, decoy, symlinks=True)

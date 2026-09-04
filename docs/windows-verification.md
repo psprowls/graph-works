@@ -689,12 +689,27 @@ of the Windows tier.
 
 **Command:** stage each offending member in the scratch bundle, then run *the
 mutation*. Reserved names cannot be created through the normal Win32 path, so
-use the `\\?\` prefix:
+use the `\\?\` prefix.
+
+**Do not use Python's `open()` for this.** It rejects every `\\?\` path with
+`[Errno 22] Invalid argument` before the call reaches Windows -- including an
+ordinary `normal.md`, so the failure is Python refusing the prefix, not Windows
+refusing the reserved name, and mistaking one for the other records a PASS that
+never happened. Measured 2026-09-03 on CPython 3.11 and 3.14. Use PowerShell's
+`[System.IO.File]::Create`, which honours the prefix:
+
+```powershell
+$w = "C:\gw-verify\ws\okf\work"
+foreach ($n in @("CON.md", "COM1.md", "trailing. .md")) {
+  $fs = [System.IO.File]::Create("\\?\$w\$n")
+  $b = [System.Text.Encoding]::ASCII.GetBytes("---`ntype: TechDebt`n---`n")
+  $fs.Write($b, 0, $b.Length); $fs.Close()
+}
+```
+
+Then, from cmd.exe:
 
 ```bat
-python -c "open(r'\\?\C:\gw-verify\ws\okf\work\CON.md','wb').write(b'---\ntype: TechDebt\n---\n')"
-python -c "open(r'\\?\C:\gw-verify\ws\okf\work\COM1.md','wb').write(b'---\ntype: TechDebt\n---\n')"
-python -c "open(r'\\?\C:\gw-verify\ws\okf\work\trailing. .md','wb').write(b'---\ntype: TechDebt\n---\n')"
 mklink C:\gw-verify\ws\okf\work\linked.md C:\gw-verify\ws\okf\work\scratch-windows-verification.md
 gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json
 echo rc=%ERRORLEVEL%
@@ -722,10 +737,18 @@ Two sub-results to record separately:
 Remove every staged member afterwards — including through `\\?\` for the ones
 Explorer and `del` will not touch:
 
-```bat
-python -c "import os; [os.remove(p) for p in (r'\\?\C:\gw-verify\ws\okf\work\CON.md', r'\\?\C:\gw-verify\ws\okf\work\COM1.md', r'\\?\C:\gw-verify\ws\okf\work\trailing. .md') if os.path.exists(p)]"
-del C:\gw-verify\ws\okf\work\linked.md
+```powershell
+$w = "C:\gw-verify\ws\okf\work"
+foreach ($n in @("CON.md", "COM1.md", "trailing. .md")) {
+  $p = "\\?\$w\$n"
+  if ([System.IO.File]::Exists($p)) { [System.IO.File]::Delete($p) }
+}
+Remove-Item "$w\linked.md" -Force -ErrorAction SilentlyContinue
 ```
+
+(Same reason as the staging block: `os.remove` on a `\\?\` path fails the same
+way `open()` does, so the Python teardown would silently leave every offender in
+place and poison the next checkpoint that walks this bundle.)
 
 **If it fails** (a mutation proceeds past any of them): Owner:
 `feature-windows-anchor-and-tier-adr`.

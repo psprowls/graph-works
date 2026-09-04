@@ -139,9 +139,21 @@ cov:
     uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95
-    uv run --package workflow-local pytest packages/workflow-local/tests --cov=workflow_local --cov-branch --cov-report=term-missing --cov-fail-under=95
+    just cov-workflow-local
     uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests --cov=graph_works_cli --cov-branch --cov-report=term-missing --cov-fail-under=95
+
+# workflow-local's coverage arm. POSIX-only: the package refuses to construct on
+# Windows by design (D-002), so a line-coverage floor there measures a suite that
+# is 51 skips wide. `just test` still runs the suite on Windows, where the skips
+# and `test_windows_guard.py` are the signal.
+[unix]
+cov-workflow-local:
+    uv run --package workflow-local pytest packages/workflow-local/tests --cov=workflow_local --cov-branch --cov-report=term-missing --cov-fail-under=95
+
+[windows]
+cov-workflow-local:
+    @echo "workflow-local: coverage gate skipped — POSIX-only backend (D-002); see test_windows_guard.py"
 
 # The plugin CLI contract — three assertions against
 # `wiki/concepts/graph-works-plugin-cli-contract.md`. Deliberately OUTSIDE

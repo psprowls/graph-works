@@ -50,6 +50,7 @@ import work_tracker_okf.init
 from config_io import PROJECTION_FILENAME, PlainYamlStore, write_projection
 from okf_ext.bundle import ApplyResult, ScaffoldPlan, apply, plan_scaffold
 
+from graph_works_core.workspace import anchors
 from graph_works_core.workspace.context_seed import render_context_file
 from graph_works_core.workspace.discovery import find_repo_root
 from graph_works_core.workspace.errors import InitError
@@ -301,12 +302,16 @@ def plan_init(
     default one. *repo_root* defaults to a `.git` walk-up from *root*; pass it
     explicitly to pin a repo the walk-up would not find.
 
-    Raises `InitError` only for a *root* that exists and is not a directory —
-    the same line both shipped `install_bundle`s draw.
+    Raises `InitError` for a *root* that exists and is not a directory, or for
+    a root whose filesystem does not support hard links -- the same
+    requirement `_WindowsAnchor` enforces at mutation time, checked here so a
+    bootstrapped-but-unusable workspace is never created in the first place.
     """
     root = Path(root).expanduser().resolve()
     if root.exists() and not root.is_dir():
         raise InitError(f"{root}: exists and is not a directory")
+    if not anchors.hard_links_supported(root):
+        raise InitError(anchors._hard_link_refusal_message(root))
 
     manifest_path = root / MANIFEST_FILENAME
     manifest = read(manifest_path) if manifest_path.exists() else defaults()

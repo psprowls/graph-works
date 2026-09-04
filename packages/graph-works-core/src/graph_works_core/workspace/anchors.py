@@ -1255,6 +1255,7 @@ __all__ = [
     "UnsupportedAnchorPlatform",
     "anchor_tier",
     "durability_tier",
+    "hard_links_supported",
     "lock_path",
     "long_paths_enabled",
     "nofollow_flag",

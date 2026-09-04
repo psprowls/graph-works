@@ -182,6 +182,36 @@ def test_success_applies_deterministic_effects_and_records_complete_journal(tmp_
     assert _states(result.journal) == ["planned", "applying", "validating", "complete"]
 
 
+def test_a_mutation_refuses_before_any_effect_lands_without_hard_link_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    """The hard-link refusal is an anchor-construction-time refusal, and the
+    weak (`_PosixAnchor`) tier has no hard-link seam at all -- so this is
+    windows-tier-only, unlike the rest of this module's tests.
+
+    `apply_mutation` opens the bundle root anchor itself before entering any
+    transaction lock or guarded phase (`transactions.py:2619`), so a refusal
+    that fires at anchor construction surfaces as an uncaught `ValueError`
+    straight out of `apply_mutation` -- the same pre-transaction-failure
+    shape as `test_work_mutations_open_failure_does_not_leak_cache_descriptor`
+    -- rather than as a `MutationApplication` with `failures`. What this test
+    proves is that the refusal reaches `apply_mutation` at all, and that
+    nothing on disk moved before it did.
+    """
+    if tier != "windows":
+        pytest.skip("the hard-link seam only exists on the windows-revalidated tier")
+
+    layout = _workspace(tmp_path)
+    before = _snapshot(layout.bundle_dir)
+    monkeypatch.setattr(anchors, "hard_links_supported", lambda path: False)
+
+    plan = _plan(layout, writes=(PlannedWrite("work/destination.bin", None, b"final"),))
+    with pytest.raises(ValueError, match="hard link support"):
+        apply_mutation(layout, plan)
+
+    assert _snapshot(layout.bundle_dir) == before
+
+
 def test_real_reparent_plan_applies_through_transaction_and_reloads_final_path(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     release = "work/release-cutover"

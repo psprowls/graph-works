@@ -759,6 +759,16 @@ def _expand_directory_members(root: Anchor, effect_paths: dict[str, Path]) -> tu
     shape reports `S_ISDIR` without `os.path.isjunction` recognizing it, so
     a cycle can never be walked twice even if the junction check itself
     ever misses one.
+
+    The junction's own name is still included in the returned scan set, but
+    this closes only the traversal-safety hole (no infinite loop / unbounded
+    walk from descending into it) -- it does not claim to close any
+    content-safety hole around junctions themselves. `_refuse_unsupported_shapes`
+    (via `Anchor.refused_members`) currently has no refusal rule for
+    junctions specifically, only symlinks (`is_symlink()` is `False` for a
+    junction), so a junction that reaches this point is scanned, found, and
+    passes through with no refusal at all. That gap is pre-existing and
+    undocumented elsewhere; it is not addressed by this function.
     """
     scan: set[str] = set(effect_paths)
     pending = list(effect_paths)
@@ -1166,6 +1176,7 @@ def _remove_live_entry(root: Anchor, member: str) -> None:
     if not stat.S_ISDIR(info.st_mode):
         parent, name = _open_parent(root, member)
         try:
+            _clear_read_only_before_unlink(parent, name)
             parent.unlink(name)
             _fsync_live_directory(parent)
         finally:
@@ -1194,6 +1205,7 @@ def _remove_live_entry(root: Anchor, member: str) -> None:
             else:
                 child_parent, child_name = _open_parent(root, child)
                 try:
+                    _clear_read_only_before_unlink(child_parent, child_name)
                     child_parent.unlink(child_name)
                     _fsync_live_directory(child_parent)
                 finally:
@@ -1220,14 +1232,25 @@ def _chmod_directory_at(root: Anchor, member: str, mode: int) -> None:
 
 
 def _copy_backup_file(root: Anchor, source: Path, member: str, mode: int) -> None:
+    """Restore *source* (a backup) onto the live filesystem as *member*.
+
+    *mode* may carry a read-only bit captured from the live member's own
+    preimage (`_apply_captured_mode`). Stamping that mode before this
+    function's own `_fsync_live_file` call -- which reopens the just-written
+    name `O_RDWR` to fsync it -- would leave the restored file read-only
+    before that reopen, and Windows refuses a write-capable reopen of a
+    read-only file (the same Defect A1 shape `_live_temporary` guards
+    against on the commit path). Stay writable through creation and both
+    fsyncs; stamp the final captured mode only after `_fsync_live_file`
+    succeeds.
+    """
     parent, name = _open_parent(root, member, create=True)
     try:
-        descriptor = parent.open_file(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(mode))
+        descriptor = parent.open_file(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, stat.S_IMODE(mode) | stat.S_IWRITE)
         try:
             with source.open("rb") as incoming, os.fdopen(os.dup(descriptor), "wb") as outgoing:
                 shutil.copyfileobj(incoming, outgoing)
                 outgoing.flush()
-            anchors.set_mode(descriptor, lambda: parent.resolve_descendant(name), stat.S_IMODE(mode))
             os.fsync(descriptor)
         finally:
             os.close(descriptor)
@@ -1235,6 +1258,7 @@ def _copy_backup_file(root: Anchor, source: Path, member: str, mode: int) -> Non
         _fsync_live_directory(parent)
     finally:
         parent.close()
+    _stamp_live_mode(root, member, stat.S_IMODE(mode))
 
 
 def _copy_backup_to_live(root: Anchor, source: Path, member: str) -> None:
@@ -1518,7 +1542,7 @@ def _stamp_live_mode(root: Anchor, member: str, mode: int) -> None:
     """
     parent, name = _open_parent(root, member)
     try:
-        descriptor = parent.open_file(name, os.O_RDWR)
+        descriptor = parent.open_file(name, _fsync_file_flags())
         try:
             anchors.set_mode(descriptor, lambda: parent.resolve_descendant(name), mode)
         finally:

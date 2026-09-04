@@ -970,7 +970,38 @@ def test_snapshotting_a_read_only_file_does_not_lock_the_backup_before_fsync(tmp
         assert target.read_bytes() == b"after"
         assert stat.S_IMODE(target.stat().st_mode) == representable_mode(stat.S_IREAD, directory=False)
     finally:
-        target.chmod(stat.S_IREAD | stat.S_IWRITE)
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_rolling_back_a_committed_read_only_write_restores_the_original_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read-only member's mutation can now succeed and leave the published
+    file read-only (Task 5's `_stamp_live_mode`). If a LATER failure -- here a
+    forced postcondition failure -- routes into `_restore_snapshot` after that
+    write has already committed, rollback must be able to remove the
+    now-read-only live file (`_remove_live_entry`, Finding C1) and restore the
+    backup onto the live filesystem (`_copy_backup_file`, Finding C2) without
+    Windows refusing either operation with `PermissionError`.
+    """
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/page.md"
+    target.parent.mkdir()
+    target.write_bytes(b"before")
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
+        monkeypatch.setattr(transactions, "_validate_postconditions", lambda *_args: ("forced validation failure",))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is False
+        assert result.rolled_back is True
+        assert target.read_bytes() == b"before"
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
 
 
 def test_deleting_a_read_only_directory_via_a_mutation_plan_clears_the_attribute_first(tmp_path: Path) -> None:
@@ -2651,7 +2682,7 @@ def test_transaction_journal_helpers_reject_malformed_histories_and_support_anch
         parent.close()
 
 
-def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures(tmp_path: Path) -> None:
+def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures() -> None:
     assert not transactions._json_values_equal(True, 1)
     assert not transactions._json_values_equal({"a": 1}, {"b": 1})
     assert not transactions._json_values_equal([1], [1, 2])
@@ -3271,8 +3302,12 @@ def test_expand_directory_members_refuses_to_recurse_into_a_junction_cycle(tmp_p
     an arbitrarily large external tree). This proves the walk terminates
     when a junction inside a scanned directory points back at that
     directory's own ancestor, and that the junction itself is still part of
-    the scanned member set (so `_refuse_unsupported_shapes` still gets a
-    chance to inspect it) -- only its contents are never visited.
+    the scanned member set -- only its contents are never visited. Note
+    that this does NOT mean the junction is safely handled: `refused_members`
+    only tests `is_symlink()`, which is `False` for a junction, so the
+    junction passes through the scan with no refusal at all. Closing that
+    content-safety gap is out of scope here; this test covers traversal
+    safety only.
     """
     layout = _workspace(tmp_path)
     item = "work/feature-target"

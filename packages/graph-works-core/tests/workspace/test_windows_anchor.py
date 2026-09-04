@@ -727,3 +727,67 @@ def test_open_child_does_not_reprobe_hard_link_support(tmp_path: Path, monkeypat
             child.close()
     finally:
         anchor.close()
+
+
+def test_link_translates_error_invalid_function_into_the_named_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_invalid_function(*args: object, **kwargs: object) -> None:
+            raise OSError(0, "Incorrect function", None, anchors.ERROR_INVALID_FUNCTION)
+
+        monkeypatch.setattr(anchors.os, "link", _raise_invalid_function)
+        with pytest.raises(ValueError, match="hard link support"):
+            anchor.link("source.txt", "dest.txt")
+    finally:
+        anchor.close()
+
+
+def test_link_translates_error_not_supported_into_the_named_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_not_supported(*args: object, **kwargs: object) -> None:
+            raise OSError(0, "Not supported", None, anchors.ERROR_NOT_SUPPORTED)
+
+        monkeypatch.setattr(anchors.os, "link", _raise_not_supported)
+        with pytest.raises(ValueError, match="hard link support"):
+            anchor.link("source.txt", "dest.txt")
+    finally:
+        anchor.close()
+
+
+def test_link_lets_file_exists_error_propagate_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_exists(*args: object, **kwargs: object) -> None:
+            raise FileExistsError(17, "File exists")
+
+        monkeypatch.setattr(anchors.os, "link", _raise_exists)
+        with pytest.raises(FileExistsError):
+            anchor.link("source.txt", "dest.txt")
+    finally:
+        anchor.close()
+
+
+def test_link_lets_unrelated_oserrors_propagate_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "source.txt").write_text("x\n", encoding="utf-8")
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+
+        def _raise_other(*args: object, **kwargs: object) -> None:
+            raise OSError(0, "Access is denied", None, 5)  # ERROR_ACCESS_DENIED
+
+        monkeypatch.setattr(anchors.os, "link", _raise_other)
+        with pytest.raises(OSError, match="Access is denied"):
+            anchor.link("source.txt", "dest.txt")
+    finally:
+        anchor.close()

@@ -887,9 +887,25 @@ class _WindowsAnchor:
         network share, or across volumes.  That is a filesystem requirement of
         the whole tier, not a degradation: `transactions._commit_write`
         (`:1380`, `:1417`) installs EVERY file this way.
+
+        The construction-time probe (`hard_links_supported`) is a claim, not a
+        measurement -- if a filesystem advertises `FILE_SUPPORTS_HARD_LINKS`
+        and still fails here, this backstop translates the two known error
+        codes into the same named refusal the constructor raises, so the
+        defect is fixed whether or not the probe was right.  `FileExistsError`
+        must propagate untouched: both call sites in `_commit_write` catch it
+        specifically to detect a name that changed since planning, and
+        swallowing it here would break that concurrency detection.
         """
         directory = self._revalidate()
-        os.link(directory / source, directory / name, follow_symlinks=False)
+        try:
+            os.link(directory / source, directory / name, follow_symlinks=False)
+        except FileExistsError:
+            raise
+        except OSError as exc:
+            if getattr(exc, "winerror", None) in (ERROR_INVALID_FUNCTION, ERROR_NOT_SUPPORTED):
+                raise ValueError(_hard_link_refusal_message(self.root)) from exc
+            raise
 
     def rename_noreplace(self, name: str, destination: Anchor, destination_name: str) -> None:
         """Fail-if-exists rename.

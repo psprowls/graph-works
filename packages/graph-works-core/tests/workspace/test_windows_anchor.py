@@ -241,6 +241,28 @@ def test_a_child_anchor_inherits_the_long_path_answer(tmp_path: Path) -> None:
         anchor.close()
 
 
+def test_the_windows_anchor_refuses_construction_without_hard_link_support(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="hard link support"):
+        anchors._WindowsAnchor(tmp_path, hard_links=False)
+
+
+def test_the_hard_link_refusal_names_the_path_and_the_alternative(tmp_path: Path) -> None:
+    with pytest.raises(ValueError) as caught:
+        anchors._WindowsAnchor(tmp_path, hard_links=False)
+    message = str(caught.value)
+    assert str(tmp_path.resolve()) in message
+    assert "exFAT" in message
+    assert "WSL" in message
+
+
+def test_the_windows_anchor_constructs_normally_with_hard_link_support(tmp_path: Path) -> None:
+    anchor = anchors._WindowsAnchor(tmp_path, hard_links=True)
+    try:
+        assert anchor._hard_links is True
+    finally:
+        anchor.close()
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="constructs the strong tier, which needs os.O_DIRECTORY")
 def test_refused_members_is_empty_on_the_strong_tier(tmp_path: Path) -> None:
     anchor = anchors.open_anchor(tmp_path, platform_name="linux")

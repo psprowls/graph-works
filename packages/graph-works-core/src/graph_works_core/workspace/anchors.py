@@ -658,9 +658,15 @@ class _WindowsAnchor:
     editor, a sync client -- not to a second `gw`.
     """
 
-    __slots__ = ("_identity", "_long_paths", "root")
+    __slots__ = ("_hard_links", "_identity", "_long_paths", "root")
 
-    def __init__(self, root: Path, *, long_paths: bool | None = None) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        long_paths: bool | None = None,
+        hard_links: bool | None = None,
+    ) -> None:
         # `resolve()` would silently follow a symlinked final component, so the
         # refusal has to happen on the UNresolved path -- same shape and
         # reasoning as `open_child`'s refusal of a symlinked component, just at
@@ -683,6 +689,9 @@ class _WindowsAnchor:
                 r"Set HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled "
                 f"to 1 and restart, or run under WSL for the {POSIX_STRONG_TIER} tier."
             )
+        self._hard_links = hard_links_supported(self.root) if hard_links is None else hard_links
+        if not self._hard_links:
+            raise ValueError(_hard_link_refusal_message(self.root))
 
     # -- lifetime ---------------------------------------------------------
 

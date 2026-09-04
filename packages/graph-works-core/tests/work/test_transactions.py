@@ -2557,6 +2557,21 @@ def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures
     with pytest.raises(ValueError, match="non-finite JSON"):
         transactions._finite_json_float("1e999")
 
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "unlinking a file while a read-only descriptor is still open on it "
+        "is refused by Windows (PermissionError: WinError 32) -- CPython's "
+        "os.open() requests no delete-sharing, and POSIX's unlink-keeps-the-fd-"
+        "valid semantics have no Windows equivalent. Coverage gap: "
+        "_assert_regular_entry_identity's stale-descriptor detection via "
+        "unlink-while-open is untested on win32. See "
+        "work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md."
+    ),
+)
+def test_assert_regular_entry_identity_detects_unlink_while_open(tmp_path: Path) -> None:
     entry = tmp_path / "entry"
     entry.write_text("one", encoding="utf-8")
     parent = transactions._open_absolute_directory(tmp_path)

@@ -2482,6 +2482,16 @@ def test_relative_moved_symlink_projection_follows_destination_ancestor_links(
         assert not moved.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "descriptor-leak counting relies on /proc/self/fd (or darwin's "
+        "/dev/fd), which does not exist on win32 -- no Windows-native "
+        "equivalent exists. Coverage gap: the cache-descriptor leak property "
+        "is untested on win32. See work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md, Cause 4."
+    ),
+)
 def test_work_mutations_open_failure_does_not_leak_cache_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2547,13 +2557,6 @@ def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures
     with pytest.raises(ValueError, match="non-finite JSON"):
         transactions._finite_json_float("1e999")
 
-    directory_fd = os.open(tmp_path, os.O_RDONLY)
-    try:
-        with pytest.raises(ValueError, match="not a regular file"):
-            transactions._require_regular_file(directory_fd, "directory")
-    finally:
-        os.close(directory_fd)
-
     entry = tmp_path / "entry"
     entry.write_text("one", encoding="utf-8")
     parent = transactions._open_absolute_directory(tmp_path)
@@ -2566,6 +2569,25 @@ def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures
     finally:
         os.close(entry_fd)
         parent.close()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "os.open() on a directory with O_RDONLY is refused by Windows -- "
+        "there is no Windows-native way to obtain a directory descriptor "
+        "this way. Coverage gap: _require_regular_file's directory-rejection "
+        "guard is untested on win32. See work/epic-native-windows-support/"
+        "children/bug-graph-works-core-suite-fails-on.md, Cause 4."
+    ),
+)
+def test_require_regular_file_rejects_a_directory_descriptor(tmp_path: Path) -> None:
+    directory_fd = os.open(tmp_path, os.O_RDONLY)
+    try:
+        with pytest.raises(ValueError, match="not a regular file"):
+            transactions._require_regular_file(directory_fd, "directory")
+    finally:
+        os.close(directory_fd)
 
 
 def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) -> None:

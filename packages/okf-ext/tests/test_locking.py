@@ -176,7 +176,6 @@ def test_locked_windows_branch_contends_for_a_real_lock_across_processes(tmp_pat
     naming the path -- not merely produce the right string from a fake."""
     import subprocess
     import sys as _sys
-    import time
 
     lock = tmp_path / "contended.lock"
 

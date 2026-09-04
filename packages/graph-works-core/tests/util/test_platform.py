@@ -16,7 +16,9 @@ from pathlib import Path
 import pytest
 from graph_works_core.util.platform import (
     LOCK_SITES,
+    NO_VERSION_REPORTED,
     POSIX_ONLY_MODULES,
+    PROBE_VERSION_DETAIL_MAX_CHARS,
     PROVIDERS,
     SCHEMA_VERSION,
     Capability,
@@ -171,6 +173,63 @@ def test_a_present_orca_probes_available_and_disagrees_with_unresolved() -> None
     assert result is not None
     assert result.status == "available"
     assert result.agrees_with_declared is False
+    assert "\n" not in result.detail
+
+
+def test_a_multi_line_orca_version_reports_no_version() -> None:
+    """F5's regression, in-process: a 363-line usage dump, exit 0, first line `orca`."""
+    usage_dump = "orca\n\nUsage: orca [OPTIONS] COMMAND [ARGS]...\n" + "\n".join(f"  option {i}" for i in range(360))
+    provider = DispatchBackendProvider(
+        which=lambda _name: "/usr/local/bin/orca",
+        run=lambda *_args, **_kwargs: _completed(0, usage_dump),
+    )
+
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.status == "available"
+    assert "\n" not in result.detail
+    assert result.detail.endswith(NO_VERSION_REPORTED)
+    assert "Usage:" not in result.detail
+
+
+def test_a_long_single_line_version_is_truncated_to_the_named_bound() -> None:
+    long_version = "orca " + "1" * 500
+    provider = DispatchBackendProvider(
+        which=lambda _name: "/usr/local/bin/orca",
+        run=lambda *_args, **_kwargs: _completed(0, long_version),
+    )
+
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    version_part = result.detail.split(": ", 1)[1]
+    assert len(version_part) == PROBE_VERSION_DETAIL_MAX_CHARS
+    assert version_part.endswith("…")
+
+
+def test_a_real_version_line_survives_verbatim() -> None:
+    provider = DispatchBackendProvider(
+        which=lambda _name: "/usr/local/bin/orca",
+        run=lambda *_args, **_kwargs: _completed(0, "orca 1.2.3\n"),
+    )
+
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.detail.endswith(": orca 1.2.3")
+
+
+def test_an_empty_orca_version_still_reports_no_version() -> None:
+    provider = DispatchBackendProvider(
+        which=lambda _name: "/usr/local/bin/orca",
+        run=lambda *_args, **_kwargs: _completed(0, ""),
+    )
+
+    result = provider.probe(layout=None)  # type: ignore[arg-type]
+
+    assert result is not None
+    assert result.detail.endswith(NO_VERSION_REPORTED)
 
 
 def test_an_absent_orca_probes_unavailable_without_running_anything() -> None:

@@ -232,6 +232,35 @@ ORCA_PROBE_TIMEOUT_SECONDS = 5.0
 #: import-linter contract, so citing it must not become importing it.
 ORCHESTRATE_SHELL = "graph_works_core.orchestrate.commands"
 
+#: What a probe reports when `orca --version` answered with something that is
+#: not a version — nothing, or more than one line. Named so the probe and its
+#: test cite the same phrase.
+NO_VERSION_REPORTED = "no version reported"
+
+#: The widest a version string may be inside a probe `detail`. Bounded for the
+#: same reason ORCA_PROBE_TIMEOUT_SECONDS is: a diagnostic verb that drowns its
+#: own findings while diagnosing is worthless. `_human` renders every probe on
+#: one indented line, so this is a rendering contract, not a preference.
+PROBE_VERSION_DETAIL_MAX_CHARS = 120
+
+
+def _version_detail(stdout: str) -> str:
+    """The only path from subprocess output to a probe `detail` in this module.
+
+    Anything that is not exactly one line — empty, or a usage dump — is not a
+    version, and saying so is more honest than quoting its first line: the dump
+    this was written for begins with the bare word `orca`.
+    """
+    lines = stdout.strip().splitlines()
+    if len(lines) != 1:
+        return NO_VERSION_REPORTED
+    version = lines[0].strip()
+    if not version:
+        return NO_VERSION_REPORTED
+    if len(version) > PROBE_VERSION_DETAIL_MAX_CHARS:
+        return version[: PROBE_VERSION_DETAIL_MAX_CHARS - 1] + "…"
+    return version
+
 
 class DispatchBackendProvider:
     """Which dispatch backend a run would use — and whether `orca` actually works here.
@@ -288,7 +317,7 @@ class DispatchBackendProvider:
             return self._result("unavailable", f"`orca --version` could not be launched: {exc}")
         if completed.returncode != 0:
             return self._result("unavailable", f"`orca --version` exited {completed.returncode}")
-        return self._result("available", f"orca at {executable}: {completed.stdout.strip() or 'no version reported'}")
+        return self._result("available", f"orca at {executable}: {_version_detail(completed.stdout)}")
 
     def _result(self, status: CapabilityStatus, detail: str) -> ProbeResult:
         """Unconditionally disagrees with the declaration, in the current

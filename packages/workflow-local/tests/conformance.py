@@ -37,6 +37,9 @@ class BackendCase:
     #: This backend's `supported_modes`, so a scenario can pick an unsupported
     #: one without reaching into a session's privates.
     modes: frozenset[str]
+    #: True when this backend refuses to construct on Windows (D-002). The
+    #: `case` fixture skips such a case there rather than erroring in setup.
+    posix_only: bool
 
 
 def _local(root: Path) -> DispatchBackend:
@@ -54,8 +57,22 @@ def _fake(root: Path) -> DispatchBackend:
 
 
 CASES = (
-    BackendCase(id="fake", make=_fake, real_processes=False, narrows_modes=True, modes=frozenset({"autonomous"})),
-    BackendCase(id="local", make=_local, real_processes=True, narrows_modes=False, modes=DISPATCH_MODES),
+    BackendCase(
+        id="fake",
+        make=_fake,
+        real_processes=False,
+        narrows_modes=True,
+        modes=frozenset({"autonomous"}),
+        posix_only=False,
+    ),
+    BackendCase(
+        id="local",
+        make=_local,
+        real_processes=True,
+        narrows_modes=False,
+        modes=DISPATCH_MODES,
+        posix_only=True,
+    ),
 )
 
 

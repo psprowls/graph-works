@@ -643,3 +643,16 @@ def test_the_declared_refusals_match_what_the_anchor_actually_refuses(tmp_path: 
     declared = anchors.durability_tier("win32").refused_plan_shapes
     assert any("reserved device name" in shape for shape in declared)
     assert "reserved device name" in refusals[0].reason
+
+
+def test_hard_links_are_unconditionally_available_off_windows() -> None:
+    assert anchors.hard_links_supported(Path("/nonexistent/anywhere")) is True
+
+
+def test_the_hard_link_refusal_message_names_the_requirement_and_the_path(tmp_path: Path) -> None:
+    message = anchors._hard_link_refusal_message(tmp_path)
+    assert "hard link support" in message
+    assert str(tmp_path) in message
+    assert "exFAT" in message
+    assert "WSL" in message
+    assert "posix-strong" in message

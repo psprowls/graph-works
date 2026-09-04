@@ -548,6 +548,73 @@ MAX_PATH = 260
 #: content.
 BUNDLE_LOCK_NAME = ".gw-bundle.lock"
 
+#: The `GetVolumeInformationW` file-system flag bit reporting hard-link
+#: support.  Named so the refusal message, the test suite, and ADR-0042 all
+#: cite the same flag.
+FILE_SUPPORTS_HARD_LINKS = 0x00400000
+
+#: Win32 error codes `CreateHardLinkW` returns when the filesystem driver does
+#: not implement hard links at all.  `ERROR_INVALID_FUNCTION` is what exFAT
+#: returns (measured); `ERROR_NOT_SUPPORTED` is the code Microsoft's own docs
+#: list for the same class of filesystem refusal on some network shares.
+ERROR_INVALID_FUNCTION = 1
+ERROR_NOT_SUPPORTED = 50
+
+
+def hard_links_supported(path: Path) -> bool:
+    """Whether the filesystem hosting *path* supports hard links.
+
+    Off Windows there is no such restriction, so the answer is unconditionally
+    yes -- the same reasoning as `long_paths_enabled()`, and for the same
+    purpose: it is what lets the POSIX coverage pass construct a
+    `_WindowsAnchor` at all.
+
+    On Windows this is `GetVolumePathNameW` (walk up to the nearest existing
+    mount point -- this works for a path that does not exist yet, and for a
+    UNC share, resolving it to its share root rather than a drive letter)
+    followed by `GetVolumeInformationW`, testing the `FILE_SUPPORTS_HARD_LINKS`
+    bit. The flag is the volume driver's *claim*, not a measurement: if a
+    filesystem advertises the flag and still fails `os.link`, this probe
+    passes and `_WindowsAnchor.link`'s backstop (see Fix 3) is what actually
+    catches it. Any `OSError` from either Win32 call returns `False`, matching
+    `long_paths_enabled()`'s own `except OSError: return False` -- refusing on
+    a false negative is the safe direction, because the alternative is a
+    commit that dies partway through.
+    """
+    if sys.platform != "win32":
+        return True
+    import ctypes  # Windows-only, imported at the point of use
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    buffer = ctypes.create_unicode_buffer(260)
+    try:
+        if not kernel32.GetVolumePathNameW(str(path), buffer, len(buffer)):
+            return False
+        flags = ctypes.c_uint32(0)
+        if not kernel32.GetVolumeInformationW(
+            buffer.value, None, 0, None, None, ctypes.byref(flags), None, 0
+        ):
+            return False
+    except OSError:
+        return False
+    return bool(flags.value & FILE_SUPPORTS_HARD_LINKS)
+
+
+def _hard_link_refusal_message(path: Path) -> str:
+    """The one place the hard-link refusal text is authored.
+
+    Fix 1 (anchor construction), Fix 2 (`gw bootstrap` preflight) and Fix 3
+    (the `link` backstop) all call this, so the three refusals cannot drift
+    apart.
+    """
+    return (
+        f"the {WINDOWS_REVALIDATED_TIER} tier requires hard link support: every file is "
+        f"installed by `CreateHardLinkW` (`transactions._commit_write`), and {path} is on a "
+        "filesystem that does not implement it -- exFAT, FAT32 and some network shares do not. "
+        f"Move the workspace to an NTFS or ReFS volume, or run under WSL for the "
+        f"{POSIX_STRONG_TIER} tier."
+    )
+
 
 def long_paths_enabled() -> bool:
     """Whether this system lifts the 260-character `MAX_PATH` limit.

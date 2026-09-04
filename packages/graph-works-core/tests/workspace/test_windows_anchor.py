@@ -222,6 +222,19 @@ def test_the_refusal_names_the_remedy_and_the_limit(tmp_path: Path) -> None:
     assert "WSL" in message
 
 
+def test_long_path_refusal_message_matches_the_windows_anchor_construction_refusal(tmp_path: Path) -> None:
+    with pytest.raises(ValueError) as caught:
+        anchors._WindowsAnchor(tmp_path, long_paths=False)
+    assert str(caught.value) == anchors._long_path_refusal_message()
+
+
+def test_long_path_refusal_message_names_the_remedy_and_the_limit() -> None:
+    message = anchors._long_path_refusal_message()
+    assert "LongPathsEnabled" in message
+    assert "260" in message
+    assert "WSL" in message
+
+
 def test_long_paths_are_unconditionally_available_off_windows() -> None:
     assert anchors.long_paths_enabled() is True
 

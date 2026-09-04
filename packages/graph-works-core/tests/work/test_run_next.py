@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -47,6 +48,32 @@ def _spec(layout, path: str) -> Path:
 def test_unknown_path_is_a_caller_error(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="work/missing"):
         work.run_next(_layout(tmp_path), "work/missing")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="exercises a Windows exclusive file handle (C4)")
+def test_a_locked_member_is_named_instead_of_reported_unknown(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    _write(layout, "work/locked")
+    page = layout.bundle_dir / "work/locked.md"
+
+    import ctypes
+
+    GENERIC_READ = 0x80000000
+    GENERIC_WRITE = 0x40000000
+    OPEN_EXISTING = 3
+    FILE_ATTRIBUTE_NORMAL = 0x80
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    handle = ctypes.windll.kernel32.CreateFileW(
+        str(page), GENERIC_READ | GENERIC_WRITE, 0, None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, None
+    )
+    assert handle != INVALID_HANDLE_VALUE
+    try:
+        with pytest.raises(ValueError, match=r"work/locked\.md") as excinfo:
+            work.run_next(layout, "work/locked")
+        assert "unknown work item" not in str(excinfo.value)
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
 
 
 def test_next_reports_requested_and_selected_canonical_paths(tmp_path: Path) -> None:

@@ -83,7 +83,7 @@ from work_tracker_okf.filing import FilingSeed
 from work_tracker_okf.hierarchy import ChildRollup, DescendResult, nearest_parent
 from work_tracker_okf.hierarchy import descend as descend_to_leaf
 from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
-from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items
+from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items, unreadable_detail
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
     PlannedWrite,
@@ -479,6 +479,9 @@ def run_next(
     items = load_items(bundle)
     requested = next((item for item in items if item.path == path), None)
     if requested is None:
+        detail = unreadable_detail(bundle, path)
+        if detail is not None:
+            raise ValueError(f"{path}.md {detail}")
         raise ValueError(f"unknown work item {path!r}")
 
     descent_result = descend_to_leaf(items, path) if descend else None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -301,6 +302,69 @@ def test_archive_incomplete_apply_emits_no_partial_json(workspace: Path, monkeyp
     assert result.exit_code == exit_codes.GENERIC
     assert result.stdout == ""
     assert "stale lane index" in result.stderr
+
+
+def test_every_advance_refusal_family_and_an_unknown_next_path_exit_nonzero(workspace: Path) -> None:
+    """C4's exit-code half (D-081): every refusal is a refusal regardless of which check
+    produced it. `unreadable-member` is covered on Windows by the locked-handle test below."""
+    owner_required_item = file_item(workspace, "Owner Required")
+    layout = resolve_workspace(str(workspace))
+    owner_page = layout.bundle_dir / f"{owner_required_item}.md"
+    document = load(owner_page)
+    document.set("phase", "execute")
+    document.set("work_status", "accepted")
+    document.save()
+
+    resolved_in_required_item = file_item(workspace, "Resolved In Required")
+    resolved_in_page = layout.bundle_dir / f"{resolved_in_required_item}.md"
+    document = load(resolved_in_page)
+    document.set("phase", "finish")
+    document.set("work_status", "in-progress")
+    document.save()
+
+    cases = [
+        (["work", "advance", "work/no-such-item", "--workspace", str(workspace), "--json"], "unknown-path"),
+        (["work", "advance", owner_required_item, "--workspace", str(workspace), "--json"], "owner-required"),
+        (
+            ["work", "advance", resolved_in_required_item, "--workspace", str(workspace), "--json"],
+            "resolved-in-required",
+        ),
+        (["next", "work/no-such-item", "--workspace", str(workspace), "--json"], "unknown work item"),
+    ]
+    for args, expected_fragment in cases:
+        result = runner.invoke(app, args)
+        assert result.exit_code != 0, (args, result.output)
+        assert expected_fragment in result.stderr, (args, result.stderr)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="exercises a Windows exclusive file handle (C4)")
+def test_advance_names_a_locked_member_instead_of_collapsing_into_unknown_path(workspace: Path) -> None:
+    path = file_item(workspace, "Locked")
+    layout = resolve_workspace(str(workspace))
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+
+    import ctypes
+
+    GENERIC_READ = 0x80000000
+    GENERIC_WRITE = 0x40000000
+    OPEN_EXISTING = 3
+    FILE_ATTRIBUTE_NORMAL = 0x80
+    INVALID_HANDLE_VALUE = ctypes.c_void_p(-1).value
+
+    handle = ctypes.windll.kernel32.CreateFileW(
+        str(page), GENERIC_READ | GENERIC_WRITE, 0, None, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, None
+    )
+    assert handle != INVALID_HANDLE_VALUE
+    try:
+        result = runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace), "--json"])
+        assert result.exit_code != 0, result.output
+        assert "unreadable-member" in result.stderr
+        assert f"{path}.md" in result.stderr
+    finally:
+        ctypes.windll.kernel32.CloseHandle(handle)
+
+    assert page.read_bytes() == before
 
 
 def test_split_topology_files_and_lints_clean(tmp_path: Path) -> None:

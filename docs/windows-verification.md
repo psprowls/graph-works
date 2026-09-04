@@ -1356,7 +1356,7 @@ Which siblings had landed in `<full-sha>`:
 | C1 | | | |
 | C2 | | | |
 | C3 | | | |
-| C4 | | | |
+| C4 | PASS (fixed) | Rollback half held; the reason half was FAIL (`unknown-path`, no member named) until [An unreadable bundle member refuses as unknown-path](/work/epic-native-windows-support/children/bug-locked-member-reported-unknown-path.md) landed `unreadable-member` in `work_tracker_okf.advance` and `graph_works_core.work.commands.run_next`. Pinned unattended by `packages/graph-works-cli/tests/test_work_cli_writes.py::test_advance_names_a_locked_member_instead_of_collapsing_into_unknown_path` and `packages/graph-works-core/tests/work/test_run_next.py::test_a_locked_member_is_named_instead_of_reported_unknown` (both Windows-only, real exclusive handle). | bug-locked-member-reported-unknown-path |
 | C5 | | | |
 | C6 | | | |
 | C7 | | | |

@@ -1143,6 +1143,9 @@ def _remove_live_entry(root: Anchor, member: str) -> None:
     for directory in reversed(directories):
         parent, name = _open_parent(root, directory)
         try:
+            current_mode = stat.S_IMODE(_lstat_at(root, directory).st_mode)
+            if not current_mode & stat.S_IWRITE:
+                parent.chmod_child_directory(name, current_mode | stat.S_IWRITE)
             parent.rmdir(name)
             _fsync_live_directory(parent)
         finally:

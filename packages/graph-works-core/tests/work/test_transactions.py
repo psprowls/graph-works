@@ -982,6 +982,38 @@ def test_deleting_a_read_only_directory_via_a_mutation_plan_clears_the_attribute
             target.chmod(stat.S_IREAD | stat.S_IWRITE)
 
 
+def test_deleting_a_read_only_directory_clears_the_attribute_first(tmp_path: Path) -> None:
+    """`_remove_live_entry` (the `_restore_snapshot` rollback path) must clear
+    a directory's read-only attribute before `rmdir`, exactly like the
+    quarantine-delete path `_commit_effect`/`_take_custody` already does.
+
+    Exercised directly against `_remove_live_entry` rather than through a
+    full `apply_mutation` plan: a single-member `deletes` entry in
+    `WorkMutationPlan` maps to one `_Effect("delete", ...)` that assumes the
+    directory is already empty (`_commit_effect` calls a bare
+    `parent.rmdir(quarantine)`, not a recursive walk) -- a directory
+    containing `child.md` fails there with `ERROR_DIR_NOT_EMPTY` regardless
+    of this fix, for a reason outside `_remove_live_entry`'s scope. Calling
+    the target function directly is the same pattern already used elsewhere
+    in this module (e.g. `transactions._open_root` /
+    `transactions._capture_validation_state` above) and isolates the
+    regression to the function this task actually changes.
+    """
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/doomed"
+    target.mkdir(parents=True)
+    (target / "child.md").write_bytes(b"content")
+    target.chmod(stat.S_IREAD)
+
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        transactions._remove_live_entry(root, "work/doomed")
+    finally:
+        root.close()
+
+    assert not target.exists()
+
+
 def test_complete_journal_failure_rolls_back_live_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout = _workspace(tmp_path)
     target = layout.bundle_dir / "work/page.bin"

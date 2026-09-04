@@ -652,14 +652,58 @@ this checkpoint while B7 is still going.
 **If it fails:** Owner: `feature-windows-anchor-and-tier-adr` if L2 is stated
 more strongly than the machine delivers; a **new child** otherwise.
 
-#### C6 — `msvcrt.locking` contention and D-012's declared divergence
+#### C6a — `msvcrt.locking`'s ten-second bound and its message
 
 **Gate:** group gate.
 
 POSIX `flock(LOCK_EX)` blocks indefinitely. The Windows branch is
 `msvcrt.locking(fd, LK_LOCK, 1)`, which retries once a second for ten tries and
-then raises. D-012 declared that bound a **property of the Windows tier**, not a
-bug; C6 observes it.
+then raises. D-012 declared that bound a **property of the Windows tier**, not
+a bug.
+
+A natural two-process CLI race does not hold the lock long enough to exercise
+this bound — the winner's critical section is on the order of one second, so
+the loser acquires the file lock on its first retry, well inside the ten-try
+budget. Observing the bound requires a **deliberate holder** that keeps the
+lock past the budget on purpose; that is what this checkpoint does. (C6b below
+observes the natural race instead, and expects a sub-ten-second loser.)
+
+**Command:** in one window, hold the bundle lock directly for 40 seconds and
+print `HELD` once it is held:
+
+```bat
+python -c "from okf_ext.locking import locked; from pathlib import Path; import time; lock = Path(r'C:\gw-verify\ws\okf\.gw-bundle.lock'); print('about to hold'); exec('with locked(lock):\n print(\"HELD\"); time.sleep(40)')"
+```
+
+Once `HELD` prints, in a second window run and time:
+
+```bat
+gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json & echo rc=%ERRORLEVEL%
+```
+
+**Expected:** the second caller **fails after roughly ten seconds** with an
+`OSError` whose message **names the lock file path**; `rc` non-zero.
+
+**PASS:** `rc` non-zero, elapsed roughly ten seconds, message names the lock
+path. **FAIL:** any other elapsed time, or a message that does not name the
+path (the latter reopens `tech-debt-portable-file-lock`, unchanged).
+
+**If it fails:** Owner: `tech-debt-portable-file-lock` if the message does not
+name the path; a **new child** if the ten-second bound itself is unworkable
+(D-012 names `LockFileEx` via `ctypes` as the upgrade path).
+
+#### C6b — contention under the staleness guard
+
+**Gate:** group gate.
+
+`transactions.apply_mutation` takes the bundle lock **before** it validates
+the plan is still current, so the staleness guard's `re-plan` refusal fires
+*inside* the locked region, not upstream of it. Two concurrent `gw work
+advance` calls on the same item are therefore serialized by the lock, and the
+loser is refused for staleness immediately after acquiring it — well before
+the ten-second retry budget in C6a is ever touched. **A sub-ten-second loser
+here is the expected result and is not evidence the file lock was bypassed —
+see C6a for the bound itself.**
 
 **Command:** two cmd.exe windows, started as close together as possible, each
 running:
@@ -668,19 +712,18 @@ running:
 gw work advance work/scratch-windows-verification --workspace C:\gw-verify\ws --json & echo rc=%ERRORLEVEL%
 ```
 
-**Expected:** one of exactly two outcomes, and both are a **PASS**:
+Record both elapsed times.
 
-1. The second caller **blocks, then proceeds** after the first releases; `rc=0`.
-2. The second caller **fails after roughly ten seconds** with an `OSError` whose
-   message **names the lock file path**; `rc` non-zero.
+**Expected:** exactly one caller succeeds, `rc=0`; the other fails, `rc`
+non-zero, with a message containing `changed since planning; re-plan`; the
+bundle is left in the winner's post-state.
 
-Time the second window and record the elapsed seconds. A message that does not
-name the lock path is a **FAIL** — D-012 requires it precisely because a bare
-`OSError` after ten silent seconds is indistinguishable from a corrupt lock file.
+**PASS:** exactly one winner, the loser refused with the `re-plan` message,
+bundle left consistent. **FAIL:** both succeed (a lost update), both fail, or
+the bundle is left in a mixed state.
 
-**If it fails:** Owner: `tech-debt-portable-file-lock` if `locked()` does not
-re-raise with the path; a **new child** if the bound itself is unworkable
-(D-012 names `LockFileEx` via `ctypes` as the upgrade path).
+**If it fails:** Owner: a **new child** — a lost update or a mixed bundle here
+is a transaction-engine defect, not a locking one.
 
 #### C7 — the preflight refusals
 
@@ -1358,7 +1401,8 @@ Which siblings had landed in `<full-sha>`:
 | C3 | | | |
 | C4 | | | |
 | C5 | | | |
-| C6 | | | |
+| C6a | | | |
+| C6b | | | |
 | C7 | | | |
 | D1 | | | |
 | D2 | | | |
@@ -1396,24 +1440,24 @@ xxd/certutil hex for Group D, the journal for C5, both platform reports for F5>
 This is what gets copied into the work item body and the epic ledger.>
 ````
 
-Before committing the record, check it mechanically — 34 rows, every verdict in
+Before committing the record, check it mechanically — 35 rows, every verdict in
 the vocabulary, every non-`PASS` row owned:
 
 ```bash
 python3 - <<'PY'
 import re, pathlib, sys
 p = pathlib.Path('okf/work/epic-native-windows-support/children/tech-debt-windows-verification-run/references/03-windows-run-<DATE>.md')
-rows = [l for l in p.read_text(encoding='utf-8').splitlines() if re.match(r'^\| [A-F]\d+ \|', l)]
+rows = [l for l in p.read_text(encoding='utf-8').splitlines() if re.match(r'^\| [A-F]\d+[a-z]? \|', l)]
 print('rows:', len(rows))
 bad = [r for r in rows if r.split('|')[2].strip() not in {'PASS', 'FAIL', 'NOT RUN'}]
 missing_owner = [r for r in rows if r.split('|')[2].strip() in {'FAIL', 'NOT RUN'} and not r.split('|')[4].strip()]
 print('bad verdict:', *bad, sep='\n')
 print('missing owner:', *missing_owner, sep='\n')
-sys.exit(1 if bad or missing_owner or len(rows) != 34 else 0)
+sys.exit(1 if bad or missing_owner or len(rows) != 35 else 0)
 PY
 ```
 
-**Expected:** `rows: 34`, nothing under `bad verdict:` or `missing owner:`, exit 0.
+**Expected:** `rows: 35`, nothing under `bad verdict:` or `missing owner:`, exit 0.
 
 ## Red → owner routing
 
@@ -1431,7 +1475,8 @@ duplicate.
 | B7 | transaction/anchor failure reopens `feature-windows-anchor-and-tier-adr`; anything else is a **new child** |
 | C1, C3–C5, C7 | `feature-windows-anchor-and-tier-adr` if the ADR's stated contract is wrong; a **new child** if the contract is right and the implementation is not |
 | C2 (`st_ino` unstable on NTFS) | **reopens** `feature-windows-anchor-and-tier-adr` — its design already names this outcome |
-| C6 | `tech-debt-portable-file-lock` if `locked()` does not re-raise naming the path; a **new child** if the 10s bound itself is unworkable |
+| C6a | `tech-debt-portable-file-lock` if the message does not name the lock path; a **new child** if the 10s bound itself is unworkable (D-012 names `LockFileEx` via `ctypes` as the upgrade path) |
+| C6b | **new child** — a lost update or a mixed bundle is a transaction-engine defect, not a locking one |
 | D1–D3 | **reopens** `bug-explicit-encoding-newline` — its guard passed while the behaviour did not |
 | E1–E4 | fires `tech-debt-port-workflow-local-process-control`, D-002's filed contingency |
 | F1–F4, F7 | **new child** scoped to the failing verb |

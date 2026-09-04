@@ -591,9 +591,7 @@ def hard_links_supported(path: Path) -> bool:
         if not kernel32.GetVolumePathNameW(str(path), buffer, len(buffer)):
             return False
         flags = ctypes.c_uint32(0)
-        if not kernel32.GetVolumeInformationW(
-            buffer.value, None, 0, None, None, ctypes.byref(flags), None, 0
-        ):
+        if not kernel32.GetVolumeInformationW(buffer.value, None, 0, None, None, ctypes.byref(flags), None, 0):
             return False
     except OSError:
         return False

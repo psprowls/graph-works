@@ -886,7 +886,7 @@ class _WindowsAnchor:
         `CreateHardLinkW` on Windows, and it fails outright on FAT32, exFAT, a
         network share, or across volumes.  That is a filesystem requirement of
         the whole tier, not a degradation: `transactions._commit_write`
-        (`:1380`, `:1417`) installs EVERY file this way.
+        (`:1697`, `:1741`) installs EVERY file this way.
 
         The construction-time probe (`hard_links_supported`) is a claim, not a
         measurement -- if a filesystem advertises `FILE_SUPPORTS_HARD_LINKS`

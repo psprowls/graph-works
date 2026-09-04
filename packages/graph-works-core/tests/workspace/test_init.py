@@ -103,7 +103,7 @@ def test_plan_init_creates_nothing_when_long_paths_are_unsupported(tmp_path, mon
 
 def test_plan_init_checks_long_paths_before_hard_links(tmp_path, monkeypatch):
     """`_WindowsAnchor.__init__` checks long paths before hard links
-    (anchors.py:684 then :692); `plan_init` must raise the same refusal
+    (anchors.py:702 then :705); `plan_init` must raise the same refusal
     first when both checks would fail, so the two call sites never disagree
     about which refusal a caller sees."""
     from graph_works_core.workspace import anchors

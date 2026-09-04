@@ -940,12 +940,21 @@ class _WindowsAnchor:
         (`_copy_backup_to_live:1029,1065`) -- the one path that must not fail.
         Discovering it mid-rollback would leave a half-restored bundle.
 
-        The scan is over the *planned* members only, not the whole bundle.  A
-        symlink deeper inside a targeted directory subtree is caught instead
-        by `symlink()` raising during snapshot creation
-        (`_copy_live_entry:849`), which still runs before any live mutation --
-        so the guarantee holds either way.  Preflight makes it explicit rather
-        than incidental.
+        The scan is over whatever *members* the caller passes in -- it does
+        not itself walk anything.  `transactions._preflight` no longer passes
+        only the plan's literal members: it expands every directory a
+        mutation touches or validates (via `_expand_directory_members`) into
+        its existing descendants first, and scans that whole expanded set.
+        So a symlink (or reserved device name, or trailing-dot/space name)
+        living anywhere inside a directory the plan mkdirs, deletes,
+        validates, or otherwise names is caught here, not just one staged at
+        a literal planned path. Before that expansion existed, a symlink
+        deeper inside a targeted subtree could still be caught by `symlink()`
+        raising during snapshot creation (`_copy_live_entry:849`), which
+        still runs before any live mutation -- so the rollback-safety
+        guarantee this scan protects held either way. The scan here now
+        exists to make that guarantee explicit and early (at preflight)
+        rather than incidental and late (mid-snapshot).
         """
         refusals: list[RefusedShape] = []
         root = self._revalidate()

@@ -746,14 +746,35 @@ def _expand_directory_members(root: Anchor, effect_paths: dict[str, Path]) -> tu
     otherwise invisible to `_refuse_unsupported_shapes`, which only inspects
     the names it is given. This closes that gap without changing what
     `_effective_members` itself means.
+
+    Refuses to recurse into a Windows directory junction (a reparse point
+    reachable through a regular directory listing). `stat.S_ISDIR` is true
+    for a junction -- it is not a symlink, so `stat.S_ISLNK` never catches
+    it -- and a junction can point at an ancestor of the walk (an immediate
+    cycle) or at an arbitrarily large tree outside the bundle entirely.
+    Descending into one would make this walk loop forever or scan unbounded
+    external storage; `os.path.isjunction` (a no-op, always-`False` check
+    off Windows) is checked before every recursive step. A visited-identity
+    guard (`st_dev`/`st_ino`) backs this up in case some other reparse
+    shape reports `S_ISDIR` without `os.path.isjunction` recognizing it, so
+    a cycle can never be walked twice even if the junction check itself
+    ever misses one.
     """
     scan: set[str] = set(effect_paths)
     pending = list(effect_paths)
+    visited: set[tuple[int, int]] = set()
     while pending:
         member = pending.pop()
         if not _lexists_at(root, member):
             continue
-        if not stat.S_ISDIR(_lstat_at(root, member).st_mode):
+        info = _lstat_at(root, member)
+        if not stat.S_ISDIR(info.st_mode):
+            continue
+        identity = (info.st_dev, info.st_ino)
+        if identity in visited:
+            continue
+        visited.add(identity)
+        if os.path.isjunction(root.resolve_descendant(member)):
             continue
         parent, name = _open_parent(root, member)
         try:

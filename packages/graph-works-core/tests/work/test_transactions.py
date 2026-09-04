@@ -7,6 +7,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import threading
 from contextlib import contextmanager
@@ -41,7 +42,14 @@ def tier(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str
     POSIX -- so the weak tier gets continuous logic coverage here even though
     no Windows CI exists (D-001).  Cases needing a genuinely POSIX-only
     primitive as their SUBJECT are xfailed via `_xfail_on_weak_tier`, and
-    ADR-0042 names every one of them.
+    ADR-0042 names every one of them -- with one documented exception:
+    `test_validation_uses_live_root_for_absolute_internal_registered_sources`
+    is an 8th `_xfail_on_weak_tier` case that ADR-0042 does not yet name. It
+    was added when closing the C7 scanning gap (Defect B) made the weak
+    tier's categorical symlink refusal also catch a legitimate registered
+    symlink source (see that test's own xfail reason for the full trade-off).
+    This is a known gap in ADR-0042's coverage, pending the ADR being updated
+    upstream -- not a claim that the invariant above holds without exception.
 
     The parametrization is unidirectional by construction, and the `skipif`
     below is that asymmetry made explicit rather than left to fail as an
@@ -1763,15 +1771,31 @@ def test_validation_uses_live_root_for_absolute_internal_registered_sources(
 ) -> None:
     _xfail_on_weak_tier(
         request,
-        "The registered source here is a symlink living inside the item's owned "
-        "directory, which `validate_paths` names but never touches directly. "
-        "Since the preflight scan now recurses into every planned directory member "
-        "to close the C7 scanning gap (an offending shape staged inside a validated "
-        "directory must be caught, not just literally-named members), this symlink "
-        "is caught too -- and the windows-revalidated tier refuses every symlink it "
-        "sees categorically at preflight (D-002's backstop), regardless of whether "
-        "it is a legitimate registered source or an out-of-band offender. The two "
-        "cases are indistinguishable to `_refuse_unsupported_shapes` by design.",
+        "This is a real, examined trade-off the controller accepted when closing "
+        "the C7 scanning gap (Defect B), not a proven impossibility. The registered "
+        "source here is a symlink living inside the item's owned directory, which "
+        "`validate_paths` names but never touches directly. Closing C7 means "
+        "`_expand_directory_members` now recurses into every directory a plan "
+        "touches or validates -- including validate_paths-only directories -- and "
+        "scans everything it finds (see "
+        "`test_preflight_refuses_offending_members_staged_inside_a_validated_directory`, "
+        "whose offender is staged inside exactly such a directory). That expanded "
+        "scan necessarily also surfaces this symlink, and the windows-revalidated "
+        "tier refuses every symlink it sees categorically at preflight (D-002's "
+        "backstop) -- it has no way to distinguish 'a source explicitly registered "
+        "in this item's frontmatter' from 'an out-of-band offender' at the "
+        "preflight-scan level, because that distinction lives in a different layer "
+        "(the item's `sources:` frontmatter) that `_preflight` deliberately does "
+        "not read. Narrowing the scan to skip validate_paths-only directories was "
+        "considered as a way to avoid this xfail, and rejected: it would exempt "
+        "exactly the directory shape "
+        "`test_preflight_refuses_offending_members_staged_inside_a_validated_directory` "
+        "exists to cover, silently reopening the C7 gap this task closed. So a "
+        "legitimate registered symlink source pays the same categorical-refusal "
+        "price as an illegitimate one on this tier, accepted as the cost of closing "
+        "C7 -- see `Anchor.refused_members`'s docstring for the tier's symlink "
+        "backstop, and the strong POSIX tier (or WSL) for a durability tier that "
+        "does not have this limitation.",
     )
     layout = _workspace(tmp_path)
     item = "work/feature-target"
@@ -3236,3 +3260,38 @@ def test_preflight_refuses_offending_members_staged_inside_a_validated_directory
     assert result.ok is False
     assert result.rolled_back is False
     assert any("CON.md" in failure and "reserved device name" in failure for failure in result.failures)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="directory junctions are an NTFS/Windows-only reparse-point shape")
+def test_expand_directory_members_refuses_to_recurse_into_a_junction_cycle(tmp_path: Path) -> None:
+    """`stat.S_ISDIR` is true for a directory junction, and `stat.S_ISLNK`
+    never catches it -- a junction is not a symlink. Left unguarded,
+    `_expand_directory_members` would follow a junction that points back at
+    one of its own ancestors and loop forever (or, pointed elsewhere, walk
+    an arbitrarily large external tree). This proves the walk terminates
+    when a junction inside a scanned directory points back at that
+    directory's own ancestor, and that the junction itself is still part of
+    the scanned member set (so `_refuse_unsupported_shapes` still gets a
+    chance to inspect it) -- only its contents are never visited.
+    """
+    layout = _workspace(tmp_path)
+    item = "work/feature-target"
+    _write_item(layout.bundle_dir, item, type="Feature")
+    owner = layout.bundle_dir / item
+    owner.mkdir()
+    nested = owner / "nested"
+    nested.mkdir()
+    loop = nested / "loop"
+    # A junction inside `nested` pointing back at `owner`: recursing into it
+    # would revisit `owner`, then `nested`, then `loop` again, forever.
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(loop), str(owner)], check=True, capture_output=True)
+
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        expanded = transactions._expand_directory_members(root, {item: owner})
+    finally:
+        root.close()
+
+    assert f"{item}/nested" in expanded
+    assert f"{item}/nested/loop" in expanded
+    assert not any(member.startswith(f"{item}/nested/loop/") for member in expanded)

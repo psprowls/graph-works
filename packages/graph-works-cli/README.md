@@ -100,6 +100,15 @@ $ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc12
   tree — the machine-readable surface freeze used to catch an undocumented or
   accidentally-renamed command.
 
+- `gw util line-endings [--fix] [--workspace PATH] [--json]` detects (and,
+  with `--fix`, repairs) CRLF reaccumulation in the bundle. `.gitattributes`
+  declares every tracked bundle member LF-in-worktree, but git enforces that
+  only at checkout — nothing enforces it on write, and `git status` cannot
+  see a violation because it compares normalised content. The default
+  invocation reports every non-binary member whose on-disk bytes contain
+  CRLF, with a count per file, and exits non-zero if any are found; `--fix`
+  rewrites each to LF in place and exits zero.
+
 ## Testing
 
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests -v

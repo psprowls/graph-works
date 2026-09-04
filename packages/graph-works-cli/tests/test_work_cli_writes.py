@@ -150,6 +150,37 @@ def test_file_refusal_emits_no_partial_json(workspace: Path) -> None:
     assert result.stdout == "" and "refused" in result.stderr
 
 
+def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace: Path) -> None:
+    """§1/D-095: a CRLF-flipped `work/index.md` makes filing refuse, and the
+    top-level error must name `work/index.md` -- the file actually in the way
+    -- not the item being filed.
+    """
+    file_item(workspace, "Baseline item")
+    index = resolve_workspace(str(workspace)).bundle_dir / "work" / "index.md"
+    index.write_bytes(index.read_bytes().replace(b"\n", b"\r\n"))
+
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Second item",
+            "--kind",
+            "Feature",
+            "--summary",
+            "d",
+            "--workspace",
+            str(workspace),
+        ],
+    )
+
+    assert result.exit_code != 0
+    last_line = [line for line in result.stderr.splitlines() if line.strip()][-1]
+    assert "work/index.md" in last_line
+    assert "feature-second-item" not in last_line
+
+
 def test_file_json_keeps_warnings_on_stderr(workspace: Path) -> None:
     result = runner.invoke(
         app,

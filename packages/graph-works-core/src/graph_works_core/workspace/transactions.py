@@ -773,6 +773,44 @@ def _preflight(
     return effect_paths
 
 
+def _line_ending_cause(member: str) -> str:
+    """The cause clause appended to a stale-preflight refusal when translating
+    line endings recovers the planned digest.
+
+    Bidirectional by construction (D-095): a planned-LF member found CRLF on
+    disk, and a planned-CRLF member found LF on disk, both fire this. A
+    one-directional check would misdiagnose the reverse drift with false
+    confidence -- `okf-io` supports CRLF documents by contract (see
+    `packages/okf-io/tests/fixtures/edge/encoding/crlf.md`), so this is not
+    merely defensive.
+    """
+    return (
+        f" -- the on-disk bytes of {member} differ from the planned bytes ONLY in line endings. "
+        "git status cannot see this: .gitattributes normalises on read, so git believes the file "
+        "is unchanged. Run `gw util line-endings --fix` to restore LF, then retry."
+    )
+
+
+def _line_ending_recovers_digest(current_bytes: bytes, expected_digest: str) -> bool:
+    """True when translating *current_bytes*' line endings (either direction)
+    recovers *expected_digest* -- the bidirectional test D-095 requires.
+    """
+    if hashlib.sha256(current_bytes.replace(b"\r\n", b"\n")).hexdigest() == expected_digest:
+        return True
+    return b"\r\n" not in current_bytes and (
+        hashlib.sha256(current_bytes.replace(b"\n", b"\r\n")).hexdigest() == expected_digest
+    )
+
+
+def _line_ending_recovers_body_digest(current_text: str, expected_digest: str) -> bool:
+    """The move-plan-body sibling of `_line_ending_recovers_digest`: a body
+    digest is over `Document.body`, a `str`, not raw bytes.
+    """
+    if body_digest(current_text.replace("\r\n", "\n")) == expected_digest:
+        return True
+    return "\r\n" not in current_text and (body_digest(current_text.replace("\n", "\r\n")) == expected_digest)
+
+
 def _preflight_anchored(plan: WorkMutationPlan, root: Anchor, manifest_scratch: Path) -> None:
     conditions = [condition.member for condition in plan.directory_preconditions]
     if len(conditions) != len(set(conditions)):
@@ -810,7 +848,10 @@ def _preflight_anchored(plan: WorkMutationPlan, root: Anchor, manifest_scratch: 
         except OSError as exc:
             raise ValueError(f"{preimage_member}: changed since planning ({exc}); re-plan") from exc
         if hashlib.sha256(current_bytes).hexdigest() != write.before_digest:
-            raise ValueError(f"{preimage_member}: changed since planning; re-plan")
+            cause = ""
+            if _line_ending_recovers_digest(current_bytes, write.before_digest):
+                cause = _line_ending_cause(preimage_member)
+            raise ValueError(f"{preimage_member}: changed since planning; re-plan{cause}")
         if write.source_member is not None and _lexists_at(root, write.member):
             raise ValueError(f"{write.member}: changed since planning (now exists); re-plan")
 
@@ -822,7 +863,10 @@ def _preflight_anchored(plan: WorkMutationPlan, root: Anchor, manifest_scratch: 
             except (OSError, UnicodeDecodeError, ValueError) as exc:
                 raise ValueError(f"{member}: changed since planning ({exc}); re-plan") from exc
             if body_digest(current_document.body) != expected:
-                raise ValueError(f"{member}: changed since planning; re-plan")
+                cause = ""
+                if _line_ending_recovers_body_digest(current_document.body, expected):
+                    cause = _line_ending_cause(member)
+                raise ValueError(f"{member}: changed since planning; re-plan{cause}")
 
     destinations: set[str] = set()
     for move in plan.moves:
@@ -1481,6 +1525,13 @@ def _commit_write(
                     detail=f"changed since planning ({exc})",
                 )
                 raise AssertionError("custody recovery must raise") from exc
+            # No line-ending diagnosis here, deliberately (D-095): the preflight above
+            # already revalidated every digest over the same members immediately before
+            # the first live effect, so a miss reaching this commit-time check means the
+            # bytes changed *between* preflight and commit -- a genuine concurrent write,
+            # which a line-ending story would misdescribe. Diagnosing here would also cost
+            # a second read: this check digests through a descriptor and never holds the
+            # raw bytes the way the preflight's write-preimage check does.
             if actual != expected_digest:
                 _restore_custody_or_raise(
                     parent,

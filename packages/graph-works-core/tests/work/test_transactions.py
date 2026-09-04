@@ -304,6 +304,17 @@ def test_executor_lock_serializes_snapshot_through_terminal_state(
     assert all(result.ok for result in results)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "renaming a lock file the tier holds open is refused by Windows itself "
+        "(PermissionError: WinError 32) before the tier under test is ever "
+        "reached -- this scenario is not constructible on Windows. Coverage "
+        "gap: inode replacement under a held lock is untested on win32. "
+        "See work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md, Cause 2."
+    ),
+)
 def test_bundle_root_lock_survives_executor_lock_inode_replacement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2265,6 +2276,16 @@ def test_executor_lock_name_swap_never_redirects_lock_io_into_bundle(
     assert held_lock.is_file()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "renaming journal.jsonl while the tier holds it open is refused by "
+        "Windows itself before the tier under test is ever reached -- this "
+        "scenario is not constructible on Windows. Coverage gap: the journal "
+        "name swap is untested on win32. See work/epic-native-windows-support/"
+        "children/bug-graph-works-core-suite-fails-on.md, Cause 2."
+    ),
+)
 def test_journal_name_swap_never_redirects_journal_io_into_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

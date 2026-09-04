@@ -1,8 +1,13 @@
 """`okf_ext.locking`: the portable exclusive lock shared by the three flock sites.
 
 `primitive_for` is pure string logic; `locked` is the context manager. The
-Windows branch is exercised from this POSIX box by forcing
-`platform_name="win32"` and injecting a fake `msvcrt` module.
+Windows branch is exercised from a POSIX box by forcing `platform_name="win32"`
+and injecting a fake `msvcrt` module (D-014) -- that gives the branch coverage
+`just cov`'s 95% gate needs from any box, but the fake asserts only message
+shape and call ordering, never whether a real contended lock actually waits.
+One further test, gated on `sys.platform == "win32"`, contends for a genuine
+`msvcrt.locking` from a real subprocess and is skipped everywhere else: it is
+the second witness for the retry-bound claim the fakes cannot make.
 """
 
 from __future__ import annotations
@@ -157,3 +162,51 @@ def test_forcing_the_posix_arm_on_windows_refuses_by_name(tmp_path: Path, monkey
     for helper in (_flock_exclusive, _flock_release):
         with pytest.raises(UnsupportedLockPlatform, match=r"fcntl\.flock"):
             helper(0)
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="exercises the real msvcrt.locking retry bound; only runs where msvcrt exists",
+)
+def test_locked_windows_branch_contends_for_a_real_lock_across_processes(tmp_path: Path):
+    """The three tests above fake `msvcrt` (D-014) and prove the message shape
+    and call ordering, but never prove the retry bound is real. This test is
+    the second witness for that one claim: a genuine `msvcrt.locking` held by
+    a parent process, contended by a real subprocess, must wait and then raise
+    naming the path -- not merely produce the right string from a fake."""
+    import subprocess
+    import sys as _sys
+
+    lock = tmp_path / "contended.lock"
+
+    child_script = (
+        "import time\n"
+        "from pathlib import Path\n"
+        "from okf_ext.locking import locked\n"
+        f"lock = Path(r{str(lock)!r})\n"
+        "start = time.monotonic()\n"
+        "try:\n"
+        "    with locked(lock):\n"
+        "        pass\n"
+        "except OSError as exc:\n"
+        "    elapsed = time.monotonic() - start\n"
+        "    print(f'FAILED {elapsed} {exc}')\n"
+        "else:\n"
+        "    elapsed = time.monotonic() - start\n"
+        "    print(f'SUCCEEDED {elapsed}')\n"
+    )
+
+    with locked(lock):
+        result = subprocess.run(
+            [_sys.executable, "-c", child_script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+
+    assert result.returncode == 0, result.stderr
+    output = result.stdout.strip()
+    assert output.startswith("FAILED "), f"expected the child to fail while the parent held the lock, got: {output!r}"
+    _, elapsed_str, message = output.split(" ", 2)
+    assert str(lock) in message
+    assert float(elapsed_str) >= 8.0

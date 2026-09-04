@@ -64,6 +64,7 @@ def test_load_config_not_valid_yaml_raises(tmp_path: Path) -> None:
 
 def test_load_config_graph_dir_tilde_expands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     _write(tmp_path, "version: 1\n")
     config = load_config(tmp_path, graph_dir="~/graphs/code")
     assert config.graph_dir == (tmp_path / "graphs/code")
@@ -172,6 +173,7 @@ def test_declarations_dir_accepts_an_absolute_path(tmp_path: Path) -> None:
 
 def test_declarations_dir_tilde_expands(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     _write(tmp_path, "version: 1\n")
     config = load_config(tmp_path, graph_dir="../graphs/code", declarations_dir="~/shared-declarations")
     assert config.declarations_dir == (tmp_path / "shared-declarations")

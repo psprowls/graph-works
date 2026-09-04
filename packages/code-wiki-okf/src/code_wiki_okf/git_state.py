@@ -23,7 +23,7 @@ def _run(repo: Path, *args: str) -> tuple[int, str, str] | None:
             text=True,
             timeout=10,
         )
-    except (FileNotFoundError, subprocess.SubprocessError):
+    except (OSError, subprocess.SubprocessError):
         return None
     return result.returncode, result.stdout, result.stderr
 

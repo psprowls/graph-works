@@ -733,7 +733,7 @@ class _WindowsAnchor:
             raise NotADirectoryError(f"refusing to follow a symlinked component: {name!r}")
         if not stat.S_ISDIR(info.st_mode):
             raise NotADirectoryError(f"not a directory: {name!r}")
-        return _WindowsAnchor(candidate, long_paths=self._long_paths)
+        return _WindowsAnchor(candidate, long_paths=self._long_paths, hard_links=self._hard_links)
 
     def open_or_create_child(self, name: str) -> _WindowsAnchor:
         try:
@@ -755,7 +755,7 @@ class _WindowsAnchor:
         the pre-swap directory forward.  That difference is a tier property,
         not a bug, and ADR-0042 names it.
         """
-        return _WindowsAnchor(self.root, long_paths=self._long_paths)
+        return _WindowsAnchor(self.root, long_paths=self._long_paths, hard_links=self._hard_links)
 
     def close(self) -> None:
         """Nothing to release.  A path is not a descriptor.

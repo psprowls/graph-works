@@ -678,3 +678,52 @@ def test_the_hard_link_refusal_message_names_the_requirement_and_the_path(tmp_pa
     assert "exFAT" in message
     assert "WSL" in message
     assert "posix-strong" in message
+
+
+def test_a_child_anchor_inherits_the_hard_link_answer(tmp_path: Path) -> None:
+    """Mirrors test_a_child_anchor_inherits_the_long_path_answer: open_child
+    must not re-probe and must not silently re-enable what the parent refused."""
+    (tmp_path / "lane").mkdir()
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+        child = anchor.open_child("lane")
+        try:
+            assert child._hard_links is True
+        finally:
+            child.close()
+    finally:
+        anchor.close()
+
+
+def test_a_duplicate_anchor_inherits_the_hard_link_answer(tmp_path: Path) -> None:
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+        copy = anchor.duplicate()
+        try:
+            assert copy._hard_links is True
+        finally:
+            copy.close()
+    finally:
+        anchor.close()
+
+
+def test_open_child_does_not_reprobe_hard_link_support(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "lane").mkdir()
+    calls: list[Path] = []
+    original = anchors.hard_links_supported
+
+    def _spy(path: Path) -> bool:
+        calls.append(path)
+        return original(path)
+
+    monkeypatch.setattr(anchors, "hard_links_supported", _spy)
+    anchor = anchors._WindowsAnchor(tmp_path, long_paths=True, hard_links=True)
+    try:
+        calls.clear()
+        child = anchor.open_child("lane")
+        try:
+            assert calls == []
+        finally:
+            child.close()
+    finally:
+        anchor.close()

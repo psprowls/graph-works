@@ -82,6 +82,21 @@ def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _normalize_link_target(link: Path) -> Path:
+    """Strip Windows' `\\\\?\\` extended-length-path prefix from a symlink target.
+
+    `Path.readlink()` on win32 can return the target `\\\\?\\`-prefixed even
+    when the link was created with an unprefixed absolute path -- a
+    representation difference, not a tier-behavior difference (see
+    work/epic-native-windows-support/children/
+    bug-graph-works-core-suite-fails-on.md, Cause 3).
+    """
+    raw = str(link.readlink())
+    if raw.startswith("\\\\?\\"):
+        raw = raw[4:]
+    return Path(raw)
+
+
 def test_public_work_transaction_surface_reexports_the_workspace_executor() -> None:
     assert public_transactions.apply_mutation is apply_mutation
     assert public_transactions.MutationApplication is MutationApplication
@@ -1702,7 +1717,7 @@ def test_validation_uses_live_root_for_absolute_internal_registered_sources(tmp_
     result = apply_mutation(layout, plan)
 
     assert result.ok is True
-    assert registered.readlink() == actual
+    assert _normalize_link_target(registered) == actual
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fifo semantics")
@@ -2043,7 +2058,7 @@ def test_absolute_external_symlink_move_is_refused_before_live_effects(tmp_path:
     # live effect, which is the guarantee under test.
     assert "escape the bundle root" in result.failures[0] or "is a symlink" in result.failures[0]
     assert source.is_symlink()
-    assert source.readlink() == external
+    assert _normalize_link_target(source) == external
     assert not (layout.bundle_dir / "work/destination").exists()
     assert external.read_bytes() == b"external"
 

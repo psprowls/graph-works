@@ -253,6 +253,7 @@ def test_the_hard_link_refusal_names_the_path_and_the_alternative(tmp_path: Path
     assert str(tmp_path.resolve()) in message
     assert "exFAT" in message
     assert "WSL" in message
+    assert message == anchors._hard_link_refusal_message(tmp_path.resolve())
 
 
 def test_the_windows_anchor_constructs_normally_with_hard_link_support(tmp_path: Path) -> None:
@@ -740,8 +741,9 @@ def test_link_translates_error_invalid_function_into_the_named_refusal(
             raise OSError(0, "Incorrect function", None, anchors.ERROR_INVALID_FUNCTION)
 
         monkeypatch.setattr(anchors.os, "link", _raise_invalid_function)
-        with pytest.raises(ValueError, match="hard link support"):
+        with pytest.raises(ValueError) as caught:
             anchor.link("source.txt", "dest.txt")
+        assert str(caught.value) == anchors._hard_link_refusal_message(anchor.root)
     finally:
         anchor.close()
 
@@ -757,8 +759,9 @@ def test_link_translates_error_not_supported_into_the_named_refusal(
             raise OSError(0, "Not supported", None, anchors.ERROR_NOT_SUPPORTED)
 
         monkeypatch.setattr(anchors.os, "link", _raise_not_supported)
-        with pytest.raises(ValueError, match="hard link support"):
+        with pytest.raises(ValueError) as caught:
             anchor.link("source.txt", "dest.txt")
+        assert str(caught.value) == anchors._hard_link_refusal_message(anchor.root)
     finally:
         anchor.close()
 

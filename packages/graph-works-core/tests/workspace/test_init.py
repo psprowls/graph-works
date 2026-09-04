@@ -66,8 +66,9 @@ def test_plan_init_refuses_without_hard_link_support(tmp_path, monkeypatch):
 
     monkeypatch.setattr(anchors, "hard_links_supported", lambda path: False)
     root = tmp_path / "works"
-    with pytest.raises(InitError, match="hard link support"):
+    with pytest.raises(InitError) as caught:
         plan_init(root, today=TODAY)
+    assert str(caught.value) == anchors._hard_link_refusal_message(root.resolve())
 
 
 def test_plan_init_creates_nothing_when_hard_links_are_unsupported(tmp_path, monkeypatch):

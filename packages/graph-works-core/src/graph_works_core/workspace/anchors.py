@@ -581,13 +581,13 @@ def hard_links_supported(path: Path) -> bool:
     a false negative is the safe direction, because the alternative is a
     commit that dies partway through.
     """
-    if sys.platform != "win32":
+    if sys.platform != "win32":  # pragma: no cover -- native Windows only
         return True
     import ctypes  # Windows-only, imported at the point of use
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     buffer = ctypes.create_unicode_buffer(260)
-    try:
+    try:  # pragma: no cover -- native Windows only
         if not kernel32.GetVolumePathNameW(str(path), buffer, len(buffer)):
             return False
         flags = ctypes.c_uint32(0)

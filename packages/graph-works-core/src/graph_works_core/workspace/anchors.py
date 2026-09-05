@@ -614,6 +614,23 @@ def _hard_link_refusal_message(path: Path) -> str:
     )
 
 
+def _long_path_refusal_message() -> str:
+    """The one place the long-path refusal text is authored.
+
+    Fix 1 (anchor construction) and Fix 2 (`gw bootstrap` preflight) both call
+    this, so the two refusals cannot drift apart -- the same reasoning
+    `_hard_link_refusal_message` documents for the hard-link case. Unlike that
+    message, this one names no path: the requirement is machine-wide (the
+    registry key), not filesystem-specific.
+    """
+    return (
+        f"the {WINDOWS_REVALIDATED_TIER} tier requires long path support: bundle "
+        f"member paths routinely exceed the {MAX_PATH}-character MAX_PATH limit. "
+        r"Set HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled "
+        f"to 1 and restart, or run under WSL for the {POSIX_STRONG_TIER} tier."
+    )
+
+
 def long_paths_enabled() -> bool:
     """Whether this system lifts the 260-character `MAX_PATH` limit.
 
@@ -683,12 +700,7 @@ class _WindowsAnchor:
         self._identity = (info.st_dev, info.st_ino)
         self._long_paths = long_paths_enabled() if long_paths is None else long_paths
         if not self._long_paths:
-            raise ValueError(
-                f"the {WINDOWS_REVALIDATED_TIER} tier requires long path support: bundle "
-                f"member paths routinely exceed the {MAX_PATH}-character MAX_PATH limit. "
-                r"Set HKLM\SYSTEM\CurrentControlSet\Control\FileSystem\LongPathsEnabled "
-                f"to 1 and restart, or run under WSL for the {POSIX_STRONG_TIER} tier."
-            )
+            raise ValueError(_long_path_refusal_message())
         self._hard_links = hard_links_supported(self.root) if hard_links is None else hard_links
         if not self._hard_links:
             raise ValueError(_hard_link_refusal_message(self.root))

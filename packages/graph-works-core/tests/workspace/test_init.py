@@ -81,6 +81,41 @@ def test_plan_init_creates_nothing_when_hard_links_are_unsupported(tmp_path, mon
     assert not root.exists()
 
 
+def test_plan_init_refuses_without_long_path_support(tmp_path, monkeypatch):
+    from graph_works_core.workspace import anchors
+
+    monkeypatch.setattr(anchors, "long_paths_enabled", lambda: False)
+    root = tmp_path / "works"
+    with pytest.raises(InitError) as caught:
+        plan_init(root, today=TODAY)
+    assert str(caught.value) == anchors._long_path_refusal_message()
+
+
+def test_plan_init_creates_nothing_when_long_paths_are_unsupported(tmp_path, monkeypatch):
+    from graph_works_core.workspace import anchors
+
+    monkeypatch.setattr(anchors, "long_paths_enabled", lambda: False)
+    root = tmp_path / "works"
+    with pytest.raises(InitError):
+        plan_init(root, today=TODAY)
+    assert not root.exists()
+
+
+def test_plan_init_checks_long_paths_before_hard_links(tmp_path, monkeypatch):
+    """`_WindowsAnchor.__init__` checks long paths before hard links
+    (anchors.py:703 then :706); `plan_init` must raise the same refusal
+    first when both checks would fail, so the two call sites never disagree
+    about which refusal a caller sees."""
+    from graph_works_core.workspace import anchors
+
+    monkeypatch.setattr(anchors, "long_paths_enabled", lambda: False)
+    monkeypatch.setattr(anchors, "hard_links_supported", lambda path: False)
+    root = tmp_path / "works"
+    with pytest.raises(InitError) as caught:
+        plan_init(root, today=TODAY)
+    assert str(caught.value) == anchors._long_path_refusal_message()
+
+
 # --- act 1: directories -----------------------------------------------------
 
 

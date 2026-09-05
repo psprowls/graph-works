@@ -302,14 +302,18 @@ def plan_init(
     default one. *repo_root* defaults to a `.git` walk-up from *root*; pass it
     explicitly to pin a repo the walk-up would not find.
 
-    Raises `InitError` for a *root* that exists and is not a directory, or for
-    a root whose filesystem does not support hard links -- the same
-    requirement `_WindowsAnchor` enforces at mutation time, checked here so a
-    bootstrapped-but-unusable workspace is never created in the first place.
+    Raises `InitError` for a *root* that exists and is not a directory, for a
+    system that does not have Windows long-path support enabled, or for a root
+    whose filesystem does not support hard links -- the same two requirements
+    `_WindowsAnchor` enforces at mutation time, checked here (in the same
+    order `_WindowsAnchor.__init__` checks them) so a bootstrapped-but-unusable
+    workspace is never created in the first place.
     """
     root = Path(root).expanduser().resolve()
     if root.exists() and not root.is_dir():
         raise InitError(f"{root}: exists and is not a directory")
+    if not anchors.long_paths_enabled():
+        raise InitError(anchors._long_path_refusal_message())
     if not anchors.hard_links_supported(root):
         raise InitError(anchors._hard_link_refusal_message(root))
 

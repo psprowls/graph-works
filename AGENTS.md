@@ -61,12 +61,15 @@ exists yet — enforcement is local, by design (ADR-0010).
 
 | Command | What it does |
 |---|---|
-| `just` / `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` + `test-plugin-native` — the full gate |
+| `just` / `just check` | `sync` + `subtree-base` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` + `test-plugin-native` — the full gate |
 | `just sync` | `uv sync --all-packages` — provisions every member's deps, not just the root's |
 | `just normalization` | Unicode-normalization check on tracked filenames (cheap, run first) |
+| `just text-io` | Implicit text-IO defaults in shipped source — a missing `encoding=` on any text read/write, or a missing `newline=` on any text write. Not a `lint` addition deliberately: ruff's `PLW1514` is preview-only and covers `encoding=` alone, and `scripts`/`plugins` sit in ruff's `exclude`. Scope is `packages/*/src` and `scripts`, plus the three byte-exact test trees (`okf-io`, `okf-ext`, `scripts/tests`); the other nine still rely on a suite run |
+| `just line-endings` | A tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true` |
+| `just platform-declared` | A package that imports a POSIX-only module, or reaches a POSIX-only process primitive, with no `## Platform` section declaring it — ADR-0021 rule 3a as a check |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
 | `just types` | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, then `win32`), 24 invocations total — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa |
-| `just contracts` | `uv run lint-imports` — okf-ext's internal capability-boundary contract |
+| `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
 | `just test` | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package |
 | `just cov` | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing` |
 | `just subtree-base` | Asserts the `plugins/graph-works` subtree merge-base is reachable/recorded/prefix-rooted — see "The vendored plugin" below |

@@ -19,4 +19,4 @@ workflow:
       plan: opus
       execute: sonnet
       finish: sonnet
-repo-directory: /Users/pat/Personal/graph-works
+repo-directory: ../../graph-works

@@ -46,7 +46,6 @@ everywhere else in this package and in `work-tracker-okf`.
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import os
 from collections.abc import Iterator, Mapping, Sequence
@@ -60,6 +59,7 @@ from typing import Literal
 from code_wiki_okf.config import Config
 from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
 from okf_ext.bundle import SECTIONS_DIRNAME
+from okf_ext.locking import locked as _locked_file
 from okf_ext.shape import load_sections
 from okf_io import Bundle, load_bundle, parse
 from okf_io import validate as okf_validate
@@ -83,7 +83,7 @@ from work_tracker_okf.filing import FilingSeed
 from work_tracker_okf.hierarchy import ChildRollup, DescendResult, nearest_parent
 from work_tracker_okf.hierarchy import descend as descend_to_leaf
 from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
-from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items
+from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items, unreadable_detail
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
     PlannedWrite,
@@ -479,6 +479,9 @@ def run_next(
     items = load_items(bundle)
     requested = next((item for item in items if item.path == path), None)
     if requested is None:
+        detail = unreadable_detail(bundle, path)
+        if detail is not None:
+            raise ValueError(f"{path}.md {detail}")
         raise ValueError(f"unknown work item {path!r}")
 
     descent_result = descend_to_leaf(items, path) if descend else None
@@ -753,15 +756,8 @@ def _decision_lock_path(layout: WorkspaceLayout, owner_path: str) -> Path:
 @contextmanager
 def _decision_lock(layout: WorkspaceLayout, owner_path: str) -> Iterator[None]:
     """Serialize decision composition on caller-owned, replace-stable cache state."""
-    lock = _decision_lock_path(layout, owner_path)
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    with _locked_file(_decision_lock_path(layout, owner_path)):
         yield
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
 
 
 def _decision_context(layout: WorkspaceLayout, path: str) -> DecisionContext:

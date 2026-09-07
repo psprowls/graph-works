@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from ext_helpers import SECTIONS_DIR, sectioned_bundle, write_bundle
+from ext_helpers import SECTIONS_DIR, sectioned_bundle, write, write_bundle, write_tree
 from okf_ext.sections import CODES, TOPIC, load_sections, section_rule
 from okf_io import validate
 
@@ -36,10 +36,9 @@ def build(tmp_path, files, *, declarations=DECLARATIONS, extra=None):
     root = tmp_path / "kb"
     sections_dir = root / "sections"
     sections_dir.mkdir(parents=True)
-    (sections_dir / "Feature.yaml").write_text(declarations, encoding="utf-8")
+    write(sections_dir / "Feature.yaml", declarations)
     if extra is not None:
-        for name, body in extra.items():
-            (sections_dir / name).write_text(body, encoding="utf-8")
+        write_tree(sections_dir, extra)
     bundle = write_bundle(root, files, ignore=("sections/*",))
     return bundle, load_sections(sections_dir)
 

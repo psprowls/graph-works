@@ -1,3 +1,15 @@
+# Every tracked text file is LF in the index and LF in the worktree, on every
+# platform. Git for Windows ships core.autocrlf=true, so anything left
+# `unspecified` here checks out CRLF -- which makes a bash script unrunnable
+# (`#!/usr/bin/env bash\r`) and makes the PreToolUse doc-routing hook fail
+# *silently*. This is a blanket rule on purpose: the bug it closes was caused by
+# enumeration (the vendored plugin file names `hooks/session-start` individually,
+# and four extensionless scripts added later were never added to it).
+#
+# `text=auto` leaves anything git detects as binary alone. The `-text` blocks
+# below are byte-exact contracts and must stay AFTER this line -- last match wins.
+* text=auto eol=lf
+
 # The test fixture corpus is a byte-exact contract, not source code.
 #
 # `edge/encoding/crlf.md` is uniformly CRLF and `edge/encoding/bom.md` carries a

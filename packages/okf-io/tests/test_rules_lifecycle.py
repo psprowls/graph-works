@@ -4,16 +4,13 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from helpers import write
 from okf_io import bundle
 from okf_io.validate import validate
 
 
 def report_for(tmp_path: Path, frontmatter: str, *, today: date = date(2026, 8, 3)):
-    target = tmp_path / "a.md"
-    target.write_text(
-        f"---\ntype: Metric\ntitle: T\ndescription: D\n{frontmatter}---\n\n# Definition\n",
-        encoding="utf-8",
-    )
+    write(tmp_path / "a.md", f"---\ntype: Metric\ntitle: T\ndescription: D\n{frontmatter}---\n\n# Definition\n")
     return validate(bundle.load(tmp_path), today=today)
 
 

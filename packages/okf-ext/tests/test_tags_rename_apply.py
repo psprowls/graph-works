@@ -131,7 +131,7 @@ def test_a_foreign_plan_raises(tmp_path):
     other_root = tmp_path / "other"
     other_root.mkdir()
     (other_root / "a.md").write_text(
-        "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [ga4]\n---\n\n# T\n", encoding="utf-8"
+        "---\ntype: Metric\ntitle: T\ndescription: D\ntags: [ga4]\n---\n\n# T\n", encoding="utf-8", newline=""
     )
     with pytest.raises(ValueError, match="different bundle"):
         apply(load_bundle(other_root), plan_rename(one, "ga4", "analytics"))
@@ -146,6 +146,7 @@ def test_a_stale_plan_is_refused_per_document_and_reported(tmp_path):
     (root / "block.md").write_text(
         "---\ntype: Metric\ntitle: Orders\ndescription: D\ntags: [changed]\n---\n\n# Orders\n",
         encoding="utf-8",
+        newline="",
     )
     result = apply(load_bundle(root), plan)
     assert result.written == ()
@@ -516,6 +517,7 @@ def test_a_stale_plan_from_reordering_is_refused(tmp_path):
     (root / "block.md").write_text(
         "---\ntype: Metric\ntitle: Orders\ndescription: D\ntags:\n- ga4\n- Data Quality\n- kpi\n---\n\n# Orders\n",
         encoding="utf-8",
+        newline="",
     )
     result = apply(load_bundle(root), plan)
     assert result.written == ()
@@ -533,6 +535,7 @@ def test_a_stale_plan_from_a_shortened_sequence_is_refused(tmp_path):
     (root / "block.md").write_text(
         "---\ntype: Metric\ntitle: Orders\ndescription: D\ntags:\n- Data Quality\n---\n\n# Orders\n",
         encoding="utf-8",
+        newline="",
     )
     result = apply(load_bundle(root), plan)
     assert result.written == ()
@@ -556,6 +559,7 @@ def test_a_stale_document_does_not_block_its_siblings_in_the_same_plan(tmp_path)
     (root / "underscore.md").write_text(
         "---\ntype: Reference\ntitle: Quality notes\ndescription: D\ntags: [changed]\n---\n\n# Quality notes\n",
         encoding="utf-8",
+        newline="",
     )
     result = apply(load_bundle(root), plan)
     assert set(result.written) == {"block.md", "merge_me.md"}
@@ -688,7 +692,7 @@ def test_emptying_a_tag_list_writes_an_empty_sequence_not_a_removed_key(tmp_path
     )
     result = apply(bundle, plan)
     assert result.written == ("solo.md",)
-    after = (tmp_path / "solo.md").read_text()
+    after = (tmp_path / "solo.md").read_text(encoding="utf-8")
     assert "tags: []" in after
     assert "tags:" in after
 
@@ -734,7 +738,7 @@ def test_trailing_whitespace_blank_lines_and_comments_in_frontmatter_survive(tmp
     bundle = load_bundle(tmp_path)
     result = apply(bundle, plan_rename(bundle, "alpha", "gamma"))
     assert result.written == ("commented.md",)
-    after = (tmp_path / "commented.md").read_text()
+    after = (tmp_path / "commented.md").read_text(encoding="utf-8")
     assert "type: Metric  \n" in after  # trailing whitespace on an untouched line
     assert "# a comment about tags\n" in after
     assert "\n\nstatus: stable\n" in after  # the blank line before `status`

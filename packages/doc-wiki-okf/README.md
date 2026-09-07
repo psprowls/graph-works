@@ -243,7 +243,8 @@ See `docs/cutover-key-mapping.md` for the full old-key-to-new-key mapping.
 
 ## Commands
 
-    uv run --package doc-wiki-okf mypy --strict packages/doc-wiki-okf/src
+    uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
+    uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests
 
 Coverage is gated at 95% (`just cov`).

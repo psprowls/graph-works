@@ -162,7 +162,7 @@ def test_migration_refuses_incomplete_manifest_members(
 ) -> None:
     legacy_root = tmp_path / "legacy"
     shutil.copytree(FIXTURE_ROOT, legacy_root)
-    (legacy_root / "work/2026-08-24-broken.md").write_text(content, encoding="utf-8")
+    (legacy_root / "work/2026-08-24-broken.md").write_text(content, encoding="utf-8", newline="")
 
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
 
@@ -192,7 +192,7 @@ def test_migration_refuses_ignored_raw_manifest_member(tmp_path: Path) -> None:
     shutil.copytree(FIXTURE_ROOT, legacy_root)
     hidden = legacy_root / "work/schema/children/feature-hidden.md"
     hidden.parent.mkdir(parents=True)
-    hidden.write_text("---\ntype: Unknown\n---\n", encoding="utf-8")
+    hidden.write_text("---\ntype: Unknown\n---\n", encoding="utf-8", newline="")
     bundle = load_bundle(legacy_root, ignore=LEGACY_IGNORE)
 
     assert "work/schema/children/feature-hidden.md" in bundle.ignored
@@ -213,6 +213,7 @@ def test_migration_refuses_disagreeing_hierarchy(tmp_path: Path) -> None:
     parent.write_text(
         parent.read_text(encoding="utf-8").replace("  - 2026-08-22-feature-child\n", ""),
         encoding="utf-8",
+        newline="",
     )
 
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
@@ -231,6 +232,7 @@ def test_migration_refuses_ambiguous_date_free_destinations(tmp_path: Path) -> N
             "",
         ),
         encoding="utf-8",
+        newline="",
     )
     duplicate = legacy_root / "work/2026-08-23-feature-child.md"
     duplicate_text = (legacy_root / "work/2026-08-22-feature-child.md").read_text(encoding="utf-8")
@@ -245,7 +247,7 @@ def test_migration_refuses_ambiguous_date_free_destinations(tmp_path: Path) -> N
         "",
     )
     duplicate_text = duplicate_text.replace("depends_on:\n  - 2026-08-19-bug-old\n", "")
-    duplicate.write_text(duplicate_text, encoding="utf-8")
+    duplicate.write_text(duplicate_text, encoding="utf-8", newline="")
 
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
 
@@ -263,6 +265,7 @@ def test_migration_refuses_missing_hierarchy_nodes(tmp_path: Path) -> None:
             "parent: missing-parent",
         ),
         encoding="utf-8",
+        newline="",
     )
 
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
@@ -276,7 +279,7 @@ def test_migration_refuses_missing_physical_parent_without_raising(tmp_path: Pat
     shutil.copytree(FIXTURE_ROOT, legacy_root)
     page = legacy_root / "work/missing/children/feature-orphan.md"
     page.parent.mkdir(parents=True)
-    page.write_text("---\ntype: Feature\n---\n", encoding="utf-8")
+    page.write_text("---\ntype: Feature\n---\n", encoding="utf-8", newline="")
 
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
 
@@ -299,6 +302,7 @@ def test_migration_refuses_physical_child_omitted_by_declared_children(tmp_path:
             "children: []\n",
         ),
         encoding="utf-8",
+        newline="",
     )
     child_page = legacy_root / f"work/{child_name}.md"
     child_page.write_text(
@@ -307,6 +311,7 @@ def test_migration_refuses_physical_child_omitted_by_declared_children(tmp_path:
             "",
         ),
         encoding="utf-8",
+        newline="",
     )
     child_lane = legacy_root / f"work/{parent_name}/children"
     child_lane.mkdir(parents=True)
@@ -335,8 +340,8 @@ def test_migration_refuses_hierarchy_cycles(tmp_path: Path) -> None:
         "parent: 2026-08-20-epic-parent\n",
         "parent: 2026-08-20-epic-parent\nchildren:\n  - 2026-08-20-epic-parent\n",
     )
-    parent.write_text(parent_text, encoding="utf-8")
-    child.write_text(child_text, encoding="utf-8")
+    parent.write_text(parent_text, encoding="utf-8", newline="")
+    child.write_text(child_text, encoding="utf-8", newline="")
 
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
 
@@ -366,7 +371,7 @@ def test_projected_migration_refuses_a_remaining_unmanifested_work_member(tmp_pa
     legacy_root = tmp_path / "legacy"
     shutil.copytree(FIXTURE_ROOT, legacy_root)
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
-    (legacy_root / "work/unmanifested.md").write_text("---\ntitle: Missing type\n---\n", encoding="utf-8")
+    (legacy_root / "work/unmanifested.md").write_text("---\ntitle: Missing type\n---\n", encoding="utf-8", newline="")
 
     refusals = _projected_refusals(plan.mutation, plan.manifest)
 
@@ -379,7 +384,7 @@ def test_projected_migration_refuses_an_ignored_raw_work_member(tmp_path: Path) 
     plan = plan_migration(load_bundle(legacy_root, ignore=LEGACY_IGNORE))
     hidden = legacy_root / "work/sections/children/feature-hidden.md"
     hidden.parent.mkdir(parents=True)
-    hidden.write_text("---\ntype: Unknown\n---\n", encoding="utf-8")
+    hidden.write_text("---\ntype: Unknown\n---\n", encoding="utf-8", newline="")
 
     refusals = _projected_refusals(plan.mutation, plan.manifest)
 

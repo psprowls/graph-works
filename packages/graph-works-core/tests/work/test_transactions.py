@@ -7,21 +7,22 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import sys
 import threading
 from contextlib import contextmanager
-from datetime import date
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
+from _transaction_helpers import _plan, _snapshot, _workspace, representable_mode
 from graph_works_core.work import MutationApplication, apply_mutation
 from graph_works_core.work import transactions as public_transactions
-from graph_works_core.workspace import transactions
-from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
-from okf_ext.moves import Move
-from okf_io import load_bundle
+from graph_works_core.workspace import anchors, transactions
+from okf_ext.moves import Move, MovePlan
+from okf_ext.writing import body_digest
+from okf_io import load_bundle, parse
 from work_tracker_okf.indexes import plan_indexes as path_plan_indexes
-from work_tracker_okf.init import install_bundle
 from work_tracker_okf.items import IGNORE, load_items
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
@@ -33,67 +34,101 @@ from work_tracker_okf.mutation import (
 from work_tracker_okf.reparent import plan_reparent
 
 
+@pytest.fixture(params=["posix", "windows"], autouse=True)
+def tier(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Run every test in this module under both durability tiers.
+
+    `_WindowsAnchor` is path join-and-re-validate, which runs correctly on
+    POSIX -- so the weak tier gets continuous logic coverage here even though
+    no Windows CI exists (D-001).  Cases needing a genuinely POSIX-only
+    primitive as their SUBJECT are xfailed via `_xfail_on_weak_tier`, and
+    ADR-0042 names every one of them -- with one documented exception:
+    `test_validation_uses_live_root_for_absolute_internal_registered_sources`
+    is an 8th `_xfail_on_weak_tier` case that ADR-0042 does not yet name. It
+    was added when closing the C7 scanning gap (Defect B) made the weak
+    tier's categorical symlink refusal also catch a legitimate registered
+    symlink source (see that test's own xfail reason for the full trade-off).
+    This is a known gap in ADR-0042's coverage, pending the ADR being updated
+    upstream -- not a claim that the invariant above holds without exception.
+
+    The mirror also exists: a case whose SUBJECT is a weak-tier-only contract
+    -- the refused plan shapes -- is xfailed on the strong tier via
+    `_xfail_on_strong_tier`, since `_PosixAnchor.refused_members` returns `()`
+    by contract.  ADR-0042 names the weak-tier xfails but does not yet name
+    this inverse category.
+
+    The parametrization is unidirectional by construction, and the `skipif`
+    below is that asymmetry made explicit rather than left to fail as an
+    `AttributeError`.  The weak tier is pure path logic and runs anywhere; the
+    strong tier needs `openat`, `flock` and `os.O_DIRECTORY`, which Windows
+    does not have at all.  Forcing the weak tier from POSIX works.  Forcing
+    the strong tier from Windows cannot -- not an oversight, an absence.  A
+    POSIX host still runs both arms exactly as D-001 intended.
+
+    The two delegators patched here are the ones `transactions`' own call
+    sites resolve through this module's globals -- the same property the
+    `transactions.py:290-305` comment block exists to protect.  Patching
+    `anchors.open_anchor` instead would NOT bite.
+    """
+    if request.param == "posix" and sys.platform == "win32":
+        pytest.skip("the strong tier needs openat/flock/os.O_DIRECTORY, none of which exist on Windows")
+    platform_name = "win32" if request.param == "windows" else "linux"
+    monkeypatch.setattr(
+        transactions,
+        "_open_root",
+        lambda root: anchors.open_anchor(root, platform_name=platform_name),
+    )
+    monkeypatch.setattr(
+        transactions,
+        "_open_absolute_directory",
+        lambda path: anchors.open_absolute_anchor(path, platform_name=platform_name),
+    )
+    return request.param
+
+
+def _xfail_on_weak_tier(request: pytest.FixtureRequest, reason: str) -> None:
+    """Mark the current test xfail when it is running under the weak tier."""
+    if request.getfixturevalue("tier") == "windows":
+        request.node.add_marker(pytest.mark.xfail(strict=True, reason=reason))
+
+
+def _xfail_on_strong_tier(request: pytest.FixtureRequest, reason: str) -> None:
+    """Mark the current test xfail when it is running under the strong tier.
+
+    The mirror of `_xfail_on_weak_tier`, for a test whose SUBJECT is a
+    weak-tier-only contract -- the refused plan shapes ADR-0042 declares.
+    `_PosixAnchor.refused_members` returns `()` ("the strong tier refuses no
+    plan shapes"), so such a test cannot pass under `posix` and must not be
+    read as a defect there.  `strict=True` deliberately: were the strong tier
+    ever to start refusing, the resulting XPASS is a tier-contract change that
+    should fail loudly rather than pass quietly.
+    """
+    if request.getfixturevalue("tier") == "posix":
+        request.node.add_marker(pytest.mark.xfail(strict=True, reason=reason))
+
+
 def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
+
+
+def _normalize_link_target(link: Path) -> Path:
+    """Strip Windows' `\\\\?\\` extended-length-path prefix from a symlink target.
+
+    `Path.readlink()` on win32 can return the target `\\\\?\\`-prefixed even
+    when the link was created with an unprefixed absolute path -- a
+    representation difference, not a tier-behavior difference (see
+    work/epic-native-windows-support/children/
+    bug-graph-works-core-suite-fails-on.md, Cause 3).
+    """
+    raw = str(link.readlink())
+    if raw.startswith("\\\\?\\"):
+        raw = raw[4:]
+    return Path(raw)
 
 
 def test_public_work_transaction_surface_reexports_the_workspace_executor() -> None:
     assert public_transactions.apply_mutation is apply_mutation
     assert public_transactions.MutationApplication is MutationApplication
-
-
-def _workspace(tmp_path: Path) -> WorkspaceLayout:
-    layout = layout_for(tmp_path / "workspace")
-    layout.bundle_dir.mkdir(parents=True)
-    layout.cache_dir.mkdir(parents=True)
-    installed = install_bundle(layout.bundle_dir, today=date(2026, 8, 22), dry_run=False)
-    assert installed.ok
-    return layout
-
-
-def _snapshot(root: Path) -> dict[str, tuple[str, int, bytes | str | None]]:
-    snapshot: dict[str, tuple[str, int, bytes | str | None]] = {}
-    pending = [root]
-    while pending:
-        current = pending.pop()
-        for path in sorted(current.iterdir(), key=lambda entry: os.fsencode(entry.name), reverse=True):
-            relative = path.relative_to(root).as_posix()
-            mode = stat.S_IMODE(path.lstat().st_mode)
-            if path.is_symlink():
-                snapshot[relative] = ("symlink", mode, str(path.readlink()))
-            elif path.is_dir():
-                snapshot[relative] = ("directory", mode, None)
-                pending.append(path)
-            else:
-                snapshot[relative] = ("file", mode, path.read_bytes())
-    return snapshot
-
-
-def _plan(
-    layout: WorkspaceLayout,
-    *,
-    moves: tuple[Move, ...] = (),
-    writes: tuple[PlannedWrite, ...] = (),
-    deletes: tuple[str, ...] = (),
-    mkdirs: tuple[str, ...] = (),
-    validate_paths: tuple[str, ...] = (),
-    directory_preconditions: tuple[DirectoryPrecondition, ...] = (),
-    path_mapping: dict[str, str] | None = None,
-) -> WorkMutationPlan:
-    return WorkMutationPlan(
-        root=layout.bundle_dir,
-        operation="reparent",
-        path_mapping={} if path_mapping is None else path_mapping,
-        move_plan=None,
-        moves=moves,
-        writes=writes,
-        deletes=deletes,
-        mkdirs=mkdirs,
-        warnings=("opaque reference retained",),
-        refusals=(),
-        validate_paths=validate_paths,
-        directory_preconditions=directory_preconditions,
-    )
 
 
 def _states(journal: Path) -> list[str]:
@@ -133,6 +168,7 @@ def _write_item(
         "| Action | Done when | Rationale |\n"
         "| --- | --- | --- |\n",
         encoding="utf-8",
+        newline="",
     )
 
 
@@ -165,6 +201,36 @@ def test_success_applies_deterministic_effects_and_records_complete_journal(tmp_
     assert not source.exists()
     assert not deleted.exists()
     assert _states(result.journal) == ["planned", "applying", "validating", "complete"]
+
+
+def test_a_mutation_refuses_before_any_effect_lands_without_hard_link_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tier: str
+) -> None:
+    """The hard-link refusal is an anchor-construction-time refusal, and the
+    weak (`_PosixAnchor`) tier has no hard-link seam at all -- so this is
+    windows-tier-only, unlike the rest of this module's tests.
+
+    `apply_mutation` opens the bundle root anchor itself before entering any
+    transaction lock or guarded phase (`transactions.py:2619`), so a refusal
+    that fires at anchor construction surfaces as an uncaught `ValueError`
+    straight out of `apply_mutation` -- the same pre-transaction-failure
+    shape as `test_work_mutations_open_failure_does_not_leak_cache_descriptor`
+    -- rather than as a `MutationApplication` with `failures`. What this test
+    proves is that the refusal reaches `apply_mutation` at all, and that
+    nothing on disk moved before it did.
+    """
+    if tier != "windows":
+        pytest.skip("the hard-link seam only exists on the windows-revalidated tier")
+
+    layout = _workspace(tmp_path)
+    before = _snapshot(layout.bundle_dir)
+    monkeypatch.setattr(anchors, "hard_links_supported", lambda path: False)
+
+    plan = _plan(layout, writes=(PlannedWrite("work/destination.bin", None, b"final"),))
+    with pytest.raises(ValueError, match="hard link support"):
+        apply_mutation(layout, plan)
+
+    assert _snapshot(layout.bundle_dir) == before
 
 
 def test_real_reparent_plan_applies_through_transaction_and_reloads_final_path(tmp_path: Path) -> None:
@@ -312,6 +378,17 @@ def test_executor_lock_serializes_snapshot_through_terminal_state(
     assert all(result.ok for result in results)
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "renaming a lock file the tier holds open is refused by Windows itself "
+        "(PermissionError: WinError 32) before the tier under test is ever "
+        "reached -- this scenario is not constructible on Windows. Coverage "
+        "gap: inode replacement under a held lock is untested on win32. "
+        "See work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md, Cause 2."
+    ),
+)
 def test_bundle_root_lock_survives_executor_lock_inode_replacement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -573,7 +650,7 @@ def test_successful_write_preserves_the_effective_preimage_mode(tmp_path: Path) 
 
     assert result.ok is True
     assert target.read_bytes() == b"after"
-    assert stat.S_IMODE(target.stat().st_mode) == 0o640
+    assert stat.S_IMODE(target.stat().st_mode) == representable_mode(0o640, directory=False)
 
 
 def test_distinct_source_member_supplies_final_bytes_precondition_and_mode(tmp_path: Path) -> None:
@@ -606,7 +683,7 @@ def test_distinct_source_member_supplies_final_bytes_precondition_and_mode(tmp_p
     destination = layout.bundle_dir / "work/destination/page.md"
     assert result.ok is True
     assert destination.read_bytes() == b"composed final bytes"
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    assert stat.S_IMODE(destination.stat().st_mode) == representable_mode(0o600, directory=False)
     assert not source_directory.exists()
 
 
@@ -671,7 +748,16 @@ def test_absent_implicit_mkdir_ancestor_is_revalidated_without_effects(tmp_path:
     assert _snapshot(layout.bundle_dir) == before
 
 
-def test_direct_moves_preserve_symlink_target_and_empty_directory_effects(tmp_path: Path) -> None:
+def test_direct_moves_preserve_symlink_target_and_empty_directory_effects(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "Moving a symlink member must succeed for this plan; the "
+        "windows-revalidated tier refuses every planned symlink member "
+        "categorically at preflight (D-002's backstop), so this move can "
+        "never succeed on the weak tier.",
+    )
     layout = _workspace(tmp_path)
     work = layout.bundle_dir / "work"
     source = work / "source"
@@ -732,7 +818,7 @@ def test_targeted_index_validation_failure_restores_original_index(tmp_path: Pat
     _write_item(layout.bundle_dir, "work/feature-target", type="Feature")
     (work / "feature-target").mkdir()
     index = work / "index.md"
-    index.write_text("# Human prose\n", encoding="utf-8")
+    index.write_text("# Human prose\n", encoding="utf-8", newline="")
     before = _snapshot(layout.bundle_dir)
     plan = _plan(
         layout,
@@ -756,7 +842,7 @@ def test_targeted_index_validation_reads_the_anchored_bundle(tmp_path: Path, mon
     _write_item(layout.bundle_dir, "work/feature-target", type="Feature")
     (work / "feature-target").mkdir()
     index = work / "index.md"
-    index.write_text("# Human prose\n", encoding="utf-8")
+    index.write_text("# Human prose\n", encoding="utf-8", newline="")
     decoy = layout.bundle_dir.with_name("okf-index-decoy")
     held = layout.bundle_dir.with_name("okf-index-held")
     shutil.copytree(layout.bundle_dir, decoy, symlinks=True)
@@ -920,6 +1006,113 @@ def test_rollback_failure_reports_original_and_recovery_errors(tmp_path: Path, m
     assert final_record["complete"] is False
 
 
+def test_snapshotting_a_read_only_file_does_not_lock_the_backup_before_fsync(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/page.md"
+    target.parent.mkdir()
+    target.write_bytes(b"before")
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is True
+        assert target.read_bytes() == b"after"
+        assert stat.S_IMODE(target.stat().st_mode) == representable_mode(stat.S_IREAD, directory=False)
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_rolling_back_a_committed_read_only_write_restores_the_original_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A read-only member's mutation can now succeed and leave the published
+    file read-only (Task 5's `_stamp_live_mode`). If a LATER failure -- here a
+    forced postcondition failure -- routes into `_restore_snapshot` after that
+    write has already committed, rollback must be able to remove the
+    now-read-only live file (`_remove_live_entry`, Finding C1) and restore the
+    backup onto the live filesystem (`_copy_backup_file`, Finding C2) without
+    Windows refusing either operation with `PermissionError`.
+    """
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/page.md"
+    target.parent.mkdir()
+    target.write_bytes(b"before")
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
+        monkeypatch.setattr(transactions, "_validate_postconditions", lambda *_args: ("forced validation failure",))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is False
+        assert result.rolled_back is True
+        assert target.read_bytes() == b"before"
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_deleting_a_read_only_directory_via_a_mutation_plan_clears_the_attribute_first(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/readonly-dir"
+    target.mkdir(parents=True)
+    target.chmod(stat.S_IREAD)
+    try:
+        plan = _plan(layout, deletes=("work/readonly-dir",))
+
+        result = apply_mutation(layout, plan)
+
+        assert result.ok is True
+        assert not target.exists()
+    finally:
+        if target.exists():
+            target.chmod(stat.S_IREAD | stat.S_IWRITE)
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason=(
+        "the subject, `_clear_read_only_before_unlink`, returns immediately on "
+        "non-win32 -- there is no POSIX read-only attribute to clear. The setup's "
+        "`chmod(S_IREAD)` is 0o400 on POSIX, an untraversable directory rather than "
+        "a read-only one, which `_remove_live_entry` refuses to walk by design."
+    ),
+)
+def test_deleting_a_read_only_directory_clears_the_attribute_first(tmp_path: Path) -> None:
+    """`_remove_live_entry` (the `_restore_snapshot` rollback path) must clear
+    a directory's read-only attribute before `rmdir`, exactly like the
+    quarantine-delete path `_commit_effect`/`_take_custody` already does.
+
+    Exercised directly against `_remove_live_entry` rather than through a
+    full `apply_mutation` plan: a single-member `deletes` entry in
+    `WorkMutationPlan` maps to one `_Effect("delete", ...)` that assumes the
+    directory is already empty (`_commit_effect` calls a bare
+    `parent.rmdir(quarantine)`, not a recursive walk) -- a directory
+    containing `child.md` fails there with `ERROR_DIR_NOT_EMPTY` regardless
+    of this fix, for a reason outside `_remove_live_entry`'s scope. Calling
+    the target function directly is the same pattern already used elsewhere
+    in this module (e.g. `transactions._open_root` /
+    `transactions._capture_validation_state` above) and isolates the
+    regression to the function this task actually changes.
+    """
+    layout = _workspace(tmp_path)
+    target = layout.bundle_dir / "work/doomed"
+    target.mkdir(parents=True)
+    (target / "child.md").write_bytes(b"content")
+    target.chmod(stat.S_IREAD)
+
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        transactions._remove_live_entry(root, "work/doomed")
+    finally:
+        root.close()
+
+    assert not target.exists()
+
+
 def test_complete_journal_failure_rolls_back_live_effects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout = _workspace(tmp_path)
     target = layout.bundle_dir / "work/page.bin"
@@ -1081,8 +1274,15 @@ def test_ancestor_swap_after_final_preflight_cannot_escape_bundle(
 
 
 def test_symlink_move_cannot_make_a_later_effect_traverse_its_target(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "The windows-revalidated tier refuses the planned symlink member "
+        "categorically at preflight (D-002's backstop), before the moved "
+        "symlink is ever created -- so the later-effect traversal this test "
+        "guards against cannot be constructed on the weak tier.",
+    )
     layout = _workspace(tmp_path)
     work = layout.bundle_dir / "work"
     physical = work / "physical"
@@ -1138,11 +1338,11 @@ def test_baseline_capture_counts_findings_under_their_post_move_paths(tmp_path: 
     (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), path, release)
-    root_fd = transactions._open_root(layout.bundle_dir)
+    root = transactions._open_root(layout.bundle_dir)
     try:
-        state = transactions._capture_validation_state(layout, plan, root_fd, repo_root=repo)
+        state = transactions._capture_validation_state(layout, plan, root, repo_root=repo)
     finally:
-        os.close(root_fd)
+        root.close()
 
     destination = f"{release}/children/bug-source.md"
     assert state.findings[(destination, "targets.affects-missing")] == 1
@@ -1180,18 +1380,18 @@ def test_unrelated_excused_note_does_not_fabricate_a_pre_existing_summary(tmp_pa
     _write_item(layout.bundle_dir, path, type="Feature")
     (layout.bundle_dir / path).mkdir()
     plan = _plan(layout, validate_paths=(path,))
-    root_fd = transactions._open_root(layout.bundle_dir)
+    root = transactions._open_root(layout.bundle_dir)
     excused = ["baseline capture failed, falling back to absolute postcondition gate for this mutation: boom"]
     try:
         failures = transactions._validate_postconditions(
             layout,
             plan,
-            root_fd,
+            root,
             baseline=None,
             excused=excused,
         )
     finally:
-        os.close(root_fd)
+        root.close()
 
     assert failures == ()
     assert excused == ["baseline capture failed, falling back to absolute postcondition gate for this mutation: boom"]
@@ -1304,12 +1504,50 @@ def test_real_reparent_preserves_mapped_nested_and_empty_directory_modes(tmp_pat
 
     destination = layout.bundle_dir / release / "children/bug-source"
     assert result.ok is True
-    assert stat.S_IMODE(destination.stat().st_mode) == 0o700
-    assert stat.S_IMODE(destination.joinpath("nested").stat().st_mode) == 0o710
-    assert stat.S_IMODE(destination.joinpath("nested/empty").stat().st_mode) == 0o750
+    assert stat.S_IMODE(destination.stat().st_mode) == representable_mode(0o700, directory=True)
+    assert stat.S_IMODE(destination.joinpath("nested").stat().st_mode) == representable_mode(0o710, directory=True)
+    assert stat.S_IMODE(destination.joinpath("nested/empty").stat().st_mode) == representable_mode(
+        0o750, directory=True
+    )
 
 
 def test_mapped_directory_mode_change_after_snapshot_refuses_before_effects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = _workspace(tmp_path)
+    release = "work/release-cutover"
+    source = "work/bug-source"
+    _write_item(layout.bundle_dir, release, type="Release")
+    _write_item(layout.bundle_dir, source, type="Bug")
+    source_root = layout.bundle_dir / source
+    source_root.mkdir()
+    source_root.chmod(0o500)
+    (layout.bundle_dir / release / "children").mkdir(parents=True)
+    (layout.bundle_dir / release / "children/_archive").mkdir()
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    plan = plan_reparent(bundle, load_items(bundle), source, release)
+    real_snapshot = transactions._create_snapshot
+
+    def chmod_after_snapshot(*args: object, **kwargs: object):
+        snapshot = real_snapshot(*args, **kwargs)
+        source_root.chmod(0o755)
+        return snapshot
+
+    monkeypatch.setattr(transactions, "_create_snapshot", chmod_after_snapshot)
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is False
+    assert result.rolled_back is False
+    assert "directory mode changed since planning" in result.failures[0]
+    assert stat.S_IMODE(source_root.stat().st_mode) == representable_mode(0o755, directory=True)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="0o700 -> 0o755 is invisible on NTFS, which resolves both to S_IWRITE set -- see ADR-0042 L8",
+)
+def test_mapped_directory_mode_change_refuses_a_drift_the_platform_can_only_represent_on_posix(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     layout = _workspace(tmp_path)
@@ -1338,7 +1576,7 @@ def test_mapped_directory_mode_change_after_snapshot_refuses_before_effects(
     assert result.ok is False
     assert result.rolled_back is False
     assert "directory mode changed since planning" in result.failures[0]
-    assert stat.S_IMODE(source_root.stat().st_mode) == 0o755
+    assert stat.S_IMODE(source_root.stat().st_mode) == representable_mode(0o755, directory=True)
 
 
 def test_rollback_is_not_reported_complete_when_snapshot_verification_fails(
@@ -1619,7 +1857,37 @@ def test_existing_write_mismatch_recovery_never_exchanges_over_a_recreated_name(
     assert any("quarantine" in failure for failure in result.failures)
 
 
-def test_validation_uses_live_root_for_absolute_internal_registered_sources(tmp_path: Path) -> None:
+def test_validation_uses_live_root_for_absolute_internal_registered_sources(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "This is a real, examined trade-off the controller accepted when closing "
+        "the C7 scanning gap (Defect B), not a proven impossibility. The registered "
+        "source here is a symlink living inside the item's owned directory, which "
+        "`validate_paths` names but never touches directly. Closing C7 means "
+        "`_expand_directory_members` now recurses into every directory a plan "
+        "touches or validates -- including validate_paths-only directories -- and "
+        "scans everything it finds (see "
+        "`test_preflight_refuses_offending_members_staged_inside_a_validated_directory`, "
+        "whose offender is staged inside exactly such a directory). That expanded "
+        "scan necessarily also surfaces this symlink, and the windows-revalidated "
+        "tier refuses every symlink it sees categorically at preflight (D-002's "
+        "backstop) -- it has no way to distinguish 'a source explicitly registered "
+        "in this item's frontmatter' from 'an out-of-band offender' at the "
+        "preflight-scan level, because that distinction lives in a different layer "
+        "(the item's `sources:` frontmatter) that `_preflight` deliberately does "
+        "not read. Narrowing the scan to skip validate_paths-only directories was "
+        "considered as a way to avoid this xfail, and rejected: it would exempt "
+        "exactly the directory shape "
+        "`test_preflight_refuses_offending_members_staged_inside_a_validated_directory` "
+        "exists to cover, silently reopening the C7 gap this task closed. So a "
+        "legitimate registered symlink source pays the same categorical-refusal "
+        "price as an illegitimate one on this tier, accepted as the cost of closing "
+        "C7 -- see `Anchor.refused_members`'s docstring for the tier's symlink "
+        "backstop, and the strong POSIX tier (or WSL) for a durability tier that "
+        "does not have this limitation.",
+    )
     layout = _workspace(tmp_path)
     item = "work/feature-target"
     _write_item(layout.bundle_dir, item, type="Feature")
@@ -1645,7 +1913,7 @@ def test_validation_uses_live_root_for_absolute_internal_registered_sources(tmp_
     result = apply_mutation(layout, plan)
 
     assert result.ok is True
-    assert registered.readlink() == actual
+    assert _normalize_link_target(registered) == actual
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX fifo semantics")
@@ -1926,7 +2194,17 @@ def test_terminal_journal_history_requires_recursive_json_type_identity(
     assert transactions._journal_has_terminal_complete(journal, expected_history) is False
 
 
-def test_absolute_internal_symlink_moves_byte_for_byte_while_external_still_refuses(tmp_path: Path) -> None:
+def test_absolute_internal_symlink_moves_byte_for_byte_while_external_still_refuses(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "Moving a symlink member must succeed for the internal case; the "
+        "windows-revalidated tier refuses every planned symlink member "
+        "categorically at preflight (D-002's backstop), so this move can "
+        "never succeed on the weak tier regardless of where its target "
+        "resolves.",
+    )
     layout = _workspace(tmp_path)
     work = layout.bundle_dir / "work"
     source = work / "source"
@@ -1970,16 +2248,32 @@ def test_absolute_external_symlink_move_is_refused_before_live_effects(tmp_path:
 
     assert result.ok is False
     assert result.rolled_back is False
-    assert "escape the bundle root" in result.failures[0]
+    # The strong tier reaches the containment check and reports "escape the
+    # bundle root"; the weak tier refuses the symlink member categorically at
+    # preflight, before any containment analysis runs. Both refuse before any
+    # live effect, which is the guarantee under test.
+    assert "escape the bundle root" in result.failures[0] or "is a symlink" in result.failures[0]
     assert source.is_symlink()
-    assert source.readlink() == external
+    assert _normalize_link_target(source) == external
     assert not (layout.bundle_dir / "work/destination").exists()
     assert external.read_bytes() == b"external"
 
 
 def test_root_name_loss_after_validation_prevents_a_truthy_rollback(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "Asserts that the pre-write content survives at the swapped-away "
+        "original location after a failed rollback attempt -- true only "
+        "because the strong tier's descriptor-pinned restore keeps writing "
+        "to the original inode even after it is renamed out from under the "
+        "path. The weak tier's `_revalidate()` detects the identity mismatch "
+        "immediately and refuses every further anchor operation, including "
+        "the restore itself, so no write ever reaches the swapped-away "
+        "location. This is the tier's documented defining weakness "
+        "(ADR-0042), not a bug this task can fix.",
+    )
     layout = _workspace(tmp_path)
     target = layout.bundle_dir / "work/page.bin"
     target.parent.mkdir()
@@ -2100,8 +2394,18 @@ def test_direct_move_double_conflict_preserves_source_quarantine_and_destination
 
 
 def test_validation_reads_anchored_root_when_configured_name_swaps_during_load(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> None:
+    _xfail_on_weak_tier(
+        request,
+        "Asserts the strong tier's defining protection: a descriptor-pinned "
+        "read survives a path swap performed while validation is loading the "
+        "bundle. `_load_bundle_through`'s weak-tier arm walks the plain path "
+        "(anchors.py:361-375) rather than a pinned descriptor, and the swap "
+        "in this test is undone before `_assert_root_identity` re-checks -- "
+        "so the swap window is not detected. This is the tier's documented "
+        "defining weakness (ADR-0042), not a bug this task can fix.",
+    )
     layout = _workspace(tmp_path)
     item = "work/feature-target"
     _write_item(layout.bundle_dir, item, type="Feature")
@@ -2116,18 +2420,18 @@ def test_validation_reads_anchored_root_when_configured_name_swaps_during_load(
         writes=(PlannedWrite(f"{item}.md", _digest(before), b"\xff\xfe"),),
         validate_paths=(item,),
     )
-    real_load = transactions._load_bundle_at
+    real_load = transactions._load_bundle_through
 
-    def swap_only_while_loading(root: Path, root_fd: int, **kwargs: object):
+    def swap_only_while_loading(root: transactions.Anchor, path: Path, **kwargs: object):
         layout.bundle_dir.rename(held)
         decoy.rename(layout.bundle_dir)
         try:
-            return real_load(root, root_fd, **kwargs)
+            return real_load(root, path, **kwargs)
         finally:
             layout.bundle_dir.rename(decoy)
             held.rename(layout.bundle_dir)
 
-    monkeypatch.setattr(transactions, "_load_bundle_at", swap_only_while_loading)
+    monkeypatch.setattr(transactions, "_load_bundle_through", swap_only_while_loading)
 
     result = apply_mutation(layout, plan)
 
@@ -2137,25 +2441,44 @@ def test_validation_reads_anchored_root_when_configured_name_swaps_during_load(
     assert page.read_bytes() == before
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="monkeypatches fcntl.flock to swap the lock file mid-acquire; Windows locks via msvcrt.locking",
+)
 def test_executor_lock_name_swap_never_redirects_lock_io_into_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    import fcntl  # E1: transactions.py no longer imports fcntl at module scope (Task 5).
+
     layout = _workspace(tmp_path)
     lock_path = layout.cache_dir / "work-mutations/executor.lock"
     held_lock = lock_path.with_name("executor-held.lock")
     escaped = layout.bundle_dir / ".lock-escape"
-    real_flock = transactions.fcntl.flock
+    real_flock = fcntl.flock
     swapped = False
 
     def swap_after_lock(descriptor: int, operation: int) -> None:
+        # Identify the EXECUTOR lock's own file by inode, not merely "the first
+        # regular-file LOCK_EX" -- the windows-revalidated tier's bundle-root
+        # lock (`.gw-bundle.lock`) is ALSO a regular-file `fcntl.flock` on this
+        # host (both tiers bottom out in `okf_ext.locking.locked`, which only
+        # forks on the real `sys.platform`, not this test's forced tier), and
+        # it is acquired first. Matching by inode keeps the swap trained on the
+        # executor lock regardless of which lock a given tier takes en route.
         nonlocal swapped
         real_flock(descriptor, operation)
-        if operation == transactions.fcntl.LOCK_EX and stat.S_ISREG(os.fstat(descriptor).st_mode) and not swapped:
+        if (
+            operation == fcntl.LOCK_EX
+            and not swapped
+            and stat.S_ISREG(os.fstat(descriptor).st_mode)
+            and lock_path.exists()
+            and os.fstat(descriptor).st_ino == lock_path.stat().st_ino
+        ):
             swapped = True
             lock_path.rename(held_lock)
             lock_path.symlink_to(escaped)
 
-    monkeypatch.setattr(transactions.fcntl, "flock", swap_after_lock)
+    monkeypatch.setattr(fcntl, "flock", swap_after_lock)
 
     with pytest.raises(ValueError, match=r"lock.*changed|changed.*lock"):
         apply_mutation(layout, _plan(layout))
@@ -2164,6 +2487,16 @@ def test_executor_lock_name_swap_never_redirects_lock_io_into_bundle(
     assert held_lock.is_file()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "renaming journal.jsonl while the tier holds it open is refused by "
+        "Windows itself before the tier under test is ever reached -- this "
+        "scenario is not constructible on Windows. Coverage gap: the journal "
+        "name swap is untested on win32. See work/epic-native-windows-support/"
+        "children/bug-graph-works-core-suite-fails-on.md, Cause 2."
+    ),
+)
 def test_journal_name_swap_never_redirects_journal_io_into_bundle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2293,8 +2626,17 @@ def test_duplicate_journal_keys_never_certify_terminal_completion(
 
 @pytest.mark.parametrize("target_location", ["internal", "external"])
 def test_relative_moved_symlink_projection_follows_destination_ancestor_links(
-    tmp_path: Path, target_location: str
+    tmp_path: Path, target_location: str, request: pytest.FixtureRequest
 ) -> None:
+    if target_location == "internal":
+        _xfail_on_weak_tier(
+            request,
+            "Moving a symlink member must succeed for the internal case; the "
+            "windows-revalidated tier refuses every planned symlink member "
+            "categorically at preflight (D-002's backstop), so this move can "
+            "never succeed on the weak tier regardless of where its target "
+            "resolves.",
+        )
     layout = _workspace(tmp_path)
     work = layout.bundle_dir / "work"
     source_dir = work / "source"
@@ -2327,12 +2669,25 @@ def test_relative_moved_symlink_projection_follows_destination_ancestor_links(
     else:
         assert result.ok is False
         assert result.rolled_back is False
-        assert "escape the bundle root" in result.failures[0]
+        # See test_absolute_external_symlink_move_is_refused_before_live_effects:
+        # the weak tier refuses the symlink member categorically at preflight
+        # rather than reaching the containment check, so its message differs.
+        assert "escape the bundle root" in result.failures[0] or "is a symlink" in result.failures[0]
         assert source.is_symlink()
         assert source.readlink() == Path("gateway/target.bin")
         assert not moved.exists()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "descriptor-leak counting relies on /proc/self/fd (or darwin's "
+        "/dev/fd), which does not exist on win32 -- no Windows-native "
+        "equivalent exists. Coverage gap: the cache-descriptor leak property "
+        "is untested on win32. See work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md, Cause 4."
+    ),
+)
 def test_work_mutations_open_failure_does_not_leak_cache_descriptor(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -2368,14 +2723,14 @@ def test_transaction_journal_helpers_reject_malformed_histories_and_support_anch
     journal.write_text('["prepared"]\n', encoding="utf-8")
     assert not transactions._journal_has_terminal_complete(journal, expected)
 
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
-    descriptor = os.open("journal.jsonl", os.O_RDWR | os.O_APPEND, dir_fd=parent_fd)
+    parent = transactions._open_absolute_directory(tmp_path)
+    descriptor = parent.open_file("journal.jsonl", os.O_RDWR | os.O_APPEND)
     try:
         journal.write_text("", encoding="utf-8")
         transactions._append_journal(
             journal,
             "prepared",
-            _parent_fd=parent_fd,
+            _parent=parent,
             _journal_fd=descriptor,
             transaction_id="tx",
         )
@@ -2384,10 +2739,10 @@ def test_transaction_journal_helpers_reject_malformed_histories_and_support_anch
             transactions._append_journal(journal, "bad", _journal_fd=descriptor)
     finally:
         os.close(descriptor)
-        os.close(parent_fd)
+        parent.close()
 
 
-def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures(tmp_path: Path) -> None:
+def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures() -> None:
     assert not transactions._json_values_equal(True, 1)
     assert not transactions._json_values_equal({"a": 1}, {"b": 1})
     assert not transactions._json_values_equal([1], [1, 2])
@@ -2398,25 +2753,52 @@ def test_transaction_json_and_descriptor_guards_cover_type_and_identity_failures
     with pytest.raises(ValueError, match="non-finite JSON"):
         transactions._finite_json_float("1e999")
 
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "unlinking a file while a read-only descriptor is still open on it "
+        "is refused by Windows (PermissionError: WinError 32) -- CPython's "
+        "os.open() requests no delete-sharing, and POSIX's unlink-keeps-the-fd-"
+        "valid semantics have no Windows equivalent. Coverage gap: "
+        "_assert_regular_entry_identity's stale-descriptor detection via "
+        "unlink-while-open is untested on win32. See "
+        "work/epic-native-windows-support/children/"
+        "bug-graph-works-core-suite-fails-on.md."
+    ),
+)
+def test_assert_regular_entry_identity_detects_unlink_while_open(tmp_path: Path) -> None:
+    entry = tmp_path / "entry"
+    entry.write_text("one", encoding="utf-8")
+    parent = transactions._open_absolute_directory(tmp_path)
+    entry_fd = os.open(entry, os.O_RDONLY)
+    entry.unlink()
+    entry.write_text("two", encoding="utf-8")
+    try:
+        with pytest.raises(ValueError, match="changed during mutation"):
+            transactions._assert_regular_entry_identity(parent, "entry", entry_fd, "entry")
+    finally:
+        os.close(entry_fd)
+        parent.close()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason=(
+        "os.open() on a directory with O_RDONLY is refused by Windows -- "
+        "there is no Windows-native way to obtain a directory descriptor "
+        "this way. Coverage gap: _require_regular_file's directory-rejection "
+        "guard is untested on win32. See work/epic-native-windows-support/"
+        "children/bug-graph-works-core-suite-fails-on.md, Cause 4."
+    ),
+)
+def test_require_regular_file_rejects_a_directory_descriptor(tmp_path: Path) -> None:
     directory_fd = os.open(tmp_path, os.O_RDONLY)
     try:
         with pytest.raises(ValueError, match="not a regular file"):
             transactions._require_regular_file(directory_fd, "directory")
     finally:
         os.close(directory_fd)
-
-    entry = tmp_path / "entry"
-    entry.write_text("one", encoding="utf-8")
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
-    entry_fd = os.open(entry, os.O_RDONLY)
-    entry.unlink()
-    entry.write_text("two", encoding="utf-8")
-    try:
-        with pytest.raises(ValueError, match="changed during mutation"):
-            transactions._assert_regular_entry_identity(parent_fd, "entry", entry_fd, "entry")
-    finally:
-        os.close(entry_fd)
-        os.close(parent_fd)
 
 
 def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) -> None:
@@ -2426,44 +2808,40 @@ def test_transaction_directory_open_lock_and_identity_helpers(tmp_path: Path) ->
 
     file = tmp_path / "file"
     file.write_text("x", encoding="utf-8")
-    file_fd = os.open(file, os.O_RDONLY)
-    try:
-        with pytest.raises(NotADirectoryError), transactions._bundle_root_lock(file_fd):
-            pass
-    finally:
-        os.close(file_fd)
+    with pytest.raises(NotADirectoryError):
+        transactions._open_root(file)  # refuses a non-directory on both tiers
 
     with pytest.raises(ValueError, match="must be absolute"):
         transactions._open_absolute_directory(Path("relative"))
     opened = transactions._open_absolute_directory(tmp_path)
-    os.close(opened)
+    opened.close()
 
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
+    parent = transactions._open_absolute_directory(tmp_path)
     try:
-        child_fd = transactions._open_or_create_directory(parent_fd, "created")
-        os.close(child_fd)
-        child_fd = transactions._open_or_create_directory(parent_fd, "created")
+        child = transactions._open_or_create_directory(parent, "created")
+        child.close()
+        child = transactions._open_or_create_directory(parent, "created")
         try:
             moved = tmp_path / "moved"
             (tmp_path / "created").rename(moved)
             with pytest.raises(ValueError, match="directory changed"):
-                transactions._assert_directory_identity(tmp_path / "created", child_fd, "child")
+                transactions._assert_directory_identity(tmp_path / "created", child, "child")
         finally:
-            os.close(child_fd)
+            child.close()
     finally:
-        os.close(parent_fd)
+        parent.close()
 
 
 def test_transaction_path_helpers_create_ancestors_and_hash_entry_kinds(tmp_path: Path) -> None:
-    root_fd = os.open(tmp_path, os.O_RDONLY)
+    root = transactions._open_root(tmp_path)
     touched: set[str] = set()
     try:
-        parent_fd, name = transactions._open_parent(root_fd, "new/deep/file", create=True, touched=touched)
-        os.close(parent_fd)
+        parent, name = transactions._open_parent(root, "new/deep/file", create=True, touched=touched)
+        parent.close()
         assert name == "file" and touched == {"new", "new/deep"}
         with pytest.raises(ValueError, match="now exists"):
             transactions._open_parent(
-                root_fd,
+                root,
                 "new/deep/file",
                 create=True,
                 touched=set(),
@@ -2476,19 +2854,20 @@ def test_transaction_path_helpers_create_ancestors_and_hash_entry_kinds(tmp_path
         (tmp_path / "tree").mkdir()
         (tmp_path / "tree/file").write_text("payload", encoding="utf-8")
         (tmp_path / "tree/link").symlink_to("file")
-        assert transactions._entry_fingerprint_at(root_fd, "tree")
-        transactions._validate_ancestor_chain(root_fd, "missing/child")
+        assert transactions._entry_fingerprint_at(root, "tree")
+        transactions._validate_ancestor_chain(root, "missing/child")
         (tmp_path / "ancestor-link").symlink_to(tmp_path / "tree")
         with pytest.raises(ValueError, match="unsafe ancestor"):
-            transactions._validate_ancestor_chain(root_fd, "ancestor-link/child")
+            transactions._validate_ancestor_chain(root, "ancestor-link/child")
     finally:
-        os.close(root_fd)
+        root.close()
 
     transactions._fsync_entry(tmp_path / "tree")
     transactions._fsync_entry(tmp_path / "tree/file")
     transactions._fsync_entry(tmp_path / "tree/link")
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fifo semantics")
 def test_transaction_snapshot_and_copy_helpers_cover_nested_entries_and_special_files(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     plan = _plan(
@@ -2555,18 +2934,18 @@ def test_transaction_preflight_rejects_refused_foreign_and_duplicate_effect_plan
         layout,
         directory_preconditions=(DirectoryPrecondition("absent", None), DirectoryPrecondition("absent", None)),
     )
-    root_fd = transactions._open_root(layout.bundle_dir)
+    root = transactions._open_root(layout.bundle_dir)
     try:
         with pytest.raises(ValueError, match="duplicate members"):
-            transactions._preflight_anchored(duplicate_conditions, root_fd, tmp_path / "scratch")
+            transactions._preflight_anchored(duplicate_conditions, root, tmp_path / "scratch")
         duplicate_writes = _plan(
             layout,
             writes=(PlannedWrite("new", None, b"a"), PlannedWrite("new", None, b"b")),
         )
         with pytest.raises(ValueError, match="duplicate targets"):
-            transactions._preflight_anchored(duplicate_writes, root_fd, tmp_path / "scratch")
+            transactions._preflight_anchored(duplicate_writes, root, tmp_path / "scratch")
     finally:
-        os.close(root_fd)
+        root.close()
 
 
 def test_anchored_preflight_rejects_each_stale_write_and_move_shape(tmp_path: Path) -> None:
@@ -2575,7 +2954,7 @@ def test_anchored_preflight_rejects_each_stale_write_and_move_shape(tmp_path: Pa
     (root / "existing").write_bytes(b"old")
     (root / "source").write_bytes(b"source")
     (root / "destination").write_bytes(b"destination")
-    root_fd = transactions._open_root(root)
+    root_anchor = transactions._open_root(root)
 
     cases = [
         (_plan(layout, directory_preconditions=(DirectoryPrecondition("missing", "digest"),)), "now missing"),
@@ -2602,9 +2981,116 @@ def test_anchored_preflight_rejects_each_stale_write_and_move_shape(tmp_path: Pa
     try:
         for index, (plan, message) in enumerate(cases):
             with pytest.raises(ValueError, match=message):
-                transactions._preflight_anchored(plan, root_fd, tmp_path / f"scratch-{index}")
+                transactions._preflight_anchored(plan, root_anchor, tmp_path / f"scratch-{index}")
     finally:
-        os.close(root_fd)
+        root_anchor.close()
+
+
+def test_write_preimage_stale_refusal_names_line_endings_when_crlf_recovers_the_digest(
+    tmp_path: Path,
+) -> None:
+    """§B/D-095: LF was planned, CRLF is on disk -- git status sees no change."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    (root / "existing").write_bytes(b"line one\r\nline two\r\n")
+    root_anchor = transactions._open_root(root)
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite("existing", _digest(b"line one\nline two\n"), b"new"),),
+    )
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    message = str(excinfo.value)
+    assert "existing" in message
+    assert "line ending" in message.lower()
+    assert "git status" in message.lower()
+    assert "gw util line-endings --fix" in message
+
+
+def test_write_preimage_stale_refusal_names_line_endings_when_lf_recovers_the_digest(
+    tmp_path: Path,
+) -> None:
+    """Bidirectional: CRLF was planned, LF is on disk."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    (root / "existing").write_bytes(b"line one\nline two\n")
+    root_anchor = transactions._open_root(root)
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite("existing", _digest(b"line one\r\nline two\r\n"), b"new"),),
+    )
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    message = str(excinfo.value)
+    assert "existing" in message
+    assert "line ending" in message.lower()
+    assert "gw util line-endings --fix" in message
+
+
+def test_write_preimage_stale_refusal_is_byte_identical_when_content_actually_differs(
+    tmp_path: Path,
+) -> None:
+    """A real content change must get the unchanged, bare message -- no false diagnosis."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    (root / "existing").write_bytes(b"old")
+    root_anchor = transactions._open_root(root)
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite("existing", _digest(b"different"), b"new"),),
+    )
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    assert str(excinfo.value) == "existing: changed since planning; re-plan"
+
+
+def test_move_plan_body_stale_refusal_names_line_endings_when_crlf_recovers_the_digest(
+    tmp_path: Path,
+) -> None:
+    """§B/D-095 at the second site: the move-plan body-digest check."""
+    layout = _workspace(tmp_path)
+    root = layout.bundle_dir
+    member = "existing.md"
+    planned_text = "---\ntype: Explanation\ntitle: Existing\n---\n\nBody line.\n"
+    planned_document = parse(planned_text, path=root / member)
+    on_disk_text = planned_text.replace("\n", "\r\n")
+    (root / member).write_bytes(on_disk_text.encode("utf-8"))
+    root_anchor = transactions._open_root(root)
+    move_plan = MovePlan(
+        root=root,
+        moves=(),
+        edits=(),
+        refusals=(),
+        unrebased=(),
+        digests={member: body_digest(planned_document.body)},
+    )
+    plan = replace(_plan(layout), move_plan=move_plan)
+
+    try:
+        with pytest.raises(ValueError) as excinfo:
+            transactions._preflight_anchored(plan, root_anchor, tmp_path / "scratch")
+    finally:
+        root_anchor.close()
+
+    message = str(excinfo.value)
+    assert member in message
+    assert "line ending" in message.lower()
+    assert "gw util line-endings --fix" in message
 
 
 def test_copy_entry_handles_top_level_files_and_symlinks(tmp_path: Path) -> None:
@@ -2622,16 +3108,18 @@ def test_copy_entry_handles_top_level_files_and_symlinks(tmp_path: Path) -> None
 
 
 def test_append_journal_supports_parent_descriptor_without_retained_file(tmp_path: Path) -> None:
-    parent_fd = os.open(tmp_path, os.O_RDONLY)
+    parent = transactions._open_absolute_directory(tmp_path)
     try:
         journal = tmp_path / "anchored.jsonl"
-        transactions._append_journal(journal, "prepared", _parent_fd=parent_fd, transaction_id="tx")
+        transactions._append_journal(journal, "prepared", _parent=parent, transaction_id="tx")
     finally:
-        os.close(parent_fd)
+        parent.close()
     assert json.loads(journal.read_text(encoding="utf-8"))["state"] == "prepared"
 
 
-def test_rollback_restores_a_backed_up_directory_tree_with_nested_content(tmp_path: Path) -> None:
+def test_rollback_restores_a_backed_up_directory_tree_with_nested_content(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
     """`_copy_backup_to_live`'s directory arm, which the file and symlink arms
     return before ever reaching.
 
@@ -2640,6 +3128,14 @@ def test_rollback_restores_a_backed_up_directory_tree_with_nested_content(tmp_pa
     existence check passes while the subtree beneath it is missing. This walks
     a real preimage back into place and compares the whole tree.
     """
+    _xfail_on_weak_tier(
+        request,
+        "Restoring a backed-up directory containing a symlink member calls "
+        "`Anchor.symlink()`, which the windows-revalidated tier always refuses "
+        "(D-002's backstop: Windows symlink creation needs Developer Mode or "
+        "SeCreateSymbolicLinkPrivilege); there is no way to construct this "
+        "rollback scenario on the weak tier.",
+    )
     root = tmp_path / "live"
     backup = tmp_path / "backup" / "owned"
     backup.mkdir(parents=True)
@@ -2677,6 +3173,7 @@ def test_rollback_restores_a_backed_up_directory_tree_with_nested_content(tmp_pa
     assert not (restored / "clobbered.bin").exists()
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX fifo semantics")
 def test_rollback_refuses_a_backup_holding_an_unsupported_entry_type(tmp_path: Path) -> None:
     """A preimage graph-works cannot faithfully reproduce must raise, not be
     silently skipped -- a skipped entry is a rollback reported as complete with
@@ -2826,3 +3323,79 @@ def test_a_new_dangling_dependency_added_on_top_of_a_pre_existing_one_still_fail
     introduced = [failure for failure in result.failures if "dependency target" in failure]
     assert len(introduced) == 1
     assert "work/bug-absent" in introduced[0] or "work/bug-also-absent" in introduced[0]
+
+
+def test_preflight_refuses_offending_members_staged_inside_a_validated_directory(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> None:
+    """C7's scanning gap: `_effective_members` names only a plan's literal
+    members, so an offender staged *inside* a directory the plan validates
+    (rather than named directly) was never reaching `_refuse_unsupported_shapes`.
+    """
+    _xfail_on_strong_tier(
+        request,
+        "A reserved device name is a weak-tier refusal only: `CON.md` is a "
+        "legal POSIX filename and `_PosixAnchor.refused_members` returns `()` "
+        "by contract, so the strong tier accepts this plan. The scanning gap "
+        "this proves closed is reachable only where the refusal exists.",
+    )
+    layout = _workspace(tmp_path)
+    item = "work/feature-target"
+    _write_item(layout.bundle_dir, item, type="Feature")
+    owner = layout.bundle_dir / item
+    owner.mkdir()
+    (owner / "CON.md").write_bytes(b"offender: reserved device name")
+    page = layout.bundle_dir / f"{item}.md"
+    before = page.read_bytes()
+    after = before.replace(b"updated: 2026-08-22", b"updated: 2026-08-23")
+    assert after != before
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite(f"{item}.md", _digest(before), after),),
+        validate_paths=(item,),
+    )
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is False
+    assert result.rolled_back is False
+    assert any("CON.md" in failure and "reserved device name" in failure for failure in result.failures)
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="directory junctions are an NTFS/Windows-only reparse-point shape")
+def test_expand_directory_members_refuses_to_recurse_into_a_junction_cycle(tmp_path: Path) -> None:
+    """`stat.S_ISDIR` is true for a directory junction, and `stat.S_ISLNK`
+    never catches it -- a junction is not a symlink. Left unguarded,
+    `_expand_directory_members` would follow a junction that points back at
+    one of its own ancestors and loop forever (or, pointed elsewhere, walk
+    an arbitrarily large external tree). This proves the walk terminates
+    when a junction inside a scanned directory points back at that
+    directory's own ancestor, and that the junction itself is still part of
+    the scanned member set -- only its contents are never visited. Note
+    that this does NOT mean the junction is safely handled: `refused_members`
+    only tests `is_symlink()`, which is `False` for a junction, so the
+    junction passes through the scan with no refusal at all. Closing that
+    content-safety gap is out of scope here; this test covers traversal
+    safety only.
+    """
+    layout = _workspace(tmp_path)
+    item = "work/feature-target"
+    _write_item(layout.bundle_dir, item, type="Feature")
+    owner = layout.bundle_dir / item
+    owner.mkdir()
+    nested = owner / "nested"
+    nested.mkdir()
+    loop = nested / "loop"
+    # A junction inside `nested` pointing back at `owner`: recursing into it
+    # would revisit `owner`, then `nested`, then `loop` again, forever.
+    subprocess.run(["cmd", "/c", "mklink", "/J", str(loop), str(owner)], check=True, capture_output=True)
+
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        expanded = transactions._expand_directory_members(root, {item: owner})
+    finally:
+        root.close()
+
+    assert f"{item}/nested" in expanded
+    assert f"{item}/nested/loop" in expanded
+    assert not any(member.startswith(f"{item}/nested/loop/") for member in expanded)

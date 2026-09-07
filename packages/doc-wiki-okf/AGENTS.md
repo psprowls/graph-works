@@ -15,14 +15,16 @@ From the repo root (workspace-relative invocations; this package resolves its
 own dependency closure so it runs under `--package`, per the root `justfile`):
 
 ```bash
-uv run --package doc-wiki-okf mypy --strict packages/doc-wiki-okf/src
+uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
+uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
 uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests
 uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
 These are exactly the `types` / `test` / `cov` lines the root `justfile` runs
 for this package — `just check` runs all workspace members together, but any
-one of the three above scopes to just this package. A single test or subset:
+one of the lines above scopes to just this package. `types` runs twice, once
+per `--platform` arm. A single test or subset:
 
 ```bash
 uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests/test_migrate_fixtures.py

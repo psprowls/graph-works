@@ -173,7 +173,8 @@ def file(
     if payload["applied"] and (payload["rolled_back"] or failures):
         for failure in failures:
             rendering.warn(failure)
-        rendering.fail(f"{payload['path']}: filing apply was incomplete")
+        blocking = failures[0] if failures else f"{payload['path']}: filing apply was incomplete"
+        rendering.fail(blocking)
     for warning in payload["warnings"]:
         rendering.warn(warning)
 

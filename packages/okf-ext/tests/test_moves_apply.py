@@ -59,12 +59,10 @@ def test_a_non_ok_plan_raises(live):
 
 def test_opaque_markdown_moves_without_body_or_frontmatter_edits(tmp_path):
     before = b"[old](../../feature-old.md)\n"
-    (tmp_path / "index.md").write_text("---\nokf_version: 0.2\n---\n# T\n", encoding="utf-8")
+    ext_helpers.write(tmp_path / "index.md", "---\nokf_version: 0.2\n---\n# T\n")
     refs = tmp_path / "work/feature-old/references"
     refs.mkdir(parents=True)
-    (tmp_path / "work/feature-old.md").write_text(
-        "---\ntitle: Old\ndescription: D\ntype: Feature\n---\n", encoding="utf-8"
-    )
+    ext_helpers.write(tmp_path / "work/feature-old.md", "---\ntitle: Old\ndescription: D\ntype: Feature\n---\n")
     (refs / "notes.md").write_bytes(before)
     bundle = load_bundle(tmp_path)
     mapping = {
@@ -120,7 +118,7 @@ def test_a_stale_body_aborts_the_whole_batch(live):
     root, bundle = live
     before = ext_helpers.snapshot(root)
     plan = plan_move(bundle, "concepts/alpha.md", "pages/alpha.md")
-    (root / "concepts" / "multi.md").write_text("---\ntitle: Multi\n---\n\n# Changed\n", encoding="utf-8")
+    ext_helpers.write(root / "concepts" / "multi.md", "---\ntitle: Multi\n---\n\n# Changed\n")
     reloaded = load_bundle(root)
     result = apply(reloaded, plan)
     assert not result.ok
@@ -145,6 +143,7 @@ def test_a_stale_frontmatter_value_aborts_the_whole_batch(live):
             "resource: ../assets/diagram.png\nsources:", "resource: ../assets/other.png\nsources:", 1
         ),
         encoding="utf-8",
+        newline="",
     )
     reloaded = load_bundle(root)
     result = apply(reloaded, plan)
@@ -773,7 +772,8 @@ def test_a_staging_failure_aborts_the_batch_and_leaves_no_temp_file(live, monkey
     def flaky(self, data):
         seen.append(self.name)
         if len(seen) == 3:
-            self.write_text("half a file", encoding="utf-8")  # a truncated temp, as a real failure leaves
+            # a truncated temp, as a real failure leaves
+            self.write_text("half a file", encoding="utf-8", newline="")
             raise OSError("no space left on device")
         return original(self, data)
 
@@ -797,7 +797,11 @@ def test_a_span_that_moved_under_an_unfingerprinted_plan_aborts_the_batch(live):
     plan = plan_move(bundle, "concepts/alpha.md", "pages/alpha.md")
     blind = dataclasses.replace(plan, digests={})
     multi = root / "concepts" / "multi.md"
-    multi.write_text(multi.read_text(encoding="utf-8").replace("[a](./alpha.md)", "[a](./ALPHA.md)"), encoding="utf-8")
+    multi.write_text(
+        multi.read_text(encoding="utf-8").replace("[a](./alpha.md)", "[a](./ALPHA.md)"),
+        encoding="utf-8",
+        newline="",
+    )
     reloaded = load_bundle(root)
     result = apply(reloaded, blind)
     assert not result.ok

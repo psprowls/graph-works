@@ -801,6 +801,57 @@ def _non_canonical_destination_refusals(path_mapping: Mapping[str, str]) -> tupl
     )
 
 
+def _prefix_rebase(resource: str, path_mapping: Mapping[str, str]) -> str | None:
+    """The value *resource* becomes when its owning item path moves, or `None`.
+
+    Root-absolute values only, longest matching prefix first, so a nested
+    child mapping wins over its ancestor's -- the same ordering
+    `_member_mapping` and `_directory_mapping` use. Returns `None` when
+    nothing in `path_mapping` owns *resource*, and for a value that would
+    rebase to itself, so the caller never writes a no-op edit.
+    """
+    if not resource.startswith("/"):
+        return None
+    stripped = resource[1:]
+    ordered = sorted(path_mapping, key=lambda path: (path.count("/"), len(path)), reverse=True)
+    for source in ordered:
+        if stripped != source and not stripped.startswith(f"{source}/"):
+            continue
+        destination = path_mapping[source]
+        rebased = f"/{destination}{stripped[len(source) :]}"
+        return None if rebased == resource else rebased
+    return None
+
+
+def _rebase_item_sources(after: bytes, path_mapping: Mapping[str, str]) -> bytes:
+    """Rebase every root-absolute `sources[].resource` in one rendered item page.
+
+    Operates on already-rendered bytes through `Document` so okf-io's
+    minimal-splice round-trip guarantee still holds for every other line in
+    the page. Returns *after* unchanged (same object) when nothing rebases.
+    """
+    document = Document.parse(after.decode("utf-8"))
+    sources = document.fm_raw.get("sources")
+    if not isinstance(sources, list):
+        return after
+    changed = False
+    for entry in sources:
+        if not isinstance(entry, dict):
+            continue
+        resource = entry.get("resource")
+        if not isinstance(resource, str):
+            continue
+        rebased = _prefix_rebase(resource, path_mapping)
+        if rebased is None:
+            continue
+        entry["resource"] = rebased
+        changed = True
+    if not changed:
+        return after
+    document.mark_dirty()
+    return document.serialize().encode("utf-8")
+
+
 def _plan_path_mutation(
     bundle: Bundle,
     items: Sequence[WorkItem],
@@ -810,7 +861,16 @@ def _plan_path_mutation(
     roots: Sequence[str],
     refusals: Sequence[MutationRefusal] = (),
 ) -> WorkMutationPlan:
-    """Materialize one path mapping without applying any filesystem effect."""
+    """Materialize one path mapping without applying any filesystem effect.
+
+    Two rebasing passes run over the moved bytes, deliberately not redundant:
+    okf-ext's `materialize()` rebases by *resolved identity* -- a
+    `sources[].resource` whose target is an existing bundle member. This
+    function additionally rebases a moved item page's own `sources[]` by
+    *canonical path prefix* -- an owner-relative pointer, existing or not --
+    since okf-ext has no notion of item ownership and cannot see a pointer
+    whose target was never written.
+    """
     frozen_mapping = MappingProxyType(dict(sorted(path_mapping.items())))
     members = _member_mapping(bundle, frozen_mapping)
     directories, directory_refusals = _directory_mapping(bundle.root, roots, frozen_mapping)
@@ -885,6 +945,14 @@ def _plan_path_mutation(
             effects = materialize(planning_bundle, generic)
     except ValueError as exc:
         all_refusals.append(MutationRefusal("", "materialize-error", str(exc)))
+    if effects is not None:
+        rebased_writes = dict(effects.writes)
+        for destination in frozen_mapping.values():
+            page_member = f"{destination}.md"
+            if page_member not in rebased_writes or parse_item_path(destination) is None:
+                continue
+            rebased_writes[page_member] = _rebase_item_sources(rebased_writes[page_member], frozen_mapping)
+        effects = replace(effects, writes=rebased_writes)
     rendered = {} if effects is None else effects.writes
     index_writes, index_deletes, index_members, index_refusals = _index_effects(
         bundle.root,

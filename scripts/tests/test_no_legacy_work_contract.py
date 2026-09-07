@@ -130,8 +130,15 @@ def test_active_plugin_scan_covers_every_maintained_surface() -> None:
 
 def test_transcript_capture_resolves_the_active_canonical_path() -> None:
     """Transcript capture must derive owned references from the active path."""
-    hook = ROOT / "plugins" / "graph-works" / "hooks" / "examples" / "session-end-transcript-capture.sh"
-    text = hook.read_text(encoding="utf-8")
+    module = (
+        ROOT
+        / "packages"
+        / "graph-works-core"
+        / "src"
+        / "graph_works_core"
+        / "transcript_capture.py"
+    )
+    text = module.read_text(encoding="utf-8")
 
     assert 'work_path = pointer["path"]' in text
     assert "location = parse_item_path(work_path)" in text

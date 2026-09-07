@@ -47,7 +47,7 @@ import shlex
 import subprocess
 import sys
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Literal
 
 from ruamel.yaml import YAML
@@ -210,18 +210,46 @@ def _text(value: object) -> str:
     return str(value)
 
 
-def _workspace_relative(target: Path, root: Path) -> str:
-    """*target* as `repositories.<name>.path` should carry it.
+def _workspace_relative(value: str, root: Path) -> str:
+    """*value* as `repositories.<name>.path` should carry it.
 
-    Relative to *root* -- the directory `workspace.yaml` itself lives in:
-    every reader resolves a declared repo's relative path against the
-    directory the manifest was read from
-    (`code_wiki_okf.config.load_config`, anchored on `config_path`'s parent).
-    Same computation as `graph_works_core.workspace.init._workspace_relative`,
-    restated here rather than imported because that name is private to a
-    package this script only reads through its public surface.
+    Resolved in this order:
+
+    1. `expanduser()`.
+    2. **Absolute** -- `Path.is_absolute()`, pathlib's judgement on the host platform -- used
+       as given.
+    3. **Root-anchored but driveless on Windows** (`is_absolute()` is `False` while the value
+       starts with a separator, and `PureWindowsPath(value).drive` is empty) -- refused, naming
+       the missing drive. This branch cannot fire on POSIX: there the same string is absolute
+       and stops at step 2.
+    4. **Otherwise relative** -- joined onto *root*, the directory `workspace.yaml` itself lives
+       in: every reader resolves a declared repo's relative path against the directory the
+       manifest was read from (`code_wiki_okf.config.load_config`, anchored on `config_path`'s
+       parent). Same computation as `graph_works_core.workspace.init._workspace_relative`,
+       restated here rather than imported because that name is private to a package this script
+       only reads through its public surface.
+
+    A cross-drive target raises `ConversionRefused` naming both paths, rather than the raw
+    `ValueError` `os.path.relpath` raises.
     """
-    return Path(os.path.relpath(target, start=root)).as_posix()
+    expanded = Path(value).expanduser()
+    text = str(expanded)
+    if expanded.is_absolute():
+        target = expanded
+    elif text.startswith(("/", "\\")) and not PureWindowsPath(text).drive:
+        raise ConversionRefused(
+            f"repo-directory: {value!r} is root-anchored but carries no drive, so on Windows it "
+            "resolves against whichever drive is current. Give a drive-qualified absolute path "
+            "(C:/...) or a path relative to the workspace root."
+        )
+    else:
+        target = root / expanded
+    try:
+        return Path(os.path.relpath(target, start=root)).as_posix()
+    except ValueError as exc:
+        raise ConversionRefused(
+            f"repo-directory: {target} is on a different drive than the workspace root {root}: {exc}"
+        ) from exc
 
 
 def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversion:
@@ -405,9 +433,17 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
         repo_name = options.repo_name or "unknown"
         repo_relative = ""
     else:
-        repo_target = Path(_text(raw_repo)).expanduser()
-        repo_name = options.repo_name or repo_target.name
-        repo_relative = _workspace_relative(repo_target, root)
+        repo_text = _text(raw_repo)
+        if options.repo_path is not None:
+            # A `--repo-path` value means what the shell means by it: resolve a relative value
+            # against the CWD before handing it to the workspace-root-anchored resolver, rather
+            # than letting a manifest's own anchor apply to a value that never came from one.
+            cwd_target = Path(repo_text).expanduser()
+            if not cwd_target.is_absolute():
+                cwd_target = Path.cwd() / cwd_target
+            repo_text = str(cwd_target)
+        repo_name = options.repo_name or Path(repo_text).expanduser().name
+        repo_relative = _workspace_relative(repo_text, root)
         add(
             Disposition(
                 "repo-directory",
@@ -608,13 +644,13 @@ def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
         # The header is imported rather than restated so a converted workspace's
         # gitignore is byte-identical to a bootstrapped one, and phase 3's
         # `gw bootstrap` sees nothing to append.
-        path.write_text(GITIGNORE_HEADER + body, encoding="utf-8")
+        path.write_text(GITIGNORE_HEADER + body, encoding="utf-8", newline="")
         created.append(path)
     else:
         present = {line.strip() for line in path.read_text(encoding="utf-8").splitlines()}
         missing = "".join(f"{entry}\n" for entry in entries if entry not in present)
         if missing:
-            with path.open("a", encoding="utf-8") as handle:
+            with path.open("a", encoding="utf-8", newline="") as handle:
                 handle.write(missing)
             created.append(path)
     return created
@@ -726,7 +762,7 @@ def convert(
             )
         unchanged = True
     else:
-        manifest_path.write_text(conversion.manifest_text, encoding="utf-8")
+        manifest_path.write_text(conversion.manifest_text, encoding="utf-8", newline="")
         created_manifest = True
 
     # Act 5 -- four readers. A failure unlinks a manifest *this run* created and

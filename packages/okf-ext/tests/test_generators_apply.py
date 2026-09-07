@@ -8,7 +8,7 @@ import tokenize
 from pathlib import Path
 
 import pytest
-from ext_helpers import GENERATED_DIR, generated_copy, read, write_bundle
+from ext_helpers import GENERATED_DIR, generated_copy, read, write, write_bundle
 from okf_ext.generators import Regeneration, RegenerationPlan, Render, apply, plan_regenerate
 from okf_ext.sections import DEFAULT_IGNORE as DEFAULT_IGNORE_SECTIONS
 from okf_ext.shape import load_sections
@@ -122,7 +122,7 @@ def test_a_plan_from_another_bundle_raises(tmp_path):
 def test_a_stale_plan_is_refused_for_that_document_alone(tmp_path):
     bundle = _bundle(tmp_path)
     plan = plan_regenerate(bundle, SECTION_SET, {"drifted": DRIFTED})
-    (bundle.root / "drifted.md").write_text(read(bundle.root / "drifted.md") + "\nedited\n", encoding="utf-8")
+    write(bundle.root / "drifted.md", read(bundle.root / "drifted.md") + "\nedited\n")
     reloaded = load_bundle(bundle.root, ignore=IGNORE)
     result = apply(reloaded, RegenerationPlan(root=reloaded.root, regenerations=plan.regenerations, skipped=()))
     assert [failure.kind for failure in result.failed] == ["stale"]

@@ -159,6 +159,25 @@ def test_bootstrap_fails_when_initialization_is_incomplete(monkeypatch: pytest.M
     assert "workspace initialization was incomplete" in result.stderr
 
 
+def test_bootstrap_refuses_before_any_path_when_long_paths_are_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The regression this item was filed for: `gw bootstrap` must refuse
+    with the existing long-path message, before creating anything, rather
+    than raising an unhandled `FileNotFoundError` partway through."""
+    from graph_works_core.workspace import anchors
+
+    monkeypatch.setattr(anchors, "long_paths_enabled", lambda: False)
+    root = tmp_path / "works"
+
+    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
+
+    assert result.exit_code == 1
+    assert "long path support" in result.stderr
+    assert "LongPathsEnabled" in result.stderr
+    assert not root.exists()
+
+
 def test_repo_root_pins_a_repository_the_walk_up_cannot_find(tmp_path: Path) -> None:
     """The §1.2 regression: an out-of-repo workspace must still catalog its repo.
 

@@ -116,7 +116,7 @@ def test_unescaped_placeholder_prose_is_flagged(tmp_path, text):
     Count is not asserted -- `<a-b> and <c>` is two placeholders and two
     findings. What matters is that the unescaped form is never silent.
     """
-    (tmp_path / "d.md").write_text(f"---\ntype: Note\ntitle: T\n---\n\n{text}\n", encoding="utf-8")
+    ext_helpers.write(tmp_path / "d.md", f"---\ntype: Note\ntitle: T\n---\n\n{text}\n")
     found = house(load_bundle(tmp_path), render_rule(), OUTSIDE_THE_GAP)
     assert found
     assert {f.code for f in found} == {"render.angle-bracket"}
@@ -128,7 +128,5 @@ def test_escaped_placeholder_prose_is_never_flagged(tmp_path, text):
     `render.angle-bracket` finding.** This is the property that justifies
     shipping the preventive half inside the capability that detects the
     failure, and it is testable only because they are co-located."""
-    (tmp_path / "d.md").write_text(
-        f"---\ntype: Note\ntitle: T\n---\n\n{escape_angle_brackets(text)}\n", encoding="utf-8"
-    )
+    ext_helpers.write(tmp_path / "d.md", f"---\ntype: Note\ntitle: T\n---\n\n{escape_angle_brackets(text)}\n")
     assert house(load_bundle(tmp_path), render_rule(), OUTSIDE_THE_GAP) == []

@@ -162,6 +162,11 @@ def load_items(bundle: Bundle) -> tuple[WorkItem, ...]:
     )
 
 
+def unreadable_detail(bundle: Bundle, path: str) -> str | None:
+    """Why *path*'s page could not be read, or `None` if that is not why it is missing."""
+    return bundle.unreadable.get(f"{path}.md")
+
+
 __all__ = [
     "ARCHIVE_DIR",
     "ARCHIVE_IGNORE",
@@ -171,4 +176,5 @@ __all__ = [
     "item_index",
     "load_items",
     "placement_directories",
+    "unreadable_detail",
 ]

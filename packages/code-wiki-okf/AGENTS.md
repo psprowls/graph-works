@@ -17,14 +17,16 @@ From the repo root (this package resolves its own dependency closure, so it
 needs `--package`, unlike `okf-io`/`okf-ext` which share the root `uv run`):
 
 ```bash
-uv run --package code-wiki-okf mypy --strict packages/code-wiki-okf/src
+uv run --package code-wiki-okf mypy --strict --platform linux packages/code-wiki-okf/src
+uv run --package code-wiki-okf mypy --strict --platform win32 packages/code-wiki-okf/src
 uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests
 uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests --cov=code_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
 These are exactly the `types` / `test` / `cov` lines the root `justfile`
 runs for this package — `just check` runs them for every workspace member.
-Coverage is gated at 95%, same floor as okf-io/okf-ext.
+`types` runs twice, once per `--platform` arm (`linux`, `win32`). Coverage
+is gated at 95%, same floor as okf-io/okf-ext.
 
 Subset examples:
 

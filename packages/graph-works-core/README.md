@@ -5,6 +5,17 @@ receives resolved paths as arguments — there is no `graph_dir(workspace)`
 anywhere beneath this line, and an import-linter contract in the workspace root
 makes a violation a `just check` failure.
 
+## Platform
+
+`workspace/anchors.py` imports `fcntl` at four sites, each behind a
+`sys.platform` guard, choosing between a `_PosixAnchor` and a `_WindowsAnchor`
+implementation of the five POSIX-only primitives (`flock`, the NOREPLACE
+rename, descriptor-to-path resolution, `st_dev`/`st_ino` identity, directory
+`fsync`) that the rest of `workspace` depends on. That abstraction is what
+lets the durability tier and the work vertical both depend on locking without
+either carrying its own platform seam. See `gw util platform` for the live,
+per-capability answer on the running host.
+
 ## The layout
 
 ```

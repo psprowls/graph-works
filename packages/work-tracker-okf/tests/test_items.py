@@ -1,7 +1,9 @@
+from dataclasses import replace
+
 from okf_io import Bundle
 from work_helpers import load_written_items, write_item
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.items import WorkItem, item_index, load_items
+from work_tracker_okf.items import WorkItem, item_index, load_items, unreadable_detail
 
 
 def test_projection_derives_containment_and_archive_children(path_native_bundle: Bundle) -> None:
@@ -19,6 +21,14 @@ def test_projection_uses_path_not_frontmatter_for_permanent_containment(tmp_path
     item = load_written_items(tmp_path)[0]
     assert item.parent_path == "work/release"
     assert item.active_child_paths == ()
+
+
+def test_unreadable_detail_looks_up_by_the_dotmd_path(path_native_bundle: Bundle) -> None:
+    bundle = replace(
+        path_native_bundle, unreadable={"work/locked.md": "could not be read: [Errno 13] Permission denied"}
+    )
+    assert unreadable_detail(bundle, "work/locked") == "could not be read: [Errno 13] Permission denied"
+    assert unreadable_detail(bundle, "work/not-locked") is None
 
 
 def test_projection_uses_extensionless_path_as_key_and_page_as_location(path_native_bundle: Bundle) -> None:

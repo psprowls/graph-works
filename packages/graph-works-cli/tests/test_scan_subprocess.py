@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
+import helpers
 from code_graph_io.testing import raw_conn
 from code_wiki_okf.config import load_config
 from graph_works_core.workspace.layout import CACHE_DIRNAME, DEFAULT_CONFIG_DIR, MANIFEST_FILENAME
@@ -17,16 +17,9 @@ PACKAGE_URI = "pkg:acme/demo/widgets"
 FILLED_PURPOSE = "Widgets exposes the demo package's public behavior."
 
 
-def _gw() -> Path:
-    """Use this test environment's installed console-script entry point."""
-    entry_point = Path(sys.executable).parent / "gw"
-    assert entry_point.is_file()
-    return entry_point
-
-
 def _run_gw(*args: str) -> subprocess.CompletedProcess[str]:
     """Run one independent CLI process with captured machine-readable output."""
-    return subprocess.run([str(_gw()), *args], capture_output=True, check=False, text=True)
+    return subprocess.run([str(helpers.console_script("gw")), *args], capture_output=True, check=False, text=True)
 
 
 def _git(repo: Path, *args: str) -> None:

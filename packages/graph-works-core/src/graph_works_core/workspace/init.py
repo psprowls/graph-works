@@ -50,6 +50,7 @@ import work_tracker_okf.init
 from config_io import PROJECTION_FILENAME, PlainYamlStore, write_projection
 from okf_ext.bundle import ApplyResult, ScaffoldPlan, apply, plan_scaffold
 
+from graph_works_core.workspace import anchors
 from graph_works_core.workspace.context_seed import render_context_file
 from graph_works_core.workspace.discovery import find_repo_root
 from graph_works_core.workspace.errors import InitError
@@ -301,12 +302,20 @@ def plan_init(
     default one. *repo_root* defaults to a `.git` walk-up from *root*; pass it
     explicitly to pin a repo the walk-up would not find.
 
-    Raises `InitError` only for a *root* that exists and is not a directory —
-    the same line both shipped `install_bundle`s draw.
+    Raises `InitError` for a *root* that exists and is not a directory, for a
+    system that does not have Windows long-path support enabled, or for a root
+    whose filesystem does not support hard links -- the same two requirements
+    `_WindowsAnchor` enforces at mutation time, checked here (in the same
+    order `_WindowsAnchor.__init__` checks them) so a bootstrapped-but-unusable
+    workspace is never created in the first place.
     """
     root = Path(root).expanduser().resolve()
     if root.exists() and not root.is_dir():
         raise InitError(f"{root}: exists and is not a directory")
+    if not anchors.long_paths_enabled():
+        raise InitError(anchors._long_path_refusal_message())
+    if not anchors.hard_links_supported(root):
+        raise InitError(anchors._hard_link_refusal_message(root))
 
     manifest_path = root / MANIFEST_FILENAME
     manifest = read(manifest_path) if manifest_path.exists() else defaults()
@@ -371,11 +380,11 @@ def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
     for write in plan.writes:
         write.path.parent.mkdir(parents=True, exist_ok=True)
         if write.mode == "create":
-            write.path.write_text(write.content, encoding="utf-8")
+            write.path.write_text(write.content, encoding="utf-8", newline="")
         else:
             existing = write.path.read_text(encoding="utf-8")
             separator = "" if existing.endswith("\n") or not existing else "\n"
-            write.path.write_text(existing + separator + write.content, encoding="utf-8")
+            write.path.write_text(existing + separator + write.content, encoding="utf-8", newline="")
         written.append(write.label)
 
     projection_path = plan.layout.cache_dir / PROJECTION_FILENAME

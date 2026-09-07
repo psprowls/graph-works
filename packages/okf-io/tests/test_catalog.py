@@ -7,7 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from helpers import BUNDLES, GOLDEN, NONCONFORMANT, render_finding
+from helpers import BUNDLES, GOLDEN, NONCONFORMANT, render_finding, write
 from okf_io import _md, _rules, bundle
 from okf_io.validate import Report, RuleContext, validate
 
@@ -231,22 +231,19 @@ def test_one_parse_per_body(monkeypatch):
 
 def test_tolerance_an_unknown_type_is_not_an_error(tmp_path):
     target = tmp_path / "a.md"
-    target.write_text("---\ntype: Playbook\ntitle: T\ndescription: D\n---\n\n# Definition\n", encoding="utf-8")
+    write(target, "---\ntype: Playbook\ntitle: T\ndescription: D\n---\n\n# Definition\n")
     assert validate(bundle.load(tmp_path), today=GOLDEN_TODAY).ok is True
 
 
 def test_tolerance_an_unknown_key_is_not_an_error(tmp_path):
     target = tmp_path / "a.md"
-    target.write_text(
-        '---\ntype: Metric\ntitle: T\ndescription: D\nnot: ["old definition"]\n---\n\n# D\n',
-        encoding="utf-8",
-    )
+    write(target, '---\ntype: Metric\ntitle: T\ndescription: D\nnot: ["old definition"]\n---\n\n# D\n')
     assert validate(bundle.load(tmp_path), today=GOLDEN_TODAY).ok is True
 
 
 def test_tolerance_a_missing_optional_family_is_not_an_error(tmp_path):
     target = tmp_path / "a.md"
-    target.write_text("---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n# Definition\n", encoding="utf-8")
+    write(target, "---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n# Definition\n")
     report = validate(bundle.load(tmp_path), today=GOLDEN_TODAY)
     # Deliberately stricter than this test's siblings: a document with no
     # optional family present should produce literal silence, not merely no
@@ -257,7 +254,7 @@ def test_tolerance_a_missing_optional_family_is_not_an_error(tmp_path):
 
 def test_tolerance_a_broken_link_is_not_an_error(tmp_path):
     target = tmp_path / "a.md"
-    target.write_text("---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n[x](./gone.md)\n", encoding="utf-8")
+    write(target, "---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n[x](./gone.md)\n")
     report = validate(bundle.load(tmp_path), today=GOLDEN_TODAY)
     assert report.ok is True
     assert report.by_code("links.broken") != ()
@@ -265,8 +262,8 @@ def test_tolerance_a_broken_link_is_not_an_error(tmp_path):
 
 def test_a_malformed_concept_still_lets_every_other_one_validate(tmp_path):
     """The single most important behaviour in this child."""
-    (tmp_path / "broken.md").write_text('---\ntype: "unterminated\n---\n\n# D\n', encoding="utf-8")
-    (tmp_path / "fine.md").write_text("---\ntitle: T\n---\n\n# Definition\n", encoding="utf-8")
+    write(tmp_path / "broken.md", '---\ntype: "unterminated\n---\n\n# D\n')
+    write(tmp_path / "fine.md", "---\ntitle: T\n---\n\n# Definition\n")
     report = validate(bundle.load(tmp_path), today=GOLDEN_TODAY)
     assert report.by_code("frontmatter.unparseable")[0].path == "broken.md"
     assert report.by_code("frontmatter.missing-type")[0].path == "fine.md"
@@ -274,7 +271,7 @@ def test_a_malformed_concept_still_lets_every_other_one_validate(tmp_path):
 
 def test_an_external_rule_sees_the_same_context_the_builtins_do(tmp_path):
     """The plugin contract, end to end, against a real bundle."""
-    (tmp_path / "a.md").write_text("---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n# D\n", encoding="utf-8")
+    write(tmp_path / "a.md", "---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n# D\n")
     loaded = bundle.load(tmp_path)
     seen: list[RuleContext] = []
 

@@ -30,6 +30,29 @@ def read(path: Path) -> str:
     return path.read_bytes().decode("utf-8")
 
 
+def write(path: Path, text: str) -> None:
+    """Write without newline translation, so the string's own endings survive.
+
+    The write half of `read`. `Path.write_text` with no `newline=` translates
+    LF to `os.linesep`, which on Windows makes a CRLF fixture that this
+    suite's byte-exact assertions -- inherited from okf-io's round-trip
+    contract -- then compare against an LF read.
+
+    Deliberately a copy of okf-io's `helpers.write` rather than an import of
+    it: both test directories are on `pythonpath`, so importing would work
+    and would couple this suite to another package's test helpers.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="")
+
+
+def write_tree(root: Path, files: Mapping[str, str]) -> Path:
+    """Write a `{bundle-relative posix path: text}` mapping under *root*."""
+    for relative, text in files.items():
+        write(root / relative, text)
+    return root
+
+
 def tagged_bundle() -> Bundle:
     """The read-only corpus. Never pass this to `apply()`."""
     return load_bundle(TAGGED)
@@ -121,11 +144,7 @@ def write_bundle(root: Path, files: Mapping[str, str], *, ignore: Sequence[str] 
     For suites that need a purpose-built corpus rather than one of the
     committed fixture directories. Parent directories are created on demand.
     """
-    for name, text in files.items():
-        target = root / name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    return load_bundle(root, ignore=ignore)
+    return load_bundle(write_tree(root, files), ignore=ignore)
 
 
 def _workspace_root() -> Path:

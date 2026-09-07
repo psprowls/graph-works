@@ -34,7 +34,8 @@ runs under `uv run --package`). From the workspace root:
 uv run pytest packages/okf-ext/tests                       # this package's tests only
 uv run pytest packages/okf-ext/tests/test_tags_rename_plan.py
 uv run pytest -k "moves and repair"
-uv run mypy --strict packages/okf-io/src packages/okf-ext/src   # both packages in one invocation — the `just types` recipe
+uv run mypy --strict --platform linux packages/okf-io/src packages/okf-ext/src   # both packages, linux arm
+uv run mypy --strict --platform win32 packages/okf-io/src packages/okf-ext/src   # both packages, win32 arm — together, the `just types` recipe's two okf-io/okf-ext lines
 ```
 
 `just cov` gates `okf_io` + `okf_ext` together at 95% branch coverage in one

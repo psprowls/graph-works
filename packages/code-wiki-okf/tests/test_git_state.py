@@ -42,6 +42,13 @@ def test_head_commit_none_outside_a_repo(tmp_path: Path) -> None:
     assert head_commit(tmp_path) is None
 
 
+def test_head_commit_none_when_the_repo_path_does_not_exist(tmp_path: Path) -> None:
+    """The absent-directory case, which POSIX raises FileNotFoundError for and
+    Windows raises NotADirectoryError (WinError 267) for. Both are OSError;
+    `_run`'s envelope must catch the family, not one subclass."""
+    assert head_commit(tmp_path / "never-created") is None
+
+
 def test_is_clean_on_branches_true_on_allowed_clean_branch(scratch_repo: Path) -> None:
     ok, reason = is_clean_on_branches(scratch_repo, ["main"])
     assert ok is True

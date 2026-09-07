@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 import unicodedata
 from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass
@@ -234,6 +235,22 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
 
 
 def _open_relative_directory(root_fd: int, relative: str) -> int:
+    """Walk *relative* one component at a time beneath *root_fd*.
+
+    `NotImplementedError` rather than `OSError` on Windows, deliberately:
+    `_files_at` catches `OSError` from this call and records it in
+    `unreadable`, so an `OSError` would turn "this platform has no
+    `O_DIRECTORY`" into a per-member "could not be read" for the whole
+    bundle -- a wrong answer that looks like a plausible one. Nothing in
+    production reaches this on Windows: the only caller of `_load_at` is
+    `graph_works_core.workspace.transactions._load_bundle_through`, whose
+    Windows tier takes the ordinary path walk instead.
+    """
+    if sys.platform == "win32":
+        raise NotImplementedError(
+            "the descriptor-rooted bundle walk needs os.O_DIRECTORY, which does not exist on win32; "
+            "use the path-rooted load() instead"
+        )
     descriptor = os.dup(root_fd)
     flags = os.O_RDONLY | os.O_DIRECTORY
     if hasattr(os, "O_NOFOLLOW"):

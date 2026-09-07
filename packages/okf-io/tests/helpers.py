@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import dataclasses
+from collections.abc import Mapping
+from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 
 from okf_io import _yaml
+from okf_io import bundle as _bundle
+from okf_io.document import Document
 
 FIXTURES = Path(__file__).parent / "fixtures"
 BUNDLES = FIXTURES / "bundles"
@@ -24,6 +29,95 @@ MALFORMED = frozenset(
 def read(path: Path) -> str:
     """Read without newline translation, so CRLF and BOM survive."""
     return path.read_bytes().decode("utf-8")
+
+
+def write(path: Path, text: str) -> None:
+    """Write without newline translation, so the string's own endings survive.
+
+    The write half of `read`, and the reason it exists: `Path.write_text` with
+    no `newline=` translates every LF to `os.linesep`, so on Windows a fixture
+    written from an LF string lands as CRLF. The document layer then reads the
+    file's real bytes and the round-trip assertion compares that CRLF payload
+    against an LF `read_text`, which un-translates on the way back in. Every
+    fixture writer in this suite goes through here.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8", newline="")
+
+
+def write_tree(root: Path, files: Mapping[str, str]) -> Path:
+    """Write a `{bundle-relative posix path: text}` mapping under *root*.
+
+    The loop that thirteen modules had each re-implemented inline, each copy
+    re-introducing the translating default. Returns *root* so callers can
+    write `bundle.load(write_tree(tmp_path, files))`.
+    """
+    for relative, text in files.items():
+        write(root / relative, text)
+    return root
+
+
+def load_tree_admitting_unwritable_names(root: Path, files: Mapping[str, str]) -> _bundle.Bundle:
+    """Load *files* as a `Bundle`, admitting names the host filesystem cannot hold.
+
+    A member the host cannot write is not skipped: it is injected into the loaded
+    `Bundle` as a virtual member -- the same object `bundle._load` would have produced
+    from that text -- so a test keyed on that member's content keeps running on a host
+    where the name itself is unwritable. This is a probe, not a predicate (D-041): the
+    helper attempts the write and treats `OSError` as "this host cannot hold this
+    name," rather than encoding a second, driftable copy of `graph-works-core`'s
+    name-shape rules -- which okf-io, a band-1 package, may not import anyway.
+
+    Two refusals, both raising `ValueError`:
+    - a member that could not be written and is not ASCII (D-045) -- an injected
+      non-ASCII member would desynchronise `Bundle._canonical`, which this helper does
+      not maintain; the NFC/NFD collision case has its own dedicated fixture.
+    - a member that WAS written but whose id the walk disagrees with (D-047) -- proof
+      the host silently mangled the name (e.g. stripping a trailing dot or space)
+      rather than failing loudly, which would otherwise leave both a stray real file
+      and an injected virtual member claiming the same id.
+    """
+    unwritable: dict[str, str] = {}
+    for relative, text in files.items():
+        try:
+            write(root / relative, text)
+        except OSError:
+            unwritable[relative] = text
+
+    loaded = _bundle.load(root)
+
+    for relative in files:
+        if relative in unwritable:
+            continue
+        if loaded.member_id(relative) != relative:
+            raise ValueError(f"{relative!r} was written but the walk silently mangled it (D-047)")
+
+    concepts = dict(loaded.concepts)
+    indexes = dict(loaded.indexes)
+    logs = dict(loaded.logs)
+    assets = set(loaded.assets)
+
+    for relative, text in unwritable.items():
+        if not relative.isascii():
+            raise ValueError(f"{relative!r} is not ASCII and cannot be admitted as a virtual member (D-045)")
+        pure = PurePosixPath(relative)
+        directory = "" if pure.parent.as_posix() == "." else pure.parent.as_posix()
+        if pure.name == _bundle.INDEX_NAME:
+            indexes[directory] = Document.parse(text)
+        elif pure.name == _bundle.LOG_NAME:
+            logs[directory] = Document.parse(text)
+        elif pure.suffix == ".md":
+            concepts[relative[: -len(".md")]] = Document.parse(text)
+        else:
+            assets.add(relative)
+
+    return dataclasses.replace(
+        loaded,
+        concepts=MappingProxyType(dict(sorted(concepts.items()))),
+        indexes=MappingProxyType(dict(sorted(indexes.items()))),
+        logs=MappingProxyType(dict(sorted(logs.items()))),
+        assets=frozenset(assets),
+    )
 
 
 def all_concept_files() -> list[Path]:

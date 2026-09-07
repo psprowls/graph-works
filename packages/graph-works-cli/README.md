@@ -76,10 +76,44 @@ $ gw scan --apply --results-dir .works/.gw/cache/scan/results --short-head abc12
 | 4 | The emitted scan worklist has an unsupported schema version. |
 | 5 | A required repository could not be resolved. |
 
+## Utility commands
+
+- `gw util platform [--probe] [--workspace PATH] [--json]` reports the
+  platform, durability tier, dispatch backend, file lock and process control
+  — each derived from the machinery that owns it, with `unavailable` as a
+  derived property rather than a maintained list. `--probe` also runs
+  liveness checks and requires a workspace (via `--workspace` or discovery);
+  without it the command is a pure declaration and needs no workspace.
+
+  ```console
+  $ gw util platform
+  platform: darwin
+  python: 3.12.13
+
+  durability-tier: posix-strong (available)
+    guarantee: an exclusive lock is held across the whole read-mutate-write cycle
+    ...
+  unavailable: none
+  ```
+
+- `gw util describe-surface [--json]` describes every command in the `gw`
+  tree — the machine-readable surface freeze used to catch an undocumented or
+  accidentally-renamed command.
+
+- `gw util line-endings [--fix] [--workspace PATH] [--json]` detects (and,
+  with `--fix`, repairs) CRLF reaccumulation in the bundle. `.gitattributes`
+  declares every tracked bundle member LF-in-worktree, but git enforces that
+  only at checkout — nothing enforces it on write, and `git status` cannot
+  see a violation because it compares normalised content. The default
+  invocation reports every non-binary member whose on-disk bytes contain
+  CRLF, with a count per file, and exits non-zero if any are found; `--fix`
+  rewrites each to LF in place and exits zero.
+
 ## Testing
 
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests -v
-    uv run --package graph-works-cli mypy --strict packages/graph-works-cli/src
+    uv run --package graph-works-cli mypy --strict --platform linux packages/graph-works-cli/src
+    uv run --package graph-works-cli mypy --strict --platform win32 packages/graph-works-cli/src
 
 ## Configuration
 

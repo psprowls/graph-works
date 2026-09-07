@@ -17,10 +17,11 @@ it — it documents the design rationale in more depth than this file repeats.
 
 This package runs under `uv run --package config-io`, not a bare `uv run`
 (the root `testpaths` covers okf-io/okf-ext only). The root justfile's exact
-invocations:
+invocations (`types` runs twice, once per `--platform` arm):
 
 ```bash
-uv run --package config-io mypy --strict packages/config-io/src
+uv run --package config-io mypy --strict --platform linux packages/config-io/src
+uv run --package config-io mypy --strict --platform win32 packages/config-io/src
 uv run --package config-io pytest packages/config-io/tests
 uv run --package config-io pytest packages/config-io/tests \
   --cov=config_io --cov-branch --cov-report=term-missing --cov-fail-under=95

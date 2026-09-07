@@ -49,7 +49,7 @@ def page(vault: Path, path: str, *, tags: list[str] | None = None, extra: str = 
     if extra:
         lines.append(extra)
     lines += ["---", "", f"# {target.stem}", ""]
-    target.write_text("\n".join(lines), encoding="utf-8")
+    target.write_text("\n".join(lines), encoding="utf-8", newline="")
     return target
 
 
@@ -58,8 +58,8 @@ def workspace(tmp_path: Path, *, ignore: list[str] | None = None, manifest: bool
     root = tmp_path / "graph-works"
     (root / "wiki").mkdir(parents=True)
     (root / ".gw").mkdir()
-    (root / "wiki" / "index.md").write_text("---\ntitle: Index\n---\n\n# Index\n", encoding="utf-8")
-    (root / "wiki" / "log.md").write_text("---\ntitle: Log\n---\n\n# Log\n", encoding="utf-8")
+    (root / "wiki" / "index.md").write_text("---\ntitle: Index\n---\n\n# Index\n", encoding="utf-8", newline="")
+    (root / "wiki" / "log.md").write_text("---\ntitle: Log\n---\n\n# Log\n", encoding="utf-8", newline="")
     if manifest:
         body = "topic: test\n"
         if ignore is None:
@@ -68,7 +68,7 @@ def workspace(tmp_path: Path, *, ignore: list[str] | None = None, manifest: bool
             body += "ignore:\n" + "".join(f'  - "{pattern}"\n' for pattern in ignore)
         else:
             body += "ignore: []\n"
-        (root / "workspace.yaml").write_text(body, encoding="utf-8")
+        (root / "workspace.yaml").write_text(body, encoding="utf-8", newline="")
     return root
 
 
@@ -96,7 +96,7 @@ def test_missing_manifest_names_the_override_flag(tmp_path: Path) -> None:
 
 def test_non_list_ignore_is_refused(tmp_path: Path) -> None:
     root = workspace(tmp_path)
-    (root / "workspace.yaml").write_text("ignore: entities/**\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text("ignore: entities/**\n", encoding="utf-8", newline="")
     with pytest.raises(SeedError, match="list of strings"):
         resolve_ignore(root)
 
@@ -109,7 +109,7 @@ def test_a_skipped_page_halts_the_run(tmp_path: Path) -> None:
     root = workspace(tmp_path)
     page(root / "wiki", "concepts/good.md", tags=["okf"])
     (root / "wiki" / "concepts" / "bad.md").write_text(
-        "---\ntitle: bad\ntags:\n  a: b\n---\n\n# bad\n", encoding="utf-8"
+        "---\ntitle: bad\ntags:\n  a: b\n---\n\n# bad\n", encoding="utf-8", newline=""
     )
     with pytest.raises(SeedError, match=r"concepts/bad\.md"):
         load(root, ())
@@ -360,7 +360,7 @@ def seeded(tmp_path: Path, pages: dict[str, list[str]], text: str = MERGE) -> Pa
     root = workspace(tmp_path)
     for path, tag_list in pages.items():
         page(root / "wiki", path, tags=tag_list)
-    (root / ".gw" / "tags.yaml").write_text(text, encoding="utf-8")
+    (root / ".gw" / "tags.yaml").write_text(text, encoding="utf-8", newline="")
     return root
 
 

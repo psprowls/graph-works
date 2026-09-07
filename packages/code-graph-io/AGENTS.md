@@ -11,7 +11,8 @@ that the workspace root does not install, so every root `just` recipe runs it
 under `--package` rather than a bare `uv run`:
 
 ```bash
-uv run --package code-graph-io mypy --strict packages/code-graph-io/src
+uv run --package code-graph-io mypy --strict --platform linux packages/code-graph-io/src
+uv run --package code-graph-io mypy --strict --platform win32 packages/code-graph-io/src
 uv run --package code-graph-io pytest packages/code-graph-io/tests
 uv run --package code-graph-io pytest packages/code-graph-io/tests \
   --cov=code_graph_io --cov-branch --cov-report=term-missing --cov-fail-under=90
@@ -77,7 +78,7 @@ Gotchas that span several files:
   (currently 3) gates whether the on-disk DB shape matches what this build's
   code expects at all — a mismatch raises `SchemaMismatchError` and refuses
   to open unless `full=True`, which drops and recreates `code.db`.
-  `schema.DERIVER_VERSION` (currently 10) tracks *derivation logic* changes
+  `schema.DERIVER_VERSION` (currently 11) tracks *derivation logic* changes
   (classification rules, derived-edge rules, new attrs) that don't change the
   table shape but do make existing rows stale; a mismatch there silently
   forces `full=True` on the next `run_workspace()` call instead of raising.

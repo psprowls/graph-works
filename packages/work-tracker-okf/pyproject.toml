@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "work-tracker-okf"
-version = "0.5.0"
+version = "0.5.1"
 description = "Work-item tracking as an OKF v0.2 lane: declarations, vocabulary, and the item view."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.scripts]
-work-tracker-okf = "work_tracker_okf.cli:app"
+work-tracker-okf = "work_tracker_okf.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/work_tracker_okf"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+from helpers import write
 from okf_io import bundle
 from okf_io.validate import validate
 
@@ -10,11 +11,7 @@ TODAY = date(2026, 8, 3)
 
 
 def report_for(tmp_path: Path, frontmatter: str, body: str = "# Definition\n"):
-    target = tmp_path / "a.md"
-    target.write_text(
-        f"---\ntype: Metric\ntitle: T\ndescription: D\n{frontmatter}---\n\n{body}",
-        encoding="utf-8",
-    )
+    write(tmp_path / "a.md", f"---\ntype: Metric\ntitle: T\ndescription: D\n{frontmatter}---\n\n{body}")
     return validate(bundle.load(tmp_path), today=TODAY)
 
 

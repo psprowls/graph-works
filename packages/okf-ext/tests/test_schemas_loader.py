@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 import pytest
+from ext_helpers import write
 from okf_ext.schemas import DEFAULT_IGNORE, DEFAULT_SCHEMA_DIRNAME, SchemaError, declared_directories, load_schemas
 from okf_ext.schemas.loader import build_registry
 
@@ -34,7 +35,7 @@ properties:
 def write_set(root, **files):
     root.mkdir(parents=True, exist_ok=True)
     for name, body in files.items():
-        (root / name.replace("__", ".")).write_text(body, encoding="utf-8")
+        write(root / name.replace("__", "."), body)
     return root
 
 
@@ -274,7 +275,7 @@ def _annotated_set(tmp_path, **annotations):
         }
         if directory is not ...:
             document["x-okf-directory"] = directory
-        (root / f"{type_name}.schema.json").write_text(json.dumps(document), encoding="utf-8")
+        write(root / f"{type_name}.schema.json", json.dumps(document))
     return load_schemas(root)
 
 

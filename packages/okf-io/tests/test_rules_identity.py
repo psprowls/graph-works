@@ -14,6 +14,7 @@ from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
+from helpers import write
 from okf_io import bundle
 from okf_io.validate import validate
 
@@ -21,9 +22,7 @@ TODAY = date(2026, 8, 3)
 
 
 def _write(tmp_path: Path, rel: str, text: str) -> None:
-    target = tmp_path / rel
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(text, encoding="utf-8")
+    write(tmp_path / rel, text)
 
 
 def test_no_collisions_fires_nothing(tmp_path):

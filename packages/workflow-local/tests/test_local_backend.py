@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+from marks import POSIX_ONLY
 from subagents_io.backend import (
     BackendError,
     DispatchBackend,
@@ -23,6 +24,8 @@ from subagents_io.backend import (
 from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeAction
 from workflow_local.backend import LocalBackend
 from workflow_local.ledger import LEDGER_NAME, read_ledger
+
+pytestmark = POSIX_ONLY
 
 CHILD = Path(__file__).resolve().parent / "child.py"
 
@@ -494,3 +497,17 @@ def test_the_local_backend_reports_no_worktree_of_its_own(tmp_path):
         assert record.worktree_branch is None
     finally:
         session.close()
+
+
+def test_open_session_refuses_when_the_platform_changes_under_a_live_backend(tmp_path, monkeypatch):
+    # Delegation coverage for the path `test_local_session_refuses_windows`
+    # used to exercise before it was rewritten (in test_windows_guard.py) to
+    # construct `LocalSession` directly: `LocalBackend.open_session` still has
+    # to refuse when the platform changes out from under an already-live
+    # backend. POSIX-only because it needs a real backend to construct first.
+    from workflow_local import backend as backend_module
+
+    backend = make_backend(tmp_path / "root")
+    monkeypatch.setattr(backend_module.sys, "platform", "win32")
+    with pytest.raises(BackendError):
+        backend.open_session("s")

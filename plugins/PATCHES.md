@@ -214,13 +214,12 @@ five-field patched set and are now recorded here. `description` was updated to n
 
 ---
 
-## Entry #2 — Tier A: ours-side pristine (22 files)
+## Entry #2 — Tier A: ours-side pristine (21 files)
 
 <!-- audit-delta
 state: verbatim
 file: hooks/examples/pre-commit-check-tasks.sh
 file: skills/brainstorming/scripts/helper.js
-file: skills/brainstorming/scripts/server.cjs
 file: skills/checking-gates/SKILL.md
 file: skills/receiving-code-review/SKILL.md
 file: skills/specifying-gates/SKILL.md
@@ -261,6 +260,13 @@ redundancy. The tier-A count drops from 26 to 23.
 `hooks/hooks-cursor.json` was incorrectly claimed here as an upstream-grafted file; it is in fact an
 ours-side addition not present in upstream v6.4.0. **It is now claimed by entry #19** and is removed
 from the block above. The tier-A count drops from 23 to 22.
+
+**Amendment (2026-09-01) — one more file left this entry.**
+`skills/brainstorming/scripts/server.cjs` is patched (see the new entry below, "Windows dynamic
+port range retry") to retry a bind failure on a Windows-reserved port range. It is no longer
+verbatim and is removed from the block above; leaving it in both places would be
+double-classification, which `just audit-delta` reports as an error. The tier-A count drops from
+22 to 21.
 
 **On merge.** Nothing to do. If a conflict ever appears in one of these paths, something is wrong
 somewhere else — most likely a patch landed without a ledger entry, which `just audit-delta` reports
@@ -1397,7 +1403,7 @@ disposition directs.
 
 <!-- audit-delta
 state: patched
-file: hooks/examples/session-end-transcript-capture.sh
+file: hooks/examples/session-end-transcript-capture.py
 file: skills/auto-drive/SKILL.md
 file: skills/finishing-relay/SKILL.md
 file: skills/graph-works/README.md
@@ -1435,9 +1441,18 @@ file: skills/shared/resolve-workspace.test.sh
 file: hooks/skill-doc-routing
 file: tests/hooks/test-skill-doc-routing.sh
 file: tests/pi/test-pi-extension.mjs
+file: PLATFORM.md
 file: tests/test-entry-point-skills.sh
 file: tests/test-doc-layout-claims.sh
 -->
+
+**`PLATFORM.md` — added 2026-08-27** by
+`work/epic-native-windows-support/children/tech-debt-publish-platform-matrix`. ADR-0021 rule 3c
+names "the plugin README" as where the platform matrix is published for a plugin consumer, but
+`README.md` is upstream's file (verbatim, never reviewed by this fork — entry #5), and a file
+upstream does not have merges free forever. `PLATFORM.md` is the ours-side answer instead: a short
+pointer at the repo root `README.md`'s matrix and at `gw util platform`, restating no capability
+facts of its own. `README.md` itself is untouched.
 
 **Why this entry exists.** `scripts/audit_delta.py` derives divergence from `git diff --name-status`
 against the upstream base, which reports added files exactly the way it reports modified ones. A file
@@ -1801,6 +1816,33 @@ survives under the label *non-Claude-Code SDK client*, same `COPILOT_CLI=1` env)
 files in this entry — `tests/brainstorm-server/start-server.test.sh`,
 `tests/brainstorm-server/lifecycle.test.js`, `tests/claude-code/test-user-gate-hooks.sh` — were not
 part of this reconcile's seventeen-file scope and are unchanged by it.
+
+**Amendment (2026-09-01) — `lifecycle.test.js` gains a diagnostic rewrite. One semantic rewrite,
+and it is not a rename**, same category as `test-session-start.sh` above:
+
+- `waitForStartedOutput(child, timeoutMs)` was generalised to `waitForStartedOutput(child, label,
+  timeoutMs = 5000)` so its throw reads `<label> did not report server-started. exit=… stdout=…
+  stderr=…` for any spawn site, not just `start-server.sh`. Every raw-`node server.cjs` spawn site
+  in the file (there were none using this helper before) was converted from a hand-rolled
+  `for (let i = 0; i < 60 …) await sleep(50)` stdout poll to this helper, capturing `stderr` at each
+  site. The two sites that deliberately assert a *failed* startup (`fallback with explicit
+  BRAINSTORM_TOKEN fails closed`) keep their own inline exit/stderr assertions instead, since
+  `waitForStartedOutput` throwing is exactly the outcome those tests need to inspect, not treat as a
+  test failure.
+- `firstServerStarted(out)` now throws a descriptive `Error` (`no server-started line in output:
+  …`) naming the missing marker and echoing the output it did see, instead of handing `undefined` to
+  `JSON.parse` — this is the fix for the item's filed symptom, `"undefined" is not valid JSON`, which
+  was never a persistence bug (see entry #33 and the item's design spec for the full root cause).
+- Four `isRetryableBindError` unit assertions were added, covering `EADDRINUSE`×{win32, linux} →
+  `true`, `EACCES`×win32 → `true`, `EACCES`×linux → `false`. These live here rather than in
+  `server.test.js` (untouched, no `patched` entry — adding one would open a third vendored file to
+  divergence) to avoid widening this fork's test-file surface unnecessarily.
+
+**On merge (amended).** This rewrite touches call sites throughout the file, not a single
+identity-rename anchor. Re-apply against upstream's current text the same way `test-session-start.sh`
+above is re-applied: keep upstream's skeleton and any new tests it added, re-express the
+`waitForStartedOutput` signature change, the `firstServerStarted` throw, and the
+`isRetryableBindError` assertions against upstream's current spawn sites.
 
 ---
 
@@ -2205,3 +2247,118 @@ maintenance this implies: if the session-name format or `SESSION_NAME_MAX` chang
 and §4.1's Coverage read must move in the same change, and so must
 `graph_works_cli`'s `--live` help text and its frozen surface golden.
 See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-session-name-standardization`.
+
+---
+
+## Entry #32 — `sdd-workspace`'s path vocabulary on Git Bash
+
+<!-- audit-delta
+state: patched
+file: skills/subagent-driven-development/scripts/sdd-workspace
+-->
+
+**Intent class: portability.** The first entry in this ledger that is neither an identity rename nor
+a harness-compat fix. The governing rule — *patch only the lines identity requires* — does not
+reach it; its authority is **ADR-0021 rule 3b**, *"obra's inherited Windows machinery is maintained,
+not dropped."* Maintaining that machinery includes fixing it where it is broken on the platform the
+rule exists to protect.
+
+**The patch, in full:**
+
+```diff
+-cd "$dir" && pwd
++printf '%s\n' "$dir"
+```
+
+**Why.** The script derives `root=$(git rev-parse --show-toplevel)` — `git.exe` answers in Win32
+form (`C:/Users/…`) — builds `dir` from it, creates the directory, and then discards that string to
+re-derive the path through bash's `pwd`, which answers in MSYS form (`/tmp/…`). The two name the
+same directory; only one of them resolves for the native-Windows process that reads
+`sdd-workspace`'s stdout, which is the whole point of a script whose output is pasted into an
+implementer subagent's brief.
+
+**On POSIX this is a byte-for-byte no-op.** `git rev-parse --show-toplevel` returns a physical,
+symlink-resolved, normalised absolute path, and `.superpowers/sdd/<slug>` is created by `mkdir -p`
+immediately above, so no component can be a symlink and `cd "$dir" && pwd` cannot differ from
+`$dir`. The `cd` was not serving as an existence check either — `mkdir -p` runs one line earlier
+under `set -euo pipefail`.
+
+**Upstream.** The bug is present at obra HEAD; this fork has not pre-empted a fix. Filing it
+upstream is tracked as a follow-up on
+`work/epic-native-windows-support/children/bug-test-plugin-path-shape-git-bash`, not as a blocker.
+
+**On merge.** The patched line is the last line of a short file upstream rarely touches. Re-apply by
+locating `cd "$dir" && pwd` in upstream's current text and re-substituting. If upstream ever adopts
+the fix this entry becomes retirable, and `just audit-delta` will say so by reporting it as a
+*retired patch*.
+
+**Not claimed here:** `skills/subagent-driven-development/scripts/task-brief` and
+`review-package` are untouched. Both read `sdd-workspace`'s stdout and inherit the corrected shape
+without changing, which is why fixing one line fixed three of the suite's four assertions.
+
+---
+
+## Entry #33 — `server.cjs`: retry a bind failure on a Windows-reserved port range
+
+<!-- audit-delta
+state: patched
+file: skills/brainstorming/scripts/server.cjs
+-->
+
+**Intent class: portability/gate.** `server.cjs` was previously listed `verbatim` in entry #2; it
+is patched now (see that entry's 2026-09-01 amendment for the reclassification, and the tier-A
+count drop from 22 to 21 — leaving it in both places is double-classification, which
+`just audit-delta` reports as an error).
+
+**Why.** Windows reserves blocks of the ephemeral/dynamic port range (49152–65535) for
+Hyper-V/WinNAT/WSL2/Docker/Windows Sandbox — visible without administrator rights via
+`netsh interface ipv4 show excludedportrange protocol=tcp`. A bind into one of those ranges fails
+with `EACCES`, not `EADDRINUSE`. `server.cjs`'s port draws (`randomPort()`,
+`49152 + Math.floor(Math.random() * 16383)`) land there at roughly the reserved fraction of the
+time — ~13.8% per draw on the box this was reproduced on (23 ranges, 2260 of 16383 candidate
+ports) — and the pre-patch handler treated any non-`EADDRINUSE` error as fatal, so the server
+exited 1 without ever printing `server-started`. `lifecycle.test.js` makes six such draws per run,
+so roughly half of standalone runs failed, with the failing test moving between runs — this is
+what the item was originally filed as (a persisted-token bug); the actual defect was this bind
+failure, see `work/epic-native-windows-support/children/bug-brainstorm-server-undefined-persisted-token/references/01-design.md`
+for the full root-cause account.
+
+**The patch, in full:**
+
+- A small, exported, pure classifier: `isRetryableBindError(err, platform)` returns `true` for
+  `EADDRINUSE` on any platform, and for `EACCES` only when `platform === 'win32'` — on POSIX
+  `EACCES` means a privileged port was requested, and drifting off it silently would be wrong, so
+  it stays fatal there.
+- The bind error handler retries on any retryable error, bounded by a new `bindAttempts` counter at
+  8 (`0.138^8 ≈ 1e-7` on the observed blocklist), instead of the previous single `EADDRINUSE`-only
+  attempt.
+- `preferredPort()` now also reports whether the port it returned came from a **real** preference
+  (an explicit `BRAINSTORM_PORT`, or a value read from `BRAINSTORM_PORT_FILE`) versus an arbitrary
+  first `randomPort()` draw with no preference on record. `triedFallback` — which still means
+  exactly what it did before (*"we are no longer on our preferred port"*, gating `.last-port`/
+  `.last-token` persistence and the one-time token regeneration byte-for-byte as before) — is now
+  only set when a retry gives up a **real** preference. Redrawing away from an arbitrary first
+  draw that merely landed in a reserved range is not giving up on anything, so it does not suppress
+  persistence: without this distinction, a fresh session whose very first (unpreferenced) draw hit
+  a reserved port would retry successfully but never write its `.last-port`/`.last-token`, which
+  surfaced as an intermittent "restart should reuse the same port" failure in `lifecycle.test.js`
+  once the retry itself started working — a second-order flake this patch also closes.
+- `tokenSource === 'env'` still refuses to fall back at all, unconditionally, on either error code —
+  unchanged.
+- On exhaustion, exits 1 as before, with a message that additionally names
+  `netsh interface ipv4 show excludedportrange protocol=tcp` on Windows.
+
+**Verification.** No behavioural test can reliably *cause* an `EACCES` — reserving a port range
+needs administrator rights and is machine-global. The regression guard is the
+`isRetryableBindError` unit assertions in `lifecycle.test.js` (entry #23), plus 20 consecutive
+green runs of `node lifecycle.test.js` recorded on the epic's Windows box (see the item's design
+spec `## Acceptance`).
+
+**Upstream.** General Windows-portability fix with no fork-specific content; tracked as a follow-up
+on the item to offer to `obra/superpowers`. If upstream adopts it this entry becomes retirable and
+`just audit-delta` will say so.
+
+**On merge.** obra will not have this change. Re-apply against upstream's current
+`server.on('error', ...)` handler — a small, well-localised re-application: the classifier function,
+the `bindAttempts` counter, the `preferredPort()`/`hadRealPortPreference` split, and the
+Windows-specific exhaustion message.

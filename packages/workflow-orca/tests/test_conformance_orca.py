@@ -50,6 +50,10 @@ ORCA_CASE = BackendCase(
     # not a route-table gap this package failed to fill.
     narrows_modes=False,
     modes=DISPATCH_MODES,
+    # `OrcaBackend` is D-002's designated native-Windows dispatch backend, so
+    # it is the opposite of POSIX-only; the sibling's `local` case sets this
+    # True because `LocalBackend` refuses to construct there. Nothing to skip.
+    posix_only=False,
 )
 
 

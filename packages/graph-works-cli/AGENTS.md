@@ -12,13 +12,15 @@ not a bare `uv run`):
 
 ```bash
 uv run --package graph-works-cli pytest packages/graph-works-cli/tests
-uv run --package graph-works-cli mypy --strict packages/graph-works-cli/src
+uv run --package graph-works-cli mypy --strict --platform linux packages/graph-works-cli/src
+uv run --package graph-works-cli mypy --strict --platform win32 packages/graph-works-cli/src
 uv run --package graph-works-cli pytest packages/graph-works-cli/tests --cov=graph_works_cli \
     --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
 These are exactly `just test` / `just types` / `just cov`'s per-package lines for this package (see
-root `justfile`); `just check` runs the whole workspace, not just this one.
+root `justfile`); `just check` runs the whole workspace, not just this one. `just types` runs the
+`mypy` line twice, once per `--platform` arm.
 
 Subset examples:
 

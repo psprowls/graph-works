@@ -26,6 +26,7 @@ import json
 import os
 import signal
 import subprocess  # running a child process is this package's whole job
+import sys
 import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -62,6 +63,22 @@ STDOUT_NAME = "stdout.log"
 
 def _now() -> str:
     return datetime.now(tz=UTC).isoformat()
+
+
+def _reject_windows() -> None:
+    """Refuse before `_pid_alive`'s `os.kill(pid, 0)` probe can run.
+
+    That probe maps to `TerminateProcess` on Windows, so this backend kills
+    the worker it is asked to observe instead of reporting it. Read at call
+    time (not asserted at import) so a test can monkeypatch `sys.platform`
+    without needing a fresh interpreter.
+    """
+    if sys.platform == "win32":
+        raise BackendError(
+            "workflow-local's liveness probe (os.kill(pid, 0)) maps to TerminateProcess on "
+            "Windows, so binding a session here would kill every worker in its ledger — use "
+            "workflow-orca as the Windows dispatch backend instead"
+        )
 
 
 def _pid_alive(pid: int) -> bool:
@@ -110,6 +127,7 @@ class LocalSession:
         poll_interval_s: float,
         stop_grace_s: float,
     ) -> None:
+        _reject_windows()
         self.name = name
         #: Lines skipped because they were not JSON or carried an unregistered
         #: kind. Counted rather than raised, and surfaced so it is not silent.
@@ -215,7 +233,7 @@ class LocalSession:
         if entry is None:
             raise UnknownWorker(reply_token)
         path = self._dir / entry.handle / REPLIES_NAME
-        with path.open("a", encoding="utf-8") as fh:
+        with path.open("a", encoding="utf-8", newline="\n") as fh:
             fh.write(json.dumps({"reply_token": reply_token, "answer": answer}) + "\n")
 
     def stop(self, key: str) -> None:
@@ -384,6 +402,14 @@ class LocalSession:
                 break
             time.sleep(0.02)
         else:
+            if sys.platform == "win32":
+                # Unreachable: `LocalBackend` refuses win32 at construction with a
+                # BackendError naming workflow-orca. Narrowed anyway, because the
+                # type gate now checks both platform arms from either host and an
+                # unreachable line is still a checked line -- `signal.SIGKILL` does
+                # not exist here, and the `SIGTERM` above is already the hard kill
+                # that `TerminateProcess` gives.
+                return
             with contextlib.suppress(ProcessLookupError):
                 os.kill(pid, signal.SIGKILL)
         if proc is not None:
@@ -403,6 +429,7 @@ class LocalBackend:
         poll_interval_s: float = 0.25,
         stop_grace_s: float = 2.0,
     ) -> None:
+        _reject_windows()
         self.name = "workflow-local"
         #: All three. The events file carries questions and escalations and
         #: `replies.jsonl` carries the answer back, so `attend` and `relay` are

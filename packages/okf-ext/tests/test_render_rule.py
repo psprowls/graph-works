@@ -17,7 +17,7 @@ def run(bundle, *, severity="warn", strict=False):
 
 def one(tmp_path, name, text):
     """A one-file bundle. Cheaper than a fixture for a single branch."""
-    (tmp_path / f"{name}.md").write_text(text, encoding="utf-8")
+    ext_helpers.write(tmp_path / f"{name}.md", text)
     return run(load_bundle(tmp_path))
 
 
@@ -182,7 +182,7 @@ def test_a_dangling_wikilink_target_is_flagged(tmp_path):
 
 
 def test_a_wikilink_target_that_resolves_never_fires(tmp_path):
-    (tmp_path / "other.md").write_text("---\ntype: Note\ntitle: Other\n---\n", encoding="utf-8")
+    ext_helpers.write(tmp_path / "other.md", "---\ntype: Note\ntitle: Other\n---\n")
     found = one(tmp_path, "d", "---\ntype: Note\ntitle: T\n---\n\nSee [[other]] here.\n")
     assert found == []
 

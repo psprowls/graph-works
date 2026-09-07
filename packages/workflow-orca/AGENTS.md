@@ -22,8 +22,9 @@ are all defined there and are not re-documented here.
 ## Commands
 
 ```bash
-# types (strict), scoped to this package
-uv run --package workflow-orca mypy --strict packages/workflow-orca/src
+# types (strict), scoped to this package -- `just types` runs both platform arms
+uv run --package workflow-orca mypy --strict --platform linux packages/workflow-orca/src
+uv run --package workflow-orca mypy --strict --platform win32 packages/workflow-orca/src
 
 # full suite
 uv run --package workflow-orca pytest packages/workflow-orca/tests

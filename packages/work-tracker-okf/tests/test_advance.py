@@ -44,6 +44,22 @@ def test_an_unknown_path_is_refused():
     assert plan.changes == ()
 
 
+def test_an_unreadable_member_is_refused_with_the_reason_named():
+    plan = _plan_for([make_item("a")], "b", unreadable={"work/b.md": "could not be read: [Errno 13] Permission denied"})
+    assert plan.refusal == "unreadable-member"
+    assert "work/b.md" in plan.detail
+    assert "Permission denied" in plan.detail
+    assert plan.changes == ()
+
+
+def test_a_genuinely_missing_path_still_refuses_unknown_path_even_with_unreadable_present():
+    plan = _plan_for(
+        [make_item("a")], "b", unreadable={"work/other.md": "could not be read: [Errno 13] Permission denied"}
+    )
+    assert plan.refusal == "unknown-path"
+    assert plan.changes == ()
+
+
 def test_a_blocked_route_is_refused_with_the_blockers_as_detail():
     plan = _plan_for([make_item("a", type="Widget")], "a")
     assert plan.refusal == "blocked"
@@ -421,3 +437,4 @@ def test_the_refusal_vocabulary_carries_the_affects_coverage_reason() -> None:
     from work_tracker_okf.advance import RefusalReason
 
     assert "no-affects-touched" in typing.get_args(RefusalReason)
+    assert "unreadable-member" in typing.get_args(RefusalReason)

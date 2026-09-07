@@ -23,10 +23,6 @@ PLUGIN_ROOT = ROOT / "plugins" / "graph-works"
 # scanned until the cutover deletes the subtree, at which point this becomes
 # the only one.
 NATIVE_PLUGIN_ROOT = ROOT / "plugins" / "graph-works-native"
-ACTIVE_FILES = (
-    ROOT / "scripts" / "gw_dispatch.py",
-    ROOT / "scripts" / "gw-dispatch.md",
-)
 SOURCE_SUFFIXES = {".json", ".md", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"}
 LEGACY_DATE_WORK_PATH = re.compile(
     r"(?:wiki/)?work/(?:[a-z0-9_.-]+/)*(?:19|20)\d{2}-\d{2}-\d{2}[-/]",
@@ -86,7 +82,6 @@ def _active_files() -> list[Path]:
     )
     return sorted(
         {
-            *ACTIVE_FILES,
             *(path for path in package_files if path.suffix in SOURCE_SUFFIXES),
             *script_files,
             *plugin_files,
@@ -142,8 +137,15 @@ def test_active_plugin_scan_covers_every_maintained_surface() -> None:
 
 def test_transcript_capture_resolves_the_active_canonical_path() -> None:
     """Transcript capture must derive owned references from the active path."""
-    hook = ROOT / "plugins" / "graph-works" / "hooks" / "examples" / "session-end-transcript-capture.sh"
-    text = hook.read_text(encoding="utf-8")
+    module = (
+        ROOT
+        / "packages"
+        / "graph-works-core"
+        / "src"
+        / "graph_works_core"
+        / "transcript_capture.py"
+    )
+    text = module.read_text(encoding="utf-8")
 
     assert 'work_path = pointer["path"]' in text
     assert "location = parse_item_path(work_path)" in text

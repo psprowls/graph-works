@@ -214,13 +214,12 @@ five-field patched set and are now recorded here. `description` was updated to n
 
 ---
 
-## Entry #2 — Tier A: ours-side pristine (22 files)
+## Entry #2 — Tier A: ours-side pristine (21 files)
 
 <!-- audit-delta
 state: verbatim
 file: hooks/examples/pre-commit-check-tasks.sh
 file: skills/brainstorming/scripts/helper.js
-file: skills/brainstorming/scripts/server.cjs
 file: skills/checking-gates/SKILL.md
 file: skills/receiving-code-review/SKILL.md
 file: skills/specifying-gates/SKILL.md
@@ -261,6 +260,13 @@ redundancy. The tier-A count drops from 26 to 23.
 `hooks/hooks-cursor.json` was incorrectly claimed here as an upstream-grafted file; it is in fact an
 ours-side addition not present in upstream v6.4.0. **It is now claimed by entry #19** and is removed
 from the block above. The tier-A count drops from 23 to 22.
+
+**Amendment (2026-09-01) — one more file left this entry.**
+`skills/brainstorming/scripts/server.cjs` is patched (see the new entry below, "Windows dynamic
+port range retry") to retry a bind failure on a Windows-reserved port range. It is no longer
+verbatim and is removed from the block above; leaving it in both places would be
+double-classification, which `just audit-delta` reports as an error. The tier-A count drops from
+22 to 21.
 
 **On merge.** Nothing to do. If a conflict ever appears in one of these paths, something is wrong
 somewhere else — most likely a patch landed without a ledger entry, which `just audit-delta` reports
@@ -1397,7 +1403,7 @@ disposition directs.
 
 <!-- audit-delta
 state: patched
-file: hooks/examples/session-end-transcript-capture.sh
+file: hooks/examples/session-end-transcript-capture.py
 file: skills/auto-drive/SKILL.md
 file: skills/finishing-relay/SKILL.md
 file: skills/graph-works/README.md
@@ -1435,9 +1441,18 @@ file: skills/shared/resolve-workspace.test.sh
 file: hooks/skill-doc-routing
 file: tests/hooks/test-skill-doc-routing.sh
 file: tests/pi/test-pi-extension.mjs
+file: PLATFORM.md
 file: tests/test-entry-point-skills.sh
 file: tests/test-doc-layout-claims.sh
 -->
+
+**`PLATFORM.md` — added 2026-08-27** by
+`work/epic-native-windows-support/children/tech-debt-publish-platform-matrix`. ADR-0021 rule 3c
+names "the plugin README" as where the platform matrix is published for a plugin consumer, but
+`README.md` is upstream's file (verbatim, never reviewed by this fork — entry #5), and a file
+upstream does not have merges free forever. `PLATFORM.md` is the ours-side answer instead: a short
+pointer at the repo root `README.md`'s matrix and at `gw util platform`, restating no capability
+facts of its own. `README.md` itself is untouched.
 
 **Why this entry exists.** `scripts/audit_delta.py` derives divergence from `git diff --name-status`
 against the upstream base, which reports added files exactly the way it reports modified ones. A file
@@ -1556,6 +1571,39 @@ step 2's stale `--name`/branch live-validation item was replaced by the settled
 statement. Ours-side file, already claimed above — no `file:` line changes.
 See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-verify-branch-matches-dispatch`.
 
+**`workflow` gained the execute-stage commit obligation — 2026-08-30.** Step 3's
+dispatch brief now carries a positive rule for the execute stage, both routes:
+the stage owns its commit, the planned path satisfies it through the plan's own
+final commit task, and the unplanned (no-plan) path commits the stage's full
+output itself. This replaces a *retired prohibition* rather than adding a new
+rule — `workflow.commit_strategy` used to tell implementer subagents explicitly
+not to commit, and its retirement (recorded at the config-surface entry above)
+removed the prohibition without ever adding an obligation, so on the unplanned
+path nothing instructed the worker to commit and nothing observed that it had
+not. Three recorded reproductions each left files dirty in a worktree with zero
+commits while the item advanced to `finish` anyway. Step 5 gained the matching
+reader's half: what the new `uncommitted-work` / `no-commits` refusals at
+`execute -> finish` mean, what an unevaluable-gate warning means, and the
+`gw work advance --return` way home for an item already past the gate. The
+enforcement itself lives in `graph_works_core.orchestrate.stage_advance`, not
+in the skill — a notice with nothing backing it is what failed here. Ours-side
+file, already claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/bug-at-end-commit-no-plan`.
+
+**`workflow` and `auto-drive` gained the execute-coverage obligation — 2026-08-29.**
+`skills/workflow/SKILL.md` and `skills/auto-drive/SKILL.md` — both already listed above; this
+note records what the **spec-coverage** change added to each, so a later reader does not have
+to diff to find out. `workflow` gained an execute-stage brief bullet stating the
+`03-execute-coverage.md` obligation for the *attended* path (which has no dispatch prompt), plus
+a step-4 check that reads the file back. `auto-drive` gained the §4.1 **coverage read**: on an
+`execute` dispatch settling `succeeded`, read that file, surface it verbatim, and — when any
+line is `- [ ]` — raise a three-option question (send back / retry / accept anyway). Both state
+the same obligation the packaged `EXECUTE_TAIL` carries
+(`graph_works_core.workspace.pipeline`), for the two audiences that do not see the dispatch
+prompt. Neither is enforced: no transition is gated on the file. Ours-side files, already
+claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/bug-execute-stage-unverified-against-spec`.
+
 **Amended for the fork ledger reconciliation — 2026-08-29.** Two changes to this entry's claim set,
 neither touching the tree, only the ledger's description of it.
 
@@ -1574,6 +1622,20 @@ neither touching the tree, only the ledger's description of it.
   "one `file:` line replacing two, not a `state: removed` case."
 
 See `work/epic-unforked-plugin-skill-dispatch/children/tech-debt-reconcile-fork-ledger`.
+
+**`workflow` and `archive` gained the ingest-queue and root-only archive rules — 2026-08-30.**
+`skills/workflow/SKILL.md` and `skills/archive/SKILL.md` — both already listed above; this note
+records what changed so a later reader does not have to diff. `workflow`'s Terminal handling step 1
+had claimed the ingestor "archives the source and repoints the pointer"; neither half was ever true
+(`skills/graph-works/references/ingest-workflow.md` is explicit that the original is never moved and
+the item's `sources[]` is never touched), so the step now states what ingest actually does and names
+the new read-only `gw work ingest-queue` as the way to find items an unattended finish never brought
+through this step at all. `archive` gained a **Root-only** section: sweep selects only outermost
+terminal roots, a targeted child under a live ancestor is refused with `ancestor-not-terminal`, and
+archiving a root flattens every descendant into `children/<basename>` with no per-level `_archive`
+lane. The enforcement lives in `work_tracker_okf.archive`, not in the skill. Ours-side files,
+already claimed above — no `file:` line changes.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-merge-ingest-root-archive`.
 
 ---
 
@@ -1755,6 +1817,33 @@ files in this entry — `tests/brainstorm-server/start-server.test.sh`,
 `tests/brainstorm-server/lifecycle.test.js`, `tests/claude-code/test-user-gate-hooks.sh` — were not
 part of this reconcile's seventeen-file scope and are unchanged by it.
 
+**Amendment (2026-09-01) — `lifecycle.test.js` gains a diagnostic rewrite. One semantic rewrite,
+and it is not a rename**, same category as `test-session-start.sh` above:
+
+- `waitForStartedOutput(child, timeoutMs)` was generalised to `waitForStartedOutput(child, label,
+  timeoutMs = 5000)` so its throw reads `<label> did not report server-started. exit=… stdout=…
+  stderr=…` for any spawn site, not just `start-server.sh`. Every raw-`node server.cjs` spawn site
+  in the file (there were none using this helper before) was converted from a hand-rolled
+  `for (let i = 0; i < 60 …) await sleep(50)` stdout poll to this helper, capturing `stderr` at each
+  site. The two sites that deliberately assert a *failed* startup (`fallback with explicit
+  BRAINSTORM_TOKEN fails closed`) keep their own inline exit/stderr assertions instead, since
+  `waitForStartedOutput` throwing is exactly the outcome those tests need to inspect, not treat as a
+  test failure.
+- `firstServerStarted(out)` now throws a descriptive `Error` (`no server-started line in output:
+  …`) naming the missing marker and echoing the output it did see, instead of handing `undefined` to
+  `JSON.parse` — this is the fix for the item's filed symptom, `"undefined" is not valid JSON`, which
+  was never a persistence bug (see entry #33 and the item's design spec for the full root cause).
+- Four `isRetryableBindError` unit assertions were added, covering `EADDRINUSE`×{win32, linux} →
+  `true`, `EACCES`×win32 → `true`, `EACCES`×linux → `false`. These live here rather than in
+  `server.test.js` (untouched, no `patched` entry — adding one would open a third vendored file to
+  divergence) to avoid widening this fork's test-file surface unnecessarily.
+
+**On merge (amended).** This rewrite touches call sites throughout the file, not a single
+identity-rename anchor. Re-apply against upstream's current text the same way `test-session-start.sh`
+above is re-applied: keep upstream's skeleton and any new tests it added, re-express the
+`waitForStartedOutput` signature change, the `firstServerStarted` throw, and the
+`isRetryableBindError` assertions against upstream's current spawn sites.
+
 ---
 
 ## Entry #24 — Codex distribution config in `sync-to-codex-plugin.sh`
@@ -1935,3 +2024,341 @@ specifically, not the ambient working directory — not the literal diff.
 covers a different script in the same Codex surface; the split is by file, not by design intent, and
 this cross-reference is here so the Codex surface reads as two entries by design rather than as a
 split someone forgot to finish.
+
+---
+
+## Entry #27 — the ask-outcome safety branch and the relay delivery assertion
+
+**Intent class: graph-works pipeline.** Filed as
+`work/epic-auto-drive-dispatch-correctness/children/bug-reply-never-reaches-asking-worker`
+against a correlation defect in Orca's ask/reply path. That defect **does not
+reproduce on orca 1.4.191** — the design stage proved a full round trip live
+(`ask msg_f44dd45e94e5` → `reply` → answer returned, `timedOut: false`) — so
+nothing here attempts a correlation fix. What survives the refutation is the
+*fail-open shape*: a worker whose `ask` times out found nothing in the skill
+telling it what to do, and substituted its own judgement for a human's
+("after ~30 min unanswered, proceeded and committed it"); and a coordinator
+whose `reply` took the generic message branch got `ok: true` either way. Both
+are ours to close, and both are closed here in prose.
+
+**It carries no `file:` line.** `skills/finishing-relay/SKILL.md` and
+`skills/auto-drive/SKILL.md` are both already claimed by entry #19 as ours-side
+additions with no upstream counterpart. `scripts/audit_delta.py:183` collects a
+path named by more than one entry into `duplicated`, and a non-empty
+`duplicated` makes `just audit-delta` non-ok — so this entry follows entry #22's
+precedent exactly: prose only, cross-referencing #19, claiming nothing twice.
+
+**What changed.**
+
+- `skills/finishing-relay/SKILL.md` — R3's "Live-validation item" TODO is struck
+  and replaced with a *Reading the ask outcome* decision table (exit 0 answered /
+  exit 1 `timedOut` / exit 1 `cancelled` / exit 75 `resumeRequired` /
+  `dispatch_inactive`) plus a bounded `--resume` loop (budget 3, 600,000 ms per
+  call, matching the Escalation path's existing ~30-minute window). A spent
+  budget settles to `hold` with the words "no answer received" — never `merge`,
+  `pr` or `discard`. `--resume <message_id>` is a documented flag on
+  `orca orchestration ask`, which is what let the TODO be answered rather than
+  deferred again.
+- `skills/finishing-relay/SKILL.md` (second site) — R4's `discard` confirmation
+  ask carries the identical outcome branch, with silence downgrading to `hold`
+  rather than reading as confirmation; the Escalation path's remaining
+  live-validation item is answered in place (`messages[].body`, for a reply sent
+  by either `reply --id` or §4.4's `send --to dispatch:<id>`).
+- `skills/auto-drive/SKILL.md` — §4.3 now replies with `--json` and asserts
+  `question.status == "answered"` before reporting the relay complete; an absent
+  `question` key means the reply took `orchestration.reply`'s generic
+  message branch and never reached the blocked worker, which the coordinator now
+  says out loud instead of reporting success. The step's old explanation of
+  delivery ("`reply` addresses whatever handle the original message was sent
+  *from*") described that generic branch, not the question-thread branch a
+  `question` actually takes — corrected in the same edit, since that distinction
+  is the whole difference between §4.3 working and §4.4 needing its workaround.
+
+**On merge.** Both files have no upstream counterpart (entry #19) — nothing to
+reconcile on a sync.
+
+---
+
+## Entry #28 — `auto-drive`'s blocker vocabulary, re-synced to the CLI
+
+**Intent class: graph-works pipeline.** `BLOCKED_KINDS` in
+`graph_works_core/orchestrate/commands.py` is a closed vocabulary the coordinator loop reads and
+branches on, and §2.2's list of it had drifted: it omitted `relay-untailed` and
+`worktree-unsupported`, both already emitted, and this change adds two more —
+`worktree-unprovable` and `worktree-ambiguous`, the refusals the planner now returns rather than
+naming a worktree it cannot prove holds the item's work. A coordinator meeting an unlisted kind had
+no defined behaviour, so §2.2 also gains the instruction to treat one as evidence the skill is stale
+and stop, rather than improvising a handling.
+
+**It carries no `file:` line.** `skills/auto-drive/SKILL.md` is already claimed by entry #19 as an
+ours-side addition with no upstream counterpart. `scripts/audit_delta.py:183` collects any path named
+by more than one entry into `duplicated`, and a non-empty `duplicated` makes `just audit-delta`
+non-ok, so a second `file:` claim would turn it red. Entry #22 establishes this convention for
+exactly this situation and this entry follows it.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §2.2 — the `blocked[].kind` list gains `relay-untailed`,
+  `worktree-unsupported`, `worktree-unprovable` and `worktree-ambiguous`, plus a sentence
+  instructing the coordinator to stop on an unlisted kind.
+- `skills/auto-drive/SKILL.md` §2.5 — the "every other kind" parenthetical gains the same four, and
+  the self-resolution prose places both new kinds in the needs-a-human-outside-this-loop group,
+  with one clause each on what the planner actually failed to do.
+
+**Why not `convert-to-sibling`** (the disposition every entry in this ledger must assess, per entry
+#12's precedent). Not applicable: the file has no upstream counterpart to diverge from. It is
+ours-side content under entry #19, and this is further editing of a file that entry already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The only
+maintenance this entry implies is a fork-internal one: if `BLOCKED_KINDS` gains another member,
+§2.2 and §2.5 must gain it in the same change.
+
+---
+
+## Entry #29 — `auto-drive`'s `advances[]` gains a `mode`, for the return-to-execute repair
+
+**Intent class: graph-works pipeline.** `graph_works_core.orchestrate.commands.PlannedAdvance`
+gained a `mode: Literal["advance", "return"]` field: an epic at `finish` reopened by a child filed
+after it left `execute` now plans as a `mode == "return"` advance (a repair) instead of either
+resolving the epic (wrong — its children are not all terminal) or silently dropping the new child
+(the reported bug). §2.2 and §2.4 had no way to describe or act on this distinction.
+
+**It carries no `file:` line**, for the same reason entry #28 gives: `skills/auto-drive/SKILL.md`
+is already claimed by entry #19 as an ours-side addition, and a second `file:` claim would make
+`just audit-delta`'s `duplicated` check non-empty. This entry follows entry #22's/#28's convention.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §2.2 — the `advances[]` bullet gains `mode` (`advance` | `return`),
+  with a one-clause explanation of what `return` means and a forward reference to §2.4.
+- `skills/auto-drive/SKILL.md` §2.4 — branches on `entry.mode`: `return` runs
+  `gw work advance <path> --return` (no `--worktree`/`--branch`, since a return touches no
+  provenance field); `advance` keeps the existing plain-advance behaviour unchanged.
+
+**Why not `convert-to-sibling`.** Not applicable: the file has no upstream counterpart to diverge
+from. It is ours-side content under entry #19, and this is further editing of a file that entry
+already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The only
+fork-internal maintenance this implies: if `PlannedAdvance.mode` gains a third value, §2.2 and §2.4
+must gain it in the same change.
+See `work/epic-auto-drive-dispatch-correctness/children/bug-orchestrate-drops-post-finish-children`.
+
+---
+
+## Entry #30 — `auto-drive` answers a clean child's finish merge itself
+
+**Intent class: graph-works pipeline.** Every child of an epic ends its pipeline at the `finish`
+stage in `relay` mode, and §4.3 mirrored that worker's one `ask` to the human unconditionally — so
+an epic with a dozen children blocked a human a dozen times to collect a dozen foregone `merge`
+answers. The merge target for a non-root child is the epic's *own* integration branch, not a
+release base; assembling the epic is not the review the human is there for, and the review that
+matters happens once, at the root item's own finish stage. §4.3 now answers `merge` itself for that
+one structurally identified case, and mirrors everything else exactly as before.
+
+**It carries no `file:` line**, for the reason entries #22, #28 and #29 give:
+`skills/auto-drive/SKILL.md` is already claimed by entry #19 as an ours-side addition, and
+`scripts/audit_delta.py`'s `duplicated` check turns `just audit-delta` non-ok on a second `file:`
+claim for one path.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §4.3 — a new **step 0** ahead of the mirror step, carrying three
+  guards (`supervise_merges` false; the sending dispatch's `path` is not the plan's own `path`;
+  `merge` is among the question's options), the rule that `pr`/`hold`/`discard` are never
+  auto-answered, a §2.5.1 cross-reference explaining why a standing published policy is not the
+  coordinator guessing an answer, and the one notice line printed per auto-answer. The auto path
+  rejoins the existing steps 2 and 3 unchanged — same `reply --json` call, same landed-assertion.
+  Guard 2's prose also carries a fourth fail-safe clause: when the sending dispatch cannot be
+  resolved to a `dispatches[]`/task-mirror entry with certainty, the coordinator falls through to
+  mirroring rather than guessing — an unattributable question is not a structurally identified
+  case.
+- `skills/auto-drive/SKILL.md` §4.3 opening — "this coordinator only relays it, it does not
+  interpret the question" became false under the above and is restated precisely.
+- `skills/auto-drive/SKILL.md` §4.3 step 4 — the discard-confirmation ask is stated as never
+  auto-answered (it is option-less, so guard 3 excludes it structurally too).
+- `skills/auto-drive/SKILL.md` §2.2 — the field list gains `supervise_merges` (bool, default
+  `false`), new in the `gw work orchestrate --json` payload.
+- `skills/auto-drive/SKILL.md` Wrap-up step 2 — the run summary reports auto-answered merges as
+  their own line item, distinct from human-answered ones.
+- `skills/auto-drive/SKILL.md` Out of scope — the finish-relay bullet is amended so it no longer
+  reads as disclaiming the coordinator half this change adds.
+
+**The core half.** `workflow.auto_drive.supervise_merges` (bool, default `false`) is a new manifest
+key, read via a new `checked_bool` helper, carried on `OrchestratePlan` / `OrchestrateResult` and
+emitted in the orchestrate JSON. `finishing-relay` and every prompt-assembly path
+(`orchestrate/commands.py::_prompt`, `workspace/pipeline.py::RELAY_TAIL_SEED`) are untouched: the
+worker still sends its one `ask`; what changed is who answers it.
+
+**Why not `convert-to-sibling`.** Not applicable: the file has no upstream counterpart to diverge
+from. It is ours-side content under entry #19, and this is further editing of a file that entry
+already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The fork-internal
+maintenance this implies: if the guard set in §4.3 step 0 changes, or if `supervise_merges` is
+renamed or gains a third state, §2.2, §4.3 and the Wrap-up must move together.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-auto-merge-child-finish`.
+
+---
+
+## Entry #31 — one identifier per worker: the dispatch key is a session name
+
+**Intent class: graph-works pipeline.** A dispatched worker had two identifiers and neither was a
+name: `--task-title` carried `<work-path>#<phase>` (104 characters for a nested child) and
+`--display-name` carried a second, cosmetic `<work-path> · <phase>` string that nothing looked up.
+`PlannedDispatch.key` is now a **session name** — `gw-<phase>-<slug>-<8 hex>`, capped at 64
+characters, a sibling of `branch_name`'s output by construction — and both Orca name flags carry
+that one string. The skill's own description of the ledger it derives moves with it.
+
+**It carries no `file:` line**, for the reason entries #22, #28, #29 and #30 give:
+`skills/auto-drive/SKILL.md` is already claimed by entry #19 as an ours-side addition, and
+`scripts/audit_delta.py`'s `duplicated` check turns `just audit-delta` non-ok on a second `file:`
+claim for one path.
+
+**What changed.**
+
+- `skills/auto-drive/SKILL.md` §2.1 step 1 — the task-title format is restated as a session name,
+  with the rule that a key is **opaque** (it carries a hash; nothing recovers a path by parsing
+  one), the instruction to match by equality and read `dispatches[].path` for the path, and the
+  hard-cutover note that a Run created under the old format cannot be resumed.
+- `skills/auto-drive/SKILL.md` §2.2 — the `dispatches[].key` field description names the new format
+  and states that the plan is itself the `key -> path` mapping.
+- `skills/auto-drive/SKILL.md` §3 step 1 — `--display-name` takes the same `<key>` as
+  `--task-title`, with the one-identifier rationale.
+- `skills/auto-drive/SKILL.md` §4.1 Coverage read — the phase is still read off the key (second
+  segment), but the **path** is not in the key any more; a stateless stem-match against the current
+  cycle's `dispatches[]` / `advances[]` / `blocked[]` resolves it, and an unmatched stem is reported
+  in one line rather than guessed at.
+
+**The core half.** `graph_works_core.orchestrate.commands` gains `_stable_stem` (extracted from
+`branch_name`, whose output is byte-identical before and after), `session_name`, `SESSION_NAME_MAX`
+and `session_index`. `PlannedDispatch.key` becomes the session name; `slug` still holds the full
+canonical path. The two `--live` call sites that recovered an item by `key.split("#", 1)[0]` are
+rewritten against `session_index`, which drops an ambiguous name and warns on the plan's existing
+`warnings` channel rather than binding to the wrong item. `workflow_orca.backend.launch` sends
+`dispatch.key` to both name flags.
+
+**Why not `convert-to-sibling`.** Not applicable: the file has no upstream counterpart to diverge
+from. It is ours-side content under entry #19, and this is further editing of a file that entry
+already owns.
+
+**On merge.** Nothing to reconcile — no upstream counterpart exists (entry #19). The fork-internal
+maintenance this implies: if the session-name format or `SESSION_NAME_MAX` changes, §2.1, §2.2, §3
+and §4.1's Coverage read must move in the same change, and so must
+`graph_works_cli`'s `--live` help text and its frozen surface golden.
+See `work/epic-auto-drive-dispatch-correctness/children/tech-debt-session-name-standardization`.
+
+---
+
+## Entry #32 — `sdd-workspace`'s path vocabulary on Git Bash
+
+<!-- audit-delta
+state: patched
+file: skills/subagent-driven-development/scripts/sdd-workspace
+-->
+
+**Intent class: portability.** The first entry in this ledger that is neither an identity rename nor
+a harness-compat fix. The governing rule — *patch only the lines identity requires* — does not
+reach it; its authority is **ADR-0021 rule 3b**, *"obra's inherited Windows machinery is maintained,
+not dropped."* Maintaining that machinery includes fixing it where it is broken on the platform the
+rule exists to protect.
+
+**The patch, in full:**
+
+```diff
+-cd "$dir" && pwd
++printf '%s\n' "$dir"
+```
+
+**Why.** The script derives `root=$(git rev-parse --show-toplevel)` — `git.exe` answers in Win32
+form (`C:/Users/…`) — builds `dir` from it, creates the directory, and then discards that string to
+re-derive the path through bash's `pwd`, which answers in MSYS form (`/tmp/…`). The two name the
+same directory; only one of them resolves for the native-Windows process that reads
+`sdd-workspace`'s stdout, which is the whole point of a script whose output is pasted into an
+implementer subagent's brief.
+
+**On POSIX this is a byte-for-byte no-op.** `git rev-parse --show-toplevel` returns a physical,
+symlink-resolved, normalised absolute path, and `.superpowers/sdd/<slug>` is created by `mkdir -p`
+immediately above, so no component can be a symlink and `cd "$dir" && pwd` cannot differ from
+`$dir`. The `cd` was not serving as an existence check either — `mkdir -p` runs one line earlier
+under `set -euo pipefail`.
+
+**Upstream.** The bug is present at obra HEAD; this fork has not pre-empted a fix. Filing it
+upstream is tracked as a follow-up on
+`work/epic-native-windows-support/children/bug-test-plugin-path-shape-git-bash`, not as a blocker.
+
+**On merge.** The patched line is the last line of a short file upstream rarely touches. Re-apply by
+locating `cd "$dir" && pwd` in upstream's current text and re-substituting. If upstream ever adopts
+the fix this entry becomes retirable, and `just audit-delta` will say so by reporting it as a
+*retired patch*.
+
+**Not claimed here:** `skills/subagent-driven-development/scripts/task-brief` and
+`review-package` are untouched. Both read `sdd-workspace`'s stdout and inherit the corrected shape
+without changing, which is why fixing one line fixed three of the suite's four assertions.
+
+---
+
+## Entry #33 — `server.cjs`: retry a bind failure on a Windows-reserved port range
+
+<!-- audit-delta
+state: patched
+file: skills/brainstorming/scripts/server.cjs
+-->
+
+**Intent class: portability/gate.** `server.cjs` was previously listed `verbatim` in entry #2; it
+is patched now (see that entry's 2026-09-01 amendment for the reclassification, and the tier-A
+count drop from 22 to 21 — leaving it in both places is double-classification, which
+`just audit-delta` reports as an error).
+
+**Why.** Windows reserves blocks of the ephemeral/dynamic port range (49152–65535) for
+Hyper-V/WinNAT/WSL2/Docker/Windows Sandbox — visible without administrator rights via
+`netsh interface ipv4 show excludedportrange protocol=tcp`. A bind into one of those ranges fails
+with `EACCES`, not `EADDRINUSE`. `server.cjs`'s port draws (`randomPort()`,
+`49152 + Math.floor(Math.random() * 16383)`) land there at roughly the reserved fraction of the
+time — ~13.8% per draw on the box this was reproduced on (23 ranges, 2260 of 16383 candidate
+ports) — and the pre-patch handler treated any non-`EADDRINUSE` error as fatal, so the server
+exited 1 without ever printing `server-started`. `lifecycle.test.js` makes six such draws per run,
+so roughly half of standalone runs failed, with the failing test moving between runs — this is
+what the item was originally filed as (a persisted-token bug); the actual defect was this bind
+failure, see `work/epic-native-windows-support/children/bug-brainstorm-server-undefined-persisted-token/references/01-design.md`
+for the full root-cause account.
+
+**The patch, in full:**
+
+- A small, exported, pure classifier: `isRetryableBindError(err, platform)` returns `true` for
+  `EADDRINUSE` on any platform, and for `EACCES` only when `platform === 'win32'` — on POSIX
+  `EACCES` means a privileged port was requested, and drifting off it silently would be wrong, so
+  it stays fatal there.
+- The bind error handler retries on any retryable error, bounded by a new `bindAttempts` counter at
+  8 (`0.138^8 ≈ 1e-7` on the observed blocklist), instead of the previous single `EADDRINUSE`-only
+  attempt.
+- `preferredPort()` now also reports whether the port it returned came from a **real** preference
+  (an explicit `BRAINSTORM_PORT`, or a value read from `BRAINSTORM_PORT_FILE`) versus an arbitrary
+  first `randomPort()` draw with no preference on record. `triedFallback` — which still means
+  exactly what it did before (*"we are no longer on our preferred port"*, gating `.last-port`/
+  `.last-token` persistence and the one-time token regeneration byte-for-byte as before) — is now
+  only set when a retry gives up a **real** preference. Redrawing away from an arbitrary first
+  draw that merely landed in a reserved range is not giving up on anything, so it does not suppress
+  persistence: without this distinction, a fresh session whose very first (unpreferenced) draw hit
+  a reserved port would retry successfully but never write its `.last-port`/`.last-token`, which
+  surfaced as an intermittent "restart should reuse the same port" failure in `lifecycle.test.js`
+  once the retry itself started working — a second-order flake this patch also closes.
+- `tokenSource === 'env'` still refuses to fall back at all, unconditionally, on either error code —
+  unchanged.
+- On exhaustion, exits 1 as before, with a message that additionally names
+  `netsh interface ipv4 show excludedportrange protocol=tcp` on Windows.
+
+**Verification.** No behavioural test can reliably *cause* an `EACCES` — reserving a port range
+needs administrator rights and is machine-global. The regression guard is the
+`isRetryableBindError` unit assertions in `lifecycle.test.js` (entry #23), plus 20 consecutive
+green runs of `node lifecycle.test.js` recorded on the epic's Windows box (see the item's design
+spec `## Acceptance`).
+
+**Upstream.** General Windows-portability fix with no fork-specific content; tracked as a follow-up
+on the item to offer to `obra/superpowers`. If upstream adopts it this entry becomes retirable and
+`just audit-delta` will say so.
+
+**On merge.** obra will not have this change. Re-apply against upstream's current
+`server.on('error', ...)` handler — a small, well-localised re-application: the classifier function,
+the `bindAttempts` counter, the `preferredPort()`/`hadRealPortPreference` split, and the
+Windows-specific exhaustion message.

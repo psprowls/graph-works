@@ -74,6 +74,7 @@ def run(
     config_path.write_text(
         f"repositories:\n  {resolved_name}:\n    path: {repo}\n",
         encoding="utf-8",
+        newline="",
     )
 
     sync_result = runner.invoke(app, ["sync", str(bundle_root)])

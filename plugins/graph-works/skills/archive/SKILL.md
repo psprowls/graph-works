@@ -28,6 +28,29 @@ With canonical-path arguments: targeted mode — those items only.
 
 Terminal statuses: `resolved`, `wontfix`, `superseded`.
 
+## Root-only
+
+**A work item is archived only as a root. Children ride along, in place.**
+
+- Sweep mode selects only **outermost terminal roots** — never a child, under
+  any ancestor state. A resolved child of an open epic stays at
+  `children/<name>` until its root archives.
+- Targeted mode **refuses** a child whose nearest non-archived ancestor is
+  non-terminal, with `ancestor-not-terminal` — *"archive the root instead"*.
+  There is no per-child override.
+- Archiving a root moves every descendant to `<dest>/children/<basename>`, with
+  **no** per-level `_archive` lane. A child already sitting in
+  `children/_archive/` is flattened into `children/` along with everything else.
+  Every flattened path still parses as archived: `_archive` is sticky at any
+  depth.
+
+Nested `children/_archive/` directories under already-archived roots are legacy.
+They are left exactly as they are — an archived page is frozen — and nothing can
+create that shape any more.
+
+`state.archive-eligible` does not fire on a child the policy holds in place, so
+lint no longer asks for a sweep that would be refused.
+
 ## Reference
 
 → `../graph-works/SKILL.md`

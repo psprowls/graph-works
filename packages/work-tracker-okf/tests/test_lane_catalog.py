@@ -66,10 +66,10 @@ def test_every_declared_code_carries_its_module_prefix() -> None:
             assert code.startswith(f"{topic}."), (topic, code)
 
 
-def test_the_catalog_is_thirty_seven_codes_across_six_topics() -> None:
-    assert len(_rules.CATALOG) == 37
+def test_the_catalog_is_thirty_eight_codes_across_six_topics() -> None:
+    assert len(_rules.CATALOG) == 38
     assert len(_rules.TOPICS) == 6
-    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 37
+    assert sum(len(codes) for codes in _rules.CODES_BY_TOPIC.values()) == 38
 
 
 def test_the_per_topic_counts_match_the_design_spec() -> None:
@@ -77,16 +77,16 @@ def test_the_per_topic_counts_match_the_design_spec() -> None:
         "state": 9,
         "plan": 4,
         "graph": 5,
-        "structure": 12,
+        "structure": 13,
         "targets": 2,
         "decisions": 5,
     }
 
 
-def test_the_severity_split_is_nineteen_errors_and_eighteen_warns() -> None:
+def test_the_severity_split_is_nineteen_errors_and_nineteen_warns() -> None:
     assert len(ERROR_CODES) == 19
     assert ERROR_CODES < _rules.CATALOG
-    assert len(_rules.CATALOG - ERROR_CODES) == 18
+    assert len(_rules.CATALOG - ERROR_CODES) == 19
 
 
 def test_no_lane_topic_collides_with_a_built_in_or_an_okf_ext_prefix() -> None:
@@ -153,7 +153,7 @@ def golden_report() -> Report:
 
 
 def test_the_vault_triggers_every_catalog_code(golden_report: Report) -> None:
-    """One walk, all 37. This is what catches a rule that stops firing."""
+    """One walk, all 38. This is what catches a rule that stops firing."""
     assert {f.code for f in _lane_findings(golden_report)} == _rules.CATALOG
 
 

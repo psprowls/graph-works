@@ -104,7 +104,7 @@ def test_escalation_and_heartbeat_shapes():
     assert beat.phase is None
 
 
-def test_worker_record_is_frozen_and_carries_five_fields():
+def test_worker_record_is_frozen_and_carries_seven_fields():
     rec = WorkerRecord(key="s#plan", handle="h", state="running", last_heartbeat_at=None, detail=None)
     assert WorkerRecord.__dataclass_params__.frozen
     assert {f.name for f in dataclasses.fields(rec)} == {
@@ -113,7 +113,18 @@ def test_worker_record_is_frozen_and_carries_five_fields():
         "state",
         "last_heartbeat_at",
         "detail",
+        "worktree_path",
+        "worktree_branch",
     }
+
+
+def test_the_worktree_fields_default_to_absent():
+    # A backend that provisions nothing — and every construction written
+    # before these fields existed — must keep compiling and keep meaning
+    # "not known", not "" and not the planner's guess.
+    rec = WorkerRecord(key="s#plan", handle="h", state="running", last_heartbeat_at=None, detail=None)
+    assert rec.worktree_path is None
+    assert rec.worktree_branch is None
 
 
 @pytest.mark.parametrize("err", [UnsupportedMode, UnknownWorker, WorktreeNotProvisioned])

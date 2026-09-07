@@ -33,7 +33,6 @@ ledger `Path` and an explicit cache lock `Path`.
 
 from __future__ import annotations
 
-import fcntl
 import os
 import re
 from collections.abc import Callable, Iterator, Sequence
@@ -42,6 +41,8 @@ from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path
 from typing import Literal
+
+from okf_ext.locking import locked as _locked_file
 
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref
 
@@ -482,23 +483,17 @@ def _locked(lock: Path) -> Iterator[None]:
     the ledger itself: the ledger may not exist on the first append, and each
     write replaces it, so two writers locking the ledger directly could hold
     different inodes and both proceed. The cache lock is created on demand and
-    never unlinked because unlinking races the next writer's open. POSIX-only,
-    like the rest of the stack.
+    never unlinked because unlinking races the next writer's open, via
+    `okf_ext.locking.locked`.
     """
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    descriptor = os.open(lock, os.O_CREAT | os.O_RDWR, 0o644)
-    try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX)
+    with _locked_file(lock):
         yield
-    finally:
-        fcntl.flock(descriptor, fcntl.LOCK_UN)
-        os.close(descriptor)
 
 
 def _write(ledger: Path, text: str) -> None:
     """Temp file + rename, so a crash mid-write cannot truncate the ledger."""
     tmp = ledger.parent / f".{ledger.name}.tmp.{os.getpid()}"
-    tmp.write_text(text, encoding="utf-8")
+    tmp.write_text(text, encoding="utf-8", newline="")
     tmp.replace(ledger)
 
 

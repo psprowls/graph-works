@@ -63,13 +63,25 @@ class WorktreeNotProvisioned(BackendError):
 
 @dataclass(frozen=True)
 class WorkerRecord:
-    """What a backend knows about one worker it launched."""
+    """What a backend knows about one worker it launched.
 
-    key: str  # PlannedDispatch.key — "<slug>#<phase>"
+    `worktree_path` and `worktree_branch` are what the worker *actually* runs
+    on, as the backend read it back after launching — not what a planner
+    asked for. They are optional because a backend that provisions no
+    worktree (`provisions_worktrees is False`) has nothing to report, and
+    because a read-back that failed must say "not known" rather than invent a
+    value. `None` therefore means exactly one thing: this backend did not
+    learn it. Comparing either field against a plan is a caller's business;
+    a backend records, it does not reconcile.
+    """
+
+    key: str  # PlannedDispatch.key — the worker's name, opaque to this layer
     handle: str  # backend-scoped worker id
     state: str  # one of WORKER_STATES
     last_heartbeat_at: str | None  # ISO-8601 on the backend's clock; None = never spoke
     detail: str | None  # the backend's own status string, for humans only
+    worktree_path: str | None = None  # the checkout this worker runs in; None = not known
+    worktree_branch: str | None = None  # the branch that checkout is on, short form; None = not known
 
 
 @dataclass(frozen=True)

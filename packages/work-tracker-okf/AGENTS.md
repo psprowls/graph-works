@@ -141,8 +141,12 @@ uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests
 uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests \
   --cov=work_tracker_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
 
-uv run --package work-tracker-okf mypy --strict packages/work-tracker-okf/src
+uv run --package work-tracker-okf mypy --strict --platform linux packages/work-tracker-okf/src
+uv run --package work-tracker-okf mypy --strict --platform win32 packages/work-tracker-okf/src
 ```
+
+(The two `mypy` lines are the root `justfile`'s `types` recipe for this
+package — one invocation per `--platform` arm.)
 
 A subset, same pattern as the rest of the workspace:
 

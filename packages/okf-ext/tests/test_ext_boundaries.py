@@ -37,7 +37,7 @@ SRC = Path(__file__).resolve().parents[1] / "src" / "okf_ext"
 #: The shared layer. Everything else is a capability. `shape` is a package
 #: rather than a single module, which is why `shared_modules()` expands a
 #: directory entry instead of assuming every name here is a file.
-SHARED = {"__init__.py", "body.py", "context.py", "shape", "splice.py", "writing.py"}
+SHARED = {"__init__.py", "body.py", "context.py", "locking.py", "shape", "splice.py", "writing.py"}
 
 
 def shared_modules() -> list[Path]:

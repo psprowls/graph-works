@@ -5,18 +5,14 @@ import unicodedata
 from pathlib import Path, PurePosixPath
 
 import pytest
-from helpers import BUNDLES
+from helpers import BUNDLES, write, write_tree
 from okf_io import bundle, index
 
 CONCEPT = "---\ntype: Metric\ntitle: T\ndescription: D\n---\n\n# T\n"
 
 
 def make(tmp_path: Path, files: dict[str, str]) -> bundle.Bundle:
-    for rel, text in files.items():
-        target = tmp_path / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text, encoding="utf-8")
-    return bundle.load(tmp_path)
+    return bundle.load(write_tree(tmp_path, files))
 
 
 def plan(loaded: bundle.Bundle, directory: str) -> index._Plan:
@@ -269,10 +265,10 @@ def test_a_destination_containing_a_paren_is_left_strictly_alone(tmp_path):
 def test_a_directory_containing_only_ignored_content_is_not_proposed(tmp_path):
     """`ignore=` declares content out of scope; a directory holding nothing
     else must not be invented as a missing subdirectory entry."""
-    (tmp_path / "index.md").write_text("# Subdirectories\n", encoding="utf-8")
+    write(tmp_path / "index.md", "# Subdirectories\n")
     static = tmp_path / "static"
     static.mkdir()
-    (static / "build.log").write_text("noise\n", encoding="utf-8")
+    write(static / "build.log", "noise\n")
     loaded = bundle.load(tmp_path, ignore=["*.log"])
     assert "static/build.log" in loaded.ignored
     result = plan(loaded, "")
@@ -644,7 +640,7 @@ def test_a_new_section_does_not_double_the_blank_line_after_a_dead_last_line(tmp
     (result,) = index.update(loaded, directories=["d"])
     assert result.after == "# Metric\n\n# Policy\n\n* [P](p.md) - A policy.\n"
 
-    (tmp_path / "d" / "index.md").write_text(result.after, encoding="utf-8")
+    write(tmp_path / "d" / "index.md", result.after)
     (again,) = index.update(bundle.load(tmp_path), directories=["d"])
     assert again.changed is False
     assert again.changes == ()

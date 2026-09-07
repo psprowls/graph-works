@@ -41,7 +41,7 @@ def _repo(tmp_path: Path) -> Path:
 
 def test_a_clean_tree_reports_no_drift(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / f"{_NFC}.md").write_text("x", encoding="utf-8")
+    (root / f"{_NFC}.md").write_text("x", encoding="utf-8", newline="")
     _git("add", "-A", cwd=root)
     _git("commit", "-q", "-m", "init", cwd=root)
     assert find_drift(root) == []
@@ -49,7 +49,7 @@ def test_a_clean_tree_reports_no_drift(tmp_path: Path) -> None:
 
 def test_an_nfd_disk_name_for_an_nfc_tracked_name_is_drift(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / f"{_NFC}.md").write_text("x", encoding="utf-8")
+    (root / f"{_NFC}.md").write_text("x", encoding="utf-8", newline="")
     _git("add", "-A", cwd=root)
     _git("commit", "-q", "-m", "init", cwd=root)
 
@@ -68,7 +68,7 @@ def test_drift_is_found_regardless_of_directory_depth(tmp_path: Path) -> None:
     root = _repo(tmp_path)
     nested = root / "concepts"
     nested.mkdir()
-    (nested / f"{_NFC}.md").write_text("x", encoding="utf-8")
+    (nested / f"{_NFC}.md").write_text("x", encoding="utf-8", newline="")
     _git("add", "-A", cwd=root)
     _git("commit", "-q", "-m", "init", cwd=root)
     (nested / f"{_NFC}.md").rename(nested / f"{_NFD}.md")
@@ -82,7 +82,7 @@ def test_a_missing_file_is_not_this_gates_concern(tmp_path: Path) -> None:
     different problem -- `git status` already reports it. This gate only
     reports a *normalization* mismatch, never a presence mismatch."""
     root = _repo(tmp_path)
-    (root / f"{_NFC}.md").write_text("x", encoding="utf-8")
+    (root / f"{_NFC}.md").write_text("x", encoding="utf-8", newline="")
     _git("add", "-A", cwd=root)
     _git("commit", "-q", "-m", "init", cwd=root)
     (root / f"{_NFC}.md").unlink()
@@ -91,7 +91,7 @@ def test_a_missing_file_is_not_this_gates_concern(tmp_path: Path) -> None:
 
 def test_main_exits_nonzero_and_reports_on_drift(tmp_path: Path, capsys: object) -> None:
     root = _repo(tmp_path)
-    (root / f"{_NFC}.md").write_text("x", encoding="utf-8")
+    (root / f"{_NFC}.md").write_text("x", encoding="utf-8", newline="")
     _git("add", "-A", cwd=root)
     _git("commit", "-q", "-m", "init", cwd=root)
     (root / f"{_NFC}.md").rename(root / f"{_NFD}.md")
@@ -102,7 +102,7 @@ def test_main_exits_nonzero_and_reports_on_drift(tmp_path: Path, capsys: object)
 
 def test_main_exits_zero_on_a_clean_tree(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / f"{_NFC}.md").write_text("x", encoding="utf-8")
+    (root / f"{_NFC}.md").write_text("x", encoding="utf-8", newline="")
     _git("add", "-A", cwd=root)
     _git("commit", "-q", "-m", "init", cwd=root)
     assert main([str(root)]) == 0

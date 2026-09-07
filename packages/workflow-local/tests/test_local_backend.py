@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 import pytest
+from marks import POSIX_ONLY
 from subagents_io.backend import (
     BackendError,
     DispatchBackend,
@@ -24,10 +25,14 @@ from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeActio
 from workflow_local.backend import LocalBackend
 from workflow_local.ledger import LEDGER_NAME, read_ledger
 
+pytestmark = POSIX_ONLY
+
 CHILD = Path(__file__).resolve().parent / "child.py"
 
 
-def dispatch(tmp_path, *program, key="slug#plan", mode="autonomous", path=...):
+def dispatch(
+    tmp_path, *program, key="gw-plan-slug-00000000", slug="work/feature-slug", phase="plan", mode="autonomous", path=...
+):
     worktree = WorktreeAction(
         action="reuse",
         path=str(tmp_path) if path is ... else path,
@@ -37,8 +42,8 @@ def dispatch(tmp_path, *program, key="slug#plan", mode="autonomous", path=...):
     )
     return PlannedDispatch(
         key=key,
-        slug=key.split("#")[0],
-        phase=key.split("#")[1],
+        slug=slug,
+        phase=phase,
         kind="feature",
         effort="medium",
         skill="writing-plans",
@@ -117,7 +122,7 @@ def test_launch_refuses_a_duplicate_key(tmp_path):
     with pytest.raises(BackendError, match="already"):
         session.launch(dispatch(tmp_path, "sleep:5"))
     assert len(session.workers()) == 1
-    session.stop("slug#plan")
+    session.stop("gw-plan-slug-00000000")
     session.close()
 
 
@@ -137,8 +142,8 @@ def test_the_dispatch_key_reaches_the_child(tmp_path):
     session.launch(dispatch(tmp_path, "escalate:blocked"))
     events = drain(session, until=lambda evs: any(isinstance(e, Escalation) for e in evs))
     escalation = next(e for e in events if isinstance(e, Escalation))
-    assert escalation.body == "slug#plan is blocked"
-    session.stop("slug#plan")
+    assert escalation.body == "gw-plan-slug-00000000 is blocked"
+    session.stop("gw-plan-slug-00000000")
     session.close()
 
 
@@ -156,8 +161,8 @@ def test_a_full_run_yields_heartbeat_then_done(tmp_path):
     assert events[0].phase == "planning"
     assert events[1].outcome == "succeeded"
     assert events[1].files_modified == ("a.py",)
-    assert session.describe("slug#plan").state == "succeeded"
-    assert session.describe("slug#plan").last_heartbeat_at is not None
+    assert session.describe("gw-plan-slug-00000000").state == "succeeded"
+    assert session.describe("gw-plan-slug-00000000").last_heartbeat_at is not None
     session.close()
 
 
@@ -211,7 +216,7 @@ def test_a_silent_child_that_exits_nonzero_is_reaped_as_failed(tmp_path):
     events = drain(session, until=is_done)
     done = next(e for e in events if isinstance(e, WorkerDone))
     assert done.outcome == "failed"
-    assert session.describe("slug#plan").state == "failed"
+    assert session.describe("gw-plan-slug-00000000").state == "failed"
     session.close()
 
 
@@ -224,7 +229,7 @@ def test_drain_tolerates_events_file_disappearing_between_polls(tmp_path):
     assert events_path.is_file()
     events_path.unlink()
     assert session.wait(timeout_s=0.1) == []
-    session.stop("slug#plan")
+    session.stop("gw-plan-slug-00000000")
     session.close()
 
 
@@ -251,7 +256,7 @@ def test_an_unrecognized_outcome_is_recorded_as_failed(tmp_path):
     events = drain(session, until=is_done)
     done = next(e for e in events if isinstance(e, WorkerDone))
     assert done.outcome == "weird"
-    assert session.describe("slug#plan").state == "failed"
+    assert session.describe("gw-plan-slug-00000000").state == "failed"
     session.close()
 
 
@@ -288,9 +293,9 @@ def test_reply_to_an_unknown_token_raises(tmp_path):
 def test_stop_terminates_the_child_and_records_it(tmp_path):
     session = make_backend(tmp_path / "root").open_session("s")
     record = session.launch(dispatch(tmp_path, "sleep:30"))
-    session.stop("slug#plan")
-    assert session.describe("slug#plan").state == "stopped"
-    assert not _pid_alive(read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["slug#plan"].pid)
+    session.stop("gw-plan-slug-00000000")
+    assert session.describe("gw-plan-slug-00000000").state == "stopped"
+    assert not _pid_alive(read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["gw-plan-slug-00000000"].pid)
     assert record.state == "running"
     session.close()
 
@@ -321,8 +326,8 @@ def test_stop_escalates_to_sigkill_when_sigterm_is_ignored(tmp_path):
     while not ready.is_file() and time.monotonic() < deadline:
         time.sleep(0.01)
     assert ready.is_file(), "trapper never installed its SIGTERM handler"
-    session.stop("slug#plan")
-    assert session.describe("slug#plan").state == "stopped"
+    session.stop("gw-plan-slug-00000000")
+    assert session.describe("gw-plan-slug-00000000").state == "stopped"
     session.close()
 
 
@@ -335,9 +340,9 @@ def test_stop_on_a_resumed_session_has_no_process_handle_to_terminate_with(tmp_p
     first.close()  # the child is left running; nothing tracks its Popen now
 
     resumed = backend.open_session("s")
-    pid = read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["slug#plan"].pid
-    resumed.stop("slug#plan")
-    assert resumed.describe("slug#plan").state == "stopped"
+    pid = read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["gw-plan-slug-00000000"].pid
+    resumed.stop("gw-plan-slug-00000000")
+    assert resumed.describe("gw-plan-slug-00000000").state == "stopped"
     assert not _pid_alive(pid)
     resumed.close()
 
@@ -352,8 +357,8 @@ def test_stop_on_an_already_settled_worker_is_not_an_error(tmp_path):
     session = make_backend(tmp_path / "root").open_session("s")
     session.launch(dispatch(tmp_path, "done:succeeded"))
     drain(session, until=is_done)
-    session.stop("slug#plan")
-    assert session.describe("slug#plan").state == "stopped"
+    session.stop("gw-plan-slug-00000000")
+    assert session.describe("gw-plan-slug-00000000").state == "stopped"
     session.close()
 
 
@@ -375,7 +380,7 @@ def test_ack_of_the_reaped_delivery_id_is_tolerated(tmp_path):
     session.launch(dispatch(tmp_path, "exit:0"))
     events = drain(session, until=is_done)
     session.ack(next(e for e in events if isinstance(e, WorkerDone)))
-    assert read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["slug#plan"].acked_through == 0
+    assert read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["gw-plan-slug-00000000"].acked_through == 0
     session.close()
 
 
@@ -389,8 +394,8 @@ def test_reopening_re_derives_every_record_from_the_ledger(tmp_path):
     first.close()
 
     second = backend.open_session("s")
-    assert [w.key for w in second.workers()] == ["slug#plan"]
-    assert second.describe("slug#plan").state == "succeeded"
+    assert [w.key for w in second.workers()] == ["gw-plan-slug-00000000"]
+    assert second.describe("gw-plan-slug-00000000").state == "succeeded"
     second.close()
 
 
@@ -400,14 +405,14 @@ def test_a_dead_pid_with_no_terminal_event_reopens_as_unknown_then_settles(tmp_p
     backend = make_backend(tmp_path / "root")
     session = backend.open_session("s")
     record = session.launch(dispatch(tmp_path, "sleep:30"))
-    pid = read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["slug#plan"].pid
+    pid = read_ledger(tmp_path / "root" / "s" / LEDGER_NAME)["gw-plan-slug-00000000"].pid
     os.kill(pid, signal.SIGKILL)
     while _pid_alive(pid):
         time.sleep(0.02)
     session.close()
 
     resumed = backend.open_session("s")
-    assert resumed.describe("slug#plan").state == "unknown"
+    assert resumed.describe("gw-plan-slug-00000000").state == "unknown"
     done = next(e for e in drain(resumed, until=is_done) if isinstance(e, WorkerDone))
     assert done.outcome == "failed"
     assert done.handle == record.handle
@@ -462,14 +467,14 @@ def test_close_tolerates_a_handle_whose_fd_was_already_closed(tmp_path):
     # double-close no-op.
     session = make_backend(tmp_path / "root").open_session("s")
     session.launch(dispatch(tmp_path, "sleep:5"))
-    handle = session._handles["slug#plan"]
+    handle = session._handles["gw-plan-slug-00000000"]
     os.close(handle.fileno())
     try:
         session.close()  # must not raise despite the fd already being gone
     finally:
         # close() never touches processes; stop the still-live child so a
         # regression above can't orphan it for the rest of sleep:5's duration.
-        session.stop("slug#plan")
+        session.stop("gw-plan-slug-00000000")
 
 
 def _pid_alive(pid):
@@ -478,3 +483,31 @@ def _pid_alive(pid):
     except ProcessLookupError:
         return False
     return True
+
+
+def test_the_local_backend_reports_no_worktree_of_its_own(tmp_path):
+    # `provisions_worktrees is False` here: this backend runs a subprocess in
+    # a worktree someone else made, and never learns a branch. Both fields
+    # stay None, which is the protocol's own word for "not known" — not "",
+    # and not the plan's guess.
+    session = make_backend(tmp_path / "root").open_session("s")
+    try:
+        record = session.launch(dispatch(tmp_path, "done:succeeded"))
+        assert record.worktree_path is None
+        assert record.worktree_branch is None
+    finally:
+        session.close()
+
+
+def test_open_session_refuses_when_the_platform_changes_under_a_live_backend(tmp_path, monkeypatch):
+    # Delegation coverage for the path `test_local_session_refuses_windows`
+    # used to exercise before it was rewritten (in test_windows_guard.py) to
+    # construct `LocalSession` directly: `LocalBackend.open_session` still has
+    # to refuse when the platform changes out from under an already-live
+    # backend. POSIX-only because it needs a real backend to construct first.
+    from workflow_local import backend as backend_module
+
+    backend = make_backend(tmp_path / "root")
+    monkeypatch.setattr(backend_module.sys, "platform", "win32")
+    with pytest.raises(BackendError):
+        backend.open_session("s")

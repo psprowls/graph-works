@@ -8,8 +8,7 @@ for what this first slice ships.
 
 ## What is here today
 
-`doc_wiki_okf.reading` — substrate-neutral file and format inspection, ported
-from the legacy `wiki_io.ingest_source`:
+`doc_wiki_okf.reading` — substrate-neutral file and format inspection:
 
 | Symbol | What it does |
 |---|---|
@@ -99,14 +98,12 @@ abstract base and no `is_folder` / `is_batch` discriminator field — the type i
 the discriminator, so a caller holding a `FolderBrief` cannot read `entity_match`
 off it and get `None`, because the attribute is not there.
 
-Each brief carries `as_data()`, which returns the dict the legacy
-`wiki_io.ingest_source` module returned for the same input, key for key —
-`_error` sentinel, bare-string `warnings`, `is_folder` / `is_batch` flags and
-all — with two documented departures: `word_count` uses corrected computation
-(the legacy formula was itself inconsistent with its own fixtures), and
-`source_type` is renamed to `source_kind` (K-A's rename away from the collision
-with OKF's own `type:`). `in_repo_doc` is not carried at all because nothing in
-production read it. That is the parity contract the port is tested against.
+Each brief carries `as_data()`, whose dict shape — `_error` sentinel,
+bare-string `warnings`, `is_folder` / `is_batch` flags and all — is pinned
+key-for-key by each mode's `test_as_data_is_the_legacy_dict`. The
+classification key is `source_kind`, not `source_type` (K-A's rename away from
+the collision with OKF's own `type:`), and there is no `in_repo_doc` key
+because nothing in production read it.
 
 ### Refusals and warnings are two vocabularies
 
@@ -246,7 +243,8 @@ See `docs/cutover-key-mapping.md` for the full old-key-to-new-key mapping.
 
 ## Commands
 
-    uv run --package doc-wiki-okf mypy --strict packages/doc-wiki-okf/src
+    uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
+    uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests
 
 Coverage is gated at 95% (`just cov`).

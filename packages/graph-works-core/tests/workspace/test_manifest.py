@@ -14,6 +14,7 @@ from graph_works_core.workspace.manifest import (
     MANIFEST_VERSION,
     WORKSPACE_DIR_ENV,
     checked,
+    checked_bool,
     checked_int,
     checked_str,
     defaults,
@@ -57,6 +58,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "workflow.pipeline.*.prompt_tail",
         "workflow.auto_drive.max_parallel",
         "workflow.auto_drive.permission_mode",
+        "workflow.auto_drive.supervise_merges",
         "workspace.dir",
     ]
 
@@ -464,6 +466,27 @@ def test_checked_str_refuses_a_non_string_and_an_explicit_null(tmp_path):
     layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    permission_mode: null\n")
     with pytest.raises(WorkspaceError, match="explicitly null"):
         checked_str(layout, "workflow.auto_drive.permission_mode")
+
+
+def test_checked_bool_reads_a_good_value_and_the_catalog_default(tmp_path):
+    assert checked_bool(_layout(tmp_path), "workflow.auto_drive.supervise_merges") is False
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: true\n")
+    assert checked_bool(layout, "workflow.auto_drive.supervise_merges") is True
+
+
+def test_checked_bool_refuses_an_int_a_string_and_an_explicit_null(tmp_path):
+    # `isinstance(True, int)` is true, so the type gate is asymmetric: an int
+    # must not read back as a bool the way `max_parallel: true` must not read
+    # back as 1. `1` is the value this test exists to catch.
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: 1\n")
+    with pytest.raises(WorkspaceError, match="expects a boolean"):
+        checked_bool(layout, "workflow.auto_drive.supervise_merges")
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: yes-please\n")
+    with pytest.raises(WorkspaceError, match="expects a boolean"):
+        checked_bool(layout, "workflow.auto_drive.supervise_merges")
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    supervise_merges: null\n")
+    with pytest.raises(WorkspaceError, match="explicitly null"):
+        checked_bool(layout, "workflow.auto_drive.supervise_merges")
 
 
 def test_resolve_checked_key_refuses_a_hand_edited_invalid_type(tmp_path):

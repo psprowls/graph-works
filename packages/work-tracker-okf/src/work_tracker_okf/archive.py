@@ -6,6 +6,7 @@ from collections.abc import Sequence
 
 from okf_io import Bundle
 
+from work_tracker_okf.hierarchy import archive_held_by_ancestor
 from work_tracker_okf.items import WorkItem, item_index
 from work_tracker_okf.mutation import MutationRefusal, WorkMutationPlan, _plan_path_mutation, _subtree_items
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
@@ -21,6 +22,14 @@ def _archive_destination(path: str) -> str:
 
 
 def _default_targets(items: Sequence[WorkItem]) -> tuple[str, ...]:
+    """Only outermost terminal roots -- never a child, under any ancestor state.
+
+    Two exclusions, and together they are the whole policy. An item with a
+    terminal non-archived ancestor is skipped because that ancestor is itself a
+    target and will carry it along. An item whose nearest non-archived ancestor
+    is non-terminal is skipped because the policy holds it in place until its
+    root archives -- see `hierarchy.archive_held_by_ancestor`.
+    """
     by_path = item_index(list(items))
     chosen: list[str] = []
     for item in items:
@@ -33,6 +42,8 @@ def _default_targets(items: Sequence[WorkItem]) -> tuple[str, ...]:
             for path in item.ancestor_paths
         ):
             continue
+        if archive_held_by_ancestor(items, item):
+            continue
         chosen.append(item.path)
     return tuple(sorted(chosen))
 
@@ -42,7 +53,21 @@ def _archive_subtree_mapping(
     target_path: str,
     destination: str,
 ) -> dict[str, str]:
-    """Map one terminal subtree with an iterative parent-before-child walk."""
+    """Map one terminal subtree with an iterative parent-before-child walk.
+
+    Descendants land at `<mapped>/children/<basename>` -- **no per-level
+    `_archive` lane**. Only the archived root carries one, and `parse_item_path`
+    treats `_archive` as sticky at any depth, so every flattened descendant
+    still parses with `archived=True` by ancestry.
+
+    This applies to `archived_child_paths` as well as `active_child_paths`: a
+    child already sitting in `children/_archive/` before its root archived is
+    flattened into `children/` along with everything else. The "this child was
+    archived separately" record is knowingly discarded -- under
+    `_default_targets`' and `plan_archive`'s root-only policy nothing can create
+    that state any more, so preserving the distinction would mean carrying a
+    shape whose only remaining instances are historical.
+    """
     by_path = item_index(list(items))
     mapping: dict[str, str] = {}
     pending = [(target_path, destination)]
@@ -57,7 +82,7 @@ def _archive_subtree_mapping(
         for child_path in reversed((*item.active_child_paths, *item.archived_child_paths)):
             child = by_path.get(child_path)
             if child is not None:
-                pending.append((child_path, f"{mapped}/children/_archive/{child.basename}"))
+                pending.append((child_path, f"{mapped}/children/{child.basename}"))
     return mapping
 
 
@@ -100,6 +125,15 @@ def plan_archive(
                     path,
                     "not-terminal",
                     f"work_status {target.work_status!r} is not terminal",
+                )
+            )
+
+        if archive_held_by_ancestor(items, target):
+            refusals.append(
+                MutationRefusal(
+                    path,
+                    "ancestor-not-terminal",
+                    "the nearest non-archived ancestor is not terminal; archive the root instead",
                 )
             )
 

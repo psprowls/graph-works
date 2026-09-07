@@ -95,6 +95,8 @@ LAUNCH = [
     (("task-list",), "task_list"),
     (("task-create",), "task_create"),
     (("worker-start",), "worker_start"),
+    (("worker-show",), "worker_show_created"),
+    (("worktree", "show"), "worktree_show_renamed"),
 ]
 
 PROMPT = "Run /gw:workflow my-slug.\nDispatch key: my-slug#execute\nSend worker_done when done."
@@ -102,7 +104,7 @@ PROMPT = "Run /gw:workflow my-slug.\nDispatch key: my-slug#execute\nSend worker_
 
 def planned(**overrides):
     fields = dict(
-        key="my-slug#execute",
+        key="gw-execute-my-slug-2f1a9c3d",
         slug="my-slug",
         phase="execute",
         kind="feature",
@@ -189,8 +191,20 @@ def test_the_prompt_reaches_spec_unedited():
     sess.launch(planned())
     create = runner.calls_matching("task-create")[0]
     assert runner.argv_after("--spec", create) == PROMPT
-    assert runner.argv_after("--task-title", create) == "my-slug#execute"
-    assert runner.argv_after("--display-name", create) == "my-slug · execute"
+    assert runner.argv_after("--task-title", create) == "gw-execute-my-slug-2f1a9c3d"
+    assert runner.argv_after("--display-name", create) == "gw-execute-my-slug-2f1a9c3d"
+
+
+def test_both_orca_name_fields_are_the_one_key():
+    # One identifier end-to-end: the string a human reads in the task row IS
+    # the string the ledger round-trip looks up.
+    sess, runner = session()
+    sess.launch(planned())
+    create = runner.calls_matching("task-create")[0]
+    title = runner.argv_after("--task-title", create)
+    assert title == runner.argv_after("--display-name", create)
+    assert title.startswith("gw-")
+    assert len(title) <= 64
 
 
 def test_model_alone_emits_model_and_no_effort():
@@ -231,7 +245,7 @@ def test_the_record_handle_is_the_dispatch_id():
     sess, _ = session()
     record = sess.launch(planned())
     assert record.handle == "ctx_new000000001"
-    assert record.key == "my-slug#execute"
+    assert record.key == "gw-execute-my-slug-2f1a9c3d"
     assert record.state == "pending"
 
 

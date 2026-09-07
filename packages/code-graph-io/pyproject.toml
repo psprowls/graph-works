@@ -28,5 +28,5 @@ packages = ["src/code_graph_io"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [
-  "integration: requires the agent-research workspace graph (skipped when unavailable)",
+  "integration: requires a built workspace graph (skipped when unavailable)",
 ]

@@ -5,6 +5,17 @@ receives resolved paths as arguments — there is no `graph_dir(workspace)`
 anywhere beneath this line, and an import-linter contract in the workspace root
 makes a violation a `just check` failure.
 
+## Platform
+
+`workspace/anchors.py` imports `fcntl` at four sites, each behind a
+`sys.platform` guard, choosing between a `_PosixAnchor` and a `_WindowsAnchor`
+implementation of the five POSIX-only primitives (`flock`, the NOREPLACE
+rename, descriptor-to-path resolution, `st_dev`/`st_ino` identity, directory
+`fsync`) that the rest of `workspace` depends on. That abstraction is what
+lets the durability tier and the work vertical both depend on locking without
+either carrying its own platform seam. See `gw util platform` for the live,
+per-capability answer on the running host.
+
 ## The layout
 
 ```
@@ -417,11 +428,34 @@ packaged table is total, an override can replace an entry but never leave a
 hole, and `workflow.pipeline.*.mode` carries `allowed=DISPATCH_MODES`, so a bad
 value is refused at `gw config set` time rather than at dispatch time.
 
-`orchestrate.commands` splits the way `route()` does. `plan()` is IO-free —
-plain `WorkItem` data in, an `OrchestratePlan` out — so every rule (affects
-serialization, capacity, the four worktree rules, model resolution) is a table
-test. `run_orchestrate()` and `run_stage_advance()` are the shells that read
-config, stat worktrees and run git.
+`orchestrate` splits the way `route()` does, across two modules. In
+`commands.py`, `plan()` is IO-free — plain `WorkItem` data in, an
+`OrchestratePlan` out — so every rule (affects serialization, capacity, the
+four worktree rules, model resolution) is a table test, and `run_orchestrate()`
+is the shell around it that reads config, stats worktrees and runs git.
+`stage_advance.py` holds `run_stage_advance()`, the separate shell `gw work
+advance` routes through. Neither module re-exports the other.
+
+**A stage that cannot produce a commit does not acquire a placement stamp.**
+`design` and `plan` write only into the vault, so a descendant at either phase
+reuses the epic worktree as a *read* context and records nothing — neither the
+planner's prompt nor `run_stage_advance`'s cwd inference stamps it. At
+`execute` and `finish` the same descendant forks a child branch off the epic
+branch and stamps normally. The **subtree root is exempt at every phase**: its
+stamp is the epic anchor every descendant resolves against, and an epic's
+`execute` dispatches children rather than a worker for itself, so a root that
+skipped `design` and `plan` would never stamp at all. `worktree` therefore
+means exactly "a code stage ran here". An explicit `--worktree`/`--branch`
+pair still wins over all of it — a stated placement is never a guess.
+
+**Cold start mints the epic worktree; there is no opportunistic main-checkout
+placement.** `default_base` is trunk, and a stage dispatched onto trunk commits
+onto trunk. Only the subtree root may mint the anchor; a descendant that
+reaches cold start is dispatching out of order and blocks as
+`worktree-unprovable`, naming the root as the remedy. The cost is real and
+accepted: an epic whose root predates this rule and carries no stamp blocks its
+descendants until someone dispatches the root or stamps it by hand — a visible
+block rather than a silent misplacement.
 
 `workspace.provenance` is the only module in this package that runs git. Every
 function degrades to `None` or a silent no-op: capturing provenance must never
@@ -457,7 +491,7 @@ default. `layout.repo_root` stays on the layout — gitignore placement and
 `scanner_excludes` are its documented job — but `orchestrate.commands` is no
 longer one of its readers.
 
-Three limits worth knowing before you rely on the result:
+Four limits worth knowing before you rely on the result:
 
 - The owning epic's decisions ledger is read **twice** per plan — once for the
   routing gate, once for the plan's decision fields — so the two reads are not
@@ -474,6 +508,11 @@ Three limits worth knowing before you rely on the result:
   per call, so the pass is quadratic in vault size — negligible at present
   scale, and not fixed here because both available fixes either duplicate the
   ancestor walk or change the domain signature.
+- A read-only dispatch is a **non-exclusive** occupant: it claims no worktree
+  slot, so two `design` stages may share the epic worktree and neither blocks a
+  code stage from it. A `design` worker can therefore read a tree a concurrent
+  `execute` worker is mutating. It degrades a read; it cannot corrupt one.
+  Recorded rather than mitigated.
 
 ## Custom-type provenance
 

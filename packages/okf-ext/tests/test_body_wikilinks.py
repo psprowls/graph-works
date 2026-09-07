@@ -4,6 +4,7 @@ consume."""
 
 from __future__ import annotations
 
+from ext_helpers import write
 from okf_ext.body import Wikilink, resolve_wikilink, wikilinks
 from okf_io import load_bundle
 
@@ -125,7 +126,7 @@ def test_a_backtick_run_skips_a_mismatched_width_before_finding_its_pair():
 
 
 def test_resolve_wikilink_tries_dot_md_first(tmp_path):
-    (tmp_path / "foo.md").write_text("---\ntype: Note\ntitle: Foo\n---\n", encoding="utf-8")
+    write(tmp_path / "foo.md", "---\ntype: Note\ntitle: Foo\n---\n")
     bundle = load_bundle(tmp_path)
     assert resolve_wikilink("foo", bundle=bundle) == "foo.md"
 
@@ -143,6 +144,6 @@ def test_resolve_wikilink_returns_none_for_a_dangling_target(tmp_path):
 
 def test_resolve_wikilink_does_no_basename_matching(tmp_path):
     (tmp_path / "a").mkdir()
-    (tmp_path / "a" / "foo.md").write_text("---\ntype: Note\ntitle: Foo\n---\n", encoding="utf-8")
+    write(tmp_path / "a" / "foo.md", "---\ntype: Note\ntitle: Foo\n---\n")
     bundle = load_bundle(tmp_path)
     assert resolve_wikilink("foo", bundle=bundle) is None

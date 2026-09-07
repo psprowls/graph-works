@@ -100,3 +100,25 @@ def test_managed_artifacts_have_root_absolute_resource_and_filename_ids(tmp_path
     assert ref.resource == "/work/release-cutover/references/03-execute-results.md"
     assert ref.path(tmp_path) == tmp_path / ref.rel
     assert paths.source_id_for_filename("03-execute-results.md") == "execute-results"
+
+
+def test_the_execute_coverage_artifact_derives_its_id_from_its_filename(tmp_path: Path) -> None:
+    item_path = "work/release-cutover"
+    ref = paths.artifact_ref(item_path, paths.MANAGED_ARTIFACTS["execute-coverage"])
+    assert paths.MANAGED_ARTIFACTS["execute-coverage"] == "03-execute-coverage.md"
+    assert ref == ArtifactRef(
+        rel="work/release-cutover/references/03-execute-coverage.md",
+        source_id="execute-coverage",
+    )
+    assert ref.resource == "/work/release-cutover/references/03-execute-coverage.md"
+    assert ref.path(tmp_path) == tmp_path / ref.rel
+    assert paths.source_id_for_filename("03-execute-coverage.md") == "execute-coverage"
+
+
+def test_the_coverage_artifact_is_a_canonical_member_that_moves() -> None:
+    # `_CANONICAL_FILENAMES` is what makes reparent/archive relocate the file
+    # without a per-filename branch; a managed artifact absent from it is a
+    # file that silently stays behind.
+    from work_tracker_okf.mutation import _CANONICAL_FILENAMES
+
+    assert "03-execute-coverage.md" in _CANONICAL_FILENAMES

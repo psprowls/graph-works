@@ -1,0 +1,28 @@
+{
+  "id": "3c2b1a09-8f7e-4d6c-b5a4-93827160fedc",
+  "ok": true,
+  "result": {
+    "dispatch": {
+      "id": "ctx_new000000001",
+      "run_id": "run_43b63f0bdf2b",
+      "task_id": "task_new0000001",
+      "status": "dispatched",
+      "last_heartbeat_at": null
+    },
+    "worker": {
+      "dispatch_id": "ctx_new000000001",
+      "state": "ready",
+      "stage": "input_accepted",
+      "worktree_id": "a5d7cb85-fc68-4596-bffd-ecf75466124a::/Users/pat/orca/workspaces/graph-works/child",
+      "agent_terminal_handle": "term_new00000000001",
+      "setup_state": "succeeded",
+      "effects": [
+        {
+          "kind": "worktree",
+          "action": "created_child",
+          "id": "a5d7cb85-fc68-4596-bffd-ecf75466124a::/Users/pat/orca/workspaces/graph-works/child"
+        }
+      ]
+    }
+  }
+}

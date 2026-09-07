@@ -12,7 +12,7 @@ raises. `work-io` raised `ValueError` for all seven cases.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal
@@ -26,6 +26,7 @@ from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition, 
 
 RefusalReason = Literal[
     "unknown-path",
+    "unreadable-member",
     "blocked",
     "nothing-to-advance",
     "effort-required",
@@ -33,7 +34,21 @@ RefusalReason = Literal[
     "resolved-in-required",
     "children-open",
     "released-at-required",
+    "uncommitted-work",
+    "no-commits",
+    "return-not-available",
+    "no-affects-touched",
 ]
+
+#: The three reasons above that this module never produces itself. They are
+#: raised one band up, by the `execute -> finish` commit gate in
+#: `graph_works_core.orchestrate.stage_advance`, which cannot own the
+#: vocabulary: `RefusalReason` is the CLI's rendering contract
+#: (`rendering.advance_payload` reads `outcome.plan.refusal`), and a closed
+#: string vocabulary is band-legal here where a git observation is not.
+#: `return-not-available` and `unreadable-member` sit between them in
+#: `RefusalReason` but are *not* members: `advance()` produces both itself.
+GATE_REFUSALS: frozenset[str] = frozenset({"uncommitted-work", "no-commits", "no-affects-touched"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,24 +103,60 @@ def advance(
     released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
+    return_: bool = False,
+    unreadable: Mapping[str, str] | None = None,
 ) -> AdvancePlan:
     """Plan the next transition for *path*. Mutates nothing, reads no clock.
+
+    `return_=True` selects the table's `on_return` instead of
+    `on_dispatch or on_complete` -- the one backwards move, offered only at
+    `finish`. It is mutually exclusive with `resolved_in`: a return is not a
+    stage completion, and silently ignoring a `resolved_in` handed to one
+    would record nothing while looking like it had.
 
     Takes `(items, path)` rather than a pre-routed transition because routing,
     picking `on_dispatch or on_complete`, and refusing an unmet requirement are
     one decision -- splitting them across a CLI is how `work-io` ended up with
     the gate messages living away from the table that produces them.
+
+    `unreadable` is `Bundle.unreadable`, keyed by bundle-relative `.md` path:
+    when *path* is missing from `items` because its page could not be read
+    (a locked handle, an encoding failure) rather than because it never
+    existed, this distinguishes the two so the refusal names the member and
+    the OS reason instead of collapsing into `unknown-path`.
     """
     item = next((candidate for candidate in items if candidate.path == path), None)
     state = state_for(items, path, effort=effort)
     if item is None or state is None:
+        detail = (unreadable or {}).get(f"{path}.md")
+        if detail is not None:
+            return _refused(path, None, None, "unreadable-member", f"{path}.md {detail}")
         return _refused(path, None, None, "unknown-path", f"unknown path {path!r}")
     result = route(state)
     if result.blockers:
         return _refused(path, result, None, "blocked", "; ".join(result.blockers))
-    transition = result.on_dispatch or result.on_complete
-    if transition is None:
-        return _refused(path, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
+    if return_:
+        if resolved_in is not None:
+            return _refused(
+                path,
+                result,
+                None,
+                "return-not-available",
+                "--return is mutually exclusive with --resolved-in: a return is not a stage completion",
+            )
+        transition = result.on_return
+        if transition is None:
+            return _refused(
+                path,
+                result,
+                None,
+                "return-not-available",
+                f"no return path from phase {item.phase!r}: --return applies to an item at phase 'finish'",
+            )
+    else:
+        transition = result.on_dispatch or result.on_complete
+        if transition is None:
+            return _refused(path, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
     # Two independent guards on the sentinel, because a leak writes an invalid
     # enum value into a real page.
     if "effort" in transition.requires or transition.phase == PLAN_OR_EXECUTE:
@@ -234,4 +285,4 @@ def apply(document: Document, plan: AdvancePlan) -> None:
         document.set(change.key, change.after)
 
 
-__all__ = ["AdvancePlan", "FieldChange", "RefusalReason", "advance", "apply"]
+__all__ = ["GATE_REFUSALS", "AdvancePlan", "FieldChange", "RefusalReason", "advance", "apply"]

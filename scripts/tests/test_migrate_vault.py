@@ -19,9 +19,9 @@ def page(vault: Path, member: str, body: str = "", *, frontmatter: str = "") -> 
     target = vault / member
     target.parent.mkdir(parents=True, exist_ok=True)
     if frontmatter:
-        target.write_text(f"---\n{frontmatter}---\n\n{body}", encoding="utf-8")
+        target.write_text(f"---\n{frontmatter}---\n\n{body}", encoding="utf-8", newline="")
     else:
-        target.write_text(body, encoding="utf-8")
+        target.write_text(body, encoding="utf-8", newline="")
     return target
 
 
@@ -182,7 +182,9 @@ def test_decisions_rerun_preserves_a_human_decision_and_appends_new_rows(tmp_pat
 
     path = tmp_path / DECISIONS_YAML
     path.write_text(
-        path.read_text(encoding="utf-8").replace("decision:\n", "decision: Reference\n", 1), encoding="utf-8"
+        path.read_text(encoding="utf-8").replace("decision:\n", "decision: Reference\n", 1),
+        encoding="utf-8",
+        newline="",
     )
 
     page(root, "concepts/b.md", "# B\n", frontmatter="title: B\n")
@@ -202,6 +204,7 @@ def test_load_decisions_inherits_proposed_when_decision_is_blank(tmp_path: Path)
         "version: 1\nrows:\n"
         "  - member: concepts/a.md\n    question: diataxis-type\n    proposed: Reference\n    decision:\n",
         encoding="utf-8",
+        newline="",
     )
     resolved, refusals = load_decisions(path)
     assert refusals == ()
@@ -216,6 +219,7 @@ def test_load_decisions_lets_an_explicit_decision_win(tmp_path: Path) -> None:
         "version: 1\nrows:\n"
         "  - member: concepts/a.md\n    question: diataxis-type\n    proposed: Reference\n    decision: Explanation\n",
         encoding="utf-8",
+        newline="",
     )
     resolved, refusals = load_decisions(path)
     assert refusals == ()
@@ -230,6 +234,7 @@ def test_load_decisions_refuses_an_illegal_decision_rather_than_defaulting(tmp_p
         "version: 1\nrows:\n"
         "  - member: concepts/a.md\n    question: diataxis-type\n    proposed: Reference\n    decision: Wharrgarbl\n",
         encoding="utf-8",
+        newline="",
     )
     resolved, refusals = load_decisions(path)
     assert ("concepts/a.md", "diataxis-type") not in resolved
@@ -247,7 +252,7 @@ def _decide(workspace: Path, rows: tuple[tuple[str, str, str], ...]) -> Path:
         f"  - member: {member}\n    question: {question}\n    proposed: {value}\n    decision:\n"
         for member, question, value in rows
     )
-    target.write_text(body if rows else "version: 1\nrows: []\n", encoding="utf-8")
+    target.write_text(body if rows else "version: 1\nrows: []\n", encoding="utf-8", newline="")
     return target
 
 
@@ -730,7 +735,7 @@ def _seed_schema(vault: Path) -> None:
     for relative, content in seed_files().items():
         target = config_dir / relative
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(content, encoding="utf-8")
+        target.write_text(content, encoding="utf-8", newline="")
 
 
 _PLAN_BODY = "## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n"
@@ -1068,6 +1073,7 @@ def _declare(workspace: Path, directories: dict[str, str]) -> Path:
                 }
             ),
             encoding="utf-8",
+            newline="",
         )
     return schema_dir
 
@@ -1192,7 +1198,7 @@ def test_bundle_phase_regroups_the_log_into_dated_sections(tmp_path: Path) -> No
     from okf_io.log import parse as parse_log
 
     root = vault_root(tmp_path)
-    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8")
+    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8", newline="")
 
     result = cmd_bundle(_args(vault=root, write=True))
 
@@ -1209,7 +1215,7 @@ def test_bundle_phase_log_is_newest_first(tmp_path: Path) -> None:
     from okf_io.log import parse as parse_log
 
     root = vault_root(tmp_path)
-    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8")
+    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8", newline="")
     cmd_bundle(_args(vault=root, write=True))
 
     dates = [section.date for section in parse_log(load_one(root / "log.md")).sections]
@@ -1221,7 +1227,7 @@ def test_bundle_phase_log_reports_no_reserved_heading_finding(tmp_path: Path) ->
     from okf_io import load_bundle, validate
 
     root = vault_root(tmp_path)
-    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8")
+    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8", newline="")
     cmd_bundle(_args(vault=root, write=True))
 
     report = validate(load_bundle(root), today=date(2026, 8, 23))
@@ -1232,7 +1238,7 @@ def test_bundle_phase_rewrites_the_prose_header(tmp_path: Path) -> None:
     from migrate_vault import cmd_bundle
 
     root = vault_root(tmp_path)
-    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8")
+    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8", newline="")
     cmd_bundle(_args(vault=root, write=True))
 
     body = (root / "log.md").read_text(encoding="utf-8")
@@ -1260,7 +1266,7 @@ def test_bundle_phase_gives_the_root_index_its_okf_version(tmp_path: Path) -> No
 
     root = tmp_path / "wiki"
     root.mkdir()
-    (root / "index.md").write_text("# Index\n", encoding="utf-8")
+    (root / "index.md").write_text("# Index\n", encoding="utf-8", newline="")
     (tmp_path / ".gw").mkdir()
 
     cmd_bundle(_args(vault=root, write=True))
@@ -1272,7 +1278,7 @@ def test_bundle_phase_is_idempotent(tmp_path: Path) -> None:
     from migrate_vault import cmd_bundle
 
     root = vault_root(tmp_path)
-    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8")
+    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8", newline="")
     page(root, "work/index.md", "# Work\n", frontmatter="title: Work\n")
 
     cmd_bundle(_args(vault=root, write=True))
@@ -1337,7 +1343,7 @@ def test_gate_fails_assertion_three_when_broken_links_increased(tmp_path: Path) 
     root = vault_root(tmp_path)
     page(root, "concepts/a.md", "See [gone](/concepts/nowhere.md).\n", frontmatter="title: A\n")
     baseline = tmp_path / "baseline.json"
-    baseline.write_text(json.dumps({"broken": 0}), encoding="utf-8")
+    baseline.write_text(json.dumps({"broken": 0}), encoding="utf-8", newline="")
 
     result = cmd_gate(_args(vault=root, write=False, today=date(2026, 8, 23), baseline=baseline))
 
@@ -1357,6 +1363,7 @@ def test_gate_fails_assertion_four_on_an_unreviewed_unmatched_report(tmp_path: P
         "|---|---|---|---:|---|\n"
         "| `entities/pkg_x__00.md` | `pkg:o/r/x` | `repositories/r/packages/x` | 4 | repo rename |\n",
         encoding="utf-8",
+        newline="",
     )
 
     result = cmd_gate(_args(vault=root, write=False, today=date(2026, 8, 23)))
@@ -1390,6 +1397,7 @@ def test_gate_passes_assertion_four_when_first_table_is_empty_but_second_has_row
         "| `pkg:o/r/already-dangling-1` | 2 |\n"
         "| `pkg:o/r/already-dangling-2` | 1 |\n",
         encoding="utf-8",
+        newline="",
     )
 
     result = cmd_gate(_args(vault=root, write=False, today=date(2026, 8, 23)))
@@ -1432,7 +1440,7 @@ def _whole_vault(tmp_path: Path) -> Path:
     target = root / "adrs/0002-crlf.md"
     target.write_bytes("﻿---\r\ntitle: Fine\r\ntype: Adr\r\nstatus: stable\r\n---\r\n\r\n# Fine\r\n".encode())
 
-    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8")
+    (root / "log.md").write_text(LEGACY_LOG, encoding="utf-8", newline="")
     _decide(tmp_path, rows=(("concepts/c.md", "diataxis-type", "Reference"),))
     return root
 

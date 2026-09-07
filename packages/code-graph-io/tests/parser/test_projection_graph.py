@@ -63,7 +63,9 @@ def test_graph_projection(language, fname):
     tree = parse_file(fixture, package="fixtures")
     actual = _serialize_records(to_graph_records(tree))
     expected = json.loads(expected_path.read_text(encoding="utf-8"))
-    expected = _substitute(expected, str(fixture))
+    # The projection spells every path POSIX-style, absolute paths included:
+    # on Windows the fixture's own path renders C:/... , not C:\... .
+    expected = _substitute(expected, fixture.as_posix())
     assert actual["nodes"] == expected["nodes"]
     assert sorted(map(json.dumps, actual["edges"])) == sorted(map(json.dumps, expected["edges"]))
 

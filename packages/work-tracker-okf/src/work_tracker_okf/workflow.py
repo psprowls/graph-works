@@ -25,7 +25,7 @@ from work_tracker_okf.dependencies import (
     unmet,
     validate_dependencies,
 )
-from work_tracker_okf.hierarchy import ChildRollup, child_rollup
+from work_tracker_okf.hierarchy import ChildRollup, active_nonterminal_descendants, child_rollup
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.vocabulary import (
     BUG_LIKE_TYPES,
@@ -74,6 +74,7 @@ class RouteState:
     dependency_facts: tuple[DependencyFact, ...] = ()
     dependency_issues: tuple[DependencyIssue, ...] = ()
     child_rollup: ChildRollup | None = None
+    open_descendants: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +89,12 @@ class Transition:
     stamp_source: str | None = None
 
 
+#: The one backwards transition the table offers: `finish` -> `execute`, with
+#: the item put back in progress. Named once because both `_finish` arms
+#: return it and a second literal is a second thing to keep in step.
+RETURN_TO_EXECUTE = Transition(phase="execute", work_status="in-progress")
+
+
 @dataclass(frozen=True, slots=True)
 class Dispatch:
     """What to run. One field, not two, so `stage` and `variant` cannot disagree."""
@@ -98,11 +105,24 @@ class Dispatch:
 
 @dataclass(frozen=True, slots=True)
 class RouteResult:
+    """What to dispatch, and the three transitions the table offers.
+
+    `on_return` is the only one that moves an item **backwards**, and it is a
+    field of the table rather than a special case in `advance` because a phase
+    change belongs where every other phase change is written. Only `_finish`
+    sets it: an item that has already reached `finish` -- because it got there
+    before the `execute -> finish` gate existed, because the relay put it on
+    `hold`, or because a later stage-gate sends it back -- otherwise has no
+    supported route home, and hand-editing frontmatter is not one.
+    """
+
     dispatch: Dispatch | None
     reason: str
     on_dispatch: Transition | None = None
     on_complete: Transition | None = None
     blockers: tuple[str, ...] = ()
+    on_return: Transition | None = None
+    repair: Transition | None = None
 
 
 def route(state: RouteState) -> RouteResult:
@@ -307,7 +327,12 @@ def _plan(state: RouteState) -> RouteResult:
 
 
 def _parent_execute_gate(state: RouteState) -> RouteResult:
-    """The Release/Epic gate blocks dispatch while child work remains."""
+    """The Release/Epic gate blocks dispatch while child work remains.
+
+    The decision reads `open_descendants` (any depth), not the direct-child
+    rollup: a terminal direct child can still hold an open grandchild, and the
+    rollup alone would call that satisfied. `child_rollup` stays only for the
+    "no children" blocker and the `n/m terminal` counts in the message."""
     rollup = state.child_rollup
     if rollup is None or rollup.total == 0:
         return RouteResult(
@@ -315,12 +340,13 @@ def _parent_execute_gate(state: RouteState) -> RouteResult:
             reason=f"{state.type.lower()} execute: no children",
             blockers=(f"{state.type.lower()} has no children; run the plan stage to decompose it",),
         )
-    if rollup.terminal < rollup.total:
+    if state.open_descendants:
         return RouteResult(
             dispatch=None,
             reason=f"{state.type.lower()} execute: waiting on children",
             blockers=(
-                f"waiting on children: {rollup.terminal}/{rollup.total} terminal; open: {', '.join(rollup.open_paths)}",
+                f"waiting on children: {rollup.terminal}/{rollup.total} terminal; "
+                f"open: {', '.join(state.open_descendants)}",
             ),
         )
     return RouteResult(
@@ -333,8 +359,7 @@ def _parent_execute_gate(state: RouteState) -> RouteResult:
 def _feature_children_requires(state: RouteState) -> tuple[str, ...]:
     """The feature gate: it rides `Transition.requires`, because a feature has
     work of its own to dispatch. It can act; it cannot finish."""
-    rollup = state.child_rollup
-    if state.type == "Feature" and rollup is not None and rollup.open_paths:
+    if state.type == "Feature" and state.open_descendants:
         return ("children-terminal",)
     return ()
 
@@ -368,10 +393,22 @@ def _finish(state: RouteState) -> RouteResult:
         return blocker
     if state.type in {"Release", "Epic"}:
         # Releases and epics own no branch -- their descendants carry `resolved_in`.
+        if state.open_descendants:
+            # A child filed after this item reached `finish` reopens the gate:
+            # `advance()`'s children-open guard would refuse `on_complete` here,
+            # so plan the repair instead of a transition that will be refused.
+            return RouteResult(
+                dispatch=None,
+                reason=f"{state.type.lower()} at finish stage: reopened by later children",
+                blockers=(f"waiting on children filed after finish: {', '.join(state.open_descendants)}",),
+                on_return=RETURN_TO_EXECUTE,
+                repair=RETURN_TO_EXECUTE,
+            )
         return RouteResult(
             dispatch=None,
             reason=f"{state.type.lower()} at finish stage",
             on_complete=Transition(phase="done", work_status="resolved"),
+            on_return=RETURN_TO_EXECUTE,
         )
     return RouteResult(
         dispatch=Dispatch("finish", "branch"),
@@ -381,6 +418,7 @@ def _finish(state: RouteState) -> RouteResult:
             work_status="resolved",
             requires=("resolved_in", *_feature_children_requires(state)),
         ),
+        on_return=RETURN_TO_EXECUTE,
     )
 
 
@@ -412,8 +450,10 @@ def state_for(
     if item is None:
         return None
     rollup: ChildRollup | None = None
+    open_descendants: tuple[str, ...] = ()
     if item.type in PARENT_TYPES:
         rollup = child_rollup(items, path)
+        open_descendants = active_nonterminal_descendants(items, path)
         if item.type not in {"Release", "Epic"} and rollup.total == 0:
             rollup = None
     structural_issues = tuple(
@@ -433,6 +473,7 @@ def state_for(
         dependency_facts=resolve_facts(items, item.dependency_edges),
         dependency_issues=(*item.dependency_issues, *structural_issues),
         child_rollup=rollup,
+        open_descendants=open_descendants,
     )
 
 

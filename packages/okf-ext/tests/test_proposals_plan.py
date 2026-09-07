@@ -153,7 +153,7 @@ def test_a_taken_default_placement_is_disambiguated(tmp_path):
     is worked around rather than refused."""
     copy = ext_helpers.proposed_copy(tmp_path)
     occupied = copy / "proposals" / "pages-live-x.md"
-    occupied.write_text("---\ntype: Concept\ntitle: Occupies the default placement\n---\nbody\n", encoding="utf-8")
+    ext_helpers.write(occupied, "---\ntype: Concept\ntitle: Occupies the default placement\n---\nbody\n")
     bundle = load_bundle(copy)
 
     plan = plan_propose(bundle, "pages/live-x.md", [NEW_SOURCE], title="X", description="d", by=BY, at=AT)
@@ -329,7 +329,7 @@ def test_proposal_path_disambiguates_inside_a_non_default_directory(tmp_path):
     root = tmp_path / "b"
     occupied = root / "proposals" / "_archive" / "adrs-x.md"
     occupied.parent.mkdir(parents=True, exist_ok=True)
-    occupied.write_text("---\ntype: Proposal\ntitle: Occupies it\n---\nbody\n", encoding="utf-8")
+    ext_helpers.write(occupied, "---\ntype: Proposal\ntitle: Occupies it\n---\nbody\n")
     bundle = ext_helpers.write_bundle(root, {})
     assert proposal_path(bundle, "adrs/x.md", directory="proposals/_archive") == "proposals/_archive/adrs-x-2.md"
 

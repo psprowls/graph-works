@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Convert Obsidian wikilinks to OKF §6.1 markdown links, in any graph-wiki vault.
 
-``[[entities/pkg_okf-io]]`` becomes ``[okf-io](/entities/pkg_okf-io.md)``. Three
-vaults exist or will (`agent-workspace`, `agent-research`, `mono-repo`), so this
-is a tool over a vault path rather than a one-off over one of them.
+``[[entities/pkg_okf-io]]`` becomes ``[okf-io](/entities/pkg_okf-io.md)``. More
+than one vault needs this, so it is a tool over a vault path rather than a
+one-off over any single one.
 
 Design notes
 ------------

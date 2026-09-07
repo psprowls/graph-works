@@ -58,7 +58,7 @@ Three environment variables are set on every child, and nothing else:
 |---|---|
 | `SUBAGENT_EVENT_LOG` | absolute path the child **appends** JSONL events to |
 | `SUBAGENT_REPLY_LOG` | absolute path the child **reads** JSONL replies from |
-| `SUBAGENT_DISPATCH_KEY` | this worker's `PlannedDispatch.key`, `"<slug>#<phase>"` |
+| `SUBAGENT_DISPATCH_KEY` | this worker's `PlannedDispatch.key` — its name, e.g. `gw-execute-feature-x-2f1a9c3d` |
 
 A child that writes no events still settles — see *The reaper* below — so the
 contract is opt-in per capability rather than all-or-nothing.
@@ -113,6 +113,12 @@ settles, so no key can sit live forever. Its `delivery_id` is
   a process start time is platform-specific work this package will not do.
   `"unknown"` exists in `WORKER_STATES` so the honest answer is expressible,
   but the probe itself cannot always reach it.
-- **It is POSIX only.** `stop()`'s SIGTERM/SIGKILL escalation and the pid
-  liveness probe both go through `os.kill`/`signal.SIGKILL`, which do not exist
-  on Windows.
+- **It refuses to run on Windows.** `stop()`'s SIGTERM/SIGKILL escalation and
+  the pid liveness probe both go through `os.kill`/`signal.SIGKILL`, and
+  `os.kill(pid, 0)` maps to `TerminateProcess` there — a liveness probe that
+  would kill the very worker it is asked to observe. Both `LocalBackend()` and
+  `LocalSession()` (via `open_session()`) raise `BackendError` at construction
+  on `sys.platform == "win32"`, before touching the ledger. Use
+  `workflow-orca` as the Windows dispatch backend instead; `workflow_local.ledger`
+  is pure `json`/`pathlib` and stays usable on Windows for inspecting a
+  POSIX-written ledger.

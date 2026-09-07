@@ -58,6 +58,22 @@ PIPELINE_PREFIX = "workflow.pipeline."
 #: (`RELAY_TAIL_SEED`, below).
 ATTEND_TAIL = "The user may join this session to answer this stage's questions; ask normally."
 
+#: The obligation both execute variants carry. A packaged default rather than
+#: config for `ATTEND_TAIL`'s reason -- it names no vendor. It is *reported,
+#: not enforced*: the file is surfaced to a human by `auto-drive` §4.1 and
+#: registered into `sources[]` by the advance, and no transition is gated on
+#: its contents. A gate that read a worker's self-report would be trusting the
+#: exact judgement the defect this tail exists for shows a model getting wrong.
+EXECUTE_TAIL = (
+    "Before you advance, write {workspace}/okf/{path}/references/03-execute-coverage.md: "
+    "one markdown task-list line per item in this stage's design spec `## Acceptance` section, "
+    "each line `- [x]` when delivered or `- [ ]` when not, each with a one-line justification. "
+    "Where the spec has no `## Acceptance` section, enumerate its `## Scope` / "
+    "`## What this design changes` headings instead and say in the file that you did. "
+    "Mark honestly -- an unchecked box is a normal, expected outcome; an inaccurate checked box "
+    "is not. Pass that file's path as --report-path on your worker_done."
+)
+
 #: The `relay` tail a **new** workspace is seeded with, written into its
 #: manifest by `init.plan_init` rather than shipped in `PACKAGED_PIPELINE`.
 #: The tail is a value the workspace owns; core seeds it and a workspace
@@ -91,8 +107,8 @@ PACKAGED_PIPELINE: Mapping[str, PipelineEntry] = MappingProxyType(
         "epic-design": PipelineEntry("gw:epic-design", "attend", ATTEND_TAIL),
         "decompose": PipelineEntry("gw:planning-epics", "autonomous"),
         "single": PipelineEntry("superpowers:writing-plans", "autonomous"),
-        "planned": PipelineEntry("superpowers:subagent-driven-development", "autonomous"),
-        "unplanned": PipelineEntry("superpowers:test-driven-development", "autonomous"),
+        "planned": PipelineEntry("superpowers:subagent-driven-development", "autonomous", EXECUTE_TAIL),
+        "unplanned": PipelineEntry("superpowers:test-driven-development", "autonomous", EXECUTE_TAIL),
         "branch": PipelineEntry("superpowers:finishing-a-development-branch", "relay"),
     }
 )
@@ -206,6 +222,7 @@ def entry_for(variant: str, *, layout: WorkspaceLayout | None = None) -> Pipelin
 
 __all__ = [
     "ATTEND_TAIL",
+    "EXECUTE_TAIL",
     "PACKAGED_PIPELINE",
     "PIPELINE_PREFIX",
     "RELAY_TAIL_SEED",

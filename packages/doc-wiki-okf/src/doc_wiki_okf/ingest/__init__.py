@@ -9,12 +9,11 @@ offered as an API.
 
     from doc_wiki_okf.ingest import plan_document_brief, plan_folder_brief, plan_batch_brief
 
-Each brief carries `as_data()`, which returns the dict the legacy
-`wiki_io.ingest_source` function returned for the same input, key for key. That
-is the parity contract the port is tested against, and what lets the plugin be
-repointed later without an argument about behaviour.
+Each brief carries `as_data()`, whose dict shape is fixed key-for-key by
+`test_as_data_is_the_legacy_dict` in each mode's suite. That is what lets the
+plugin be repointed without an argument about behaviour.
 
-The skill brief does **not** port. It builds a guidance-shaped brief -- chunking
+There is deliberately no skill brief here. A guidance-shaped brief -- chunking
 a skill directory into `wiki/guidance/<topic>/<slug>.md` -- which is the guidance
 flow, a layer above this one. `reading.gather_skill_sources` is the
 substrate-neutral half, and it is ready for whoever claims that layer.

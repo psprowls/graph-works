@@ -189,7 +189,7 @@ def write_trace_record(
         record["error"] = error
 
     try:
-        with path.open("a") as f:
+        with path.open("a", encoding="utf-8", newline="\n") as f:
             f.write(json.dumps(record) + "\n")
     except OSError as exc:
         logger.warning("Trace write failed (data loss): %s", exc)

@@ -6,6 +6,7 @@ import sys
 from datetime import date
 
 import pytest
+from ext_helpers import write
 from okf_ext.bundle import SCAFFOLD_MEMBERS, apply, plan_install, plan_scaffold
 
 _IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
@@ -49,7 +50,7 @@ def test_a_modified_owned_template_refuses_only_that_file(tmp_path):
     the other files landing, and the edit itself is not overwritten."""
     root = tmp_path / "bundle"
     (root / "schema").mkdir(parents=True)
-    (root / "schema/Topic.schema.json").write_text('{"type": "object", "mine": true}\n', encoding="utf-8")
+    write(root / "schema/Topic.schema.json", '{"type": "object", "mine": true}\n')
 
     plan = plan_install(root, _FILES, seed_only=_SEED_ONLY)
     assert not plan.ok
@@ -67,7 +68,7 @@ def test_a_present_seed_only_file_is_skipped_whatever_its_contents(tmp_path):
     and never has an opinion about it again."""
     root = tmp_path / "bundle"
     root.mkdir()
-    (root / "_config.yaml").write_text("key: the human's own value\n", encoding="utf-8")
+    write(root / "_config.yaml", "key: the human's own value\n")
 
     plan = plan_install(root, _FILES, seed_only=_SEED_ONLY)
     assert plan.ok
@@ -113,7 +114,7 @@ def test_an_unreadable_file_is_refused(tmp_path):
     # read-tested rather than seed-checked.
     unreadable = root / "sections/Topic.yaml"
     unreadable.parent.mkdir()
-    unreadable.write_text("sections: []\n", encoding="utf-8")
+    write(unreadable, "sections: []\n")
     unreadable.chmod(0o000)
 
     try:
@@ -152,7 +153,7 @@ def test_unencodable_content_for_a_present_target_is_refused_not_raised(tmp_path
     content that cannot even be encoded to compare. Neighbours still write."""
     root = tmp_path / "bundle"
     (root / "schema").mkdir(parents=True)
-    (root / "schema/Topic.schema.json").write_text("different\n", encoding="utf-8")
+    write(root / "schema/Topic.schema.json", "different\n")
 
     files = {**_FILES, "schema/Topic.schema.json": "\ud800"}
     plan = plan_install(root, files, seed_only=_SEED_ONLY)

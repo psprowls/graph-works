@@ -4,7 +4,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
-from helpers import BUNDLES, FIXTURES, read
+from helpers import BUNDLES, FIXTURES, read, write
 from okf_io import Document, log
 
 
@@ -185,7 +185,7 @@ def test_neither_on_nor_today_raises():
 
 def test_dry_run_is_the_default_and_leaves_the_disk_untouched(tmp_path):
     path = tmp_path / "log.md"
-    path.write_text(BASE, encoding="utf-8")
+    write(path, BASE)
     result = log.append(Document.load(path), NEW, on=date(2026, 7, 1))
     assert path.read_text(encoding="utf-8") == BASE
     assert result.changed is True
@@ -193,7 +193,7 @@ def test_dry_run_is_the_default_and_leaves_the_disk_untouched(tmp_path):
 
 def test_dry_run_false_writes_the_file(tmp_path):
     path = tmp_path / "log.md"
-    path.write_text(BASE, encoding="utf-8")
+    write(path, BASE)
     result = log.append(Document.load(path), NEW, on=date(2026, 7, 1), dry_run=False)
     assert path.read_text(encoding="utf-8") == result.after
 

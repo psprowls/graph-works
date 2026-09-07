@@ -15,7 +15,8 @@ unchanged from this directory:
 ```bash
 uv run pytest tests/test_index.py -q          # one module
 uv run pytest tests/test_links.py -k resolve  # one subset
-uv run mypy --strict src                      # this package only
+uv run mypy --strict --platform linux src     # this package only
+uv run mypy --strict --platform win32 src
 ```
 
 `uv run pytest` with no path still collects the whole suite — `testpaths` is set

@@ -24,12 +24,14 @@ from typing import Any, Never, Protocol, cast
 
 import typer
 from graph_works_core.archive.commands import ArchiveRun
-from graph_works_core.orchestrate.commands import OrchestrateResult, StageAdvance
+from graph_works_core.orchestrate.commands import OrchestrateResult
+from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.work.commands import (
     ChildRollup,
     Decision,
     DecisionCommandResult,
     FilingRun,
+    IngestQueueReport,
     NextResult,
     OverturnResult,
     PathMutationResult,
@@ -345,7 +347,7 @@ def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
         "applied": application is not None,
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
-        "warnings": [] if application is None else list(application.warnings),
+        "warnings": list(result.warnings) + ([] if application is None else list(application.warnings)),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "results_path": None if result.results_path is None else str(result.results_path),
         "pointer_path": None if result.pointer_path is None else str(result.pointer_path),
@@ -427,6 +429,30 @@ def render_status(payload: dict[str, Any]) -> None:
         typer.echo(f"  resume: {resume['primary']['path']} — {resume['primary']['title']}")
         for alternative in resume["alternatives"]:
             typer.echo(f"    alt: {alternative['path']} — {alternative['title']}")
+
+
+def ingest_queue_payload(report: IngestQueueReport) -> dict[str, Any]:
+    return {
+        "pending": [
+            {
+                "path": entry.path,
+                "work_status": entry.work_status,
+                "resource": entry.resource,
+                "origin": entry.origin,
+            }
+            for entry in report.pending
+        ]
+    }
+
+
+def render_ingest_queue(payload: dict[str, Any]) -> None:
+    pending = payload["pending"]
+    typer.echo(f"{len(pending)} design spec(s) pending ingest")
+    for entry in pending:
+        typer.echo(f"  {entry['path']} — {entry['work_status']}")
+        typer.echo(f"    {entry['resource']}")
+    if pending:
+        typer.echo("  Drain with: /graph-works:ingest <resource>")
 
 
 def lint_payload(report: object) -> dict[str, Any]:
@@ -570,6 +596,7 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         "max_parallel": result.max_parallel,
         "slots_free": result.slots_free,
         "permission_mode": result.permission_mode,
+        "supervise_merges": result.supervise_merges,
         "live": list(result.live),
         "dispatches": [
             {
@@ -589,7 +616,13 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
             for dispatch in result.dispatches
         ],
         "advances": [
-            {"path": advance.path, "reason": advance.reason, "worktree": advance.worktree, "branch": advance.branch}
+            {
+                "path": advance.path,
+                "reason": advance.reason,
+                "worktree": advance.worktree,
+                "branch": advance.branch,
+                "mode": advance.mode,
+            }
             for advance in result.advances
         ],
         "blocked": [{"path": item.path, "kind": item.kind, "reason": item.reason} for item in result.blocked],
@@ -607,14 +640,17 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
 def render_orchestrate(payload: dict[str, Any]) -> None:
     free = payload["slots_free"]
     max_p = payload["max_parallel"]
-    typer.echo(f"{payload['path']}: terminal={payload['terminal']} slots_free={free}/{max_p}")
+    header = f"{payload['path']}: terminal={payload['terminal']} slots_free={free}/{max_p}"
+    if payload["supervise_merges"]:
+        header += " supervise_merges=True"
+    typer.echo(header)
     for dispatch in payload["dispatches"]:
         typer.echo(
             f"  dispatch {dispatch['key']}: {dispatch['skill']} mode={dispatch['mode']} "
             f"model={dispatch['model']} worktree={dispatch['worktree']['action']}"
         )
     for advance in payload["advances"]:
-        typer.echo(f"  advance {advance['path']}: {advance['reason']}")
+        typer.echo(f"  advance {advance['path']} (mode={advance['mode']}): {advance['reason']}")
     for blocked in payload["blocked"]:
         echo_wrapped(f"  blocked {blocked['path']} ({blocked['kind']}): ", blocked["reason"])
     for entry in payload["decisions"]["open"]:

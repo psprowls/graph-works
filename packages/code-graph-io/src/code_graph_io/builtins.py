@@ -179,7 +179,7 @@ def _load_node_builtins(cache_dir: Path) -> frozenset[str]:
     cache_file = cache_dir / f"node-builtins-{major}.json"
     if cache_file.exists():
         try:
-            return frozenset(json.loads(cache_file.read_text()))
+            return frozenset(json.loads(cache_file.read_text(encoding="utf-8")))
         except (OSError, json.JSONDecodeError):
             pass  # fall through to re-harvest
 
@@ -189,7 +189,7 @@ def _load_node_builtins(cache_dir: Path) -> frozenset[str]:
 
     cache_dir.mkdir(parents=True, exist_ok=True)
     with contextlib.suppress(OSError):  # best-effort — never raise
-        cache_file.write_text(json.dumps(harvested))
+        cache_file.write_text(json.dumps(harvested), encoding="utf-8", newline="\n")
     return frozenset(harvested)
 
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from ext_helpers import GENERATED_DIR, generated_bundle, generated_copy, write_bundle
+from ext_helpers import GENERATED_DIR, generated_bundle, generated_copy, write, write_bundle
 from okf_ext.generators.model import Render
 from okf_ext.generators.plan import plan_regenerate
 from okf_ext.sections import DEFAULT_IGNORE as DEFAULT_IGNORE_SECTIONS
@@ -237,9 +237,7 @@ def test_regenerating_an_index_with_the_values_already_there_plans_nothing(tmp_p
     bundle, section_set = _indexed(tmp_path)
     render = {"": Render(sections={"Repositories": "- [a](/repositories/a.md)"})}
     first = plan_regenerate(bundle, section_set, {}, index_renders=render)
-    (bundle.root / "index.md").write_text(
-        _ROOT_INDEX.split("# Bundle")[0] + first.regenerations[0].after, encoding="utf-8"
-    )
+    write(bundle.root / "index.md", _ROOT_INDEX.split("# Bundle")[0] + first.regenerations[0].after)
     reloaded = load_bundle(bundle.root, ignore=DEFAULT_IGNORE_SECTIONS)
     assert plan_regenerate(reloaded, section_set, {}, index_renders=render).is_empty
 

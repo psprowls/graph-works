@@ -40,7 +40,7 @@ _FILES = sorted(_production_files())
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: str(p.relative_to(_PKGS)))
 def test_no_code_db_literal(path: Path):
-    text = path.read_text()
+    text = path.read_text(encoding="utf-8")
     assert '"code.db"' not in text and "'code.db'" not in text, (
         f"{path} references code.db directly — go through code_graph_io.open_reader/open_writer"
     )
@@ -48,7 +48,7 @@ def test_no_code_db_literal(path: Path):
 
 @pytest.mark.parametrize("path", _FILES, ids=lambda p: str(p.relative_to(_PKGS)))
 def test_no_graph_io_internal_imports(path: Path):
-    tree = ast.parse(path.read_text(), filename=str(path))
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom):
             if node.module in _FORBIDDEN_MODULES:

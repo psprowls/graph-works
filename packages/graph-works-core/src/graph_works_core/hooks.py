@@ -1,8 +1,7 @@
 """graph_works_core.hooks -- the `.claude/settings.local.json` hooks merge/remove primitive.
 
-Ports `run_config_hooks` (agent-research's `graph_wiki_core/commands/config.py`,
-lines 139-307) as a typed, sync module generalized off the legacy
-`graph_wiki`/`graph-wiki` naming. Top-level, not under `workspace/`: this
+Typed and sync, and carrying no `graph_wiki`/`graph-wiki` naming. Top-level,
+not under `workspace/`: this
 merges entries into a repo-level Claude Code settings file, unrelated to the
 workspace manifest/layout `workspace/` owns, and never touches a
 `WorkspaceLayout`. Per ADR-0013, `repo_root` is a plain argument -- this
@@ -13,7 +12,9 @@ from __future__ import annotations
 
 import json
 import shlex
+import subprocess
 import sys
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, cast
@@ -45,6 +46,7 @@ class HookWiring:
     event: str
     matcher: str
     script: str
+    legacy_scripts: tuple[str, ...] = ()
 
     @staticmethod
     def for_feature(feature: Feature) -> tuple[HookWiring, ...]:
@@ -53,10 +55,19 @@ class HookWiring:
         A tuple, not a single wiring, because a feature is a *group*: the
         retired `gates` feature registered two scripts across two events, and
         the plural is what let enable/disable stay one code path. `transcript`
-        being the only survivor does not make the shape wrong.
+        being the only survivor does not make the shape wrong. `legacy_scripts`
+        names filenames a previous release registered for this same wiring --
+        `apply("enable", ...)` upgrades a repo still carrying one in place.
         """
         if feature == "transcript":
-            return (HookWiring("SessionEnd", "", "session-end-transcript-capture.sh"),)
+            return (
+                HookWiring(
+                    "SessionEnd",
+                    "",
+                    "session-end-transcript-capture.py",
+                    legacy_scripts=("session-end-transcript-capture.sh",),
+                ),
+            )
         raise HooksError(f"unknown hooks feature {feature!r} (valid: transcript)")
 
 
@@ -98,9 +109,33 @@ def _settings_path(repo_root: Path) -> Path:
     return repo_root / ".claude" / "settings.local.json"
 
 
-def _hook_command(script_path: Path) -> str:
-    """Bind a configured hook to the interpreter that installed graph-works."""
-    return f"GRAPH_WORKS_PYTHON={shlex.quote(sys.executable)} bash {shlex.quote(str(script_path))}"
+def _quote_command(argv: Sequence[str], *, platform_name: str = sys.platform) -> str:
+    """Render *argv* the way *platform_name*'s shell actually quotes.
+
+    win32's `cmd.exe` has no POSIX single-quote convention -- `list2cmdline`
+    is the stdlib's own answer for what it does understand. Everywhere else,
+    `shlex.join` (POSIX single-quoting).
+    """
+    if platform_name == "win32":
+        return subprocess.list2cmdline(list(argv))
+    return shlex.join(argv)
+
+
+def _hook_command(script_path: Path, *, platform_name: str = sys.platform) -> str:
+    """Bind a configured hook to the interpreter that installed graph-works.
+
+    No `VAR=value` shell prefix, no `bash`: the interpreter *is* the first
+    argv token, quoted for the host that will run it.
+    """
+    return _quote_command([sys.executable, str(script_path)], platform_name=platform_name)
+
+
+def _matches(command: str, names: tuple[str, ...]) -> str | None:
+    """The first name in *names* found in *command*, or None."""
+    for name in names:
+        if name in command:
+            return name
+    return None
 
 
 def _json_type(value: object) -> str:
@@ -189,7 +224,7 @@ def _write_settings(path: Path, data: dict[str, Any]) -> None:
     try:
         rendered = json.dumps(data, indent=2) + "\n"
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(rendered, encoding="utf-8")
+        path.write_text(rendered, encoding="utf-8", newline="\n")
         json.loads(path.read_text(encoding="utf-8"))  # confirm the write re-parses
     except (OSError, UnicodeError, TypeError, ValueError) as exc:
         raise HooksIOError(f"could not write settings {path}: {exc}") from exc
@@ -233,11 +268,29 @@ def apply(
 
     for wiring in wirings:
         arr: list[dict[str, Any]] = hooks_block.setdefault(wiring.event, [])
-        present = any(wiring.script in h.get("command", "") for entry in arr for h in entry.get("hooks", []))
         if action == "enable":
-            if present:
+            current_present = any(
+                wiring.script in h.get("command", "") for entry in arr for h in entry.get("hooks", [])
+            )
+            if current_present:
                 skipped.append(wiring.script)
                 continue
+            if wiring.legacy_scripts:
+                kept: list[dict[str, Any]] = []
+                for entry in arr:
+                    original = entry.get("hooks", [])
+                    entry_hooks: list[dict[str, Any]] = []
+                    for h in original:
+                        matched = _matches(h.get("command", ""), wiring.legacy_scripts)
+                        if matched is None:
+                            entry_hooks.append(h)
+                        else:
+                            removed.append(matched)
+                            changed = True
+                    if entry_hooks:
+                        kept.append({**entry, "hooks": entry_hooks})
+                hooks_block[wiring.event] = kept
+                arr = kept
             assert scripts is not None
             script_path = scripts / wiring.script
             if not script_path.is_file():
@@ -251,17 +304,20 @@ def apply(
             added.append(wiring.script)
             changed = True
         else:
-            kept: list[dict[str, Any]] = []
+            names = (wiring.script, *wiring.legacy_scripts)
+            kept = []
             for entry in arr:
                 original = entry.get("hooks", [])
-                entry_hooks = [h for h in original if wiring.script not in h.get("command", "")]
-                if len(entry_hooks) < len(original):
-                    removed.append(wiring.script)
-                    changed = True
-                    if entry_hooks:
-                        kept.append({**entry, "hooks": entry_hooks})
-                else:
-                    kept.append(entry)
+                entry_hooks = []
+                for h in original:
+                    matched = _matches(h.get("command", ""), names)
+                    if matched is None:
+                        entry_hooks.append(h)
+                    else:
+                        removed.append(matched)
+                        changed = True
+                if entry_hooks:
+                    kept.append({**entry, "hooks": entry_hooks})
             if kept:
                 hooks_block[wiring.event] = kept
             else:

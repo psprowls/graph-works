@@ -1,10 +1,10 @@
 """Where a source page goes, as a value you can hold.
 
-`sources/<month>-<slug>.md` was a module constant in the legacy
-`wiki_io.ingest_source`. Here it is the one field on a frozen `IngestLayout`
-that `plan_document_brief` and `doc_wiki_okf.sources` both take as a defaulted
-keyword -- which is what makes the brief's prediction and the writer's target
-provably the same string.
+`sources/<month>-<slug>.md` is the one field on a frozen `IngestLayout`, which
+`plan_document_brief` and `doc_wiki_okf.sources` both take as a defaulted
+keyword -- and that is what makes the brief's prediction and the writer's
+target provably the same string, rather than two constants kept in step by
+hand.
 
 This package is tier 3 -- the tier allowed to carry vault vocabulary -- so the
 rule that lower bands never know a directory name does not bind here. What the

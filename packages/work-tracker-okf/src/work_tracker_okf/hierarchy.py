@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from work_tracker_okf._selection import path_index
 from work_tracker_okf.dependencies import DependencyEdge, entry_phase, resolve_facts, unmet
 from work_tracker_okf.items import WorkItem
-from work_tracker_okf.vocabulary import TERMINAL_STATUSES
+from work_tracker_okf.vocabulary import PARENT_TYPES, TERMINAL_STATUSES
 
 PICK_ORDER: dict[str, int] = {"in-progress": 0, "accepted": 1, "open": 2}
 
@@ -84,17 +84,49 @@ def nearest_parent(items: Sequence[WorkItem], path: str) -> str | None:
     return None
 
 
+def archive_held_by_ancestor(items: Sequence[WorkItem], item: WorkItem) -> bool:
+    """Whether *item* is a child the archive policy holds in place.
+
+    `True` exactly when *item*'s nearest **non-archived** ancestor exists and is
+    **not** terminal -- a resolved child of an open epic, in other words.
+
+    **A work item is archived only as a root; children ride along, in place.**
+    Sweeping such a child mid-epic moves its path out from under a parent page
+    that still links to it at `children/<name>.md`, while the epic is being
+    assembled, for a distinction ("this child was archived separately") that
+    nothing needs.
+
+    Archived ancestors are skipped rather than consulted: an archived page is
+    frozen, and being contained by one says nothing about whether the live tree
+    above is still open. An ancestor the projection does not know does not hold
+    anything either -- an unresolvable path is not evidence of a live parent.
+
+    Written once and shared by `archive._default_targets`, `archive.plan_archive`
+    and `_rules.state.terminal`, so the lint cannot disagree with the planner
+    about what is archivable -- the same discipline `okf_io.migrate()` follows
+    in keeping reader, validator and writer on one set.
+    """
+    from work_tracker_okf.vocabulary import TERMINAL_STATUSES
+
+    index = path_index(items)
+    for path in reversed(item.ancestor_paths):
+        ancestor = index.get(path)
+        if ancestor is None or ancestor.archived:
+            continue
+        return ancestor.work_status not in TERMINAL_STATUSES
+    return False
+
+
 def unknown_depends_on(items: Sequence[WorkItem], edges: Sequence[DependencyEdge]) -> dict[str, None]:
     known = path_index(items)
     return {edge.path: None for edge in edges if edge.path not in known}
 
 
-def child_gated_node(item: WorkItem, children: Sequence[WorkItem]) -> bool:
-    if not any(child.work_status not in TERMINAL_STATUSES for child in children):
+def child_gated(items: Sequence[WorkItem], item: WorkItem) -> bool:
+    """Gated iff `advance()`'s children-open guard would refuse. One authority."""
+    if not active_nonterminal_descendants(items, item.path):
         return False
-    if item.type in {"Release", "Epic"}:
-        return item.phase == "execute"
-    return item.type == "Feature" and item.phase in {"execute", "finish"}
+    return item.type in PARENT_TYPES and item.phase in {"execute", "finish"}
 
 
 def nearest_epic(items: Sequence[WorkItem], path: str) -> str | None:
@@ -128,12 +160,17 @@ def descend(items: Sequence[WorkItem], path: str) -> DescendResult:
     visited = {path}
     while True:
         children = _direct_children(items, node.path)
-        if not child_gated_node(node, children):
+        if not child_gated(items, node):
             return DescendResult(tuple(walked), node.path)
         candidates = [
             child
             for child in children
-            if not child.archived and child.work_status in PICK_ORDER and not _dependency_blocked(items, child)
+            if not child.archived
+            and not _dependency_blocked(items, child)
+            and (
+                child.work_status in PICK_ORDER
+                or (child.work_status in TERMINAL_STATUSES and active_nonterminal_descendants(items, child.path))
+            )
         ]
         if not candidates:
             return DescendResult(
@@ -142,7 +179,9 @@ def descend(items: Sequence[WorkItem], path: str) -> DescendResult:
                 node.path,
                 "no dep-ready child: open children are blocked on dependencies or not dispatchable",
             )
-        candidates.sort(key=lambda child: (PICK_ORDER[child.work_status], child.opened, child.path))
+        candidates.sort(
+            key=lambda child: (PICK_ORDER.get(child.work_status, len(PICK_ORDER)), child.opened, child.path)
+        )
         chosen = candidates[0]
         if chosen.path in visited:
             return DescendResult(
@@ -158,7 +197,8 @@ __all__ = [
     "ChildRollup",
     "DescendResult",
     "active_nonterminal_descendants",
-    "child_gated_node",
+    "archive_held_by_ancestor",
+    "child_gated",
     "child_rollup",
     "descend",
     "nearest_epic",

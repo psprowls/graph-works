@@ -7,7 +7,7 @@ behaviour.
 from __future__ import annotations
 
 import pytest
-from ext_helpers import SECTIONS_BAD, SECTIONS_DIR
+from ext_helpers import SECTIONS_BAD, SECTIONS_DIR, write, write_tree
 from okf_ext.shape import FrontmatterOwnership, SectionError, load_sections
 
 
@@ -53,7 +53,7 @@ def test_a_declaration_with_neither_new_field_is_unchanged(tmp_path):
     is exactly what a declaration written before this capability looks like."""
     root = tmp_path / "sections"
     root.mkdir()
-    (root / "feature.yaml").write_text("sections:\n  - heading: Summary\n    required: true\n", encoding="utf-8")
+    write(root / "feature.yaml", "sections:\n  - heading: Summary\n    required: true\n")
     declaration = load_sections(root).types["feature"]
     assert declaration.sections[0].ownership == "prose"
     assert declaration.frontmatter == FrontmatterOwnership()
@@ -62,7 +62,8 @@ def test_a_declaration_with_neither_new_field_is_unchanged(tmp_path):
 def test_ownership_is_read_and_frontmatter_lists_become_tuples(tmp_path):
     root = tmp_path / "sections"
     root.mkdir()
-    (root / "entity.yaml").write_text(
+    write(
+        root / "entity.yaml",
         "frontmatter:\n"
         "  owned: [title, sources]\n"
         "  provenance: [content_hash]\n"
@@ -73,7 +74,6 @@ def test_ownership_is_read_and_frontmatter_lists_become_tuples(tmp_path):
         "    ownership: template\n"
         "    placeholder: |\n"
         "      Generated from the code graph.\n",
-        encoding="utf-8",
     )
     declaration = load_sections(root).types["entity"]
     assert declaration.frontmatter == FrontmatterOwnership(owned=("title", "sources"), provenance=("content_hash",))
@@ -87,7 +87,8 @@ def test_template_implies_seeded_is_complete(tmp_path):
     forever, for being in exactly the state it is supposed to be in."""
     root = tmp_path / "sections"
     root.mkdir()
-    (root / "entity.yaml").write_text(
+    write(
+        root / "entity.yaml",
         "sections:\n"
         "  - heading: About\n"
         "    required: true\n"
@@ -95,7 +96,6 @@ def test_template_implies_seeded_is_complete(tmp_path):
         "    seeded_is_complete: false\n"
         "    placeholder: |\n"
         "      Generated.\n",
-        encoding="utf-8",
     )
     assert load_sections(root).types["entity"].sections[0].seeded_is_complete is True
 
@@ -106,26 +106,20 @@ def test_an_unknown_key_inside_frontmatter_is_tolerated(tmp_path):
     older reader."""
     root = tmp_path / "sections"
     root.mkdir()
-    (root / "entity.yaml").write_text(
-        "frontmatter:\n  owned: [title]\n  future_class: [x]\nsections: []\n", encoding="utf-8"
-    )
+    write(root / "entity.yaml", "frontmatter:\n  owned: [title]\n  future_class: [x]\nsections: []\n")
     assert load_sections(root).types["entity"].frontmatter.owned == ("title",)
 
 
 def test_an_empty_frontmatter_block_is_the_empty_ownership(tmp_path):
     root = tmp_path / "sections"
     root.mkdir()
-    (root / "entity.yaml").write_text("frontmatter: {}\nsections: []\n", encoding="utf-8")
+    write(root / "entity.yaml", "frontmatter: {}\nsections: []\n")
     assert load_sections(root).types["entity"].frontmatter == FrontmatterOwnership()
 
 
 def _declared(tmp_path, files):
     """A `sections` directory written from `{filename: text}`."""
-    root = tmp_path / "sections"
-    root.mkdir()
-    for name, text in files.items():
-        (root / name).write_text(text, encoding="utf-8")
-    return root
+    return write_tree(tmp_path / "sections", files)
 
 
 _ROOT_INDEX = """\

@@ -84,19 +84,37 @@ function decodeFrame(buffer) {
 
 const PORT_FILE = process.env.BRAINSTORM_PORT_FILE || null;
 const randomPort = () => 49152 + Math.floor(Math.random() * 16383);
+
+// A bind failure that means "this port is not available to us; try another".
+// On Windows, netsh-excluded dynamic port ranges (Hyper-V/WinNAT/WSL2) return
+// EACCES for a high port — the same meaning EADDRINUSE carries elsewhere. On
+// POSIX, EACCES means a privileged port was requested; drifting off it silently
+// would be wrong, so it stays fatal there.
+function isRetryableBindError(err, platform) {
+  if (err.code === 'EADDRINUSE') return true;
+  return err.code === 'EACCES' && platform === 'win32';
+}
 // Prefer an explicit port, else the port this session last bound (so a restart
 // reuses it and an already-open browser tab reconnects), else a random high port.
 function preferredPort() {
-  if (process.env.BRAINSTORM_PORT) return Number(process.env.BRAINSTORM_PORT);
+  if (process.env.BRAINSTORM_PORT) return { port: Number(process.env.BRAINSTORM_PORT), source: 'env' };
   if (PORT_FILE) {
     try {
       const p = Number(fs.readFileSync(PORT_FILE, 'utf-8').trim());
-      if (Number.isInteger(p) && p > 1023 && p < 65536) return p;
+      if (Number.isInteger(p) && p > 1023 && p < 65536) return { port: p, source: 'file' };
     } catch (e) { /* no prior port recorded */ }
   }
-  return randomPort();
+  return { port: randomPort(), source: 'random' };
 }
-let PORT = preferredPort();
+const portInfo = preferredPort();
+let PORT = portInfo.port;
+// Whether PORT came from a real preference (an explicit port, or a persisted
+// one another session's tab may depend on) rather than an arbitrary first
+// draw. Only a real preference makes a later bind retry a "fallback" —
+// redrawing away from an arbitrary first draw (e.g. because it landed in a
+// Windows-reserved range) isn't giving up on anything, so it must not
+// suppress persistence the way losing a real preference does.
+const hadRealPortPreference = portInfo.source !== 'random';
 const HOST = process.env.BRAINSTORM_HOST || '127.0.0.1';
 const URL_HOST = process.env.BRAINSTORM_URL_HOST || (HOST === '127.0.0.1' ? 'localhost' : HOST);
 const SESSION_DIR = process.env.BRAINSTORM_DIR || '/tmp/brainstorm';
@@ -657,8 +675,15 @@ function startServer() {
   }
 
   // If the preferred port is already taken (e.g. a previous server is still
-  // alive), fall back to a random port once instead of failing.
+  // alive), fall back to a random port instead of failing. triedFallback means
+  // "we are no longer on our preferred port" — it gates persistence suppression
+  // and one-time token regeneration, and must stay a boolean regardless of how
+  // many bind attempts it took. bindAttempts is the separate, bounded retry
+  // counter: on Windows a re-draw can itself land in a reserved port range, so
+  // one retry is not enough (see isRetryableBindError above).
   let triedFallback = false;
+  let bindAttempts = 0;
+  const MAX_BIND_ATTEMPTS = 8;
 
   function onListen() {
     // Cookie name keys on the ACTUAL bound port (may differ from the preferred
@@ -689,20 +714,27 @@ function startServer() {
   }
 
   server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE' && !triedFallback) {
+    if (isRetryableBindError(err, process.platform) && bindAttempts < MAX_BIND_ATTEMPTS) {
       if (tokenSource === 'env') {
         console.error('Server failed to bind: preferred port is in use and BRAINSTORM_TOKEN is set; refusing fallback with explicit token');
         process.exit(1);
       }
-      triedFallback = true;
-      PORT = randomPort();
-      if (tokenSource === 'file') {
-        TOKEN = generateToken();
-        tokenSource = 'generated-fallback';
+      bindAttempts++;
+      if (hadRealPortPreference && !triedFallback) {
+        triedFallback = true;
+        if (tokenSource === 'file') {
+          TOKEN = generateToken();
+          tokenSource = 'generated-fallback';
+        }
       }
+      PORT = randomPort();
       server.listen(PORT, HOST, onListen);
     } else {
-      console.error('Server failed to bind:', err.message);
+      let message = 'Server failed to bind: ' + err.message;
+      if (process.platform === 'win32') {
+        message += ' (Windows reserves dynamic port ranges for Hyper-V/WinNAT/WSL2 — run `netsh interface ipv4 show excludedportrange protocol=tcp` to see them)';
+      }
+      console.error(message);
       process.exit(1);
     }
   });
@@ -719,5 +751,6 @@ module.exports = {
   decodeFrame,
   browserLauncherForPlatform,
   OPCODES,
-  MAX_FRAME_PAYLOAD_BYTES
+  MAX_FRAME_PAYLOAD_BYTES,
+  isRetryableBindError
 };

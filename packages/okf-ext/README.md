@@ -9,6 +9,17 @@ workspace: it extends `okf-io` and never modifies it.
 | 2. Extension layer | Beyond-spec capabilities over *any* bundle | `okf-ext` — tags, schema validation, body-section declarations, table read/splice, render correctness, bundle health, search, member moves, generator-side regeneration, the proposal ledger, additive bundle setup, page placement and locked log appends today; budgeted context assembly later |
 | 3. Applications | Domain tools that produce or consume bundles | wiki generator, AST→graph tooling, `okf-attest` |
 
+## Platform
+
+`locking.py` is the shared portable exclusive-lock primitive for this
+workspace: `fcntl.flock` on POSIX, `msvcrt.locking` on Windows, chosen per
+`sys.platform` and imported only inside the branch that uses it, never at
+module scope. It exists because `work_tracker_okf.decisions`,
+`graph_works_core.work.commands`, and this package's own `logs` module each
+took the same five lines of `fcntl.flock` before consolidating here — every
+caller of `locked()` is portable as a result. See `gw util platform` for the
+live, per-capability answer on the running host.
+
 ## Dependency policy
 
 `okf-io` carries a hard two-dependency budget because every dependency is a
@@ -95,7 +106,8 @@ and one capability that needs nothing at all:
   guard.
 
   `logs` is the sixth: it appends through `okf-io`'s own `append_log_entry` and
-  stdlib `fcntl`/`tempfile`, so it too ships with no extra and no guard.
+  the shared `okf_ext.locking`, plus stdlib `tempfile`, so it too ships with no
+  extra and no guard.
 
 `requires-python` is `>=3.12`, matching the rest of the workspace.
 `okf_io.models.Frontmatter.extra` defaults to `MappingProxyType({})`, which the
@@ -253,6 +265,20 @@ and `okf_ext.generators` regenerates from it; leaving the types inside
 is that both capabilities agree about what a declaration means.
 `okf_ext.sections` re-exports every moved name for one minor version — the
 graduation recipe above, run in reverse.
+
+`okf_ext.locking` is the fifth hoist and the first shared module that takes an
+**OS-level lock** -- a widening stated rather than smuggled, the same way
+`okf_ext.shape` stated that the layer now reads files. `work_tracker_okf`'s
+ledger lock, `graph_works_core.work.commands`'s decision lock, and
+`okf_ext.logs`'s log lock were three byte-identical `fcntl.flock` idioms, one
+per package that could reach `okf_ext`; the independence contract forbids
+`okf_ext.logs` reaching sideways for it, so `okf_ext` -- the lowest package
+all three sites share -- is where it lands. It sits beside `okf_ext.splice`
+and `okf_ext.writing` in the `layers` contract and is listed in `SHARED` in
+`tests/test_ext_boundaries.py`. It needs no entry in the "capability that
+needs nothing at all" list above: it is not a capability, and it adds no
+dependency, no extra, and no `ImportError` guard -- its `fcntl` and `msvcrt`
+imports are both branch-local, inside `locked()`, never at module scope.
 
 **Honest weakness:** CI is deferred until the repository has a remote, so both
 checks run from `just check` — a gate a human or agent must invoke, not one a
@@ -498,9 +524,8 @@ them would make every future rule import the parser through a rule module.
 
 **Downstream adoption is out of scope here.** The work item's "wire the entity
 lane's file maps and the work lane's plan tables to one implementation" is not
-done in this repository: `wiki-io` and `work-io` live in `agent-research`. This
-package ships the primitive and proves it against vendored samples of all three
-consumer shapes; each lane's adoption is its own item in its own repository.
+done here. This package ships the primitive and proves it against vendored
+samples of all three consumer shapes; each lane's adoption is its own item.
 
 **No lane vocabulary ships.** There is no `PLAN_TABLE` or `FILE_MAP` constant. A
 `TableSpec` is data a caller constructs; shipping one lane's column names in a

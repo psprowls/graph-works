@@ -343,3 +343,41 @@ def test_member_ignore_excludes_a_manifest_not_just_its_files(tmp_path: Path) ->
         assert not any(path.startswith("pkg/tests/fixtures/") for path in paths)
     finally:
         conn.close()
+
+
+_SYMBOLS_SRC = "class Widget:\n    def spin(self):\n        return 1\n\n\ndef top():\n    return 2\n"
+
+
+def test_full_build_keeps_symbol_nodes_with_posix_paths(tmp_path: Path) -> None:
+    """Symbol nodes survive the stale-node purge, spelled the way the purge spells paths.
+
+    The purge builds `tracked_paths` from git's POSIX-spelled output. A parser
+    projection that stringified its `Path` with the OS separator emitted
+    `src\\a.py` on Windows, which is `NOT IN tracked_paths`, so every function,
+    class and method was deleted on every full build and the graph silently held
+    no symbols at all. `file` nodes hid the loss: `structural_nodes.refresh()`
+    runs after the purge and re-emits them with POSIX paths.
+    """
+    init_repo(tmp_path)
+    write_and_commit(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "demo"\nversion = "0.1.1"\n',
+            "src/nested/deep.py": _SYMBOLS_SRC,
+        },
+        "init",
+    )
+
+    update.run(tmp_path, graph_dir=graph_dir(tmp_path), full=True)
+
+    conn = _open_ro(tmp_path)
+    try:
+        rows = conn.execute(
+            "SELECT kind, name, path FROM nodes WHERE kind IN ('function', 'class', 'method')"
+        ).fetchall()
+        assert rows, "the full build purged every symbol node"
+        assert ("function", "top", "src/nested/deep.py") in rows
+        paths = {row[2] for row in rows}
+        assert paths == {"src/nested/deep.py"}, f"symbol paths not POSIX-spelled: {paths}"
+    finally:
+        conn.close()

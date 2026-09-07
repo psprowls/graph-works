@@ -1,6 +1,5 @@
-"""Tests for the wiki-io entity-lookup / index-generation reader methods.
+"""Tests for the entity-lookup / index-generation reader methods.
 
-SQL ported verbatim from wiki_io/entity_lookup.py and wiki_io/index_generator.py.
 A small graph is seeded via the testing seam; one assertion per per-kind branch.
 """
 

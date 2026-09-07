@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
+import sys
 from datetime import date
 from pathlib import Path
 
@@ -292,7 +292,13 @@ def test_concurrent_empty_ledger_does_not_replace_planned_absence(tmp_path: Path
     assert result.entries == ()
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="asserts the lock is held by probing it with fcntl.flock(LOCK_NB); Windows has no equivalent",
+)
 def test_live_decision_allocation_occurs_while_owner_lock_is_held(tmp_path: Path, monkeypatch) -> None:
+    import fcntl  # POSIX-only: module scope here aborts collection of the whole package on Windows.
+
     layout = _workspace(tmp_path)
     lock = layout.cache_dir / "decisions" / f"{hashlib.sha256(OWNER.encode()).hexdigest()}.lock"
     original = work._decisions.plan_append
@@ -323,12 +329,18 @@ def test_live_decision_allocation_occurs_while_owner_lock_is_held(tmp_path: Path
     assert result.application is not None and result.application.ok
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="monkeypatches fcntl.flock to swap the owner page mid-acquire; the Windows lock is msvcrt.locking",
+)
 def test_live_decision_revalidates_owner_selection_after_acquiring_the_lock(tmp_path: Path, monkeypatch) -> None:
+    import fcntl  # POSIX-only: module scope here aborts collection of the whole package on Windows.
+
     layout = _workspace(tmp_path)
     new_owner = "work/release-v1/children/epic-a/children/feature-b"
     new_leaf = f"{new_owner}/children/bug-a"
     _write(layout, new_owner, "Feature")
-    original = work.fcntl.flock
+    original = fcntl.flock
     moved = False
 
     def move_before_lock(descriptor, operation):
@@ -340,7 +352,7 @@ def test_live_decision_revalidates_owner_selection_after_acquiring_the_lock(tmp_
             moved = True
         return original(descriptor, operation)
 
-    monkeypatch.setattr(work.fcntl, "flock", move_before_lock)
+    monkeypatch.setattr(fcntl, "flock", move_before_lock)
     with pytest.raises(ValueError, match="unknown work item"):
         work.run_decision_add(
             layout,
@@ -493,7 +505,13 @@ def test_overturn_refuses_a_follow_up_target_created_after_planning(tmp_path: Pa
     assert ledger.read_bytes() == ledger_before
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="monkeypatches fcntl.flock to swap the owner page mid-acquire; the Windows lock is msvcrt.locking",
+)
 def test_overturn_revalidates_owner_selection_after_acquiring_the_lock(tmp_path: Path, monkeypatch) -> None:
+    import fcntl  # POSIX-only: module scope here aborts collection of the whole package on Windows.
+
     layout = _workspace(tmp_path)
     work.run_decision_add(
         layout,
@@ -510,7 +528,7 @@ def test_overturn_revalidates_owner_selection_after_acquiring_the_lock(tmp_path:
     new_owner = "work/release-v1/children/epic-a/children/feature-b"
     new_leaf = f"{new_owner}/children/bug-a"
     _write(layout, new_owner, "Feature")
-    original = work.fcntl.flock
+    original = fcntl.flock
     moved = False
 
     def move_before_lock(descriptor, operation):
@@ -522,7 +540,7 @@ def test_overturn_revalidates_owner_selection_after_acquiring_the_lock(tmp_path:
             moved = True
         return original(descriptor, operation)
 
-    monkeypatch.setattr(work.fcntl, "flock", move_before_lock)
+    monkeypatch.setattr(fcntl, "flock", move_before_lock)
     with pytest.raises(ValueError, match="unknown work item"):
         work.run_decision_overturn(
             layout,

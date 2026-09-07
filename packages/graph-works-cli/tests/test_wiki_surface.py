@@ -32,6 +32,12 @@ def _option_names(payload: dict[str, object]) -> set[str]:
     }
 
 
+def _section(readme: str, heading: str) -> str:
+    """Return one level-2 README section, subsections included, heading to heading."""
+    body = readme.split(f"\n{heading}\n", 1)[1]
+    return body.split("\n## ", 1)[0]
+
+
 def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> None:
     """A command or flag drift would break callers that rely on the C4 contract."""
     root = _help()
@@ -133,4 +139,4 @@ def test_readme_documents_the_shipped_c4_surface_without_future_commands() -> No
         "| 5 |",
     ):
         assert text in readme
-    assert "gw util describe-surface" not in readme
+    assert "gw util describe-surface" not in _section(readme, "## Wiki command surface")

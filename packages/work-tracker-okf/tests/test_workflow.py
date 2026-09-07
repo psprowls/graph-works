@@ -8,6 +8,7 @@ from work_tracker_okf.workflow import (
     PLAN_OR_EXECUTE,
     Dispatch,
     RouteState,
+    Transition,
     route,
 )
 
@@ -373,12 +374,12 @@ def test_the_epic_gate_withholds_the_dispatch_while_the_feature_gate_rides_requi
     """The asymmetry is the whole point: one type cannot act while its children
     are open, the other can act but cannot finish."""
     rollup = ChildRollup(total=2, terminal=1, open_paths=("work/kid",))
-    epic = route(_state(type="Epic", phase="execute", child_rollup=rollup))
+    epic = route(_state(type="Epic", phase="execute", child_rollup=rollup, open_descendants=("work/kid",)))
     assert epic.dispatch is None
     assert "1/2 terminal" in epic.blockers[0]
     assert "kid" in epic.blockers[0]
 
-    feature = route(_state(type="Feature", phase="execute", child_rollup=rollup))
+    feature = route(_state(type="Feature", phase="execute", child_rollup=rollup, open_descendants=("work/kid",)))
     assert feature.dispatch == Dispatch("execute", "unplanned")
     assert feature.blockers == ()
     assert feature.on_complete is not None
@@ -393,6 +394,18 @@ def test_an_epic_whose_children_are_all_terminal_is_a_satisfied_gate():
     assert result.blockers == ()
     assert result.on_complete is not None
     assert result.on_complete.phase == "finish"
+
+
+def test_the_epic_gate_reads_open_descendants_not_the_direct_rollup():
+    """Axis 2: a terminal direct child can still hold an open grandchild. The
+    rollup alone would call this satisfied; `open_descendants` must not."""
+    rollup = ChildRollup(total=1, terminal=1, open_paths=())
+    result = route(
+        _state(type="Epic", phase="execute", child_rollup=rollup, open_descendants=("work/feat/children/gc",))
+    )
+    assert result.dispatch is None
+    assert result.on_complete is None
+    assert any("gc" in blocker for blocker in result.blockers)
 
 
 def test_a_childless_feature_carries_no_gate():
@@ -418,6 +431,41 @@ def test_anything_else_at_finish_dispatches_the_branch_and_needs_a_ref():
 
 def test_the_finish_gate_stacks_resolved_in_and_the_children_requirement():
     rollup = ChildRollup(total=1, terminal=0, open_paths=("work/kid",))
-    result = route(_state(type="Feature", phase="finish", child_rollup=rollup))
+    result = route(_state(type="Feature", phase="finish", child_rollup=rollup, open_descendants=("work/kid",)))
     assert result.on_complete is not None
     assert result.on_complete.requires == ("resolved_in", "children-terminal")
+
+
+def test_an_epic_at_finish_with_a_post_finish_child_repairs_instead_of_resolving():
+    """D3: `route()` never hands the coordinator a `children-open` refusal --
+    it plans a return to `execute` instead, carried on the new `repair` field."""
+    result = route(_state(type="Epic", phase="finish", open_descendants=("work/epic/children/late",)))
+    assert result.on_complete is None
+    assert result.repair == Transition(phase="execute", work_status="in-progress")
+    assert result.on_return == Transition(phase="execute", work_status="in-progress")
+    assert any("late" in blocker for blocker in result.blockers)
+
+
+def test_an_epic_at_finish_with_no_open_descendants_still_resolves():
+    result = route(_state(type="Epic", phase="finish"))
+    assert result.repair is None
+    assert result.on_complete is not None
+    assert (result.on_complete.phase, result.on_complete.work_status) == ("done", "resolved")
+
+
+# --- the way home ---------------------------------------------------------
+
+
+def test_the_finish_stage_offers_a_return_to_execute() -> None:
+    result = route(_state(phase="finish", work_status="in-progress", effort="small"))
+    assert result.on_return == Transition(phase="execute", work_status="in-progress")
+
+
+def test_an_epic_at_finish_offers_the_same_return() -> None:
+    result = route(_state(type="Epic", phase="finish", work_status="in-progress"))
+    assert result.on_return == Transition(phase="execute", work_status="in-progress")
+
+
+def test_no_stage_before_finish_offers_a_return() -> None:
+    for phase in ("design", "plan", "execute"):
+        assert route(_state(phase=phase, work_status="in-progress", effort="small")).on_return is None

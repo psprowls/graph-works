@@ -5,8 +5,12 @@
 # reason they no longer exist. See work/tech-debt-codex-slash-command-gap.
 set -uo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PLUGIN_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+# Derive SCRIPT_DIR from PLUGIN_ROOT, not independently: under Git Bash the
+# two `cd ... && pwd` calls can answer in different path vocabularies (Win32
+# vs MSYS) depending on the cwd the caller hands us, and the -not -path
+# self-exclusion below is a string compare against find's output.
+SCRIPT_DIR="$PLUGIN_ROOT/tests"
 
 FAILURES=0
 

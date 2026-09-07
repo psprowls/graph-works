@@ -1,0 +1,137 @@
+"""Shared fixtures for `test_transactions.py` and `test_windows_anchor.py`.
+
+Not a package module: `tests/` carries no `__init__.py`, so this is imported
+as a bare top-level module (`from _transaction_helpers import ...`). That
+only resolves because `tests/conftest.py` puts this directory on `sys.path`
+before any test module in the run is collected -- see the comment there.
+"""
+
+from __future__ import annotations
+
+import os
+import stat
+import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from datetime import date
+from pathlib import Path
+
+import pytest
+from graph_works_core.workspace import anchors, transactions
+from graph_works_core.workspace.anchors import BUNDLE_LOCK_NAME
+from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
+from okf_ext.moves import Move
+from work_tracker_okf.init import install_bundle
+from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
+
+
+def _workspace(tmp_path: Path) -> WorkspaceLayout:
+    layout = layout_for(tmp_path / "workspace")
+    layout.bundle_dir.mkdir(parents=True)
+    layout.cache_dir.mkdir(parents=True)
+    installed = install_bundle(layout.bundle_dir, today=date(2026, 8, 22), dry_run=False)
+    assert installed.ok
+    return layout
+
+
+def _snapshot(root: Path) -> dict[str, tuple[str, int, bytes | str | None]]:
+    """A recursive content snapshot, tier-blind by construction.
+
+    The windows-revalidated tier's bundle-root lock lives at
+    `anchors.BUNDLE_LOCK_NAME`, root-scoped -- a file a POSIX bundle never
+    carries (see the constant's docstring). Excluding it here mirrors
+    `load_bundle()`'s own ADR-0028 root-scoped dot exclusion, so a
+    before/after snapshot comparison reflects bundle *content*, not which
+    durability tier happened to acquire the lock first.
+    """
+    snapshot: dict[str, tuple[str, int, bytes | str | None]] = {}
+    pending = [root]
+    while pending:
+        current = pending.pop()
+        for path in sorted(current.iterdir(), key=lambda entry: os.fsencode(entry.name), reverse=True):
+            if current == root and path.name == BUNDLE_LOCK_NAME:
+                continue
+            relative = path.relative_to(root).as_posix()
+            mode = stat.S_IMODE(path.lstat().st_mode)
+            if path.is_symlink():
+                snapshot[relative] = ("symlink", mode, str(path.readlink()))
+            elif path.is_dir():
+                snapshot[relative] = ("directory", mode, None)
+                pending.append(path)
+            else:
+                snapshot[relative] = ("file", mode, path.read_bytes())
+    return snapshot
+
+
+def _plan(
+    layout: WorkspaceLayout,
+    *,
+    moves: tuple[Move, ...] = (),
+    writes: tuple[PlannedWrite, ...] = (),
+    deletes: tuple[str, ...] = (),
+    mkdirs: tuple[str, ...] = (),
+    validate_paths: tuple[str, ...] = (),
+    directory_preconditions: tuple[DirectoryPrecondition, ...] = (),
+    path_mapping: dict[str, str] | None = None,
+) -> WorkMutationPlan:
+    return WorkMutationPlan(
+        root=layout.bundle_dir,
+        operation="reparent",
+        path_mapping={} if path_mapping is None else path_mapping,
+        move_plan=None,
+        moves=moves,
+        writes=writes,
+        deletes=deletes,
+        mkdirs=mkdirs,
+        warnings=("opaque reference retained",),
+        refusals=(),
+        validate_paths=validate_paths,
+        directory_preconditions=directory_preconditions,
+    )
+
+
+def representable_mode(mode: int, *, directory: bool) -> int:
+    """What *mode* reads back as after a chmod on this host.
+
+    POSIX keeps every bit.  NTFS keeps only S_IWRITE, reporting 0o777/0o555 for
+    a directory and 0o666/0o444 for a file (measured, not inferred -- see this
+    item's design).  Tests assert preservation against this rather than against
+    the mode they requested, so the assertion stays meaningful on both hosts
+    instead of being skipped on one -- D-025's "whatever the platform can
+    represent" contract, applied to the engine's own tests.
+    """
+    if sys.platform != "win32":
+        return mode
+    writable = mode & stat.S_IWRITE
+    if directory:
+        return 0o777 if writable else 0o555
+    return 0o666 if writable else 0o444
+
+
+@contextmanager
+def _forced_tier(platform_name: str) -> Iterator[None]:
+    """Run the engine on a named tier.
+
+    Patches the two module-level selector delegators in `transactions` rather
+    than `anchors`' own functions, because `transactions._open_root` and
+    `_open_absolute_directory` resolve those names through `transactions`'
+    globals -- the same reason the `:290-305` delegator layer exists.
+
+    Skips rather than failing when a POSIX tier is forced on Windows: see the
+    `tier` fixture in `test_transactions.py` for why that direction is
+    impossible rather than merely untested.
+    """
+    if platform_name != "win32" and sys.platform == "win32":
+        pytest.skip("the strong tier needs openat/flock/os.O_DIRECTORY, none of which exist on Windows")
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            transactions,
+            "_open_root",
+            lambda root: anchors.open_anchor(root, platform_name=platform_name),
+        )
+        patch.setattr(
+            transactions,
+            "_open_absolute_directory",
+            lambda path: anchors.open_absolute_anchor(path, platform_name=platform_name),
+        )
+        yield

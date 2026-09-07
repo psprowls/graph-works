@@ -191,6 +191,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "terminal": False,
             "slots_free": 1,
             "max_parallel": 2,
+            "supervise_merges": False,
             "dispatches": [
                 {
                     "key": "work/a#execute",
@@ -200,7 +201,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
                     "worktree": {"action": "create"},
                 }
             ],
-            "advances": [{"path": "work/a", "reason": "ready"}],
+            "advances": [{"path": "work/a", "reason": "ready", "mode": "advance"}],
             "blocked": [{"path": "work/b", "kind": "dependency", "reason": "one\ntwo"}],
             "decisions": {"open": [decision]},
             "warnings": ["partial"],
@@ -342,9 +343,10 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         max_parallel=2,
         slots_free=1,
         permission_mode="full",
+        supervise_merges=False,
         live=("x",),
         dispatches=(dispatch,),
-        advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b"),),
+        advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b", mode="return"),),
         blocked=(SimpleNamespace(path="work/c", kind="dependency", reason="wait"),),
         decisions_owner_path="work/e",
         decisions_ledger_path="ledger",
@@ -353,7 +355,10 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         decision_counts={"open": 1},
         warnings=("w",),
     )
-    assert rendering.orchestrate_payload(orchestration)["dispatches"][0]["path"] == "work/a"
+    orchestrate_result = rendering.orchestrate_payload(orchestration)
+    assert orchestrate_result["dispatches"][0]["path"] == "work/a"
+    assert orchestrate_result["advances"][0]["mode"] == "return"
+    assert orchestrate_result["supervise_merges"] is False
 
 
 def test_fail_preserves_an_explicit_cause(capsys: pytest.CaptureFixture[str]) -> None:
@@ -362,3 +367,25 @@ def test_fail_preserves_an_explicit_cause(capsys: pytest.CaptureFixture[str]) ->
         rendering.fail("bad", cause=cause)
     assert caught.value.__cause__ is cause
     assert "bad" in capsys.readouterr().err
+
+
+def test_render_orchestrate_prints_supervise_merges_only_when_true(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    payload = {
+        "path": "work/e",
+        "terminal": False,
+        "slots_free": 1,
+        "max_parallel": 2,
+        "supervise_merges": False,
+        "dispatches": [],
+        "advances": [],
+        "blocked": [],
+        "decisions": {"open": []},
+        "warnings": [],
+    }
+    rendering.render_orchestrate(payload)
+    assert "supervise_merges" not in capsys.readouterr().out
+
+    rendering.render_orchestrate({**payload, "supervise_merges": True})
+    assert "supervise_merges=True" in capsys.readouterr().out

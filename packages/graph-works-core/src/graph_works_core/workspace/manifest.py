@@ -241,6 +241,16 @@ CATALOG: tuple[ConfigEntry, ...] = (
         description="Permission mode a dispatched worker session runs under.",
     ),
     ConfigEntry(
+        key="workflow.auto_drive.supervise_merges",
+        type="bool",
+        default=False,
+        description=(
+            "Mirror every finish-stage merge question to the human. "
+            "Off by default: auto-drive answers `merge` itself for a non-root "
+            "child, whose merge target is the epic's own integration branch."
+        ),
+    ),
+    ConfigEntry(
         key="workspace.dir",
         type="str",
         default=None,
@@ -454,6 +464,21 @@ def checked_str(layout: WorkspaceLayout, key: str) -> str:
     return value
 
 
+def checked_bool(layout: WorkspaceLayout, key: str) -> bool:
+    """*key* from this workspace's manifest as a `bool`, or a refusal.
+
+    `bool` is tested before anything int-shaped -- `isinstance(True, int)` is
+    true, so `checked()` carves bools out of the `int` branch (see line ~392)
+    before either helper's own guard runs; that's why both `checked_int` and
+    `checked_bool`'s own `isinstance` raises are unreachable and marked
+    `# pragma: no cover`.
+    """
+    value = _checked_value(layout, key)
+    if not isinstance(value, bool):  # pragma: no cover -- see `checked_int`
+        raise WorkspaceError(f"{layout.manifest_path}: {key}: expects a boolean, got {value!r}")
+    return value
+
+
 def set_value(path: str | Path, key: str, raw_value: str) -> Resolved:
     """Write one key through `config_io`'s validated, rollback-safe path.
 
@@ -531,6 +556,7 @@ __all__ = [
     "Manifest",
     "check_version",
     "checked",
+    "checked_bool",
     "checked_int",
     "checked_str",
     "defaults",

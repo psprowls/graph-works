@@ -66,6 +66,30 @@ The suffix is a band, and a permission:
 `workflow-<backend>` exists so the band-1 seam can ship with a real
 implementation without the foundation carving out an exemption to hold it.
 
+## Platform
+
+| Channel | Supported | How to check |
+|---|---|---|
+| macOS, Linux | yes | `gw util platform` |
+| Windows via WSL | yes (WSL is Linux) | `gw util platform` |
+| Native Windows (`python.exe`, Git Bash, PowerShell) | committed, not yet | `gw util platform` |
+
+The full manual verification protocol for native Windows is
+[`docs/windows-verification.md`](docs/windows-verification.md) — 34 checkpoints
+across six groups, each with an exact command and an exact expected output.
+There is no CI on that platform (ADR-0010), so a recorded run of that protocol is
+the whole of the native-Windows signal.
+
+This table is coarse and slow-moving on purpose. The per-capability truth —
+durability tier, dispatch backend, file lock, process control — is *derived
+at runtime* by `gw util platform`, not restated here, so it cannot drift out
+of sync with what the machinery actually reports.
+
+A package `README.md` with no `## Platform` section is platform-neutral —
+that silence is itself the claim, not an omission. ADR-0021 ("Windows is
+supported via WSL; native Windows is deferred"), rule 3, is the record
+behind this commitment.
+
 ## Checks
 
 Every recipe below is exactly the command a future CI job will call. No CI
@@ -75,15 +99,18 @@ workflow exists yet — enforcement is local, by design (ADR-0010).
 |---|---|
 | `just sync` | `uv sync --all-packages` — provisions every member's own deps, not just the root's |
 | `just normalization` | Unicode-normalization check on tracked filenames |
+| `just text-io` | implicit text-IO defaults in shipped source — a missing `encoding=` on any text read/write, or a missing `newline=` on any text write |
+| `just line-endings` | a tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true` |
+| `just platform-declared` | a package that reaches a POSIX-only module or process primitive with no `## Platform` section declaring it (ADR-0021 rule 3a) |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
-| `just types` | `uv run mypy --strict`, once per package |
+| `just types` | `uv run mypy --strict`, twice per package — once per `--platform` arm (`linux`, `win32`), 24 invocations total |
 | `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
 | `just test` | `uv run pytest`, plus one run per non-okf-io/okf-ext package under `uv run --package <name>` |
 | `just cov` | branch coverage, gated per package (95% for most, 90% for `code-graph-io`) |
 | `just subtree-base` | asserts the `plugins/graph-works` subtree merge-base is intact |
 | `just test-plugin` | the offline, code-executing subset of the **vendored subtree's** own test suites — not the only plugin suite; see `test-plugin-native` |
 | `just test-plugin-native` | the Graph Works-native plugin's own test suites, under `plugins/graph-works-native/` |
-| `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` + `test-plugin-native` — the full gate |
+| `just check` | `sync` + `subtree-base` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` + `test-plugin-native` — the full gate |
 
 A coverage failure reports only a global percentage per package; start with
 the lowest-covered module and read `term-missing`. `just audit-delta` and
@@ -91,6 +118,45 @@ the lowest-covered module and read `term-missing`. `just audit-delta` and
 explicitly rather than gated — see `plugins/SYNC.md`.
 
 If `just` is not installed, run the commands from the `justfile` directly.
+
+### On Windows, run these from Git Bash
+
+`just`'s default shell is `sh -cu` on every platform, Windows included — it does
+not fall back to `cmd.exe`. Git for Windows puts only `C:\Program Files\Git\cmd`
+on the Windows `PATH`, and that directory holds `git.exe`, not `sh.exe`. So a
+launch from cmd.exe or PowerShell cannot resolve a shell at all, and every recipe
+fails identically, before its body runs:
+
+```
+error: recipe `sync` could not be run because just could not find the shell `sh`: program not found
+```
+
+From **Git Bash** `sh` resolves to `/usr/bin/sh`, so every recipe runs **bare** —
+no `--shell` flags, and no `set windows-shell` line in the `justfile`. That the
+shell resolves is all this note claims; which recipes are actually *green* on
+native Windows is what `docs/windows-verification.md` measures, and the
+`## Platform` table above is the standing answer.
+
+This is a fact about which shell you launch from, not a defect in the `justfile`,
+which is why nothing here is fixed by editing it. `set windows-shell` would
+hardcode an install path that scoop, winget and any custom target directory get
+wrong, and it *overrides* shell resolution — so committing it would break the Git
+Bash launch that works today on every box where Git lives somewhere else.
+
+A future Windows CI job must therefore set `shell: bash` on the step. ADR-0010
+means no such job exists yet; this note is what stops the next person writing one
+on the runner's default PowerShell.
+
+### Argument encoding across the Git Bash boundary
+
+Do not pass an argument containing a double quote from Python's `subprocess` into a Git Bash /
+MSYS-linked executable (anything under `Git\usr\bin`). Native Windows has no argv array:
+`list2cmdline` flattens the list into one command line, escaping each `"` as `\"`, and the MSYS2
+runtime re-splits it under different rules. An argument containing whitespace happens to survive;
+one without it loses its first quote to a backslash. `MSYS2_ARG_CONV_EXCL` does not help — that
+governs path conversion, not re-parsing. Put the quotes in a file the tool reads (`sed -f`), or do
+the work in Python. Native binaries — `git.exe`, `node.exe`, `python.exe` — are unaffected. See
+work/epic-native-windows-support/children/bug-subprocess-argv-quote-mangling-msys.
 
 ## Versioning and release (dormant)
 

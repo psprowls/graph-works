@@ -16,7 +16,8 @@ from datetime import UTC, date, datetime
 
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
-from graph_works_core.orchestrate.commands import run_orchestrate, run_stage_advance
+from graph_works_core.orchestrate.commands import run_orchestrate
+from graph_works_core.orchestrate.stage_advance import run_stage_advance
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
@@ -172,7 +173,8 @@ def file(
     if payload["applied"] and (payload["rolled_back"] or failures):
         for failure in failures:
             rendering.warn(failure)
-        rendering.fail(f"{payload['path']}: filing apply was incomplete")
+        blocking = failures[0] if failures else f"{payload['path']}: filing apply was incomplete"
+        rendering.fail(blocking)
     for warning in payload["warnings"]:
         rendering.warn(warning)
 
@@ -206,6 +208,30 @@ def status(
         rendering.emit(payload)
     else:
         rendering.render_status(payload)
+
+
+@work_app.command(name="ingest-queue")
+def ingest_queue(
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = typer.Option(False, "--json", help="Emit the queue as JSON."),
+) -> None:
+    """List terminal work items whose design spec has not been ingested.
+
+    Derived from `sources[]` and the ingested `Source` pages' `origin` — never
+    stored, and never written. Drain it with `/graph-works:ingest <resource>`;
+    the ingest itself is what clears an entry.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        report = work.run_ingest_queue(layout)
+    except (OSError, ValueError) as exc:
+        rendering.fail(str(exc), cause=exc)
+
+    payload = rendering.ingest_queue_payload(report)
+    if json_output:
+        rendering.emit(payload)
+    else:
+        rendering.render_ingest_queue(payload)
 
 
 @work_app.command()
@@ -296,6 +322,10 @@ def advance(
     released_at: str = typer.Option("", "--released-at", help="Release date (YYYY-MM-DD)."),
     worktree: str = typer.Option("", "--worktree", help="The item's worktree path, when the caller knows it."),
     branch: str = typer.Option("", "--branch", help="The item's branch, paired with --worktree."),
+    start_sha: str = typer.Option(
+        "", "--start-sha", help="Where this phase started; required for a finish-stage results stub."
+    ),
+    return_: bool = typer.Option(False, "--return", help="Send an item at `finish` back to `execute`."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = typer.Option(False, "--json", help="Emit the advance as JSON."),
@@ -306,6 +336,18 @@ def advance(
     pair is applied unconditionally -- it is the caller's own resolved
     decision, which is what lets an item be evicted out of a shared main
     checkout; without the pair, provenance falls back to cwd inference.
+
+    `--start-sha` names where the phase being completed began. Out of `execute`
+    it is optional — core derives one from the worktree's merge base against the
+    default branch, then from the spec's own anchors. Out of `finish` there is no
+    derivation: a guessed range there would sweep in the whole execute range, so
+    the stub is written only when this flag is given.
+
+    `--return` is the way home: it walks the routing table's one backwards
+    transition, `finish` -> `execute`, for an item that reached `finish`
+    before the commit gate existed, that the relay put on hold, or that a
+    later stage-gate sends back. It is refused from any other phase, and is
+    mutually exclusive with `--resolved-in`.
     """
     warn_if_stale_routing()
     layout = resolve_workspace(workspace)
@@ -320,6 +362,8 @@ def advance(
             released_at=_optional_date(released_at, "--released-at"),
             worktree=worktree or None,
             branch=branch or None,
+            start_sha=start_sha or None,
+            return_=return_,
             dry_run=dry_run,
         )
     except WorkspaceError as exc:
@@ -353,7 +397,9 @@ def advance(
 @work_app.command()
 def orchestrate(
     path: str = typer.Argument(..., help="Extensionless bundle-relative canonical root concept path."),
-    live: str = typer.Option("", "--live", help="Comma-separated running dispatch keys (<path>#<phase>)."),
+    live: str = typer.Option(
+        "", "--live", help="Comma-separated running dispatch keys (session names, gw-<phase>-<slug>)."
+    ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = typer.Option(False, "--json", help="Emit the dispatch plan as JSON."),
 ) -> None:

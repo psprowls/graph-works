@@ -125,6 +125,15 @@ assert_eq "no git repo anywhere: exit 0" "0" "$rc"
 # checkout, and a gate that silently skips reports green while covering nothing.
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
+# Path-vocabulary boundary. Under Git Bash the shell speaks MSYS paths
+# (/tmp/...) while a native-Windows python.exe speaks Win32 paths (C:/...);
+# stdin is the one channel MSYS does not convert for us, so convert here.
+# Identity on POSIX, where cygpath does not exist, and on an empty value.
+to_py() {
+  [ -z "$1" ] && return 0
+  if command -v cygpath >/dev/null 2>&1; then cygpath -m "$1"; else printf '%s' "$1"; fi
+}
+
 # Rows: name | bash arg | bash cwd | GRAPH_WORKS_DIR | python workspace= | python cwd=
 PARITY_ROWS=(
   "env var|||$TMP/envws|$TMP/envws|"
@@ -144,7 +153,7 @@ PARITY_ROWS=(
 python_answers=$(
   for row in "${PARITY_ROWS[@]}"; do
     IFS='|' read -r _name _arg _cwd _env py_workspace py_cwd <<< "$row"
-    printf '%s\t%s\t%s\n' "$py_workspace" "$py_cwd" "$_env"
+    printf '%s\t%s\t%s\n' "$(to_py "$py_workspace")" "$(to_py "$py_cwd")" "$(to_py "$_env")"
   done | uv run --project "$REPO_ROOT" python -c '
 import sys
 from pathlib import Path
@@ -154,12 +163,14 @@ from graph_works_core.workspace.discovery import resolve_root
 for line in sys.stdin.read().splitlines():
     workspace, cwd, env = line.split("\t")
     environ = {"GRAPH_WORKS_DIR": env} if env else {}
-    print(resolve_root(
+    # Win32 paths come back with backslashes; cygpath -m emits forward
+    # slashes, so normalise the separator to match before comparing.
+    print(str(resolve_root(
         workspace=workspace or None,
         cwd=cwd or Path.cwd(),
         environ=environ,
-    ))
-' 2>/dev/null
+    )).replace("\\", "/"))
+' 2>/dev/null | tr -d '\r'
 )
 
 if [[ -z "$python_answers" ]]; then
@@ -183,7 +194,7 @@ else
     fi
 
     if [[ -n "$bash_out" ]]; then
-      assert_eq "parity ($name): bash path == resolve_root" "$python_path" "$bash_out"
+      assert_eq "parity ($name): bash path == resolve_root" "$python_path" "$(to_py "$bash_out")"
     elif [[ -d "$python_path" ]]; then
       fail=$((fail + 1))
       echo "FAIL - parity ($name): bash declined but resolve_root named a real directory"

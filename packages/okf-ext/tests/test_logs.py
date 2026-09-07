@@ -9,10 +9,13 @@ comes back as `None` rather than as an exception.
 from __future__ import annotations
 
 import stat
+import sys
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
+import pytest
+from ext_helpers import write
 from okf_ext.logs import append_entry, atomic_replace, locked_log
 
 TODAY = date(2026, 8, 19)
@@ -28,9 +31,9 @@ LOG = """# Log
 def _bundle(tmp_path: Path, log: str | None = LOG) -> Path:
     root = tmp_path / "okf"
     root.mkdir()
-    (root / "index.md").write_text("# Index\n", encoding="utf-8")
+    write(root / "index.md", "# Index\n")
     if log is not None:
-        (root / "log.md").write_text(log, encoding="utf-8")
+        write(root / "log.md", log)
     return root
 
 
@@ -106,15 +109,46 @@ def test_a_log_that_disappears_inside_the_lock_is_refused(tmp_path, monkeypatch)
     assert append_entry(root, "**note** today", on=TODAY) is None
 
 
-def test_atomic_replace_keeps_the_existing_file_mode(tmp_path):
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="group/other mode bits have no representation on NTFS",
+)
+def test_atomic_replace_keeps_the_full_existing_file_mode_on_posix(tmp_path):
     target = tmp_path / "log.md"
-    target.write_text("before\n", encoding="utf-8")
+    write(target, "before\n")
     target.chmod(0o640)
 
     atomic_replace(target, b"after\n")
 
     assert target.read_text(encoding="utf-8") == "after\n"
     assert stat.S_IMODE(target.stat().st_mode) == 0o640
+
+
+def test_atomic_replace_preserves_the_read_only_bit_on_both_platforms(tmp_path):
+    target = tmp_path / "log.md"
+    write(target, "before\n")
+    target.chmod(stat.S_IREAD)
+
+    atomic_replace(target, b"after\n")
+
+    assert target.read_text(encoding="utf-8") == "after\n"
+    assert not stat.S_IMODE(target.stat().st_mode) & stat.S_IWRITE
+
+
+def test_a_failed_replace_against_a_read_only_target_raises_its_own_error_and_leaves_no_temp(tmp_path, monkeypatch):
+    target = tmp_path / "log.md"
+    write(target, "before\n")
+    target.chmod(stat.S_IREAD)
+
+    def fail(self, other):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "replace", fail)
+
+    with pytest.raises(OSError, match="disk full"):
+        atomic_replace(target, b"after\n")
+
+    assert not tuple(tmp_path.glob(".log.md.*.tmp"))
 
 
 def test_the_lock_file_sits_outside_the_bundle(tmp_path):

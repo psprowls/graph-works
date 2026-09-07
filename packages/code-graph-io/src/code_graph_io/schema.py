@@ -19,7 +19,12 @@ SCHEMA_VERSION = 3
 # v10: app/agent_plugin become linked facets of an unconditional Package
 # node (facet_of edge) instead of alternatives; plugin-root manifests are
 # now admitted as Package nodes too.
-DERIVER_VERSION = 10
+# v11: parsed symbol node paths are POSIX-spelled. A Windows DB last updated
+# incrementally holds backslash-pathed symbol rows that no query joins on and
+# that the full-mode purge's tracked set never matches, so nothing but a full
+# rebuild clears them. POSIX output is byte-identical; the bump costs one
+# rebuild there and is the only thing that reaches the stranded Windows rows.
+DERIVER_VERSION = 11
 
 _DDL_STATEMENTS = (
     """

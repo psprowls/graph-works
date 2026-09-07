@@ -23,12 +23,14 @@ correctly wired against the workspace lock):
 
 ```bash
 uv run --package subagents-io pytest packages/subagents-io/tests
-uv run --package subagents-io mypy --strict packages/subagents-io/src
+uv run --package subagents-io mypy --strict --platform linux packages/subagents-io/src
+uv run --package subagents-io mypy --strict --platform win32 packages/subagents-io/src
 uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
 These are exactly the root `justfile`'s `test`, `types`, and `cov` recipe
 lines for this package — see `/Users/pat/Personal/graph-works/justfile`.
+`types` runs twice, once per `--platform` arm.
 
 Subset examples:
 
@@ -223,6 +225,13 @@ contract, not code:
   instead of growing a new method — a coordinator checks the flag before
   planning, rather than discovering the gap when a `PlannedDispatch` that
   worked against one backend raises `WorktreeNotProvisioned` against another.
+
+`WorkerRecord.worktree_path` / `.worktree_branch` are read-back fields: what
+the worker *actually* runs on, as the backend learned it after launching —
+never what a planner asked for. Both default to `None`, which means "this
+backend did not learn it" and nothing else. Only `workflow-orca` populates
+them (Orca provisions worktrees and renames the branch as it does so);
+`workflow-local` provisions nothing and leaves both absent.
 
 Do not add an implementation of `DispatchBackend`/`DispatchSession` inside
 this package. If you find yourself importing `subprocess`, a worktree

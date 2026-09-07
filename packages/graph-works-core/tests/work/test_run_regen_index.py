@@ -42,6 +42,13 @@ def _workspace(tmp_path):
     return layout
 
 
+def _write_epic(layout, path: str) -> None:
+    slug = path.rsplit("/", 1)[-1]
+    page = layout.bundle_dir / f"{path}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(_ITEM.replace("type: Feature", "type: Epic").format(slug=slug), encoding="utf-8")
+
+
 def test_a_dry_run_writes_nothing(tmp_path):
     layout = _workspace(tmp_path)
     (layout.bundle_dir / "work" / "2026-08-01-feature-a.md").write_text(
@@ -79,7 +86,6 @@ def test_run_regen_indexes_returns_every_required_lane(tmp_path):
     assert {plan.lane for plan in result.plans} >= {
         "work",
         f"{release}/children",
-        f"{release}/children/_archive",
     }
 
 
@@ -119,3 +125,17 @@ def test_regen_refuses_an_absent_lane_created_after_domain_planning(tmp_path, mo
     assert result.application is not None and not result.application.ok
     assert (archive_lane / "external.bin").read_bytes() == b"external owner"
     assert not (archive_lane / "index.md").exists()
+
+
+def test_regen_index_does_not_create_an_archive_lane_for_a_parent_without_archived_children(
+    tmp_path,
+) -> None:
+    layout = _workspace(tmp_path)
+    _write_epic(layout, "work/epic-new")
+
+    result = work.run_regen_indexes(layout, dry_run=False)
+
+    planned = {plan.lane for plan in result.plans}
+    assert "work/epic-new/children" in planned
+    assert "work/epic-new/children/_archive" not in planned
+    assert not (layout.bundle_dir / "work/epic-new/children/_archive").exists()

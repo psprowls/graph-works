@@ -17,6 +17,16 @@ settlement and the unsent-prompt nudge are folded into `ack()`, `close()` and
 `wait()`; they are correctness, not API, and an Orca-aware coordinator with
 extra methods to call would be a coordinator that no longer swaps backends.
 
+## Platform
+
+This is the native-Windows auto-drive backend. Orca itself ships a native
+Windows build (D-004), and `workflow-local`'s pid-based liveness probe maps
+`os.kill(pid, 0)` to `TerminateProcess` on Windows — a refusal it enforces at
+construction (see `workflow-local`'s README) rather than something a caller
+works around. `OrcaBackend` drives Orca's own process management instead of
+signalling pids directly, so it carries no such restriction and runs
+unmodified on Windows.
+
 ## Fixtures
 
 `tests/fixtures/` is JSON captured verbatim from the live `orca` CLI. Nothing

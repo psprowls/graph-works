@@ -295,6 +295,7 @@ def advance_and_stamp(
     released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
+    return_: bool = False,
     dry_run: bool = True,
 ) -> AdvanceOutcome:
     """Advance *path*, stamp its artifact, ensure its plan row -- in **one save**.
@@ -335,6 +336,8 @@ def advance_and_stamp(
         released_at=released_at,
         worktree=worktree,
         branch=branch,
+        return_=return_,
+        unreadable=bundle.unreadable,
     )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)
@@ -542,7 +545,7 @@ def apply_file_and_reconcile(plan: FilingCompositionPlan) -> FilingApplication:
 
         for index in plan.indexes:
             index.path.parent.mkdir(parents=True, exist_ok=True)
-            index.path.write_text(index.after, encoding="utf-8")
+            index.path.write_text(index.after, encoding="utf-8", newline="")
         indexes = plan.indexes
         application = FilingApplication(page=page, indexes=indexes)
 

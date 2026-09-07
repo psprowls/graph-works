@@ -80,11 +80,13 @@ other vertical, it has no second file: `commands.py` is the entire module,
 so there is nothing left to keep qualified.
 
 The util vertical hoists `LogAppendResult`, `TokenStamp`, `SkippedPage`,
-`TokensUpdate`, `run_log` and `run_tokens_update` — its whole API — for the
+`TokensUpdate`, `run_log` and `run_tokens_update` — and, from `platform.py`,
+`Capability`, `PlatformReport`, `ProbeResult` and `build_report` — for the
 reason the archive and wiki_stats verticals hoist theirs: they are the call
-and its result shape. `VALID_OPS` and `TOKENS_KEY` stay
-`util.commands.*`; both are too generic for a front door, and the only
-consumer that needs them is the sub-app named for this vertical.
+and its result shape. `VALID_OPS`, `TOKENS_KEY`, `PROVIDERS` and the four
+provider classes stay `util.commands.*` / `util.platform.*`: the registry and
+its members are the seam's internals, and the only consumer that needs them is
+the sub-app named for this vertical.
 
 The work vertical is deliberately **not** hoisted here. Its `run_lint` would
 collide with the wiki lint vertical's already-hoisted `run_lint`, and no
@@ -158,11 +160,10 @@ from graph_works_core.orchestrate.commands import (
     OrchestratePlan,
     OrchestrateResult,
     PlannedAdvance,
-    StageAdvance,
     run_orchestrate,
-    run_stage_advance,
 )
 from graph_works_core.orchestrate.commands import plan as orchestrate_plan
+from graph_works_core.orchestrate.stage_advance import StageAdvance, run_stage_advance
 from graph_works_core.query.adapters import LOOP_REGISTRY, REGISTRY
 from graph_works_core.scan.commands import (
     ScanResult,
@@ -182,6 +183,12 @@ from graph_works_core.util.commands import (
     TokensUpdate,
     run_log,
     run_tokens_update,
+)
+from graph_works_core.util.platform import (
+    Capability,
+    PlatformReport,
+    ProbeResult,
+    build_report,
 )
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats, compute_stats
 from graph_works_core.workspace.discovery import find_repo_root, resolve
@@ -217,6 +224,7 @@ __all__ = [
     "ArchiveRun",
     "BlockedItem",
     "Candidate",
+    "Capability",
     "DriftFinding",
     "GraphResult",
     "GraphTarget",
@@ -236,6 +244,8 @@ __all__ = [
     "PipelineEntry",
     "PlannedAdvance",
     "PlannedWrite",
+    "PlatformReport",
+    "ProbeResult",
     "PropagateResult",
     "ProposalBacklog",
     "ProseRefreshResult",
@@ -262,6 +272,7 @@ __all__ = [
     "apply_init",
     "apply_scan_results",
     "build_catalog",
+    "build_report",
     "build_scan_worklist",
     "chunk_text",
     "coerce_tool_name",

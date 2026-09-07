@@ -15,14 +15,16 @@ From the repo root (workspace-relative invocations; this package resolves its
 own dependency closure so it runs under `--package`, per the root `justfile`):
 
 ```bash
-uv run --package doc-wiki-okf mypy --strict packages/doc-wiki-okf/src
+uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
+uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
 uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests
 uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
 
 These are exactly the `types` / `test` / `cov` lines the root `justfile` runs
 for this package — `just check` runs all workspace members together, but any
-one of the three above scopes to just this package. A single test or subset:
+one of the lines above scopes to just this package. `types` runs twice, once
+per `--platform` arm. A single test or subset:
 
 ```bash
 uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests/test_migrate_fixtures.py
@@ -111,13 +113,11 @@ languages, representative file, refusals/warnings. `plan_batch_brief` (a
 directory + a `kind`) → a manifest of ingest units, capped by default. Each
 brief is a distinct frozen type with only the fields its mode needs — no shared
 base, no `is_folder`/`is_batch` discriminator to misread. `as_data()` on each
-reproduces the legacy `wiki_io.ingest_source` dict shape key-for-key (with two
-documented departures: corrected `word_count`, and `source_type` renamed to
-`source_kind`), which is the parity contract the port is tested against.
-Refusals and warnings are two separate, closed vocabularies
-(`FolderRefusal`/`FolderWarning`) — legacy conflated them into one untyped
-channel. Nothing on this path raises; a refused folder still reports its file
-count and size.
+returns a dict shape pinned key-for-key by its mode's
+`test_as_data_is_the_legacy_dict`; the classification key is `source_kind`, not
+`source_type`. Refusals and warnings are two separate, closed vocabularies
+(`FolderRefusal`/`FolderWarning`) rather than one untyped channel. Nothing on
+this path raises; a refused folder still reports its file count and size.
 
 **Proposals** (`proposals/` + `okf_ext.proposals`) are the propose → decide →
 promote lifecycle for a wiki page. A proposal is identified by the **target
@@ -184,17 +184,17 @@ present (`has_member` counts it), it's just not a concept.
   after move) but `cli.py` has no `doc-wiki-okf archive` entry point — check
   before assuming the feature is reachable from the command line.
 
-## The port
+## `reading/`
 
-`reading/` is a re-decomposition of the substrate-neutral half of the legacy
-650-line `wiki_io/ingest_source.py`, and most of its tests came across
-unchanged from `wiki-io`'s own suite — an unedited passing test is the
-behaviour-parity evidence. Two names lost a leading underscore on the way
-(`iter_link_targets`, `resolve_companion`) because they now cross a module
-boundary. `SkillBundle` became frozen, and its two file lists became tuples.
-The legacy `build_skill_ingest_brief` (chunking a skill directory into guidance
-pages) does not port — that's a layer above this one; the substrate-neutral
-half it would need already lives in `reading/skills`.
+`reading/` is the substrate-neutral half of ingest: file and format inspection,
+with no knowledge of briefs, lanes, or Diátaxis. `iter_link_targets` and
+`resolve_companion` are public rather than underscore-prefixed because they
+cross a module boundary. `SkillBundle` is frozen and its two file lists are
+tuples.
+
+There is no skill-ingest brief here — chunking a skill directory into guidance
+pages is a layer above this one, and the substrate-neutral half it would need
+already lives in `reading/skills`.
 
 ## Conventions
 

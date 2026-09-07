@@ -1,7 +1,7 @@
 from work_helpers import make_item
 from work_tracker_okf.dependencies import DependencyEdge, DependencyFact
 from work_tracker_okf.hierarchy import ChildRollup
-from work_tracker_okf.workflow import state_for
+from work_tracker_okf.workflow import route, state_for
 
 
 def test_an_unknown_path_has_no_state() -> None:
@@ -34,6 +34,69 @@ def test_a_feature_with_children_carries_full_paths() -> None:
     state = state_for(items, "work/feat")
     assert state is not None
     assert state.child_rollup == ChildRollup(1, 0, (child_path,))
+
+
+def test_open_descendants_sees_past_a_terminal_direct_child() -> None:
+    child_path = "work/feat/children/done"
+    grandchild_path = f"{child_path}/children/gc"
+    items = [
+        make_item("feat", type="Feature", active_child_paths=(child_path,)),
+        make_item(
+            child_path,
+            type="Feature",
+            parent_path="work/feat",
+            ancestor_paths=("work/feat",),
+            work_status="resolved",
+            active_child_paths=(grandchild_path,),
+        ),
+        make_item(
+            grandchild_path,
+            type="Bug",
+            parent_path=child_path,
+            ancestor_paths=("work/feat", child_path),
+            work_status="open",
+        ),
+    ]
+    state = state_for(items, "work/feat")
+    assert state is not None
+    assert state.child_rollup == ChildRollup(1, 1, ())
+    assert state.open_descendants == (grandchild_path,)
+
+
+def test_a_feature_with_an_open_grandchild_still_requires_children_terminal() -> None:
+    """Fixture 3 (design §3): a resolved direct child hiding an open grandchild
+    must not let the feature finish as if its children were all terminal."""
+    child_path = "work/feat/children/done"
+    grandchild_path = f"{child_path}/children/gc"
+    items = [
+        make_item(
+            "feat",
+            type="Feature",
+            phase="execute",
+            work_status="in-progress",
+            active_child_paths=(child_path,),
+        ),
+        make_item(
+            child_path,
+            type="Feature",
+            parent_path="work/feat",
+            ancestor_paths=("work/feat",),
+            work_status="resolved",
+            active_child_paths=(grandchild_path,),
+        ),
+        make_item(
+            grandchild_path,
+            type="Bug",
+            parent_path=child_path,
+            ancestor_paths=("work/feat", child_path),
+            work_status="open",
+        ),
+    ]
+    state = state_for(items, "work/feat")
+    assert state is not None
+    result = route(state)
+    assert result.on_complete is not None
+    assert result.on_complete.requires == ("children-terminal",)
 
 
 def test_an_archived_dependency_reads_as_met() -> None:

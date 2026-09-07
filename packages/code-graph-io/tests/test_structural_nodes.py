@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import sys
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -364,6 +366,10 @@ def test_is_type_only_d_ts_and_pyi() -> None:
     assert not structural_nodes._is_type_only("foo.py")
 
 
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="NTFS has no execute bit: chmod(0o755) cannot set one, so there is nothing to detect",
+)
 def test_is_executable_exec_bit(tmp_path: Path) -> None:
     f = tmp_path / "no_ext_script"
     f.write_text("hello\n")
@@ -744,7 +750,7 @@ def test_physically_contains_is_strict_tree(tmp_path: Path) -> None:
 
     ws = tmp_path
     db_path = graph_dir(ws) / "code.db"
-    with sqlite3.connect(f"file:{db_path}?mode=ro", uri=True) as probe:
+    with closing(sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)) as probe:
         # Assertion 1: strict tree — no child has >1 structural parent
         dupes = probe.execute(
             "SELECT dst, COUNT(*) FROM edges WHERE kind='physically_contains' GROUP BY dst HAVING COUNT(*) > 1"

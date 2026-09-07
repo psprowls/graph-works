@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from ext_helpers import tabled_bundle, tabled_copy
+from ext_helpers import tabled_bundle, tabled_copy, write
 from okf_ext.tables import Column, TableSpec, apply, plan_row
 from okf_io import load_bundle
 
@@ -76,7 +76,7 @@ def test_an_idempotent_hit_is_not_reported_as_a_skip():
 
 def test_a_parse_error_concept_is_skipped(tmp_path):
     root = tabled_copy(tmp_path)
-    (root / "broken.md").write_text("---\ntype: [\n---\n\n# Broken\n", encoding="utf-8")
+    write(root / "broken.md", "---\ntype: [\n---\n\n# Broken\n")
     plan = _plan(load_bundle(root), ["broken"])
     assert [(s.concept_id, s.reason) for s in plan.skipped] == [("broken", "parse-error")]
 

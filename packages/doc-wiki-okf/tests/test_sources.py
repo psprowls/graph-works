@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 from doc_wiki_okf.cli import IGNORE
-from doc_wiki_okf.sources import plan_ingest, preflight_ingest
+from doc_wiki_okf.sources import normalize_origin, plan_ingest, preflight_ingest
 from okf_ext.proposals import PagePlan, apply
 from okf_io import Bundle, load_bundle
 from source_helpers import AT, BY, TODAY, binary_material, build_bundle, material, schema_set, section_set
@@ -427,3 +427,69 @@ def test_seed_source_kinds_is_the_shipped_seven() -> None:
     from doc_wiki_okf.sources import seed_source_kinds
 
     assert seed_source_kinds() == ("spec", "article", "ticket", "skill", "doc", "transcript", "code-review")
+
+
+_SOURCE_PAGE = """---
+type: Source
+title: Design for bug y
+description: d
+source_kind: doc
+source_path: sources/references/2026-08-design-for-bug-y.md
+origin: {origin}
+ingested: 2026-08-12
+---
+
+# Design for bug y
+"""
+
+
+def test_normalize_origin_strips_every_archive_segment(tmp_path: Path) -> None:
+    root = tmp_path / "wiki"
+    active = root / "work/epic-x/children/bug-y/references/01-design.md"
+    archived = root / "work/_archive/epic-x/children/_archive/bug-y/references/01-design.md"
+
+    assert normalize_origin(str(active), root) == "work/epic-x/children/bug-y/references/01-design.md"
+    assert normalize_origin(str(archived), root) == "work/epic-x/children/bug-y/references/01-design.md"
+
+
+def test_normalize_origin_leaves_urls_and_outside_paths_alone(tmp_path: Path) -> None:
+    root = tmp_path / "wiki"
+
+    assert normalize_origin("https://example.com/a/_archive/b", root) == "https://example.com/a/_archive/b"
+    assert normalize_origin("/somewhere/else/spec.md", root) == "/somewhere/else/spec.md"
+    assert normalize_origin("", root) == ""
+
+
+def test_normalize_origin_is_idempotent(tmp_path: Path) -> None:
+    root = tmp_path / "wiki"
+    once = normalize_origin(str(root / "work/epic-x/references/01-design.md"), root)
+
+    assert normalize_origin(once, root) == once
+
+
+def test_reingest_after_archive_is_still_refused(tmp_path: Path) -> None:
+    """The sharp regression: an ingested design whose item later archives must
+    not be ingestable a second time."""
+    root = tmp_path / "wiki"
+    active = "work/epic-x/children/bug-y/references/01-design.md"
+    archived = "work/_archive/epic-x/children/bug-y/references/01-design.md"
+    bundle = build_bundle(
+        root,
+        {
+            "sources/2026-08-design-for-bug-y.md": _SOURCE_PAGE.format(origin=str(root / active)),
+        },
+    )
+    material = root / archived
+    material.parent.mkdir(parents=True, exist_ok=True)
+    material.write_text("# spec\n", encoding="utf-8")
+
+    preflight = preflight_ingest(
+        bundle,
+        material,
+        title="A different title entirely",
+        origin=str(material),
+        today=TODAY,
+    )
+
+    assert not preflight.ok
+    assert any("already ingested" in refusal.detail for refusal in preflight.refusals)

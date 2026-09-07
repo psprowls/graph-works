@@ -51,15 +51,20 @@ def _qualify(prefix: str, name: str) -> str:
     return f"{prefix}.{name}" if prefix else name
 
 
+# Paths cross into the graph POSIX-spelled, as every other node-emitting module
+# in the package already does. git hands `update` POSIX-relative paths and the
+# full-mode stale-node purge matches on them, so a `str(WindowsPath)` here would
+# spell `src\a.py`, miss the purge's tracked set, and delete the whole symbol
+# tree on every full build.
 def _key(node: SourceNode, qname: str) -> NodeKey:
-    return (node.kind, qname, str(node.path))
+    return (node.kind, qname, node.path.as_posix())
 
 
 def _emit_node(node: SourceNode, qname: str) -> GraphNode:
     return GraphNode(
         kind=node.kind,
         name=qname,
-        path=str(node.path),
+        path=node.path.as_posix(),
         line=None if node.kind == "file" else node.span.start_line,
         attrs=dict(node.attrs),
         start_byte=node.span.start_byte,
@@ -75,7 +80,7 @@ def _walk(
     prefix: str = "",
     enclosing_class: str | None = None,
 ) -> None:
-    name = node.name if node.name is not None else str(node.path)
+    name = node.name if node.name is not None else node.path.as_posix()
     qname = _qualify(prefix, name)
     nodes.append(_emit_node(node, qname))
     parent_key = _key(node, qname)
@@ -93,7 +98,7 @@ def _walk(
     else:
         child_enclosing = enclosing_class
     for child in node.children:
-        child_name = child.name if child.name is not None else str(child.path)
+        child_name = child.name if child.name is not None else child.path.as_posix()
         child_qname = _qualify(child_prefix, child_name)
         edges.append(
             GraphEdge(

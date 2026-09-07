@@ -195,3 +195,41 @@ def test_orchestrate_hard_fails_on_a_malformed_stage_skill(workspace: Path) -> N
     result = runner.invoke(app, ["work", "orchestrate", path, "--workspace", str(workspace), "--json"])
     assert result.exit_code == exit_codes.SCHEMA_MISMATCH
     assert "workflow.pipeline.exploration.skill" in result.stderr
+
+
+def test_ingest_queue_lists_a_terminal_item_with_an_uningested_design(workspace: Path) -> None:
+    layout = work_main.resolve_workspace(str(workspace))
+    page = layout.bundle_dir / "work" / "bug-a.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Bug\ntitle: bug-a\ndescription: d\nstatus: stable\n"
+        "work_status: resolved\nphase: done\neffort: small\n"
+        "opened: 2026-08-01\nupdated: 2026-08-02\naffects:\n- packages/a\n"
+        "sources:\n  - id: design\n    resource: /work/bug-a/references/01-design.md\n"
+        "    title: Design\n---\n\n## Summary\nd\n\n## Plan\n\n"
+        "| Action | Done when | Rationale |\n| --- | --- | --- |\n",
+        encoding="utf-8",
+    )
+    artifact = layout.bundle_dir / "work" / "bug-a" / "references" / "01-design.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# spec\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["work", "ingest-queue", "--workspace", str(workspace), "--json"])
+
+    assert result.exit_code == 0, result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["pending"] == [
+        {
+            "path": "work/bug-a",
+            "work_status": "resolved",
+            "resource": "/work/bug-a/references/01-design.md",
+            "origin": "work/bug-a/references/01-design.md",
+        }
+    ]
+
+
+def test_ingest_queue_renders_an_empty_queue_in_human_mode(workspace: Path) -> None:
+    result = runner.invoke(app, ["work", "ingest-queue", "--workspace", str(workspace)])
+
+    assert result.exit_code == 0, result.stdout
+    assert "0 design spec(s) pending ingest" in result.stdout

@@ -26,7 +26,7 @@ dependencies = [
 ]
 
 [project.scripts]
-gw = "graph_works_cli.cli:app"
+gw = "graph_works_cli.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graph_works_cli"]

@@ -2896,7 +2896,7 @@
     },
     {
       "name": "gw work ingest-queue",
-      "help": "List terminal work items whose design spec has not been ingested.\n\nDerived from `sources[]` and the ingested `Source` pages' `origin` \u2014 never\nstored, and never written. Drain it with `/graph-works:ingest <resource>`;\nthe ingest itself is what clears an entry.",
+      "help": "List terminal work items whose design spec has not been ingested.\n\nDerived from `sources[]` and the ingested `Source` pages' `origin` \u2014 never\nstored, and never written. Drain it with `/gw:ingest <resource>`;\nthe ingest itself is what clears an entry.",
       "short_help": "List terminal work items whose design spec has not been ingested.",
       "usage": [
         "[OPTIONS]"

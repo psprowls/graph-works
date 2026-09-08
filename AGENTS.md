@@ -6,8 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A `uv` workspace (`members = ["packages/*"]`) for OKF tooling. The root is a
 workspace root only — not distributable, `package = false`. It holds thirteen
-packages today, plus one vendored plugin subtree (`plugins/graph-works`, see
-below — not a workspace member, not Python).
+packages today, plus one plugin tree (not a workspace member, not Python):
+`plugins/gw`, the first-party Claude Code plugin this repo publishes and the
+one Claude Code loads (name `gw`).
 
 The OKF v0.2 spec is **not** in this repository. Code and docs cite it by
 section (`§5.1`, `§11`) and expect you to reason from those citations.
@@ -57,19 +58,22 @@ exists yet — enforcement is local, by design (ADR-0010).
 
 | Command | What it does |
 |---|---|
-| `just` / `just check` | `sync` + `subtree-base` + `normalization` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
+| `just` / `just check` | `sync` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
 | `just sync` | `uv sync --all-packages` — provisions every member's deps, not just the root's |
 | `just normalization` | Unicode-normalization check on tracked filenames (cheap, run first) |
+| `just text-io` | Implicit text-IO defaults in shipped source — a missing `encoding=` on any text read/write, or a missing `newline=` on any text write. Not a `lint` addition deliberately: ruff's `PLW1514` is preview-only and covers `encoding=` alone, and `scripts`/`plugins` sit in ruff's `exclude`. Scope is `packages/*/src` and `scripts`, plus the three byte-exact test trees (`okf-io`, `okf-ext`, `scripts/tests`); the other nine still rely on a suite run |
+| `just line-endings` | A tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true` |
+| `just platform-declared` | A package that imports a POSIX-only module, or reaches a POSIX-only process primitive, with no `## Platform` section declaring it — ADR-0021 rule 3a as a check |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
 | `just types` | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, then `win32`), 24 invocations total — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa |
-| `just contracts` | `uv run lint-imports` — okf-ext's internal capability-boundary contract |
+| `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
 | `just test` | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package |
 | `just cov` | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing` |
-| `just subtree-base` | Asserts the `plugins/graph-works` subtree merge-base is reachable/recorded/prefix-rooted — see "The vendored plugin" below |
-| `just test-plugin` | The offline, code-executing subset of the vendored plugin's own test suites |
-| `just audit-delta` | Advisory, not in `check` — cross-checks `plugins/PATCHES.md` against the tree |
-| `just plugin-contract` | Advisory, not in `check` — the plugin CLI contract page assertions |
-| `just test-plugin-slow` | The one vendored plugin suite excluded from `check` (~150s) |
+| `just test-plugin` | The `gw` plugin's own test suites (bash, plus one `node --test` suite), under `plugins/gw/` |
+
+Every suite `just check` runs is Python, bash, or — for the plugin's
+`tests/pi` extension suite alone — `node --test`. Node 23.6+ is required for
+that one suite; `npm` is not required by anything in the gate any more.
 
 Single test / subset (pytest `testpaths` and `pythonpath` are preconfigured
 for okf-io/okf-ext, so these work from the repo root):
@@ -259,37 +263,20 @@ Fixture discovery lives in `tests/helpers.py`, not `conftest.py`. Use
 `lstrip("﻿").startswith("---")` disagrees with the splitter on doubled-BOM
 files (`lstrip` strips every BOM; the splitter strips exactly one).
 
-## The vendored plugin (`plugins/graph-works`)
+## The plugin (`plugins/gw`)
 
-`plugins/graph-works/` is **not** a workspace member and is not Python — it is
-a Claude Code plugin (skills, hooks, agents) vendored **verbatim** as a `git
-subtree` of [obra/superpowers](https://github.com/obra/superpowers), per
-ADR-0019. Everything under that prefix is upstream's, unmodified, except the
-files recorded — with a disposition and merge instruction — in
-`plugins/PATCHES.md`.
+`plugins/gw/` is **not** a workspace member and is not Python — it is the
+first-party Claude Code plugin this repo publishes (skills and hooks, name
+`gw`), registered by the root `.claude-plugin/marketplace.json`. It is
+ordinary first-party code: edit it like any other tree here. It was once a
+vendored `git subtree` of [obra/superpowers](https://github.com/obra/superpowers)
+per ADR-0019; that fork, its ledger and its re-sync ritual were deleted by
+`epic-unforked-plugin-skill-dispatch`, and pulling an upstream release is now
+reading their diff and deciding, not a `git subtree pull`.
 
-**Do not hand-edit a file under this prefix unless `PATCHES.md` already
-records it as patched.** An unrecorded edit silently becomes undocumented
-divergence, which the next upstream pull either clobbers or conflicts with for
-no traceable reason. If a change belongs here, add or update its `PATCHES.md`
-entry in the same change.
-
-`plugins/SYNC.md` is the full ritual for pulling a new upstream release —
-read it before touching anything subtree-related; it is not optional
-reading. Two points worth front-loading:
-
-- `just subtree-base` is **enforcing** and part of `just check` — it is the
-  one fork check in the gate that must never go red on legitimate
-  in-progress work, because the property it asserts (the subtree
-  merge-base stays reachable, recorded, and prefix-rooted) can only be
-  broken by history rewriting, never by ordinary edits.
-- `just audit-delta` and `just plugin-contract` are advisory and deliberately
-  **not** in `just check` — they go legitimately red mid-work and are run
-  explicitly at the moments named in `SYNC.md`.
-
-`plugins/graph-works/AGENTS.md` and `CLAUDE.md` are themselves vendored
-verbatim (`PATCHES.md` entry #5, "keep verbatim," never reviewed by this
-fork) — do not update them from this repo; any correction belongs upstream.
+Its suites run under `just test-plugin`, which is enforcing and part of
+`just check`. Every suite in the tree is named there explicitly — a new suite
+gets a line in the same change, because a suite nothing invokes is not coverage.
 
 ## The knowledge base lives outside this repo
 
@@ -306,9 +293,8 @@ explicitly does not honor it, and a workspace under that shape resolves as
 "not a workspace" rather than falling back. If you see it referenced anywhere
 outside a test asserting the old name is rejected, that reference is stale.)
 
-Work items are driven stage-by-stage with `/graph-works:workflow <path>` (one
-stage per session, fresh context between stages; renamed from
-`/graph-works:next`). `scripts/` is repo tooling, excluded from ruff and not
-part of any package.
+Work items are driven stage-by-stage with `/gw:workflow <path>` (one stage per
+session, fresh context between stages). `scripts/` is repo tooling, excluded
+from ruff and not part of any package.
 
 Feature work runs in git worktrees under `.claude/worktrees/` (gitignored).

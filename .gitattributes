@@ -3,8 +3,9 @@
 # `unspecified` here checks out CRLF -- which makes a bash script unrunnable
 # (`#!/usr/bin/env bash\r`) and makes the PreToolUse doc-routing hook fail
 # *silently*. This is a blanket rule on purpose: the bug it closes was caused by
-# enumeration (the vendored plugin file names `hooks/session-start` individually,
-# and four extensionless scripts added later were never added to it).
+# enumeration (an earlier, now-deleted vendored plugin named `hooks/session-start`
+# individually rather than by a glob, and four extensionless scripts added
+# later were never added to it).
 #
 # `text=auto` leaves anything git detects as binary alone. The `-text` blocks
 # below are byte-exact contracts and must stay AFTER this line -- last match wins.
@@ -30,3 +31,11 @@ packages/okf-ext/tests/fixtures/** -text
 # end-of-line normalization would rewrite those bytes on checkout -- silently,
 # on someone else's machine -- and break the very property they exist to prove.
 packages/doc-wiki-okf/tests/fixtures/** -text
+
+# The plugin's rendered branding assets are binary. Git's `text=auto` above
+# already detects them as such (a PNG's IHDR chunk carries NUL bytes), so this
+# block changes no behavior today. It is written down because this file's own
+# header records that enumeration-by-omission has bitten this repo before, and
+# because every other byte-exact file here is named explicitly rather than left
+# to detection.
+plugins/gw/assets/*.png -text

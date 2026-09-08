@@ -308,7 +308,7 @@ def test_stats_and_proposal_payloads_have_exact_keys() -> None:
 
 def test_both_scan_payloads_report_identical_structural_errors(tmp_path: Path) -> None:
     """`entity_errors` is the partial-write signal the scanner agent reports
-    verbatim (plugins/graph-works/skills/scan/SKILL.md). Emit mode must not
+    verbatim (plugins/gw/skills/scan/SKILL.md). Emit mode must not
     render a narrower set than normal mode, or a failed mirror repo becomes
     invisible to the agent driving the scan.
     """

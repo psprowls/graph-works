@@ -454,7 +454,7 @@ GW_AVAILABLE = subprocess.run(
 needs_gw = pytest.mark.skipif(not GW_AVAILABLE, reason="the graph-works CLI is not runnable here")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-HOOK = REPO_ROOT / "plugins" / "graph-works" / "hooks" / "skill-doc-routing"
+HOOK = REPO_ROOT / "plugins" / "gw" / "hooks" / "skill-doc-routing"
 # The hook's own extractor, verbatim from skill-doc-routing:138. Asserted, not just
 # claimed -- see test_hook_extractor_constant_is_still_verbatim_in_the_hook_source.
 HOOK_EXTRACTOR = r's/.*"bundle_dir"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'
@@ -475,7 +475,7 @@ def test_projection_is_written_and_fresh(tmp_path: Path) -> None:
 
 def test_hook_extractor_constant_is_still_verbatim_in_the_hook_source() -> None:
     if not HOOK.exists():
-        pytest.skip("plugins/graph-works subtree not checked out")
+        pytest.skip("plugins/gw/hooks/skill-doc-routing is not present in this checkout")
     assert HOOK_EXTRACTOR in HOOK.read_text(encoding="utf-8")
 
 

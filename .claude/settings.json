@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "graph-works@graph-works": true
+    "gw@graph-works": true,
+    "superpowers@claude-plugins-official": true
   }
 }

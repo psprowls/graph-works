@@ -1,0 +1,144 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+MARKETPLACE="$REPO_ROOT/.agents/plugins/marketplace.json"
+
+python3 - "$MARKETPLACE" "$REPO_ROOT" <<'PY'
+import json
+import struct
+import sys
+from pathlib import Path
+
+marketplace_path = Path(sys.argv[1])
+repo_root = Path(sys.argv[2])
+
+if not marketplace_path.exists():
+    raise AssertionError(".agents/plugins/marketplace.json must exist")
+
+marketplace = json.loads(marketplace_path.read_text(encoding="utf-8"))
+
+def assert_equal(actual, expected, label):
+    if actual != expected:
+        raise AssertionError(f"{label}: expected {expected!r}, got {actual!r}")
+
+assert_equal(marketplace.get("name"), "graph-works", "marketplace name")
+assert_equal(
+    marketplace.get("interface", {}).get("displayName"),
+    "Graph Works",
+    "marketplace display name",
+)
+
+plugins = marketplace.get("plugins")
+if not isinstance(plugins, list):
+    raise AssertionError("plugins must be a list")
+
+matching_plugins = [plugin for plugin in plugins if plugin.get("name") == "gw"]
+assert_equal(len(matching_plugins), 1, "gw plugin entry count")
+assert_equal(len(plugins), 1, "marketplace ships exactly one plugin entry")
+
+plugin = matching_plugins[0]
+# Load-bearing: the rebase spike proved Codex only recognises
+# .codex-plugin/plugin.json at the marketplace ROOT and does not recurse
+# (evidence/codex.md, Attempt 2). A nested source path installs nothing.
+assert_equal(plugin.get("source"), {"source": "url", "url": "./"}, "plugin source")
+assert_equal(
+    plugin.get("policy"),
+    {"installation": "AVAILABLE", "authentication": "ON_INSTALL"},
+    "plugin policy",
+)
+assert_equal(plugin.get("category"), "Developer Tools", "plugin category")
+
+plugin_manifest = repo_root / ".codex-plugin" / "plugin.json"
+if not plugin_manifest.exists():
+    raise AssertionError(".codex-plugin/plugin.json must exist")
+
+manifest = json.loads(plugin_manifest.read_text(encoding="utf-8"))
+assert_equal(manifest.get("name"), plugin.get("name"), "plugin manifest name")
+assert_equal(manifest.get("version"), "0.1.0", "plugin manifest version")
+assert_equal(manifest.get("skills"), "./skills/", "plugin manifest skills dir")
+
+# Codex auto-discovers a plugin's hooks/hooks.json whenever the Codex manifest
+# has no `hooks` field: load_plugin_hooks falls back to a hardcoded
+# DEFAULT_HOOKS_CONFIG_FILE = "hooks/hooks.json" and registers it. That file is
+# the Claude Code SessionStart hook, it is tracked in this repo, and this
+# marketplace installs the whole plugin root (source url "./"), so on Codex the
+# fallback re-registers the SessionStart hook and its install-time trust prompt.
+# Declaring an empty inline hooks object ({}) parses as an empty inline hook set
+# and suppresses the auto-discovery. An absent field, an empty array ([]), and
+# an empty inline list all collapse back to the fallback, so the value must be
+# exactly an empty object.
+hooks_config = repo_root / "hooks" / "hooks.json"
+if not hooks_config.exists():
+    raise AssertionError("hooks/hooks.json must exist (Claude Code SessionStart hook)")
+
+assert_equal(
+    manifest.get("hooks"),
+    {},
+    "Codex manifest must declare empty hooks {} to suppress hooks/hooks.json auto-discovery",
+)
+
+# The icons must resolve AND be real artwork. Their filenames are child 3's
+# call, so assert the manifest's own values point at files that exist rather
+# than hardcoding names. Resolution alone is not enough: a 1x1 placeholder
+# pixel resolves exactly as well as a logo, which is how placeholders shipped
+# the first time. Each asset therefore also gets a shape check that a
+# placeholder cannot pass.
+for key in ("composerIcon", "logo"):
+    rel = manifest.get("interface", {}).get(key)
+    if not rel:
+        raise AssertionError(f"interface.{key} must be set")
+    asset = repo_root / rel.lstrip("./")
+    if not asset.exists():
+        raise AssertionError(f"interface.{key} points at a missing file: {rel}")
+
+    if asset.suffix == ".png":
+        # Parse the IHDR chunk directly (stdlib struct, no image dependency):
+        # 8-byte signature, then a 4-byte length, b"IHDR", width, height.
+        raw = asset.read_bytes()
+        if raw[:8] != b"\x89PNG\r\n\x1a\n" or raw[12:16] != b"IHDR":
+            raise AssertionError(f"interface.{key} is not a PNG: {rel}")
+        width, height = struct.unpack(">II", raw[16:24])
+        if width != height:
+            raise AssertionError(
+                f"interface.{key} must be square, got {width}x{height}: {rel}"
+            )
+        if width < 256:
+            raise AssertionError(
+                f"interface.{key} is {width}x{height}; a marketplace logo needs "
+                f"at least 256x256 (a placeholder pixel resolves too): {rel}"
+            )
+    elif asset.suffix == ".svg":
+        # A placeholder is one lone shape. Real artwork is composed, so count
+        # drawing primitives rather than trying to judge the art itself.
+        markup = asset.read_text(encoding="utf-8")
+        primitives = sum(
+            markup.count(f"<{tag}")
+            for tag in ("path", "circle", "rect", "line", "polyline", "polygon", "ellipse")
+        )
+        if primitives < 2:
+            raise AssertionError(
+                f"interface.{key} carries {primitives} drawing primitive(s); a "
+                f"single shape is a placeholder, not a mark: {rel}"
+            )
+    else:
+        raise AssertionError(f"interface.{key} has an unchecked asset type: {rel}")
+
+# No lineage claims in the human-readable copy: the native plugin has no
+# upstream to track. Asset *filenames* are exempt -- child 3 owns those, and
+# whether they get un-branded is child 3's call, not this manifest's.
+prose = " ".join(
+    str(manifest.get(key, ""))
+    for key in ("name", "description")
+).lower()
+prose += " " + " ".join(
+    str(manifest.get("interface", {}).get(key, ""))
+    for key in ("displayName", "shortDescription", "longDescription")
+).lower()
+for banned in ("obra", "superpowers", "fork of"):
+    if banned in prose:
+        raise AssertionError(f"Codex manifest still claims upstream lineage: {banned!r}")
+
+print("Codex marketplace manifest looks good")
+PY

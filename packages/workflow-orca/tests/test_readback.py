@@ -16,7 +16,7 @@ from workflow_orca._cli import OrcaResult
 
 TARGET = "auto-drive:2026-08-14-epic-feature-orca-dispatch-backend"
 
-PROMPT = "Run /graph-works:workflow my-slug.\nDispatch key: my-slug#execute\nSend worker_done when done."
+PROMPT = "Run /gw:workflow my-slug.\nDispatch key: my-slug#execute\nSend worker_done when done."
 
 ROUTES = [
     (("run-list", "--cursor"), "run_list_page2"),

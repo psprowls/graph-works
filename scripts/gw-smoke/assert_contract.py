@@ -48,7 +48,7 @@ def main() -> int:
         "packages/index.md",
         "repositories/index.md",
         "test-suites/index.md",
-        f"{prefix}/agent-plugins/graph-works.md",
+        f"{prefix}/agent-plugins/gw.md",
         f"{prefix}/agent-plugins/index.md",
         f"{prefix}/apps/code-wiki-okf.md",
         f"{prefix}/apps/index.md",

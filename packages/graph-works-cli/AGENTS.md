@@ -48,6 +48,13 @@ change that moved it, never as an incidental side effect.
   `util_cli.main.register_util_root_commands()`. `gw next` is a genuine alias — it reuses `gw work
   next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`),
   so the two can never drift.
+
+  `gw work next` has one blocker source the routing table cannot see: a malformed
+  configured stage skill. `entry_for()` is called under a `WorkspaceError` guard
+  and its message is appended to `blockers[]` with `action` nulled, rather than
+  failing the command — the command owns a blockers channel and the workflow skill
+  already stops on one. `gw work advance` and `gw work orchestrate` own no such
+  channel and keep the `WorkspaceError` → `SCHEMA_MISMATCH` mapping.
 - `config_cli` — `gw config get|list|set|unset|sync|hooks enable|disable`, the sole programmatic
   writer for `workspace.yaml` catalog keys. `set`/`unset` refresh `.gw/cache/config.json`
   automatically; `sync` is the manual refresh after a hand edit.

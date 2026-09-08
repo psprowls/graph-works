@@ -1,7 +1,9 @@
 """In-process unit tests for the SessionEnd hook body.
 
-Ported from `plugins/graph-works/hooks/examples/session-end-transcript-capture.sh`
-(bug-windows-hook-command-unexecutable): the bash script's only exercise was
+Ported from the bash script this replaced
+(`git show 6c1c5763:plugins/graph-works/hooks/examples/session-end-transcript-capture.sh`,
+the vendored subtree's own copy, at the last commit before it was rewritten as
+a Python shim) (bug-windows-hook-command-unexecutable): that bash script had only
 two slow wheel/sdist subprocess smoke tests. As a module, `main` is driven
 directly here, and each branch -- guard, malformed input, missing transcript,
 no pointer, invalid pointer, the happy path, and fail-open on an unexpected

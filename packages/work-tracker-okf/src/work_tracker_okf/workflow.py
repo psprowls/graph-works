@@ -48,7 +48,9 @@ from work_tracker_okf.vocabulary import (
 PLAN_OR_EXECUTE = "plan-or-execute"
 
 Stage = Literal["design", "plan", "execute", "finish"]
-Variant = Literal["exploration", "diagnosis", "reconcile", "decompose", "single", "planned", "unplanned", "branch"]
+Variant = Literal[
+    "exploration", "diagnosis", "reconcile", "epic-design", "decompose", "single", "planned", "unplanned", "branch"
+]
 
 
 @dataclass(frozen=True, slots=True)
@@ -243,8 +245,13 @@ def _entry(state: RouteState) -> RouteResult:
 
 
 def _design_variant(state: RouteState) -> Variant:
+    # Order matters: `reconcile` keeps precedence over the type check. An Epic
+    # filed from a template has a spec to reconcile against, and reconciling one
+    # beats re-designing it from a blank page for every type (D-002).
     if state.has_spec_doc:
         return "reconcile"
+    if state.type in {"Release", "Epic"}:
+        return "epic-design"
     return "diagnosis" if state.type in DIAGNOSIS_TYPES else "exploration"
 
 

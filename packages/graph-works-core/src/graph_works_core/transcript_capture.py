@@ -1,9 +1,11 @@
 """The `SessionEnd` transcript-capture hook body.
 
-Ported from `plugins/graph-works/hooks/examples/session-end-transcript-capture.sh`
-(bug-windows-hook-command-unexecutable / D-066, D-068): the bash script,
-invoked via a `VAR=value bash <path>` command, cannot run under a native
-Windows platform shell. As a typed module it is unit-testable in process
+Ported from the bash script this replaced
+(`git show 6c1c5763:plugins/graph-works/hooks/examples/session-end-transcript-capture.sh`,
+the vendored subtree's own copy, at the last commit before it was rewritten as
+a Python shim) (bug-windows-hook-command-unexecutable / D-066, D-068): that
+bash script, invoked via a `VAR=value bash <path>` command, could not run under
+a native Windows platform shell. As a typed module it is unit-testable in process
 and sits inside this package's branch-coverage gate, which the bash script
 never did -- its only exercise was two slow wheel/sdist subprocess smoke
 tests.

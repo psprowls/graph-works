@@ -172,7 +172,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "work_status": "open",
             "phase": "design",
             "descent": {"path": ["work/e", "work/a"]},
-            "action": {"skill": "brainstorming", "reason": "design"},
+            "action": {"skill": "superpowers:brainstorming", "reason": "design"},
             "artifact": {"path": "/tmp/01-design.md"},
             "blockers": ["one\ntwo"],
         },

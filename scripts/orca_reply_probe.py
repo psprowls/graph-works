@@ -1,8 +1,7 @@
 """`just orca-reply-probe` — the standing guard on Orca's ask/reply correlation.
 
 Repo tooling: ruff-excluded, part of no package, matching the rest of `scripts/`. The
-recipe sits outside `just check` alongside `audit-delta` and `plugin-contract`, because
-`just check` must stay offline and Orca-free.
+recipe sits outside `just check`, which must stay offline and Orca-free.
 
 Filed as a correlation defect
 (`work/.../bug-reply-never-reaches-asking-worker`) and refuted at design time: on orca

@@ -8,10 +8,10 @@ out CRLF there -- which makes a bash script unrunnable
 (`#!/usr/bin/env bash\\r`) and makes a `PreToolUse` hook fail *silently*. See
 `work/epic-native-windows-support/children/bug-enforce-lf-line-endings`.
 
-`plugins/graph-works/.gitattributes` covers its own tree by enumerating
-globs; enumeration is exactly what failed when four extensionless scripts
-were added after that file was written. This gate is the mechanical check
-the vendored file's own author-by-hand approach cannot provide.
+The now-deleted vendored subtree's own `.gitattributes` covered its tree by
+enumerating globs; enumeration is exactly what failed when four extensionless
+scripts were added after that file was written. This gate is the mechanical
+check a hand-authored `.gitattributes` cannot provide.
 
 Its oracle is `git ls-files --eol`, which reports each tracked path's index
 EOL alongside its resolved attributes. Two assertions, in both directions:
@@ -43,6 +43,11 @@ ALLOWLISTED_TEXT_PREFIXES = (
     "packages/okf-io/tests/fixtures/",
     "packages/okf-ext/tests/fixtures/",
     "packages/doc-wiki-okf/tests/fixtures/",
+    # The gw plugin's rendered branding assets. `logo.png` is a rasterised
+    # binary -- EOL normalization would corrupt the pixel data outright, not
+    # just perturb it -- and `.gitattributes` names it explicitly rather than
+    # relying on `text=auto`'s NUL-byte detection to keep noticing.
+    "plugins/gw/assets/",
 )
 
 

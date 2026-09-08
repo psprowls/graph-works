@@ -57,12 +57,12 @@ regression or a different box, so this preamble is what carries that burden.
 | Long-path setting | `reg query "HKLM\SYSTEM\CurrentControlSet\Control\FileSystem" /v LongPathsEnabled` | C3 runs both ways and must know which state it started in |
 | Symlink privilege | `whoami /priv` and Settings → System → For developers (Developer Mode) | C7's symlink refusal fires on its absence |
 | Git for Windows | `git --version` and `git config --get core.autocrlf` | Group A's whole premise is the shipped default `true` |
-| Toolchain | `python --version`, `python3 --version`, `uv --version`, `just --version`, `node --version`, `npm --version` | Group B is a toolchain result as much as a code result |
+| Toolchain | `python --version`, `python3 --version`, `uv --version`, `just --version`, `node --version`, `npm --version` (npm is no longer a gate requirement — recorded here as an environment fact only) | Group B is a toolchain result as much as a code result |
 | Checkout revision | `git rev-parse HEAD` and `git status --porcelain` | F5 and F6 compare against what this exact tree declares |
 | Orca build | installer filename, and the version shown in-app under Help → About | Group E's subject |
 
-`python3 --version` is in the list deliberately: it is what `just subtree-base`
-invokes (B9), and Windows Python installers do not all create that name.
+`python3 --version` is in the list deliberately: Windows Python installers do
+not all create that name, and its absence is worth recording on its own.
 
 ## Gating
 
@@ -71,7 +71,7 @@ A run over a partially-landed tree measures nothing anyone can cite later.
 | Group | Gate |
 |---|---|
 | A | none — runnable |
-| B0–B6, B8, B9 | none — runnable |
+| B0–B6, B8 | none — runnable |
 | B7 (`just cov`) | partial: the suite runs today, but its Windows-anchor parametrization needs `tech-debt-anchor-abstraction` and `feature-windows-anchor-and-tier-adr` |
 | C | **gated** on `tech-debt-anchor-abstraction` **and** `feature-windows-anchor-and-tier-adr`, both resolved |
 | D | none — runnable |
@@ -173,32 +173,22 @@ on purpose and is a byte-exact regression fixture. A `w/lf` here is a **FAIL**.
 **If it fails:** the root or plugin `.gitattributes` does not cover a path it
 must. Owner: reopens `bug-enforce-lf-line-endings`.
 
-#### A2 — the four fork-added extensionless bash scripts execute
+#### A2 — the fork-added extensionless bash script executes
 
 **Gate:** none.
 
 **Command:** under **Git Bash**, from the clone's root:
 
 ```bash
-bash plugins/graph-works/skills/subagent-driven-development/scripts/review-package; echo "rc=$?"
-bash plugins/graph-works/skills/subagent-driven-development/scripts/sdd-workspace; echo "rc=$?"
-bash plugins/graph-works/skills/subagent-driven-development/scripts/task-brief; echo "rc=$?"
-printf '{}' | bash plugins/graph-works/hooks/skill-doc-routing; echo "rc=$?"
+printf '{}' | bash plugins/gw/hooks/skill-doc-routing; echo "rc=$?"
 ```
 
-**Expected:** each of the first three prints its own usage line —
-`usage: review-package PLAN_FILE BASE HEAD [OUTFILE]`,
-`usage: sdd-workspace PLAN_FILE`,
-`usage: task-brief PLAN_FILE TASK_NUMBER [OUTFILE]` — and a non-zero `rc`.
-`skill-doc-routing` prints a single JSON object and `rc=0`.
+**Expected:** `skill-doc-routing` prints a single JSON object and `rc=0`.
 
-**Nowhere in any of the four outputs may the string `\r` appear**, and in
-particular none of them may print `$'\r': command not found` or
+**Nowhere in the output may the string `\r` appear**, and in particular it may
+not print `$'\r': command not found` or
 `/usr/bin/env: 'bash\r': No such file or directory`. That string is the actual
 failure mode this checkpoint exists for.
-
-A non-zero `rc` from the first three is a **PASS** — they are refusing bad
-arguments, which is the cheapest way to prove the interpreter line parsed.
 
 **If it fails:** the file checked out CRLF. Note that `skill-doc-routing` fails
 *silently* in production — it is fail-open by design — which is why it is checked
@@ -263,7 +253,7 @@ echo rc=$?
 
 **Expected: `PASS, unmodified`.** The recipes assume a POSIX shell — several chain
 with `&&`, and `test-plugin` carries a `#!/usr/bin/env bash` shebang, `cd`s, and
-hard-requires `bash`, `node` and `npm` — and from Git Bash they get one. `just`'s
+hard-requires `bash` and `node` — and from Git Bash they get one. `just`'s
 default shell is `sh -cu` on every platform, Windows included; under Git Bash `sh`
 resolves to `/usr/bin/sh` and no flags are needed.
 
@@ -289,14 +279,14 @@ Record in the evidence one of:
 - **FAIL** — not invocable by any means you tried. Record what you tried.
 
 A `FAIL` here is a **red with an owner**, not a blocked run: continue to
-B1–B9 by invoking each recipe's underlying commands directly from Git Bash
+B1–B8 by invoking each recipe's underlying commands directly from Git Bash
 (they are listed verbatim in the `justfile`) and say so in the record.
 
 **If it fails:** Owner: a **new child** under `epic-native-windows-support`. Note
 that the shell prerequisite itself is already settled — see the routing table
 below — so a red here is a *new* finding, not a rediscovery of that one.
 
-#### B1–B9 — recipe by recipe
+#### B1–B8 — recipe by recipe
 
 **Gate:** none, except B7 — see below.
 
@@ -312,8 +302,7 @@ the exit code of each:
 | B5 | `just types` | one `Success: no issues found in N source files` line per `mypy --strict` invocation | 0 |
 | B6 | `just contracts` | one `KEPT` line per contract, then `Contracts: N kept, 0 broken.` | 0 |
 | B7 | `just cov` | every per-package `pytest --cov` run reports `Required test coverage of N% reached` | 0 |
-| B8 | `just test-plugin` | the `--- ` banner lines print in order and the run ends with npm's test summary | 0 |
-| B9 | `just subtree-base` | the four-line `subtree-base -- plugins/graph-works` report, ending `ok -- the subtree merge base is reachable, recorded, and prefix-rooted` | 0 |
+| B8 | `just test-plugin` | the `--- ` banner lines print in order and the run ends with the `node --test` suite's summary | 0 |
 
 Record the exit code for each. On any failure, record **the first failing
 assertion verbatim** — not a summary of it. For B7 that means the first failing
@@ -326,12 +315,6 @@ report by *printing the offending paths*, so silence is the whole signal. The
 `uv run python scripts/check_*.py .` line you will see is `just`'s stderr echo,
 not the guard's output.
 
-**B9 prints a report, not nothing.** It is the one recipe in this group whose
-success is verbose: it names the recorded squash commit, the upstream commit,
-the `plugins/SYNC.md` ledger row, and the prefix-rooted tree check, and closes
-with the `ok -- ` line above. The commit hashes will differ from any transcribed
-here; what must match is the shape and the final `ok -- ` line.
-
 **B7 is the real payload.** It runs every package suite, including
 `packages/graph-works-core/tests/test_transactions.py` — the asset D-003's
 rationale named, and the only thing that turns "a weaker Windows tier" from a
@@ -340,22 +323,16 @@ claim into a tier. Its Windows-anchor parametrization is gated on
 Windows-anchor case reports `xfail`, record which, because that is precisely the
 qualifier this run exists to remove.
 
-**B9 is not in the design's checkpoint list — it was added at plan time.**
-`just check` depends on `subtree-base`, which invokes `python3 scripts/check_subtree_base.py`.
-Windows Python installers do not all create a `python3` name. If B9 fails with
-`'python3' is not recognized`, that is a **real finding about `just check` on
-Windows**, not an environment complaint — record it as such.
-
 Note what `just text-io` deliberately does **not** cover: child 2 scoped its
 guard to shipped source, because test trees write to `tmp_path`. The instrument
 for those is a suite run on Windows — which is B7.
 
-**If any fails:** B1–B3, B9 → the guard scripts themselves; owner is a **new
+**If any fails:** B1–B3 → the guard scripts themselves; owner is a **new
 child**. B4–B6 → owner is a **new child** scoped to the failing check. B7 →
 route by what failed: a transaction/anchor failure reopens
 `feature-windows-anchor-and-tier-adr`, anything else is a **new child** scoped to
-the failing suite. B8 → a **new child**; `test-plugin` hard-requires `bash`,
-`node` and `npm`, so record which was missing if that is the cause.
+the failing suite. B8 → a **new child**; `test-plugin` hard-requires `bash`
+and `node`, so record which was missing if that is the cause.
 
 ## Group C — the transaction tier
 
@@ -1010,7 +987,7 @@ installer filename and the version shown in-app under Help → About.
 
 **Gate:** E1.
 
-This is the same precondition `plugins/graph-works/skills/auto-drive/SKILL.md`
+This is the same precondition `plugins/gw/skills/auto-drive/SKILL.md`
 checks before every auto-drive run.
 
 **Command:**
@@ -1395,7 +1372,6 @@ Which siblings had landed in `<full-sha>`:
 | B6 | | | |
 | B7 | | | |
 | B8 | | | |
-| B9 | | | |
 | C1 | **PASS** | 2026-09-04, real exFAT VHD mounted as `E:` (`fsutil` confirms `File System Name : exFAT`). At `5ad4ff22`, `gw bootstrap --workspace E:\ws` exits **rc=1** and refuses: *"the windows-revalidated tier requires hard link support: every file is installed by `CreateHardLinkW` (`transactions._commit_write`), and E:\ws is on a filesystem that does not implement it -- exFAT, FAT32 and some network shares do not. Move the workspace to an NTFS or ReFS volume, or run under WSL for the posix-strong tier."* **Nothing is left on disk** -- `E:\ws` does not exist and the volume holds only `System Volume Information`. `gw work file` is moot: bootstrap refuses first. Probe verified directly: `hard_links_supported()` is `False` on `E:` and `True` on `C:`. Prior reading at `012d5aff` was FAIL (attribution): bootstrap **succeeded** on exFAT and only `gw work file` failed, with an unattributable `[WinError 1] Incorrect function` -- and that error came from `os.link` in `transactions._commit_write`, not from `okf_ext.logs.atomic_replace` as originally recorded. | [bug-atomic-replace-exfat-unattributable](/work/epic-native-windows-support/children/bug-atomic-replace-exfat-unattributable.md) |
 | C2 | | | |
 | C3 | | | |
@@ -1440,7 +1416,7 @@ xxd/certutil hex for Group D, the journal for C5, both platform reports for F5>
 This is what gets copied into the work item body and the epic ledger.>
 ````
 
-Before committing the record, check it mechanically — 35 rows, every verdict in
+Before committing the record, check it mechanically — 34 rows, every verdict in
 the vocabulary, every non-`PASS` row owned:
 
 ```bash
@@ -1453,11 +1429,11 @@ bad = [r for r in rows if r.split('|')[2].strip() not in {'PASS', 'FAIL', 'NOT R
 missing_owner = [r for r in rows if r.split('|')[2].strip() in {'FAIL', 'NOT RUN'} and not r.split('|')[4].strip()]
 print('bad verdict:', *bad, sep='\n')
 print('missing owner:', *missing_owner, sep='\n')
-sys.exit(1 if bad or missing_owner or len(rows) != 35 else 0)
+sys.exit(1 if bad or missing_owner or len(rows) != 34 else 0)
 PY
 ```
 
-**Expected:** `rows: 35`, nothing under `bad verdict:` or `missing owner:`, exit 0.
+**Expected:** `rows: 34`, nothing under `bad verdict:` or `missing owner:`, exit 0.
 
 ## Red → owner routing
 
@@ -1470,7 +1446,7 @@ duplicate.
 | A1, A2 | reopens `bug-enforce-lf-line-endings` |
 | A3 (`run-hook.cmd` mis-parse) | **new child** — flatten the batch half's `if` blocks, keep LF |
 | B0 (`just check` not natively invocable) | **settled** by `tech-debt-just-windows-shell-prerequisite` (D-022): the shell is a documented prerequisite — run bare from Git Bash; the `justfile` deliberately does not change. A red here now means something *other* than shell resolution, and is a **new child** |
-| B1–B3, B9 | **new child** scoped to the failing guard script |
+| B1–B3 | **new child** scoped to the failing guard script |
 | B4–B6, B8 | **new child** scoped to the failing check |
 | B7 | transaction/anchor failure reopens `feature-windows-anchor-and-tier-adr`; anything else is a **new child** |
 | C1, C3–C5, C7 | `feature-windows-anchor-and-tier-adr` if the ADR's stated contract is wrong; a **new child** if the contract is right and the implementation is not |

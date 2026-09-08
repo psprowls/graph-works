@@ -130,6 +130,75 @@ def test_reconcile_context_rejects_a_named_non_repo(workspace: Path, tmp_path: P
     assert result.stdout == ""
 
 
+def override_skill(workspace: Path, value: str) -> None:
+    """Hand-edit `workflow.pipeline.exploration.skill` into the manifest.
+
+    Written as text rather than through `gw config set`, because the case under
+    test *is* the hand-edited manifest that bypasses config-io's set-time
+    checks. Bootstrap already emits a `workflow: / pipeline: / branch:` block,
+    so this inserts a sibling variant rather than a second `workflow:` key.
+    """
+    path = workspace / "workspace.yaml"
+    text = path.read_text(encoding="utf-8")
+    assert "    branch:" in text, text
+    path.write_text(
+        text.replace("    branch:", f"    exploration:\n      skill: {json.dumps(value)}\n    branch:"),
+        encoding="utf-8",
+    )
+
+
+def test_next_reports_a_malformed_stage_skill_as_a_blocker(workspace: Path) -> None:
+    path = file_item(workspace, "Alpha")
+    override_skill(workspace, "a:b:c")
+    result = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace), "--json"])
+    payload = json.loads(result.stdout)
+    assert result.exit_code == exit_codes.GENERIC
+    assert payload["action"] is None
+    assert payload["on_dispatch"] is None
+    assert any("workflow.pipeline.exploration.skill" in blocker for blocker in payload["blockers"])
+    assert any("workspace.yaml" in blocker for blocker in payload["blockers"])
+
+
+def test_next_reports_an_empty_stage_skill_as_a_blocker(workspace: Path) -> None:
+    path = file_item(workspace, "Alpha")
+    override_skill(workspace, "")
+    result = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace), "--json"])
+    assert result.exit_code == exit_codes.GENERIC
+    assert json.loads(result.stdout)["action"] is None
+
+
+def test_next_renders_the_preflight_blocker_in_human_output(workspace: Path) -> None:
+    path = file_item(workspace, "Alpha")
+    override_skill(workspace, "a:b:c")
+    result = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace)])
+    assert result.exit_code == exit_codes.GENERIC
+    assert "blocked:" in result.stdout
+    assert "dispatch:" not in result.stdout
+
+
+def test_next_still_dispatches_a_valid_override_verbatim(workspace: Path) -> None:
+    # The over-refusal regression at the CLI boundary: a bare name is valid
+    # (D-002) and must reach `action.skill` unchanged.
+    path = file_item(workspace, "Alpha")
+    override_skill(workspace, "my-brainstormer")
+    result = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace), "--json"])
+    payload = json.loads(result.stdout)
+    assert result.exit_code == exit_codes.SUCCESS
+    assert payload["action"]["skill"] == "my-brainstormer"
+    assert payload["blockers"] == []
+
+
+def test_orchestrate_hard_fails_on_a_malformed_stage_skill(workspace: Path) -> None:
+    # Auto-drive has no blockers channel to degrade into, so it keeps the
+    # existing WorkspaceError -> SCHEMA_MISMATCH mapping. This is what stops
+    # auto-drive dispatching a malformed name.
+    path = file_item(workspace, "Alpha")
+    override_skill(workspace, "a:b:c")
+    result = runner.invoke(app, ["work", "orchestrate", path, "--workspace", str(workspace), "--json"])
+    assert result.exit_code == exit_codes.SCHEMA_MISMATCH
+    assert "workflow.pipeline.exploration.skill" in result.stderr
+
+
 def test_ingest_queue_lists_a_terminal_item_with_an_uningested_design(workspace: Path) -> None:
     layout = work_main.resolve_workspace(str(workspace))
     page = layout.bundle_dir / "work" / "bug-a.md"

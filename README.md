@@ -1,10 +1,10 @@
 # graph-works
 
 A uv workspace for the graph-works tooling packages. The root is a workspace
-root only — it is not itself distributable. `plugins/graph-works` sits
-alongside it: a Claude Code plugin vendored verbatim as a `git subtree` of
-[obra/superpowers](https://github.com/obra/superpowers) (see
-`plugins/SYNC.md`), not a workspace member and not Python.
+root only — it is not itself distributable. One plugin tree sits alongside it,
+not a workspace member and not Python: `plugins/gw`, the first-party Claude
+Code plugin this repo publishes and the one Claude Code installs and loads
+(name `gw`).
 
 ## Members
 
@@ -103,14 +103,13 @@ workflow exists yet — enforcement is local, by design (ADR-0010).
 | `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
 | `just test` | `uv run pytest`, plus one run per non-okf-io/okf-ext package under `uv run --package <name>` |
 | `just cov` | branch coverage, gated per package (95% for most, 90% for `code-graph-io`) |
-| `just subtree-base` | asserts the `plugins/graph-works` subtree merge-base is intact |
-| `just test-plugin` | the offline, code-executing subset of the vendored plugin's own test suites |
-| `just check` | `sync` + `subtree-base` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
+| `just test-plugin` | the `gw` plugin's own test suites (bash, plus one `node --test` suite), under `plugins/gw/` |
+| `just check` | `sync` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
 
 A coverage failure reports only a global percentage per package; start with
-the lowest-covered module and read `term-missing`. `just audit-delta` and
-`just plugin-contract` are advisory checks on the vendored plugin, run
-explicitly rather than gated — see `plugins/SYNC.md`.
+the lowest-covered module and read `term-missing`. Every suite the gate runs
+is Python or bash, except the plugin's `tests/pi` extension suite, which
+needs `node --test` (Node 23.6+); nothing in the gate needs `npm` any more.
 
 If `just` is not installed, run the commands from the `justfile` directly.
 

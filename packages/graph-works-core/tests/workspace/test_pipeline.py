@@ -27,14 +27,38 @@ def test_every_packaged_mode_is_a_dispatch_mode():
     assert {entry.mode for entry in pipeline.PACKAGED_PIPELINE.values()} <= DISPATCH_MODES
 
 
+def test_every_packaged_skill_is_plugin_qualified():
+    # The name shape is load-bearing: the workflow skill invokes `action.skill`
+    # verbatim, so a bare name here resolves to whichever plugin happens to
+    # claim it. This is the regression guard for a ninth variant, or for a row
+    # edited back to a bare name. Enforcement at dispatch time is a later
+    # child's seam; this is the value-side half of the same property.
+    for variant, entry in pipeline.PACKAGED_PIPELINE.items():
+        plugin, sep, skill = entry.skill.partition(":")
+        assert sep == ":", f"{variant}: packaged skill {entry.skill!r} is not <plugin>:<skill>"
+        assert plugin, f"{variant}: packaged skill {entry.skill!r} has an empty plugin"
+        assert skill, f"{variant}: packaged skill {entry.skill!r} has an empty skill"
+        assert ":" not in skill, f"{variant}: packaged skill {entry.skill!r} is multiply qualified"
+
+
 def test_packaged_only_resolution_needs_no_layout():
     table = pipeline.pipeline_table()
     assert table["exploration"] == pipeline.PipelineEntry(
-        skill="brainstorming", mode="attend", prompt_tail=pipeline.ATTEND_TAIL
+        skill="superpowers:brainstorming", mode="attend", prompt_tail=pipeline.ATTEND_TAIL
     )
     assert table["branch"] == pipeline.PipelineEntry(
-        skill="finishing-a-development-branch", mode="relay", prompt_tail=None
+        skill="superpowers:finishing-a-development-branch", mode="relay", prompt_tail=None
     )
+
+
+def test_the_epic_design_entry_is_attend_with_the_neutral_tail():
+    """An epic design is a human-in-the-room stage, same as `exploration`. The
+    skill name is asserted by suffix so this test survives child 5's
+    fully-qualified rename without becoming a second place to edit."""
+    entry = pipeline.PACKAGED_PIPELINE["epic-design"]
+    assert entry.skill.endswith("epic-design")
+    assert entry.mode == "attend"
+    assert entry.prompt_tail == pipeline.ATTEND_TAIL
 
 
 def test_one_override_replaces_one_field_and_nothing_else(tmp_path):
@@ -44,7 +68,7 @@ def test_one_override_replaces_one_field_and_nothing_else(tmp_path):
     )
     table = pipeline.pipeline_table(layout=layout)
     assert table["branch"] == pipeline.PipelineEntry(
-        skill="finishing-a-development-branch",
+        skill="superpowers:finishing-a-development-branch",
         mode="relay",
         prompt_tail="merge target is {merge_target}",
     )
@@ -58,7 +82,7 @@ def test_an_override_cannot_introduce_a_variant(tmp_path):
 
 def test_an_explicit_null_does_not_shadow_the_packaged_value(tmp_path):
     layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: null\n")
-    assert pipeline.pipeline_table(layout=layout)["single"].skill == "writing-plans"
+    assert pipeline.pipeline_table(layout=layout)["single"].skill == "superpowers:writing-plans"
 
 
 def test_a_bad_mode_is_refused_at_set_time(tmp_path):
@@ -69,7 +93,7 @@ def test_a_bad_mode_is_refused_at_set_time(tmp_path):
 
 
 def test_entry_for_reads_one_variant(tmp_path):
-    assert pipeline.entry_for("diagnosis").skill == "systematic-debugging"
+    assert pipeline.entry_for("diagnosis").skill == "superpowers:systematic-debugging"
 
 
 def test_a_hand_edited_bad_mode_is_refused_at_read_time(tmp_path):
@@ -108,7 +132,7 @@ def test_a_non_string_prompt_tail_is_refused(tmp_path):
 def test_a_valid_override_still_layers_after_the_gate(tmp_path):
     layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      mode: attend\n")
     table = pipeline.pipeline_table(layout=layout)
-    assert table["single"] == pipeline.PipelineEntry(skill="writing-plans", mode="attend", prompt_tail=None)
+    assert table["single"] == pipeline.PipelineEntry(skill="superpowers:writing-plans", mode="attend", prompt_tail=None)
 
 
 def test_the_relay_seed_carries_both_halves_of_the_relay_contract():
@@ -133,13 +157,72 @@ def test_the_packaged_branch_entry_stays_untailed():
     assert pipeline.PACKAGED_PIPELINE["branch"].prompt_tail is None
 
 
+@pytest.mark.parametrize("name", ["brainstorming", "graph-works:brainstorming", "a:b"])
+def test_a_well_formed_skill_name_is_accepted(name):
+    # Bare names stay valid (D-002): user-level and repo-local skills carry no
+    # plugin prefix, so requiring qualification would make them unroutable.
+    assert pipeline.is_valid_skill_name(name)
+
+
+@pytest.mark.parametrize("name", ["", "   ", "a:", ":b", "a:b:c", "a: ", " :b"])
+def test_a_malformed_skill_name_is_rejected(name):
+    # A colon signals qualification *intent*, so a malformed qualification is
+    # still a refusable shape even though a bare name is not.
+    assert not pipeline.is_valid_skill_name(name)
+
+
+def test_check_skill_name_refuses_a_non_string(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    with pytest.raises(WorkspaceError, match="expects a skill name"):
+        pipeline.check_skill_name(3, key="workflow.pipeline.single.skill", source=tmp_path / "workspace.yaml")
+
+
+def test_a_malformed_override_skill_is_refused_at_read_time(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: 'a:b:c'\n")
+    with pytest.raises(WorkspaceError) as excinfo:
+        pipeline.pipeline_table(layout=layout)
+    assert "workflow.pipeline.single.skill" in str(excinfo.value)
+    assert str(layout.manifest_path) in str(excinfo.value)
+
+
+def test_an_empty_override_skill_is_refused_at_read_time(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: ''\n")
+    with pytest.raises(WorkspaceError, match="expects a skill name"):
+        pipeline.pipeline_table(layout=layout)
+
+
+def test_a_bare_override_skill_still_layers(tmp_path):
+    # The regression that catches a rule that over-refuses: D-002 keeps bare
+    # names routable, so this must resolve verbatim, not raise.
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: my-planner\n")
+    table = pipeline.pipeline_table(layout=layout)
+    assert table["single"] == pipeline.PipelineEntry(skill="my-planner", mode="autonomous", prompt_tail=None)
+
+
+def test_a_qualified_override_skill_still_layers(tmp_path):
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: acme:my-planner\n")
+    assert pipeline.pipeline_table(layout=layout)["single"].skill == "acme:my-planner"
+
+
+def test_every_packaged_skill_name_is_well_formed():
+    # `PACKAGED_PIPELINE` is a module constant, deliberately *not* checked at
+    # runtime -- a bad packaged value should fail the suite, not every command
+    # for every user. Same posture as the totality test above.
+    assert all(pipeline.is_valid_skill_name(entry.skill) for entry in pipeline.PACKAGED_PIPELINE.values())
+
+
 def test_both_execute_variants_carry_the_coverage_obligation():
     table = pipeline.pipeline_table()
     assert table["planned"] == pipeline.PipelineEntry(
-        skill="subagent-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
+        skill="superpowers:subagent-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
     )
     assert table["unplanned"] == pipeline.PipelineEntry(
-        skill="test-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
+        skill="superpowers:test-driven-development", mode="autonomous", prompt_tail=pipeline.EXECUTE_TAIL
     )
 
 

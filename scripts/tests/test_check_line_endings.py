@@ -4,8 +4,9 @@ Outside the repo's `testpaths` and coverage `source` list on purpose:
 `scripts/` is repo tooling, not a package, so these do not move the 95% gate.
 Run them with `uv run pytest scripts/tests`.
 
-The gate exists to catch what `plugins/graph-works/.gitattributes`'s
-enumeration approach cannot: a tracked path outside its five globs checks out
+The gate exists to catch what the now-deleted vendored subtree's own
+`.gitattributes` enumeration approach could not: a tracked path outside its
+five globs checks out
 CRLF under Git for Windows' `core.autocrlf=true` default -- see the design
 spec for `work/epic-native-windows-support/children/bug-enforce-lf-line-endings`.
 Two assertions, in both directions:
@@ -100,8 +101,9 @@ def test_a_crlf_file_under_a_non_allowlisted_text_prefix_is_reported(tmp_path: P
 
 def test_a_binary_declared_asset_outside_the_allowlist_is_not_a_violation(tmp_path: Path) -> None:
     """`binary` is shorthand for `-text -diff -merge` -- a real image asset
-    declared that way (as `plugins/graph-works/.gitattributes` does for
-    `*.png`/`*.jpg`/`*.gif`) is not the byte-exact-text-fixture concern
+    declared that way (as the now-deleted vendored subtree's own
+    `.gitattributes` did for `*.png`/`*.jpg`/`*.gif`) is not the
+    byte-exact-text-fixture concern
     assertion 2 exists for, and must not be flagged just for living outside
     the fixture-tree allowlist."""
     root = _repo(tmp_path)

@@ -63,7 +63,7 @@ def _check_config_projection(layout: WorkspaceLayout) -> str | None:
     """A missing `config.json` projection is a silent-dormancy risk, not a
     bundle fault: every consumer of the projection (`pre-agent-model-routing`,
     `pre-taskcreate-model-tier`, `pre-askuser-handoff-guard`, `session-start`,
-    and `plugins/graph-works/hooks/skill-doc-routing`) treats an absent file
+    and `plugins/gw/hooks/skill-doc-routing`) treats an absent file
     as dormant and allows silently. Reported here so `gw lint` names it rather
     than letting the absence stay invisible until someone happens to run
     `gw config sync`.

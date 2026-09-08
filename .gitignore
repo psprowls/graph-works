@@ -239,3 +239,6 @@ tmp/
 # Per-task SDD working reports — scratch, superseded by the work item log.
 .superpowers/
 .pi/
+# ...except the native plugin's own Pi extension, which is real source, not scratch.
+!plugins/gw/.pi/
+!plugins/gw/.pi/**

@@ -335,25 +335,42 @@ def descent_payload(result: NextResult) -> dict[str, Any] | None:
     }
 
 
-def next_blockers(result: NextResult) -> list[str]:
-    """The route's blockers, plus the descent's own refusal when one exists.
+def next_blockers(result: NextResult, *, preflight: str | None = None) -> list[str]:
+    """The route's blockers, plus the descent's own refusal and the dispatch
+    preflight refusal when either exists.
 
     A `--descend` that could not reach a leaf is a fact `route()` never sees:
     routing ran against the ancestor, so its blockers explain the ancestor and
     say nothing about why the walk stopped. The `--descend:` prefix is the
     marker the workflow skill matches on.
+
+    *preflight* is the same shape of thing one layer further out:
+    `work-tracker-okf` declines the skill mapping by name, so `RouteResult`
+    cannot know a configured skill is malformed. It is appended here for the
+    same reason the descent refusal is -- a stop condition the routing table
+    cannot see, surfaced through the channel the workflow skill already reads.
     """
     blockers = list(result.route.blockers)
     descent = result.descent
     if descent is not None and descent.leaf is None and descent.reason:
         blockers.append(f"--descend: {descent.reason}")
+    if preflight is not None:
+        blockers.append(preflight)
     return blockers
 
 
-def next_payload(result: NextResult, *, bundle_root: Path, skill: str | None) -> dict[str, Any]:
+def next_payload(
+    result: NextResult, *, bundle_root: Path, skill: str | None, preflight: str | None = None
+) -> dict[str, Any]:
     """The `gw work next` contract: phase, status, blockers, on_complete,
     action, normalized, child_rollup -- plus the donor-compatible additions
-    `gw next` (C6) wraps."""
+    `gw next` (C6) wraps.
+
+    A non-null *preflight* nulls `action` and `on_dispatch`: the route still
+    has a dispatch, but the skill it names is unusable, and a caller reading
+    either key must not be handed a name or a transition for a dispatch that
+    can never happen.
+    """
     dispatch = result.route.dispatch
     return {
         "requested_path": result.requested_path,
@@ -362,11 +379,13 @@ def next_payload(result: NextResult, *, bundle_root: Path, skill: str | None) ->
         "kind": result.state.type,
         "phase": result.state.phase,
         "effort": result.state.effort,
-        "action": None if dispatch is None else {"skill": skill, "reason": result.route.reason},
+        "action": (
+            None if dispatch is None or preflight is not None else {"skill": skill, "reason": result.route.reason}
+        ),
         "artifact": None if result.artifact is None else {"path": str(result.artifact.path(bundle_root))},
-        "on_dispatch": _transition(result.route.on_dispatch),
+        "on_dispatch": None if preflight is not None else _transition(result.route.on_dispatch),
         "on_complete": _transition(result.route.on_complete),
-        "blockers": next_blockers(result),
+        "blockers": next_blockers(result, preflight=preflight),
         "child_rollup": _rollup(result.child_rollup),
         "descent": descent_payload(result),
         "normalized": normalized_payload(result),
@@ -535,7 +554,7 @@ def render_ingest_queue(payload: dict[str, Any]) -> None:
         typer.echo(f"  {entry['path']} — {entry['work_status']}")
         typer.echo(f"    {entry['resource']}")
     if pending:
-        typer.echo("  Drain with: /graph-works:ingest <resource>")
+        typer.echo("  Drain with: /gw:ingest <resource>")
 
 
 def lint_payload(report: object) -> dict[str, Any]:

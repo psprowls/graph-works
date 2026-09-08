@@ -61,7 +61,7 @@ def test_the_other_nine_test_trees_are_still_out_of_scope():
     """
     assert not in_scope("packages/code-graph-io/tests/test_store.py")
     assert not in_scope("packages/graph-works-core/tests/test_layout.py")
-    assert not in_scope("plugins/graph-works/hooks/x.py")
+    assert not in_scope("plugins/gw/hooks/x.py")
     assert not in_scope("packages/okf-io/src/okf_io/py.typed")
 
 

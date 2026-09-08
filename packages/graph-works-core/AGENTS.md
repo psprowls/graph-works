@@ -51,17 +51,18 @@ resolves to *this* `pyproject.toml`, not the workspace root's.
 ### `hatch_build.py`
 
 A custom wheel build hook, worth knowing about before touching packaging.
-The sdist stages `plugins/graph-works/hooks/examples` inside
+The sdist stages `plugins/gw/hooks/examples` inside
 `src/graph_works_core/_hook_scripts` (see `pyproject.toml`'s
 `sdist.force-include`). Building a wheel *directly from the source tree*
 (not from an sdist) would otherwise ship without those scripts, since they
 live outside `src/`. The hook checks whether `_hook_scripts` is already
 present (sdist path — nothing to do) and, if not, force-includes the
-canonical `plugins/graph-works/hooks/examples` directory into
+canonical `plugins/gw/hooks/examples` directory into
 `graph_works_core/_hook_scripts` for the wheel, raising `FileNotFoundError`
 if that canonical directory is missing. If you move or rename
-`plugins/graph-works/hooks/examples`, update the hardcoded relative path
-here (`Path(self.root).parents[1] / "plugins" / "graph-works" / "hooks" / "examples"`).
+`plugins/gw/hooks/examples`, update the hardcoded relative path
+here (`Path(self.root).parents[1] / "plugins" / "gw" / "hooks" / "examples"`)
+and `CANONICAL_SCRIPTS_DIR` in `hooks.py`.
 
 The command `gw config hooks enable` writes binds the interpreter that ran
 it as the first argv token (no shell, no `VAR=value` prefix) and renders it
@@ -134,6 +135,14 @@ holds a `Path`, only strings; turning overrides into resolved paths is
 exist because a hand-edited manifest bypasses config-io's set-time
 validation — only `origin == "manifest"` values get re-checked against the
 catalog's declared type/`allowed`; env and default origins are trusted.
+
+A manifest-sourced `workflow.pipeline.<variant>.skill` is shape-checked at read
+time by `pipeline.check_skill_name`, beside `manifest.checked()` and for the
+same reason. A **bare** name is valid and used verbatim (user-level and
+repo-local skills carry no plugin prefix); empty, whitespace-only and
+malformed-qualification values (`a:`, `:b`, `a:b:c`) raise `WorkspaceError`.
+There is no charset rule. `PACKAGED_PIPELINE` is not checked at runtime — its
+shape is pinned by `test_pipeline.py` instead.
 
 **4. Init (`workspace/init.py`)** — `plan_init` / `apply_init`, a
 plan-then-apply pair with **no `dry_run` flag** (not calling `apply_init` is

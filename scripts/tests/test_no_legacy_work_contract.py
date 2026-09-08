@@ -17,7 +17,7 @@ FORBIDDEN_RUNTIME_TEXT = (
     "work/<YYYY-MM-DD>",
     "### `kind` (work)",
 )
-PLUGIN_ROOT = ROOT / "plugins" / "graph-works"
+PLUGIN_ROOT = ROOT / "plugins" / "gw"
 SOURCE_SUFFIXES = {".json", ".md", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"}
 LEGACY_DATE_WORK_PATH = re.compile(
     r"(?:wiki/)?work/(?:[a-z0-9_.-]+/)*(?:19|20)\d{2}-\d{2}-\d{2}[-/]",
@@ -72,8 +72,7 @@ def _active_files() -> list[Path]:
     plugin_files = (
         path
         for path in PLUGIN_ROOT.rglob("*")
-        if path.is_file()
-        and "node_modules" not in path.relative_to(PLUGIN_ROOT).parts
+        if path.is_file() and "node_modules" not in path.relative_to(PLUGIN_ROOT).parts
     )
     return sorted(
         {
@@ -119,12 +118,14 @@ def test_active_plugin_scan_covers_every_maintained_surface() -> None:
     paths = {path.relative_to(ROOT).as_posix() for path in _active_files()}
 
     assert {
-        "plugins/graph-works/README.md",
-        "plugins/graph-works/skills/ingest/SKILL.md",
-        "plugins/graph-works/docs/testing.md",
-        "plugins/graph-works/scripts/bump-version.sh",
-        "plugins/graph-works/tests/brainstorm-server/auth.test.js",
-        "plugins/graph-works/tests/hooks/test-session-start.sh",
+        "plugins/gw/.claude-plugin/plugin.json",
+        "plugins/gw/hooks/session-start",
+        "plugins/gw/hooks/skill-doc-routing",
+        "plugins/gw/hooks/examples/session-end-transcript-capture.py",
+        "plugins/gw/skills/ingest/SKILL.md",
+        "plugins/gw/skills/using-graph-works/SKILL.md",
+        "plugins/gw/skills/shared/resolve-workspace.sh",
+        "plugins/gw/tests/test-entry-point-skills.sh",
     } <= paths
 
 
@@ -148,7 +149,7 @@ def test_transcript_capture_resolves_the_active_canonical_path() -> None:
 def test_public_managed_artifact_payloads_do_not_use_legacy_doc_keys() -> None:
     paths = (
         ROOT / "packages" / "graph-works-cli" / "src" / "graph_works_cli" / "work_cli" / "rendering.py",
-        ROOT / "plugins" / "graph-works" / "skills" / "workflow" / "SKILL.md",
+        ROOT / "plugins" / "gw" / "skills" / "workflow" / "SKILL.md",
     )
     findings = [str(path.relative_to(ROOT)) for path in paths if "spec_doc" in path.read_text(encoding="utf-8")]
     findings += [str(path.relative_to(ROOT)) for path in paths if "plan_doc" in path.read_text(encoding="utf-8")]

@@ -114,7 +114,7 @@ def test_enable_transcript_uses_the_real_default_script(tmp_path: Path) -> None:
     script = PurePath(tokens[-1])
     assert script.parts[-5:] == (
         "plugins",
-        "graph-works",
+        "gw",
         "hooks",
         "examples",
         "session-end-transcript-capture.py",

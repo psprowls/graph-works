@@ -230,7 +230,7 @@ def ingest_queue(
     """List terminal work items whose design spec has not been ingested.
 
     Derived from `sources[]` and the ingested `Source` pages' `origin` — never
-    stored, and never written. Drain it with `/graph-works:ingest <resource>`;
+    stored, and never written. Drain it with `/gw:ingest <resource>`;
     the ingest itself is what clears an entry.
     """
     layout = resolve_workspace(workspace)
@@ -301,9 +301,20 @@ def next_stage(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
+    # `entry_for` reads the manifest, so a malformed configured skill raises
+    # here -- outside the `try` above. It is *not* a hard failure: this command
+    # owns a blockers channel, and step 1 of the workflow skill already reports
+    # blockers and stops. `advance` and `orchestrate` have no such channel and
+    # keep their SCHEMA_MISMATCH mapping.
     dispatch = result.route.dispatch
-    skill = None if dispatch is None else entry_for(dispatch.variant, layout=layout).skill
-    payload = rendering.next_payload(result, bundle_root=layout.bundle_dir, skill=skill)
+    skill: str | None = None
+    preflight: str | None = None
+    if dispatch is not None:
+        try:
+            skill = entry_for(dispatch.variant, layout=layout).skill
+        except WorkspaceError as exc:
+            preflight = str(exc)
+    payload = rendering.next_payload(result, bundle_root=layout.bundle_dir, skill=skill, preflight=preflight)
     if json_output:
         rendering.emit(payload)
         for warning in result.warnings:

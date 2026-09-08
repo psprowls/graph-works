@@ -42,13 +42,21 @@ def _today() -> date:
     return datetime.now(UTC).date()
 
 
+def _warn_refusals(refusals: object) -> None:
+    """Name every refusal before failing -- the reason is computed, so print it."""
+    assert isinstance(refusals, list)
+    for refusal in refusals:
+        assert isinstance(refusal, dict)
+        rendering.warn(f"{refusal['path']}: {refusal['kind']} — {refusal['detail']}")
+
+
 def _optional_date(raw: str, option: str) -> date | None:
     if not raw:
         return None
     try:
         return date.fromisoformat(raw)
     except ValueError as exc:
-        rendering.fail(f"{option}: expected YYYY-MM-DD, got {raw!r}", cause=exc)
+        rendering.fail(f"{option}: expected YYYY-MM-DD, got {raw!r}", reason="usage", cause=exc)
 
 
 def _config(layout: WorkspaceLayout) -> WorkspaceConfig:
@@ -56,9 +64,9 @@ def _config(layout: WorkspaceLayout) -> WorkspaceConfig:
     try:
         return load_workspace_config(layout)
     except WorkspaceConfigError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
 
 _DEP_KEYS = ("path", "blocks", "needs")
@@ -76,19 +84,19 @@ def _parse_dep_spec(raw: str) -> dict[str, str]:
     pairs: dict[str, str] = {}
     for fragment in raw.split(","):
         if "=" not in fragment:
-            rendering.fail(f"--dep {raw!r}: expected key=value pairs")
+            rendering.fail(f"--dep {raw!r}: expected key=value pairs", reason="usage")
         key, _, value = fragment.partition("=")
         key, value = key.strip(), value.strip()
         if key not in _DEP_KEYS:
-            rendering.fail(f"--dep {raw!r}: unknown key {key!r}; expected path|blocks|needs")
+            rendering.fail(f"--dep {raw!r}: unknown key {key!r}; expected path|blocks|needs", reason="usage")
         if key in pairs:
-            rendering.fail(f"--dep {raw!r}: duplicate key {key!r}")
+            rendering.fail(f"--dep {raw!r}: duplicate key {key!r}", reason="usage")
         if not value:
-            rendering.fail(f"--dep {raw!r}: {key}= must not be empty")
+            rendering.fail(f"--dep {raw!r}: {key}= must not be empty", reason="usage")
         pairs[key] = value
     missing = [key for key in _DEP_KEYS if key not in pairs]
     if missing:
-        rendering.fail(f"--dep {raw!r}: missing {', '.join(missing)}")
+        rendering.fail(f"--dep {raw!r}: missing {', '.join(missing)}", reason="usage")
     return pairs
 
 
@@ -103,7 +111,7 @@ def _dependency_edges(dep_specs: list[str]) -> tuple[work.DependencyEdge, ...]:
     parsed = work.parse_dependencies(raw)
     if parsed.issues:
         detail = "; ".join(f"{issue.code}: {issue.detail} ({origins[issue.index]!r})" for issue in parsed.issues)
-        rendering.fail(f"--dep: {detail}")
+        rendering.fail(f"--dep: {detail}", reason="usage")
     return parsed.edges
 
 
@@ -128,7 +136,7 @@ def file(
     tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the filing as JSON."),
+    json_output: bool = rendering.json_option("Emit the filing as JSON."),
 ) -> None:
     """File one work item, reconcile `work/index.md`, and log its arrival.
 
@@ -159,22 +167,26 @@ def file(
             dry_run=dry_run,
         )
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.file_payload(outcome)
     if outcome.plan.refusal is not None:
         for warning in payload["warnings"]:
             rendering.warn(warning)
-        rendering.fail(f"{payload['path']}: refused ({payload['refusal']}) — {payload['detail']}")
+        rendering.fail(
+            f"{payload['path']}: refused ({payload['refusal']}) — {payload['detail']}",
+            reason="refused",
+            payload=payload,
+        )
     failures = payload["failures"]
     assert isinstance(failures, list)
     if payload["applied"] and (payload["rolled_back"] or failures):
         for failure in failures:
             rendering.warn(failure)
         blocking = failures[0] if failures else f"{payload['path']}: filing apply was incomplete"
-        rendering.fail(blocking)
+        rendering.fail(blocking, reason="incomplete-apply", payload=payload)
     for warning in payload["warnings"]:
         rendering.warn(warning)
 
@@ -194,14 +206,14 @@ def file(
 @work_app.command()
 def status(
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the rollup as JSON."),
+    json_output: bool = rendering.json_option("Emit the rollup as JSON."),
 ) -> None:
     """Count the active work items and name the one worth resuming."""
     layout = resolve_workspace(workspace)
     try:
         report = work.run_status(layout)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.status_payload(report)
     if json_output:
@@ -213,7 +225,7 @@ def status(
 @work_app.command(name="ingest-queue")
 def ingest_queue(
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the queue as JSON."),
+    json_output: bool = rendering.json_option("Emit the queue as JSON."),
 ) -> None:
     """List terminal work items whose design spec has not been ingested.
 
@@ -225,7 +237,7 @@ def ingest_queue(
     try:
         report = work.run_ingest_queue(layout)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.ingest_queue_payload(report)
     if json_output:
@@ -238,7 +250,7 @@ def ingest_queue(
 def lint(
     strict: bool = typer.Option(False, "--strict", help="Promote every warning to an error."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the report as JSON."),
+    json_output: bool = rendering.json_option("Emit the report as JSON."),
 ) -> None:
     """Report work-lane conformance. Never writes.
 
@@ -251,9 +263,9 @@ def lint(
         repo_root, _ = resolve_repo(layout)
         report = work.run_lint(layout, config, repo_root=repo_root, strict=strict, today=_today())
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     if json_output:
         rendering.emit(rendering.lint_payload(report))
@@ -270,7 +282,7 @@ def next_stage(
         False, "--descend", help="When the item waits on children, switch to the next actionable child."
     ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the routing decision as JSON."),
+    json_output: bool = rendering.json_option("Emit the routing decision as JSON."),
 ) -> None:
     """Compute what to dispatch for PATH, and what advancing would change.
 
@@ -283,11 +295,11 @@ def next_stage(
     try:
         result = work.run_next(layout, path, descend=descend, dry_run=False)
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
-        rendering.fail(str(exc), code=exit_codes.AMBIGUOUS, cause=exc)
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     # `entry_for` reads the manifest, so a malformed configured skill raises
     # here -- outside the `try` above. It is *not* a hard failure: this command
@@ -328,7 +340,7 @@ def advance(
     return_: bool = typer.Option(False, "--return", help="Send an item at `finish` back to `execute`."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the advance as JSON."),
+    json_output: bool = rendering.json_option("Emit the advance as JSON."),
 ) -> None:
     """Apply the routing table's next transition for PATH.
 
@@ -367,19 +379,23 @@ def advance(
             dry_run=dry_run,
         )
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
-        rendering.fail(str(exc), code=exit_codes.AMBIGUOUS, cause=exc)
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.advance_payload(result, path)
     if payload["refusal"] is not None:
-        rendering.fail(f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}")
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
     if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
         for failure in payload["failures"]:
             rendering.warn(failure)
-        rendering.fail(f"{path}: apply was incomplete")
+        rendering.fail(f"{path}: apply was incomplete", reason="incomplete-apply", payload=payload)
     for warning in payload["warnings"]:
         rendering.warn(warning)
 
@@ -401,7 +417,7 @@ def orchestrate(
         "", "--live", help="Comma-separated running dispatch keys (session names, gw-<phase>-<slug>)."
     ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the dispatch plan as JSON."),
+    json_output: bool = rendering.json_option("Emit the dispatch plan as JSON."),
 ) -> None:
     """Compute the auto-drive dispatch plan for PATH's subtree. Read-only.
 
@@ -413,11 +429,11 @@ def orchestrate(
     try:
         result = run_orchestrate(layout, path, live=tuple(rendering.split_csv(live)))
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
-        rendering.fail(str(exc), code=exit_codes.AMBIGUOUS, cause=exc)
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.orchestrate_payload(result)
     if json_output:
@@ -432,7 +448,7 @@ def orchestrate(
 def regen_index(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the reconciliation as JSON."),
+    json_output: bool = rendering.json_option("Emit the reconciliation as JSON."),
 ) -> None:
     """Reconcile `work/index.md` against what is on disk.
 
@@ -443,19 +459,20 @@ def regen_index(
     try:
         update = work.run_regen_indexes(layout, dry_run=dry_run)
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.regen_index_payload(update)
     for warning in payload["warnings"]:
         rendering.warn(warning)
     if payload["refusals"]:
-        rendering.fail("index reconciliation refused; nothing was applied")
+        _warn_refusals(payload["refusals"])
+        rendering.fail("index reconciliation refused; nothing was applied", reason="refused", payload=payload)
     if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
         for failure in payload["failures"]:
             rendering.warn(failure)
-        rendering.fail("index reconciliation apply was incomplete")
+        rendering.fail("index reconciliation apply was incomplete", reason="incomplete-apply", payload=payload)
     if json_output:
         rendering.emit(payload)
     elif payload["indexes"]:
@@ -472,7 +489,7 @@ def archive(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of moving."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the archive run as JSON."),
+    json_output: bool = rendering.json_option("Emit the archive run as JSON."),
 ) -> None:
     """Relocate terminal work items to `work/_archive/`, repairing the OKF
     markdown references that pointed at them.
@@ -490,9 +507,9 @@ def archive(
     try:
         run = run_archive(layout, targeted or None, today=_today(), dry_run=dry_run)
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.archive_payload(run, dry_run=dry_run)
     for warning in payload["warnings"]:
@@ -503,15 +520,20 @@ def archive(
     for warning in stranded_warnings(run):
         rendering.warn(warning)
     if payload["conflict"]:
-        rendering.fail(f"cross-lane conflict on {', '.join(payload['conflict'])}; nothing was applied")
+        rendering.fail(
+            f"cross-lane conflict on {', '.join(payload['conflict'])}; nothing was applied",
+            reason="conflict",
+            payload=payload,
+        )
     if payload["refusals"]:
-        rendering.fail("archive refused; nothing was applied")
+        _warn_refusals(payload["refusals"])
+        rendering.fail("archive refused; nothing was applied", reason="refused", payload=payload)
     if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
         for failure in payload["failures"]:
             rendering.warn(failure)
-        rendering.fail("archive apply was incomplete")
+        rendering.fail("archive apply was incomplete", reason="incomplete-apply", payload=payload)
     if not run.ok or (targeted and any(path not in payload["path_mapping"] for path in targeted)):
-        rendering.fail("archive did not complete for every requested path")
+        rendering.fail("archive did not complete for every requested path", reason="incomplete", payload=payload)
 
     if json_output:
         rendering.emit(payload)
@@ -536,16 +558,14 @@ def _finish_path_mutation(payload: dict[str, object], *, dry_run: bool, json_out
     refusals = payload["refusals"]
     assert isinstance(refusals, list)
     if refusals:
-        for refusal in refusals:
-            assert isinstance(refusal, dict)
-            rendering.warn(f"{refusal['path']}: {refusal['kind']} — {refusal['detail']}")
-        rendering.fail("work mutation refused; nothing was applied")
+        _warn_refusals(refusals)
+        rendering.fail("work mutation refused; nothing was applied", reason="refused", payload=payload)
     failures = payload["failures"]
     assert isinstance(failures, list)
     if payload["applied"] and (payload["rolled_back"] or failures):
         for failure in failures:
             rendering.warn(str(failure))
-        rendering.fail("work mutation apply was incomplete")
+        rendering.fail("work mutation apply was incomplete", reason="incomplete-apply", payload=payload)
     if json_output:
         rendering.emit(payload)
     elif dry_run:
@@ -564,16 +584,16 @@ def reparent(
     parent_path: str = typer.Option(..., "--parent", help="Canonical destination parent path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the mutation as JSON."),
+    json_output: bool = rendering.json_option("Emit the mutation as JSON."),
 ) -> None:
     """Move a complete work subtree beneath PARENT_PATH."""
     layout = resolve_workspace(workspace)
     try:
         result = work.run_reparent(layout, path, parent_path, dry_run=dry_run)
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
     _finish_path_mutation(rendering.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
 
 
@@ -583,14 +603,14 @@ def adopt(
     release_path: str = typer.Option(..., "--release", help="Canonical destination Release path."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the mutation as JSON."),
+    json_output: bool = rendering.json_option("Emit the mutation as JSON."),
 ) -> None:
     """Adopt an active root subtree beneath a Release."""
     layout = resolve_workspace(workspace)
     try:
         result = work.run_release_adoption(layout, path, release_path, dry_run=dry_run)
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
     _finish_path_mutation(rendering.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)

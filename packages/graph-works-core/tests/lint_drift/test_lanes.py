@@ -225,12 +225,17 @@ def test_a_missing_config_projection_is_reported_as_a_lane_error(workspace):
     assert [lane.name for lane in lanes.lanes] == ["wiki", "work"]
 
 
-def test_a_malformed_declaration_is_one_lane_error_and_the_other_lane_still_runs(workspace):
+def test_a_malformed_declaration_is_one_error_per_lane_that_shares_it(workspace):
+    """Both lanes read `config.declarations_dir`, so a malformed `tags.yaml`
+    is an error for each -- the wiki lane's `_wiki_rules` and the work lane's
+    `work_tracker_okf.compose.rule_set` both gate their `vocabulary_rule` on
+    the same file, and neither lane composes."""
     (workspace.layout.config_dir / VOCABULARY_FILENAME).write_text("not: [a mapping\n", encoding="utf-8")
     lanes = _compose(workspace)
-    assert len(lanes.errors) == 1
+    assert len(lanes.errors) == 2
     assert "wiki" in lanes.errors[0]
-    assert [lane.name for lane in lanes.lanes] == ["work"]
+    assert "work" in lanes.errors[1]
+    assert lanes.lanes == ()
 
 
 def test_a_bug_inside_a_rule_factory_propagates_rather_than_becoming_a_lane_error(workspace, monkeypatch):

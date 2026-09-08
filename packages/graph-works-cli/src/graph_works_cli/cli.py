@@ -17,6 +17,7 @@ from graph_works_cli.introspection import TyperCommand, command_to_help_entry, j
 from graph_works_cli.logging_config import configure_verbose_logging
 from graph_works_cli.util_cli.main import register_util_root_commands, util_app
 from graph_works_cli.wiki_cli.main import register_root_commands, wiki_app
+from graph_works_cli.work_cli import rendering as work_rendering
 from graph_works_cli.work_cli.main import work_app
 
 # test_cli.py imports these by their old private names and must not be edited; keep as aliases.
@@ -42,6 +43,12 @@ def _root(
 ) -> None:
     """gw: graph-works CLI."""
     configure_verbose_logging(verbose)
+    # Click runs the group callback before `cmd.make_context()` parses the
+    # subcommand's own options, so this reset always precedes that command's
+    # `json_option()` callback -- including the `gw next` root alias, which
+    # reuses `gw work next`'s own callback object and would otherwise be
+    # missed by a `work_app`-level callback.
+    work_rendering.reset_json_mode()
 
 
 def _json_help_payload(command_path: tuple[str, ...] = ()) -> dict[str, Any]:

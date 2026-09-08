@@ -167,7 +167,7 @@ _CALLOUT_ATTEMPT_RE = re.compile(r"^\[!?\[?!")
 _BREAKS = frozenset({"softbreak", "hardbreak"})
 
 
-def _members(bundle: Bundle) -> Iterator[tuple[str, Document]]:
+def _members(bundle: Bundle, scope: frozenset[str] | None = None) -> Iterator[tuple[str, Document]]:
     """Every markdown member a person reads, in sorted path order.
 
     Concepts, indexes **and** logs: render correctness is a property of
@@ -178,12 +178,20 @@ def _members(bundle: Bundle) -> Iterator[tuple[str, Document]]:
     Sorted because findings must not depend on mapping order; `validate()`
     sorts after collection anyway, so this is about the rule being reproducible
     when called directly.
+
+    *scope*, when given, is the set of bundle-relative member paths this pass
+    is interested in -- `okf_io.validate.RuleContext.scope`. Member paths
+    rather than concept ids precisely because this iterator is wider than
+    `bundle.concepts`: an index or a log has no concept id, and a work-lane
+    mutation's targeted set routinely names `work/index.md`.
     """
     members: dict[str, Document] = {f"{concept_id}.md": doc for concept_id, doc in bundle.concepts.items()}
     for directory, document in bundle.indexes.items():
         members[f"{directory}/{_INDEX_NAME}" if directory else _INDEX_NAME] = document
     for directory, document in bundle.logs.items():
         members[f"{directory}/{_LOG_NAME}" if directory else _LOG_NAME] = document
+    if scope is not None:
+        members = {member: document for member, document in members.items() if member in scope}
     for path in sorted(members):
         yield path, members[path]
 
@@ -430,7 +438,7 @@ def render_rule(*, severity: Severity = "warn") -> Rule:
     parser = MarkdownIt("commonmark").enable("table")
 
     def rule(context: RuleContext) -> Iterable[Finding]:
-        for path, document in _members(context.bundle):
+        for path, document in _members(context.bundle, context.scope):
             if document.parse_error is not None:
                 continue
             body = document.body

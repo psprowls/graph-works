@@ -5,6 +5,7 @@ import pytest
 import work_tracker_okf.compose as compose
 from okf_ext.shape import load_sections
 from okf_ext.tables import read_section
+from okf_ext.tags import VOCABULARY_FILENAME, VocabularyError
 from okf_io import load, load_bundle, validate
 from work_helpers import CONFORMANT_TODAY, make_item, write_item
 from work_tracker_okf import IGNORE, load_items
@@ -240,3 +241,56 @@ def test_rule_set_with_repo_root_adds_both_path_rules(conformant_root: Path) -> 
     assert (
         len(compose.rule_set(conformant_root, repo_root=conformant_root)) == len(compose.rule_set(conformant_root)) + 2
     )
+
+
+def test_rule_set_reports_a_tag_outside_the_vocabulary(root: Path) -> None:
+    (root / VOCABULARY_FILENAME).write_text(
+        "version: 1\ntags:\n  - name: graph-works\n",
+        encoding="utf-8",
+    )
+    write_item(
+        root,
+        ITEM,
+        "type: Feature\nwork_status: open\nstatus: draft\n"
+        "opened: 2026-08-22\nupdated: 2026-08-22\naffects: [packages/work-tracker-okf]\n"
+        "tags: [not-in-vocabulary]\n",
+    )
+    bundle = load_bundle(root, ignore=IGNORE)
+    report = validate(bundle, today=TODAY, extra_rules=compose.rule_set(root))
+    assert [f.code for f in report.warnings if f.code == "tags.unknown"]
+
+
+def test_rule_set_skips_the_vocabulary_rule_when_tags_yaml_is_absent(root: Path) -> None:
+    (root / VOCABULARY_FILENAME).write_text(
+        "version: 1\ntags:\n  - name: graph-works\n",
+        encoding="utf-8",
+    )
+    with_vocab = compose.rule_set(root)
+    (root / VOCABULARY_FILENAME).unlink()
+    without_vocab = compose.rule_set(root)
+    assert len(without_vocab) == len(with_vocab) - 1
+
+
+def test_rule_set_propagates_a_malformed_vocabulary_as_value_error(root: Path) -> None:
+    (root / VOCABULARY_FILENAME).write_text("version: 2\n", encoding="utf-8")
+    with pytest.raises(VocabularyError):
+        compose.rule_set(root)
+
+
+def test_rule_set_vocabulary_findings_are_always_warn(root: Path) -> None:
+    (root / VOCABULARY_FILENAME).write_text(
+        "version: 1\ntags:\n  - name: graph-works\n",
+        encoding="utf-8",
+    )
+    write_item(
+        root,
+        ITEM,
+        "type: Feature\nwork_status: open\nstatus: draft\n"
+        "opened: 2026-08-22\nupdated: 2026-08-22\naffects: [packages/work-tracker-okf]\n"
+        "tags: [not-in-vocabulary]\n",
+    )
+    bundle = load_bundle(root, ignore=IGNORE)
+    report = validate(bundle, today=TODAY, extra_rules=compose.rule_set(root))
+    tag_findings = [f for f in (*report.errors, *report.warnings) if f.code.startswith("tags.")]
+    assert tag_findings
+    assert all(f.severity == "warn" for f in tag_findings)

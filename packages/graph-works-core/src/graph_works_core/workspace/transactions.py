@@ -29,6 +29,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import shutil
 import stat
 import sys
@@ -2177,26 +2178,119 @@ def _extra_rules(layout: WorkspaceLayout, repo_root: Path | None) -> tuple[Rule,
     )
 
 
+def _gate_scope(plan: WorkMutationPlan) -> frozenset[str]:
+    """The members the postcondition gate actually reads.
+
+    Identical to the `targeted_members` set `_validate_postconditions` has
+    always filtered its report down to. Handing it to `okf_io.validate` as
+    `scope=` means the per-document rules stop *computing* the findings the
+    filter was going to discard -- 10.9s to 0.7s on a 1,700-concept vault. The
+    filter stays: cross-document rules are deliberately unscoped, so they can
+    still report against a member outside this set.
+    """
+    members = {f"{path}.md" for path in plan.validate_paths}
+    members.update(_affected_index_members(plan))
+    return frozenset(members)
+
+
+def _baseline_scope(plan: WorkMutationPlan) -> frozenset[str]:
+    """The pre-mutation members whose findings the gate will consult.
+
+    The baseline is captured before any effect, and `_capture_validation_state`
+    keys every finding by `_map_member(plan.path_mapping, finding.path)` -- the
+    path the member will have *after* the mutation. So the members worth
+    validating are exactly the pre-image of `_gate_scope(plan)` under that
+    mapping, which for a move is not the same set.
+
+    Inverting the mapping is right rather than merely cheap: scanning the corpus
+    for members that map into the gate scope would be O(bundle), and the whole
+    point is not to touch the bundle. `path_mapping` is a handful of entries.
+
+    A member that the mapping does not move is its own pre-image, so a plan with
+    no moves yields exactly `_gate_scope(plan)`.
+    """
+    gate = _gate_scope(plan)
+    members = {member for member in gate if _map_member(plan.path_mapping, member) in gate}
+    for source, destination in plan.path_mapping.items():
+        source_member = f"{source}.md"
+        if _map_member(plan.path_mapping, source_member) in gate:
+            members.add(source_member)
+        for member in gate:
+            if member.startswith(f"{destination}/"):
+                members.add(f"{source}/{member[len(destination) + 1 :]}")
+    return frozenset(members)
+
+
 def _capture_validation_state(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
     root: Anchor,
     *,
     repo_root: Path | None,
+    bundle: Bundle | None = None,
 ) -> _ValidationState:
     """Validate the bundle as it stands and key the outcome post-mutation.
 
-    Called under the held bundle lock while the bundle is still pristine, with
-    the same load, rule set and `repo_root` the postcondition pass will use --
-    identical inputs on both sides are what makes the difference meaningful.
+    Called under the held bundle lock while the bundle is still pristine.
     Raising is safe here: no effect has been committed yet.
+
+    This function computes two different things, and they are sound for two
+    different reasons -- do not conflate them:
+
+    - The **findings** half (`validate(bundle, ..., scope=_baseline_scope(plan))`)
+      may reuse a caller-supplied *bundle* (see below), because the pass is
+      scoped to `_baseline_scope(plan)` and `_preflight` digest-verifies
+      exactly those members under the held lock before any effect runs. A
+      concurrent writer can make a reused bundle stale only in regions the
+      gate no longer reads.
+    - The **conditions** half (`items = load_items(...)` feeding the
+      whole-corpus `conditions` Counter via `_item_conditions`) checks
+      `parent-missing`/`dependency-missing` against the *full* item map, not
+      scoped to the plan. A caller-supplied *bundle* is never used for this
+      half, regardless of whether one was passed in: it may have been loaded
+      before the lock was taken, and nothing digest-verifies items outside
+      `_baseline_scope(plan)`, so a concurrent edit to a wholly unrelated
+      item's parent/dependency could otherwise leave this Counter reflecting
+      stale corpus-wide state. `items` is therefore always loaded fresh, under
+      the lock, via the same `_load_bundle_through(..., ignore=IGNORE)` call
+      used when no *bundle* is supplied at all -- `load_items` is cheap
+      (~0.01s), so this costs nothing worth avoiding.
+
+    *bundle* lets the caller hand over a bundle it already loaded with the same
+    `ignore=IGNORE` set, skipping a second full load *for the findings half
+    only*. It was loaded before the lock was taken, which is safe there only
+    because the pass is scoped as described above. **Never pass a bundle
+    loaded with a different `ignore` set** -- that would silently validate a
+    different corpus.
     """
     validation_root = layout.bundle_dir
     _assert_root_identity(validation_root, root)
-    bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
+    bundle_supplied = bundle is not None
+    if bundle is None:
+        bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
     _assert_root_identity(validation_root, root)
-    items = load_items(bundle)
-    report = validate(bundle, today=date.max, extra_rules=_extra_rules(layout, repo_root))
+    # The conditions half always loads fresh under the lock -- see the
+    # docstring above. It is never derived from a caller-supplied `bundle`.
+    # When no `bundle` was supplied, the load just above already happened
+    # fresh under the lock, so it doubles as this load too -- only the
+    # caller-supplied-bundle case pays for a second one.
+    if bundle_supplied:
+        conditions_bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
+        _assert_root_identity(validation_root, root)
+    else:
+        conditions_bundle = bundle
+    items = load_items(conditions_bundle)
+    # `links=` deliberately left unwired: this function builds no `LinkGraph`
+    # of its own before this call, and the postcondition pass in
+    # `_validate_postconditions` validates a different bundle state (the
+    # post-mutation bundle, not this pristine one) -- sharing a `LinkGraph`
+    # between the two passes would be unsound, not merely un-optimized.
+    report = validate(
+        bundle,
+        today=date.max,
+        extra_rules=_extra_rules(layout, repo_root),
+        scope=_baseline_scope(plan),
+    )
     _assert_root_identity(validation_root, root)
     by_path = {item.path: item for item in items}
     findings = Counter(
@@ -2244,14 +2338,19 @@ def _validate_postconditions(
             root.close()
         return reload_failures
     by_path = {item.path: item for item in items}
-    targeted_members = {f"{path}.md" for path in plan.validate_paths}
-    targeted_indexes = set(_affected_index_members(plan))
-    targeted_members.update(targeted_indexes)
+    gate_scope = _gate_scope(plan)
+    targeted_members = set(gate_scope)
     try:
+        # `links=` deliberately left unwired: this function builds no
+        # `LinkGraph` of its own before this call, and `_capture_validation_state`
+        # validates a different bundle state (the pre-mutation bundle, not this
+        # post-mutation one) -- sharing a `LinkGraph` between the two passes
+        # would be unsound, not merely un-optimized.
         report = validate(
             bundle,
             today=date.max,
             extra_rules=_extra_rules(layout, repo_root),
+            scope=gate_scope,
         )
         _assert_root_identity(validation_root, root)
     except (OSError, ValueError) as exc:
@@ -2346,259 +2445,462 @@ def _application(
     )
 
 
+#: `MutationApplication.transaction_id` for a plan that had nothing to apply.
+#: An empty string, never a uuid, so "no transaction directory was opened" is
+#: a value a caller can test rather than a directory it has to go looking for.
+EMPTY_TRANSACTION_ID = ""
+
+#: How many terminal (complete/rolled-back) transaction directories the prune
+#: sweep keeps, newest first by `journal.jsonl` mtime. A module constant, not
+#: a literal, so tests can name it.
+RETAINED_TRANSACTIONS = 10
+
+#: Every transaction directory name is `uuid.uuid4().hex` -- this is the
+#: allow-list that keeps the prune sweep from ever touching a non-transaction
+#: sibling (`executor.lock`, a stray `.DS_Store`, ...) in the cache root.
+_TRANSACTION_ID_PATTERN = re.compile(r"^[0-9a-f]{32}$")
+
+#: Journal states the prune sweep treats as terminal and therefore prunable.
+_PRUNABLE_JOURNAL_STATES = frozenset({"complete", "rolled-back"})
+
+
+def _terminal_journal_state(content: bytes) -> str | None:
+    """The last journal record's `state`, or `None` if it cannot be trusted.
+
+    Deliberately tolerant: any parse failure, a non-dict record, or a missing
+    trailing newline (the durability contract every `_append_journal` call
+    honors) reads as "no terminal record" -- which pins the directory rather
+    than risking pruning rollback evidence.
+    """
+    try:
+        if not content.endswith(b"\n"):
+            return None
+        lines = content.decode("utf-8").splitlines()
+        if not lines:
+            return None
+        record = json.loads(lines[-1])
+    except (UnicodeError, ValueError):
+        return None
+    if not isinstance(record, dict):
+        return None
+    state = record.get("state")
+    return state if isinstance(state, str) else None
+
+
+def _prunable_transaction_candidates(transaction_root_anchor: Anchor) -> list[tuple[str, float]]:
+    """`(transaction_id, journal_mtime)` pairs eligible for pruning.
+
+    A candidate must be a real directory (never a symlink -- `lstat` is
+    checked, not followed), its name must match the uuid4-hex shape, and its
+    `journal.jsonl` must parse with a terminal `complete`/`rolled-back` last
+    record. Ordered by the journal's own mtime (D-002c): it is
+    executor-`O_APPEND`-written only, unlike the directory's mtime, which any
+    external process (a Finder `.DS_Store`, an editor) can bump.
+
+    The just-committed transaction is a candidate too -- it is the newest by
+    construction, so it naturally lands inside the retained window and counts
+    toward `RETAINED_TRANSACTIONS` rather than being kept as an extra.
+    """
+    candidates: list[tuple[str, float]] = []
+    for name in transaction_root_anchor.listdir():
+        if not _TRANSACTION_ID_PATTERN.match(name):
+            continue
+        try:
+            info = transaction_root_anchor.lstat(name)
+        except OSError:
+            continue
+        if not stat.S_ISDIR(info.st_mode):
+            continue
+        try:
+            journal_info = _lstat_at(transaction_root_anchor, f"{name}/journal.jsonl")
+        except OSError:
+            continue
+        if not stat.S_ISREG(journal_info.st_mode):
+            continue
+        try:
+            content = _read_bytes_at(transaction_root_anchor, f"{name}/journal.jsonl")
+        except OSError:
+            continue
+        if _terminal_journal_state(content) not in _PRUNABLE_JOURNAL_STATES:
+            continue
+        candidates.append((name, journal_info.st_mtime))
+    return candidates
+
+
+def _prune_completed_transactions(
+    transaction_root_anchor: Anchor,
+    *,
+    exclude: str,
+    excused: list[str],
+) -> None:
+    """Reclaim terminal transaction directories beyond `RETAINED_TRANSACTIONS`.
+
+    Called only on the success path, after the `complete` journal record is
+    durable, inside the same executor lock that created every directory it
+    might remove -- no other executor can hold a live transaction directory
+    in this cache while that lock is held, so the sweep needs no synchronisation
+    of its own.
+
+    *exclude* (the transaction that just committed) is never removed even if
+    it somehow fell outside the retained window -- a defensive guard, not the
+    mechanism that keeps it: its journal mtime is the newest by construction,
+    so it is expected to sort inside `RETAINED_TRANSACTIONS` on its own.
+
+    Every failure is swallowed and recorded in *excused* rather than raised:
+    a housekeeping sweep must never roll back a mutation that already
+    committed and validated successfully.
+    """
+    try:
+        candidates = _prunable_transaction_candidates(transaction_root_anchor)
+        candidates.sort(key=lambda candidate: (candidate[1], candidate[0]), reverse=True)
+        for stale_id, _mtime in candidates[RETAINED_TRANSACTIONS:]:
+            if stale_id == exclude:
+                continue
+            _remove_live_entry(transaction_root_anchor, stale_id)
+    except Exception as exc:
+        excused.append(f"transaction cache prune failed: {exc}")
+
+
+def _is_wholly_empty(plan: WorkMutationPlan) -> bool:
+    """No effects **and** no claims on the filesystem.
+
+    The effect fields alone are not enough: `run_regen_indexes` attaches
+    `directory_preconditions` for lanes that were absent when the planner read
+    them, and a precondition is an assertion the transaction exists to check.
+    A plan carrying one is not empty even when it writes nothing.
+    """
+    return not (plan.writes or plan.mkdirs or plan.moves or plan.deletes or plan.directory_preconditions)
+
+
 def _apply_mutation_locked(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
     locked_root: Anchor,
     *,
     repo_root: Path | None = None,
+    baseline_bundle: Bundle | None = None,
 ) -> MutationApplication:
-    transaction_id = uuid.uuid4().hex
     transaction_root = layout.cache_dir / "work-mutations"
     resolved_bundle = layout.bundle_dir.resolve(strict=True)
     resolved_transactions = transaction_root.resolve(strict=False)
     if resolved_transactions.is_relative_to(resolved_bundle):
         raise ValueError("work mutation journal must live outside the bundle")
-    configured_transaction_dir = transaction_root / transaction_id
-    with (
-        _locked_transaction_root(layout.cache_dir, transaction_root) as (
-            cache,
-            transaction_root_anchor,
-        ),
-        _new_transaction_directory(
+    with _locked_transaction_root(layout.cache_dir, transaction_root) as (
+        cache,
+        transaction_root_anchor,
+    ):
+        if _is_wholly_empty(plan):
+            # Equivalence argument (narrowed form -- see `apply_mutation`'s
+            # docstring for the original, wider version this replaces):
+            #
+            # What STILL happens above this point, unconditionally, for every
+            # plan including this one: the bundle root is opened and
+            # `_bundle_root_lock` is held (in `apply_mutation`, before this
+            # function is even entered), and -- just above, via
+            # `_locked_transaction_root` -- the `work-mutations` cache
+            # directory is opened (creating it on first use) and the
+            # cross-process executor lock is acquired and released cleanly by
+            # that context manager's own `finally` blocks. Two existing tests
+            # (`test_executor_lock_name_swap_never_redirects_lock_io_into_bundle`,
+            # `test_work_mutations_open_failure_does_not_leak_cache_descriptor`)
+            # exercise exactly that acquisition/open for an all-default,
+            # wholly-empty plan and must keep observing it -- which is why the
+            # short-circuit sits here, inside `_locked_transaction_root`,
+            # rather than before it.
+            #
+            # What is skipped from this point on: `_new_transaction_directory`
+            # (no per-mutation transaction subdirectory, no journal file is
+            # created under it) and everything `_apply_mutation_locked` would
+            # otherwise do inside that directory -- preflight, snapshotting,
+            # staging writes, committing effects, baseline capture, and the
+            # postcondition `validate()` pass. `_is_wholly_empty` does not
+            # inspect `validate_paths`, so this holds even for a plan with no
+            # effects but a non-empty `validate_paths`: `_effects(plan, ...)`
+            # yields nothing to commit either way, and `_affected_index_members(plan)`
+            # is empty so the absolute lane-index staleness check has nothing
+            # to check. `_gate_scope(plan)` is `{f"{p}.md" for p in
+            # plan.validate_paths} | _affected_index_members(plan)` --
+            # `validate_paths` WIDENS the gate scope, it never narrows it --
+            # so for an effect-free plan the members it names would be
+            # validated by a full pass against an identical, unmutated
+            # baseline, and only the two absolute (never baseline-excused)
+            # `validate_paths`-specific checks in `_validate_postconditions`
+            # ("validate path is not canonical", "final work item did not
+            # reload") plus preflight's path-safety walk are foregone by
+            # skipping validation entirely for such a plan. No shipped caller
+            # today builds an effect-free plan with a non-empty
+            # `validate_paths` (every call site that sets `validate_paths`
+            # also attaches at least one write), so this is a latent gap in
+            # the short-circuit's coverage, not an observed regression --
+            # `_is_wholly_empty` is the agreed predicate and is not changed
+            # here to close it. For every plan `_is_wholly_empty` actually
+            # admits today, returning here changes no observable outcome: no
+            # caller can distinguish "transaction opened and immediately
+            # closed with nothing done" from "no transaction directory was
+            # opened", since `MutationApplication` carries no such directory
+            # reference back and the journal path returned below was never
+            # created.
+            return _application(
+                EMPTY_TRANSACTION_ID,
+                transaction_root,
+                plan,
+            )
+        transaction_id = uuid.uuid4().hex
+        configured_transaction_dir = transaction_root / transaction_id
+        with _new_transaction_directory(
             transaction_root_anchor,
             configured_transaction_dir,
             transaction_id,
-        ) as (transaction, transaction_dir, journal_fd),
-    ):
-        journal = configured_transaction_dir / "journal.jsonl"
-        journal_storage = transaction_dir / "journal.jsonl"
-        planned_details: dict[str, object] = {
-            "deletes": list(plan.deletes),
-            "mkdirs": list(plan.mkdirs),
-            "moves": [{"source": move.source, "destination": move.dest} for move in plan.moves],
-            "operation": plan.operation,
-            "transaction_id": transaction_id,
-            "validate_paths": list(plan.validate_paths),
-            "writes": [write.member for write in plan.writes],
-        }
-        planned_record = _journal_record("planned", planned_details)
-        _append_journal(
-            journal_storage,
-            "planned",
-            _parent=transaction,
-            _journal_fd=journal_fd,
-            **planned_details,
-        )
+        ) as (transaction, transaction_dir, journal_fd):
+            journal = configured_transaction_dir / "journal.jsonl"
+            journal_storage = transaction_dir / "journal.jsonl"
+            planned_details: dict[str, object] = {
+                "deletes": list(plan.deletes),
+                "mkdirs": list(plan.mkdirs),
+                "moves": [{"source": move.source, "destination": move.dest} for move in plan.moves],
+                "operation": plan.operation,
+                "transaction_id": transaction_id,
+                "validate_paths": list(plan.validate_paths),
+                "writes": [write.member for write in plan.writes],
+            }
+            planned_record = _journal_record("planned", planned_details)
+            _append_journal(
+                journal_storage,
+                "planned",
+                _parent=transaction,
+                _journal_fd=journal_fd,
+                **planned_details,
+            )
 
-        snapshots: tuple[_SnapshotEntry, ...] = ()
-        moved: list[tuple[str, str]] = []
-        written: list[str] = []
-        created: list[str] = []
-        touched: set[str] = set()
-        protected: dict[str, str] = {}
-        effect_attempted = False
-        phase = "preflight"
-        baseline: _ValidationState | None = None
-        excused: list[str] = []
-        root = locked_root.duplicate()
-        try:
+            snapshots: tuple[_SnapshotEntry, ...] = ()
+            moved: list[tuple[str, str]] = []
+            written: list[str] = []
+            created: list[str] = []
+            touched: set[str] = set()
+            protected: dict[str, str] = {}
+            effect_attempted = False
+            phase = "preflight"
+            baseline: _ValidationState | None = None
+            excused: list[str] = []
+            root = locked_root.duplicate()
             try:
-                _assert_directory_identity(layout.cache_dir, cache, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                _assert_root_identity(layout.bundle_dir, root)
-                _preflight(layout, plan, root, transaction_dir / "preflight-initial")
-                created = [member for member in plan.mkdirs if not _lexists_at(root, member)]
-                snapshot_records = [
-                    {"member": member, "existed": _lexists_at(root, member)} for member in _snapshot_targets(plan)
-                ]
-                directory_modes = _mapped_directory_modes(plan, root)
-                snapshots = _create_snapshot(plan, transaction_dir, root)
-                staged = _stage_writes(plan, transaction_dir, root)
-                _preflight(layout, plan, root, transaction_dir / "preflight-final")
-                _verify_directory_modes(root, directory_modes)
                 try:
-                    baseline = _capture_validation_state(layout, plan, root, repo_root=repo_root)
-                except (OSError, ValueError) as exc:
-                    baseline = None
-                    excused.append(
-                        f"baseline capture failed, falling back to absolute postcondition gate for this mutation: {exc}"
-                    )
-                _assert_root_identity(layout.bundle_dir, root)
-                expected_fingerprints = {
-                    member: _entry_fingerprint_at(root, member)
-                    for member in {*(move.source for move in plan.moves), *plan.deletes}
-                    if _lexists_at(root, member)
-                }
-                expected_identities = {
-                    member: _entry_identity(_lstat_at(root, member))
-                    for member in {*(move.source for move in plan.moves), *plan.deletes}
-                    if _lexists_at(root, member)
-                }
-                absent_directories = {
-                    condition.member for condition in plan.directory_preconditions if condition.before_digest is None
-                }
-                write_digests = {
-                    write.member: write.before_digest if write.source_member is None else None for write in plan.writes
-                }
-                applying_details: dict[str, object] = {
-                    "backups": [
-                        {
-                            "member": entry.member,
-                            "path": (
-                                None if entry.backup is None else entry.backup.relative_to(transaction_dir).as_posix()
-                            ),
-                        }
-                        for entry in snapshots
-                    ],
-                    "snapshots": snapshot_records,
-                }
-                applying_record = _journal_record("applying", applying_details)
-                _append_journal(
-                    journal_storage,
-                    "applying",
-                    _parent=transaction,
-                    _journal_fd=journal_fd,
-                    **applying_details,
-                )
-                phase = "apply"
-                _assert_directory_identity(layout.cache_dir, cache, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                for effect in _effects(plan, staged, root):
-                    effect_attempted = True
-                    _commit_effect(
-                        plan.root,
-                        effect,
-                        root=root,
-                        write_digests=write_digests,
-                        expected_fingerprints=expected_fingerprints,
-                        expected_identities=expected_identities,
-                        absent_directories=absent_directories,
-                        touched=touched,
-                        protected=protected,
-                    )
-                    if effect.kind == "move":
-                        assert effect.destination is not None
-                        moved.append((effect.member, effect.destination))
-                    elif effect.kind == "write":
-                        written.append(effect.member)
-                _apply_directory_modes(root, directory_modes, touched)
-                _assert_root_identity(layout.bundle_dir, root)
-                _assert_directory_identity(layout.cache_dir, cache, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                _fsync_live_directory(root)
-                phase = "validation"
-                validating_details: dict[str, object] = {"validate_paths": list(plan.validate_paths)}
-                validating_record = _journal_record("validating", validating_details)
-                _append_journal(
-                    journal_storage,
-                    "validating",
-                    _parent=transaction,
-                    _journal_fd=journal_fd,
-                    **validating_details,
-                )
-                postcondition_failures = _validate_postconditions(
-                    layout,
-                    plan,
-                    root,
-                    repo_root=repo_root,
-                    baseline=baseline,
-                    excused=excused,
-                )
-                if postcondition_failures:
-                    raise ValueError("; ".join(postcondition_failures))
-                _assert_root_identity(layout.bundle_dir, root)
-                _assert_directory_identity(layout.cache_dir, cache, "cache")
-                _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
-                _fsync_live_directory(root)
-                complete_record = _complete_record(transaction_id, moved, written, created)
-                try:
-                    _append_journal(
-                        journal_storage,
-                        "complete",
-                        _parent=transaction,
-                        _journal_fd=journal_fd,
-                        **{key: value for key, value in complete_record.items() if key != "state"},
-                    )
-                except Exception:
-                    if not _journal_has_terminal_complete(
-                        journal_storage,
-                        (planned_record, applying_record, validating_record, complete_record),
-                        journal_fd=journal_fd,
-                    ):
-                        raise
-                return _application(
-                    transaction_id,
-                    journal,
-                    plan,
-                    moved=moved,
-                    written=written,
-                    created=created,
-                    warnings=(*plan.warnings, *excused),
-                )
-            except Exception as exc:
-                failure = f"{phase} failed: {exc}"
-                recovery_failures: list[str] = []
-                try:
-                    _append_journal(
-                        journal_storage,
-                        "rolling-back",
-                        _parent=transaction,
-                        _journal_fd=journal_fd,
-                        failure=failure,
-                    )
-                except Exception as journal_exc:
-                    recovery_failures.append(f"rollback journal failed: {journal_exc}")
-                rollback_failures: list[str] = []
-                if snapshots and effect_attempted:
+                    _assert_directory_identity(layout.cache_dir, cache, "cache")
+                    _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
+                    _assert_root_identity(layout.bundle_dir, root)
+                    preflight_initial_scratch = transaction_dir / "preflight-initial"
                     try:
-                        _restore_snapshot(
+                        _preflight(layout, plan, root, preflight_initial_scratch)
+                    finally:
+                        _remove_entry(preflight_initial_scratch)
+                    created = [member for member in plan.mkdirs if not _lexists_at(root, member)]
+                    snapshot_records = [
+                        {"member": member, "existed": _lexists_at(root, member)} for member in _snapshot_targets(plan)
+                    ]
+                    directory_modes = _mapped_directory_modes(plan, root)
+                    snapshots = _create_snapshot(plan, transaction_dir, root)
+                    staged = _stage_writes(plan, transaction_dir, root)
+                    preflight_final_scratch = transaction_dir / "preflight-final"
+                    try:
+                        _preflight(layout, plan, root, preflight_final_scratch)
+                    finally:
+                        _remove_entry(preflight_final_scratch)
+                    _verify_directory_modes(root, directory_modes)
+                    try:
+                        baseline = _capture_validation_state(
+                            layout, plan, root, repo_root=repo_root, bundle=baseline_bundle
+                        )
+                    except (OSError, ValueError) as exc:
+                        baseline = None
+                        excused.append(
+                            "baseline capture failed, falling back to absolute postcondition gate "
+                            f"for this mutation: {exc}"
+                        )
+                    _assert_root_identity(layout.bundle_dir, root)
+                    expected_fingerprints = {
+                        member: _entry_fingerprint_at(root, member)
+                        for member in {*(move.source for move in plan.moves), *plan.deletes}
+                        if _lexists_at(root, member)
+                    }
+                    expected_identities = {
+                        member: _entry_identity(_lstat_at(root, member))
+                        for member in {*(move.source for move in plan.moves), *plan.deletes}
+                        if _lexists_at(root, member)
+                    }
+                    absent_directories = {
+                        condition.member
+                        for condition in plan.directory_preconditions
+                        if condition.before_digest is None
+                    }
+                    write_digests = {
+                        write.member: write.before_digest if write.source_member is None else None
+                        for write in plan.writes
+                    }
+                    applying_details: dict[str, object] = {
+                        "backups": [
+                            {
+                                "member": entry.member,
+                                "path": (
+                                    None
+                                    if entry.backup is None
+                                    else entry.backup.relative_to(transaction_dir).as_posix()
+                                ),
+                            }
+                            for entry in snapshots
+                        ],
+                        "snapshots": snapshot_records,
+                    }
+                    applying_record = _journal_record("applying", applying_details)
+                    _append_journal(
+                        journal_storage,
+                        "applying",
+                        _parent=transaction,
+                        _journal_fd=journal_fd,
+                        **applying_details,
+                    )
+                    phase = "apply"
+                    _assert_directory_identity(layout.cache_dir, cache, "cache")
+                    _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
+                    for effect in _effects(plan, staged, root):
+                        effect_attempted = True
+                        _commit_effect(
                             plan.root,
-                            snapshots,
+                            effect,
                             root=root,
+                            write_digests=write_digests,
+                            expected_fingerprints=expected_fingerprints,
+                            expected_identities=expected_identities,
+                            absent_directories=absent_directories,
                             touched=touched,
                             protected=protected,
                         )
-                    except Exception as rollback_exc:
-                        rollback_failures.append(f"rollback failed: {rollback_exc}")
-                    try:
-                        verification_failures = _verify_snapshot(root, snapshots, protected)
-                    except Exception as verification_exc:
-                        rollback_failures.append(f"rollback verification failed: {verification_exc}")
-                    else:
-                        rollback_failures.extend(
-                            f"rollback verification failed: {detail}" for detail in verification_failures
-                        )
-                    try:
-                        _assert_root_identity(layout.bundle_dir, root)
-                    except Exception as identity_exc:
-                        rollback_failures.append(f"rollback verification failed: {identity_exc}")
-                recovery_failures.extend(rollback_failures)
-                try:
+                        if effect.kind == "move":
+                            assert effect.destination is not None
+                            moved.append((effect.member, effect.destination))
+                        elif effect.kind == "write":
+                            written.append(effect.member)
+                    _apply_directory_modes(root, directory_modes, touched)
+                    _assert_root_identity(layout.bundle_dir, root)
+                    _assert_directory_identity(layout.cache_dir, cache, "cache")
+                    _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
+                    _fsync_live_directory(root)
+                    phase = "validation"
+                    validating_details: dict[str, object] = {"validate_paths": list(plan.validate_paths)}
+                    validating_record = _journal_record("validating", validating_details)
                     _append_journal(
                         journal_storage,
-                        "rolled-back",
+                        "validating",
                         _parent=transaction,
                         _journal_fd=journal_fd,
-                        failures=recovery_failures,
-                        complete=not recovery_failures,
+                        **validating_details,
                     )
-                except Exception as journal_exc:
-                    recovery_failures.append(f"rollback journal failed: {journal_exc}")
-                return _application(
-                    transaction_id,
-                    journal,
-                    plan,
-                    moved=moved,
-                    written=written,
-                    created=created,
-                    failures=(failure, *recovery_failures),
-                    rolled_back=bool(touched) and not rollback_failures,
-                    warnings=(*plan.warnings, *excused),
-                )
+                    postcondition_failures = _validate_postconditions(
+                        layout,
+                        plan,
+                        root,
+                        repo_root=repo_root,
+                        baseline=baseline,
+                        excused=excused,
+                    )
+                    if postcondition_failures:
+                        raise ValueError("; ".join(postcondition_failures))
+                    _assert_root_identity(layout.bundle_dir, root)
+                    _assert_directory_identity(layout.cache_dir, cache, "cache")
+                    _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
+                    _fsync_live_directory(root)
+                    complete_record = _complete_record(transaction_id, moved, written, created)
+                    try:
+                        _append_journal(
+                            journal_storage,
+                            "complete",
+                            _parent=transaction,
+                            _journal_fd=journal_fd,
+                            **{key: value for key, value in complete_record.items() if key != "state"},
+                        )
+                    except Exception:
+                        if not _journal_has_terminal_complete(
+                            journal_storage,
+                            (planned_record, applying_record, validating_record, complete_record),
+                            journal_fd=journal_fd,
+                        ):
+                            raise
+                    _prune_completed_transactions(
+                        transaction_root_anchor,
+                        exclude=transaction_id,
+                        excused=excused,
+                    )
+                    return _application(
+                        transaction_id,
+                        journal,
+                        plan,
+                        moved=moved,
+                        written=written,
+                        created=created,
+                        warnings=(*plan.warnings, *excused),
+                    )
+                except Exception as exc:
+                    failure = f"{phase} failed: {exc}"
+                    recovery_failures: list[str] = []
+                    try:
+                        _append_journal(
+                            journal_storage,
+                            "rolling-back",
+                            _parent=transaction,
+                            _journal_fd=journal_fd,
+                            failure=failure,
+                        )
+                    except Exception as journal_exc:
+                        recovery_failures.append(f"rollback journal failed: {journal_exc}")
+                    rollback_failures: list[str] = []
+                    if snapshots and effect_attempted:
+                        try:
+                            _restore_snapshot(
+                                plan.root,
+                                snapshots,
+                                root=root,
+                                touched=touched,
+                                protected=protected,
+                            )
+                        except Exception as rollback_exc:
+                            rollback_failures.append(f"rollback failed: {rollback_exc}")
+                        try:
+                            verification_failures = _verify_snapshot(root, snapshots, protected)
+                        except Exception as verification_exc:
+                            rollback_failures.append(f"rollback verification failed: {verification_exc}")
+                        else:
+                            rollback_failures.extend(
+                                f"rollback verification failed: {detail}" for detail in verification_failures
+                            )
+                        try:
+                            _assert_root_identity(layout.bundle_dir, root)
+                        except Exception as identity_exc:
+                            rollback_failures.append(f"rollback verification failed: {identity_exc}")
+                    recovery_failures.extend(rollback_failures)
+                    try:
+                        _append_journal(
+                            journal_storage,
+                            "rolled-back",
+                            _parent=transaction,
+                            _journal_fd=journal_fd,
+                            failures=recovery_failures,
+                            complete=not recovery_failures,
+                        )
+                    except Exception as journal_exc:
+                        recovery_failures.append(f"rollback journal failed: {journal_exc}")
+                    return _application(
+                        transaction_id,
+                        journal,
+                        plan,
+                        moved=moved,
+                        written=written,
+                        created=created,
+                        failures=(failure, *recovery_failures),
+                        rolled_back=bool(touched) and not rollback_failures,
+                        warnings=(*plan.warnings, *excused),
+                    )
 
-        finally:
-            root.close()
+            finally:
+                root.close()
 
 
 def apply_mutation(
@@ -2606,6 +2908,7 @@ def apply_mutation(
     plan: WorkMutationPlan,
     *,
     repo_root: Path | None = None,
+    baseline_bundle: Bundle | None = None,
 ) -> MutationApplication:
     """Apply *plan* atomically, retaining durable recovery evidence in cache.
 
@@ -2615,13 +2918,42 @@ def apply_mutation(
     split topology -- workspace and code repo separate. A caller that already
     resolved the code repo (`workspace.repos.resolve_repo`) passes it here so
     validation checks `affects` paths against the code repo, not the vault.
+
+    *baseline_bundle* is an optimisation with a hard precondition: it MUST have
+    been loaded from `layout.bundle_dir` with `ignore=work_tracker_okf.items.IGNORE`.
+    Callers in `work/commands.py` that load with `ignore=()` or a lane-narrowed
+    set (`run_reparent`, `run_release_adoption`) must NOT pass one; omitting
+    it restores the second load and is always correct.
+
+    A plan with no writes, mkdirs, moves, deletes or directory preconditions
+    (`_is_wholly_empty`) still opens the bundle root, takes `_bundle_root_lock`,
+    opens the `work-mutations` cache directory and acquires the cross-process
+    executor lock -- but does no bundle work: no transaction subdirectory or
+    journal is created, and preflight/snapshot/staging/postcondition `validate()`
+    never run. It returns immediately with
+    `transaction_id == EMPTY_TRANSACTION_ID`. This is equivalence for every
+    plan `_is_wholly_empty` admits today, not a heuristic: with no effects
+    `_effects(plan, ...)` yields nothing to commit and
+    `_affected_index_members(plan)` is empty, so the absolute lane-index
+    check has nothing to check. `validate_paths` widens the gate scope, not
+    narrows it -- the members it names would be validated against an
+    identical (unmutated) baseline for an effect-free plan, so only the two
+    absolute `validate_paths`-specific checks (canonical path, item reload)
+    are foregone by skipping validation entirely -- and no shipped caller
+    today produces an effect-free plan that carries a non-empty
+    `validate_paths`, so this is a latent gap, not an observed regression.
+    A full preflight/snapshot/validate pass over an actually-empty plan would
+    only ever validate the bundle against itself. See the comment at the
+    short-circuit site in `_apply_mutation_locked` for the fuller derivation,
+    including why the lock/cache-open survives the short-circuit while the
+    per-mutation transaction directory does not.
     """
     root = _open_root(layout.bundle_dir)
     try:
         with _bundle_root_lock(root):
-            return _apply_mutation_locked(layout, plan, root, repo_root=repo_root)
+            return _apply_mutation_locked(layout, plan, root, repo_root=repo_root, baseline_bundle=baseline_bundle)
     finally:
         root.close()
 
 
-__all__ = ["MutationApplication", "apply_mutation"]
+__all__ = ["EMPTY_TRANSACTION_ID", "MutationApplication", "apply_mutation"]

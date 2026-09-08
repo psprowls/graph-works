@@ -188,6 +188,8 @@ def run_archive(
     if dry_run or not plan.ok or not wiki_plan.ok or conflict:
         return ArchiveRun(plan=plan, wiki_plan=wiki_plan, conflict=conflict, logged=logged)
 
+    # `bundle` (line 166) was loaded with a wider ignore set than IGNORE
+    # (ARCHIVE_IGNORE + WIKI_ARCHIVE_IGNORE) -- not eligible as baseline_bundle.
     result = apply_mutation(layout, plan, repo_root=resolve_repo(layout)[0])
     if not result.ok:
         return ArchiveRun(plan=plan, wiki_plan=wiki_plan, result=result, logged=logged)

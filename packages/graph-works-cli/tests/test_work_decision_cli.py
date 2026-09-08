@@ -99,7 +99,7 @@ def test_answer_and_supersede_are_path_keyed(workspace: tuple[Path, str, str]) -
     assert json.loads(superseded.stdout)["superseded"] == decision_id
 
 
-def test_refused_decision_emits_diagnostics_only(workspace: tuple[Path, str, str]) -> None:
+def test_refused_decision_emits_the_envelope(workspace: tuple[Path, str, str]) -> None:
     root, epic, _child = workspace
     result = runner.invoke(
         app,
@@ -118,7 +118,10 @@ def test_refused_decision_emits_diagnostics_only(workspace: tuple[Path, str, str
         ],
     )
     assert result.exit_code == exit_codes.GENERIC
-    assert result.stdout == "" and "refused" in result.stderr
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"}
+    assert doc["error"]["reason"] == "refused"
+    assert "refused" in result.stderr
 
 
 def test_overturn_files_a_path_native_follow_up(workspace: tuple[Path, str, str]) -> None:
@@ -165,9 +168,11 @@ def test_overturn_files_a_path_native_follow_up(workspace: tuple[Path, str, str]
     assert payload["follow_up_filed"] is True
 
 
-def test_unknown_path_is_ambiguous_and_has_no_stdout(workspace: tuple[Path, str, str]) -> None:
+def test_unknown_path_is_ambiguous_and_emits_the_envelope(workspace: tuple[Path, str, str]) -> None:
     root, _epic, _child = workspace
     result = runner.invoke(
         app, ["work", "decision", "list", "work/feature-missing", "--workspace", str(root), "--json"]
     )
-    assert result.exit_code == exit_codes.AMBIGUOUS and result.stdout == ""
+    assert result.exit_code == exit_codes.AMBIGUOUS
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"} and doc["error"]["reason"] == "unresolved"

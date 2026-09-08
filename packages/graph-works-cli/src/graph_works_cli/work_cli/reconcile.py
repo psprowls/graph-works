@@ -35,7 +35,7 @@ def _repo_override(repo: str) -> Path | None:
         return None
     path = Path(repo)
     if not (path / ".git").exists():
-        rendering.fail(f"{path}: not a git repository", code=exit_codes.NOT_IN_GIT_REPO)
+        rendering.fail(f"{path}: not a git repository", reason="not-a-repo", code=exit_codes.NOT_IN_GIT_REPO)
     return path
 
 
@@ -44,7 +44,7 @@ def reconcile_context(
     repo: str = typer.Option("", "--repo", help="Code repository path; overrides the declared resolution."),
     repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json", help="Emit the context as JSON."),
+    json_output: bool = rendering.json_option("Emit the context as JSON."),
 ) -> None:
     """Assemble everything `reconciling-spec` needs for one work item. Read-only."""
     layout = resolve_workspace(workspace)
@@ -52,11 +52,11 @@ def reconcile_context(
     try:
         context = run_reconcile_context(layout, path, repo=override, repo_name=repo_name or None)
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
-        rendering.fail(str(exc), code=exit_codes.AMBIGUOUS, cause=exc)
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.reconcile_payload(context)
     if json_output:

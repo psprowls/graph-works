@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -12,16 +13,60 @@ from graph_works_cli.work_cli import rendering
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 
 
+@pytest.fixture(autouse=True)
+def _json_mode_default() -> object:
+    """`fail()` reads `_JSON_MODE`/`_COMMAND_NAME`, which Click's own
+    `--json` parsing sets -- these unit tests call `fail()` directly, so set
+    a default the way a non-`--json` invocation would, and reset both after
+    so a test run alongside CLI-level tests (which do set `_COMMAND_NAME`
+    through a real invocation) cannot leak into this file's assertions."""
+    mode_token = rendering._JSON_MODE.set(False)
+    name_token = rendering._COMMAND_NAME.set("")
+    yield
+    rendering._JSON_MODE.reset(mode_token)
+    rendering._COMMAND_NAME.reset(name_token)
+
+
 def test_split_csv_trims_and_drops_empty_fragments() -> None:
     assert rendering.split_csv(" a, ,b,, ") == ["a", "b"]
 
 
 def test_fail_writes_only_to_stderr_and_carries_the_code(capsys: pytest.CaptureFixture[str]) -> None:
     with pytest.raises(typer.Exit) as caught:
-        rendering.fail("nope", code=exit_codes.AMBIGUOUS)
+        rendering.fail("nope", reason="unresolved", code=exit_codes.AMBIGUOUS)
     captured = capsys.readouterr()
     assert caught.value.exit_code == exit_codes.AMBIGUOUS
     assert captured.out == "" and "nope" in captured.err
+
+
+def test_fail_emits_the_envelope_on_stdout_in_json_mode(capsys: pytest.CaptureFixture[str]) -> None:
+    rendering._JSON_MODE.set(True)
+    with pytest.raises(typer.Exit) as caught:
+        rendering.fail("nope", reason="unresolved", code=exit_codes.AMBIGUOUS, payload={"a": 1})
+    captured = capsys.readouterr()
+    doc = json.loads(captured.out)
+    assert set(doc) == {"error"}
+    assert doc["error"] == {
+        "command": "",
+        "reason": "unresolved",
+        "message": "nope",
+        "exit_code": exit_codes.AMBIGUOUS,
+        "payload": {"a": 1},
+    }
+    assert caught.value.exit_code == exit_codes.AMBIGUOUS
+    assert "nope" in captured.err
+
+
+def test_fail_rejects_a_reason_outside_the_closed_vocabulary() -> None:
+    rendering._JSON_MODE.set(True)
+    with pytest.raises(AssertionError):
+        rendering.fail("nope", reason="not-a-real-reason")  # type: ignore[arg-type]
+
+
+def test_fail_asserts_when_json_mode_was_never_declared() -> None:
+    rendering._JSON_MODE.set(None)
+    with pytest.raises(AssertionError, match="json_option"):
+        rendering.fail("nope", reason="usage")
 
 
 def test_rollup_projects_open_paths() -> None:
@@ -364,7 +409,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
 def test_fail_preserves_an_explicit_cause(capsys: pytest.CaptureFixture[str]) -> None:
     cause = ValueError("root")
     with pytest.raises(typer.Exit) as caught:
-        rendering.fail("bad", cause=cause)
+        rendering.fail("bad", reason="io", cause=cause)
     assert caught.value.__cause__ is cause
     assert "bad" in capsys.readouterr().err
 

@@ -34,16 +34,16 @@ def _config(layout: WorkspaceLayout) -> WorkspaceConfig:
     try:
         return load_workspace_config(layout)
     except WorkspaceConfigError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
 
 def _unknown_target(exc: ValueError) -> typer.Exit:
     """`run_decision_*` raises `ValueError` for an unknown path or one
     with no decision owner. Both are unresolved targets, so both land on
     `AMBIGUOUS` -- the message distinguishes them, the exit code does not."""
-    rendering.fail(str(exc), code=exit_codes.AMBIGUOUS, cause=exc)
+    rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
 
 
 def _emit(payload: dict[str, object], *, verb: str, json_output: bool) -> None:
@@ -52,9 +52,9 @@ def _emit(payload: dict[str, object], *, verb: str, json_output: bool) -> None:
     for warning in warnings:
         rendering.warn(str(warning))
     if payload["refusal"] is not None:
-        rendering.fail(f"refused ({payload['refusal']}); nothing was applied")
+        rendering.fail(f"refused ({payload['refusal']}); nothing was applied", reason="refused", payload=payload)
     if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
-        rendering.fail("decision apply was incomplete")
+        rendering.fail("decision apply was incomplete", reason="incomplete-apply", payload=payload)
     if json_output:
         rendering.emit(payload)
     else:
@@ -73,7 +73,7 @@ def add(
     decided_by: str = typer.Option("user", "--decided-by", help="Actor recorded in `decided`."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan the append without writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json"),
+    json_output: bool = rendering.json_option(""),
 ) -> None:
     """Append a decision to the owning epic's ledger."""
     layout = resolve_workspace(workspace)
@@ -92,11 +92,11 @@ def add(
             dry_run=dry_run,
         )
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
     _emit(rendering.decision_payload(result), verb="appended", json_output=json_output)
 
 
@@ -107,7 +107,7 @@ def list_cmd(
     affects: str = typer.Option("", "--affects", help="Filter: entries whose affects contain this work path."),
     cites: str = typer.Option("", "--cites", help="Filter: entries referencing this id, e.g. D-014."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json"),
+    json_output: bool = rendering.json_option(""),
 ) -> None:
     """List the owning epic's decisions. A missing ledger reads as empty.
 
@@ -122,7 +122,7 @@ def list_cmd(
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.decision_payload(result)
     for warning in payload["warnings"]:
@@ -142,7 +142,7 @@ def answer(
     decided_by: str = typer.Option("user", "--decided-by", help="Actor recorded in `decided`."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan the answer without writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json"),
+    json_output: bool = rendering.json_option(""),
 ) -> None:
     """Flip an open or assumed decision to answered."""
     layout = resolve_workspace(workspace)
@@ -158,11 +158,11 @@ def answer(
             dry_run=dry_run,
         )
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
     _emit(rendering.decision_payload(result), verb="answered", json_output=json_output)
 
 
@@ -177,7 +177,7 @@ def supersede(
     decided_by: str = typer.Option("user", "--decided-by", help="Actor recorded in `decided`."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan the supersession without writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json"),
+    json_output: bool = rendering.json_option(""),
 ) -> None:
     """Retire one decision and append its canonical replacement, under one lock."""
     layout = resolve_workspace(workspace)
@@ -196,11 +196,11 @@ def supersede(
             dry_run=dry_run,
         )
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
     _emit(rendering.decision_payload(result), verb="appended", json_output=json_output)
 
 
@@ -216,7 +216,7 @@ def overturn(
     decided_by: str = typer.Option("user", "--decided-by", help="Actor recorded in `decided`."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preflight both halves without writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
-    json_output: bool = typer.Option(False, "--json"),
+    json_output: bool = rendering.json_option(""),
 ) -> None:
     """Supersede a decision and file a follow-up against what already landed.
 
@@ -244,22 +244,27 @@ def overturn(
         rendering.fail(
             f"overturn applied the ledger write but failed to file the follow-up: {exc}. "
             "The ledger and the work lane now disagree; reconcile by hand.",
+            reason="incomplete-apply",
             cause=exc,
         )
     except WorkspaceError as exc:
-        rendering.fail(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:
         _unknown_target(exc)
     except OSError as exc:
-        rendering.fail(str(exc), cause=exc)
+        rendering.fail(str(exc), reason="io", cause=exc)
 
     payload = rendering.overturn_payload(result)
     for warning in payload["warnings"]:
         rendering.warn(warning)
     if payload["refusal"] is not None:
-        rendering.fail(f"refused ({payload['refusal']}); neither the ledger nor the work lane was written")
+        rendering.fail(
+            f"refused ({payload['refusal']}); neither the ledger nor the work lane was written",
+            reason="refused",
+            payload=payload,
+        )
     if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
-        rendering.fail("overturn apply rolled back; no partial JSON emitted")
+        rendering.fail("overturn apply rolled back", reason="incomplete-apply", payload=payload)
     if json_output:
         rendering.emit(payload)
     else:

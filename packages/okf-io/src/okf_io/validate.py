@@ -76,6 +76,21 @@ class RuleContext:
     bundle: Bundle
     links: LinkGraph
     today: date
+    scope: frozenset[str] | None = None
+    """Bundle-relative posix member paths this pass is interested in, or `None`
+    for the whole bundle.
+
+    **It constrains per-document iteration only.** A rule that answers a
+    question about one document at a time honours it, through
+    `okf_io._rules._common.concepts`. A rule that reasons *across* documents --
+    `links.broken` off `ctx.links`, `identity.canonical-collision` off
+    `bundle.canonical_collisions`, a duplicate-title grouping -- must keep
+    reading the full bundle, or it would report an artifact of the scope rather
+    than a fact about the corpus.
+
+    Member paths, not concept ids, because the set has to be able to name a
+    reserved member (`work/index.md`) that is not a concept at all.
+    """
 
 
 #: An external rule is any callable of this shape. It runs through the same
@@ -108,6 +123,8 @@ def validate(
     today: date,
     extra_rules: Sequence[Rule] = (),
     strict: bool = False,
+    scope: frozenset[str] | None = None,
+    links: LinkGraph | None = None,
 ) -> Report:
     """Run the catalog over *bundle*.
 
@@ -133,9 +150,30 @@ def validate(
     exception from a rule propagates: tolerance is a promise about bundle
     *content*, and swallowing a plugin bug would leave a silently incomplete
     report, which is worse than a traceback.
+
+    ``scope`` is the fifth extension point, alongside ``extra_rules=``,
+    ``fm_data(dates="iso")``, ``ignore=`` on ``load_bundle()`` and ``describe=``
+    on ``update_index()``. It names bundle-relative posix member paths and
+    narrows **per-document iteration only**; see ``RuleContext.scope``. ``None``
+    -- the default -- is the whole bundle, which is exactly the behaviour that
+    existed before the parameter did. A caller that narrows is asking a smaller
+    question, not a different one: cross-document rules keep full visibility, so
+    a scoped report is a subset of an unscoped one for the rules that honour it
+    and identical for the rules that do not.
+
+    ``links`` lets a caller that has already built the graph hand it over
+    instead of paying for a rebuild. **It must be ``okf_io.links.build(bundle)``
+    for this exact bundle.** Passing a graph derived from different content is
+    caller error and is not checked -- verifying it would cost the build it
+    exists to avoid.
     """
     builtin, topics = _registry()
-    context = RuleContext(bundle=bundle, links=build(bundle), today=today)
+    context = RuleContext(
+        bundle=bundle,
+        links=build(bundle) if links is None else links,
+        today=today,
+        scope=scope,
+    )
 
     findings: list[Finding] = []
     for rule in builtin:

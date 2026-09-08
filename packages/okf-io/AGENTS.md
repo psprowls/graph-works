@@ -136,11 +136,21 @@ frontmatter. Writing them dirties every neighbour on each edit.
 `provenance` 2/4, `reserved` 2/4, `trust` 4/4.
 
 A rule is `Callable[[RuleContext], Iterable[Finding]]`. `RuleContext` carries
-`bundle`, `links` and `today` — and nothing that touches the filesystem or a
-clock. Use `_rules/_common.py`'s `concepts(ctx)` (yields in sorted id order) and
-`member_path(concept_id)`; nothing in this package iterates a mapping raw,
-because findings are sorted after collection and output must not depend on dict
-order or on what order the filesystem handed back files.
+`bundle`, `links`, `today` and `scope` — and nothing that touches the
+filesystem or a clock. Use `_rules/_common.py`'s `concepts(ctx)` (yields in
+sorted id order) and `member_path(concept_id)`; nothing in this package
+iterates a mapping raw, because findings are sorted after collection and
+output must not depend on dict order or on what order the filesystem handed
+back files.
+
+`RuleContext.scope` — and `validate(scope=)`, which sets it — is one of
+okf-io's extension points (see the root `AGENTS.md`): a `frozenset[str] | None`
+of bundle-relative member paths that constrains *per-document* iteration only.
+A rule reasoning across documents (`links.broken`, a duplicate-title grouping)
+must still read the whole bundle regardless of scope, or it would report an
+artifact of the scope rather than the bundle. `validate(links=)` is a related
+but separate parameter — passing a pre-built `LinkGraph` is an optimisation
+that skips recomputing it, not a change in behaviour.
 
 `_common.py` is underscore-prefixed precisely to keep it out of the registry —
 adding a non-rule helper module means prefixing it too.

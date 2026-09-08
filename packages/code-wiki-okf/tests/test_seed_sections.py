@@ -12,7 +12,7 @@ from okf_io import load_bundle, validate
 _TODAY = date(2026, 1, 1)
 
 _EXPECTED_OWNED = {
-    "Package": ("language", "version", "depends_on", "test_suites", "entry_points"),
+    "Package": ("language", "version", "depends_on", "test_suites", "entry_points", "used_by", "versions_in_use"),
     "App": ("package",),
     "Dependency": ("ecosystem", "implemented_by", "used_by", "versions_in_use"),
     "TestSuite": ("tested_packages", "suite_kind", "file_count"),

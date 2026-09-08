@@ -67,6 +67,8 @@ def render_package(desc: PackageDescription, *, repo_name: str) -> Render:
             "depends_on": list(desc.internal_dependencies),
             "test_suites": [suite.name for suite in desc.test_suites],
             "entry_points": [ep.name for ep in desc.entry_points],
+            "used_by": list(desc.used_by),
+            "versions_in_use": list(desc.versions_in_use),
         },
         sections={"Files": _files_section(desc.files, repo_name=repo_name)},
     )

@@ -407,11 +407,20 @@ def plan_entities(
             resource=context.resource,
         )
         implementations = sorted(dependency_description.implemented_by)
+        if implementations:
+            # A Dependency whose node resolves to a workspace member gets no
+            # page (ADR-0034 as narrowed by ADR-0048): `used_by` and
+            # `versions_in_use` move onto the implementing Package page
+            # instead. The graph node and its `implemented_by` edge are
+            # unaffected — only the write is skipped. Ambiguity is still
+            # reported: the warning is raised here, before the skip, so
+            # suppressing the page never suppresses the diagnostic.
+            if len(implementations) > 1:
+                warnings.append(f"{context.resource} has multiple implementations: {', '.join(implementations)}")
+            continue
         dependency_description = replace(dependency_description, implemented_by=implementations)
         render = _stamp_provenance(render_dependency(dependency_description), sha=None, at=generated_at)
         add(_write(context, title=dependency_name, render=render))
-        if len(implementations) > 1:
-            warnings.append(f"{context.resource} has multiple implementations: {', '.join(implementations)}")
 
     ordered_writes = tuple(sorted(writes, key=lambda write: (write.member, write.context.resource)))
     _preflight_existing(bundle, index, ordered_writes)

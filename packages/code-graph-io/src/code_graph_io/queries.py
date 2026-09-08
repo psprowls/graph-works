@@ -195,6 +195,11 @@ class PackageDescription:
     # both directions of the depends_on_package edge.
     internal_dependencies: list[str] = field(default_factory=list)  # outgoing
     internal_dependents: list[str] = field(default_factory=list)  # incoming
+    # facts migrated from the implemented Dependency node (ADR-0048); empty
+    # when this package does not implement a distributable manifest's
+    # Dependency node.
+    used_by: list[str] = field(default_factory=list)
+    versions_in_use: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -803,6 +808,39 @@ def describe_package(
     ).fetchall()
     internal_dependents = [r[0] for r in internal_dependent_rows]
 
+    # Facts migrated from the implemented Dependency node, if this package
+    # implements one (ADR-0048). Same consumer-kind filter and ordering as
+    # describe_dependency, so the two agree by construction.
+    used_by: list[str] = []
+    versions_in_use: list[str] = []
+    # ORDER BY is not cosmetic: a member shipping two distributable manifests
+    # (a pyproject.toml and a package.json, say) is implemented_by two
+    # Dependency nodes, and an unordered fetchone would pick between them by
+    # iteration order. No workspace member has both today; the ordering makes
+    # the day one does a stable choice rather than a flapping one.
+    implemented_dep_row = conn.execute(
+        "SELECT dep.id, dep.attrs_json FROM edges e "
+        "JOIN nodes dep ON e.src = dep.id "
+        "WHERE e.kind='implemented_by' AND e.dst = ? AND dep.kind='dependency' "
+        "ORDER BY dep.uri",
+        (package_id,),
+    ).fetchone()
+    if implemented_dep_row is not None:
+        dep_id, dep_attrs_json = implemented_dep_row
+        used_by_rows = conn.execute(
+            "SELECT DISTINCT p.uri FROM edges e "
+            "JOIN nodes p ON e.src = p.id "
+            "WHERE e.kind='used_by' AND e.dst = ? AND p.kind IN ('package', 'app', 'repository') "
+            "AND p.uri IS NOT NULL "
+            "ORDER BY p.uri",
+            (dep_id,),
+        ).fetchall()
+        used_by = [r[0] for r in used_by_rows]
+        dep_attrs = json.loads(dep_attrs_json) if dep_attrs_json else {}
+        versions = dep_attrs.get("versions_in_use") or []
+        if isinstance(versions, list):
+            versions_in_use = list(versions)
+
     return PackageDescription(
         name=name,
         language=attrs.get("language", ""),
@@ -813,6 +851,8 @@ def describe_package(
         test_suites=test_suites,
         internal_dependencies=internal_dependencies,
         internal_dependents=internal_dependents,
+        used_by=used_by,
+        versions_in_use=versions_in_use,
     )
 
 
@@ -1286,8 +1326,14 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
     dependency remain discoverable — the same convention `describe_app`'s
     docstring names — and so a virtual workspace root's dev tooling,
     re-sourced to the Repository node, renders too.
-    Deduplicated and sorted alphabetically by consumer name. `conn` must be
-    opened read-only.
+
+    `used_by` carries consumer **URIs**, not bare names (ADR-0048): the three
+    admitted kinds flattened into one name list cannot say which is which, so
+    a virtual workspace root reads as a package. A URI is self-describing
+    about kind and resolvable to a page by placement. `describe_package`'s
+    migrated `used_by` uses the same representation.
+
+    Deduplicated and sorted by consumer URI. `conn` must be opened read-only.
     """
     row = conn.execute(
         "SELECT id, name, attrs_json, uri FROM nodes "
@@ -1300,10 +1346,11 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
     dep_id, dep_name, attrs_json, uri = row
     attrs = json.loads(attrs_json) if attrs_json else {}
     used_by_rows = conn.execute(
-        "SELECT DISTINCT p.name FROM edges e "
+        "SELECT DISTINCT p.uri FROM edges e "
         "JOIN nodes p ON e.src = p.id "
         "WHERE e.kind='used_by' AND e.dst = ? AND p.kind IN ('package', 'app', 'repository') "
-        "ORDER BY p.name",
+        "AND p.uri IS NOT NULL "
+        "ORDER BY p.uri",
         (dep_id,),
     ).fetchall()
     used_by = [r[0] for r in used_by_rows]

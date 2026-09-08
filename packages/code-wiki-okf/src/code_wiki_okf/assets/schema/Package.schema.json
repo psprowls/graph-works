@@ -14,6 +14,8 @@
     "depends_on": { "type": "array", "items": { "type": "string" } },
     "test_suites": { "type": "array", "items": { "type": "string" } },
     "entry_points": { "type": "array", "items": { "type": "string" } },
+    "used_by": { "type": "array", "items": { "type": "string" } },
+    "versions_in_use": { "type": "array", "items": { "type": "string" } },
     "generated": {
       "type": "object",
       "required": ["by", "at"],

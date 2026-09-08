@@ -1,5 +1,5 @@
 frontmatter:
-  owned: [language, version, depends_on, test_suites, entry_points]
+  owned: [language, version, depends_on, test_suites, entry_points, used_by, versions_in_use]
   provenance: [generated, last_updated_commit, tokens, prose_refreshed_commit, prose_refresh_attempts]
 sections:
   - heading: Purpose

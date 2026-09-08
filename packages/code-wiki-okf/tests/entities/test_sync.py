@@ -592,7 +592,10 @@ def test_entity_plan_and_frontmatter_are_immutable(tmp_path: Path) -> None:
         plan.writes = ()  # type: ignore[misc]
 
 
-def test_dependency_preserves_multiple_implementations_and_warns(tmp_path: Path) -> None:
+def test_dependency_with_multiple_implementations_is_suppressed_but_still_warns(tmp_path: Path) -> None:
+    """A Dependency node with a non-empty `implemented_by` gets no page (ADR-0048),
+    but the multiple-implementations diagnostic still fires — it flags a graph
+    ambiguity, independent of whether a page is written for it."""
     graph_dir = tmp_path / "graph"
     _seed(
         graph_dir,
@@ -613,8 +616,7 @@ def test_dependency_preserves_multiple_implementations_and_warns(tmp_path: Path)
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    dependency = next(write for write in plan.writes if write.context.resource == "dependency:pypi/shared")
-    assert dependency.frontmatter["implemented_by"] == ("pkg:acme/one/first", "pkg:acme/two/second")
+    assert not [write for write in plan.writes if write.context.resource == "dependency:pypi/shared"]
     assert plan.warnings == (
         "dependency:pypi/shared has multiple implementations: pkg:acme/one/first, pkg:acme/two/second",
     )
@@ -622,8 +624,32 @@ def test_dependency_preserves_multiple_implementations_and_warns(tmp_path: Path)
     summary = apply_entities(bundle_root, plan, today=_TODAY)
     assert summary.warnings == plan.warnings
     document = load_bundle(bundle_root).concept("dependencies/pypi/shared")
-    assert document is not None
-    assert document.fm_raw["implemented_by"] == ["pkg:acme/one/first", "pkg:acme/two/second"]
+    assert document is None
+
+
+def test_dependency_with_a_single_implementation_is_suppressed_and_does_not_warn(tmp_path: Path) -> None:
+    """A Dependency node with exactly one implementation is suppressed the same
+    way, and the (inherently single-valued) case never fires the
+    multiple-implementations warning."""
+    graph_dir = tmp_path / "graph"
+    _seed(
+        graph_dir,
+        [_RepoSeed("acme", "one", packages=("first",))],
+        dependencies=(_dependency_node("pypi", "solo"),),
+    )
+    _seed_dependency_edges(
+        graph_dir,
+        dependency=("pypi", "solo"),
+        implementations=(("one", "first"),),
+    )
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("one",), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert not [write for write in plan.writes if write.context.resource == "dependency:pypi/solo"]
+    assert plan.warnings == ()
 
 
 def test_dependency_with_a_consumer_and_no_implementation_remains(tmp_path: Path) -> None:
@@ -646,7 +672,9 @@ def test_dependency_with_a_consumer_and_no_implementation_remains(tmp_path: Path
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
     dependency = next(write for write in plan.writes if write.context.resource == "dependency:pypi/external")
-    assert dependency.frontmatter["used_by"] == ("consumer",)
+    # A consumer URI, not a bare name (ADR-0048): the three admitted consumer
+    # kinds are indistinguishable once flattened to names.
+    assert dependency.frontmatter["used_by"] == ("pkg:acme/demo/consumer",)
     assert dependency.frontmatter["implemented_by"] == ()
     assert plan.warnings == ()
 

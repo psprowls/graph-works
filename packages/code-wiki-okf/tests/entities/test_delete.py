@@ -34,6 +34,112 @@ def _write_package_page(
     return path
 
 
+_WHY_PLACEHOLDER = "> TODO: why the workspace depends on this, and what it is used for."
+
+
+def _write_dependency_page(
+    root: Path,
+    member: str,
+    resource: str,
+    *,
+    implemented_by: str = "[]",
+    why_text: str = _WHY_PLACEHOLDER,
+    generated: bool = True,
+) -> Path:
+    path = root / member
+    path.parent.mkdir(parents=True, exist_ok=True)
+    provenance = "generated:\n  by: code-wiki-okf/0.4.0\n  at: '2026-01-01T00:00:00+00:00'\n" if generated else ""
+    path.write_text(
+        f'---\ntype: Dependency\ntitle: gone\nresource: "{resource}"\n'
+        f"implemented_by: {implemented_by}\n{provenance}---\n\n"
+        f"## Why we depend on this\n\n{why_text}\n\n"
+        "## Gotchas / workarounds\n\n> TODO: known issues, version pins, or workarounds this dependency needs.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_dependency_with_implemented_by_is_guarded_like_any_other_page(tmp_path: Path) -> None:
+    """A workspace-implemented Dependency gets no *page* (ADR-0048 suppresses
+    the write in `entities/sync.py`), but a stale page left over from before
+    that rule is still ordinary prune input: authored prose declines it.
+
+    This is the regression for the removed lane-residue bypass. ADR-0034's
+    prose guard has no per-type exceptions, and the one-time sweep that
+    cleared the live bundle's residue is history, not a standing rule."""
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    page = _write_dependency_page(
+        tmp_path,
+        "dependencies/pypi/gone.md",
+        "dependency:pypi/gone",
+        implemented_by="[pkg:acme/repo/gone]",
+        why_text="A human wrote a detailed justification here.",
+    )
+
+    result = prune_entities(load_bundle(tmp_path), frozenset())
+
+    assert result.deleted == ()
+    assert result.declined == (("dependencies/pypi/gone", "prose-edited"),)
+    assert page.exists()
+
+
+def test_unedited_dependency_with_implemented_by_is_deleted_like_any_other_page(tmp_path: Path) -> None:
+    """The other half: `implemented_by` is not a shield either. A stale,
+    generated, placeholder-prose Dependency page prunes on the ordinary path,
+    with no special-casing in either direction."""
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    page = _write_dependency_page(
+        tmp_path,
+        "dependencies/pypi/gone.md",
+        "dependency:pypi/gone",
+        implemented_by="[pkg:acme/repo/gone]",
+    )
+
+    result = prune_entities(load_bundle(tmp_path), frozenset())
+
+    assert result.deleted == ("dependencies/pypi/gone",)
+    assert result.declined == ()
+    assert not page.exists()
+
+
+def test_dependency_without_code_wiki_provenance_is_declined(tmp_path: Path) -> None:
+    """A Dependency page with no code-wiki `generated.by` stamp is a human's
+    page, not ours, and stays whatever its prose says."""
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    page = _write_dependency_page(
+        tmp_path,
+        "dependencies/pypi/gone.md",
+        "dependency:pypi/gone",
+        implemented_by="[pkg:acme/repo/gone]",
+        generated=False,
+    )
+
+    result = prune_entities(load_bundle(tmp_path), frozenset())
+
+    assert result.deleted == ()
+    assert result.declined == (("dependencies/pypi/gone", "not-generated"),)
+    assert page.exists()
+
+
+def test_dependency_without_implemented_by_still_needs_the_prose_guard(tmp_path: Path) -> None:
+    """A third-party Dependency page — no `implemented_by` — declines on
+    edited prose, identically to the implemented case above."""
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    page = _write_dependency_page(
+        tmp_path,
+        "dependencies/pypi/external.md",
+        "dependency:pypi/external",
+        implemented_by="[]",
+        why_text="A human wrote a detailed justification here.",
+    )
+
+    result = prune_entities(load_bundle(tmp_path), frozenset())
+
+    assert result.deleted == ()
+    assert result.declined == (("dependencies/pypi/external", "prose-edited"),)
+    assert page.exists()
+
+
 def test_generated_stale_page_is_deleted_by_type_even_when_misplaced(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     misplaced = _write_package_page(tmp_path, "misc/misplaced.md", "pkg:acme/repo/gone")

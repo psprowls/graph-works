@@ -40,6 +40,8 @@ def test_render_package_owned_frontmatter_and_files_section() -> None:
         test_suites=[SuiteDescription(name="okf-io-tests", uri="", kind="pytest", file_count=12)],
         internal_dependencies=["code-graph-io"],
         internal_dependents=["code-wiki-okf"],
+        used_by=["graph-works-cli", "graph-works"],
+        versions_in_use=["okf-io>=0.2", "okf-io>=0.2.4"],
     )
     render = render_package(desc, repo_name="agent-workspace")
     assert render.frontmatter == {
@@ -48,6 +50,8 @@ def test_render_package_owned_frontmatter_and_files_section() -> None:
         "depends_on": ["code-graph-io"],
         "test_suites": ["okf-io-tests"],
         "entry_points": ["okf-io"],
+        "used_by": ["graph-works-cli", "graph-works"],
+        "versions_in_use": ["okf-io>=0.2", "okf-io>=0.2.4"],
     }
     assert render.sections.keys() == {"Files"}
     assert "/repositories/agent-workspace/files/packages/okf-io/src/okf_io/bundle.py.md" in render.sections["Files"]
@@ -58,6 +62,16 @@ def test_render_package_empty_files_renders_none_placeholder() -> None:
     desc = PackageDescription(name="empty", language="python", version="0.0.0", files=[], counts={})
     render = render_package(desc, repo_name="agent-workspace")
     assert render.sections["Files"].strip() == "_(none)_"
+
+
+def test_render_package_used_by_and_versions_in_use_default_to_empty_lists() -> None:
+    """A Package that does not implement any distributable manifest's
+    Dependency node still emits both keys, as empty lists — not omitted,
+    not null (ADR-0048's migration; `workflow-orca` is the real example)."""
+    desc = PackageDescription(name="workflow-orca", language="python", version="0.1.0", files=[], counts={})
+    render = render_package(desc, repo_name="agent-workspace")
+    assert render.frontmatter["used_by"] == []
+    assert render.frontmatter["versions_in_use"] == []
 
 
 def test_render_app_frontmatter_drops_packaging_facts_for_a_package_reference() -> None:

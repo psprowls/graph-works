@@ -1182,9 +1182,111 @@ def test_describe_dependency_returns_dependency_description(conn: sqlite3.Connec
     assert d.name == "boto3"
     assert d.uri == "dependency:pypi/boto3"
     assert d.versions_in_use == ["boto3>=1.38", "boto3==1.39.0"]
-    assert d.used_by == ["my-pkg"]
+    assert d.used_by == ["pkg:local/repo/my-pkg"]
     assert d.implemented_by == []
     assert d.ambiguous is False
+
+
+def test_describe_package_used_by_and_versions_in_use_match_describe_dependency(
+    conn: sqlite3.Connection,
+) -> None:
+    """A workspace-implemented dependency's `used_by`/`versions_in_use` are also
+    reachable from the implementing Package, and agree with `describe_dependency`
+    by construction (same consumer-kind filter, same ordering)."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="dependency",
+                    name="shared-dep",
+                    path=None,
+                    line=None,
+                    attrs={
+                        "ecosystem": "pypi",
+                        "name": "shared-dep",
+                        "uri": "dependency:pypi/shared-dep",
+                        "versions_in_use": ["shared-dep>=1.0"],
+                    },
+                ),
+                GraphNode(
+                    kind="package",
+                    name="impl-pkg",
+                    path="src/impl_pkg",
+                    line=None,
+                    attrs={"uri": "pkg:local/repo/impl-pkg"},
+                ),
+                GraphNode(
+                    kind="package",
+                    name="consumer-pkg",
+                    path="src/consumer_pkg",
+                    line=None,
+                    attrs={"uri": "pkg:local/repo/consumer-pkg"},
+                ),
+                GraphNode(
+                    kind="repository",
+                    name="root-repo",
+                    path="",
+                    line=None,
+                    attrs={"owner": "o", "name": "root-repo", "uri": "repo:o/root-repo"},
+                ),
+            ],
+            edges=[
+                GraphEdge(
+                    src=("dependency", "shared-dep", None),
+                    dst=("package", "impl-pkg", "src/impl_pkg"),
+                    kind="implemented_by",
+                    attrs={},
+                ),
+                GraphEdge(
+                    src=("package", "consumer-pkg", "src/consumer_pkg"),
+                    dst=("dependency", "shared-dep", None),
+                    kind="used_by",
+                    attrs={},
+                ),
+                GraphEdge(
+                    src=("repository", "root-repo", ""),
+                    dst=("dependency", "shared-dep", None),
+                    kind="used_by",
+                    attrs={"dev": True},
+                ),
+            ],
+        ),
+    )
+    d = queries.describe_dependency(conn, ecosystem="pypi", name="shared-dep")
+    assert d is not None
+    p = queries.describe_package(conn, name="impl-pkg")
+    assert p is not None
+    assert p.used_by == d.used_by
+    assert p.versions_in_use == d.versions_in_use
+    assert p.used_by == ["pkg:local/repo/consumer-pkg", "repo:o/root-repo"]
+    assert p.versions_in_use == ["shared-dep>=1.0"]
+
+
+def test_describe_package_used_by_and_versions_in_use_empty_when_not_implemented(
+    conn: sqlite3.Connection,
+) -> None:
+    """A Package with no implemented_by edge (not the workspace implementation of
+    any dependency) gets empty lists, not an error."""
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="package",
+                    name="lonely-pkg",
+                    path="src/lonely_pkg",
+                    line=None,
+                    attrs={"uri": "pkg:local/repo/lonely-pkg"},
+                ),
+            ],
+            edges=[],
+        ),
+    )
+    p = queries.describe_package(conn, name="lonely-pkg")
+    assert p is not None
+    assert p.used_by == []
+    assert p.versions_in_use == []
 
 
 def test_describe_dependency_retains_sorted_deduplicated_implementations(conn: sqlite3.Connection) -> None:
@@ -1333,7 +1435,7 @@ def test_describe_dependency_includes_app_only_consumer(conn: sqlite3.Connection
     )
     d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
     assert d is not None
-    assert d.used_by == ["work-tracker-okf"]
+    assert d.used_by == ["app:o/r/work-tracker-okf"]
 
 
 def test_describe_dependency_includes_repository_consumer(conn: sqlite3.Connection) -> None:
@@ -1370,7 +1472,7 @@ def test_describe_dependency_includes_repository_consumer(conn: sqlite3.Connecti
     )
     d = queries.describe_dependency(conn, ecosystem="pypi", name="mypy")
     assert d is not None
-    assert d.used_by == ["agent-workspace"]
+    assert d.used_by == ["repo:o/agent-workspace"]
 
 
 def test_describe_dependency_used_by_matches_consumer_packages(conn: sqlite3.Connection) -> None:
@@ -1420,11 +1522,20 @@ def test_describe_dependency_used_by_matches_consumer_packages(conn: sqlite3.Con
     d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
     assert d is not None
     cp = queries.consumer_packages(conn, kind="dependency", entity_name="typer")
-    assert d.used_by == list(cp)
+    # Same consumer *set*, two representations: describe_dependency carries
+    # page-resolvable URIs (ADR-0048), consumer_packages stays the
+    # domain-agnostic name query it documents itself as. The guard is that
+    # neither silently gains or loses a consumer relative to the other.
+    assert [uri.rsplit("/", 1)[-1] for uri in d.used_by] == list(cp)
 
 
-def test_describe_dependency_dedupes_same_named_package_and_app(conn: sqlite3.Connection) -> None:
-    """A package and an app sharing a name collapse to one used_by entry."""
+def test_describe_dependency_separates_same_named_package_and_app(conn: sqlite3.Connection) -> None:
+    """A package and an app sharing a name stay two used_by entries.
+
+    Under the old bare-name representation these collapsed to one, which said
+    "used by twin" where two distinct entities — with two distinct pages —
+    each use the dependency. URIs (ADR-0048) keep them apart and let each
+    resolve to its own page."""
     upsert.upsert_records(
         conn,
         GraphRecords(
@@ -1469,7 +1580,7 @@ def test_describe_dependency_dedupes_same_named_package_and_app(conn: sqlite3.Co
     )
     d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
     assert d is not None
-    assert d.used_by == ["twin"]
+    assert d.used_by == ["app:o/r/twin", "pkg:local/repo/twin"]
 
 
 def test_describe_agent_plugin_returns_description(conn: sqlite3.Connection) -> None:

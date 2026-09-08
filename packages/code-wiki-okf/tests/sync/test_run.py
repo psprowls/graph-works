@@ -593,12 +593,10 @@ def test_multi_implementation_dependency_warns_without_selecting_one(tmp_path: P
         "dependency:pypi/shared has multiple implementations: pkg:acme/demo/alternate, pkg:acme/demo/widgets",
     )
     dependency = load_bundle(bundle_root).concept("dependencies/pypi/shared")
-    assert dependency is not None
-    assert dependency.fm_raw["implemented_by"] == [
-        "pkg:acme/demo/alternate",
-        "pkg:acme/demo/widgets",
-    ]
-    assert "/dependencies/pypi/shared.md" in (bundle_root / "dependencies/pypi/index.md").read_text(encoding="utf-8")
+    assert dependency is None
+    index_path = bundle_root / "dependencies/pypi/index.md"
+    if index_path.exists():
+        assert "/dependencies/pypi/shared.md" not in index_path.read_text(encoding="utf-8")
 
 
 def test_plan_time_preflight_refuses_an_entity_target_blocked_by_a_directory(tmp_path: Path) -> None:

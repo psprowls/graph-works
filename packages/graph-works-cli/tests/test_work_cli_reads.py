@@ -69,10 +69,12 @@ def test_next_emits_requested_and_selected_paths(workspace: Path) -> None:
     assert "work_status" in payload and "slug" not in payload
 
 
-def test_next_unknown_path_is_diagnostic_only(workspace: Path) -> None:
+def test_next_unknown_path_emits_the_envelope(workspace: Path) -> None:
     result = runner.invoke(app, ["work", "next", "work/feature-missing", "--workspace", str(workspace), "--json"])
     assert result.exit_code == exit_codes.AMBIGUOUS
-    assert result.stdout == ""
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"}
+    assert doc["error"]["reason"] == "unresolved" and doc["error"]["payload"] is None
     assert "unknown work item" in result.stderr
 
 

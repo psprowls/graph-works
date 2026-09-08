@@ -213,11 +213,15 @@ an implementation detail.
 - **okf-io is the pure core** (ADR-0005). Every other package depends on it
 (directly or via `okf-ext`), never the reverse. Schema validation, harvesters,
 servers, wiki generation — none of those belong here. The core instead
-exposes four extension points, all shipped and contract-tested before any
+exposes five extension points, all shipped and contract-tested before any
 consumer exists: `extra_rules=` on `validate()`, `Document.fm_data(dates="iso")`
 (plain-data projection, `json.dumps`-able with no encoder), `ignore=` on
-`load_bundle()` (an ignored member is "not a concept", not "not there"), and
-`describe=` on `update_index()`.
+`load_bundle()` (an ignored member is "not a concept", not "not there"),
+`describe=` on `update_index()`, and `scope=` on `validate()` / `RuleContext`
+(a `frozenset[str] | None` of bundle-relative member paths that constrains
+per-document rule iteration). `validate(links=)` is a related optimisation
+parameter, not an extension point — passing a pre-built `LinkGraph` skips
+recomputing it and changes no behaviour.
 - `okf_io.validate` **is the function, not the submodule.** Use
 `from okf_io.validate import Finding, Report, RuleContext`. Both
 `import okf_io.validate as m` and `from okf_io import validate as m` bind the

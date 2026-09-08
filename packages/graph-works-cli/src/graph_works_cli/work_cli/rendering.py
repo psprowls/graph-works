@@ -11,13 +11,16 @@ Human output is bespoke here rather than routed through
 `code_graph_io.render`: that module's spine is a graph entity, and a routing
 decision, a rollup and a reconciliation context are none of those.
 
-JSON occupies stdout alone; warnings and errors go to stderr in every mode,
-and a failed command prints no partial JSON document.
+JSON occupies stdout alone; warnings and errors go to stderr in every mode. A
+`--json` refusal additionally emits a single-key `{"error": ...}` envelope on
+stdout before exiting non-zero (D-004) -- see `_envelope()` below; the exit
+code never becomes zero, and human-mode output is unaffected.
 """
 
 from __future__ import annotations
 
 import json
+from contextvars import ContextVar
 from datetime import date
 from pathlib import Path
 from typing import Any, Never, Protocol, cast
@@ -47,14 +50,113 @@ from graph_works_cli import exit_codes
 # Emit / exit policy
 # ---------------------------------------------------------------------------
 
+_JSON_MODE: ContextVar[bool | None] = ContextVar("gw_work_json_mode", default=None)
+
+#: Captured alongside `_JSON_MODE`, at the same `--json` parse-time seam --
+#: `typer.Context`/`typer.CallbackParam` wrap this codebase's own vendored
+#: click fork (`typer._click`), which keeps a context stack the real `click`
+#: package's `get_current_context()` cannot see (see this package's AGENTS.md
+#: "typer.core vs click" gotcha); capturing the path here, once, at a point
+#: where the context is unambiguously available avoids relying on any such
+#: lookup later, inside `fail()`.
+_COMMAND_NAME: ContextVar[str] = ContextVar("gw_work_command_name", default="")
+
+#: The closed `reason` vocabulary for a `fail()` envelope (D-004 §3.2). A new
+#: exit site must pick one of these deliberately -- there is no catch-all.
+_REASONS = frozenset(
+    {
+        "refused",
+        "incomplete-apply",
+        "conflict",
+        "incomplete",
+        "usage",
+        "workspace",
+        "unresolved",
+        "not-a-repo",
+        "io",
+    }
+)
+
+
+def _set_json_mode(ctx: typer.Context, param: typer.CallbackParam, value: bool) -> bool:
+    """The shared `--json` option callback: records this invocation's mode
+    and command path.
+
+    Click invokes an option's callback even when the option is absent,
+    passing the declared default -- so every command built with
+    `json_option()` sets this var, to `True` or to `False`. A command that
+    hand-rolls its own `--json` leaves it `None`, which `fail()` treats as a
+    programming error rather than a silent default.
+    """
+    _JSON_MODE.set(value)
+    _root_name, _, rest = ctx.command_path.partition(" ")
+    _COMMAND_NAME.set(rest)
+    return value
+
+
+def reset_json_mode() -> None:
+    """Reset the per-invocation JSON-mode var. Called from the root callback,
+    which Click runs before the subcommand's own option parsing -- so this
+    always executes before that command's `json_option()` callback."""
+    _JSON_MODE.set(None)
+    _COMMAND_NAME.set("")
+
+
+def json_option(help: str) -> bool:
+    """The one `--json` declaration every `gw work` command must use.
+
+    Replaces a hand-written `typer.Option(False, "--json", help=...)`: same
+    surface (default `False`, same help text), plus the mode-tracking
+    callback `fail()` depends on. Typed `bool` to match every call site's own
+    `json_output: bool = ...` annotation -- `typer.Option()` itself is typed
+    `Any` in typer's stubs.
+    """
+    return cast(bool, typer.Option(False, "--json", help=help, callback=_set_json_mode))
+
+
+def _envelope(*, reason: str, message: str, code: int, payload: object) -> dict[str, Any]:
+    """The single-key, structurally-unmistakable refusal document (D-004 §3.2).
+
+    No success projection in this module carries a top-level `error` key, so
+    `"error" in doc` is a sound, collision-free discriminator (§2.5).
+    """
+    assert reason in _REASONS, f"fail(): {reason!r} is not in the closed reason vocabulary"
+    return {
+        "error": {
+            "command": _COMMAND_NAME.get(),
+            "reason": reason,
+            "message": message,
+            "exit_code": code,
+            "payload": payload,
+        }
+    }
+
 
 def emit(payload: object) -> None:
     """One JSON document on stdout, and nothing else."""
     typer.echo(json.dumps(payload, indent=2))
 
 
-def fail(message: str, *, code: int = exit_codes.GENERIC, cause: BaseException | None = None) -> Never:
-    """Write one user-facing error to stderr and stop the current command."""
+def fail(
+    message: str,
+    *,
+    reason: str,
+    code: int = exit_codes.GENERIC,
+    cause: BaseException | None = None,
+    payload: object | None = None,
+) -> Never:
+    """Emit a `--json` refusal envelope (when in JSON mode), write the
+    human-facing error to stderr in every mode, and stop the current command.
+
+    `reason` is required, not defaulted: a new exit site must name which of
+    the closed vocabulary it is, so it can never silently fall through to a
+    catch-all. The stderr line and exit code are unchanged from before D-004;
+    the envelope is purely additive, and only appears on stdout.
+    """
+    mode = _JSON_MODE.get()
+    assert mode is not None, "gw work command reached fail() without declaring --json via json_option()"
+    if mode:
+        emit(_envelope(reason=reason, message=message, code=code, payload=payload))
     typer.echo(f"Error: {message}", err=True)
     if cause is None:
         raise typer.Exit(code=code)

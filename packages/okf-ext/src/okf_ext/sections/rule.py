@@ -147,11 +147,16 @@ def section_rule(section_set: SectionSet, *, severity: Severity = "warn") -> Rul
     Documents okf-io could not parse are skipped rather than re-reported, and
     a document with no `type`, or an empty one, is skipped because there is
     nothing to dispatch on. Both match `schema_rule` exactly.
+
+    Honours `RuleContext.scope`: this rule is per-document, so a narrowed pass
+    asks the same question of fewer documents.
     """
     set_name = section_set.root.name or str(section_set.root)
 
     def rule(context: RuleContext) -> Iterable[Finding]:
         for concept_id in sorted(context.bundle.concepts):
+            if context.scope is not None and f"{concept_id}.md" not in context.scope:
+                continue
             document = context.bundle.concepts[concept_id]
             if document.parse_error is not None:
                 continue

@@ -256,7 +256,12 @@ def run_file(
 
     return FilingRun(
         plan=outcome.plan,
-        application=apply_mutation(layout, _filing_mutation(bundle, outcome.plan), repo_root=_repo_root(layout)),
+        application=apply_mutation(
+            layout,
+            _filing_mutation(bundle, outcome.plan),
+            repo_root=_repo_root(layout),
+            baseline_bundle=bundle,
+        ),
     )
 
 
@@ -410,6 +415,8 @@ def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNorma
 def _apply_normalizations(
     layout: WorkspaceLayout,
     changes: Sequence[SourceNormalization],
+    *,
+    bundle: Bundle | None = None,
 ) -> tuple[NextApplication, tuple[str, ...]]:
     normalized: list[str] = []
     warnings: list[str] = []
@@ -427,7 +434,7 @@ def _apply_normalizations(
                     (_planned_write(member, before, document.serialize().encode("utf-8")),),
                     validate_paths=(change.path,),
                 )
-                application = apply_mutation(layout, mutation, repo_root=_repo_root(layout))
+                application = apply_mutation(layout, mutation, repo_root=_repo_root(layout), baseline_bundle=bundle)
                 if application.ok:
                     normalized.append(change.path)
                 else:
@@ -516,7 +523,7 @@ def run_next(
     if dry_run:
         return preview
 
-    application, warnings = _apply_normalizations(layout, normalizations)
+    application, warnings = _apply_normalizations(layout, normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     persisted_items = load_items(persisted_bundle)
     persisted_state = state_for(
@@ -648,7 +655,9 @@ def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> Regen
             condition for lane, condition in lane_preconditions.items() if lane in changed_lanes
         ),
     )
-    application = None if dry_run else apply_mutation(layout, mutation, repo_root=_repo_root(layout))
+    application = (
+        None if dry_run else apply_mutation(layout, mutation, repo_root=_repo_root(layout), baseline_bundle=bundle)
+    )
     return RegenIndexesResult(plans=plans, mutation=mutation, application=application)
 
 
@@ -667,6 +676,8 @@ def run_reparent(
     *,
     dry_run: bool = True,
 ) -> PathMutationResult:
+    # Loaded with ignore=() (not IGNORE) -- do not pass this bundle as baseline_bundle,
+    # it would silently validate a different corpus than the postcondition gate expects.
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
     return PathMutationResult(
@@ -681,6 +692,8 @@ def run_release_adoption(
     *,
     dry_run: bool = True,
 ) -> PathMutationResult:
+    # Loaded with ignore=() (not IGNORE) -- do not pass this bundle as baseline_bundle,
+    # it would silently validate a different corpus than the postcondition gate expects.
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
     return PathMutationResult(
@@ -832,7 +845,12 @@ def _apply_decision(
 ) -> MutationApplication | None:
     if plan.refusal is not None:
         return None
-    return apply_mutation(layout, _decision_mutation(context, plan, ledger_before), repo_root=_repo_root(layout))
+    return apply_mutation(
+        layout,
+        _decision_mutation(context, plan, ledger_before),
+        repo_root=_repo_root(layout),
+        baseline_bundle=context.bundle,
+    )
 
 
 def _decision_result(
@@ -1075,7 +1093,7 @@ def run_decision_overturn(
             _decision_mutation(context, combined.decision, ledger_before),
             _filing_mutation(context.bundle, combined.filing),
         )
-        application = apply_mutation(layout, mutation, repo_root=_repo_root(layout))
+        application = apply_mutation(layout, mutation, repo_root=_repo_root(layout), baseline_bundle=context.bundle)
     return OverturnResult(
         owner=context.owner,
         plan=combined,

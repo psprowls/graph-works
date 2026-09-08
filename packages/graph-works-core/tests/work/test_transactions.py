@@ -19,6 +19,7 @@ from _transaction_helpers import _plan, _snapshot, _workspace, representable_mod
 from graph_works_core.work import MutationApplication, apply_mutation
 from graph_works_core.work import transactions as public_transactions
 from graph_works_core.workspace import anchors, transactions
+from graph_works_core.workspace.layout import WorkspaceLayout
 from okf_ext.moves import Move, MovePlan
 from okf_ext.writing import body_digest
 from okf_io import load_bundle, parse
@@ -3399,3 +3400,159 @@ def test_expand_directory_members_refuses_to_recurse_into_a_junction_cycle(tmp_p
     assert f"{item}/nested" in expanded
     assert f"{item}/nested/loop" in expanded
     assert not any(member.startswith(f"{item}/nested/loop/") for member in expanded)
+
+
+# ---------------------------------------------------------------------------
+# Transaction directory retention -- work/epic-work-mutation-performance-hygiene
+# /children/bug-transaction-directory-retention. `apply_mutation` used to mint
+# a directory per successful mutation and never remove one; these tests cover
+# the prune sweep added to close that leak (D-002a/b/c in the item's design).
+# ---------------------------------------------------------------------------
+
+
+def _apply_simple_mutation(layout: WorkspaceLayout, index: int) -> MutationApplication:
+    """Apply one trivial, always-successful mutation -- just enough to mint a
+    fresh transaction directory and land a `complete` journal record.
+    """
+    member = f"work/retention-{index:04d}"
+    plan = _plan(layout, mkdirs=(member,), directory_preconditions=(DirectoryPrecondition(member, None),))
+    result = apply_mutation(layout, plan)
+    assert result.ok is True
+    return result
+
+
+def _transaction_directory_names(layout: WorkspaceLayout) -> set[str]:
+    transaction_root = layout.cache_dir / "work-mutations"
+    return {
+        entry.name
+        for entry in transaction_root.iterdir()
+        if entry.is_dir() and transactions._TRANSACTION_ID_PATTERN.match(entry.name)
+    }
+
+
+def test_prune_bounds_the_cache_to_retained_transactions(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    total = transactions.RETAINED_TRANSACTIONS + 2
+
+    results = [_apply_simple_mutation(layout, index) for index in range(total)]
+
+    remaining = _transaction_directory_names(layout)
+    assert len(remaining) == transactions.RETAINED_TRANSACTIONS
+    expected = {result.transaction_id for result in results[-transactions.RETAINED_TRANSACTIONS :]}
+    assert remaining == expected
+
+
+def test_prune_never_removes_a_non_terminal_transaction(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    transaction_root = layout.cache_dir / "work-mutations"
+    transaction_root.mkdir(parents=True, exist_ok=True)
+    pinned_dir = transaction_root / ("0" * 32)
+    pinned_dir.mkdir()
+    (pinned_dir / "journal.jsonl").write_text(json.dumps({"state": "planned"}) + "\n", encoding="utf-8")
+
+    for index in range(transactions.RETAINED_TRANSACTIONS + 2):
+        _apply_simple_mutation(layout, index)
+
+    assert pinned_dir.is_dir()
+    assert (pinned_dir / "journal.jsonl").is_file()
+    remaining = _transaction_directory_names(layout)
+    assert len(remaining) == transactions.RETAINED_TRANSACTIONS + 1  # the pinned directory, plus the kept window
+
+
+def test_prune_removes_a_rolled_back_transaction(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    source = layout.bundle_dir / "work/source.bin"
+    source.parent.mkdir()
+    source.write_bytes(b"source")
+    plan = _plan(
+        layout,
+        mkdirs=("work/destination",),
+        moves=(Move("work/source.bin", "work/destination/source.bin", is_asset=True),),
+        directory_preconditions=(DirectoryPrecondition("work/destination", None),),
+    )
+    real_commit = transactions._commit_effect
+    calls = 0
+
+    def fail_second_effect(*args: object, **kwargs: object) -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("injected commit failure")
+        real_commit(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(transactions, "_commit_effect", fail_second_effect)
+        rolled_back = apply_mutation(layout, plan)
+    assert rolled_back.ok is False
+    assert rolled_back.rolled_back is True
+    rolled_back_dir = rolled_back.journal.parent
+    assert rolled_back_dir.is_dir()
+
+    for index in range(transactions.RETAINED_TRANSACTIONS + 1):
+        _apply_simple_mutation(layout, index)
+
+    assert not rolled_back_dir.exists()
+
+
+def test_prune_leaves_executor_lock_and_foreign_entries_untouched(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    transaction_root = layout.cache_dir / "work-mutations"
+    transaction_root.mkdir(parents=True, exist_ok=True)
+    foreign = transaction_root / "not-a-transaction"
+    foreign.mkdir()
+    (foreign / "marker.txt").write_bytes(b"keep")
+
+    for index in range(transactions.RETAINED_TRANSACTIONS + 2):
+        _apply_simple_mutation(layout, index)
+
+    lock_path = transaction_root / "executor.lock"
+    assert lock_path.is_file()
+    with transactions._executor_lock(transaction_root):
+        pass  # still lockable after the sweep
+    assert foreign.is_dir()
+    assert (foreign / "marker.txt").read_bytes() == b"keep"
+
+
+def test_prune_failure_never_fails_the_committing_mutation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _workspace(tmp_path)
+    for index in range(transactions.RETAINED_TRANSACTIONS + 1):
+        _apply_simple_mutation(layout, index)
+
+    def broken_remove(*args: object, **kwargs: object) -> None:
+        raise OSError("injected prune failure")
+
+    monkeypatch.setattr(transactions, "_remove_live_entry", broken_remove)
+    plan = _plan(
+        layout,
+        mkdirs=("work/prune-failure-target",),
+        directory_preconditions=(DirectoryPrecondition("work/prune-failure-target", None),),
+    )
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is True
+    assert (layout.bundle_dir / "work/prune-failure-target").is_dir()
+    assert any("transaction cache prune failed" in warning for warning in result.warnings)
+
+
+def test_preflight_scratch_does_not_survive_its_transaction(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    source = layout.bundle_dir / "work/source"
+    source.mkdir(parents=True)
+    (source / "page.bin").write_bytes(b"source")
+    replace = layout.bundle_dir / "work/replace.bin"
+    replace.write_bytes(b"before")
+    plan = _plan(
+        layout,
+        writes=(PlannedWrite("work/replace.bin", _digest(b"before"), b"after"),),
+        directory_preconditions=(DirectoryPrecondition("work/source", directory_manifest_digest(source)),),
+    )
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is True
+    transaction_dir = result.journal.parent
+    assert not (transaction_dir / "preflight-initial").exists()
+    assert not (transaction_dir / "preflight-final").exists()
+    assert (transaction_dir / "backups").is_dir()
+    assert (transaction_dir / "journal.jsonl").is_file()

@@ -33,6 +33,7 @@ from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionSet, load_sections
 from okf_ext.tables import TextSplice, splice_text
+from okf_ext.tags import VOCABULARY_FILENAME, load_vocabulary, vocabulary_rule
 from okf_io import (
     Bundle,
     Document,
@@ -119,6 +120,20 @@ def rule_set(
     code repo are different git repos) the two roots are different
     directories.
 
+    **The tag vocabulary composes when present, mirroring the wiki lane's own
+    `_wiki_rules`.** Unlike `schema/`/`sections/`, `tags.yaml` is optional:
+    `okf_ext.tags.vocabulary` is explicit that nothing is auto-discovered, so a
+    bundle installed before the vocabulary was seeded must keep linting rather
+    than start erroring. When `<declarations>/tags.yaml` exists,
+    `vocabulary_rule(load_vocabulary(...))` is appended; a malformed file
+    raises `VocabularyError` (a `ValueError`), landing in this function's
+    existing documented raise contract rather than a new one. **It stays at
+    its native `warn`**, the same argument this docstring already makes for
+    `render_rule()` above: the rule takes no `severity=` parameter by design
+    (`Report.ok` is a claim about OKF v0.2 conformance, and a house rule must
+    not make a conformant bundle look otherwise), and the live vault trips it
+    in bulk, so `gw work advance`'s exit code must stay unaffected.
+
     Raises `OSError` for a missing declarations directory and `ValueError` for
     a malformed one, straight out of `load_schemas` / `load_sections`. That is
     caller configuration, not bundle content -- `code_wiki_okf.cli.validate`
@@ -127,13 +142,17 @@ def rule_set(
     """
     declarations = root if declarations_dir is None else declarations_dir
     schema_set = load_schemas(declarations / "schema")
-    return (
+    rules: list[Rule] = [
         schema_rule(schema_set, severity="error"),
         section_rule(load_sections(declarations / "sections"), severity="error"),
         render_rule(),
         placement_rule(placement_directories(schema_set), severity="error"),
         *lane_rules(repo_root=repo_root, vault_root=vault_root),
-    )
+    ]
+    tags_path = declarations / VOCABULARY_FILENAME
+    if tags_path.is_file():
+        rules.append(vocabulary_rule(load_vocabulary(tags_path)))
+    return tuple(rules)
 
 
 def _first_h1(body: str) -> str | None:

@@ -320,7 +320,9 @@ def run_stage_advance(
         validate_paths=(path,),
         directory_preconditions=conditions,
     )
-    application = apply_mutation(layout, mutation, repo_root=resolved_repo)
+    # `bundle` (line 200) is still the live, un-reloaded IGNORE-loaded bundle --
+    # the line-252 reload only extracted one document and is not this one.
+    application = apply_mutation(layout, mutation, repo_root=resolved_repo, baseline_bundle=bundle)
     if application.ok:
         outcome = replace(outcome, written=True)
         if result_member is not None:

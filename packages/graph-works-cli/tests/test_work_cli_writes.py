@@ -124,10 +124,12 @@ def test_incomplete_or_malformed_dep_is_refused_before_core(workspace: Path, spe
         ],
     )
     assert result.exit_code == exit_codes.GENERIC
-    assert result.stdout == "" and spec in result.stderr
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"} and doc["error"]["reason"] == "usage"
+    assert spec in result.stderr
 
 
-def test_file_refusal_emits_no_partial_json(workspace: Path) -> None:
+def test_file_refusal_emits_the_envelope(workspace: Path) -> None:
     result = runner.invoke(
         app,
         [
@@ -147,7 +149,11 @@ def test_file_refusal_emits_no_partial_json(workspace: Path) -> None:
         ],
     )
     assert result.exit_code == exit_codes.GENERIC
-    assert result.stdout == "" and "refused" in result.stderr
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"}
+    assert doc["error"]["reason"] == "refused"
+    assert doc["error"]["payload"]["refusal"] == "invalid-effort"
+    assert "refused" in result.stderr
 
 
 def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace: Path) -> None:
@@ -213,7 +219,7 @@ def test_advance_applies_by_default_and_accepts_released_at(workspace: Path) -> 
     assert "work_status" in payload
 
 
-def test_invalid_date_is_diagnostic_only(workspace: Path) -> None:
+def test_invalid_date_emits_a_usage_envelope(workspace: Path) -> None:
     result = runner.invoke(
         app,
         [
@@ -232,7 +238,10 @@ def test_invalid_date_is_diagnostic_only(workspace: Path) -> None:
             "--json",
         ],
     )
-    assert result.exit_code == 1 and result.stdout == ""
+    assert result.exit_code == 1
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"}
+    assert doc["error"]["reason"] == "usage" and doc["error"]["payload"] is None
     assert "expected YYYY-MM-DD" in result.stderr
 
 
@@ -252,7 +261,7 @@ def test_reparent_live_apply_updates_lane_indexes(workspace: Path) -> None:
     assert "work/index.md" in payload["indexes"]
 
 
-def test_incomplete_path_apply_emits_no_partial_json(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_incomplete_path_apply_emits_the_envelope(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(work_main.work, "run_reparent", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         work_main.rendering,
@@ -272,7 +281,11 @@ def test_incomplete_path_apply_emits_no_partial_json(workspace: Path, monkeypatc
         ["work", "reparent", "work/feature-a", "--parent", "work/epic-e", "--workspace", str(workspace), "--json"],
     )
     assert result.exit_code == exit_codes.GENERIC
-    assert result.stdout == "" and "stale snapshot" in result.stderr
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"}
+    assert doc["error"]["reason"] == "incomplete-apply"
+    assert doc["error"]["payload"]["failures"] == ["stale snapshot"]
+    assert "stale snapshot" in result.stderr
 
 
 def test_adopt_live_apply_updates_lane_indexes(workspace: Path) -> None:
@@ -307,7 +320,31 @@ def test_archive_live_apply_updates_lane_indexes(workspace: Path) -> None:
     assert "work/index.md" in payload["indexes"]
 
 
-def test_archive_incomplete_apply_emits_no_partial_json(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_archive_refusal_names_each_refusal_on_stderr(workspace: Path) -> None:
+    path = file_item(workspace, "Done", kind="Bug")
+    layout = resolve_workspace(str(workspace))
+    page = layout.bundle_dir / f"{path}.md"
+    document = load(page)
+    document.set("work_status", "resolved")
+    document.save()
+    sources_dir = layout.bundle_dir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    sources_dir.joinpath("broken.md").write_text(
+        f"---\ntitle: Broken\nbad: value: here\n---\n\n"
+        f"A link to [Done](../{path}.md) in a document that will not parse.\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["work", "archive", path, "--workspace", str(workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    assert "sources/broken.md" in result.stderr
+    assert "parse-error" in result.stderr
+    assert "cannot rewrite a document that failed to parse" in result.stderr
+    assert "archive refused; nothing was applied" in result.stderr
+
+
+def test_archive_incomplete_apply_emits_the_envelope(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = SimpleNamespace(
         plan=SimpleNamespace(move_plan=None),
         wiki_plan=SimpleNamespace(moves=SimpleNamespace(stranded=())),
@@ -331,7 +368,10 @@ def test_archive_incomplete_apply_emits_no_partial_json(workspace: Path, monkeyp
     )
     result = runner.invoke(app, ["work", "archive", "work/bug-done", "--workspace", str(workspace), "--json"])
     assert result.exit_code == exit_codes.GENERIC
-    assert result.stdout == ""
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"}
+    assert doc["error"]["reason"] == "incomplete-apply"
+    assert doc["error"]["payload"]["failures"] == ["stale lane index"]
     assert "stale lane index" in result.stderr
 
 

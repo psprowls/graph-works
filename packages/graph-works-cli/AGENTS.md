@@ -76,6 +76,44 @@ independently rather than calling `errors.exit_error()` — widening the normali
 sites is deliberately deferred (tracked as D-026), not an oversight to "fix" incidentally while
 touching either file.
 
+### The `--json` refusal envelope — `gw work` only (D-004/D-007)
+
+A `--json` `gw work` command that refuses still exits non-zero, but now also prints a structured
+document on stdout before it does, instead of leaving stdout empty:
+
+```json
+{
+  "error": {
+    "command": "work archive",
+    "reason": "refused",
+    "message": "archive refused; nothing was applied",
+    "exit_code": 1,
+    "payload": { "...the verb payload the CLI already computed, or null..." }
+  }
+}
+```
+
+`work_cli/rendering.py`'s `fail()` is the single choke point every `gw work` exit site routes
+through (65 call sites as of D-004); it now takes a required `reason=` from a closed vocabulary
+(`refused`, `incomplete-apply`, `conflict`, `incomplete`, `usage`, `workspace`, `unresolved`,
+`not-a-repo`, `io`) and an optional `payload=` — the verb payload already computed for a
+post-payload refusal, `None` for a pre-payload failure (an argument-parse or workspace-resolution
+error, where no payload was ever built). `"error" in doc` is the discriminator: no success
+projection in `rendering.py` carries a top-level `error` key or is a single-key object, so a refusal
+document can never be misread as a result.
+
+The mechanism is a `ContextVar` (`rendering._JSON_MODE`, plus `_COMMAND_NAME` for the envelope's
+`command` field), set by `rendering.json_option()` — the one `--json` declaration every `gw work`
+command must use instead of hand-writing `typer.Option(False, "--json", ...)` — and reset by
+`cli.py`'s root callback before each subcommand's own option parsing runs. `fail()` asserts rather
+than defaults when the var was never set, so a command that skips `json_option()` fails loudly in
+its own test suite instead of silently never emitting an envelope.
+
+This is scoped to `gw work` only (D-004): `gw help --json`'s own `{"status": "error", ...}` failure
+shape (`cli.py`) predates this and is deliberately not converged onto it — `status` collides with
+`work_status`/`document_status` elsewhere in the work lane, and reconciling the two shapes is out of
+scope for this item.
+
 ### Formatting — delegate for `graph`, bespoke everywhere else (D-003)
 
 `code_graph_io.render` ships a generic `render()` dispatcher, a `describe_block()` sectioned-spine

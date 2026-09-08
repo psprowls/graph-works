@@ -75,6 +75,9 @@ def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
     as ISO strings and `additionalProperties: false` still sees every key the
     document actually carries. Documents okf-io could not parse are skipped
     rather than re-reported.
+
+    Honours `RuleContext.scope`: this rule is per-document, so a narrowed pass
+    asks the same question of fewer documents.
     """
     registry = build_registry(schema_set.documents)
     validators: dict[str, Any] = {
@@ -85,6 +88,8 @@ def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
 
     def rule(context: RuleContext) -> Iterable[Finding]:
         for concept_id in sorted(context.bundle.concepts):
+            if context.scope is not None and f"{concept_id}.md" not in context.scope:
+                continue
             document = context.bundle.concepts[concept_id]
             if document.parse_error is not None:
                 continue

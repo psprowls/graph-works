@@ -100,11 +100,16 @@ def test_a_work_item_with_a_broken_plan_target_trips_the_work_lane(workspace):
     assert not any(code.startswith("plan.") for code in by_lane["wiki"])
 
 
-def test_a_malformed_declaration_becomes_an_error_line_and_the_other_lane_still_reports(workspace):
+def test_a_malformed_declaration_becomes_an_error_line_for_every_lane_that_shares_it(workspace):
+    """Both lanes read `config.declarations_dir`, so a malformed `tags.yaml`
+    is one error per lane, not one -- the wiki lane's `_wiki_rules` and the
+    work lane's `work_tracker_okf.compose.rule_set` both gate their
+    `vocabulary_rule` on the same file."""
     (workspace.layout.config_dir / VOCABULARY_FILENAME).write_text("not: [a mapping\n", encoding="utf-8")
     report = _run(workspace)
-    assert len(report.errors) == 1
-    assert [lane.name for lane in report.mechanical] == ["work"]
+    assert len(report.errors) == 2
+    assert {error.split(":", 1)[0] for error in report.errors} == {"wiki lane", "work lane"}
+    assert report.mechanical == ()
     assert report.ok is False
 
 

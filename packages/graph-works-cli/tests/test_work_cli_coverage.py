@@ -14,6 +14,19 @@ from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceErr
 LAYOUT = SimpleNamespace(bundle_dir=Path("/tmp/bundle"), repo_root=Path("/tmp/repo"))
 
 
+@pytest.fixture(autouse=True)
+def _json_mode_default() -> object:
+    """These tests call command bodies directly, bypassing Click's own option
+    parsing -- so `json_option()`'s `--json` callback never runs to set
+    `rendering._JSON_MODE`, and `fail()` would otherwise hit its own
+    not-declared-json assert. Every refusal exercised here passes an explicit
+    `json_output=False`, matching this default -- a case that wants the
+    JSON-mode envelope sets the var itself."""
+    token = rendering._JSON_MODE.set(False)
+    yield
+    rendering._JSON_MODE.reset(token)
+
+
 def _exit_code(call) -> int:
     with pytest.raises(typer.Exit) as caught:
         call()
@@ -203,8 +216,9 @@ def test_regen_index_all_output_policies(monkeypatch: pytest.MonkeyPatch, capsys
     payload["indexes"] = []
     main.regen_index(False, "", False)
     assert "nothing to do" in capsys.readouterr().out
-    payload["refusals"] = ["bad"]
+    payload["refusals"] = [{"path": "work/a", "kind": "bad", "detail": "why"}]
     assert _exit_code(lambda: main.regen_index(False, "", False)) == 1
+    assert "work/a: bad — why" in capsys.readouterr().err
 
 
 def test_finish_path_mutation_all_policies(capsys: pytest.CaptureFixture[str]) -> None:

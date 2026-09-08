@@ -27,13 +27,17 @@ from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import SectionSet, load_sections
 from okf_io import Bundle
 
-from code_wiki_okf.placement import is_code_wiki_type
+from code_wiki_okf.placement import is_code_wiki_type, is_lane_residue
 
 
 @dataclass(frozen=True, slots=True)
 class PruneResult:
     deleted: tuple[str, ...] = field(default_factory=tuple)
     declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)  # (concept_id, reason)
+    # The subset of `deleted` removed via the D-A1 lane-residue bypass (a
+    # Dependency page whose node resolves to a workspace member) rather than
+    # an ordinary stale-and-unedited deletion. Always a subset of `deleted`.
+    lane_residue: tuple[str, ...] = field(default_factory=tuple)
 
 
 def _normalized(text: str) -> str:
@@ -98,6 +102,7 @@ def plan_prune_entities(
     section_set = load_sections(declarations_root / SECTIONS_DIRNAME)
     deleted: list[str] = []
     declined: list[tuple[str, str]] = []
+    lane_residue: list[str] = []
 
     for concept_id, document in sorted(bundle.concepts.items()):
         type_name = (document.fm.type or "").strip()
@@ -106,15 +111,23 @@ def plan_prune_entities(
             continue
         if resource in current_resources:
             continue
+        if not _is_generated(document.fm_raw):
+            declined.append((concept_id, "not-generated"))
+            continue
+        if is_lane_residue(type_name, document.fm_raw):
+            # Lane residue bypasses the prose check (D-A1): it is deleted
+            # regardless of authored prose, but only once _is_generated above
+            # has already confirmed this is our own page, never a human's.
+            deleted.append(concept_id)
+            lane_residue.append(concept_id)
+            continue
         reason = _decline_reason(document.body, section_set, type_name)
-        if reason is None and not _is_generated(document.fm_raw):
-            reason = "not-generated"
         if reason is None:
             deleted.append(concept_id)
         else:
             declined.append((concept_id, reason))
 
-    return PruneResult(deleted=tuple(deleted), declined=tuple(declined))
+    return PruneResult(deleted=tuple(deleted), declined=tuple(declined), lane_residue=tuple(lane_residue))
 
 
 def prune_entities(

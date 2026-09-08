@@ -195,6 +195,11 @@ class PackageDescription:
     # both directions of the depends_on_package edge.
     internal_dependencies: list[str] = field(default_factory=list)  # outgoing
     internal_dependents: list[str] = field(default_factory=list)  # incoming
+    # facts migrated from the implemented Dependency node (ADR-0048); empty
+    # when this package does not implement a distributable manifest's
+    # Dependency node.
+    used_by: list[str] = field(default_factory=list)
+    versions_in_use: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -803,6 +808,32 @@ def describe_package(
     ).fetchall()
     internal_dependents = [r[0] for r in internal_dependent_rows]
 
+    # Facts migrated from the implemented Dependency node, if this package
+    # implements one (ADR-0048). Same consumer-kind filter and ordering as
+    # describe_dependency, so the two agree by construction.
+    used_by: list[str] = []
+    versions_in_use: list[str] = []
+    implemented_dep_row = conn.execute(
+        "SELECT dep.id, dep.attrs_json FROM edges e "
+        "JOIN nodes dep ON e.src = dep.id "
+        "WHERE e.kind='implemented_by' AND e.dst = ? AND dep.kind='dependency'",
+        (package_id,),
+    ).fetchone()
+    if implemented_dep_row is not None:
+        dep_id, dep_attrs_json = implemented_dep_row
+        used_by_rows = conn.execute(
+            "SELECT DISTINCT p.name FROM edges e "
+            "JOIN nodes p ON e.src = p.id "
+            "WHERE e.kind='used_by' AND e.dst = ? AND p.kind IN ('package', 'app', 'repository') "
+            "ORDER BY p.name",
+            (dep_id,),
+        ).fetchall()
+        used_by = [r[0] for r in used_by_rows]
+        dep_attrs = json.loads(dep_attrs_json) if dep_attrs_json else {}
+        versions = dep_attrs.get("versions_in_use") or []
+        if isinstance(versions, list):
+            versions_in_use = list(versions)
+
     return PackageDescription(
         name=name,
         language=attrs.get("language", ""),
@@ -813,6 +844,8 @@ def describe_package(
         test_suites=test_suites,
         internal_dependencies=internal_dependencies,
         internal_dependents=internal_dependents,
+        used_by=used_by,
+        versions_in_use=versions_in_use,
     )
 
 

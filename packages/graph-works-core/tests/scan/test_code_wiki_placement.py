@@ -35,6 +35,12 @@ _TRACKED_FILES = (
 #: sections, built from the same flat cross-repo list by the same code. The
 #: per-repository lanes below (`{prefix}/packages/index.md` and friends) are
 #: untouched by that ADR and stay.
+#:
+#: `console`, `foobar` and `widgets` are workspace-implemented (their own
+#: manifests self-implement their same-named Dependency node), so under
+#: ADR-0034 as narrowed by ADR-0048 they get no `dependencies/` page at all —
+#: `used_by`/`versions_in_use` migrate onto their Package pages instead. Only
+#: `httpx` (genuinely external, in both ecosystems here) keeps a page.
 _GLOBAL_MEMBERS = frozenset(
     {
         "index.md",
@@ -42,11 +48,8 @@ _GLOBAL_MEMBERS = frozenset(
         "dependencies/index.md",
         "dependencies/npm/httpx.md",
         "dependencies/npm/index.md",
-        "dependencies/pypi/console.md",
-        "dependencies/pypi/foobar.md",
         "dependencies/pypi/httpx.md",
         "dependencies/pypi/index.md",
-        "dependencies/pypi/widgets.md",
         "repositories/index.md",
     }
 )

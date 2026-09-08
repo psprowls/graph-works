@@ -10,7 +10,7 @@ documents.
 from __future__ import annotations
 
 import unicodedata
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Literal
@@ -89,6 +89,26 @@ class PlacementError(ValueError):
 def is_code_wiki_type(type_name: str) -> bool:
     """Whether *type_name* is owned by the code-wiki vocabulary."""
     return type_name in CODE_WIKI_TYPES
+
+
+def is_lane_residue(type_name: str, frontmatter: Mapping[str, object]) -> bool:
+    """Whether a stale page of *type_name* is lane residue by definition
+    (ADR-0034 as narrowed by ADR-0048), rather than an ordinary generated page.
+
+    True only for a ``Dependency`` whose ``implemented_by`` is non-empty: the
+    ``dependencies/`` lane is the third-party lane, and such a node's page is
+    never legitimate content, only leftover from before the write guard in
+    ``entities/sync.py`` suppressed it. This is a *prose-check bypass* for
+    :func:`code_wiki_okf.entities.delete.plan_prune_entities`, not a delete
+    trigger on its own — the caller still gates on provenance
+    (:func:`code_wiki_okf.entities.delete._is_generated`) and staleness
+    (absence from ``current_resources``) before this predicate is even
+    consulted, so a hand-authored page is never at risk of it.
+    """
+    if type_name != "Dependency":
+        return False
+    implemented_by = frontmatter.get("implemented_by")
+    return isinstance(implemented_by, (list, tuple)) and len(implemented_by) > 0
 
 
 def is_entity_lane_page(concept_id: str) -> bool:
@@ -365,5 +385,6 @@ __all__ = [
     "filesystem_member_identity",
     "is_code_wiki_type",
     "is_entity_lane_page",
+    "is_lane_residue",
     "placement_rule",
 ]

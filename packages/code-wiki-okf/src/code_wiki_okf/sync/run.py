@@ -362,6 +362,7 @@ def combine_results(
             entities,
             deleted=prune_result.deleted,
             declined=prune_result.declined,
+            deleted_lane_residue=prune_result.lane_residue,
             catalog=catalogs.written,
             catalog_created=tuple(path for path in catalog_plan.created if path in catalogs.written),
             catalog_updated=tuple(path for path in catalog_plan.updated if path in catalogs.written),
@@ -398,7 +399,11 @@ def sync_bundle(
             declarations_dir=config.declarations_dir,
         )
         mirror_removed = _mirror_removed_concepts(plan.mirrors)
-        prune = replace(raw_prune, deleted=tuple(item for item in raw_prune.deleted if item not in mirror_removed))
+        prune = replace(
+            raw_prune,
+            deleted=tuple(item for item in raw_prune.deleted if item not in mirror_removed),
+            lane_residue=tuple(item for item in raw_prune.lane_residue if item not in mirror_removed),
+        )
         catalog_bundle = _project_mirror_indexes(bundle, plan.mirrors)
         catalog_plan = plan_catalogs(
             catalog_bundle,
@@ -410,6 +415,7 @@ def sync_bundle(
                 entities,
                 deleted=prune.deleted,
                 declined=prune.declined,
+                deleted_lane_residue=prune.lane_residue,
                 catalog=tuple(dict.fromkeys((*catalog_plan.created, *catalog_plan.updated))),
                 catalog_created=catalog_plan.created,
                 catalog_updated=catalog_plan.updated,

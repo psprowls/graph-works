@@ -34,6 +34,90 @@ def _write_package_page(
     return path
 
 
+_WHY_PLACEHOLDER = "> TODO: why the workspace depends on this, and what it is used for."
+
+
+def _write_dependency_page(
+    root: Path,
+    member: str,
+    resource: str,
+    *,
+    implemented_by: str = "[]",
+    why_text: str = _WHY_PLACEHOLDER,
+    generated: bool = True,
+) -> Path:
+    path = root / member
+    path.parent.mkdir(parents=True, exist_ok=True)
+    provenance = "generated:\n  by: code-wiki-okf/0.4.0\n  at: '2026-01-01T00:00:00+00:00'\n" if generated else ""
+    path.write_text(
+        f'---\ntype: Dependency\ntitle: gone\nresource: "{resource}"\n'
+        f"implemented_by: {implemented_by}\n{provenance}---\n\n"
+        f"## Why we depend on this\n\n{why_text}\n\n"
+        "## Gotchas / workarounds\n\n> TODO: known issues, version pins, or workarounds this dependency needs.\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_lane_residue_dependency_with_edited_prose_is_still_deleted(tmp_path: Path) -> None:
+    """A generated Dependency page whose node resolves to a workspace member
+    (non-empty `implemented_by`) is lane residue under ADR-0048/ADR-0034 and is
+    deleted regardless of authored prose — the widened D-A1 guard."""
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    page = _write_dependency_page(
+        tmp_path,
+        "dependencies/pypi/gone.md",
+        "dependency:pypi/gone",
+        implemented_by="[pkg:acme/repo/gone]",
+        why_text="A human wrote a detailed justification here.",
+    )
+
+    result = prune_entities(load_bundle(tmp_path), frozenset())
+
+    assert result.deleted == ("dependencies/pypi/gone",)
+    assert result.declined == ()
+    assert not page.exists()
+
+
+def test_lane_residue_dependency_without_code_wiki_provenance_is_still_declined(tmp_path: Path) -> None:
+    """The provenance guard still composes with the widened residue predicate:
+    a Dependency page with `implemented_by` but no code-wiki `generated.by`
+    stamp is a human's page, not ours, and stays declined."""
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    page = _write_dependency_page(
+        tmp_path,
+        "dependencies/pypi/gone.md",
+        "dependency:pypi/gone",
+        implemented_by="[pkg:acme/repo/gone]",
+        generated=False,
+    )
+
+    result = prune_entities(load_bundle(tmp_path), frozenset())
+
+    assert result.deleted == ()
+    assert result.declined == (("dependencies/pypi/gone", "not-generated"),)
+    assert page.exists()
+
+
+def test_dependency_without_implemented_by_still_needs_the_prose_guard(tmp_path: Path) -> None:
+    """A plain (non-residue) Dependency page — no `implemented_by` — is
+    unaffected by the widening and still declines on edited prose."""
+    install_bundle(tmp_path, today=_TODAY, dry_run=False)
+    page = _write_dependency_page(
+        tmp_path,
+        "dependencies/pypi/external.md",
+        "dependency:pypi/external",
+        implemented_by="[]",
+        why_text="A human wrote a detailed justification here.",
+    )
+
+    result = prune_entities(load_bundle(tmp_path), frozenset())
+
+    assert result.deleted == ()
+    assert result.declined == (("dependencies/pypi/external", "prose-edited"),)
+    assert page.exists()
+
+
 def test_generated_stale_page_is_deleted_by_type_even_when_misplaced(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     misplaced = _write_package_page(tmp_path, "misc/misplaced.md", "pkg:acme/repo/gone")

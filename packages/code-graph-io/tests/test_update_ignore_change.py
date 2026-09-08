@@ -85,6 +85,36 @@ def test_broadening_ignore_incrementally_retracts_every_stranded_kind(
         conn.close()
 
 
+def test_ignored_manifest_yields_no_dependency_node(tmp_path: Path) -> None:
+    """Regression for work/bug-scanner-writes-a-dependency-page-for (absorbed
+    scope): a distributable manifest under an ignored path must not mint a
+    `dependency` node at all — not merely skip its rendered page. This is the
+    gap the design's Phase 1d identified: `webutil.md` survived on disk not
+    because of an ignore-glob defect (the node was already correctly absent
+    from the graph), but because of the prose guard. No prior test asserted
+    the graph side of this, only a docstring mention of `dependency` nodes in
+    `test_broadening_ignore_incrementally_retracts_every_stranded_kind`."""
+    init_repo(tmp_path)
+    _seed_repo_with_a_package_worth_ignoring(tmp_path)
+
+    update.run_workspace(
+        [tmp_path],
+        graph_dir=graph_dir(tmp_path),
+        full=True,
+        member_ignore=[("pkg/**",)],
+    )
+
+    conn = _ro(tmp_path)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='genpkg'").fetchone()[0] == 0
+        # The un-ignored sibling manifest still gets its own dependency node —
+        # proves the absence above is the ignore glob at work, not a
+        # collateral break of dependency reconciliation itself.
+        assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='realpkg'").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
 def test_unchanged_ignore_patterns_do_not_force_a_rebuild(tmp_path: Path) -> None:
     """The fingerprint must be stable across runs with identical patterns: an
     incremental run whose ignore set did NOT move must still short-circuit at

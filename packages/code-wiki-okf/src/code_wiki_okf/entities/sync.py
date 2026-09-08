@@ -128,6 +128,7 @@ class SyncSummary:
     warnings: tuple[str, ...] = field(default_factory=tuple)
     deleted: tuple[str, ...] = field(default_factory=tuple)
     declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)
+    deleted_lane_residue: tuple[str, ...] = field(default_factory=tuple)
     catalog: tuple[str, ...] = field(default_factory=tuple)
     catalog_created: tuple[str, ...] = field(default_factory=tuple)
     catalog_updated: tuple[str, ...] = field(default_factory=tuple)
@@ -407,11 +408,18 @@ def plan_entities(
             resource=context.resource,
         )
         implementations = sorted(dependency_description.implemented_by)
+        if len(implementations) > 1:
+            warnings.append(f"{context.resource} has multiple implementations: {', '.join(implementations)}")
+        if implementations:
+            # A Dependency whose node resolves to a workspace member gets no
+            # page (ADR-0034 as narrowed by ADR-0048): `used_by` and
+            # `versions_in_use` move onto the implementing Package page
+            # instead. The graph node and its `implemented_by` edge are
+            # unaffected — only the write is skipped.
+            continue
         dependency_description = replace(dependency_description, implemented_by=implementations)
         render = _stamp_provenance(render_dependency(dependency_description), sha=None, at=generated_at)
         add(_write(context, title=dependency_name, render=render))
-        if len(implementations) > 1:
-            warnings.append(f"{context.resource} has multiple implementations: {', '.join(implementations)}")
 
     ordered_writes = tuple(sorted(writes, key=lambda write: (write.member, write.context.resource)))
     _preflight_existing(bundle, index, ordered_writes)

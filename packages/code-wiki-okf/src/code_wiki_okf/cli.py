@@ -237,7 +237,10 @@ def sync(
             typer.echo(f"entities: would update {concept_id}")
         for concept_id in result.entities.deleted:
             entity_changes = True
-            typer.echo(f"entities: would delete {concept_id}")
+            if concept_id in result.entities.deleted_lane_residue:
+                typer.echo(f"entities: would delete {concept_id} (lane-residue)")
+            else:
+                typer.echo(f"entities: would delete {concept_id}")
         for concept_id, reason in result.entities.declined:
             entity_changes = True
             typer.echo(f"entities: would decline deletion of {concept_id} ({reason})")
@@ -258,7 +261,8 @@ def sync(
             typer.echo("catalog: no changes")
     else:
         typer.echo(
-            f"entities: written {len(result.entities.written)}, deleted {len(result.entities.deleted)}, "
+            f"entities: written {len(result.entities.written)}, deleted {len(result.entities.deleted)} "
+            f"({len(result.entities.deleted_lane_residue)} lane-residue), "
             f"declined {len(result.entities.declined)}"
         )
         for skipped in result.entities.skipped:

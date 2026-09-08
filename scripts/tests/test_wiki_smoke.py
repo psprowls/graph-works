@@ -107,10 +107,33 @@ def test_main_exits_zero_on_a_clean_run(tmp_path: Path) -> None:
     assert exit_code == 0
 
 
-def test_smoke_run_files_the_packages_own_dependency_under_its_ecosystem(tmp_path: Path) -> None:
-    """Spec decision 10: every manifest-backed distributable Package creates a
-    Dependency. `config-io` is distributable, so its own consumption-facing
-    page must exist at the PEP 503 distribution name.
+def test_smoke_run_suppresses_the_packages_own_self_implemented_dependency(tmp_path: Path) -> None:
+    """`config-io` is distributable, so `reconcile_dependencies` always mints a
+    `dependency:pypi/config-io` node with `config-io`'s own manifest as its
+    (self-)`implemented_by` -- ADR-0034's "every distributable manifest Package
+    creates exactly one ecosystem-qualified Dependency". ADR-0048 then narrows
+    the *page* consequence of that: a Dependency node whose `implemented_by` is
+    non-empty gets no page at all, ecosystem-qualified filename or otherwise --
+    `dependencies/` is the third-party lane; `config-io`'s own page is its
+    Package page.
+    """
+    bundle_dir = tmp_path / "bundle"
+    result = wiki_smoke.run(_REAL_CHECKOUT, bundle_dir)
+
+    assert result.sync_exit_code == 0, result.sync_output
+    assert not result.mismatch
+    assert not (bundle_dir / "dependencies" / "pypi" / "config-io.md").exists()
+    assert not (bundle_dir / "dependencies" / "pypi" / "config_io.md").exists()
+
+
+def test_smoke_run_files_a_third_party_dependency_under_its_ecosystem(tmp_path: Path) -> None:
+    """The PEP 503 distribution-name regression this smoke test originally
+    guarded (`_normalize_name` filing a Dependency under an *import* name
+    instead of the PyPI *distribution* name -- see `packages/code-graph-io`'s
+    own history for the `code_graph_io` vs `code-graph-io` incident) is still
+    live for a genuine third-party dependency: `config-io`'s sole runtime
+    dependency, `pyyaml`, is never self-implemented by this checkout, so it
+    still gets a page, and still at its distribution name.
 
     This assertion is the gate that was missing. `scripts/gw-smoke/run.sh`
     checked the dependency lane but nothing runs it; this file runs inside
@@ -122,8 +145,7 @@ def test_smoke_run_files_the_packages_own_dependency_under_its_ecosystem(tmp_pat
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
-    assert (bundle_dir / "dependencies" / "pypi" / "config-io.md").is_file()
-    assert not (bundle_dir / "dependencies" / "pypi" / "config_io.md").exists()
+    assert (bundle_dir / "dependencies" / "pypi" / "pyyaml.md").is_file()
 
 
 def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:

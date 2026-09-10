@@ -11,6 +11,7 @@ from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import maintenance
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
+from helpers import initialized_workspace as _initialized_workspace
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -19,10 +20,7 @@ runner = CliRunner()
 @pytest.fixture
 def initialized_workspace(tmp_path: Path) -> Path:
     """Create the smallest real initialized workspace for CLI boundary tests."""
-    root = tmp_path / "works"
-    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
-    assert result.exit_code == 0
-    return root
+    return _initialized_workspace(tmp_path / "works")
 
 
 def test_stats_uses_the_default_top_and_the_seven_key_json_contract(

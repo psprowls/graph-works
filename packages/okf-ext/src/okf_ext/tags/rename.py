@@ -1,4 +1,4 @@
-"""Bulk tag rename: four planners plus `apply`.
+"""Bulk tag rename: **five** planners plus `apply`.
 
 **Plan and apply are two calls, not a `dry_run` flag.** okf-io's writers take
 `dry_run=True` and return a description; this diverges deliberately. A rename
@@ -6,7 +6,7 @@ touching 40 files produces a preview you want to inspect and filter, and
 "apply 38 of these 40" is a thing a boolean cannot express and a plan-as-value
 can.
 
-All four planners are pure reads: no writes, and no document left dirty.
+All five planners are pure reads: no writes, and no document left dirty.
 `apply` is the one function in this module that writes.
 
 **Known asymmetry with `inventory()`.** `okf_io`'s coercion turns a non-string
@@ -164,6 +164,61 @@ def plan_merge(bundle: Bundle, sources: Sequence[str], into: str, ctx: ExtContex
             f"wrap it in a list, e.g. plan_merge(bundle, [{sources!r}], {into!r})"
         )
     return _plan(bundle, {source: into for source in sources})
+
+
+def plan_strip(bundle: Bundle, tags: Sequence[str], ctx: ExtContext | None = None) -> RenamePlan:
+    """Remove every occurrence of every tag in *tags*.
+
+    The one planner that does not go through `_plan_mapping`. That engine is
+    driven by an `old -> new` mapping of strings, so a removal can only reach
+    it as the *side effect* of a merge collapsing onto an already-claimed tag
+    -- there is no `new` a caller could pass to mean "delete this". Removal is
+    modelled directly instead: every edit here carries `new=None`, which is
+    exactly what `TagEdit` already documents and what `apply` already
+    executes descending-index-first.
+
+    Every position is visited once, so no two edits can name the same index
+    and `apply`'s `duplicate-edit` refusal is unreachable from here. A
+    document carrying one tag twice yields two removals at two indices, which
+    is correct: both go.
+
+    Skips are `scan()`'s, identical to every sibling -- a parse-error or
+    non-sequence `tags` document is reported, never edited.
+
+    A `None` sentinel (a null or other non-string position, per `_raw_tags`)
+    is never in *targets*: `targets` holds `str` only, so the sentinel can
+    never be stripped. This is the same refusal `plan_rename` makes and for
+    the same reason -- matching a coerced string would risk deleting a value
+    that was never a string on disk.
+
+    *ctx* is accepted for signature uniformity across the capability and is
+    deliberately unused: the tag names are exact strings, so there is no
+    normalization policy to apply.
+
+    Raises `TypeError` when *tags* is a bare `str`, for the reason
+    `plan_merge` documents at length: `Sequence[str]` accepts a `str`, which
+    then iterates its own characters and plans a strip of `"k"`, `"p"`,
+    `"i"` -- an empty plan with no error.
+    """
+    if isinstance(tags, str):
+        raise TypeError(
+            f"tags must be a sequence of tag names, not a bare string ({tags!r}); "
+            f"wrap it in a list, e.g. plan_strip(bundle, [{tags!r}])"
+        )
+    targets = set(tags)
+    usable, skipped = scan(bundle)
+    edits: list[TagEdit] = []
+    for concept_id in usable:
+        values = _raw_tags(bundle, concept_id)
+        if values is None:
+            continue
+        edits.extend(
+            TagEdit(concept_id=concept_id, path=f"{concept_id}.md", index=index, old=old, new=None)
+            for index, old in enumerate(values)
+            if old is not None and old in targets
+        )
+    edits.sort(key=lambda edit: (edit.concept_id, edit.index))
+    return RenamePlan(root=bundle.root, edits=tuple(edits), skipped=tuple(skipped))
 
 
 def plan_normalize(bundle: Bundle, ctx: ExtContext | None = None) -> RenamePlan:

@@ -27,6 +27,10 @@ Wiki commands:
 - `gw wiki stats [--top N] [--json]`
 - `gw wiki index`
 - `gw wiki archive [TARGET] [--dry-run]`
+- `gw wiki tags inventory [--json]`
+- `gw wiki tags draft OUT --as-of YYYY-MM-DD [--floor N] [--ceiling F]`
+- `gw wiki tags apply DISPOSITION [--only merge|strip] [--dry-run]`
+- `gw wiki tags gate [--json]`
 - `gw wiki proposals [--json]`
 - `gw wiki proposal file --lane TEXT --title TEXT --id TEXT --resource PATH [--description TEXT] [--rationale TEXT] [--evidence TEXT]`
 - `gw wiki proposal approve TARGET`
@@ -35,6 +39,9 @@ Wiki commands:
 Most mutating commands apply by default; `--dry-run` is the preview option. `gw bootstrap --dry-run`
 and `gw wiki archive --dry-run` show the plan without applying. `gw wiki drift` inverts this: it
 previews by default (use `--no-dry-run` to apply).
+
+`gw wiki tags gate` is the narrow, CI-shaped question — it exits non-zero on any tag the
+vocabulary does not declare, without running a full lint.
 
 ### Scan worklist handoff
 

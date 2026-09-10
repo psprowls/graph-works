@@ -43,7 +43,7 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from okf_io import Finding, Rule, RuleContext
+from okf_io import Finding, Rule, RuleContext, Severity
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
@@ -232,7 +232,12 @@ CODES = (
 _CODE_UNKNOWN, _CODE_DEPRECATED, _CODE_NON_CANONICAL = CODES
 
 
-def vocabulary_rule(vocab: Vocabulary, ctx: ExtContext | None = None) -> Rule:
+def vocabulary_rule(
+    vocab: Vocabulary,
+    ctx: ExtContext | None = None,
+    *,
+    severity: Severity = "warn",
+) -> Rule:
     """Build an `okf_io.Rule` that checks tags against *vocab*.
 
         validate(bundle, today=..., extra_rules=[vocabulary_rule(vocab)])
@@ -241,9 +246,16 @@ def vocabulary_rule(vocab: Vocabulary, ctx: ExtContext | None = None) -> Rule:
     view already coerced them and a second reading is a second thing to keep in
     sync.
 
-    **Every code is `warn`.** See the module docstring for why; the short
-    version is that `Report.ok` is a claim about OKF v0.2 conformance, and a
-    house rule has no business making a conformant bundle look otherwise.
+    **`warn` by default, and that default is the argument, not an accident.**
+    `Report.ok` over a rule set composed purely from okf-io is a claim about
+    OKF v0.2 conformance, and a house rule must not make a conformant bundle
+    look otherwise. But this rule ships in `okf_ext`, never `okf_io`, so a
+    lint composed from okf-io alone carries no tag rule at all -- `ok` over a
+    *composed* rule set was never a conformance claim in the first place. A
+    tier-2 or tier-3 composition that wants its own house rule enforced may
+    therefore pass `severity="error"`; `okf_io`'s own rules are untouched by
+    this parameter and stay the only answer to spec conformance. See
+    ADR-0050.
 
     `tags.non-canonical` suppresses only `tags.unknown`, never `tags.deprecated`.
     When the canonical form is **allowed**, unknown is suppressed: `Data Quality`
@@ -265,7 +277,7 @@ def vocabulary_rule(vocab: Vocabulary, ctx: ExtContext | None = None) -> Rule:
                 if form != tag:
                     yield Finding(
                         code=_CODE_NON_CANONICAL,
-                        severity="warn",
+                        severity=severity,
                         message=f"Tag `{tag}` is not canonical; its canonical form is `{form}`.",
                         spec=vocab.source,
                         path=path,
@@ -279,7 +291,7 @@ def vocabulary_rule(vocab: Vocabulary, ctx: ExtContext | None = None) -> Rule:
                     detail = f" Use `{replacement}` instead." if replacement is not None else " It has no replacement."
                     yield Finding(
                         code=_CODE_DEPRECATED,
-                        severity="warn",
+                        severity=severity,
                         message=f"Tag `{tag}` is deprecated.{detail}",
                         spec=vocab.source,
                         path=path,
@@ -292,7 +304,7 @@ def vocabulary_rule(vocab: Vocabulary, ctx: ExtContext | None = None) -> Rule:
                         message += f" Did you mean `{close[0]}`?"
                     yield Finding(
                         code=_CODE_UNKNOWN,
-                        severity="warn",
+                        severity=severity,
                         message=message,
                         spec=vocab.source,
                         path=path,

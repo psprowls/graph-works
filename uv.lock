@@ -417,7 +417,7 @@ dev = [
 
 [[package]]
 name = "graph-works-cli"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/graph-works-cli" }
 dependencies = [
     { name = "click" },
@@ -450,7 +450,7 @@ requires-dist = [
 
 [[package]]
 name = "graph-works-core"
-version = "0.4.0"
+version = "0.5.0"
 source = { editable = "packages/graph-works-core" }
 dependencies = [
     { name = "code-graph-io" },
@@ -461,6 +461,7 @@ dependencies = [
     { name = "models-io", extra = ["bedrock"] },
     { name = "okf-ext", extra = ["schemas"] },
     { name = "okf-io" },
+    { name = "ruamel-yaml" },
     { name = "subagents-io" },
     { name = "work-tracker-okf" },
 ]
@@ -481,6 +482,7 @@ requires-dist = [
     { name = "models-io", extras = ["vercel"], marker = "extra == 'vercel'", editable = "packages/models-io" },
     { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
     { name = "okf-io", editable = "packages/okf-io" },
+    { name = "ruamel-yaml", specifier = ">=0.18" },
     { name = "subagents-io", editable = "packages/subagents-io" },
     { name = "work-tracker-okf", editable = "packages/work-tracker-okf" },
 ]
@@ -1107,7 +1109,7 @@ wheels = [
 
 [[package]]
 name = "okf-ext"
-version = "0.4.11"
+version = "0.4.13"
 source = { editable = "packages/okf-ext" }
 dependencies = [
     { name = "markdown-it-py" },
@@ -2127,7 +2129,7 @@ wheels = [
 
 [[package]]
 name = "work-tracker-okf"
-version = "0.5.1"
+version = "0.6.0"
 source = { editable = "packages/work-tracker-okf" }
 dependencies = [
     { name = "okf-ext", extra = ["schemas"] },

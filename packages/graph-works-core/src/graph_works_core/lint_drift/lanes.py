@@ -138,7 +138,7 @@ def _wiki_rules(config: Config, reader: GraphReader | None, *, at: datetime) -> 
 
     tags_path = config.declarations_dir / VOCABULARY_FILENAME
     if tags_path.is_file():
-        rules.append(vocabulary_rule(load_vocabulary(tags_path)))
+        rules.append(vocabulary_rule(load_vocabulary(tags_path), severity="error"))
 
     if reader is not None:
         rules.append(_deferred_sync_rule(config, reader, at=at))

@@ -47,6 +47,7 @@ from okf_ext.tags.rename import (
     plan_merge,
     plan_normalize,
     plan_rename,
+    plan_strip,
 )
 from okf_ext.tags.vocabulary import (
     CODES,
@@ -104,6 +105,7 @@ __all__ = [
     "plan_merge",
     "plan_normalize",
     "plan_rename",
+    "plan_strip",
     "plan_vocabulary_merge",
     "scan",
     "vocabulary_rule",

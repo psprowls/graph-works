@@ -9,6 +9,22 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+from graph_works_cli.cli import app
+from typer.testing import CliRunner
+
+_runner = CliRunner()
+
+
+def initialized_workspace(root: Path) -> Path:
+    """Bootstrap the smallest real initialized workspace at *root*, for CLI boundary tests.
+
+    Shared by every suite that needs a real `.gw`/`okf` layout on disk rather than a
+    monkeypatched bundle — do not re-invent this scaffolding per test module.
+    """
+    result = _runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
+    assert result.exit_code == 0
+    return root
+
 
 def console_script(name: str) -> Path:
     """This environment's installed entry point for `name`.

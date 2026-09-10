@@ -58,8 +58,14 @@ def test_version_is_static_and_pinned():
     the okf-io floor moves to `0.2.3`.
 
     `0.5.0` is still not free: the README promises the `okf_ext.sections`
-    re-export shim, and now the `placement` alias too, come out there."""
-    assert okf_ext.__version__ == "0.4.11"
+    re-export shim, and now the `placement` alias too, come out there.
+
+    `0.4.12` adds `plan_strip`, the fifth tag planner -- additive, so a
+    patch.
+
+    `0.4.13` adds `severity=` to `vocabulary_rule`, defaulted to `"warn"` so
+    nothing observable changes -- additive, so a patch too."""
+    assert okf_ext.__version__ == "0.4.13"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

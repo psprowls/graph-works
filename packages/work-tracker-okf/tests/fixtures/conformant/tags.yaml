@@ -1,0 +1,4 @@
+version: 1
+tags:
+  - name: fixture
+    description: A tag used only by this package's conformant test fixture.

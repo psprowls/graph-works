@@ -218,6 +218,26 @@ def test_the_work_lane_now_validates_schema_and_section_conformance(workspace):
     assert any(finding.code.startswith("schemas.") for finding in report.findings)
 
 
+def test_the_wiki_lane_promotes_tags_unknown_to_error(workspace):
+    """The work lane's `vocabulary_rule` composes at `severity="error"`
+    (`work_tracker_okf.compose.rule_set`), and the wiki lane's own
+    `_wiki_rules` must match -- otherwise the promotion only covers `work/`
+    and the rest of the vault, where most pages live, can still regrow the
+    tag vocabulary silently."""
+    bundle_dir = workspace.layout.bundle_dir
+    (bundle_dir / "orphan.md").write_text(
+        "---\ntitle: Orphan\ntags: [nonexistent-tag]\n---\n\nBody.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    wiki, _work = _compose(workspace).lanes
+    bundle = load_bundle(wiki.root, ignore=wiki.ignore)
+    ctx = RuleContext(bundle=bundle, links=build_link_graph(bundle), today=TODAY)
+    findings = [finding for rule in wiki.rules for finding in rule(ctx) if finding.code == "tags.unknown"]
+    assert findings
+    assert all(finding.severity == "error" for finding in findings)
+
+
 def test_a_missing_config_projection_is_reported_as_a_lane_error(workspace):
     (workspace.layout.cache_dir / "config.json").unlink()
     lanes = _compose(workspace)

@@ -77,6 +77,10 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         ("wiki", "stats"): {"--top", "--json", "--workspace"},
         ("wiki", "index"): {"--workspace"},
         ("wiki", "archive"): {"--dry-run", "--workspace"},
+        ("wiki", "tags", "inventory"): {"--json", "--workspace"},
+        ("wiki", "tags", "draft"): {"--as-of", "--floor", "--ceiling", "--workspace"},
+        ("wiki", "tags", "apply"): {"--only", "--dry-run", "--workspace"},
+        ("wiki", "tags", "gate"): {"--json", "--workspace"},
         ("wiki", "proposals"): {"--json", "--workspace"},
         ("wiki", "proposal", "file"): {
             "--lane",
@@ -96,10 +100,16 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
 
     wiki = _help("wiki")
     proposal = _help("wiki", "proposal")
-    assert _command_names(wiki) == ["lint", "drift", "stats", "index", "archive", "proposals", "proposal"]
+    # typer.main.get_group_from_info always lists every plain `registered_command` before
+    # every `registered_group` (sub-Typer) at a given level, regardless of source order —
+    # the same reason `proposal` (a group) already sorts after `proposals` (a command).
+    # `tags` is a group (four subcommands), so it lands after every plain wiki command too.
+    assert _command_names(wiki) == ["lint", "drift", "stats", "index", "archive", "proposals", "tags", "proposal"]
     assert _command_names(proposal) == ["file", "approve", "reject"]
     assert _option_names(wiki) == set()
     assert _option_names(proposal) == set()
+    assert _command_names(_help("wiki", "tags")) == ["inventory", "draft", "apply", "gate"]
+    assert _option_names(_help("wiki", "tags")) == set()
 
     assert not {"--tool", "--force"} & _option_names(_help("bootstrap"))
     assert not {"--limit", "--all"} & _option_names(_help("ingest"))
@@ -123,6 +133,10 @@ def test_readme_documents_the_shipped_c4_surface_without_future_commands() -> No
         "gw wiki stats",
         "gw wiki index",
         "gw wiki archive",
+        "gw wiki tags inventory",
+        "gw wiki tags draft",
+        "gw wiki tags apply",
+        "gw wiki tags gate",
         "gw wiki proposals",
         "gw wiki proposal file",
         "gw wiki proposal approve",

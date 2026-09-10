@@ -337,6 +337,34 @@ def test_probe_unknown_without_suggestion():
     assert not any("Did you mean" in f.message for f in ga4_findings), "Should not suggest anything for 'ga4'"
 
 
+def test_the_rule_is_warn_by_default():
+    vocab = load_vocabulary(VOCABULARY)
+    report = validate(tagged_bundle(), today=TODAY, extra_rules=[vocabulary_rule(vocab)])
+    assert {f.severity for f in report.by_code("tags.unknown")} == {"warn"}
+    # The corpus is already non-conformant independent of this rule
+    # (`broken.md` is unparseable -- see test_the_house_rule_never_changes_conformance),
+    # so `report.ok` itself cannot be asserted True here. What the default
+    # actually guarantees is that no tag finding is severe enough to land
+    # among the errors.
+    assert not any(f.code.startswith("tags.") for f in report.errors)
+
+
+def test_severity_error_promotes_every_tag_code():
+    vocab = load_vocabulary(VOCABULARY)
+    report = validate(tagged_bundle(), today=TODAY, extra_rules=[vocabulary_rule(vocab, severity="error")])
+    tag_findings = [f for f in report.errors + report.warnings if f.code.startswith("tags.")]
+    assert tag_findings
+    assert {f.severity for f in tag_findings} == {"error"}
+    assert not report.ok
+
+
+def test_severity_does_not_touch_findings_from_other_rules():
+    vocab = load_vocabulary(VOCABULARY)
+    report = validate(tagged_bundle(), today=TODAY, extra_rules=[vocabulary_rule(vocab, severity="error")])
+    others = [f for f in report.warnings if not f.code.startswith("tags.")]
+    assert {f.severity for f in others} <= {"warn"}
+
+
 def test_probe_unknown_suggestion_can_be_deprecated(tmp_path):
     """A suggestion for an unknown tag can itself be a deprecated tag."""
     from okf_io import load_bundle

@@ -298,12 +298,14 @@ non-string tag.** `okf_io`'s frontmatter view coerces a non-string scalar tag
 — an int `42`, a float, a bool — into the string `'42'` and records no
 `coercion_failures` entry for it (unlike a mapping or a list, which it
 refuses and does record). `tags.inventory()` therefore counts `'42'` as a
-real tag like any other. Every `tags.plan_*` function, however, reads tag
-*positions* from the raw YAML sequence rather than the coerced view — because
-a plan's positions must mean something in the sequence `apply()` will
-actually edit — and a position holding a non-string value is deliberately
-never matched, so `plan_rename(bundle, "42", "forty-two")` against that same
-bundle returns an **empty plan with no explanation**. The behaviour on both
+real tag like any other. Every `tags.plan_*` function — `plan_rename`,
+`plan_merge`, `plan_normalize`, `plan_from_vocabulary`, and `plan_strip` alike
+— however, reads tag *positions* from the raw YAML sequence rather than the
+coerced view — because a plan's positions must mean something in the
+sequence `apply()` will actually edit — and a position holding a non-string
+value is deliberately never matched, so `plan_rename(bundle, "42",
+"forty-two")` against that same bundle returns an **empty plan with no
+explanation**, and `plan_strip(bundle, ["42"])` the same. The behaviour on both
 sides is individually correct and deliberate: the inventory is not supposed
 to normalize away the mess, and the planner is not supposed to risk rewriting
 a value that was never really a string on disk. What is missing is a signal

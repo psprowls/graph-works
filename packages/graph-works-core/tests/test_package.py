@@ -12,7 +12,7 @@ from graph_works_core.workspace.errors import InitError, WorkspaceError, Workspa
 
 
 def test_version_is_static_and_matches_the_distribution():
-    assert graph_works_core.__version__ == "0.4.0"
+    assert graph_works_core.__version__ == "0.5.0"
 
 
 def test_private_descriptor_loader_has_a_synchronized_okf_io_floor():

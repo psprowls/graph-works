@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "commands": [
     {
       "name": "gw archive",
@@ -1357,7 +1357,8 @@
         "lint",
         "proposal",
         "proposals",
-        "stats"
+        "stats",
+        "tags"
       ],
       "path": [
         "wiki"
@@ -1826,6 +1827,230 @@
       "path": [
         "wiki",
         "stats"
+      ]
+    },
+    {
+      "name": "gw wiki tags",
+      "help": "Tag inventory, retention policy, and gate.",
+      "short_help": "Tag inventory, retention policy, and gate.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "apply",
+        "draft",
+        "gate",
+        "inventory"
+      ],
+      "path": [
+        "wiki",
+        "tags"
+      ]
+    },
+    {
+      "name": "gw wiki tags apply",
+      "help": "Execute a reviewed disposition against the vault.\n\n**`--dry-run` with both phases planned prints pre-merge strip indices.**\nThe loop below calls `plan_phase` for each phase in turn without applying\neither, so when both `merge` and `strip` run the strip preview's\n`path[index]` lines are computed against the *pre-merge* bundle -- the\nedits `apply_phase` would actually make are unaffected (a real, non-dry\nrun always applies merge before planning strip against its result), only\nthe dry-run preview's printed indices can be off from what a subsequent\nreal run would show for `strip`.",
+      "short_help": "Execute a reviewed disposition against the vault.",
+      "usage": [
+        "[OPTIONS]",
+        "{DISPOSITION}"
+      ],
+      "arguments": [
+        {
+          "name": "disposition",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "only",
+          "opts": [
+            "--only"
+          ],
+          "secondary_opts": [],
+          "help": "Run one phase: merge or strip. Omitted, both run in that order.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "tags",
+        "apply"
+      ]
+    },
+    {
+      "name": "gw wiki tags draft",
+      "help": "Write the reviewable disposition from the retention rule.",
+      "short_help": "Write the reviewable disposition from the retention rule.",
+      "usage": [
+        "[OPTIONS]",
+        "{out}"
+      ],
+      "arguments": [
+        {
+          "name": "out",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "as_of",
+          "opts": [
+            "--as-of"
+          ],
+          "secondary_opts": [],
+          "help": "Generation date, YYYY-MM-DD. Required: the CLI owns the clock.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "floor",
+          "opts": [
+            "--floor"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": 5,
+          "is_flag": false
+        },
+        {
+          "name": "ceiling",
+          "opts": [
+            "--ceiling"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": 0.4,
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "tags",
+        "draft"
+      ]
+    },
+    {
+      "name": "gw wiki tags gate",
+      "help": "Exit non-zero if the vault carries a tag the vocabulary does not know.",
+      "short_help": "Exit non-zero if the vault carries a tag the vocabulary does not know.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "tags",
+        "gate"
+      ]
+    },
+    {
+      "name": "gw wiki tags inventory",
+      "help": "Report every tag the vault carries, with its page count.",
+      "short_help": "Report every tag the vault carries, with its page count.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "tags",
+        "inventory"
       ]
     },
     {

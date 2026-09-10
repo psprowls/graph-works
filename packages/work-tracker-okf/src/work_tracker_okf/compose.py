@@ -127,12 +127,28 @@ def rule_set(
     than start erroring. When `<declarations>/tags.yaml` exists,
     `vocabulary_rule(load_vocabulary(...))` is appended; a malformed file
     raises `VocabularyError` (a `ValueError`), landing in this function's
-    existing documented raise contract rather than a new one. **It stays at
-    its native `warn`**, the same argument this docstring already makes for
-    `render_rule()` above: the rule takes no `severity=` parameter by design
-    (`Report.ok` is a claim about OKF v0.2 conformance, and a house rule must
-    not make a conformant bundle look otherwise), and the live vault trips it
-    in bulk, so `gw work advance`'s exit code must stay unaffected.
+    existing documented raise contract rather than a new one.
+
+    **It composes at `error`.** The argument this docstring makes for
+    `render_rule()` above -- `Report.ok` is a claim about OKF v0.2 conformance,
+    and a house rule must not make a conformant bundle look otherwise -- is
+    correct *about okf-io*, and that is exactly why it does not reach here.
+    `vocabulary_rule` ships in `okf_ext`, never `okf_io`: a lint composed
+    purely from okf-io carries no tag rule at all and reports `ok` regardless
+    of a vault's tags. `Report.ok` over a *composed* rule set was never a
+    conformance claim, so a tier-2 house rule may be ERROR without touching
+    the one that is. See ADR-0050, which sharpens ADR-0044 the way ADR-0044
+    sharpens ADR-0005. The consequence is deliberate: an undeclared tag blocks
+    `gw work advance`.
+
+    **The promotion covers all three `vocabulary_rule` codes, `tags.deprecated`
+    included** -- `severity=` is one argument for the whole rule, not scoped
+    per code, and that is `vocabulary_rule`'s contract, not a gap here. One
+    consequence follows: a deprecation window is no longer a valid
+    intermediate state in this lane. Marking a tag deprecated and migrating
+    the pages that used it must land as one atomic change -- committing the
+    deprecation alone, while pages still carry the old tag, now fails
+    `gw work advance` rather than merely warning.
 
     Raises `OSError` for a missing declarations directory and `ValueError` for
     a malformed one, straight out of `load_schemas` / `load_sections`. That is
@@ -151,7 +167,7 @@ def rule_set(
     ]
     tags_path = declarations / VOCABULARY_FILENAME
     if tags_path.is_file():
-        rules.append(vocabulary_rule(load_vocabulary(tags_path)))
+        rules.append(vocabulary_rule(load_vocabulary(tags_path), severity="error"))
     return tuple(rules)
 
 

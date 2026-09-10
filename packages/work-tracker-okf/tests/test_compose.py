@@ -257,7 +257,7 @@ def test_rule_set_reports_a_tag_outside_the_vocabulary(root: Path) -> None:
     )
     bundle = load_bundle(root, ignore=IGNORE)
     report = validate(bundle, today=TODAY, extra_rules=compose.rule_set(root))
-    assert [f.code for f in report.warnings if f.code == "tags.unknown"]
+    assert [f.code for f in report.errors if f.code == "tags.unknown"]
 
 
 def test_rule_set_skips_the_vocabulary_rule_when_tags_yaml_is_absent(root: Path) -> None:
@@ -277,7 +277,25 @@ def test_rule_set_propagates_a_malformed_vocabulary_as_value_error(root: Path) -
         compose.rule_set(root)
 
 
-def test_rule_set_vocabulary_findings_are_always_warn(root: Path) -> None:
+def test_the_tag_vocabulary_composes_at_error(root: Path) -> None:
+    (root / VOCABULARY_FILENAME).write_text(
+        "version: 1\ntags:\n  - name: graph-works\n",
+        encoding="utf-8",
+    )
+    write_item(
+        root,
+        ITEM,
+        "type: Feature\nwork_status: open\nstatus: draft\n"
+        "opened: 2026-08-22\nupdated: 2026-08-22\naffects: [packages/work-tracker-okf]\n"
+        "tags: [not-in-vocabulary]\n",
+    )
+    bundle = load_bundle(root, ignore=IGNORE)
+    report = validate(bundle, today=TODAY, extra_rules=compose.rule_set(root))
+    assert {f.severity for f in report.by_code("tags.unknown")} == {"error"}
+    assert not report.ok
+
+
+def test_rule_set_vocabulary_findings_are_always_error(root: Path) -> None:
     (root / VOCABULARY_FILENAME).write_text(
         "version: 1\ntags:\n  - name: graph-works\n",
         encoding="utf-8",
@@ -293,4 +311,4 @@ def test_rule_set_vocabulary_findings_are_always_warn(root: Path) -> None:
     report = validate(bundle, today=TODAY, extra_rules=compose.rule_set(root))
     tag_findings = [f for f in (*report.errors, *report.warnings) if f.code.startswith("tags.")]
     assert tag_findings
-    assert all(f.severity == "warn" for f in tag_findings)
+    assert all(f.severity == "error" for f in tag_findings)

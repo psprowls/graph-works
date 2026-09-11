@@ -18,32 +18,36 @@ section (`§5.1`, `§11`) and expect you to reason from those citations.
 The suffix on a package name is a band, and a permission — what it may
 couple to:
 
-| Suffix | Band | May couple to |
-|---|---|---|
-| `-io` | 1, foundation | stdlib and declared third party only — never a sibling package, never a workspace path; `os` only where a package's own boundary test names a narrow, tested exemption |
-| `-okf` | 2, OKF-aware | band 1 plus the OKF document model |
-| `-core` | 3, application | everything below it; exactly one package (`graph-works-core`) knows what a workspace is |
-| `workflow-<backend>` | beside band 1 | vendor/system coupling lives here — one package per dispatch backend |
+
+| Suffix               | Band           | May couple to                                                                                                                                                          |
+| -------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-io`                | 1, foundation  | stdlib and declared third party only — never a sibling package, never a workspace path; `os` only where a package's own boundary test names a narrow, tested exemption |
+| `-okf`               | 2, OKF-aware   | band 1 plus the OKF document model                                                                                                                                     |
+| `-core`              | 3, application | everything below it; exactly one package (`graph-works-core`) knows what a workspace is                                                                                |
+| `workflow-<backend>` | beside band 1  | vendor/system coupling lives here — one package per dispatch backend                                                                                                   |
+
 
 Each package carries its own `AGENTS.md` (via a `CLAUDE.md` that just
 `@`-imports it) with its module layout and gotchas. This file covers what
 spans packages.
 
-| Package | Band | What it is |
-|---|---|---|
-| `okf-io` | 1 | Read/derive/write-back for OKF v0.2 concept documents — the spec, nothing else. See "okf-io" below; this is the package the rest of the `-okf` band builds on. |
-| `config-io` | 1 | Schema-driven, git-like scoped configuration over YAML. |
-| `models-io` | 1 | Guarded Bedrock / Vercel AI Gateway model constructors. |
-| `subagents-io` | 1 | Bounded async fan-out pool for role-bound model dispatch. |
-| `code-graph-io` | 1 | Code-graph core: SQLite store, tree-sitter parsing, manifest scanning, read-only queries. |
-| `workflow-local` | beside 1 | Subprocess `DispatchBackend` for `subagents-io`. |
-| `workflow-orca` | beside 1 | Orca-Run `DispatchBackend` for `subagents-io`. |
-| `okf-ext` | 2 | Beyond-spec capabilities over any OKF v0.2 bundle — extends `okf-io`, never modifies it. |
-| `code-wiki-okf` | 2 | Generates/updates a standalone OKF v0.2 bundle from the shared code graph. |
-| `doc-wiki-okf` | 2 | The documentation-wiki lane: source reading, ingest briefs, proposals. |
-| `work-tracker-okf` | 2 | Work-item tracking as an OKF v0.2 lane. |
-| `graph-works-core` | 3 | What a workspace is: discovery, the layout object, the manifest, init. |
-| `graph-works-cli` | — | `gw`: a thin Typer interface over `graph-works-core` (ADR-0013 — logic stays in core, this package routes/parses/formats/traces). |
+
+| Package            | Band     | What it is                                                                                                                                                     |
+| ------------------ | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `okf-io`           | 1        | Read/derive/write-back for OKF v0.2 concept documents — the spec, nothing else. See "okf-io" below; this is the package the rest of the `-okf` band builds on. |
+| `config-io`        | 1        | Schema-driven, git-like scoped configuration over YAML.                                                                                                        |
+| `models-io`        | 1        | Guarded Bedrock / Vercel AI Gateway model constructors.                                                                                                        |
+| `subagents-io`     | 1        | Bounded async fan-out pool for role-bound model dispatch.                                                                                                      |
+| `code-graph-io`    | 1        | Code-graph core: SQLite store, tree-sitter parsing, manifest scanning, read-only queries.                                                                      |
+| `workflow-local`   | beside 1 | Subprocess `DispatchBackend` for `subagents-io`.                                                                                                               |
+| `workflow-orca`    | beside 1 | Orca-Run `DispatchBackend` for `subagents-io`.                                                                                                                 |
+| `okf-ext`          | 2        | Beyond-spec capabilities over any OKF v0.2 bundle — extends `okf-io`, never modifies it.                                                                       |
+| `code-wiki-okf`    | 2        | Generates/updates a standalone OKF v0.2 bundle from the shared code graph.                                                                                     |
+| `doc-wiki-okf`     | 2        | The documentation-wiki lane: source reading, ingest briefs, proposals.                                                                                         |
+| `work-tracker-okf` | 2        | Work-item tracking as an OKF v0.2 lane.                                                                                                                        |
+| `graph-works-core` | 3        | What a workspace is: discovery, the layout object, the manifest, init.                                                                                         |
+| `graph-works-cli`  | —        | `gw`: a thin Typer interface over `graph-works-core` (ADR-0013 — logic stays in core, this package routes/parses/formats/traces).                              |
+
 
 Dependencies only point down the table (never up, never sideways within a
 band except through the band-1 `DispatchBackend` seam). `graph-works-core` is
@@ -56,20 +60,22 @@ arguments.
 Every `just` recipe is exactly what a future CI job will call. No CI workflow
 exists yet — enforcement is local, by design (ADR-0010).
 
-| Command | What it does |
-|---|---|
-| `just` / `just check` | `sync` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate |
-| `just sync` | `uv sync --all-packages` — provisions every member's deps, not just the root's |
-| `just normalization` | Unicode-normalization check on tracked filenames (cheap, run first) |
-| `just text-io` | Implicit text-IO defaults in shipped source — a missing `encoding=` on any text read/write, or a missing `newline=` on any text write. Not a `lint` addition deliberately: ruff's `PLW1514` is preview-only and covers `encoding=` alone, and `scripts`/`plugins` sit in ruff's `exclude`. Scope is `packages/*/src` and `scripts`, plus the three byte-exact test trees (`okf-io`, `okf-ext`, `scripts/tests`); the other nine still rely on a suite run |
-| `just line-endings` | A tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true` |
-| `just platform-declared` | A package that imports a POSIX-only module, or reaches a POSIX-only process primitive, with no `## Platform` section declaring it — ADR-0021 rule 3a as a check |
-| `just lint` | `uv run ruff check . && uv run ruff format --check .` |
-| `just types` | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, then `win32`), 24 invocations total — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa |
-| `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
-| `just test` | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package |
-| `just cov` | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing` |
-| `just test-plugin` | The `gw` plugin's own test suites (bash, plus one `node --test` suite), under `plugins/gw/` |
+
+| Command                  | What it does                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `just` / `just check`    | `sync` + `normalization` + `text-io` + `line-endings` + `platform-declared` + `lint` + `types` + `contracts` + `cov` + `test-plugin` — the full gate                                                                                                                                                                                                                                                                                                      |
+| `just sync`              | `uv sync --all-packages` — provisions every member's deps, not just the root's                                                                                                                                                                                                                                                                                                                                                                            |
+| `just normalization`     | Unicode-normalization check on tracked filenames (cheap, run first)                                                                                                                                                                                                                                                                                                                                                                                       |
+| `just text-io`           | Implicit text-IO defaults in shipped source — a missing `encoding=` on any text read/write, or a missing `newline=` on any text write. Not a `lint` addition deliberately: ruff's `PLW1514` is preview-only and covers `encoding=` alone, and `scripts`/`plugins` sit in ruff's `exclude`. Scope is `packages/*/src` and `scripts`, plus the three byte-exact test trees (`okf-io`, `okf-ext`, `scripts/tests`); the other nine still rely on a suite run |
+| `just line-endings`      | A tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true`                                                                                                                                                                                                                                                                                                                                                              |
+| `just platform-declared` | A package that imports a POSIX-only module, or reaches a POSIX-only process primitive, with no `## Platform` section declaring it — ADR-0021 rule 3a as a check                                                                                                                                                                                                                                                                                           |
+| `just lint`              | `uv run ruff check . && uv run ruff format --check .`                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `just types`             | `uv run mypy --strict`, **twice per package** — once per `--platform` arm (`linux`, then `win32`), 24 invocations total — via `uv run --package <name> mypy --strict --platform <arm> packages/<name>/src` (okf-io and okf-ext share a bare `uv run` since they share the root `testpaths`); a POSIX host cannot otherwise see a Windows-only `mypy --strict` failure, or vice versa                                                                      |
+| `just contracts`         | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries                                                                                                                                                                                                                                                                                                                                              |
+| `just test`              | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package                                                                                                                                                                                                                                                                                                                                           |
+| `just cov`               | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing`                                                                                                                                                                                                                          |
+| `just test-plugin`       | The `gw` plugin's own test suites (bash, plus one `node --test` suite), under `plugins/gw/`                                                                                                                                                                                                                                                                                                                                                               |
+
 
 Every suite `just check` runs is Python, bash, or — for the plugin's
 `tests/pi` extension suite alone — `node --test`. Node 23.6+ is required for

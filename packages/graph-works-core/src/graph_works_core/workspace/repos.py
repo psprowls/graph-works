@@ -15,8 +15,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from code_wiki_okf.config import ConfigError, load_config
-
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -46,16 +45,9 @@ def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tu
     """
     path = layout.manifest_path
     try:
-        config = load_config(
-            layout.bundle_dir,
-            config_path=layout.manifest_path,
-            graph_dir=layout.cache_dir,
-            declarations_dir=layout.config_dir,
-        )
+        config = load_workspace_config(layout)
     except OSError:
         return None, f"{path}: absent, so this workspace declares no code repository"
-    except ConfigError as exc:
-        raise WorkspaceError(str(exc)) from exc
 
     declared = sorted(entry.name for entry in config.repos)
     if repo_name is not None:

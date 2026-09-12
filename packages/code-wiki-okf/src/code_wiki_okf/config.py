@@ -16,6 +16,7 @@ validation. The three blocks' *internal* shape is still checked strictly.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -160,9 +161,53 @@ def load_config(
     bundle_root = Path(bundle_root)
     path = Path(config_path) if config_path is not None else bundle_root / MANIFEST_FILENAME
     raw = _read_yaml(path)
-    name = path.name
+    doc = _require_mapping(raw, name=path.name, where="the document") if raw is not None else {}
+    return config_from_mapping(
+        doc,
+        anchor=path.parent,
+        bundle_root=bundle_root,
+        graph_dir=graph_dir,
+        declarations_dir=declarations_dir,
+        source=path.name,
+    )
 
-    doc = _require_mapping(raw, name=name, where="the document") if raw is not None else {}
+
+def config_from_mapping(
+    content: Mapping[str, Any],
+    *,
+    anchor: str | Path,
+    bundle_root: str | Path,
+    graph_dir: str | Path,
+    declarations_dir: str | Path | None = None,
+    source: str = MANIFEST_FILENAME,
+) -> Config:
+    """Validate an already-parsed manifest's `repositories` / `ignore` /
+    `state_gate` blocks.
+
+    The sibling of `load_config` (D-005), for a caller that has already read
+    the document — `graph_works_core.workspace.config`, which reads it through
+    `config-io`'s store so the workspace has one YAML parser rather than two. A
+    `content=` keyword on `load_config` would have been mutually exclusive
+    with `config_path=` and needed a runtime refusal for the both-given case;
+    two functions have no illegal argument combination.
+
+    *anchor* is the directory a relative `repositories.*.path` resolves
+    against — the directory the document itself was read from (ADR-0041). It
+    is **not** *bundle_root*, which is what a relative *graph_dir* /
+    *declarations_dir* resolves against and what *declarations_dir* defaults
+    to. The two coincide only when the document sits at
+    `<bundle_root>/workspace.yaml`.
+
+    *source* is the name every `ConfigError` message quotes. It is the
+    document's name, not a path, and it defaults to `MANIFEST_FILENAME`.
+
+    Every top-level key other than the three blocks is ignored; see
+    `load_config`.
+    """
+    bundle_root = Path(bundle_root)
+    anchor = Path(anchor)
+    name = source
+    doc = dict(content)
 
     resolved_graph_dir = _resolve(bundle_root, _require_nonempty_kwarg(graph_dir, param="graph_dir"))
 
@@ -185,7 +230,7 @@ def load_config(
         allowed_repo_keys = {"path", "ignore"}
         _reject_unknown_keys(entry, allowed=allowed_repo_keys, name=name, where=f"`repositories.{repo_name}`")
         repo_path_raw = _require_nonempty_string(entry.get("path"), name=name, where=f"`repositories.{repo_name}.path`")
-        repo_path = _resolve(path.parent, repo_path_raw)
+        repo_path = _resolve(anchor, repo_path_raw)
         per_repo_ignore = _string_list(entry.get("ignore"), name=name, where=f"`repositories.{repo_name}.ignore`")
         repos.append(RepoConfig(name=repo_name, path=repo_path, ignore=global_ignore + per_repo_ignore))
 

@@ -40,12 +40,12 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any
 
-from config_io import PlainYamlStore, expand_wildcards, resolve_key
+from config_io import expand_wildcards, resolve_key
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import CATALOG as MANIFEST_CATALOG
-from graph_works_core.workspace.manifest import checked
+from graph_works_core.workspace.manifest import checked, workspace_store
 
 #: The catalog prefix this module owns, and the one `roles.py` filters against.
 PIPELINE_PREFIX = "workflow.pipeline."
@@ -173,7 +173,7 @@ def workspace_pipeline(layout: WorkspaceLayout) -> dict[str, dict[str, Any]]:
     have real defaults, so a null there lets a workspace inherit one while
     believing it set something, and `manifest.checked_int` refuses it.
     """
-    store = PlainYamlStore(layout.manifest_path)
+    store = workspace_store(layout)
     overrides: dict[str, dict[str, Any]] = {}
     for key in expand_wildcards(MANIFEST_CATALOG, store=store):
         if not key.startswith(PIPELINE_PREFIX):

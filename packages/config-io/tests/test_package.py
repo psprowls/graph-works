@@ -11,7 +11,7 @@ PKG_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_version_is_static():
-    assert config_io.__version__ == "0.1.0"
+    assert config_io.__version__ == "0.2.0"
 
 
 def test_ships_a_py_typed_marker():
@@ -24,7 +24,7 @@ def test_declares_exactly_one_runtime_dependency():
     meta = tomllib.loads((PKG_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     deps = meta["project"]["dependencies"]
     assert len(deps) == 1
-    assert deps[0].startswith("pyyaml")
+    assert deps[0].startswith("ruamel.yaml")
 
 
 def test_all_is_sorted_and_bound():
@@ -53,6 +53,8 @@ def test_the_public_surface_is_the_spec_s_module_table():
         "coerce",
         "ConfigStore",
         "Fingerprint",
+        "LayeredStore",
+        "LayeredYamlStore",
         "PlainYamlStore",
         "resolve_key",
         "resolve_all",

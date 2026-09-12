@@ -89,6 +89,7 @@ def test_bootstrap_json_is_idempotent(tmp_path: Path) -> None:
         "cache_dir",
         "created",
         "written",
+        "deleted",
     }
 
 
@@ -231,3 +232,37 @@ def test_dry_run_json_keys_mirror_the_applied_payload(tmp_path: Path) -> None:
     assert payload["changed"] is True
     assert "+ workspace.yaml" in payload["planned"]
     assert not root.exists()
+
+
+def test_bootstrap_previews_then_deletes_a_stale_bundle_context_pair(tmp_path: Path) -> None:
+    root = tmp_path / "works"
+    assert runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root), "--json"]).exit_code == 0
+    stale_agents = root / "okf" / "AGENTS.md"
+    stale_claude = root / "okf" / "CLAUDE.md"
+    stale_agents.write_text("# stale\n", encoding="utf-8")
+    stale_claude.write_text("@AGENTS.md\n", encoding="utf-8")
+
+    preview = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root), "--dry-run", "--json"])
+    assert preview.exit_code == 0
+    assert "- okf/AGENTS.md" in json.loads(preview.stdout)["planned"]
+    assert stale_agents.is_file()
+
+    applied = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root), "--json"])
+    assert applied.exit_code == 0
+    payload = json.loads(applied.stdout)
+    assert payload["changed"] is True
+    assert payload["deleted"] == ["okf/AGENTS.md", "okf/CLAUDE.md"]
+    assert "okf/AGENTS.md" not in payload["written"]
+    assert not stale_agents.exists()
+    assert not stale_claude.exists()
+
+
+def test_bootstrap_text_output_shows_a_deletion(tmp_path: Path) -> None:
+    root = tmp_path / "works"
+    assert runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)]).exit_code == 0
+    (root / "okf" / "AGENTS.md").write_text("# stale\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
+
+    assert result.exit_code == 0
+    assert "- okf/AGENTS.md" in result.stdout.splitlines()

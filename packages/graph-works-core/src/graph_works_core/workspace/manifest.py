@@ -34,6 +34,7 @@ from pathlib import Path
 
 from config_io import (
     ConfigEntry,
+    LayeredYamlStore,
     PlainYamlStore,
     Resolved,
     StoreValidationError,
@@ -48,6 +49,7 @@ from graph_works_core.workspace.errors import WorkspaceError, WorkspaceNotFound
 from graph_works_core.workspace.layout import (
     DEFAULT_BUNDLE_DIR,
     DEFAULT_CONFIG_DIR,
+    LOCAL_MANIFEST_FILENAME,
     MANIFEST_FILENAME,
     WorkspaceLayout,
 )
@@ -65,6 +67,12 @@ BACKENDS: tuple[str, ...] = ("bedrock", "vercel", "claude_code")
 #: where a key gets documented and a key the CLI cannot name is one users have
 #: to be told about in prose.
 WORKSPACE_DIR_ENV = "GRAPH_WORKS_DIR"
+
+#: The origins that name a value some human typed into a file. Both bypass
+#: config-io's set-time checks — a hand-edited overlay is no more validated
+#: than a hand-edited base — so `checked` covers both. `"env"` stays
+#: fail-open (config-io's documented rule) and `"default"` is catalog-authored.
+STORED_ORIGINS: frozenset[str] = frozenset({"manifest", "local"})
 
 CATALOG: tuple[ConfigEntry, ...] = (
     ConfigEntry(
@@ -328,6 +336,42 @@ def check_version(values: Mapping[str, object], path: Path) -> int:
     return _version(values.get("version", MANIFEST_VERSION), path)
 
 
+def manifest_store(path: str | Path) -> LayeredYamlStore:
+    """The store every workspace-config reader goes through.
+
+    A two-layer view: the committed `workspace.yaml` under the gitignored,
+    per-machine `workspace.local.yaml` beside it. Overlay wins, mappings
+    deep-merge, everything else replaces wholesale. The store is read-only —
+    a write names its layer (`store.base` / `store.overlay`) and goes through
+    `config_io.set_key` on that plain store.
+
+    A **read** seam (D-004) that also hands back the write-side layers.
+    `set_value` below is the one other site that names `PlainYamlStore`
+    itself; `graph_works_cli.config_cli.main._store` writes by reading
+    `.base` / `.overlay` off the `LayeredYamlStore` this function already
+    built, rather than constructing its own. `config_io.set_key` is
+    read-mutate-write and this layered store is deliberately read-only, which
+    is why a write must name a layer at all.
+    `tests/test_workspace_store_boundary.py` is what makes that a rule rather
+    than a convention; the type system cannot express it, since every
+    `config-io` entry point takes `ConfigStore` and `ConfigStore` declares
+    `write`.
+
+    Takes a path rather than only a layout because `discovery.resolve` calls
+    `read(root / MANIFEST_FILENAME)` before any layout exists.
+    """
+    manifest_path = Path(path)
+    return LayeredYamlStore(
+        base=PlainYamlStore(manifest_path),
+        overlay=PlainYamlStore(manifest_path.parent / LOCAL_MANIFEST_FILENAME),
+    )
+
+
+def workspace_store(layout: WorkspaceLayout) -> LayeredYamlStore:
+    """`manifest_store` for a resolved workspace."""
+    return manifest_store(layout.manifest_path)
+
+
 def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manifest:
     """Read and resolve *path*.
 
@@ -349,7 +393,7 @@ def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manif
             "Initialize one with `graph_works_core.plan_init` / `apply_init`."
         )
     try:
-        resolved = resolve_all(CATALOG, store=PlainYamlStore(path), environ={} if environ is None else environ)
+        resolved = resolve_all(CATALOG, store=manifest_store(path), environ={} if environ is None else environ)
     except StoreValidationError as exc:
         raise WorkspaceError(f"{path}: {exc}") from exc
     values: dict[str, object] = {item.key: item.value for item in resolved}
@@ -372,16 +416,18 @@ def checked(resolved: Resolved, *, source: Path) -> object:
     generalizes: a hand-edited manifest bypasses config-io's set-time checks,
     so a reader that trusts a stored value trusts a file nothing validated.
 
-    **Only `origin == "manifest"` is checked.** An env value stays fail-open —
-    that is config-io's documented rule and this is not the place to
-    relitigate it — and a default is catalog-authored, so trusted by
-    construction.
+    **Only a stored origin is checked** — `STORED_ORIGINS`, which is
+    `"manifest"` (the committed file) and `"local"` (the per-machine
+    overlay). Both are hand-editable and neither passed through config-io's
+    set-time checks. An env value stays fail-open — that is config-io's
+    documented rule and this is not the place to relitigate it — and a
+    default is catalog-authored, so trusted by construction.
 
     Raises:
         WorkspaceError: for a stored value whose shape contradicts the
             catalog's declared `type` or `allowed`.
     """
-    if resolved.origin != "manifest":
+    if resolved.origin not in STORED_ORIGINS:
         return resolved.value
     value = resolved.value
     entry = resolved.entry
@@ -405,38 +451,49 @@ def checked(resolved: Resolved, *, source: Path) -> object:
     return value
 
 
-def _check_resolved(resolved: Resolved, *, explicit: Mapping[str, object], source: Path) -> Resolved:
+def _check_resolved(resolved: Resolved, *, explicit: Mapping[str, object], layout: WorkspaceLayout) -> Resolved:
     """Refuse a malformed stored value while preserving its resolution metadata."""
     # `resolve_key` treats a stored null as unset and returns the catalog
     # default, so the raw mapping is the only place a deliberate null remains
     # visible. Optional keys whose default is already None retain their normal
     # unset meaning; a null that hides a real default is the ambiguous case.
+    #
+    # A stored explicit null always resolves with origin "default" (see
+    # `resolve_key`), so which layer actually holds the null cannot be
+    # recovered from the already-merged `explicit` mapping alone — this
+    # refusal names the base manifest regardless of which file the null is
+    # actually in.
     if (
         resolved.entry.default is not None
         and dotted.has(explicit, resolved.key)
         and dotted.get(explicit, resolved.key) is None
     ):
         raise WorkspaceError(
-            f"{source}: {resolved.key}: is explicitly null. This key has a real default, so a "
+            f"{layout.manifest_path}: {resolved.key}: is explicitly null. This key has a real default, so a "
             "null here inherits it while reading as a deliberate setting — remove the line, or set a value."
         )
+    # Unlike the null check above, a *malformed* (wrong-type) value's origin
+    # is exactly which layer produced it — "local" only when the overlay
+    # itself carries the winning value (see `resolve_key`) — so the refusal
+    # can and does name the actual offending file.
+    source = layout.local_manifest_path if resolved.origin == "local" else layout.manifest_path
     checked(resolved, source=source)
     return resolved
 
 
 def resolve_checked_key(layout: WorkspaceLayout, key: str, *, environ: Mapping[str, str]) -> Resolved:
     """Resolve one manifest key and reject malformed hand-edited values."""
-    store = PlainYamlStore(layout.manifest_path)
+    store = workspace_store(layout)
     resolved = resolve_key(CATALOG, key, store=store, environ=environ)
-    return _check_resolved(resolved, explicit=store.read_explicit(), source=layout.manifest_path)
+    return _check_resolved(resolved, explicit=store.read_explicit(), layout=layout)
 
 
 def resolve_checked_all(layout: WorkspaceLayout, *, environ: Mapping[str, str]) -> list[Resolved]:
     """Resolve every manifest key and reject malformed hand-edited values."""
-    store = PlainYamlStore(layout.manifest_path)
+    store = workspace_store(layout)
     explicit = store.read_explicit()
     return [
-        _check_resolved(resolved, explicit=explicit, source=layout.manifest_path)
+        _check_resolved(resolved, explicit=explicit, layout=layout)
         for resolved in resolve_all(CATALOG, store=store, environ=environ)
     ]
 
@@ -552,6 +609,7 @@ __all__ = [
     "BACKENDS",
     "CATALOG",
     "MANIFEST_VERSION",
+    "STORED_ORIGINS",
     "WORKSPACE_DIR_ENV",
     "Manifest",
     "check_version",

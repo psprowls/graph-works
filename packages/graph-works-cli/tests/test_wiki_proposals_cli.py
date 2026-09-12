@@ -8,9 +8,9 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from code_wiki_okf.config import ConfigError
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import proposals as proposals_module
+from graph_works_core.workspace.errors import WorkspaceConfigError
 from okf_ext.proposals import Proposal
 from typer.testing import CliRunner
 
@@ -162,7 +162,7 @@ def test_proposal_file_builds_the_ordered_source_mapping_and_timestamps_it(
     filed: list[dict[str, object]] = []
 
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: bundle)
-    monkeypatch.setattr(proposals_module, "load_config", lambda _root, **_kwargs: config, raising=False)
+    monkeypatch.setattr(proposals_module, "load_workspace_config", lambda _layout: config, raising=False)
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: schemas, raising=False)
     monkeypatch.setattr(proposals_module, "lane_set", lambda actual_schemas: lanes, raising=False)
 
@@ -298,8 +298,8 @@ def test_proposal_file_omits_unprovided_optional_source_fields(
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: bundle)
     monkeypatch.setattr(
         proposals_module,
-        "load_config",
-        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/declarations")),
+        "load_workspace_config",
+        lambda _layout: SimpleNamespace(declarations_dir=Path("/declarations")),
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object())
     monkeypatch.setattr(proposals_module, "lane_set", lambda _schemas: object())
@@ -342,8 +342,8 @@ def test_proposal_file_refusal_or_incomplete_apply_exits_one(
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
     monkeypatch.setattr(
         proposals_module,
-        "load_config",
-        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/declarations")),
+        "load_workspace_config",
+        lambda _layout: SimpleNamespace(declarations_dir=Path("/declarations")),
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object())
     monkeypatch.setattr(proposals_module, "lane_set", lambda _schemas: object())
@@ -622,10 +622,10 @@ def test_proposal_file_reports_an_unloadable_lane_schema(
     """Filing against an unreadable schema must name the schema, not raise."""
 
     def fail(*_args: object, **_kwargs: object) -> object:
-        raise ConfigError("declarations dir is missing")
+        raise WorkspaceConfigError("declarations dir is missing")
 
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
-    monkeypatch.setattr(proposals_module, "load_config", fail, raising=False)
+    monkeypatch.setattr(proposals_module, "load_workspace_config", fail, raising=False)
 
     result = runner.invoke(app, _file_args(initialized_workspace))
 
@@ -642,8 +642,8 @@ def test_proposal_file_reports_an_unknown_lane(monkeypatch: pytest.MonkeyPatch, 
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
     monkeypatch.setattr(
         proposals_module,
-        "load_config",
-        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/d")),
+        "load_workspace_config",
+        lambda _layout: SimpleNamespace(declarations_dir=Path("/d")),
         raising=False,
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object(), raising=False)
@@ -663,8 +663,8 @@ def test_proposal_file_reports_a_failed_write_and_echoes_written_members(
     monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
     monkeypatch.setattr(
         proposals_module,
-        "load_config",
-        lambda _root, **_kwargs: SimpleNamespace(declarations_dir=Path("/d")),
+        "load_workspace_config",
+        lambda _layout: SimpleNamespace(declarations_dir=Path("/d")),
         raising=False,
     )
     monkeypatch.setattr(proposals_module, "load_schemas", lambda _path: object(), raising=False)

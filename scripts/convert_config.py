@@ -299,8 +299,8 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
                 None,
                 "drop",
                 raw["plugins"],
-                "No catalog equivalent and no successor field. The installer roster is rendered "
-                "into the CLAUDE.md/AGENTS.md auto block; plugin versions live in "
+                "No catalog equivalent and no successor field. The installer roster is not "
+                "rendered anywhere any more; plugin versions live in "
                 "~/.claude/plugins/installed_plugins.json.",
             )
         )

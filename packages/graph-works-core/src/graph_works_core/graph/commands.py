@@ -9,7 +9,7 @@ is the whole job.
 **No command raises for a graph-state reason.** A missing graph, a stale
 schema, a build already in flight — each comes back as a `GraphResult`
 carrying its code. Only `graph_target` raises, and only for configuration:
-a malformed `workspace.yaml` is a `ConfigError`, following the line
+a malformed `workspace.yaml` is a `WorkspaceConfigError`, following the line
 `code_wiki_okf.config` draws and `okf_ext`'s `VocabularyError` sets.
 
 There is no Typer surface here and no tracing. Both live in E7, which builds
@@ -34,9 +34,9 @@ from code_graph_io import (
     render,
     update,
 )
-from code_wiki_okf.config import load_config
 
 from graph_works_core.graph.graph_tools import ROW_CAP, _describe
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 
@@ -48,7 +48,7 @@ class GraphTarget:
     `repositories` key for each path, which is what `build(only=…)` scopes by.
     `member_ignore` is index-aligned with `members` too — each member's
     `ignore:` glob patterns (global + per-repo, already merged by
-    `code_wiki_okf.config.load_config`). All three are empty when there is
+    `config_from_mapping`, via `workspace.config.load_workspace_config`). All three are empty when there is
     nothing to build, and a caller that only reads (a test, C5's tool
     factory) can supply none of them.
     """
@@ -93,7 +93,7 @@ def graph_target(layout: WorkspaceLayout) -> GraphTarget:
     target complete: every command reads the target and nothing else, so a
     caller constructing one by hand needs no layout.
 
-    Raises `code_wiki_okf.ConfigError` for a malformed `workspace.yaml`.
+    Raises `WorkspaceConfigError` for a malformed `workspace.yaml`.
     """
     if not layout.manifest_path.exists():
         if layout.repo_root is None:
@@ -104,12 +104,7 @@ def graph_target(layout: WorkspaceLayout) -> GraphTarget:
             member_names=(layout.repo_root.name,),
             member_ignore=((),),
         )
-    config = load_config(
-        layout.bundle_dir,
-        config_path=layout.manifest_path,
-        graph_dir=layout.cache_dir,
-        declarations_dir=layout.config_dir,
-    )
+    config = load_workspace_config(layout)
     return GraphTarget(
         graph_dir=config.graph_dir,
         members=tuple(repo.path for repo in config.repos),

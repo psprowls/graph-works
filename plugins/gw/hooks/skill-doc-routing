@@ -115,6 +115,11 @@ if [ ! -f "$WORKSPACE/workspace.yaml" ]; then
 fi
 
 # The projection is the read surface for consumers that must not spawn Python.
+# It is generated from *both* config layers: `workspace.yaml` (recorded as
+# `_meta.source_sha256`) and the gitignored `workspace.local.yaml` (recorded as
+# `_meta.overlay_sha256`). A projection written before the overlay existed
+# carries only the two `source_*` keys; the check below treats that as fresh so
+# long as no local manifest is present.
 # `gw init` writes this file as of the .gw/ rename, so a freshly bootstrapped
 # workspace normally has one; it can still be absent on an older workspace
 # that has not re-run init, or when `gw config sync` has never run there —
@@ -146,6 +151,31 @@ if [ -f "$PROJECTION" ]; then
     actual_sha=$(sha256_of "$WORKSPACE/workspace.yaml")
     if [ -n "$recorded_sha" ] && [ -n "$actual_sha" ] && [ "$recorded_sha" != "$actual_sha" ]; then
         STALE_NOTICE="<graph-works-config-stale> The workspace manifest ($WORKSPACE/workspace.yaml) has changed since $PROJECTION was generated — likely a hand-edit. Hooks read the projection, so it is out of date. Run: \`gw config sync\`"
+    fi
+
+    # The second layer. Unlike the base check, an empty *recorded* side is
+    # evidence: a local manifest that exists with no recorded hash means the
+    # projection predates it, and a recorded hash with no file means it was
+    # removed. Both are staleness. An empty *actual* hash is not — that means
+    # no hashing tool, the same reason the base check above skips.
+    overlay_file="$WORKSPACE/workspace.local.yaml"
+    recorded_overlay=$(sed -n 's/.*"overlay_sha256"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{64\}\)".*/\1/p' "$PROJECTION" 2>/dev/null | head -n 1)
+    overlay_stale=0
+    if [ -f "$overlay_file" ]; then
+        actual_overlay=$(sha256_of "$overlay_file")
+        if [ -n "$actual_overlay" ] && [ "$recorded_overlay" != "$actual_overlay" ]; then
+            overlay_stale=1
+        fi
+    elif [ -n "$recorded_overlay" ]; then
+        overlay_stale=1
+    fi
+
+    if [ "$overlay_stale" -eq 1 ]; then
+        if [ -n "$STALE_NOTICE" ]; then
+            STALE_NOTICE="<graph-works-config-stale> Both workspace manifests ($WORKSPACE/workspace.yaml and $overlay_file) have changed since $PROJECTION was generated — likely a hand-edit. Hooks read the projection, so it is out of date. Run: \`gw config sync\`"
+        else
+            STALE_NOTICE="<graph-works-config-stale> The local workspace manifest ($overlay_file) has changed since $PROJECTION was generated — likely a hand-edit. Hooks read the projection, so it is out of date. Run: \`gw config sync\`"
+        fi
     fi
 fi
 

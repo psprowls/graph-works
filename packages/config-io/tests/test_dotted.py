@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from config_io import dotted
+from config_io.dotted import merge
 
 
 def test_get_reads_a_nested_value():
@@ -93,3 +94,54 @@ def test_unset_in_top_level_key():
     data: dict[str, object] = {"a": 1, "b": 2}
     assert dotted.unset_in(data, "a") is True
     assert data == {"b": 2}
+
+
+# --- merge -----------------------------------------------------------------
+
+
+def test_merge_recurses_into_mappings_on_both_sides():
+    base = {"repositories": {"gw": {"path": "../gw", "ignore": ["a"]}}}
+    overlay = {"repositories": {"gw": {"path": "/abs/gw"}}}
+    assert merge(base, overlay) == {"repositories": {"gw": {"path": "/abs/gw", "ignore": ["a"]}}}
+
+
+def test_merge_replaces_a_list_wholesale():
+    # Lists are not merged element-wise: a local `ignore:` states the whole list.
+    assert merge({"ignore": ["a", "b"]}, {"ignore": ["c"]}) == {"ignore": ["c"]}
+
+
+def test_merge_replaces_a_scalar():
+    assert merge({"topic": "base"}, {"topic": "local"}) == {"topic": "local"}
+
+
+def test_merge_carries_an_overlay_null_through():
+    # D-001: a local null replaces, and `manifest._check_resolved` then applies
+    # the one null rule the manifest already states. Dropping it here would
+    # make a local null silently inert.
+    assert merge({"topic": "base"}, {"topic": None}) == {"topic": None}
+
+
+def test_merge_copies_keys_present_only_in_base():
+    assert merge({"version": 1, "topic": "x"}, {"topic": "y"}) == {"version": 1, "topic": "y"}
+
+
+def test_merge_replaces_a_base_mapping_with_an_overlay_scalar():
+    # Only a mapping on *both* sides recurses.
+    assert merge({"layout": {"bundle_dir": "okf"}}, {"layout": "nope"}) == {"layout": "nope"}
+
+
+def test_merge_replaces_a_base_scalar_with_an_overlay_mapping():
+    assert merge({"layout": "nope"}, {"layout": {"bundle_dir": "okf"}}) == {"layout": {"bundle_dir": "okf"}}
+
+
+def test_merge_mutates_neither_input():
+    base = {"a": {"x": 1}}
+    overlay = {"a": {"y": 2}}
+    merged = merge(base, overlay)
+    merged["a"]["z"] = 3
+    assert base == {"a": {"x": 1}}
+    assert overlay == {"a": {"y": 2}}
+
+
+def test_merge_of_two_empty_mappings_is_empty():
+    assert merge({}, {}) == {}

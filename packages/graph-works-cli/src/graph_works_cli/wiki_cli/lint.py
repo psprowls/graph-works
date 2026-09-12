@@ -7,8 +7,8 @@ import json
 from datetime import UTC, datetime
 
 import typer
-from code_wiki_okf.config import ConfigError, load_config
 from graph_works_core.lint_drift.lint import run_lint
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.repos import resolve_repo
 
 from graph_works_cli.wiki_cli.errors import exit_error
@@ -23,13 +23,8 @@ def lint(
     """Run the workspace's mechanical and semantic lint pipeline."""
     layout = resolve_workspace(workspace)
     try:
-        config = load_config(
-            layout.bundle_dir,
-            config_path=layout.manifest_path,
-            graph_dir=layout.cache_dir,
-            declarations_dir=layout.config_dir,
-        )
-    except (ConfigError, OSError, ValueError) as exc:
+        config = load_workspace_config(layout)
+    except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
     today = datetime.now(UTC).date()

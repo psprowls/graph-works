@@ -11,6 +11,12 @@ hand-edit and tell the user to re-sync.
 caller — the same class of leak as a hardcoded key name. Renaming them is a
 stated migration obligation for whoever reads this file today.
 
+A `LayeredStore` adds `overlay_mtime` / `overlay_sha256` beside those two.
+Added rather than renamed: `source_*` keeps meaning "the lower, committed
+layer", so a consumer written against the two-key shape keeps working and
+simply never checks the overlay. A non-layered store produces byte-identical
+output to a pre-overlay release.
+
 This module is the one place in the package that imports `os`, and the boundary
 test exempts it by name: writing a file atomically is not the same thing as
 reading the environment, which is what the band-1 rule forbids.
@@ -23,7 +29,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from config_io.store import ConfigStore
+from config_io.store import ConfigStore, LayeredStore
 
 #: The conventional basename. The *directory* is always the caller's choice —
 #: this package never composes a path.
@@ -34,10 +40,15 @@ def write_projection(store: ConfigStore, target: Path) -> Path:
     """Regenerate `target` from `store`'s explicit values. Returns `target`."""
     payload: dict[str, object] = dict(store.read_explicit())
     fingerprint = store.fingerprint()
-    payload["_meta"] = {
+    meta: dict[str, object] = {
         "source_mtime": fingerprint.mtime if fingerprint is not None else None,
         "source_sha256": fingerprint.sha256 if fingerprint is not None else None,
     }
+    if isinstance(store, LayeredStore):
+        overlay = store.overlay_fingerprint()
+        meta["overlay_mtime"] = overlay.mtime if overlay is not None else None
+        meta["overlay_sha256"] = overlay.sha256 if overlay is not None else None
+    payload["_meta"] = meta
     target = Path(target)
     target.parent.mkdir(parents=True, exist_ok=True)
     # default=str: YAML parses bare dates into datetime.date, which json

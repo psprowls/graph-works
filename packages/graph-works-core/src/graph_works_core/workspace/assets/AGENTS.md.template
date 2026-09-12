@@ -1,51 +1,281 @@
 # Graph-Works Workspace
 
-> **Workspace path:** `{{WORKSPACE_PATH}}`
+> **Topic:** `{{TOPIC}}`
 > **Initialized:** `{{INITIALIZED_AT}}`
+> **Bundle dir:** `{{BUNDLE_DIR}}/`
+> **Config dir:** `{{CONFIG_DIR}}/`
 
 This is a graph-works workspace: a per-repo container for the knowledge graph, its
-config, and its work tracker. `okf/` is the OKF bundle (the content itself); `.gw/`
-holds everything graph-works owns about it.
+config, and its work tracker. `{{BUNDLE_DIR}}/` is the OKF v0.2 bundle (the content
+itself); `{{CONFIG_DIR}}/` holds everything graph-works owns about it. The workspace
+is strictly larger than the bundle: `{{CONFIG_DIR}}/` and `scratch/` are siblings of
+the bundle root, not bundle content.
+
+The repositories this workspace catalogs are declared in `workspace.yaml` under
+`repositories:`, with paths relative to that file. Nothing in this document names an
+absolute path: machine-local locations come from the `gw` CLI's own discovery and
+from the skill-doc-routing hook, never from here.
 
 ## Layout
 
-- `workspace.yaml` — the workspace manifest. Layout overrides, roles, and the seeded
-  relay tail live here.
-- `okf/` — the OKF bundle: `index.md`, `log.md`, and the concept/entity/work pages the
-  installed verticals write.
-- `.gw/` — the control plane: `schema/`, `sections/` and `tags.yaml`, the declarations
-  the installed verticals own.
-- `.gw/cache/` — the derived code graph, traces, and the `config.json` projection.
+- `workspace.yaml` — the workspace manifest, committed. `layout.bundle_dir` (here:
+  `{{BUNDLE_DIR}}`), the scanned `repositories:` and their `ignore:` globs, and the
+  `workflow:` block that configures auto-drive (per-phase models, `max_parallel`, the
+  seeded relay tail).
+- `workspace.local.yaml` — an optional, gitignored sibling of `workspace.yaml` for
+  per-machine values: a `repositories.<name>.path` that differs on this machine,
+  `workflow.auto_drive` settings that suit this box. Mappings deep-merge over
+  `workspace.yaml`; lists and scalars replace; local wins. Born by
+  `gw config set --local <key> <value>`; `gw config get` / `gw config list` report
+  which layer a value came from. `gw bootstrap` keeps its line in the workspace-root
+  `.gitignore`.
+- `{{BUNDLE_DIR}}/` — the OKF bundle: `index.md`, `log.md`, and every page the
+  installed verticals write. See "The bundle" below.
+- `{{CONFIG_DIR}}/schema/` — per-type JSON Schema (`Bug.schema.json`,
+  `Package.schema.json`, …) plus the shared `_base.schema.json` /
+  `_base-diataxis.schema.json`. Defines the frontmatter each `type:` requires.
+- `{{CONFIG_DIR}}/sections/` — per-type section declarations (required headings and
+  their placeholders), plus the root-index sections each vertical owns and the shared
+  `_fragments.*.yaml`.
+- `{{CONFIG_DIR}}/tags.yaml` — the bundle's tag vocabulary. One name + description per
+  tag; the work lane and curated pages draw `tags:` from it.
+- `{{CONFIG_DIR}}/cache/` — derived and disposable: the code graph (`code.db`), scan
+  results, traces, and the `config.json` projection of the manifest. Gitignored.
+- `{{CONFIG_DIR}}/worktrees/` — feature-work worktrees created under this workspace.
   Gitignored.
-- `.gw/worktrees/` — feature-work worktrees created under this workspace. Gitignored.
-- `workspace.yaml` — the scanned repositories (`repositories:`/`ignore:`), seeded from the layout at init.
+- `scratch/` — handoffs, staged material, and scratch documents. Not bundle content.
+  Ingest reads material from anywhere on disk, so nothing has to be staged here first.
 
-## Plugins installed
+## The `gw` CLI
 
-<!-- graph-works:auto:installers:start -->
-{{INSTALLER_LIST}}
-<!-- graph-works:auto:installers:end -->
+Everything is driven through `gw`; the workspace is discovered automatically
+(`GRAPH_WORKS_DIR`, else `<repo>/.works`). `gw <cmd> --help` is authoritative. The
+top-level verbs:
 
-The block above is auto-rendered from the installer roster every time
-`graph_works_core.workspace.init` runs. Hand-edit anything outside the markers; it
-will be preserved.
+| Command | What it does |
+| --- | --- |
+| `gw bootstrap` | Initialize or re-render this workspace (regenerates this file) |
+| `gw scan` | Build the code graph and write one page per admitted entity |
+| `gw ingest <path>` | Ingest one source into the bundle |
+| `gw query "<q>"` | Answer one question against the bundle |
+| `gw next <path>` | Compute what to dispatch for a work item |
+| `gw archive` | Sweep eligible work items and proposals into `_archive/` |
+| `gw wiki …` | `lint`, `stats`, `index`, `archive`, `proposals`, `proposal` |
+| `gw work …` | `file`, `status`, `next`, `advance`, `lint`, `regen-index`, `orchestrate`, `archive`, `reparent`, `adopt`, `decision` |
+| `gw config …` | `get` / `set` / `list` / `unset` / `sync` / `hooks` over the manifest |
+| `gw graph …` | Code-graph queries |
+| `gw util …` | Diagnostics: log, tokens, traces, surface freeze |
 
-## Conventions for LLM agents
+Prefer the `/gw:*` skills for interactive work — they wrap these verbs with the
+discussion and confirmation steps the raw CLI skips.
 
-- Cite with markdown links and `` `code-path:line` `` — this vault uses OKF markdown
-  links, not `[[wikilinks]]`.
-- Treat each installed vertical's own schema doc as authoritative for its directory.
+## The bundle
+
+`{{BUNDLE_DIR}}/` **is** the bundle root. Every root-absolute markdown link — such as
+`[Work Index](/work/index.md)` — resolves relative to it, not to the workspace and not
+to the filesystem root.
+
+```
+<workspace>/
+├── workspace.yaml            manifest (committed)
+├── workspace.local.yaml      per-machine overrides (gitignored, optional)
+├── AGENTS.md, CLAUDE.md      this file and its one-line pointer
+├── scratch/                  handoffs; not bundle content
+├── {{CONFIG_DIR}}/           schema/, sections/, tags.yaml, cache/, worktrees/
+└── {{BUNDLE_DIR}}/           the bundle; the three lanes own everything inside
+    ├── index.md, log.md      root index and the append-only timeline
+    ├── repositories/ packages/ apps/ agent-plugins/ test-suites/ dependencies/
+    ├── explanations/ references/ tutorials/ how-tos/
+    ├── sources/ adrs/ proposals/
+    └── work/
+```
+
+There is no `raw/` and no `entities/`; both belonged to the legacy graph-wiki layout.
+Material is ingested from anywhere on disk, and entity pages live in per-type lanes.
+
+Three verticals write into this one bundle. Each owns its directories outright.
+
+### Code wiki — `code_wiki_okf`, written by `gw scan`
+
+Graph-derived. One page per admitted code entity, regenerated from the code graph.
+**Do not hand-author these** — change the code or the scan config, then rescan.
+
+| Directory | Type | Filename |
+| --- | --- | --- |
+| `repositories/` | `Repository` | `<repo>/repository.md` |
+| `packages/` | `Package` | `<name>.md` |
+| `apps/` | `App` | `<name>.md` |
+| `agent-plugins/` | `AgentPlugin` | `<name>.md` |
+| `test-suites/` | `TestSuite` | `<name>.md` |
+| `dependencies/` | `Dependency` | `<ecosystem>/<name>.md` |
+
+Entities also appear nested under their owning repository —
+`repositories/<repo>/packages/<name>.md`, `repositories/<repo>/files/…` — so a
+repository page reaches its members by relative path.
+
+Generated pages carry a `generated:` block (`by:`, `at:`) and a `resource:` URI such as
+`dependency:pypi/pytest`. Prose sections under the frontmatter (`## Why we depend on
+this`, `## Gotchas / workarounds`) are human- or agent-authored and **survive rescan** —
+that is where hard-won knowledge belongs.
+
+### Doc wiki — `doc_wiki_okf`
+
+The four Diátaxis lanes plus the material they are drawn from:
+
+| Directory | Type | Purpose |
+| --- | --- | --- |
+| `explanations/` | `Explanation` | Understanding-oriented: why a thing is shaped this way |
+| `references/` | `Reference` | Information-oriented: what is true of a thing |
+| `how-tos/` | `HowTo` | Goal-oriented: solve one problem |
+| `tutorials/` | `Tutorial` | Learning-oriented: build one thing end to end |
+| `sources/` | `Source` | One summary per ingested source, at `sources/<YYYY-MM>-<slug>.md` |
+| `adrs/` | `Adr` | Architecture decision records, `<NNNN>-<slug>.md` |
+| `proposals/` | `Proposal` | Staged curated pages awaiting disposition |
+
+A proposal names its `target:` (e.g. `adrs/bulk-write-staging-protocol.md`) and cites
+the `sources:` that justify it. `/gw:proposals` accepts, rejects, or supersedes them;
+accepting authors the destination page and archives the proposal.
+
+### Work tracker — `work_tracker_okf`
+
+Path-native work items. Each item is a markdown file with a **sibling directory of the
+same name**:
+
+```
+work/bug-csharp-scanning-import-defects.md          the item itself
+work/bug-csharp-scanning-import-defects/
+├── references/
+│   ├── 00-decisions.md                             decision ledger
+│   ├── 01-design.md                                design-stage artifact
+│   ├── 02-plan.md                                  plan-stage artifact
+│   └── index.md
+└── children/                                       sub-items, same shape, recursively
+```
+
+The canonical path of an item is its **extensionless bundle-relative path** —
+`work/epic-auto-drive-dispatch-correctness/children/bug-at-end-commit-no-plan`. That is
+what every `gw work` verb takes and what links should point at (with `.md` appended).
+
+Types: `Bug`, `Feature`, `TechDebt`, `Spike`, `TestGap`, `Epic`, `Release`. Epics and
+Releases roll up children rather than carrying their own implementation.
+
+`work/index.md` is the generated index — reconcile it with `gw work regen-index` after
+any out-of-band edit. Terminal items sweep to `work/_archive/` via `gw work archive`.
+
+## The pipeline
+
+A work item advances through phases; `gw work next <path>` computes the stage and the
+skill to dispatch, and `gw work advance <path>` applies the transition.
+
+```
+design → plan → execute → finish → done
+```
+
+`gw work next --json` returns the `action.skill` to run, the `artifact.path` it must
+write, and the `on_dispatch` / `on_complete` frontmatter deltas. Dispatch one stage per
+session with `/gw:workflow <path>` and clear context between stages. `--descend`
+switches to the next actionable child when a parent is waiting on its subtree.
+
+Frontmatter carries the live state: `phase`, `work_status`, `phase_started_commit`,
+`worktree`, `branch`, `affects`, `depends_on`.
+
+Unattended runs go through `/gw:auto-drive`, which dispatches each ready stage as an
+Orca-supervised worker using the per-phase models in `workspace.yaml`. Re-running the
+same command is the resume path.
+
+## Frontmatter
+
+Every page opens with YAML frontmatter. `type:` selects the contract:
+
+```yaml
+---
+type: <Bug | Feature | Package | Explanation | Adr | Source | …>
+title: <Title>
+description: <one-line summary>
+tags: [tag1, tag2]
+updated: YYYY-MM-DD
+---
+```
+
+`{{CONFIG_DIR}}/schema/<Type>.schema.json` is authoritative for required fields, and
+`{{CONFIG_DIR}}/sections/<Type>.yaml` for required headings and their placeholder text.
+Read those rather than copying another page's shape — older pages may still carry
+legacy keys (`category:`, `kind:`) from the graph-wiki era.
+
+`tags:` must come from the vocabulary in `{{CONFIG_DIR}}/tags.yaml`. The work lane does
+not enforce the vocabulary; curated lanes do.
+
+## The four operations
+
+Each has a `/gw:*` skill that adds discussion and confirmation around the CLI verb. Use
+the skill interactively; use the verb when scripting.
+
+### Scan — `/gw:scan` → `gw scan`
+
+Walks the repositories in `workspace.yaml`, rebuilds the code graph, and writes one page
+per admitted entity. Reports created / updated / deleted by URI and surfaces deletions
+for confirmation. Regenerates the affected indexes and appends a `scan` log entry.
+
+### Ingest — `/gw:ingest <path>` → `gw ingest <path>`
+
+1. Read the source directly (any path on disk, or a repo-relative `.md` design doc)
+2. **Discuss first** — TL;DR, key claims, which entities and concepts get touched, any
+   contradictions with the code
+3. Wait for confirmation
+4. Write the summary at `sources/<YYYY-MM>-<slug>.md`
+5. Update every relevant entity, doc, and ADR page (typically 5–15)
+6. Propose an ADR if the source records a decision; file curated pages as proposals
+7. Flag contradictions with `> ⚠️ Contradiction:` callouts
+8. Update the indexes, append an `ingest` log entry, report touched pages as links
+
+### Query — `/gw:query "<question>"` → `gw query`
+
+Read `index.md` first, pick 3–10 relevant pages across lanes, read them in full, follow
+links opportunistically, fall back to the code when the bundle does not cover it.
+Synthesize: direct answer → supporting detail → inline links and `` `code-path:line` ``
+→ related pages. **Offer to file the answer back** as a proposal.
+
+### Lint — `/gw:lint` → `gw wiki lint` / `gw work lint`
+
+Mechanical checks (orphans, broken links, missing frontmatter, duplicate titles, index
+drift, log gaps), code drift (what is on disk vs. what the bundle claims), semantic
+checks (contradictions, stale claims, ADR chain health), and the work-lane conformance
+rules. Present findings as a report with suggested actions; append a `lint` entry.
+
+## Iron rules
+
+1. **The code is the source of truth.** If the bundle and the code disagree, update the
+   bundle — never the other way around.
+2. **Links are root-absolute markdown links**, not `[[wikilinks]]`. `okf_io.LinkGraph`
+   parses markdown links and cannot see a wikilink at all.
+3. **All bundle writes go under `{{BUNDLE_DIR}}/`** — work items included.
+4. **Generated pages are regenerated, not hand-edited.** Prose sections beneath the
+   generated frontmatter are yours; the frontmatter is the scanner's.
+5. **Every page has frontmatter** conforming to its `type:`'s schema.
+6. **Every claim cites** — a bundle page (`[…](/sources/….md)`) or a code path
+   (`` `packages/okf-io/src/okf_io/bundle.py:42` ``).
+7. **Contradictions get flagged inline**, on the page and against the code path.
+8. **Good query answers get filed back.** Explorations compound.
+9. **Indexes are reconciled, not written by hand** — `gw wiki index`, `gw work
+   regen-index`.
+10. **Never hand-edit `{{CONFIG_DIR}}/cache/`** — regenerate it.
 
 ## Log format
 
+Appended to `{{BUNDLE_DIR}}/log.md`. One `## <ISO date>` section per day, newest first;
+one list item per entry (OKF v0.2 §9). `okf_io.log` enforces both: a non-ISO heading is
+reported as `reserved.log-heading-not-date`, and non-newest-first ordering is reported
+too.
+
 ```
-## [YYYY-MM-DD] <op> | <title>
-<optional detail — which pages touched, what changed>
+## YYYY-MM-DD
+
+- **<Op>** <title> — <optional detail: which pages touched, what changed>
 ```
 
 Valid ops: `scan`, `ingest`, `query`, `lint`, `create`, `update`, `delete`, `note`.
 
-Grep the log: `grep "^## \[" okf/log.md | tail -10`
+Grep the log: `grep -E "^## [0-9]{4}-" {{BUNDLE_DIR}}/log.md | tail -10`
 
 ## Style
 
@@ -54,3 +284,11 @@ Grep the log: `grep "^## \[" okf/log.md | tail -10`
 - Cite aggressively with markdown links and `` `code-path:line` ``.
 - When you're not sure, say so in the page. Don't invent content.
 - Update `updated:` frontmatter whenever you touch a page.
+
+---
+
+## File ownership
+
+Everything above the `## Local Conventions` heading is regenerated by `gw bootstrap`
+from the installed gw version; edits here are lost on the next run. Everything from
+that heading down is yours and is carried across verbatim.

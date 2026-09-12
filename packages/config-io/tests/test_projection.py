@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from config_fakes import DictStore
 from config_io.projection import PROJECTION_FILENAME, write_projection
-from config_io.store import PlainYamlStore
+from config_io.store import LayeredYamlStore, PlainYamlStore
 
 
 def _payload(target):
@@ -81,7 +81,7 @@ def test_overwrites_an_existing_projection_atomically(tmp_path):
 
 
 def test_dates_serialise_rather_than_raising(tmp_path):
-    # PyYAML parses a bare `2026-07-04` into datetime.date, which json.dumps
+    # ruamel.yaml parses a bare `2026-07-04` into datetime.date, which json.dumps
     # refuses without default=str.
     class DateStore(DictStore):
         def read_explicit(self):
@@ -131,3 +131,66 @@ def test_the_written_file_is_not_left_owner_only(tmp_path):
     target = tmp_path / PROJECTION_FILENAME
     write_projection(DictStore({"topic": "x"}), target)
     assert target.stat().st_mode & 0o777 == 0o644
+
+
+# --- the overlay fingerprint (layered stores only) -------------------------
+
+
+def _layered(tmp_path, base_text=None, overlay_text=None):
+    base = tmp_path / "config.yaml"
+    overlay = tmp_path / "config.local.yaml"
+    if base_text is not None:
+        base.write_text(base_text, encoding="utf-8")
+    if overlay_text is not None:
+        overlay.write_text(overlay_text, encoding="utf-8")
+    return LayeredYamlStore(base=PlainYamlStore(base), overlay=PlainYamlStore(overlay))
+
+
+def test_a_layered_store_writes_four_meta_keys(tmp_path):
+    target = tmp_path / PROJECTION_FILENAME
+    write_projection(_layered(tmp_path, "topic: base\n", "topic: local\n"), target)
+    assert set(_payload(target)["_meta"]) == {
+        "source_mtime",
+        "source_sha256",
+        "overlay_mtime",
+        "overlay_sha256",
+    }
+
+
+def test_the_overlay_hash_is_the_overlay_files(tmp_path):
+    target = tmp_path / PROJECTION_FILENAME
+    write_projection(_layered(tmp_path, "topic: base\n", "topic: local\n"), target)
+    meta = _payload(target)["_meta"]
+    assert meta["overlay_sha256"] == hashlib.sha256((tmp_path / "config.local.yaml").read_bytes()).hexdigest()
+    assert meta["source_sha256"] == hashlib.sha256((tmp_path / "config.yaml").read_bytes()).hexdigest()
+    assert meta["overlay_mtime"] is not None
+
+
+def test_an_absent_overlay_writes_both_overlay_fields_null(tmp_path):
+    target = tmp_path / PROJECTION_FILENAME
+    write_projection(_layered(tmp_path, "topic: base\n"), target)
+    meta = _payload(target)["_meta"]
+    assert meta["overlay_mtime"] is None
+    assert meta["overlay_sha256"] is None
+    assert meta["source_sha256"] is not None
+
+
+def test_the_projection_body_is_the_merged_view(tmp_path):
+    target = tmp_path / PROJECTION_FILENAME
+    store = _layered(
+        tmp_path,
+        "topic: base\nrepositories:\n  gw:\n    path: ../gw\n",
+        "repositories:\n  gw:\n    path: /abs/gw\n",
+    )
+    write_projection(store, target)
+    payload = _payload(target)
+    assert payload["topic"] == "base"
+    assert payload["repositories"]["gw"]["path"] == "/abs/gw"
+
+
+def test_a_non_layered_store_keeps_the_two_key_meta(tmp_path):
+    # The additive shape is what lets an older consumer keep reading
+    # source_sha256 and simply never check the overlay.
+    target = tmp_path / PROJECTION_FILENAME
+    write_projection(PlainYamlStore(tmp_path / "missing.yaml"), target)
+    assert set(_payload(target)["_meta"]) == {"source_mtime", "source_sha256"}

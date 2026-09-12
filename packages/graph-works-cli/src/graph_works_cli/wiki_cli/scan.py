@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Never
 
 import typer
-from code_wiki_okf.config import ConfigError, load_config
 from graph_works_core.scan.commands import (
     BRIEFS_DIRNAME,
     WORKLIST_FILENAME,
@@ -23,6 +22,7 @@ from graph_works_core.scan.commands import (
     scan_results_dir,
 )
 from graph_works_core.scan.scan_contract import UnsupportedWorklistSchema
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import ScanError
 
 from graph_works_cli import exit_codes
@@ -94,12 +94,7 @@ def scan(
                 code=exit_codes.STALE,
             )
         try:
-            config = load_config(
-                layout.bundle_dir,
-                config_path=layout.manifest_path,
-                graph_dir=layout.cache_dir,
-                declarations_dir=layout.config_dir,
-            )
+            config = load_workspace_config(layout)
             applied = apply_scan_worklist(
                 worklist_path=worklist_path,
                 worklist=worklist,
@@ -109,7 +104,7 @@ def scan(
                 today=now.date(),
                 dry_run=False,
             )
-        except (ConfigError, OSError, ScanError, ValueError) as exc:
+        except (OSError, ScanError, ValueError) as exc:
             exit_error(str(exc), cause=exc)
         _emit_json(scan_apply_payload(applied))
         if not applied.ok:
@@ -117,13 +112,8 @@ def scan(
         return
 
     try:
-        config = load_config(
-            layout.bundle_dir,
-            config_path=layout.manifest_path,
-            graph_dir=layout.cache_dir,
-            declarations_dir=layout.config_dir,
-        )
-    except (ConfigError, OSError, ValueError) as exc:
+        config = load_workspace_config(layout)
+    except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
     try:

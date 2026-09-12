@@ -7,11 +7,11 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
-from code_wiki_okf.config import ConfigError
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import lint as lint_module
 from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
+from graph_works_core.workspace.errors import WorkspaceConfigError
 from okf_io import Finding, Report
 from typer.testing import CliRunner
 
@@ -62,12 +62,7 @@ def test_lint_passes_one_captured_utc_date_to_the_typed_core_call(
     assert calls == [
         {
             "layout": layout,
-            "config": lint_module.load_config(
-                layout.bundle_dir,
-                config_path=layout.manifest_path,
-                graph_dir=layout.cache_dir,
-                declarations_dir=layout.config_dir,
-            ),
+            "config": lint_module.load_workspace_config(layout),
             "today": date(2026, 8, 18),
             "repo_root": layout.repo_root,
         }
@@ -235,16 +230,10 @@ def test_lint_reports_unreadable_configuration_before_running(
 ) -> None:
     """Lint reads configuration first; a config fault must not be reported as a lint finding."""
 
-    def fail(
-        _bundle_root: object,
-        *,
-        config_path: object = None,
-        graph_dir: object = None,
-        declarations_dir: object = None,
-    ) -> object:
-        raise ConfigError("config.yaml is malformed")
+    def fail(_layout: object) -> object:
+        raise WorkspaceConfigError("config.yaml is malformed")
 
-    monkeypatch.setattr(lint_module, "load_config", fail)
+    monkeypatch.setattr(lint_module, "load_workspace_config", fail)
 
     result = runner.invoke(app, ["wiki", "lint", "--workspace", str(initialized_workspace)])
 

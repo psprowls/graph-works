@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 from code_graph_io import exit_codes, paths
-from code_wiki_okf import ConfigError
 from graph_works_core import GraphResult, GraphTarget, graph_target, layout_for
 from graph_works_core.graph import commands as graph_cmd
+from graph_works_core.workspace.errors import WorkspaceConfigError
 
 
 def _layout_with_config(root: Path, body: str):
@@ -86,7 +86,7 @@ def test_a_malformed_config_raises_rather_than_returning_a_result(tmp_path):
     """Configuration raises; content never does. Resolution failures are the
     caller's to handle — only graph state comes back as an exit code."""
     layout = _layout_with_config(tmp_path, "repositories: [not, a, mapping]\n")
-    with pytest.raises(ConfigError):
+    with pytest.raises(WorkspaceConfigError):
         graph_target(layout)
 
 

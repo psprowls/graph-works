@@ -27,14 +27,14 @@ from functools import lru_cache, partial
 from importlib import resources
 from typing import Any
 
-from config_io import PlainYamlStore, StoreValidationError, dotted, expand_wildcards
+from config_io import StoreValidationError, dotted, expand_wildcards
 from langchain_core.language_models import BaseChatModel
 from models_io import make_bedrock_llm, make_gateway_llm
 from subagents_io.roles import RoleBinding, RoleSpec, resolve_role_spec
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.manifest import BACKENDS, check_version
+from graph_works_core.workspace.manifest import BACKENDS, check_version, workspace_store
 from graph_works_core.workspace.manifest import CATALOG as MANIFEST_CATALOG
 
 #: The packaged catalog, as package data.
@@ -84,7 +84,7 @@ def workspace_roles(layout: WorkspaceLayout) -> dict[str, dict[str, Any]]:
     equivalent for these entries, which declare no `env_var` and default to
     `None`, and whose keys all came out of the same catalog.
     """
-    store = PlainYamlStore(layout.manifest_path)
+    store = workspace_store(layout)
     try:
         raw = store.read_explicit()
     except StoreValidationError as exc:

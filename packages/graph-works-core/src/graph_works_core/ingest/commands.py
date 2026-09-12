@@ -70,7 +70,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
-from code_wiki_okf.config import Config, load_config
+from code_wiki_okf.config import Config
 from code_wiki_okf.git_state import compute_state_gate
 from doc_wiki_okf.ingest import DocumentBrief, plan_document_brief
 from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout
@@ -92,6 +92,7 @@ from graph_works_core.ingest.entity_match import entity_matcher
 from graph_works_core.ingest.prompts.ingestor import build_ingestor_system
 from graph_works_core.ingest.suggest_pages import apply_suggestions, merge_apply_status, plan_suggestions
 from graph_works_core.prompts import render_project_context
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 logger = logging.getLogger(__name__)
@@ -398,12 +399,7 @@ def plan_ingest_brief(
     return shape would couple this function's signature to `run_ingest_source`'s
     later, unrelated need for `config`/`schema_set`/`section_set`/`lanes`/`bundle`.
     """
-    config = load_config(
-        layout.bundle_dir,
-        config_path=layout.manifest_path,
-        graph_dir=layout.cache_dir,
-        declarations_dir=layout.config_dir,
-    )
+    config = load_workspace_config(layout)
     schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
     with _matcher_for(match_entity, config, schema_set) as matcher:
         return plan_document_brief(
@@ -493,12 +489,7 @@ async def run_ingest_source(
     the same `origin`, so a re-ingest whose model picks a different title is
     still refused rather than landing a second page.
     """
-    config = load_config(
-        layout.bundle_dir,
-        config_path=layout.manifest_path,
-        graph_dir=layout.cache_dir,
-        declarations_dir=layout.config_dir,
-    )
+    config = load_workspace_config(layout)
     schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
     kinds = source_kinds(schema_set)
     section_set = load_sections(config.declarations_dir / SECTIONS_DIRNAME)

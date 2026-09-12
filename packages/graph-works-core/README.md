@@ -34,8 +34,9 @@ per-capability answer on the running host.
 ```
 
 `workspace.yaml` stays at the **workspace root**, not under `.gw/` or the
-bundle: `code_wiki_okf.config.load_config` reads it from there (or from wherever
-`config_path=` points it).
+bundle: `workspace.config.load_workspace_config` reads it from there, via
+`workspace_store` and `code_wiki_okf.config.config_from_mapping` (or from
+wherever a layout override points it).
 
 ## Using it
 
@@ -59,8 +60,9 @@ is no `dry_run` flag, following the six shipped writers in `okf-ext` and
 
 `workspace.yaml` is the workspace's one configuration file:
 `version`, `initialized_at`, `topic`, the four layout overrides, and the
-bundle declarations `code_wiki_okf.config.load_config` reads — `repositories`,
-`ignore`, `state_gate`. `graph_dir` and `declarations_dir` are not stored in
+bundle declarations `load_workspace_config` reads — `repositories`,
+`ignore`, `state_gate` — via `workspace_store` and `config_from_mapping`, the
+one adapter over `code_wiki_okf.config`. `graph_dir` and `declarations_dir` are not stored in
 it; they are resolved from the layout and supplied by the caller at read time
 (e.g. `graph_dir=layout.cache_dir`).
 

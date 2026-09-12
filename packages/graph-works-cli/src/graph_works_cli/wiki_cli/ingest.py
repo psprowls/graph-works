@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import cast
 
 import typer
-from code_wiki_okf.config import ConfigError, load_config
 from graph_works_core.agent_substrate.roles import role_spec
 from graph_works_core.ingest.commands import plan_ingest_brief, run_ingest_source, state_gate_adapter
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceError
 from models_io import ModelsIoError
 
@@ -51,13 +51,8 @@ def ingest(
     """Ingest one source into the initialized workspace."""
     layout = resolve_workspace(workspace)
     try:
-        config = load_config(
-            layout.bundle_dir,
-            config_path=layout.manifest_path,
-            graph_dir=layout.cache_dir,
-            declarations_dir=layout.config_dir,
-        )
-    except (ConfigError, OSError, ValueError) as exc:
+        config = load_workspace_config(layout)
+    except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
     if not config.repos:
         exit_error("no repositories are configured", code=exit_codes.NOT_IN_GIT_REPO)

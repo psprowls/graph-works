@@ -168,6 +168,48 @@ def test_a_workspace_with_no_gitignorable_members_writes_no_gitignore(tmp_path):
     assert not (root / ".gw" / ".gitignore").exists()
 
 
+# --- act 2b: the root gitignore keeps the local manifest out of git ---------
+
+
+def test_a_fresh_init_writes_a_root_gitignore_holding_the_local_manifest(tmp_path):
+    result = _init(tmp_path / "works")
+    text = (result.layout.root / ".gitignore").read_text(encoding="utf-8")
+    assert "workspace.local.yaml" in text
+
+
+def test_a_hand_written_root_gitignore_gains_only_the_missing_line(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / ".gitignore").write_text("*.tmp", encoding="utf-8")
+    _init(root)
+    text = (root / ".gitignore").read_text(encoding="utf-8")
+    # Pins the actual line set, not just substring presence: a separator-less
+    # append ("*.tmpworkspace.local.yaml") would still satisfy weaker
+    # `in`/`count` checks but corrupts the pre-existing line.
+    assert text.splitlines() == ["*.tmp", "workspace.local.yaml"]
+
+
+def test_a_root_gitignore_that_already_has_the_line_is_not_rewritten(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    before = (root / ".gitignore").read_bytes()
+    _init(root)
+    assert (root / ".gitignore").read_bytes() == before
+    assert (root / ".gitignore").read_text(encoding="utf-8").count("workspace.local.yaml") == 1
+
+
+def test_the_repo_root_gitignore_is_still_never_edited_in_the_works_shape(tmp_path):
+    # layout.root is <repo>/.works here, so the workspace's own root gitignore
+    # is <repo>/.works/.gitignore and the repo's stays untouched.
+    repo = tmp_path / "repo"
+    (repo / ".git").mkdir(parents=True)
+    repo_gitignore = repo / ".gitignore"
+    repo_gitignore.write_text("*.pyc\n", encoding="utf-8")
+    result = _init(repo / ".works")
+    assert repo_gitignore.read_text(encoding="utf-8") == "*.pyc\n"
+    assert "workspace.local.yaml" in (result.layout.root / ".gitignore").read_text(encoding="utf-8")
+
+
 # --- the ticket's own acceptance: everything collapses into .gw/ ------------
 
 
@@ -179,7 +221,14 @@ def test_a_fresh_bootstrap_produces_exactly_the_gw_tree(tmp_path):
     result = _init(tmp_path / "works")
     root = result.layout.root
 
-    assert {path.name for path in root.iterdir()} == {"workspace.yaml", ".gw", "okf", "CLAUDE.md", "AGENTS.md"}
+    assert {path.name for path in root.iterdir()} == {
+        "workspace.yaml",
+        ".gitignore",
+        ".gw",
+        "okf",
+        "CLAUDE.md",
+        "AGENTS.md",
+    }
     gw_members = {path.name for path in (root / ".gw").iterdir()}
     assert {"cache", "worktrees", ".gitignore"} <= gw_members
     assert not (root / ".gw" / "_repositories.yaml").exists()
@@ -331,35 +380,123 @@ def test_a_stray_repositories_yaml_is_inert_dead_weight(tmp_path):
     assert "hand-edited" not in (root / "workspace.yaml").read_text(encoding="utf-8")
 
 
-# --- act 7: CLAUDE.md / AGENTS.md, seeding the prompt layer's project context ---
+# --- act 4: AGENTS.md at the workspace root, and the CLAUDE.md pointer -------
 
 
-def test_a_fresh_init_writes_both_context_files_with_identical_bodies(tmp_path):
-    result = _init(tmp_path / "works")
-    claude = (result.layout.root / "CLAUDE.md").read_text(encoding="utf-8")
+def test_a_fresh_init_writes_agents_md_and_the_claude_pointer(tmp_path):
+    result = _init(tmp_path / "works", topic="Demo")
     agents = (result.layout.root / "AGENTS.md").read_text(encoding="utf-8")
-    assert claude == agents
-    assert "## Style" in claude
-    assert "## Log format" in claude
+    claude = (result.layout.root / "CLAUDE.md").read_text(encoding="utf-8")
+    assert claude == "@AGENTS.md\n"
+    assert "## Style" in agents
+    assert "## Log format" in agents
+    assert "`Demo`" in agents
+    assert agents.endswith("\n\n## Local Conventions\n")
 
 
-def test_context_files_land_in_the_repo_the_workspace_lives_in(tmp_path):
+def test_the_header_is_stable_across_reinits_on_different_days(tmp_path):
+    # The rendered body must not vary run to run: `initialized_at` is read
+    # back from the manifest, never from `today`.
+    root = tmp_path / "works"
+    _init(root)
+    assert "2026-08-13" in (root / "AGENTS.md").read_text(encoding="utf-8")
+    assert plan_init(root, today=date(2030, 1, 1)).is_empty
+
+
+def test_a_manifest_missing_initialized_at_does_not_reread_the_clock_on_reinit(tmp_path):
+    # A real, reachable case: an existing `workspace.yaml` that happens to
+    # lack `initialized_at` (e.g. hand-written, or from before this key
+    # existed). `manifest.initialized_at` then defaults to "" on every read,
+    # so `manifest.initialized_at or today.isoformat()` used to fall through
+    # to the clock every single re-plan -- contradicting "gw never reads the
+    # clock" and making the header (and `plan_init(...).is_empty`) vary run
+    # to run.
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+
+    apply_init(plan_init(root, today=date(2026, 1, 1)))
+    agents_after_first_apply = (root / "AGENTS.md").read_text(encoding="utf-8")
+
+    second_plan = plan_init(root, today=date(2030, 1, 1))
+    assert second_plan.is_empty
+    apply_init(second_plan)
+    assert (root / "AGENTS.md").read_text(encoding="utf-8") == agents_after_first_apply
+
+
+def test_the_rendered_header_names_the_layout_not_a_machine_path(tmp_path):
+    result = _init(tmp_path / "works")
+    agents = (result.layout.root / "AGENTS.md").read_text(encoding="utf-8")
+    assert str(result.layout.root) not in agents
+    assert "/Users/" not in agents
+    assert "`okf/`" in agents
+    assert "`.gw/`" in agents
+
+
+def test_context_files_land_at_the_workspace_root_never_the_repo_root(tmp_path):
+    # D-001: in the in-repo `.works` shape the repo's own AGENTS.md is foreign
+    # content that whole-body regeneration must never touch.
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
+    (repo / "AGENTS.md").write_text("# The repo's own file\n", encoding="utf-8")
     result = _init(repo / ".works")
-    assert (repo / "CLAUDE.md").is_file()
-    assert (repo / "AGENTS.md").is_file()
-    assert not (result.layout.root / "CLAUDE.md").exists()
+    assert (result.layout.root / "AGENTS.md").is_file()
+    assert (result.layout.root / "CLAUDE.md").is_file()
+    assert (repo / "AGENTS.md").read_text(encoding="utf-8") == "# The repo's own file\n"
+    assert not (repo / "CLAUDE.md").exists()
 
 
-def test_a_hand_edited_context_file_keeps_its_prose_on_reinit(tmp_path):
+def test_prose_under_local_conventions_survives_reinit(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    path = root / "AGENTS.md"
+    edited = path.read_text(encoding="utf-8") + "\nTeam-specific note.\n"
+    path.write_text(edited, encoding="utf-8", newline="")
+    _init(root)
+    assert path.read_text(encoding="utf-8") == edited
+
+
+def test_prose_above_local_conventions_is_replaced_on_reinit(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    path = root / "AGENTS.md"
+    original = path.read_text(encoding="utf-8")
+    path.write_text("# Someone rewrote the header\n\n" + original, encoding="utf-8", newline="")
+    _init(root)
+    assert path.read_text(encoding="utf-8") == original
+
+
+def test_a_crlf_tail_survives_a_reinit_that_actually_rewrites_the_gw_body(tmp_path):
+    """`_context_writes` must read the existing `AGENTS.md` with `newline=""`
+    -- otherwise Python's universal-newline translation silently turns a
+    CRLF-authored tail into LF the moment the gw body actually changes and
+    the write executes. Stale prose above the heading forces that: the plan
+    must not be empty, so the write path (not just the pure renderer
+    `test_context_seed.py` already covers) is exercised."""
+    root = tmp_path / "works"
+    _init(root)
+    path = root / "AGENTS.md"
+    original = path.read_bytes().decode("utf-8")
+    head, _, _ = original.rpartition("## Local Conventions\n")
+    crlf_tail = "## Local Conventions\r\n\r\nMine.\r\n"
+    path.write_text("# Someone rewrote the header\n\n" + head + crlf_tail, encoding="utf-8", newline="")
+
+    plan = plan_init(root, today=TODAY)
+    assert "+ AGENTS.md" in plan.diff().splitlines()
+    apply_init(plan)
+
+    assert path.read_bytes().endswith(crlf_tail.encode("utf-8"))
+
+
+def test_a_hand_edited_claude_md_is_replaced_by_the_pointer(tmp_path):
     root = tmp_path / "works"
     _init(root)
     path = root / "CLAUDE.md"
-    edited = path.read_text(encoding="utf-8") + "\n## Extra\n\nTeam-specific note.\n"
-    path.write_text(edited, encoding="utf-8")
-    _init(root)
-    assert "Team-specific note." in path.read_text(encoding="utf-8")
+    path.write_text("# Custom\n\n## Style\n\nMine.\n", encoding="utf-8", newline="")
+    plan = plan_init(root, today=TODAY)
+    assert "+ CLAUDE.md" in plan.diff().splitlines()
+    apply_init(plan)
+    assert path.read_text(encoding="utf-8") == "@AGENTS.md\n"
 
 
 def test_render_project_context_reads_back_a_freshly_bootstrapped_workspace(tmp_path):
@@ -368,8 +505,112 @@ def test_render_project_context_reads_back_a_freshly_bootstrapped_workspace(tmp_
     result = _init(tmp_path / "works")
     rendered = render_project_context(result.layout)
     assert rendered != ""
-    assert "§Style" in rendered
-    assert "§Log format" in rendered
+    assert "(AGENTS.md §Style)" in rendered
+    assert "(AGENTS.md §Log format)" in rendered
+
+
+def test_render_project_context_omits_the_templates_file_ownership_paragraph(tmp_path):
+    # The template's closing paragraph ("Everything above the `## Local
+    # Conventions` heading is regenerated by `gw bootstrap` ...") sits right
+    # after the `## Style` section with no heading of its own between them.
+    # `_extract_section` stops a section only at the next `## ` line, so
+    # without the template's own `## File ownership` heading that paragraph
+    # would be swept into the extracted `## Style` body and leak into every
+    # subagent system prompt built from it.
+    from graph_works_core.prompts.project_context import render_project_context
+
+    result = _init(tmp_path / "works")
+    rendered = render_project_context(result.layout)
+    assert "regenerated by" not in rendered
+    assert "carried across verbatim" not in rendered
+
+
+def test_a_stale_bundle_context_pair_is_previewed_deleted_and_reported(tmp_path):
+    # The pre-merge layout hand-carried okf/AGENTS.md + okf/CLAUDE.md; the
+    # merged root file absorbs them, so bootstrap removes them -- as a
+    # planned act the caller sees before apply (ADR-0022), then a second
+    # plan is empty.
+    root = tmp_path / "works"
+    _init(root)
+    stale_agents = root / "okf" / "AGENTS.md"
+    stale_claude = root / "okf" / "CLAUDE.md"
+    stale_agents.write_text("# old bundle file\n", encoding="utf-8", newline="")
+    stale_claude.write_text("@AGENTS.md", encoding="utf-8", newline="")
+
+    plan = plan_init(root, today=TODAY)
+    lines = plan.diff().splitlines()
+    assert "- okf/AGENTS.md" in lines
+    assert "- okf/CLAUDE.md" in lines
+    assert stale_agents.is_file()  # planning touches no disk
+
+    result = apply_init(plan)
+    assert not stale_agents.exists()
+    assert not stale_claude.exists()
+    assert result.deleted == ("okf/AGENTS.md", "okf/CLAUDE.md")
+    assert result.changed
+    assert "- okf/AGENTS.md" in result.diff().splitlines()
+    assert "okf/AGENTS.md" not in result.written
+    assert plan_init(root, today=TODAY).is_empty
+
+
+def test_a_delete_label_follows_a_customized_bundle_dir(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(
+        "version: 1\ninitialized_at: '2026-08-13'\nlayout:\n  bundle_dir: content\n",
+        encoding="utf-8",
+        newline="",
+    )
+    _init(root)
+    (root / "content" / "AGENTS.md").write_text("stale\n", encoding="utf-8", newline="")
+    assert "- content/AGENTS.md" in plan_init(root, today=TODAY).diff().splitlines()
+
+
+def test_no_stale_delete_is_planned_when_bundle_dir_resolves_to_root(tmp_path):
+    # Pathological but not rejected anywhere: `layout.bundle_dir: .` makes
+    # `layout.bundle_dir` equal `layout.root`, so a naive `_stale_bundle_
+    # context_deletes` would target the exact `<root>/AGENTS.md` and
+    # `<root>/CLAUDE.md` act 4 just wrote in the same plan -- and
+    # `apply_init` would write, then immediately unlink, both files on every
+    # run.
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(
+        "version: 1\ninitialized_at: '2026-08-13'\nlayout:\n  bundle_dir: .\n",
+        encoding="utf-8",
+        newline="",
+    )
+    result = _init(root)
+    assert result.layout.bundle_dir == result.layout.root
+    assert (root / "AGENTS.md").is_file()
+    assert (root / "CLAUDE.md").is_file()
+
+    lines = plan_init(root, today=TODAY).diff().splitlines()
+    assert not any(line.startswith("- ") for line in lines)
+
+    second = apply_init(plan_init(root, today=TODAY))
+    assert second.deleted == ()
+
+
+def test_a_directory_at_the_stale_path_is_left_alone(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    (root / "okf" / "AGENTS.md").mkdir()
+    plan = plan_init(root, today=TODAY)
+    assert not any(line.startswith("- ") for line in plan.diff().splitlines())
+    assert (root / "okf" / "AGENTS.md").is_dir()
+
+
+def test_a_planned_delete_whose_file_vanished_before_apply_is_not_an_error(tmp_path):
+    root = tmp_path / "works"
+    _init(root)
+    stale = root / "okf" / "AGENTS.md"
+    stale.write_text("stale\n", encoding="utf-8", newline="")
+    plan = plan_init(root, today=TODAY)
+    stale.unlink()
+    result = apply_init(plan)
+    assert result.ok
+    assert result.deleted == ("okf/AGENTS.md",)
 
 
 # --- idempotence ------------------------------------------------------------
@@ -393,6 +634,7 @@ def test_a_first_apply_reports_change_and_renders_a_diff(tmp_path):
     rendered = result.diff()
     assert "workspace.yaml" in rendered
     assert ".gitignore" in rendered
+    assert not any(line.startswith("- ") for line in rendered.splitlines())
 
 
 def test_a_plan_over_a_customized_workspace_previews_that_workspace(tmp_path):
@@ -437,6 +679,7 @@ def test_a_fresh_plan_renders_every_act_it_will_perform(tmp_path):
     lines = plan_init(root, today=TODAY, topic="Demo").diff().splitlines()
 
     assert f"+ {root.resolve()}/" in lines
+    assert "+ .gitignore" in lines
     assert "+ .gw/.gitignore" in lines
     assert "+ workspace.yaml" in lines
     assert "+ index.md" in lines

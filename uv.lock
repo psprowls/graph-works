@@ -238,7 +238,7 @@ requires-dist = [
 
 [[package]]
 name = "code-wiki-okf"
-version = "0.5.0"
+version = "0.5.1"
 source = { editable = "packages/code-wiki-okf" }
 dependencies = [
     { name = "code-graph-io" },
@@ -266,14 +266,14 @@ wheels = [
 
 [[package]]
 name = "config-io"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/config-io" }
 dependencies = [
-    { name = "pyyaml" },
+    { name = "ruamel-yaml" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyyaml", specifier = ">=6.0" }]
+requires-dist = [{ name = "ruamel-yaml", specifier = ">=0.18" }]
 
 [[package]]
 name = "coverage"
@@ -417,7 +417,7 @@ dev = [
 
 [[package]]
 name = "graph-works-cli"
-version = "0.3.1"
+version = "0.3.2"
 source = { editable = "packages/graph-works-cli" }
 dependencies = [
     { name = "click" },
@@ -450,7 +450,7 @@ requires-dist = [
 
 [[package]]
 name = "graph-works-core"
-version = "0.5.0"
+version = "0.6.0"
 source = { editable = "packages/graph-works-core" }
 dependencies = [
     { name = "code-graph-io" },

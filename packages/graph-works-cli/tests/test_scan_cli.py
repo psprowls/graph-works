@@ -7,14 +7,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from code_wiki_okf.config import ConfigError
 from code_wiki_okf.entities.sync import SyncSummary
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import scan as scan_module
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist, worklist_payload
-from graph_works_core.workspace.errors import ScanError
+from graph_works_core.workspace.errors import ScanError, WorkspaceConfigError
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -239,8 +238,8 @@ def test_apply_refuses_a_stale_short_head_before_apply(
     monkeypatch.setattr(scan_module, "apply_scan_worklist", calls.append)
     monkeypatch.setattr(
         scan_module,
-        "load_config",
-        lambda _bundle_root: (_ for _ in ()).throw(AssertionError("stale apply must not read bundle configuration")),
+        "load_workspace_config",
+        lambda _layout: (_ for _ in ()).throw(AssertionError("stale apply must not read bundle configuration")),
     )
 
     result = runner.invoke(
@@ -421,10 +420,10 @@ def test_scan_reports_unreadable_configuration_before_running(
 ) -> None:
     """Normal mode reads configuration first; its failure must not look like a scan failure."""
 
-    def fail(_bundle_root: object, **_kwargs: object) -> object:
-        raise ConfigError("config.yaml is malformed")
+    def fail(_layout: object) -> object:
+        raise WorkspaceConfigError("config.yaml is malformed")
 
-    monkeypatch.setattr(scan_module, "load_config", fail)
+    monkeypatch.setattr(scan_module, "load_workspace_config", fail)
     monkeypatch.setattr(
         scan_module, "run_scan", lambda *_args, **_kwargs: pytest.fail("an unreadable config must not start a scan")
     )

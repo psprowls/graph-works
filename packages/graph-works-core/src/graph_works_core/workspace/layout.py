@@ -13,6 +13,9 @@ repository. It is *not* the scan target: scan targets are declared, with
 paths, in the workspace manifest's `repositories:` block. Naming the
 distinction in the type is what stops a caller with one `Path` to hand from
 conflating them.
+
+`local_manifest_path` is its gitignored, per-machine sibling — same directory,
+different lifecycle.
 """
 
 from __future__ import annotations
@@ -23,6 +26,12 @@ from pathlib import Path
 #: The workspace marker. A fixed name, because a file cannot be relocated by a
 #: key it contains.
 MANIFEST_FILENAME = "workspace.yaml"
+
+#: The per-machine overlay, gitignored and never committed. A sibling of the
+#: manifest rather than a member of `config_dir`, so both files are read from
+#: the same directory and a relative path in either anchors identically
+#: (ADR-0041).
+LOCAL_MANIFEST_FILENAME = "workspace.local.yaml"
 
 #: What a `.git` walk-up defaults to: `<repo>/.works`.
 DEFAULT_WORKSPACE_NAME = ".works"
@@ -72,6 +81,10 @@ class WorkspaceLayout:
     @property
     def manifest_path(self) -> Path:
         return self.root / MANIFEST_FILENAME
+
+    @property
+    def local_manifest_path(self) -> Path:
+        return self.root / LOCAL_MANIFEST_FILENAME
 
     @property
     def directories(self) -> tuple[Path, ...]:
@@ -151,6 +164,7 @@ __all__ = [
     "DEFAULT_CONFIG_DIR",
     "DEFAULT_WORKSPACE_NAME",
     "GW_DIRNAME",
+    "LOCAL_MANIFEST_FILENAME",
     "MANIFEST_FILENAME",
     "WORKTREES_DIRNAME",
     "WorkspaceLayout",

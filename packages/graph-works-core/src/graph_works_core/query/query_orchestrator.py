@@ -26,7 +26,6 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, cast
 
-from code_wiki_okf.config import load_config
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import BaseTool, tool
 from models_io.pricing import cost_for_usage
@@ -48,6 +47,7 @@ from graph_works_core.query.commands import _read_file_bounded
 from graph_works_core.query.prompts.code_reader import ORCHESTRATED_CODE_READER_SYSTEM
 from graph_works_core.query.prompts.librarian import build_librarian_system
 from graph_works_core.query.prompts.query_orchestrator import QUERY_ORCHESTRATOR_SYSTEM
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 ALLOWED_SOURCE_TYPES = {"wiki", "code"}
@@ -911,12 +911,7 @@ async def run_worker_batch(
                     _worker_error_row(task, "layout is required for librarian workers") for task in role_tasks
                 )
                 continue
-            config = load_config(
-                layout.bundle_dir,
-                config_path=layout.manifest_path,
-                graph_dir=layout.cache_dir,
-                declarations_dir=layout.config_dir,
-            )
+            config = load_workspace_config(layout)
             schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
             task_runner = _build_librarian_task_runner(
                 binding.make_llm(), query=query, bundle=bundle, schema_set=schema_set

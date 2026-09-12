@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "config-io"
-version = "0.1.0"
+version = "0.2.0"
 description = "Schema-driven, git-like scoped configuration over YAML: precedence resolution, validated writes, JSON projection."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -13,9 +13,12 @@ readme = "README.md"
 requires-python = ">=3.12"
 # Exactly one runtime dependency, and only PlainYamlStore uses it. The
 # resolution and write paths touch no third-party code; a caller supplying its
-# own ConfigStore never loads yaml at all.
+# own ConfigStore never loads a YAML library at all. `ruamel.yaml` and not
+# `pyyaml` because YAML 1.2 is the workspace's dialect (D-001) -- the floor
+# matches okf-io's, for which this package has no reason of its own to pin
+# tighter.
 dependencies = [
-  "pyyaml>=6.0",
+  "ruamel.yaml>=0.18",
 ]
 
 [tool.hatch.build.targets.wheel]

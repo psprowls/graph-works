@@ -56,7 +56,8 @@ change that moved it, never as an incidental side effect.
   already stops on one. `gw work advance` and `gw work orchestrate` own no such
   channel and keep the `WorkspaceError` → `SCHEMA_MISMATCH` mapping.
 - `config_cli` — `gw config get|list|set|unset|sync|hooks enable|disable`, the sole programmatic
-  writer for `workspace.yaml` catalog keys. `set`/`unset` refresh `.gw/cache/config.json`
+  writer for `workspace.yaml` catalog keys. `set`/`unset --local` write the gitignored, per-machine
+  `workspace.local.yaml` overlay instead. `set`/`unset` refresh `.gw/cache/config.json`
   automatically; `sync` is the manual refresh after a hand edit.
 - `util_cli` — diagnostics: `gw util describe-surface [--json]`, `log`, `tokens`, `trace`.
 

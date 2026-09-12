@@ -16,7 +16,7 @@ all supplied by the caller.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from config_io import dotted
 from config_io.entries import (
@@ -46,7 +46,7 @@ from config_io.registry import (
     set_key,
     unset_key,
 )
-from config_io.store import ConfigStore, Fingerprint, PlainYamlStore
+from config_io.store import ConfigStore, Fingerprint, LayeredStore, LayeredYamlStore, PlainYamlStore
 
 __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural sort; test_all_is_sorted_and_bound holds this.
     "ConfigEntry",
@@ -54,6 +54,8 @@ __all__ = [  # noqa: RUF022 -- sorted with plain `sorted()`, not isort's natural
     "EnvOnlyKeyError",
     "Fingerprint",
     "InvalidValueError",
+    "LayeredStore",
+    "LayeredYamlStore",
     "LinkFileKeyError",
     "PROJECTION_FILENAME",
     "PlainYamlStore",

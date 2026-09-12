@@ -90,3 +90,30 @@ class InvalidAfterWriteStore(DictStore):
         if dotted.get(self.data, self.forbidden_key) == self.forbidden_value:
             raise StoreValidationError(f"{self.forbidden_key} may not be {self.forbidden_value!r}")
         return super().read()
+
+
+class LayeredDictStore(DictStore):
+    """An in-memory `LayeredStore`: two mappings, the overlay winning.
+
+    The registry's layered branch must be reachable without touching a
+    filesystem, and a fake is also how the `LayeredStore` Protocol stays
+    honest — `LayeredYamlStore` is not the only shape that satisfies it.
+    """
+
+    def __init__(
+        self,
+        base: Mapping[str, object] | None = None,
+        overlay: Mapping[str, object] | None = None,
+    ) -> None:
+        self.base_data: dict[str, object] = copy.deepcopy(dict(base or {}))
+        self.overlay_data: dict[str, object] = copy.deepcopy(dict(overlay or {}))
+        super().__init__(dotted.merge(self.base_data, self.overlay_data))
+
+    def read_base_explicit(self):
+        return copy.deepcopy(self.base_data)
+
+    def read_overlay_explicit(self):
+        return copy.deepcopy(self.overlay_data)
+
+    def overlay_fingerprint(self):
+        return Fingerprint(mtime=2.0, sha256=64 * "1") if self.overlay_data else None

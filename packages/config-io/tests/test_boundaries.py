@@ -86,10 +86,12 @@ def test_the_resolution_path_never_imports_os(module):
     assert "os" not in import_roots(module)
 
 
-def test_only_the_shipped_store_imports_yaml():
-    # pyyaml is the single runtime dependency and exists only for
-    # PlainYamlStore; a caller supplying its own store never loads it.
-    importers = {module.name for module in modules() if "yaml" in import_roots(module)}
+def test_only_the_shipped_store_imports_a_yaml_library():
+    # `ruamel.yaml` is the single runtime dependency and exists only for
+    # PlainYamlStore; a caller supplying its own store never loads it. The
+    # import root is `ruamel`, not `yaml` -- `from ruamel.yaml import YAML`
+    # would slip past a check keyed on the old name.
+    importers = {module.name for module in modules() if {"ruamel", "yaml"} & import_roots(module)}
     assert importers == {"store.py"}
 
 

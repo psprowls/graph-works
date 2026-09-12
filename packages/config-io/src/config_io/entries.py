@@ -67,10 +67,12 @@ class Resolved:
 
     key: str
     value: object
-    origin: str  # "env" | "manifest" | "default"
+    origin: str  # "env" | "local" | "manifest" | "default"
     entry: ConfigEntry
-    #: The explicit stored value hidden behind an env override. Populated only
-    #: when `origin == "env"` and the entry consults the store.
+    #: The explicit stored value hidden behind a higher tier. Populated when
+    #: `origin == "env"` (the merged stored value the environment masks) and
+    #: when `origin == "local"` (the base layer's value, which may be `None`
+    #: when the key exists only in the overlay).
     shadowed: object | None = None
 
 

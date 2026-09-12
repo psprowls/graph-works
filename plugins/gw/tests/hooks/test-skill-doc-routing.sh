@@ -65,11 +65,21 @@ make_workspace() {
     printf '%s\n' "$ws"
 }
 
-# write_projection <workspace> <sha256|-> [bundle_dir]
+# add_local_manifest <workspace> [body]
+# Creates <workspace>/workspace.local.yaml and echoes its sha256.
+add_local_manifest() {
+    local ws="$1" body="${2:-topic: Laptop}"
+    printf '%s\n' "$body" > "$ws/workspace.local.yaml"
+    sha256_of "$ws/workspace.local.yaml"
+}
+
+# write_projection <workspace> <sha256|-> [bundle_dir] [overlay_sha256|-]
 # Writes <workspace>/.gw/cache/config.json in the shape config_io.write_projection
-# emits (json.dumps(..., indent=2)). "-" records a null source_sha256.
+# emits (json.dumps(..., indent=2)). "-" records a null hash. Omitting the
+# fourth argument writes the two-key _meta a non-layered store produces — the
+# shape an older projection has, which the hook must not read as staleness.
 write_projection() {
-    local ws="$1" sha="$2" bundle="${3:-}"
+    local ws="$1" sha="$2" bundle="${3:-}" overlay="${4:-}"
     mkdir -p "$ws/.gw/cache"
     {
         printf '{\n'
@@ -79,9 +89,19 @@ write_projection() {
         printf '  "_meta": {\n'
         printf '    "source_mtime": 1755000000.0,\n'
         if [ "$sha" = "-" ]; then
-            printf '    "source_sha256": null\n'
+            printf '    "source_sha256": null'
         else
-            printf '    "source_sha256": "%s"\n' "$sha"
+            printf '    "source_sha256": "%s"' "$sha"
+        fi
+        if [ -n "$overlay" ]; then
+            printf ',\n    "overlay_mtime": 1755000000.0,\n'
+            if [ "$overlay" = "-" ]; then
+                printf '    "overlay_sha256": null\n'
+            else
+                printf '    "overlay_sha256": "%s"\n' "$overlay"
+            fi
+        else
+            printf '\n'
         fi
         printf '  }\n'
         printf '}\n'
@@ -370,6 +390,60 @@ assert_output \
     "nested" "required" \
     "$ws_nullsha/okf/<work-path>/references/" "" \
     "absent" "" \
+    "$out"
+
+# --- 7b. overlay present and recorded correctly -> no notice ---------------
+ws_overlay_ok="$(make_workspace ws_overlay_ok)"
+overlay_sha="$(add_local_manifest "$ws_overlay_ok")"
+write_projection "$ws_overlay_ok" "$(sha256_of "$ws_overlay_ok/workspace.yaml")" "" "$overlay_sha"
+out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
+    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_overlay_ok")"
+assert_output \
+    "overlay hash agrees: no staleness notice" \
+    "nested" "required" \
+    "$ws_overlay_ok/okf/<work-path>/references/" "" \
+    "absent" "" \
+    "$out"
+
+# --- 7c. overlay present, projection predates it -> notice names it --------
+ws_overlay_new="$(make_workspace ws_overlay_new)"
+write_projection "$ws_overlay_new" "$(sha256_of "$ws_overlay_new/workspace.yaml")"
+add_local_manifest "$ws_overlay_new" >/dev/null
+out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
+    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_overlay_new")"
+assert_output \
+    "local manifest appeared after the projection: notice names workspace.local.yaml" \
+    "nested" "required" \
+    "$ws_overlay_new/okf/<work-path>/references/" "" \
+    "present" \
+    "graph-works-config-stale${US}gw config sync${US}workspace.local.yaml" \
+    "$out"
+
+# --- 7d. overlay recorded but the file is gone -> notice -------------------
+ws_overlay_gone="$(make_workspace ws_overlay_gone)"
+write_projection "$ws_overlay_gone" "$(sha256_of "$ws_overlay_gone/workspace.yaml")" "" "$(printf 'b%.0s' {1..64})"
+out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
+    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_overlay_gone")"
+assert_output \
+    "recorded local manifest removed: notice names workspace.local.yaml" \
+    "nested" "required" \
+    "$ws_overlay_gone/okf/<work-path>/references/" "" \
+    "present" \
+    "graph-works-config-stale${US}gw config sync${US}workspace.local.yaml" \
+    "$out"
+
+# --- 7e. both layers drifted -> one notice naming both --------------------
+ws_both="$(make_workspace ws_both)"
+write_projection "$ws_both" "$(printf 'a%.0s' {1..64})" "" "$(printf 'b%.0s' {1..64})"
+add_local_manifest "$ws_both" >/dev/null
+out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
+    CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_both")"
+assert_output \
+    "both layers drifted: one notice naming both files" \
+    "nested" "required" \
+    "$ws_both/okf/<work-path>/references/" "" \
+    "present" \
+    "graph-works-config-stale${US}workspace.yaml${US}workspace.local.yaml${US}gw config sync" \
     "$out"
 
 # --- 8. the three platform shapes ----------------------------------------

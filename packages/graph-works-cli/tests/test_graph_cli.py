@@ -17,11 +17,11 @@ import typer
 from code_graph_io import upsert
 from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 from code_graph_io.testing import raw_conn
-from code_wiki_okf.config import ConfigError
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.graph_cli import main as graph_main
 from graph_works_core.graph.commands import GraphResult, GraphTarget
+from graph_works_core.workspace.errors import WorkspaceConfigError
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -99,7 +99,7 @@ def test_resolve_target_maps_config_error_to_generic(monkeypatch, capsys) -> Non
     monkeypatch.setattr(graph_main, "resolve_workspace", lambda workspace: "LAYOUT")
 
     def _boom(layout):
-        raise ConfigError("workspace.yaml: not valid YAML")
+        raise WorkspaceConfigError("workspace.yaml: not valid YAML")
 
     monkeypatch.setattr(graph_main, "graph_target", _boom)
 
@@ -284,8 +284,7 @@ def test_export_carries_a_core_failure_to_stderr(spy) -> None:
 def seeded_workspace(tmp_path: Path) -> Path:
     """A bootstrapped workspace whose `.gw/cache/code.db` holds a tiny real graph.
 
-    `graph_target()` calls `load_config(layout.bundle_dir,
-    config_path=layout.manifest_path, graph_dir=layout.cache_dir, ...)`, so the
+    `graph_target()` calls `load_workspace_config(layout)`, so the
     graph the CLI opens is always `layout.cache_dir` (`<root>/.gw/cache` by
     default) — supplied by the caller, not read from the document.
     """

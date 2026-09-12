@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import pkgutil
+import re
 from collections.abc import Mapping, Sequence
 from datetime import date
 
@@ -135,12 +136,16 @@ def test_no_fragment_ships_an_unsubstituted_placeholder():
     # librarian system prompts because nothing formatted the fragment and
     # nothing checked that it needed no formatting. A fragment is a finished
     # string by construction; anything that looks like a substitution slot in
-    # one is a bug, not a template.
+    # one is a bug, not a template. Regex quantifiers immediately after a
+    # character class, like [0-9]{4}, are legitimate and are exempted.
     for module, name, text in FRAGMENTS:
         assert "vault_path" not in text, f"{module}.{name} ships a vault_path placeholder"
-        assert "{" not in text.replace("{{", "").replace("}}", ""), (
-            f"{module}.{name} ships what looks like a substitution slot"
-        )
+        # Remove escaped braces ({{...}}) and regex quantifiers after character classes,
+        # then check for any remaining unescaped braces that look like template placeholders
+        cleaned = re.sub(r"\{\{.*?\}\}", "", text)  # Remove {{...}}
+        # Remove a quantifier immediately after a regex character class, e.g. [0-9]{4}
+        cleaned = re.sub(r"(?<=\])\{[0-9,\-]*\}", "", cleaned)
+        assert "{" not in cleaned and "}" not in cleaned, f"{module}.{name} ships what looks like a substitution slot"
 
 
 def test_the_link_rules_name_the_syntax_they_do_want():
@@ -195,14 +200,24 @@ def test_no_schema_file_renders_nothing(tmp_path):
     assert prompts.render_project_context(layout_for(tmp_path)) == ""
 
 
-def test_claude_md_is_read_and_agents_md_is_the_fallback(tmp_path):
-    (tmp_path / "AGENTS.md").write_text(_SCHEMA, encoding="utf-8")
-    assert "AGENTS.md" in prompts.render_project_context(layout_for(tmp_path))
-
+def test_agents_md_is_read_and_claude_md_is_the_fallback(tmp_path):
+    # CLAUDE.md at the workspace root is the one-line `@AGENTS.md` pointer
+    # after bootstrap, so AGENTS.md has to win whenever both exist.
     (tmp_path / "CLAUDE.md").write_text(_SCHEMA, encoding="utf-8")
+    assert "CLAUDE.md" in prompts.render_project_context(layout_for(tmp_path))
+
+    (tmp_path / "AGENTS.md").write_text(_SCHEMA, encoding="utf-8")
     rendered = prompts.render_project_context(layout_for(tmp_path))
-    assert "CLAUDE.md" in rendered
-    assert "AGENTS.md" not in rendered
+    assert "AGENTS.md" in rendered
+    assert "CLAUDE.md" not in rendered
+
+
+def test_a_pointer_only_claude_md_still_yields_the_style_block(tmp_path):
+    (tmp_path / "CLAUDE.md").write_text("@AGENTS.md\n", encoding="utf-8")
+    (tmp_path / "AGENTS.md").write_text(_SCHEMA, encoding="utf-8")
+    rendered = prompts.render_project_context(layout_for(tmp_path))
+    assert "§Style" in rendered
+    assert "Be concise." in rendered
 
 
 def test_both_sections_are_extracted_and_named(tmp_path):
@@ -243,16 +258,21 @@ def test_only_the_style_section_renders_when_log_format_is_absent(tmp_path):
 # --------------------------------------------------------------------------
 
 
-def test_project_context_comes_from_the_repo_the_workspace_lives_in(tmp_path):
+def test_project_context_comes_from_the_workspace_root_never_the_repo_root(tmp_path):
+    # D-001: gw never reads a catalogued repo's own root files. In the
+    # in-repo `.works` shape the repo's AGENTS.md is foreign content.
     repo = tmp_path / "repo"
     (repo / ".works").mkdir(parents=True)
-    (repo / "CLAUDE.md").write_text("## Style\n\nFrom the repo root.\n", encoding="utf-8")
+    (repo / "AGENTS.md").write_text("## Style\n\nFrom the repo root.\n", encoding="utf-8")
     layout = layout_for(repo / ".works", repo_root=repo)
-    assert "From the repo root." in prompts.render_project_context(layout)
+    assert prompts.render_project_context(layout) == ""
+
+    (repo / ".works" / "AGENTS.md").write_text("## Style\n\nFrom the workspace root.\n", encoding="utf-8")
+    assert "From the workspace root." in prompts.render_project_context(layout)
 
 
-def test_project_context_falls_back_to_the_workspace_root_outside_a_repo(tmp_path):
-    (tmp_path / "CLAUDE.md").write_text("## Style\n\nFrom the workspace root.\n", encoding="utf-8")
+def test_project_context_comes_from_the_workspace_root_outside_a_repo_too(tmp_path):
+    (tmp_path / "AGENTS.md").write_text("## Style\n\nFrom the workspace root.\n", encoding="utf-8")
     layout = layout_for(tmp_path)
     assert layout.repo_root is None
     assert "From the workspace root." in prompts.render_project_context(layout)
@@ -268,13 +288,28 @@ def test_the_config_dir_is_never_consulted_for_project_context(tmp_path):
     assert prompts.render_project_context(layout) == ""
 
 
-def test_the_disambiguation_fragment_describes_no_wiki_level_claude_md():
-    # The fragment described the retired plugin layout: graph-works seeds no
-    # wiki-level CLAUDE.md and reads none. A prompt that says otherwise sends
-    # the model looking for a file that is not there.
+def test_the_disambiguation_fragment_points_at_the_workspace_agents_md():
+    # The project context comes from the workspace's own AGENTS.md now --
+    # not a repo root file, and there is no wiki-level CLAUDE.md. A prompt
+    # that says otherwise sends the model looking for a file that is not
+    # there.
     fragment = prompts.CLAUDE_MD_DISAMBIGUATION
+    assert "the workspace's `AGENTS.md`" in fragment
+    assert "repo's root" not in fragment
     assert "the wiki's `CLAUDE.md`" not in fragment
-    assert "CLAUDE.md" in fragment
+    assert "has no `CLAUDE.md` of its own" in fragment
+
+
+def test_the_log_format_fragment_teaches_the_iso_date_heading():
+    # `okf_io.log` reports a non-ISO `##` heading as
+    # `reserved.log-heading-not-date`; a prompt teaching the retired
+    # `## [YYYY-MM-DD] <op> | <title>` grammar makes every agent-written
+    # entry a lint finding.
+    fragment = prompts.LOG_FORMAT
+    assert "## YYYY-MM-DD" in fragment
+    assert "[YYYY-MM-DD]" not in fragment
+    assert "- **<Op>** <title>" in fragment
+    assert 'grep -E "^## [0-9]{4}-" log.md | tail -10' in fragment
 
 
 def test_the_ingest_prompts_carry_no_wikilinks(tmp_path):

@@ -12,6 +12,7 @@ from graph_works_core.workspace.layout import (
     DEFAULT_BUNDLE_DIR,
     DEFAULT_CONFIG_DIR,
     GW_DIRNAME,
+    LOCAL_MANIFEST_FILENAME,
     MANIFEST_FILENAME,
     WORKTREES_DIRNAME,
     layout_for,
@@ -39,6 +40,19 @@ def test_the_layout_is_frozen_and_slotted(tmp_path):
 def test_the_manifest_name_is_fixed_at_the_root(tmp_path):
     assert layout_for(tmp_path).manifest_path == tmp_path.resolve() / MANIFEST_FILENAME
     assert MANIFEST_FILENAME == "workspace.yaml"
+
+
+def test_the_local_manifest_sits_beside_the_manifest(tmp_path):
+    # Same directory, so ADR-0041's anchor sentence is unchanged: a relative
+    # path in either file resolves against the directory it was read from,
+    # and both are read from the root.
+    layout = layout_for(tmp_path / "works")
+    assert layout.local_manifest_path == layout.manifest_path.parent / "workspace.local.yaml"
+    assert layout.local_manifest_path == (tmp_path / "works") / LOCAL_MANIFEST_FILENAME
+
+
+def test_the_local_manifest_name_is_fixed(tmp_path):
+    assert LOCAL_MANIFEST_FILENAME == "workspace.local.yaml"
 
 
 def test_the_control_plane_default_is_dot_gw(tmp_path):

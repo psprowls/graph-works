@@ -7,11 +7,11 @@ from datetime import UTC
 from pathlib import Path
 
 import pytest
-from code_wiki_okf.config import ConfigError
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import ingest as ingest_module
 from graph_works_core.ingest.commands import IngestResult
+from graph_works_core.workspace.errors import WorkspaceConfigError
 from models_io import BedrockAccessDenied, ProviderNotInstalled
 from ruamel.yaml import YAML
 from typer.testing import CliRunner
@@ -324,16 +324,10 @@ def test_ingest_reports_unreadable_configuration_before_any_model_call(
     source = tmp_path / "source.md"
     source.write_text("# Source\n", encoding="utf-8")
 
-    def fail(
-        _bundle_root: object,
-        *,
-        config_path: object = None,
-        graph_dir: object = None,
-        declarations_dir: object = None,
-    ) -> object:
-        raise ConfigError("config.yaml is malformed")
+    def fail(_layout: object) -> object:
+        raise WorkspaceConfigError("config.yaml is malformed")
 
-    monkeypatch.setattr(ingest_module, "load_config", fail)
+    monkeypatch.setattr(ingest_module, "load_workspace_config", fail)
 
     result = runner.invoke(app, ["ingest", "--source", str(source), "--workspace", str(initialized_workspace)])
 

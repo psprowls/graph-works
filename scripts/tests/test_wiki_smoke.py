@@ -132,8 +132,10 @@ def test_smoke_run_files_a_third_party_dependency_under_its_ecosystem(tmp_path: 
     instead of the PyPI *distribution* name -- see `packages/code-graph-io`'s
     own history for the `code_graph_io` vs `code-graph-io` incident) is still
     live for a genuine third-party dependency: `config-io`'s sole runtime
-    dependency, `pyyaml`, is never self-implemented by this checkout, so it
-    still gets a page, and still at its distribution name.
+    dependency, `ruamel.yaml` (swapped from `pyyaml` by the read-seam
+    consolidation -- see `packages/config-io/AGENTS.md`), is never
+    self-implemented by this checkout, so it still gets a page, and still at
+    its distribution name, normalized (`ruamel.yaml` -> `ruamel-yaml`).
 
     This assertion is the gate that was missing. `scripts/gw-smoke/run.sh`
     checked the dependency lane but nothing runs it; this file runs inside
@@ -145,7 +147,7 @@ def test_smoke_run_files_a_third_party_dependency_under_its_ecosystem(tmp_path: 
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
-    assert (bundle_dir / "dependencies" / "pypi" / "pyyaml.md").is_file()
+    assert (bundle_dir / "dependencies" / "pypi" / "ruamel-yaml.md").is_file()
 
 
 def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:

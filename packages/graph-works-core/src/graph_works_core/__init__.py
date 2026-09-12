@@ -37,8 +37,8 @@ flattened, because `proposal_reasoner` and `query_orchestrator` each name
 both a command and a prompt (and, for `query_orchestrator`, an adapter too).
 
 `roles` and `prompts` are the two places here that read anything. `roles`
-reads only what it is handed a layout for; `prompts.project_context` reads a
-caller-supplied `CLAUDE.md`/`AGENTS.md` directory, and
+reads only what it is handed a layout for; `prompts.project_context` reads
+the workspace root's `AGENTS.md` (or `CLAUDE.md`), and
 `prompts.render_architecture_overview` reads a `WorkspaceLayout`'s members
 (hence `prompts` importing `layout`, not stdlib alone). `manifest`, `roles`
 and `prompts` stay submodules for the reason `work_tracker_okf.vocabulary`
@@ -118,7 +118,7 @@ and the rest of the shared `prompts`.
 
 from __future__ import annotations
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from graph_works_core.agent_substrate.agent_loop import ToolLoopResult, coerce_tool_name, run_tool_loop
 from graph_works_core.agent_substrate.agent_tools import (

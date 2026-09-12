@@ -6,11 +6,11 @@ import json
 from pathlib import Path
 
 import pytest
-from config_io import RegistryError
+from config_io import ConfigEntry, RegistryError, Resolved
 from graph_works_cli import exit_codes
 from graph_works_cli.config_cli import main as config_main
 from graph_works_cli.config_cli.main import config_app
-from graph_works_cli.config_cli.rendering import render_resolved
+from graph_works_cli.config_cli.rendering import render_resolved, render_resolved_list
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -81,8 +81,6 @@ def test_list_plain_output_documents_default_and_description(tmp_path: Path) -> 
 
 
 def test_plain_render_notes_an_environment_shadow() -> None:
-    from config_io import ConfigEntry, Resolved
-
     result = Resolved(
         key="example",
         value="environment",
@@ -183,3 +181,48 @@ def test_list_maps_a_broken_catalog_to_the_generic_exit(tmp_path: Path, monkeypa
     assert result.exit_code == exit_codes.GENERIC
     assert result.stdout == ""
     assert "Error: catalog entry 'roles.*' has no resolver" in result.stderr
+
+
+# --- the local origin in the read views -------------------------------------
+
+
+def test_get_names_the_local_origin_and_the_shadowed_committed_value(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    (root / "workspace.yaml").write_text("version: 1\ntopic: Committed\n", encoding="utf-8")
+    (root / "workspace.local.yaml").write_text("topic: Laptop\n", encoding="utf-8")
+
+    result = runner.invoke(config_app, ["get", "topic", "--workspace", str(root)])
+
+    assert result.exit_code == 0
+    assert "(origin: local)" in result.stdout
+    assert "workspace.yaml value 'Committed' is shadowed by workspace.local.yaml" in result.stdout
+
+
+def test_get_json_carries_the_local_origin(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    (root / "workspace.yaml").write_text("version: 1\ntopic: Committed\n", encoding="utf-8")
+    (root / "workspace.local.yaml").write_text("topic: Laptop\n", encoding="utf-8")
+
+    result = runner.invoke(config_app, ["get", "topic", "--workspace", str(root), "--json"])
+
+    payload = json.loads(result.stdout)
+    assert (payload["origin"], payload["value"], payload["shadowed"]) == ("local", "Laptop", "Committed")
+
+
+def test_list_marks_a_locally_overridden_row(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    (root / "workspace.local.yaml").write_text("topic: Laptop\n", encoding="utf-8")
+
+    result = runner.invoke(config_app, ["list", "--workspace", str(root)])
+
+    assert result.exit_code == 0
+    assert "~ topic = 'Laptop'" in result.stdout
+
+
+def test_the_marker_table_covers_every_origin_a_resolved_can_carry() -> None:
+    # A fourth origin with no marker is a KeyError at render time, not a
+    # missing glyph — so the table and the vocabulary move together.
+    entry = ConfigEntry(key="topic", type="str", default=None, description="Display name.")
+    for origin in ("env", "local", "manifest", "default"):
+        rendered = render_resolved_list([Resolved("topic", "x", origin, entry)], json_output=False)
+        assert "topic = 'x'" in rendered

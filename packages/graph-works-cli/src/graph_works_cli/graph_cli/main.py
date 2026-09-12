@@ -19,12 +19,12 @@ from pathlib import Path
 from typing import Never
 
 import typer
-from code_wiki_okf.config import ConfigError
 from graph_works_core.graph.commands import GraphResult, GraphTarget, graph_target
 from graph_works_core.graph.commands import build as core_build
 from graph_works_core.graph.commands import describe as core_describe
 from graph_works_core.graph.commands import export as core_export
 from graph_works_core.graph.commands import find as core_find
+from graph_works_core.workspace.errors import WorkspaceConfigError
 
 from graph_works_cli import exit_codes
 from graph_works_cli.workspace_resolution import resolve_workspace
@@ -67,7 +67,7 @@ def _resolve_target(workspace: str) -> GraphTarget:
     layout = resolve_workspace(workspace)
     try:
         return graph_target(layout)
-    except ConfigError as exc:
+    except WorkspaceConfigError as exc:
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=exit_codes.GENERIC) from exc
 

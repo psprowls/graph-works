@@ -50,15 +50,17 @@ resolve_all(CATALOG, store=store, environ={})  # one Resolved per key
 
 ### Precedence
 
-**env var counterpart > stored explicit value > entry default.** Only
-`kind="manifest"` entries consult the store; `kind="env-only"` entries never
-touch it.
+**env var counterpart > local explicit value > base explicit value > entry
+default.** Only `kind="manifest"` entries consult the store; `kind="env-only"`
+entries never touch it. The two explicit tiers are one tier for any store that
+is not a `LayeredStore` — which is every store unless the caller supplies a
+layered one.
 
 Reads are fail-open. A malformed env value resolves to its raw string rather
 than raising — the consumer surfaces the problem, resolution does not fail on
-the way past. `Resolved.shadowed` carries the explicit stored value hidden
-behind an env override, so a `list` view can show what the environment is
-masking.
+the way past. `Resolved.shadowed` carries what a higher tier is masking: the
+merged stored value behind an env override, or the base layer's value behind a
+local one.
 
 ## The store seam
 
@@ -74,11 +76,32 @@ inherited.
 | `restore(snapshot)` | Put a snapshot back. **`restore(None)` means "there was nothing there; remove it"** — not "do nothing". |
 | `fingerprint()` | `Fingerprint(mtime, sha256)` for the projection's `_meta`, or `None` when nothing is stored. Returning one object is what keeps the two fields from disagreeing. |
 
-`PlainYamlStore` ships with the package and is the only reason `pyyaml` is a
-dependency. It is lossless — `read` and `read_explicit` return the same
+`PlainYamlStore` ships with the package and is the only reason `ruamel.yaml` is
+a dependency. It is lossless — `read` and `read_explicit` return the same
 content and no defaults are injected — so the persistence check below can
-never fire against it. A caller supplying its own store never loads `yaml` at
-all.
+never fire against it. A caller supplying its own store never loads a YAML
+library at all.
+
+It reads and writes **YAML 1.2**: `yes`/`no`/`on`/`off` are strings, a leading
+zero is not an octal, and `1:30` is not a sexagesimal. Writes preserve
+insertion order and emit non-ASCII literally.
+
+`LayeredYamlStore(base=..., overlay=...)` is the second shipped
+implementation: a **read-only** merged view over two `PlainYamlStore`s, the
+overlay winning. Mappings deep-merge; lists, scalars and an explicit `null`
+replace wholesale. `fingerprint()` reports the *base*; `overlay_fingerprint()`
+reports the overlay.
+
+`write` / `snapshot` / `restore` raise `TypeError`. That is not an oversight:
+`set_key` is read-mutate-write over `store.read()`, so pointing it at a merged
+mapping would copy every overlay value into the base file. A caller writes by
+naming a layer — `set_key(catalog, key, value, store=layered.overlay)` — and
+then regenerates the projection from the layered store itself.
+
+It satisfies `LayeredStore`, a second structural Protocol
+(`read_base_explicit`, `read_overlay_explicit`, `overlay_fingerprint`). The
+read side uses `isinstance` against it and behaves exactly as before for any
+store that does not satisfy it.
 
 ### The persistence invariant
 
@@ -155,6 +178,12 @@ must never observe a truncation.
 `_meta` carries `source_mtime` and `source_sha256`, both real or both `None`,
 never a mix.
 
+A `LayeredStore` adds `overlay_mtime` and `overlay_sha256` beside them, again
+both real or both `None` — `None` meaning the upper layer's file is absent.
+`source_*` keeps meaning "the lower, committed layer". The shape is additive
+on purpose: a consumer written against the two-key `_meta` keeps working and
+simply never checks the overlay.
+
 > **Migration obligation.** The seed called these `manifest_mtime` /
 > `manifest_sha256`. "Manifest" is caller vocabulary in a package that must
 > not know its caller — the same class of leak as a hardcoded key name — so
@@ -201,4 +230,5 @@ set from the filesystem. It asserts the two invariants that actually matter:
    contract, which only orders what it was told to enumerate.
 2. Nothing on the resolution path imports `os`.
 
-Plus: `yaml` is imported by `store.py` and by nothing else.
+Plus: a YAML library (`ruamel`, and the `yaml` name it replaced) is imported by
+`store.py` and by nothing else.

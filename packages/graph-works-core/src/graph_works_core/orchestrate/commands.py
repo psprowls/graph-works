@@ -26,7 +26,7 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Any, Literal
 
-from config_io import PlainYamlStore, dotted
+from config_io import dotted
 from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from subagents_io.routing import resolve_model, validate_rules
@@ -44,7 +44,7 @@ from work_tracker_okf.workflow import RouteResult, route, state_for
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.manifest import checked_bool, checked_int, checked_str
+from graph_works_core.workspace.manifest import checked_bool, checked_int, checked_str, workspace_store
 from graph_works_core.workspace.pipeline import PipelineEntry, pipeline_table
 from graph_works_core.workspace.provenance import default_base, run_git
 from graph_works_core.workspace.repos import resolve_repo
@@ -1160,7 +1160,7 @@ def _routing_rules(layout: WorkspaceLayout) -> Mapping[str, Any]:
     outside its vocabulary is a dead rule, and a dead rule silently routes the
     wrong model.
     """
-    raw = PlainYamlStore(layout.manifest_path).read_explicit()
+    raw = workspace_store(layout).read_explicit()
     block = dotted.get(raw, AUTO_DRIVE_KEY)
     rules: Mapping[str, Any] = block if isinstance(block, dict) else {}
     errors = validate_rules(rules, ROUTING_VOCABULARIES, default_key="phase")

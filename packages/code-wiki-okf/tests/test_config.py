@@ -227,3 +227,77 @@ def test_load_config_config_path_error_messages_name_the_actual_file(tmp_path: P
 
     with pytest.raises(ConfigError, match=re.escape("custom-name.yaml")):
         load_config(tmp_path, config_path=config_path, graph_dir="../graphs/code")
+
+
+def test_config_from_mapping_validates_without_touching_the_filesystem(tmp_path: Path) -> None:
+    from code_wiki_okf.config import config_from_mapping
+
+    config = config_from_mapping(
+        {"repositories": {"gw": {"path": "../code"}}, "ignore": ["tmp/**"]},
+        anchor=tmp_path / "anchor",
+        bundle_root=tmp_path / "bundle",
+        graph_dir=tmp_path / "cache",
+        declarations_dir=tmp_path / "declarations",
+    )
+
+    assert config.graph_dir == tmp_path / "cache"
+    assert config.declarations_dir == tmp_path / "declarations"
+    assert [repo.name for repo in config.repos] == ["gw"]
+    # ADR-0041: a relative repo path anchors on `anchor`, not `bundle_root`.
+    assert config.repos[0].path == (tmp_path / "anchor" / "../code").resolve()
+    assert config.repos[0].ignore == ("tmp/**",)
+
+
+def test_config_from_mapping_quotes_source_in_its_refusals(tmp_path: Path) -> None:
+    from code_wiki_okf.config import ConfigError, config_from_mapping
+
+    with pytest.raises(ConfigError, match=r"^my-manifest\.yaml: "):
+        config_from_mapping(
+            {"repositories": "not a mapping"},
+            anchor=tmp_path,
+            bundle_root=tmp_path,
+            graph_dir=tmp_path,
+            source="my-manifest.yaml",
+        )
+
+
+def test_config_from_mapping_defaults_declarations_dir_to_bundle_root(tmp_path: Path) -> None:
+    from code_wiki_okf.config import config_from_mapping
+
+    config = config_from_mapping({}, anchor=tmp_path, bundle_root=tmp_path / "bundle", graph_dir=tmp_path / "cache")
+    assert config.declarations_dir == tmp_path / "bundle"
+
+
+def test_config_from_mapping_defaults_the_state_gate(tmp_path: Path) -> None:
+    from code_wiki_okf.config import config_from_mapping
+
+    gate = config_from_mapping({}, anchor=tmp_path, bundle_root=tmp_path, graph_dir=tmp_path).state_gate
+    assert gate.enabled is True
+    assert gate.branches == ("main",)
+
+
+def test_load_config_and_config_from_mapping_agree(tmp_path: Path) -> None:
+    """One validator, two entry points: the file reader must add nothing."""
+    import yaml
+    from code_wiki_okf.config import config_from_mapping, load_config
+
+    bundle_root = tmp_path / "bundle"
+    bundle_root.mkdir()
+    manifest = tmp_path / "workspace.yaml"
+    content = {
+        "version": 1,
+        "repositories": {"gw": {"path": "../code", "ignore": ["build/**"]}},
+        "ignore": ["tmp/**"],
+        "state_gate": {"enabled": False, "branches": ["main", "release"]},
+    }
+    manifest.write_text(yaml.safe_dump(content, sort_keys=False), encoding="utf-8", newline="")
+
+    from_file = load_config(bundle_root, config_path=manifest, graph_dir=tmp_path / "cache")
+    from_mapping = config_from_mapping(
+        content,
+        anchor=manifest.parent,
+        bundle_root=bundle_root,
+        graph_dir=tmp_path / "cache",
+        source=manifest.name,
+    )
+    assert from_file == from_mapping

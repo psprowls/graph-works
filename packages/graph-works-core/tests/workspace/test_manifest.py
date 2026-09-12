@@ -12,6 +12,7 @@ from graph_works_core.workspace.layout import layout_for
 from graph_works_core.workspace.manifest import (
     CATALOG,
     MANIFEST_VERSION,
+    STORED_ORIGINS,
     WORKSPACE_DIR_ENV,
     checked,
     checked_bool,
@@ -224,10 +225,11 @@ def test_state_gate_defaults_when_the_block_is_absent(tmp_path):
 
 
 def test_a_set_roles_write_leaves_repositories_ignore_and_state_gate_content_intact(tmp_path):
-    # `PlainYamlStore.write` re-dumps the whole file through `yaml.safe_dump`
-    # (see `packages/config-io/src/config_io/store.py`) rather than splicing
-    # like okf-io's writer, so quoting/flow-style is not preserved byte for
-    # byte across an unrelated write — only the parsed content is a contract.
+    # `PlainYamlStore.write` re-dumps the whole file through ruamel's safe
+    # dumper (see `packages/config-io/src/config_io/store.py`) rather than
+    # splicing like okf-io's writer, so quoting/flow-style is not preserved
+    # byte for byte across an unrelated write — only the parsed content is a
+    # contract. Key order *is* preserved (D-003).
     text = (
         "version: 1\n"
         "repositories:\n"
@@ -537,3 +539,106 @@ def test_a_relay_tail_needing_quoting_survives_the_hand_rendered_yaml(tmp_path):
     hostile = "Auto-drive context: relay it  # not a comment; target {merge_target}"
     _write(tmp_path, render_initial(today=TODAY, relay_tail=hostile))
     assert pipeline_table(layout=layout_for(tmp_path))["branch"].prompt_tail == hostile
+
+
+def test_manifest_store_reads_the_file_it_is_handed(tmp_path):
+    from graph_works_core.workspace.manifest import manifest_store
+
+    path = _write(tmp_path, "version: 1\ntopic: Seam\n")
+    assert manifest_store(path).read_explicit() == {"version": 1, "topic": "Seam"}
+
+
+def test_manifest_store_accepts_a_string_path(tmp_path):
+    # `discovery.resolve` hands `manifest.read` a path, not a layout; a
+    # layout-only factory cannot cover the reader that runs first.
+    from graph_works_core.workspace.manifest import manifest_store
+
+    path = _write(tmp_path, "version: 1\n")
+    assert manifest_store(str(path)).read_explicit() == {"version": 1}
+
+
+def test_workspace_store_reads_the_layouts_manifest(tmp_path):
+    from graph_works_core.workspace.layout import layout_for
+    from graph_works_core.workspace.manifest import workspace_store
+
+    root = tmp_path / "ws"
+    root.mkdir()
+    layout = layout_for(root)
+    layout.manifest_path.write_text("version: 1\ntopic: Seam\n", encoding="utf-8", newline="")
+    assert workspace_store(layout).read_explicit() == {"version": 1, "topic": "Seam"}
+
+
+# --- the local overlay layer ------------------------------------------------
+
+
+def _workspace(tmp_path, base="version: 1\n", local=None):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text(base, encoding="utf-8")
+    if local is not None:
+        (root / "workspace.local.yaml").write_text(local, encoding="utf-8")
+    return layout_for(root)
+
+
+def test_read_picks_up_a_layout_override_from_the_local_file(tmp_path):
+    # D-004: any catalog key may be overridden locally, layout.* included.
+    layout = _workspace(tmp_path, "version: 1\nlayout:\n  bundle_dir: okf\n", "layout:\n  bundle_dir: vault\n")
+    assert read(layout.manifest_path).bundle_dir == "vault"
+
+
+def test_a_local_value_resolves_with_the_local_origin_and_shadows_the_base(tmp_path):
+    layout = _workspace(
+        tmp_path,
+        "version: 1\nworkflow:\n  auto_drive:\n    max_parallel: 4\n",
+        "workflow:\n  auto_drive:\n    max_parallel: 2\n",
+    )
+    got = resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
+    assert (got.value, got.origin, got.shadowed) == (2, "local", 4)
+
+
+def test_a_local_null_on_a_real_default_key_is_refused(tmp_path):
+    # D-001: the local null replaces, then _check_resolved's existing rule
+    # applies with no new code.
+    layout = _workspace(tmp_path, "version: 1\n", "workflow:\n  auto_drive:\n    max_parallel: null\n")
+    with pytest.raises(WorkspaceError, match="explicitly null"):
+        resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
+
+
+def test_a_malformed_local_value_is_refused_like_a_malformed_base_one(tmp_path):
+    # A hand-edited local file bypasses set-time checks exactly as the base
+    # does, so `checked` has to cover its origin too.
+    layout = _workspace(tmp_path, "version: 1\n", "workflow:\n  auto_drive:\n    max_parallel: nope\n")
+    with pytest.raises(WorkspaceError, match="expects an integer"):
+        resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
+
+
+def test_a_malformed_local_only_value_is_refused_naming_the_local_file(tmp_path):
+    # The offending line lives only in workspace.local.yaml, so the refusal
+    # must name that file, not the (actually fine) base workspace.yaml — a
+    # user pointed at the wrong file cannot fix a value they cannot find.
+    layout = _workspace(tmp_path, "version: 1\n", "workflow:\n  auto_drive:\n    max_parallel: nope\n")
+    with pytest.raises(WorkspaceError) as excinfo:
+        resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
+    message = str(excinfo.value)
+    assert str(layout.local_manifest_path) in message
+    assert str(layout.manifest_path) not in message
+
+
+def test_a_malformed_base_only_value_still_names_the_base_file(tmp_path):
+    # The mirror case: a base-only malformed value (no overlay at all) must
+    # keep naming workspace.yaml, exactly as before this fix.
+    layout = _workspace(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_parallel: nope\n")
+    with pytest.raises(WorkspaceError) as excinfo:
+        resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={})
+    message = str(excinfo.value)
+    assert str(layout.manifest_path) in message
+
+
+def test_stored_origins_is_the_two_layer_names():
+    assert frozenset({"manifest", "local"}) == STORED_ORIGINS
+
+
+def test_a_base_only_value_still_resolves_with_the_manifest_origin(tmp_path):
+    layout = _workspace(tmp_path, "version: 1\ntopic: Committed\n")
+    got = resolve_checked_key(layout, "topic", environ={})
+    assert (got.value, got.origin, got.shadowed) == ("Committed", "manifest", None)

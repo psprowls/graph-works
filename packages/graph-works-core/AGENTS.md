@@ -133,8 +133,26 @@ the layout and supplied by the caller at read time. `Manifest` itself never
 holds a `Path`, only strings; turning overrides into resolved paths is
 `layout_for`'s job alone. `checked()`/`resolve_checked_key`/`resolve_checked_all`
 exist because a hand-edited manifest bypasses config-io's set-time
-validation — only `origin == "manifest"` values get re-checked against the
-catalog's declared type/`allowed`; env and default origins are trusted.
+validation — only `STORED_ORIGINS` values (`"manifest"`, the committed file,
+and `"local"`, the per-machine overlay) get re-checked against the catalog's
+declared type/`allowed`; env and default origins are trusted.
+
+**One read seam, two write sites.** `manifest_store(path)` and
+`workspace_store(layout)` are how every *reader* of a `workspace.yaml` gets
+its store — `read`, `resolve_checked_key`, `resolve_checked_all`,
+`agent_substrate.roles`, `workspace.pipeline`, `orchestrate._routing_rules`,
+`workspace.init`'s projection write, and `workspace.config`. Both forms exist
+because `discovery.resolve` calls `read(path)` before a layout exists.
+
+`config-io`'s write path is read-mutate-write, so a write never goes through
+`PlainYamlStore` construction inside the seam itself: only `manifest_store`
+and `set_value` construct it, and `tests/test_workspace_store_boundary.py`
+pins the permitted construction sites at exactly those two.
+`graph_works_cli.config_cli.main._store` calls `workspace_store` like any
+other reader, then writes by naming a layer already on the `LayeredYamlStore`
+it got back — `.base` or `.overlay` — rather than constructing its own
+`PlainYamlStore`. That is what let the seam's return type change (the layered
+read-only store) without any caller moving.
 
 A manifest-sourced `workflow.pipeline.<variant>.skill` is shape-checked at read
 time by `pipeline.check_skill_name`, beside `manifest.checked()` and for the
@@ -149,13 +167,19 @@ plan-then-apply pair with **no `dry_run` flag** (not calling `apply_init` is
 the dry run, matching six other shipped writers across the workspace). In
 order, `apply_init` performs: (1) create directories (`root`, `.gw/`,
 `.gw/cache/`, `okf/`, `.gw/worktrees/`); (2) write `<config_dir>/.gitignore`
-(only the gitignored members — cache and worktrees dirs — never the repo's
-own root `.gitignore`); (3) write `<root>/workspace.yaml` **only if absent,
+(only the gitignored members — cache and worktrees dirs) and `<root>/.gitignore`
+(one line: `workspace.local.yaml`, the gitignored per-machine overlay); the
+repo's own root `.gitignore` is never edited — in the `.works` shape
+`layout.root` is `<repo>/.works`, so the workspace's root gitignore is inside
+the workspace; (3) write `<root>/workspace.yaml` **only if absent,
 never overwritten** — this is where `repositories:`/`ignore:` get seeded
-from the detected repo root; (4) write `CLAUDE.md`/`AGENTS.md` (identical
-bodies) at `layout.repo_root or layout.root`, via `render_context_file`,
-splicing a fresh block into existing hand-edited files rather than
-clobbering them; (5) `okf_ext.bundle.plan_scaffold` for `index.md`,
+from the detected repo root; (4) write `<root>/AGENTS.md` via `render_context_file` — the gw region above
+`## Local Conventions` regenerated whole from `assets/AGENTS.md.template`,
+the tail beneath that heading carried verbatim — and `<root>/CLAUDE.md` as
+the one-line `@AGENTS.md` pointer, both at `layout.root` and never a repo
+root; then plan a `- ` delete for `<bundle_dir>/AGENTS.md` and
+`<bundle_dir>/CLAUDE.md` when present (`PlannedWrite.mode == "delete"`);
+(5) `okf_ext.bundle.plan_scaffold` for `index.md`,
 `log.md`, `tags.yaml`; (6) each installer in `INSTALLERS` (currently
 `code_wiki_okf`, `work_tracker_okf`, `doc_wiki_okf`'s `install_bundle`);
 (7) write `<cache_dir>/config.json`, the manifest's resolved projection —
@@ -235,6 +259,14 @@ hand. `today` is always injected; nothing in this package reads the clock.
   (`scan.commands.*`, `query.commands.*`) stay qualified. `graph_target` and
   `resolve` are hoisted because they *are* the call, the same reason
   `apply_init`/`plan_init` are.
+
+- **Context files are whole-body regenerated.** Anything a human writes in
+  `<root>/AGENTS.md` above `## Local Conventions` is lost on the next
+  `gw bootstrap`; prose belongs beneath that heading. `CLAUDE.md` at the root
+  is always replaced by the `@AGENTS.md` pointer. The renderer is pure and
+  varies on nothing run to run (`initialized_at` comes from the manifest), so
+  a second plan is empty — if it is not, something in the template is
+  reading a run-to-run input.
 
 See `packages/graph-works-core/README.md` for the fuller narrative,
 including the agent substrate, the graph surface's exit-code table, the

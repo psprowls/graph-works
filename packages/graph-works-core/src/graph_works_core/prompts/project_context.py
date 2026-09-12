@@ -1,18 +1,23 @@
 """Project-context renderer for subagent system prompts.
 
-Reads `CLAUDE.md` (or `AGENTS.md` as fallback) from the repo a workspace lives
-in and emits a compact deterministic block covering the project's `## Style`
-rules and its `## Log format` section.
+Reads the workspace's own `AGENTS.md` (or `CLAUDE.md` as fallback) from the
+workspace root and emits a compact deterministic block covering the `## Style`
+rules and the `## Log format` section.
 
 Pure: no LLM calls, no network, no mutation. Returns the empty string when
-neither schema file exists, so callers can pass the result through unchanged.
+neither file exists, so callers can pass the result through unchanged.
 
-The one change from the source is the signature: the location is derived from
-the workspace layout rather than an assumed `wiki/`, and the rendered headings
-name the file alone. It takes the **layout**, not a directory, so that two
-consumers of one renderer cannot look in two places — which is exactly what
-`ingest` and `lint` did, and one of the two read a directory nothing ever
-writes a `CLAUDE.md` into.
+The location is the workspace root, `layout.root`, and only that: gw owns the
+context files it writes there and never reads a catalogued repo's own root
+files (work item `feature-unified-context-files-local-overlays`, D-001). It
+takes the **layout**, not a directory, so that two consumers of one renderer
+cannot look in two places — which is exactly what `ingest` and `lint` did,
+and one of the two read a directory nothing ever writes a context file into.
+
+`AGENTS.md` is tried first because `CLAUDE.md` at the workspace root is, by
+construction, the one-line `@AGENTS.md` pointer `workspace.init` writes; a
+`CLAUDE.md`-first order would return `""` for every bootstrapped workspace.
+No `@` pointer is followed (D-002).
 
 The fence-aware section walker is kept verbatim — it exists so a
 `## [YYYY-MM-DD]` sample inside a fenced code block does not falsely terminate
@@ -25,22 +30,21 @@ from pathlib import Path
 
 from graph_works_core.workspace.layout import WorkspaceLayout
 
-# CLAUDE.md takes priority; AGENTS.md is the fallback.
-_CANDIDATES: tuple[str, ...] = ("CLAUDE.md", "AGENTS.md")
+# AGENTS.md takes priority; CLAUDE.md is the fallback (it is normally a pointer).
+_CANDIDATES: tuple[str, ...] = ("AGENTS.md", "CLAUDE.md")
 
 
 def render_project_context(layout: WorkspaceLayout) -> str:
     """Render a compact project-context block for subagent system prompts.
 
-    Reads `CLAUDE.md` if it exists, else `AGENTS.md`, from the repo the
-    workspace lives in — falling back to the workspace root when it lives
-    outside one. Composes `## Project style (<file> §Style)` and
+    Reads `AGENTS.md` if it exists, else `CLAUDE.md`, from the workspace root.
+    Composes `## Project style (<file> §Style)` and
     `## Log format (<file> §Log format)`, each omitted when its section is
     absent. Returns `""` when neither file exists, so a workspace that
     declares no project context simply contributes no block; never raises for
     a missing file.
     """
-    context_dir = layout.repo_root or layout.root
+    context_dir = layout.root
     for name in _CANDIDATES:
         schema = context_dir / name
         if schema.exists():

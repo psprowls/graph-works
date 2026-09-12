@@ -25,8 +25,8 @@ _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "click": ("8.0.0",),
     "code-graph-io": ("0.1.0", "0.1.1", "0.2.0", "0.3.0"),
-    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0"),
-    "config-io": ("0.1.0",),
+    "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.5.1"),
+    "config-io": ("0.1.0", "0.2.0"),
     "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2", "0.3.3"),
     "langchain-core": ("1.4.0",),
     "models-io": ("0.2.0",),
@@ -72,7 +72,7 @@ def _manifest_requirements(relative_manifest: str) -> dict[str, Requirement]:
         (
             "packages/graph-works-core/pyproject.toml",
             "code-wiki-okf",
-            frozenset({">=0.5", "<0.6"}),
+            frozenset({">=0.5.1", "<0.6"}),
         ),
         (
             "packages/graph-works-cli/pyproject.toml",

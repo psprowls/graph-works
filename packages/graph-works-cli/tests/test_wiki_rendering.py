@@ -31,20 +31,32 @@ from okf_ext.proposals import Proposal
 from okf_io import Finding, Report
 
 
-def test_bootstrap_payload_has_exact_keys_and_reports_actual_diff_additions(tmp_path: Path) -> None:
+def test_bootstrap_payload_has_exact_keys_and_reports_additions_and_deletions(tmp_path: Path) -> None:
     layout = layout_for(tmp_path / "workspace")
     result = WorkspaceInit(
         layout=layout,
         created=(layout.root,),
         written=("workspace.yaml", "workspace.yaml"),
+        deleted=("okf/AGENTS.md", "okf/CLAUDE.md"),
         scaffold=BundleApplyResult(written=("index.md",), failed=(), skipped=()),
         installs=(),
     )
 
     payload = bootstrap_payload(result)
 
-    assert set(payload) == {"ok", "changed", "workspace", "bundle_dir", "config_dir", "cache_dir", "created", "written"}
+    assert set(payload) == {
+        "ok",
+        "changed",
+        "workspace",
+        "bundle_dir",
+        "config_dir",
+        "cache_dir",
+        "created",
+        "written",
+        "deleted",
+    }
     assert payload["written"] == [f"{layout.root}/", "workspace.yaml", "index.md"]
+    assert payload["deleted"] == ["okf/AGENTS.md", "okf/CLAUDE.md"]
 
 
 def test_bootstrap_plan_payload_has_exact_keys_and_reports_the_planned_lines(tmp_path: Path) -> None:

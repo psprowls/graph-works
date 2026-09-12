@@ -46,8 +46,14 @@ and covers this package too — no separate per-package invocation.
 - `dotted.py` — `get` / `has` / `set_in` / `unset_in` over nested mappings by
   dotted key. All reads are **total**: a key that runs past a scalar or
   through a missing branch is just absent, never an exception.
-- `store.py` — the `ConfigStore` Protocol (structural, not inherited) plus the
-  shipped `PlainYamlStore`. This is the only module that imports `yaml`.
+- `store.py` — the `ConfigStore` Protocol (structural, not inherited), the
+  `LayeredStore` Protocol (`@runtime_checkable`, for two-layer stores), and the
+  two shipped implementations `PlainYamlStore` and `LayeredYamlStore`. This is
+  the only module that imports `yaml`; `LayeredYamlStore` composes two plain
+  stores and parses nothing itself. `PlainYamlStore` reads and writes
+  **YAML 1.2** through `ruamel.yaml` `typ="safe"` — so `yes`/`no`/`on`/`off`
+  are strings, `012` is twelve, and `1:30` is a string. Writes disable the
+  representer's key sorting, so a one-key `set` does not reorder the file.
 - `registry.py` — resolution (`resolve_key`, `resolve_all`, `expand_wildcards`)
   and the write path (`set_key`, `unset_key`).
 - `projection.py` — `write_projection()`, atomic JSON rendering of a store's
@@ -57,12 +63,16 @@ and covers this package too — no separate per-package invocation.
 
 ### Precedence resolution
 
-For a `kind="manifest"` entry: **env var counterpart > stored explicit value >
-entry default.** `kind="env-only"` entries never consult the store at all.
-Reads are fail-open — a malformed env value resolves to its raw string rather
-than raising; resolution never fails on the way past, the consumer surfaces
-the problem. `Resolved.shadowed` carries the stored value an env override is
-hiding, so a `list`-style view can show what's masked.
+For a `kind="manifest"` entry: **env var counterpart > local explicit value >
+base explicit value > entry default.** `origin == "local"` is reported only
+when the store satisfies the `LayeredStore` Protocol *and* the upper layer
+holds the key; `shadowed` then carries the lower layer's value. Every
+non-layered store collapses the two explicit tiers into today's `"manifest"`.
+`kind="env-only"` entries never consult the store at all. Reads are fail-open
+— a malformed env value resolves to its raw string rather than raising;
+resolution never fails on the way past, the consumer surfaces the problem.
+`Resolved.shadowed` carries the stored value an env override is hiding, so a
+`list`-style view can show what's masked.
 
 `environ: Mapping[str, str]` is a **required keyword**, with no `os.environ`
 fallback anywhere on the resolution path — `import os` is structurally absent
@@ -135,6 +145,11 @@ a custom store makes rollback silently leave a stray file behind.
 two separate accessor methods, specifically so the projection's `_meta` can
 never end up with one field real and the other `None`.
 
+`LayeredYamlStore` refuses `write` / `snapshot` / `restore` with `TypeError`.
+The merged view is the wrong thing to write back through, and making that an
+immediate error is cheaper than debugging a committed manifest that silently
+grew every machine-local value. Write by naming a layer.
+
 ### The JSON projection
 
 `write_projection()` renders **explicit values only** — no defaults merged.
@@ -148,6 +163,11 @@ observe a partial write.
 a package that must not know its caller (the same class of leak as a
 hardcoded key name). Anyone porting an old consumer that reads `manifest_*`
 needs to update it.
+
+`_meta` grows two more keys — `overlay_mtime` / `overlay_sha256` — when and
+only when the store satisfies `LayeredStore`. "Overlay" is store vocabulary; a
+caller that calls its upper layer something else (graph-works calls it
+`workspace.local.yaml`) still reads these key names.
 
 Caller gotcha: `set_key` / `unset_key` only regenerate the projection when
 `projection=` is explicitly passed. There's no way to statically enforce

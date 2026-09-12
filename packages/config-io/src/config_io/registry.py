@@ -5,9 +5,12 @@ the caller, the environment mapping is supplied by the caller, and so is the
 projection target. This module knows no key name, no file name, and no
 variable name.
 
-Precedence for reads: env var counterpart > stored explicit value > entry
-default. Reads are fail-open — a malformed env value resolves to its raw
-string rather than raising, and the consumer surfaces the problem.
+Precedence for reads: env var counterpart > local explicit value > base
+explicit value > entry default. The two explicit tiers collapse into one for
+any store that is not a `LayeredStore`, which is every store this package
+resolves against unless the caller supplies a layered one. Reads are
+fail-open — a malformed env value resolves to its raw string rather than
+raising, and the consumer surfaces the problem.
 
 `environ` is a **required** keyword. The seed defaulted it to `os.environ`,
 which read the live process environment on the package's own initiative; here
@@ -34,7 +37,7 @@ from config_io.errors import (
     StoreValidationError,
 )
 from config_io.projection import write_projection
-from config_io.store import ConfigStore
+from config_io.store import ConfigStore, LayeredStore
 
 
 def resolve_key(
@@ -44,7 +47,7 @@ def resolve_key(
     store: ConfigStore,
     environ: Mapping[str, str],
 ) -> Resolved:
-    """Resolve one key across env > stored explicit > default."""
+    """Resolve one key across env > local explicit > base explicit > default."""
     entry = find_entry(catalog, key)
     if entry is None:
         raise unknown_key_error(catalog, key)
@@ -60,6 +63,12 @@ def resolve_key(
     if entry.kind == "manifest":
         explicit = dotted.get(store.read_explicit(), key)
         if explicit is not None:
+            # A layered store's explicit view is already merged, so `explicit`
+            # is the effective value either way. Asking the upper layer
+            # separately is only how the *origin* is decided — and the lower
+            # layer's value is what the caller wants to see as shadowed.
+            if isinstance(store, LayeredStore) and dotted.get(store.read_overlay_explicit(), key) is not None:
+                return Resolved(key, explicit, "local", entry, dotted.get(store.read_base_explicit(), key))
             return Resolved(key, explicit, "manifest", entry)
     return Resolved(key, entry.default, "default", entry)
 

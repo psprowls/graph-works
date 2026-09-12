@@ -17,8 +17,14 @@ from okf_ext.proposals import Proposal
 
 
 def bootstrap_payload(result: WorkspaceInit) -> dict[str, object]:
-    """Render workspace initialization without exposing installer internals."""
-    written = list(dict.fromkeys(line[2:] for line in result.diff().splitlines() if line.startswith("+ ")))
+    """Render workspace initialization without exposing installer internals.
+
+    `written` and `deleted` are both read off `diff()`'s line vocabulary
+    (`+ ` and `- `), so the JSON can never disagree with the text rendering.
+    """
+    lines = result.diff().splitlines()
+    written = list(dict.fromkeys(line[2:] for line in lines if line.startswith("+ ")))
+    deleted = list(dict.fromkeys(line[2:] for line in lines if line.startswith("- ")))
     return {
         "ok": result.ok,
         "changed": result.changed,
@@ -28,6 +34,7 @@ def bootstrap_payload(result: WorkspaceInit) -> dict[str, object]:
         "cache_dir": str(result.layout.cache_dir),
         "created": [str(path) for path in result.created],
         "written": written,
+        "deleted": deleted,
     }
 
 

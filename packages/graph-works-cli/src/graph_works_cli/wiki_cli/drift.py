@@ -8,10 +8,10 @@ from datetime import UTC, datetime
 
 import typer
 from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
-from code_wiki_okf.config import ConfigError, load_config
 from graph_works_core.agent_substrate.roles import role_spec
 from graph_works_core.graph import commands as graph_commands
 from graph_works_core.lint_drift.propagate_drift import plan_drift_brief, run_propagate_drift
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.repos import resolve_repo
 from models_io import ModelsIoError
@@ -40,13 +40,8 @@ def drift(
         exit_error(str(exc), cause=exc)
 
     try:
-        config = load_config(
-            layout.bundle_dir,
-            config_path=layout.manifest_path,
-            graph_dir=layout.cache_dir,
-            declarations_dir=layout.config_dir,
-        )
-    except (ConfigError, OSError, ValueError) as exc:
+        config = load_workspace_config(layout)
+    except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
     try:

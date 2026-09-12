@@ -38,7 +38,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
 from code_graph_io import GraphNotInitializedError, GraphReader, SchemaMismatchError, open_reader
-from code_wiki_okf.config import load_config
 from langchain_core.embeddings import Embeddings
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool, tool
@@ -58,6 +57,7 @@ from graph_works_core.graph.commands import GraphTarget, graph_target
 from graph_works_core.query.prompts.code_reader import CODE_READER_SYSTEM
 from graph_works_core.query.prompts.librarian import build_librarian_system
 from graph_works_core.query.prompts.synthesizer import SYNTHESIZER_SYSTEM
+from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import QueryError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.provenance import head_sha
@@ -1042,12 +1042,7 @@ async def _run_fixed_query(
     """
     bundle = prepared.bundle
     layout = prepared.layout
-    config = load_config(
-        layout.bundle_dir,
-        config_path=layout.manifest_path,
-        graph_dir=layout.cache_dir,
-        declarations_dir=layout.config_dir,
-    )
+    config = load_workspace_config(layout)
     schema_set = load_schemas(config.declarations_dir / SCHEMA_DIRNAME)
     librarian_system = build_librarian_system(schema_set=schema_set)
 

@@ -8,8 +8,8 @@ from pathlib import PurePosixPath
 from typing import Any
 
 import typer
-from code_wiki_okf.config import ConfigError, load_config
 from doc_wiki_okf.proposals import lane_set, plan_file
+from graph_works_core.workspace.config import load_workspace_config
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.proposals import Decision, Proposal, apply, list_proposals, plan_decide
 from okf_ext.schemas import load_schemas
@@ -117,14 +117,9 @@ def file_proposal(
     layout = resolve_workspace(workspace)
     try:
         bundle = load_bundle(layout.bundle_dir)
-        config = load_config(
-            layout.bundle_dir,
-            config_path=layout.manifest_path,
-            graph_dir=layout.cache_dir,
-            declarations_dir=layout.config_dir,
-        )
+        config = load_workspace_config(layout)
         lanes = lane_set(load_schemas(config.declarations_dir / SCHEMA_DIRNAME))
-    except (ConfigError, OSError, ValueError, KeyError) as exc:
+    except (OSError, ValueError, KeyError) as exc:
         exit_error(str(exc), cause=exc)
 
     source: dict[str, Any] = {"id": identifier, "resource": resource}

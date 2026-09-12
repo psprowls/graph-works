@@ -10,7 +10,7 @@ from typing import Never
 import typer
 from config_io import (
     PROJECTION_FILENAME,
-    PlainYamlStore,
+    LayeredYamlStore,
     RegistryError,
     StoreValidationError,
     resolve_key,
@@ -24,6 +24,7 @@ from graph_works_core.workspace import manifest
 from graph_works_core.workspace.discovery import find_repo_root
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.manifest import workspace_store
 
 from graph_works_cli import exit_codes
 from graph_works_cli.config_cli.rendering import render_hooks, render_projection, render_resolved, render_resolved_list
@@ -47,6 +48,11 @@ _REPO_OPTION = typer.Option(
     help="Repository whose .claude/settings.local.json is written (default: cwd Git discovery).",
 )
 _HOOK_FEATURE_ARGUMENT = typer.Argument(..., help="transcript")
+_LOCAL_OPTION = typer.Option(
+    False,
+    "--local",
+    help="Write workspace.local.yaml instead of workspace.yaml.",
+)
 
 
 class HookFeature(StrEnum):
@@ -67,10 +73,17 @@ def _layout(workspace: str) -> WorkspaceLayout:
     return resolve_workspace(workspace)
 
 
-def _store(workspace: str) -> tuple[WorkspaceLayout, PlainYamlStore]:
-    """Resolve a workspace and bind its manifest to the config-io store seam."""
+def _store(workspace: str) -> tuple[WorkspaceLayout, LayeredYamlStore]:
+    """Resolve a workspace and bind both config layers through core's seam.
+
+    The one seam every `gw config` verb goes through now, read or write:
+    `sync` projects straight from what this returns, and `set`/`unset` write
+    through `.base` or `.overlay` before re-projecting from the whole layered
+    store. `workspace_store` is typed `-> LayeredYamlStore` precisely because
+    this file is the one caller that needs `.base`/`.overlay`.
+    """
     layout = _layout(workspace)
-    return layout, PlainYamlStore(layout.manifest_path)
+    return layout, workspace_store(layout)
 
 
 def _exit_config_error(exc: Exception, *, code: int) -> Never:
@@ -127,7 +140,7 @@ def get_cmd(
     workspace: str = _WORKSPACE_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
-    """Show a key's effective value and origin (env / manifest / default)."""
+    """Show a key's effective value and origin (env / local / manifest / default)."""
     try:
         result = manifest.resolve_checked_key(_layout(workspace), key, environ=os.environ)
     except RegistryError as exc:
@@ -157,18 +170,21 @@ def set_cmd(
     key: str = typer.Argument(...),
     value: str = typer.Argument(...),
     workspace: str = _WORKSPACE_OPTION,
+    local: bool = _LOCAL_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
     """Set a catalog key and refresh `.gw/cache/config.json`."""
     try:
         layout, store = _store(workspace)
-        result = set_key(
-            manifest.CATALOG,
-            key,
-            value,
-            store=store,
-            projection=layout.cache_dir / PROJECTION_FILENAME,
-        )
+        # `projection=` is deliberately not passed: set_key would regenerate
+        # from the single layer it just wrote, losing the merged body and the
+        # other layer's fingerprint. Project from the layered store instead.
+        result = set_key(manifest.CATALOG, key, value, store=store.overlay if local else store.base)
+        write_projection(store, layout.cache_dir / PROJECTION_FILENAME)
+        # set_key reports its own write as "manifest"; re-resolving through the
+        # layered store is what makes the rendered origin honest — a base write
+        # can still be shadowed by an existing workspace.local.yaml value.
+        result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
     except RegistryError as exc:
         _exit_config_error(exc, code=exit_codes.GENERIC)
     except (StoreValidationError, WorkspaceError) as exc:
@@ -180,17 +196,14 @@ def set_cmd(
 def unset_cmd(
     key: str = typer.Argument(...),
     workspace: str = _WORKSPACE_OPTION,
+    local: bool = _LOCAL_OPTION,
     json_output: bool = _JSON_OPTION,
 ) -> None:
     """Remove an explicit key, refresh the projection, and show its fallback."""
     try:
         layout, store = _store(workspace)
-        unset_key(
-            manifest.CATALOG,
-            key,
-            store=store,
-            projection=layout.cache_dir / PROJECTION_FILENAME,
-        )
+        unset_key(manifest.CATALOG, key, store=store.overlay if local else store.base)
+        write_projection(store, layout.cache_dir / PROJECTION_FILENAME)
         result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
     except RegistryError as exc:
         _exit_config_error(exc, code=exit_codes.GENERIC)

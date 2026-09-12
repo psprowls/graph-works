@@ -7,11 +7,10 @@ from pathlib import Path
 
 import pytest
 from code_graph_io.testing import raw_conn
-from code_wiki_okf.config import ConfigError
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import drift as drift_module
 from graph_works_core.lint_drift.propagate_drift import Candidate, DriftBrief, PropagateResult, Target
-from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -151,9 +150,9 @@ def test_drift_reports_unreadable_configuration_before_opening_the_graph(
     """A config fault must surface as a clean diagnostic, not a lint/graph error."""
 
     def fail(*args: object, **kwargs: object) -> object:
-        raise ConfigError("config.yaml is malformed")
+        raise WorkspaceConfigError("config.yaml is malformed")
 
-    monkeypatch.setattr(drift_module, "load_config", fail)
+    monkeypatch.setattr(drift_module, "load_workspace_config", fail)
 
     result = runner.invoke(app, ["wiki", "drift", "--workspace", str(initialized_workspace)])
 

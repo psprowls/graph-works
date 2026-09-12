@@ -39,7 +39,7 @@ def test_set_coerces_persists_and_refreshes_projection(tmp_path: Path) -> None:
     assert stored["workflow"] == {"auto_drive": {"max_parallel": 3}}
     projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
     assert projection["workflow"]["auto_drive"]["max_parallel"] == 3
-    assert set(projection["_meta"]) == {"source_mtime", "source_sha256"}
+    assert set(projection["_meta"]) == {"source_mtime", "source_sha256", "overlay_mtime", "overlay_sha256"}
 
 
 def test_unset_removes_explicit_value_refreshes_projection_and_reports_default(tmp_path: Path) -> None:
@@ -156,6 +156,31 @@ def test_sync_json_names_the_projection_path(tmp_path: Path) -> None:
     assert json.loads(result.stdout) == {"projection": str(root / ".gw" / "cache" / "config.json")}
 
 
+def test_set_does_not_reorder_the_manifest(tmp_path: Path) -> None:
+    # D-003: ruamel's safe representer sorts mapping keys by default, which
+    # would turn a one-key write into a whole-file reordering diff. `version`
+    # landing anywhere but first is the symptom.
+    root = _workspace(tmp_path)
+    manifest = root / "workspace.yaml"
+    PlainYamlStore(manifest).write({"version": 1, "topic": "t", "ignore": ["tmp/**"]})
+    before = [
+        line.split(":", 1)[0]
+        for line in manifest.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith((" ", "-", "#"))
+    ]
+
+    result = runner.invoke(config_app, ["set", "topic", "Reordered?", "--workspace", str(root)])
+
+    assert result.exit_code == 0
+    after = [
+        line.split(":", 1)[0]
+        for line in manifest.read_text(encoding="utf-8").splitlines()
+        if line and not line.startswith((" ", "-", "#"))
+    ]
+    assert after == before
+    assert after[0] == "version"
+
+
 def test_sync_maps_a_registry_fault_to_the_generic_exit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """A projection that cannot resolve the registry is a tool fault, not a malformed store."""
     root = _workspace(tmp_path)
@@ -170,3 +195,102 @@ def test_sync_maps_a_registry_fault_to_the_generic_exit(tmp_path: Path, monkeypa
     assert result.exit_code == exit_codes.GENERIC
     assert result.stdout == ""
     assert "Error: no projection resolver for 'workflow.*'" in result.stderr
+
+
+# --- the --local layer ------------------------------------------------------
+
+
+def test_set_local_writes_only_the_local_file_and_projects_the_merged_view(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    committed_before = (root / "workspace.yaml").read_bytes()
+
+    result = runner.invoke(
+        config_app,
+        ["set", "--local", "workflow.auto_drive.max_parallel", "2", "--workspace", str(root), "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["value"] == 2
+    assert payload["origin"] == "local"
+    assert (root / "workspace.yaml").read_bytes() == committed_before
+    local = PlainYamlStore(root / "workspace.local.yaml").read_explicit()
+    assert local == {"workflow": {"auto_drive": {"max_parallel": 2}}}
+    projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
+    assert projection["workflow"]["auto_drive"]["max_parallel"] == 2
+    assert projection["_meta"]["overlay_sha256"] is not None
+
+
+def test_set_local_shadows_a_committed_value_without_touching_it(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    runner.invoke(config_app, ["set", "workflow.auto_drive.max_parallel", "4", "--workspace", str(root)])
+
+    result = runner.invoke(
+        config_app,
+        ["set", "--local", "workflow.auto_drive.max_parallel", "2", "--workspace", str(root), "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert (payload["value"], payload["origin"], payload["shadowed"]) == (2, "local", 4)
+    committed = PlainYamlStore(root / "workspace.yaml").read_explicit()
+    assert committed["workflow"] == {"auto_drive": {"max_parallel": 4}}
+
+
+def test_set_without_local_still_writes_only_the_committed_file(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    runner.invoke(config_app, ["set", "topic", "Committed", "--workspace", str(root)])
+    assert not (root / "workspace.local.yaml").exists()
+    assert PlainYamlStore(root / "workspace.yaml").read_explicit()["topic"] == "Committed"
+
+
+def test_a_base_set_reports_the_true_effective_value_when_a_local_override_shadows_it(tmp_path: Path) -> None:
+    # I-1: writing the base while a workspace.local.yaml override already
+    # exists must not claim the write took effect on this machine — the
+    # rendered origin/value have to match what `get` would show immediately
+    # afterward.
+    root = _workspace(tmp_path)
+    runner.invoke(config_app, ["set", "--local", "topic", "Laptop", "--workspace", str(root)])
+
+    result = runner.invoke(
+        config_app,
+        ["set", "topic", "Renamed", "--workspace", str(root), "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert (payload["value"], payload["origin"], payload["shadowed"]) == ("Laptop", "local", "Renamed")
+    # The base write itself still happened — only the *reported* value changes.
+    assert PlainYamlStore(root / "workspace.yaml").read_explicit()["topic"] == "Renamed"
+
+
+def test_unset_local_removes_the_override_and_falls_back_to_the_base(tmp_path: Path) -> None:
+    root = _workspace(tmp_path)
+    runner.invoke(config_app, ["set", "workflow.auto_drive.max_parallel", "4", "--workspace", str(root)])
+    runner.invoke(config_app, ["set", "--local", "workflow.auto_drive.max_parallel", "2", "--workspace", str(root)])
+
+    result = runner.invoke(
+        config_app,
+        ["unset", "--local", "workflow.auto_drive.max_parallel", "--workspace", str(root), "--json"],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert (payload["value"], payload["origin"]) == (4, "manifest")
+    assert PlainYamlStore(root / "workspace.local.yaml").read_explicit() == {}
+    projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
+    assert projection["workflow"]["auto_drive"]["max_parallel"] == 4
+
+
+def test_a_failed_first_local_write_leaves_no_local_file_behind(tmp_path: Path) -> None:
+    # "nope" fails int() coercion inside `coerce()`, before `set_key` ever
+    # reads or writes the overlay's store — so no rollback fires at all; there
+    # is simply nothing on disk yet for a refused first --local write to
+    # create.
+    root = _workspace(tmp_path)
+    result = runner.invoke(
+        config_app,
+        ["set", "--local", "workflow.auto_drive.max_parallel", "nope", "--workspace", str(root)],
+    )
+    assert result.exit_code != 0
+    assert not (root / "workspace.local.yaml").exists()

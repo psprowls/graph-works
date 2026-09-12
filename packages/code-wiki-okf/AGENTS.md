@@ -70,6 +70,20 @@ those three blocks — this package cannot depend on `graph_works_core`
 (ADR-0005 puts it above tier 3), so every other top-level key is ignored
 rather than validated.
 
+**Two entry points, one validator.** `load_config(bundle_root, config_path=…)`
+reads the file and validates it. `config_from_mapping(content, anchor=…,
+bundle_root=…, …)` validates an already-parsed mapping, for a caller that has
+its own reader — `graph_works_core.workspace.config`, which reads through
+`config-io`'s store so the workspace has one YAML parser rather than two. The
+band rule is untouched: this package is handed a mapping and two directories,
+and still imports nothing from `graph_works_core`.
+
+`anchor` is the directory a relative `repositories.*.path` resolves against
+(ADR-0041) and `bundle_root` is what a relative `graph_dir` /
+`declarations_dir` resolves against — different directories in a graph-works
+layout, so do not pass one for the other. `source` is the name every
+`ConfigError` quotes.
+
 `Config.state_gate` (`StateGateConfig`) is parsed from `workspace.yaml` and
 `git_state.compute_state_gate()`/`StateGate` are fully implemented, but as of
 this writing **nothing in `cli.py` or `sync/run.py` calls

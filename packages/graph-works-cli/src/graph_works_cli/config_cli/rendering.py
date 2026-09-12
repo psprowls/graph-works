@@ -23,8 +23,10 @@ def render_resolved(result: Resolved, *, json_output: bool) -> str:
     if json_output:
         return json.dumps(asdict(result), indent=2, default=str)
     lines = [f"{result.key} = {result.value!r}  (origin: {result.origin})"]
-    if result.shadowed is not None and result.entry.env_var is not None:
+    if result.shadowed is not None and result.entry.env_var is not None and result.origin == "env":
         lines.append(f"  note: manifest value {result.shadowed!r} is shadowed by ${result.entry.env_var}")
+    elif result.origin == "local" and result.shadowed is not None:
+        lines.append(f"  note: workspace.yaml value {result.shadowed!r} is shadowed by workspace.local.yaml")
     return "\n".join(lines)
 
 
@@ -34,7 +36,9 @@ def render_resolved_list(results: Sequence[Resolved], *, json_output: bool) -> s
         return json.dumps([asdict(result) for result in results], indent=2, default=str)
     lines: list[str] = []
     for result in results:
-        marker = {"env": "*", "manifest": "+", "default": " "}[result.origin]
+        # A fourth origin with no entry here is a KeyError at render time, not
+        # a missing glyph — which is why the two move in the same change.
+        marker = {"env": "*", "local": "~", "manifest": "+", "default": " "}[result.origin]
         lines.append(f"{marker} {result.key} = {result.value!r}  [{result.origin}; default {result.entry.default!r}]")
         lines.append(f"    {result.entry.description}")
     return "\n".join(lines)

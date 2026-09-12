@@ -1,68 +1,144 @@
-"""`context_seed`'s three-case renderer: first-create, marker refresh, and
-marker-deleted append."""
+"""`context_seed`'s two-region renderer: the gw body above `## Local
+Conventions` is regenerated whole; the heading and everything below it is the
+human's and survives byte for byte."""
 
 from __future__ import annotations
 
-from datetime import date
+from pathlib import Path
 
-from graph_works_core.workspace.context_seed import AUTO_END, AUTO_START, render_context_file
+from graph_works_core.workspace.context_seed import (
+    CLAUDE_POINTER,
+    LOCAL_CONVENTIONS_HEADING,
+    render_context_file,
+)
 
-TODAY = date(2026, 8, 20)
-
-
-def _installer(module_name: str):
-    def fn(*args, **kwargs):
-        raise NotImplementedError
-
-    fn.__module__ = f"{module_name}.init"
-    return fn
+_CLAUDE_TEMPLATE_PATH = (
+    Path(__file__).resolve().parents[2] / "src" / "graph_works_core" / "workspace" / "assets" / "CLAUDE.md.template"
+)
 
 
-INSTALLERS = (_installer("code_wiki_okf"), _installer("work_tracker_okf"))
+def _render(existing: str | None = None, **overrides):
+    kwargs = {"topic": "Demo", "initialized_at": "2026-08-20", "bundle_dir": "okf", "config_dir": ".gw"}
+    kwargs.update(overrides)
+    return render_context_file(existing, **kwargs)
 
 
-def test_first_render_fills_the_template(tmp_path):
-    text = render_context_file(None, workspace=tmp_path, installers=INSTALLERS, today=TODAY)
-    assert str(tmp_path) in text
+def _heading_lines(text: str) -> list[str]:
+    return [line for line in text.splitlines() if line.rstrip() == LOCAL_CONVENTIONS_HEADING]
+
+
+# --- first render -------------------------------------------------------------
+
+
+def test_first_render_ends_with_an_empty_local_conventions_section():
+    text = _render()
+    assert text.endswith("\n\n## Local Conventions\n")
+    assert _heading_lines(text) == [LOCAL_CONVENTIONS_HEADING]
+
+
+def test_first_render_substitutes_every_placeholder():
+    text = _render()
+    assert "`Demo`" in text
     assert "2026-08-20" in text
-    assert "code_wiki_okf" in text
-    assert "work_tracker_okf" in text
-    assert AUTO_START in text
-    assert AUTO_END in text
+    assert "okf/" in text
+    assert ".gw/" in text
+    assert "{{" not in text
 
 
-def test_first_render_with_no_installers_says_so(tmp_path):
-    text = render_context_file(None, workspace=tmp_path, installers=(), today=TODAY)
-    assert "no installers" in text.lower()
+def test_a_custom_layout_is_named_not_assumed():
+    text = _render(bundle_dir="content", config_dir="control")
+    assert "content/" in text
+    assert "control/" in text
 
 
-def test_rerender_with_markers_present_preserves_prose_outside_them(tmp_path):
-    first = render_context_file(None, workspace=tmp_path, installers=INSTALLERS, today=TODAY)
-    edited = first.replace(
-        "## Conventions for LLM agents",
-        "## Conventions for LLM agents\n\nHand-edited note that must survive.",
-    )
-    second = render_context_file(edited, workspace=tmp_path, installers=INSTALLERS, today=TODAY)
-    assert "Hand-edited note that must survive." in second
+def test_the_body_carries_no_machine_path_no_marker_and_no_legacy_skill_name():
+    text = _render()
+    assert "/Users/" not in text
+    assert "graph-works:auto" not in text
+    assert "<!--" not in text
+    assert "/graph-works:" not in text
+    assert "/gw:" in text
 
 
-def test_rerender_with_an_added_installer_refreshes_only_the_block(tmp_path):
-    first = render_context_file(None, workspace=tmp_path, installers=INSTALLERS, today=TODAY)
-    grown = (*INSTALLERS, _installer("doc_wiki_okf"))
-    second = render_context_file(first, workspace=tmp_path, installers=grown, today=TODAY)
-    assert "doc_wiki_okf" in second
-    assert "2026-08-20" in second  # header untouched by a block-only refresh
+def test_the_body_teaches_the_iso_log_heading_and_the_local_yaml_layer():
+    text = _render()
+    assert "## YYYY-MM-DD" in text
+    assert "[YYYY-MM-DD]" not in text
+    assert "workspace.local.yaml" in text
+    assert "## Style" in text
+    assert "## Log format" in text
 
 
-def test_rerender_is_a_no_op_when_nothing_changed(tmp_path):
-    first = render_context_file(None, workspace=tmp_path, installers=INSTALLERS, today=TODAY)
-    second = render_context_file(first, workspace=tmp_path, installers=INSTALLERS, today=TODAY)
-    assert second == first
+def test_an_unset_topic_renders_without_raising():
+    assert "(unset)" in _render(topic=None)
 
 
-def test_rerender_with_markers_deleted_appends_rather_than_clobbers(tmp_path):
-    hand_written = "# My Workspace\n\nCompletely custom content, no markers at all.\n"
-    rendered = render_context_file(hand_written, workspace=tmp_path, installers=INSTALLERS, today=TODAY)
-    assert "Completely custom content" in rendered
-    assert rendered.index("Completely custom content") < rendered.index(AUTO_START)
-    assert "code_wiki_okf" in rendered
+# --- the human tail -----------------------------------------------------------
+
+
+def test_a_tail_beneath_the_heading_survives_byte_for_byte():
+    tail = "## Local Conventions   \n\nTeam note.  \n- keep this\n\n\nno trailing newline"
+    head, _, _ = _render().rpartition("## Local Conventions\n")
+    assert _render(head + tail).endswith(tail)
+
+
+def test_a_crlf_tail_survives_byte_for_byte():
+    tail = "## Local Conventions\r\n\r\nMine.\r\n"
+    head, _, _ = _render().rpartition("## Local Conventions\n")
+    assert _render(head + tail).endswith(tail)
+
+
+def test_stale_gw_prose_above_the_heading_is_replaced():
+    stale = "# Old header\n\n/graph-works:scan lives here\n\n## Local Conventions\n\nMine.\n"
+    text = _render(stale)
+    assert "# Old header" not in text
+    assert "/graph-works:scan" not in text
+    assert text.endswith("\n\n## Local Conventions\n\nMine.\n")
+    assert _heading_lines(text) == [LOCAL_CONVENTIONS_HEADING]
+
+
+def test_a_file_without_the_heading_is_replaced_whole_and_gains_the_heading():
+    text = _render("# My Workspace\n\nCompletely custom content, no heading at all.\n")
+    assert "Completely custom content" not in text
+    assert text == _render()
+
+
+def test_a_heading_on_the_first_line_replaces_the_whole_gw_region():
+    text = _render("## Local Conventions\nOnly mine.\n")
+    assert text.startswith("# Graph-Works Workspace")
+    assert text.endswith("\n\n## Local Conventions\nOnly mine.\n")
+
+
+def test_only_a_whole_line_heading_is_the_boundary():
+    # An inline mention of the heading (as the body's own closing paragraph
+    # makes) is not a boundary; neither is a deeper heading.
+    decoy = "### Local Conventions\nnot the boundary\n"
+    text = _render(decoy)
+    assert "not the boundary" not in text
+    assert text == _render()
+
+
+# --- idempotence --------------------------------------------------------------
+
+
+def test_rendering_is_idempotent():
+    once = _render()
+    assert _render(once) == once
+    with_tail = once + "\nMy rule.\n"
+    assert _render(with_tail) == with_tail
+    assert _render(_render(with_tail)) == with_tail
+
+
+# --- the pointer --------------------------------------------------------------
+
+
+def test_the_claude_pointer_is_one_line():
+    assert CLAUDE_POINTER == "@AGENTS.md\n"
+
+
+def test_the_shipped_claude_template_matches_the_pointer_constant():
+    # `CLAUDE.md.template` is not read by any code path -- `CLAUDE_POINTER` is
+    # used directly instead -- but it ships deliberately, for a human looking
+    # for a template beside `AGENTS.md.template`. Nothing else pins the two
+    # together, so a drift between them would go unnoticed.
+    assert _CLAUDE_TEMPLATE_PATH.read_text(encoding="utf-8") == CLAUDE_POINTER

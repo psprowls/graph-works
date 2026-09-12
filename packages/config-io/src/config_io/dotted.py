@@ -6,6 +6,10 @@ Named for what it operates on — dotted keys over nested mappings — rather th
 
 Reads are total: no shape of data and no shape of key raises. A key that runs
 past a scalar, or through a missing branch, is simply absent.
+
+`merge` is the layering primitive: a deep merge of two such mappings, pure and
+total in the same way, with no I/O and no knowledge of where either side came
+from.
 """
 
 from __future__ import annotations
@@ -77,3 +81,26 @@ def unset_in(data: dict[str, object], key: str) -> bool:
         if not parent[seg]:
             del parent[seg]
     return True
+
+
+def merge(base: Mapping[str, object], overlay: Mapping[str, object]) -> dict[str, object]:
+    """*base* with *overlay* layered over it; overlay wins.
+
+    Deep over mappings, wholesale everywhere else: when both sides hold a
+    `Mapping` the two are merged recursively, otherwise the overlay value
+    replaces the base value outright — lists, scalars, and an explicit `null`
+    alike. A key present only in *base* is copied through.
+
+    Total and non-mutating: neither input is written to, and no shape of
+    either raises. A nested mapping that came only from *base* is carried by
+    reference rather than copied — every store this package ships re-parses on
+    each read, so no caller observes the sharing.
+    """
+    merged: dict[str, object] = dict(base)
+    for key, value in overlay.items():
+        existing = merged.get(key)
+        if isinstance(existing, Mapping) and isinstance(value, Mapping):
+            merged[key] = merge(existing, value)
+        else:
+            merged[key] = value
+    return merged

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from config_fakes import DictStore
+from config_fakes import DictStore, LayeredDictStore
 from config_io.entries import ConfigEntry
 from config_io.errors import UnknownKeyError
 from config_io.registry import expand_wildcards, resolve_all, resolve_key
@@ -143,3 +143,58 @@ def test_resolve_all_carries_origins_through():
     by_key = {r.key: r for r in resolve_all(CATALOG, store=store, environ={})}
     assert by_key["topic"].origin == "manifest"
     assert by_key["state_gate.enabled"].origin == "default"
+
+
+# --- the local layer -------------------------------------------------------
+
+
+def test_a_key_set_in_both_layers_resolves_local_and_shadows_the_base():
+    store = LayeredDictStore(
+        base={"workflow": {"commit_strategy": "per-task"}},
+        overlay={"workflow": {"commit_strategy": "at-end"}},
+    )
+    got = resolve_key(CATALOG, "workflow.commit_strategy", store=store, environ={})
+    assert (got.value, got.origin, got.shadowed) == ("at-end", "local", "per-task")
+
+
+def test_a_key_set_only_in_the_overlay_resolves_local_with_no_shadow():
+    store = LayeredDictStore(overlay={"topic": "Laptop"})
+    got = resolve_key(CATALOG, "topic", store=store, environ={})
+    assert (got.value, got.origin, got.shadowed) == ("Laptop", "local", None)
+
+
+def test_a_key_set_only_in_the_base_still_resolves_manifest():
+    store = LayeredDictStore(base={"topic": "Committed"})
+    got = resolve_key(CATALOG, "topic", store=store, environ={})
+    assert (got.value, got.origin, got.shadowed) == ("Committed", "manifest", None)
+
+
+def test_a_key_in_neither_layer_resolves_default():
+    got = resolve_key(CATALOG, "state_gate.enabled", store=LayeredDictStore(), environ={})
+    assert (got.value, got.origin, got.shadowed) == (True, "default", None)
+
+
+def test_env_still_outranks_the_local_layer_and_shadows_the_merged_value():
+    # Precedence: env var > local explicit > base explicit > default.
+    store = LayeredDictStore(
+        base={"workflow": {"commit_strategy": "per-task"}},
+        overlay={"workflow": {"commit_strategy": "at-end"}},
+    )
+    got = resolve_key(
+        CATALOG,
+        "workflow.commit_strategy",
+        store=store,
+        environ={"DEMO_COMMIT_STRATEGY": "per-task"},
+    )
+    assert (got.value, got.origin, got.shadowed) == ("per-task", "env", "at-end")
+
+
+def test_resolve_all_expands_a_wildcard_key_that_exists_only_in_the_overlay():
+    store = LayeredDictStore(overlay={"roles": {"planner": {"max_tokens": 4096}}})
+    got = {item.key: (item.value, item.origin) for item in resolve_all(CATALOG, store=store, environ={})}
+    assert got["roles.planner.max_tokens"] == (4096, "local")
+
+
+def test_a_plain_store_never_reports_the_local_origin():
+    store = DictStore({"topic": "Committed"})
+    assert resolve_key(CATALOG, "topic", store=store, environ={}).origin == "manifest"

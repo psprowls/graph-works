@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "commands": [
     {
       "name": "gw archive",
@@ -134,8 +134,8 @@
     },
     {
       "name": "gw config get",
-      "help": "Show a key's effective value and origin (env / manifest / default).",
-      "short_help": "Show a key's effective value and origin (env / manifest / default).",
+      "help": "Show a key's effective value and origin (env / local / manifest / default).",
+      "short_help": "Show a key's effective value and origin (env / local / manifest / default).",
       "usage": [
         "[OPTIONS]",
         "{key}"
@@ -360,6 +360,17 @@
           "is_flag": false
         },
         {
+          "name": "local",
+          "opts": [
+            "--local"
+          ],
+          "secondary_opts": [],
+          "help": "Write workspace.local.yaml instead of workspace.yaml.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
           "name": "json_output",
           "opts": [
             "--json"
@@ -441,6 +452,17 @@
           "required": false,
           "default": "",
           "is_flag": false
+        },
+        {
+          "name": "local",
+          "opts": [
+            "--local"
+          ],
+          "secondary_opts": [],
+          "help": "Write workspace.local.yaml instead of workspace.yaml.",
+          "required": false,
+          "default": false,
+          "is_flag": true
         },
         {
           "name": "json_output",

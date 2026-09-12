@@ -282,7 +282,7 @@ gets a line in the same change, because a suite nothing invokes is not coverage.
 
 ADRs, concepts, entity pages, sources and work items live in a graph-works
 workspace at `$GRAPH_WORKS_DIR`
-(`/Users/pat/Personal/workspaces/graph-works`, exported by `.envrc` via
+(`/Users/pat/Personal/graph-works/gw-workspace`, exported by `.envrc` via
 direnv and pinned in `.claude/settings.local.json`). ADRs referenced
 throughout the code are `$GRAPH_WORKS_DIR/okf/adrs/`. Read them before
 revisiting a settled decision — most surprising choices in this codebase are

@@ -1,0 +1,218 @@
+{
+  "archive_sha256": "8da6eb76802116c9bf0904fe0bebc3b27b9fcbcc8218b9d16c8e90e1fc78131b",
+  "source_repository": "https://github.com/obra/superpowers",
+  "versions": {
+    "v6.2.0": "3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9",
+    "v6.3.0": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
+  },
+  "nested_archive": {
+    "member": "psprowls-superpowers/provenance/upstream-6.3.0.tar.gz",
+    "sha256": "6957f1dd6502ffd4cba635e8ee8b8cfd3ee0a55dd0d42c7fbce9ff9ed7a78989"
+  },
+  "files": [
+    {
+      "path": "behavior-experiment/README.md",
+      "member": "psprowls-superpowers-update-experiment/behavior-experiment/README.md",
+      "sha256": "9afa2733605b3a868f8db5b25d36885322502a4a0119fb031f743504d294e21f",
+      "mode": 420
+    },
+    {
+      "path": "behavior-experiment/ledger.json",
+      "member": "psprowls-superpowers-update-experiment/behavior-experiment/ledger.json",
+      "sha256": "c9220db2b2da75f8be993c3f6f6e618657d67cccecedfec42408dd27cebe2b00",
+      "mode": 420
+    },
+    {
+      "path": "behavior-experiment/older-local/skills/psprowls-subagent-driven-development/SKILL.md",
+      "member": "psprowls-superpowers-update-experiment/behavior-experiment/older-local/skills/psprowls-subagent-driven-development/SKILL.md",
+      "sha256": "d217998deb488a2bba9bb773c28cf98b0f3ac7d20c0598efbe47c5bbb6640019",
+      "mode": 420
+    },
+    {
+      "path": "behavior-experiment/resolved-preview/skills/psprowls-subagent-driven-development/SKILL.md",
+      "member": "psprowls-superpowers-update-experiment/behavior-experiment/resolved-preview/skills/psprowls-subagent-driven-development/SKILL.md",
+      "sha256": "fd62fd73a88814227eb26bc1939662646f2e0b75700644097a46db426c1ec15c",
+      "mode": 420
+    },
+    {
+      "path": "behavior-experiment/text-merge/skills/psprowls-subagent-driven-development/SKILL.md",
+      "member": "psprowls-superpowers-update-experiment/behavior-experiment/text-merge/skills/psprowls-subagent-driven-development/SKILL.md",
+      "sha256": "ba7fa2445fcd7e04c6ceaf2cf483009b7f9a9b9f5ee7cdebdd86c340ac539709",
+      "mode": 420
+    },
+    {
+      "path": "fork-v6.2.0/LICENSE",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/LICENSE",
+      "sha256": "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+      "mode": 420
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-requesting-code-review/code-reviewer.md",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-requesting-code-review/code-reviewer.md",
+      "sha256": "b2f2ec7596925fe52dac158fdfbca19b3a7d779d619c481e6706a6c0001662d3",
+      "mode": 420
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-subagent-driven-development/SKILL.md",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-subagent-driven-development/SKILL.md",
+      "sha256": "b0628bffa8d1595cd24419e4c031bd7f344fb7b8360d014cb77e241b8df7f59b",
+      "mode": 420
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-subagent-driven-development/implementer-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-subagent-driven-development/implementer-prompt.md",
+      "sha256": "946601616a6f76ab3f165ef98377390968f1ec124ecef87422bc3553404e0332",
+      "mode": 420
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-subagent-driven-development/re-review-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-subagent-driven-development/re-review-prompt.md",
+      "sha256": "e1d8e0e65e58ccde6dc920843da9148d23e65aeb0f8932bcc30be1341a703c4c",
+      "mode": 420
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-subagent-driven-development/scripts/review-package",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-subagent-driven-development/scripts/review-package",
+      "sha256": "49081bf5e5303dbe183aa70175cd4ab1fc7c34276abdfafafc09a03af36f0f46",
+      "mode": 493
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-subagent-driven-development/scripts/sdd-workspace",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-subagent-driven-development/scripts/sdd-workspace",
+      "sha256": "55f981bbae7c30ba6be2571f68e69bbc5f635a33089a19cd0f056caeed3be156",
+      "mode": 493
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-subagent-driven-development/scripts/task-brief",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-subagent-driven-development/scripts/task-brief",
+      "sha256": "478f89d5468d5fb42db817ef06ba3e7d4f14b86f7a48fcf98cca8b1618031781",
+      "mode": 493
+    },
+    {
+      "path": "fork-v6.2.0/skills/psprowls-subagent-driven-development/task-reviewer-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/fork-v6.2.0/skills/psprowls-subagent-driven-development/task-reviewer-prompt.md",
+      "sha256": "e3b4a1bfe7cd55ed0459e5ca9cdddb6ff086c345b99e9097036db6a18545729e",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.2.0/.claude-plugin/plugin.json",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/.claude-plugin/plugin.json",
+      "sha256": "5e9f9b99d9d009ccbcdbce82644a5bf902691c39f152b79540b4542533fe53c3",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.2.0/LICENSE",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/LICENSE",
+      "sha256": "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.2.0/skills/requesting-code-review/code-reviewer.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/requesting-code-review/code-reviewer.md",
+      "sha256": "b2f2ec7596925fe52dac158fdfbca19b3a7d779d619c481e6706a6c0001662d3",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.2.0/skills/subagent-driven-development/SKILL.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/subagent-driven-development/SKILL.md",
+      "sha256": "349a08ad8b59b19b86c13a7d2f34a1a38719bf88257004a863eefefa8d9f9e40",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.2.0/skills/subagent-driven-development/implementer-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/subagent-driven-development/implementer-prompt.md",
+      "sha256": "946601616a6f76ab3f165ef98377390968f1ec124ecef87422bc3553404e0332",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.2.0/skills/subagent-driven-development/re-review-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/subagent-driven-development/re-review-prompt.md",
+      "sha256": "e1d8e0e65e58ccde6dc920843da9148d23e65aeb0f8932bcc30be1341a703c4c",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.2.0/skills/subagent-driven-development/scripts/review-package",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/subagent-driven-development/scripts/review-package",
+      "sha256": "fac3d4bd7f94369e8037b9ead2a8a502dca6ab333902b560b9455dbb3c450ebe",
+      "mode": 493
+    },
+    {
+      "path": "sources/v6.2.0/skills/subagent-driven-development/scripts/sdd-workspace",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/subagent-driven-development/scripts/sdd-workspace",
+      "sha256": "95a09d9d3983ad1aafd093ca72b4587946dea885c6e302caa02a779a2f911c31",
+      "mode": 493
+    },
+    {
+      "path": "sources/v6.2.0/skills/subagent-driven-development/scripts/task-brief",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/subagent-driven-development/scripts/task-brief",
+      "sha256": "d6954ef7841c7da3d77373e6ff5118b3f2f2e998606fd95d33e6527851bce044",
+      "mode": 493
+    },
+    {
+      "path": "sources/v6.2.0/skills/subagent-driven-development/task-reviewer-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.2.0/skills/subagent-driven-development/task-reviewer-prompt.md",
+      "sha256": "e3b4a1bfe7cd55ed0459e5ca9cdddb6ff086c345b99e9097036db6a18545729e",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.3.0/.claude-plugin/plugin.json",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/.claude-plugin/plugin.json",
+      "sha256": "d0d56f9f3a6adbf341d5d49850f63def17bfb7e9a39704b517745b2c554498c3",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.3.0/LICENSE",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/LICENSE",
+      "sha256": "a37e0e9697144819e1d965176ac4ae5bc3fa02d11e7812036bbcadf6dafe2400",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.3.0/skills/requesting-code-review/code-reviewer.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/skills/requesting-code-review/code-reviewer.md",
+      "sha256": "5eca5fcfd48a50e0a526ce5ffd64bf625d6b81bb46d11795274dae451fe6ffd4",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.3.0/skills/subagent-driven-development/SKILL.md",
+      "member": "psprowls-superpowers/provenance/upstream-6.3.0.tar.gz!skills/subagent-driven-development/SKILL.md",
+      "sha256": "8dd1b8e698edec3700c6d89517dbe96febd3bacd3f6ea21c1a3569c62ea104b5",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.3.0/skills/subagent-driven-development/implementer-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/skills/subagent-driven-development/implementer-prompt.md",
+      "sha256": "81dd9d5a3fb0b09b96b5829f03b9796842f3199ef7591d1ba1c2db2a515f64d0",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.3.0/skills/subagent-driven-development/re-review-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/skills/subagent-driven-development/re-review-prompt.md",
+      "sha256": "db0d5849478bc79cbde97b9b2cf0e58b50be8b8ed18464b0252c2bf27b6440a6",
+      "mode": 420
+    },
+    {
+      "path": "sources/v6.3.0/skills/subagent-driven-development/scripts/review-package",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/skills/subagent-driven-development/scripts/review-package",
+      "sha256": "fac3d4bd7f94369e8037b9ead2a8a502dca6ab333902b560b9455dbb3c450ebe",
+      "mode": 493
+    },
+    {
+      "path": "sources/v6.3.0/skills/subagent-driven-development/scripts/sdd-workspace",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/skills/subagent-driven-development/scripts/sdd-workspace",
+      "sha256": "95a09d9d3983ad1aafd093ca72b4587946dea885c6e302caa02a779a2f911c31",
+      "mode": 493
+    },
+    {
+      "path": "sources/v6.3.0/skills/subagent-driven-development/scripts/task-brief",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/skills/subagent-driven-development/scripts/task-brief",
+      "sha256": "d6954ef7841c7da3d77373e6ff5118b3f2f2e998606fd95d33e6527851bce044",
+      "mode": 493
+    },
+    {
+      "path": "sources/v6.3.0/skills/subagent-driven-development/task-reviewer-prompt.md",
+      "member": "psprowls-superpowers-update-experiment/sources/v6.3.0/skills/subagent-driven-development/task-reviewer-prompt.md",
+      "sha256": "eea23e33ec570c3041f40e9569fa711d61b8029f9eecf908345138aa1c6e61ab",
+      "mode": 420
+    }
+  ]
+}

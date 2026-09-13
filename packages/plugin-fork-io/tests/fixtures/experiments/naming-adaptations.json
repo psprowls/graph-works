@@ -1,0 +1,362 @@
+[
+  {
+    "kind": "skill-name",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 8,
+    "end": 12,
+    "expected": "3a207375",
+    "replacement": "3a20707370726f776c732d7375",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 1536,
+    "end": 1540,
+    "expected": "20202273",
+    "replacement": "202022707370726f776c732d73",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 1583,
+    "end": 1587,
+    "expected": "20202265",
+    "replacement": "202022707370726f776c732d65",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 2048,
+    "end": 2052,
+    "expected": "3e202273",
+    "replacement": "3e2022707370726f776c732d73",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 2124,
+    "end": 2128,
+    "expected": "3e202265",
+    "replacement": "3e2022707370726f776c732d65",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 3794,
+    "end": 3836,
+    "expected": "645d3b0a202020202244697370617463682066696e616c20636f646520726576696577657220282e2e2f",
+    "replacement": "645d3b0a202020202244697370617463682066696e616c20636f646520726576696577657220282e2e2f707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 4057,
+    "end": 4076,
+    "expected": "202022557365207375706572706f776572733a",
+    "replacement": "20202255736520707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 6648,
+    "end": 6684,
+    "expected": "3e202244697370617463682066696e616c20636f646520726576696577657220282e2e2f",
+    "replacement": "3e202244697370617463682066696e616c20636f646520726576696577657220282e2e2f707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 6736,
+    "end": 6778,
+    "expected": "225d3b0a202020202244697370617463682066696e616c20636f646520726576696577657220282e2e2f",
+    "replacement": "225d3b0a202020202244697370617463682066696e616c20636f646520726576696577657220282e2e2f707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 7097,
+    "end": 7116,
+    "expected": "3e2022557365207375706572706f776572733a",
+    "replacement": "3e202255736520707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 7218,
+    "end": 7224,
+    "expected": "650a73757065",
+    "replacement": "650a707370",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 7225,
+    "end": 7233,
+    "expected": "706f776572733a75",
+    "replacement": "6f776c732d75",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 7807,
+    "end": 7815,
+    "expected": "2f2e737570657270",
+    "replacement": "2f2e70737072",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 7817,
+    "end": 7826,
+    "expected": "6572732f7364642f3c",
+    "replacement": "6c732f7364642f3c",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 8396,
+    "end": 8404,
+    "expected": "602e737570657270",
+    "replacement": "602e70737072",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 8406,
+    "end": 8415,
+    "expected": "6572732f7364642f70",
+    "replacement": "6c732f7364642f70",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 23258,
+    "end": 23264,
+    "expected": "670a73757065",
+    "replacement": "670a707370",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 23265,
+    "end": 23273,
+    "expected": "706f776572733a72",
+    "replacement": "6f776c732d72",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 23314,
+    "end": 23319,
+    "expected": "5d282e2e2f",
+    "replacement": "5d282e2e2f707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 24123,
+    "end": 24127,
+    "expected": "68656e0a",
+    "replacement": "68656e0a707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 24414,
+    "end": 24431,
+    "expected": "0a557365207375706572706f776572733a",
+    "replacement": "0a55736520707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 25812,
+    "end": 25829,
+    "expected": "3a20646f63732f7375706572706f776572",
+    "replacement": "3a20646f63732f707370726f776c",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 25894,
+    "end": 25911,
+    "expected": "6520646f63732f7375706572706f776572",
+    "replacement": "6520646f63732f707370726f776c",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 26234,
+    "end": 26240,
+    "expected": "672f73757065",
+    "replacement": "672f707370",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 26241,
+    "end": 26249,
+    "expected": "706f776572732f68",
+    "replacement": "6f776c732f68",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/SKILL.md",
+    "start": 28027,
+    "end": 28041,
+    "expected": "67207375706572706f776572733a",
+    "replacement": "6720707370726f776c732d",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/review-package",
+    "start": 338,
+    "end": 340,
+    "expected": "2e73",
+    "replacement": "2e7073",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/review-package",
+    "start": 340,
+    "end": 342,
+    "expected": "7570",
+    "replacement": "70",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/review-package",
+    "start": 342,
+    "end": 345,
+    "expected": "657270",
+    "replacement": "72",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/review-package",
+    "start": 347,
+    "end": 350,
+    "expected": "657273",
+    "replacement": "6c73",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/sdd-workspace",
+    "start": 264,
+    "end": 272,
+    "expected": "282e737570657270",
+    "replacement": "282e70737072",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/sdd-workspace",
+    "start": 274,
+    "end": 283,
+    "expected": "6572732f7364642f3c",
+    "replacement": "6c732f7364642f3c",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/sdd-workspace",
+    "start": 795,
+    "end": 803,
+    "expected": "202e737570657270",
+    "replacement": "202e70737072",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/sdd-workspace",
+    "start": 805,
+    "end": 814,
+    "expected": "6572732f7364642f20",
+    "replacement": "6c732f7364642f20",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/sdd-workspace",
+    "start": 1482,
+    "end": 1490,
+    "expected": "2f2e737570657270",
+    "replacement": "2f2e70737072",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/sdd-workspace",
+    "start": 1492,
+    "end": 1500,
+    "expected": "6572732f73646422",
+    "replacement": "6c732f73646422",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/task-brief",
+    "start": 289,
+    "end": 291,
+    "expected": "2e73",
+    "replacement": "2e7073",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/task-brief",
+    "start": 291,
+    "end": 293,
+    "expected": "7570",
+    "replacement": "70",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/task-brief",
+    "start": 293,
+    "end": 296,
+    "expected": "657270",
+    "replacement": "72",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  },
+  {
+    "kind": "invocation",
+    "path": "skills/subagent-driven-development/scripts/task-brief",
+    "start": 298,
+    "end": 301,
+    "expected": "657273",
+    "replacement": "6c73",
+    "purpose": "Explicit archived naming/path adaptation; unique in both pinned original revisions"
+  }
+]

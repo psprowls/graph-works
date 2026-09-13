@@ -17,6 +17,8 @@ Code plugin this repo publishes and the one Claude Code installs and loads
 - [`packages/config-io`](packages/config-io) — schema-driven, git-like scoped
   configuration over YAML: precedence resolution, validated writes, JSON
   projection.
+- [`packages/plugin-fork-io`](packages/plugin-fork-io) — standalone,
+  provenance-preserving management for forked agent skills.
 - [`packages/models-io`](packages/models-io) — guarded Bedrock and Vercel AI
   Gateway model constructors, chat and embeddings: an access-denied taxonomy,
   content normalization, and caller-supplied credentials.
@@ -99,7 +101,7 @@ workflow exists yet — enforcement is local, by design (ADR-0010).
 | `just line-endings` | a tracked file that would check out CRLF under Git for Windows' default `core.autocrlf=true` |
 | `just platform-declared` | a package that reaches a POSIX-only module or process primitive with no `## Platform` section declaring it (ADR-0021 rule 3a) |
 | `just lint` | `uv run ruff check . && uv run ruff format --check .` |
-| `just types` | `uv run mypy --strict`, twice per package — once per `--platform` arm (`linux`, `win32`), 24 invocations total |
+| `just types` | `uv run mypy --strict`, twice per package — once per `--platform` arm (`linux`, `win32`), 26 invocations total |
 | `just contracts` | `uv run lint-imports` — the workspace's band/suffix boundaries plus okf-ext's internal capability boundaries |
 | `just test` | `uv run pytest`, plus one run per non-okf-io/okf-ext package under `uv run --package <name>` |
 | `just cov` | branch coverage, gated per package (95% for most, 90% for `code-graph-io`) |

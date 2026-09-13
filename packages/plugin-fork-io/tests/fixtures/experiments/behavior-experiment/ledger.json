@@ -1,0 +1,120 @@
+{
+  "date": "2026-09-12",
+  "status": "preview only; not accepted or installed",
+  "parent_ledger": "../ledger.json",
+  "versions": {
+    "v6.2.0": "3dcbd5c4b48e02263fbf4a3c01e3fe4f81d584d9",
+    "v6.3.0": "b36e0829c6d0140e93cfef2ca599b1b07d4a7797"
+  },
+  "customization": {
+    "purpose": "Ask the user before changing a plan that contradicts its specification.",
+    "scope": "Only the affected work waits; ordinary choices consistent with plan and spec do not need this approval.",
+    "text": "**Plan/spec approval gate (local customization).** If the implementation plan\ncontradicts the specification, ask the human before changing the plan or carrying\nout a correction that changes what the plan requires. Show the conflicting\npassages and the proposed correction. Hold the affected work until the human\nresponds, record the approval, then apply the approved correction. Independent\nwork may continue. This gate concerns plan/spec contradictions, not ordinary\nimplementation choices that are consistent with both documents.\n\n"
+  },
+  "file": "skills/psprowls-subagent-driven-development/SKILL.md",
+  "hashes": {
+    "adapted_base": "b0628bffa8d1595cd24419e4c031bd7f344fb7b8360d014cb77e241b8df7f59b",
+    "older_local": "d217998deb488a2bba9bb773c28cf98b0f3ac7d20c0598efbe47c5bbb6640019",
+    "adapted_incoming": "4870954a5425a61fd8ebe97c40fcc5e66dfd77101b0c4c96d646956e4edad01c",
+    "text_merge": "ba7fa2445fcd7e04c6ceaf2cf483009b7f9a9b9f5ee7cdebdd86c340ac539709",
+    "resolved_preview": "fd62fd73a88814227eb26bc1939662646f2e0b75700644097a46db426c1ec15c"
+  },
+  "text_merge_conflicts": 0,
+  "semantic_conflict": "The local approval gate survives text merge, but new upstream instructions restrict stopping to four other classes and direct the controller to decide plan corrections without asking.",
+  "resolution_method": "Manual review of all autonomy instructions and diagrams, not an automatic semantic merge algorithm.",
+  "resolution_changes": [
+    {
+      "before": "the four named below",
+      "after": "the five named below",
+      "occurrences": 1
+    },
+    {
+      "before": "**Rulings, not stalls.** A running plan does not wait on a human. Conflicts,\nambiguities, plan defects, a cap you would have asked to exceed \u2014 decide\nthem.",
+      "after": "**Rulings, not stalls.** Apply the plan/spec approval gate before deciding a\ncorrection. For other conflicts, ambiguities, plan defects, or a cap you would\nhave asked to exceed, make a ruling within the stopping conditions below.",
+      "occurrences": 1
+    },
+    {
+      "before": "Four things stop you, and only these:",
+      "after": "Five conditions stop the affected work:",
+      "occurrences": 1
+    },
+    {
+      "before": "publish); and a plan so broken that every path forward is a guess. For those,\nstop and ask.",
+      "after": "publish); a plan so broken that every path forward is a guess; and a\nplan/spec contradiction requiring approval under the local gate above. For those,\nstop and ask. Hold affected work until the required response arrives.",
+      "occurrences": 1
+    },
+    {
+      "before": "Rule on the conflict, ledger the ruling",
+      "after": "Apply plan/spec gate; after required approval, rule and ledger",
+      "occurrences": 3
+    },
+    {
+      "before": "Rule and continue; stop only if every path forward is a guess",
+      "after": "Apply plan/spec gate; continue only after required approval or if gate does not apply",
+      "occurrences": 2
+    },
+    {
+      "before": "authority the plan argues from, and conflicts inside the plan resolve\nagainst it.",
+      "after": "authority the plan argues from. If the plan contradicts that spec, apply\nthe plan/spec approval gate before correcting the plan or affected work.",
+      "occurrences": 1
+    },
+    {
+      "before": "Write the table to the ledger. Rule on everything you find before execution\nbegins \u2014 each finding against the plan text that mandates it \u2014 and record\neach ruling in the ledger. If the scan is clean, proceed without comment.\nRule on each conflict it surfaces \u2014 the spec is the binding authority, the\nplan is its argument \u2014 record the ruling beside its row, and dispatch\nTask 1.",
+      "after": "Write the table to the ledger. For plan/spec contradictions, present the\nconflicting passages and proposed correction, and await approval before the\naffected task or plan correction. For other findings, rule within the remaining\nstopping conditions. Record decisions and approvals beside their rows. If the\nscan is clean, proceed without comment. Dispatch only work whose required\napprovals have been received.",
+      "occurrences": 1
+    },
+    {
+      "before": "4. If the plan itself is wrong, rule on the correction, ledger it, and re-dispatch with the ruling carried in the dispatch",
+      "after": "4. If the plan itself is wrong, check the plan/spec approval gate. Obtain required approval before correcting or re-dispatching affected work; otherwise rule within the remaining stopping conditions. Carry the recorded decision in the dispatch.",
+      "occurrences": 1
+    },
+    {
+      "before": "  what the plan's text requires \u2014 is yours to rule on: weigh the finding\n  against the plan text, decide with the spec as the binding authority, and\n  ledger the ruling before you act on it.",
+      "after": "  what the plan's text requires \u2014 first requires checking the plan against\n  the spec. When they contradict, obtain approval under the local gate before\n  acting. Otherwise decide within the remaining stopping conditions. Ledger\n  the decision and any required approval before acting.",
+      "occurrences": 1
+    },
+    {
+      "before": "  without a recorded ruling.",
+      "after": "  without a recorded ruling and any approval required by the plan/spec gate.",
+      "occurrences": 1
+    },
+    {
+      "before": "  plan defect: rule on the smallest change that unblocks the dependent work,",
+      "after": "  plan defect: apply the plan/spec approval gate before correcting affected\n  work. After any required approval, rule on the smallest change that unblocks\n  the dependent work,",
+      "occurrences": 1
+    },
+    {
+      "before": "  silently lets every dependent task build on it. Stop only when the defect\n  leaves every path forward a guess.",
+      "after": "  silently lets every dependent task build on it. Hold affected work while\n  required approval is pending; also stop when the defect leaves every path\n  forward a guess.",
+      "occurrences": 1
+    },
+    {
+      "before": "If the final whole-branch review returns findings, dispatch ONE fix subagent\nwith the complete findings list \u2014 not one fixer per finding.",
+      "after": "If the final whole-branch review returns findings, check the plan/spec\napproval gate before dispatching fixes. Hold affected fixes until required\napproval arrives. Dispatch ONE fix subagent with the eligible findings list\nand any recorded approvals \u2014 not one fixer per finding.",
+      "occurrences": 1
+    },
+    {
+      "before": "rulings, or rule on the load-bearing ones and ledger what you decided. Only\nthe four classes above stop you here.",
+      "after": "rulings, or apply the plan/spec approval gate before correcting load-bearing\nones and ledger the decision. The five stopping conditions above apply here.",
+      "occurrences": 1
+    }
+  ],
+  "limits": "This is a proposed reconciliation of one policy, not acceptance of the update or proof of reliable model behavior.",
+  "verification": {
+    "structural": "passed: 15 skill schema checks, relative Markdown links, naming, hashes, no text conflict markers, unchanged supporting files and modes",
+    "behavioral": "One independent qualitative five-scenario probe matched intended policy. Final-review dispatch clarity fix passed a scoped re-check."
+  },
+  "review": {
+    "method": "One independent read-only agent; five scenario probe; not a reliability evaluation",
+    "initial_finding": "Global gate applied, but final review fix dispatch could state it explicitly.",
+    "fix": "Added explicit approval check before final review fix dispatch.",
+    "scenarios": {
+      "plan_spec_contradiction": "Ask and hold affected work; independent work can continue.",
+      "ordinary_variable_name": "Proceed without approval.",
+      "fix_cap_contradiction": "Cap does not bypass approval.",
+      "approval_received": "Record it, correct plan, resume affected work.",
+      "missing_spec_internal_ambiguity": "Record missing spec and provisional ruling; stop only if another stopping condition applies."
+    },
+    "scoped_recheck": "Passed: final-review dispatch now explicitly checks gate, holds affected fixes, and carries recorded approvals."
+  }
+}

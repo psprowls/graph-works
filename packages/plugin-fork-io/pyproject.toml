@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "plugin-fork-io"
+version = "0.1.0"
+description = "Standalone, provenance-preserving management for forked agent skills."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "markdown-it-py>=3.0",
+  "ruamel.yaml>=0.18",
+  "typer>=0.12",
+]
+
+[project.scripts]
+plugin-fork = "plugin_fork_io.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plugin_fork_io"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

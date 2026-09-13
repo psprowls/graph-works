@@ -18,6 +18,7 @@ members = ["packages/*"]
 okf-io = { workspace = true }
 okf-ext = { workspace = true }
 config-io = { workspace = true }
+plugin-fork-io = { workspace = true }
 models-io = { workspace = true }
 subagents-io = { workspace = true }
 code-graph-io = { workspace = true }
@@ -41,6 +42,7 @@ dev = [
     "mypy>=1.11",
     "okf-ext[schemas]",
     "okf-io",
+    "plugin-fork-io",
     "pytest>=8.0",
     # models-io and subagents-io are the packages with `async def test_*`.
     # Each sets asyncio_mode = "auto" in its own [tool.pytest.ini_options];
@@ -73,6 +75,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/code-wiki-okf/tests/**" = ["ANN"]
 "packages/work-tracker-okf/tests/**" = ["ANN"]
 "packages/config-io/tests/**" = ["ANN"]
+"packages/plugin-fork-io/tests/**" = ["ANN"]
 "packages/models-io/tests/**" = ["ANN"]
 "packages/subagents-io/tests/**" = ["ANN"]
 "packages/doc-wiki-okf/tests/**" = ["ANN"]
@@ -154,7 +157,7 @@ precision = 2
 root_packages = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io",
     "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "graph_works_core",
-    "workflow_local", "workflow_orca",
+    "workflow_local", "workflow_orca", "graph_works_cli", "plugin_fork_io",
 ]
 
 [[tool.importlinter.contracts]]
@@ -232,7 +235,7 @@ layers = [
 [[tool.importlinter.contracts]]
 name = "The foundation is a strict layer — band-1 packages never import each other"
 type = "independence"
-modules = ["okf_io", "code_graph_io", "config_io", "models_io", "subagents_io"]
+modules = ["okf_io", "code_graph_io", "config_io", "models_io", "subagents_io", "plugin_fork_io"]
 
 # Constraint 1 is the reason this epic exists: exactly one package knows what a
 # workspace is, and every package below band 3 receives resolved paths as
@@ -243,9 +246,19 @@ name = "Nothing below band 3 imports the application band"
 type = "forbidden"
 source_modules = [
     "okf_io", "okf_ext", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf",
-    "config_io", "subagents_io", "models_io", "code_graph_io",
+    "config_io", "subagents_io", "models_io", "code_graph_io", "plugin_fork_io",
 ]
 forbidden_modules = ["graph_works_core"]
+
+[[tool.importlinter.contracts]]
+name = "plugin-fork-io never imports workspace siblings"
+type = "forbidden"
+source_modules = ["plugin_fork_io"]
+forbidden_modules = [
+    "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io",
+    "subagents_io", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf",
+    "graph_works_core", "graph_works_cli", "workflow_local", "workflow_orca",
+]
 
 # The seam only works in one direction. `independence` forbids every edge AMONG
 # the band-1 packages; this forbids the one edge OUT of band 1 that would undo

@@ -1,5 +1,5 @@
 # Workspace task runner — okf-io, okf-ext, code-graph-io, code-wiki-okf,
-# work-tracker-okf, config-io, models-io, subagents-io, doc-wiki-okf,
+# work-tracker-okf, config-io, plugin-fork-io, models-io, subagents-io, doc-wiki-okf,
 # graph-works-core, workflow-local, workflow-orca.
 # Each recipe is exactly the command a future CI job will call.
 #
@@ -81,6 +81,7 @@ types: sync
     uv run --package code-wiki-okf mypy --strict --platform linux packages/code-wiki-okf/src
     uv run --package work-tracker-okf mypy --strict --platform linux packages/work-tracker-okf/src
     uv run --package config-io mypy --strict --platform linux packages/config-io/src
+    uv run --package plugin-fork-io mypy --strict --platform linux packages/plugin-fork-io/src
     uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform linux packages/models-io/src
     uv run --package subagents-io mypy --strict --platform linux packages/subagents-io/src
     uv run --package doc-wiki-okf mypy --strict --platform linux packages/doc-wiki-okf/src
@@ -93,6 +94,7 @@ types: sync
     uv run --package code-wiki-okf mypy --strict --platform win32 packages/code-wiki-okf/src
     uv run --package work-tracker-okf mypy --strict --platform win32 packages/work-tracker-okf/src
     uv run --package config-io mypy --strict --platform win32 packages/config-io/src
+    uv run --package plugin-fork-io mypy --strict --platform win32 packages/plugin-fork-io/src
     uv run --package models-io --extra bedrock --extra vercel mypy --strict --platform win32 packages/models-io/src
     uv run --package subagents-io mypy --strict --platform win32 packages/subagents-io/src
     uv run --package doc-wiki-okf mypy --strict --platform win32 packages/doc-wiki-okf/src
@@ -113,6 +115,7 @@ test:
     uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests
     uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests
     uv run --package config-io pytest packages/config-io/tests
+    uv run --package plugin-fork-io pytest packages/plugin-fork-io/tests
     uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests
     uv run --package subagents-io pytest packages/subagents-io/tests
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests
@@ -135,6 +138,7 @@ cov:
     uv run --package code-wiki-okf pytest packages/code-wiki-okf/tests --cov=code_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests --cov=work_tracker_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package config-io pytest packages/config-io/tests --cov=config_io --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package plugin-fork-io pytest packages/plugin-fork-io/tests --cov=plugin_fork_io --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package models-io --extra bedrock --extra vercel pytest packages/models-io/tests --cov=models_io --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package subagents-io pytest packages/subagents-io/tests --cov=subagents_io --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package doc-wiki-okf pytest packages/doc-wiki-okf/tests --cov=doc_wiki_okf --cov-branch --cov-report=term-missing --cov-fail-under=95

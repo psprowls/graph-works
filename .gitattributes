@@ -39,3 +39,6 @@ packages/doc-wiki-okf/tests/fixtures/** -text
 # because every other byte-exact file here is named explicitly rather than left
 # to detection.
 plugins/gw/assets/*.png -text
+
+# Archived original/local/review snapshots are hash-pinned byte evidence.
+packages/plugin-fork-io/tests/fixtures/experiments/** -text

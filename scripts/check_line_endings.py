@@ -43,6 +43,9 @@ ALLOWLISTED_TEXT_PREFIXES = (
     "packages/okf-io/tests/fixtures/",
     "packages/okf-ext/tests/fixtures/",
     "packages/doc-wiki-okf/tests/fixtures/",
+    # Attributed original/local/review skill snapshots have pinned full-file
+    # hashes; newline conversion would destroy the archived provenance evidence.
+    "packages/plugin-fork-io/tests/fixtures/experiments/",
     # The gw plugin's rendered branding assets. `logo.png` is a rasterised
     # binary -- EOL normalization would corrupt the pixel data outright, not
     # just perturb it -- and `.gitattributes` names it explicitly rather than

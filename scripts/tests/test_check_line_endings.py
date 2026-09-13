@@ -144,3 +144,22 @@ def test_main_exits_zero_on_a_clean_tree(tmp_path: Path) -> None:
     _commit_crlf_as_is(root)
 
     assert main([str(root)]) == 0
+
+
+def test_plugin_fork_experiments_are_byte_exact_without_exempting_adjacent_source(tmp_path: Path) -> None:
+    root = _repo(tmp_path)
+    (root / ".gitattributes").write_text(
+        "packages/plugin-fork-io/** -text\n", encoding="utf-8", newline=""
+    )
+    fixture = "packages/plugin-fork-io/tests/fixtures/experiments/older-local/SKILL.md"
+    adjacent = {
+        "packages/plugin-fork-io/src/plugin_fork_io/normal.py",
+        "packages/plugin-fork-io/tests/fixtures/normal.md",
+        "packages/plugin-fork-io/tests/fixtures/experiments-other/raw.md",
+    }
+    for relative in (fixture, *sorted(adjacent)):
+        _write_crlf(root / relative, "original evidence\n")
+    _commit_crlf_as_is(root)
+
+    assert {v.path for v in find_violations(root)} == adjacent
+    assert (root / fixture).read_bytes() == b"original evidence\r\n"

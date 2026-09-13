@@ -85,6 +85,17 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
 - Managed artifacts live under the owner's `references/` directory using the
   filenames in `paths.MANAGED_ARTIFACTS` (`00-decisions.md` through
   `04-finish-results.md`).
+- `gw work next`'s stamped `sources[]` entry (`missing_design_source` /
+  `_apply_normalizations` in `graph_works_core.work.commands`) is frontmatter
+  only — this package never writes a body citation for it. If a body citation
+  is wanted to satisfy `provenance.source-uncited` (`okf_io/_rules/provenance.py`;
+  §5.1 — a bare footnote *definition* with no inline `[^id]` reference already
+  satisfies it), write it as `[^id]: [Title](resource)`, the bracketed-link
+  style `okf_io.migrate` itself emits, not a bare-path `[^id]: resource`. Only
+  the bare form currently blocks `gw work reparent`/`gw work archive` when the
+  cited artifact is inside the moved set — see
+  `okf-ext/README.md`'s "reference-style link refuses the whole plan" and
+  `work/bug-moves-refuses-footnote-definitions`.
 - Decision ledgers belong to the nearest parent-capable item (`Release`,
   `Epic`, `Feature`), addressed via `decisions.ledger_ref(owner_path)`.
 - Path mutations cover a complete owned subtree, opaque attachments included:

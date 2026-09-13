@@ -379,6 +379,20 @@ refuses on sight. Raw HTML anchors are the related case: `okf_io._md` yields no
 token for them and they are not edges, so a document containing one still
 repairs — the reconciliation cannot count what the graph cannot see.
 
+A footnote definition (`[^id]: dest`) is one instance of this, not a
+separate case — markdown-it's core reference-definition grammar doesn't
+distinguish a `^`-prefixed label from any other, so a *bare-destination*
+footnote definition parses as the same `[label]: dest` shape and inherits the
+same refusal, `RefDef.href`/`.line` computed but never rewritten. It only
+bites the bare form, though: `[^id]: [Title](dest)` — the shape
+`okf_io.migrate` itself emits (`migrate.py:405`, §5.6) — isn't a valid
+reference-definition destination at all (CommonMark requires a bare URL
+there), so markdown-it leaves it as ordinary prose containing an inline link,
+which the locator already finds and the rebase path already rewrites
+correctly. A `sources[].id` cited via `provenance.footnote_join`
+(`okf_io/_rules/provenance.py`) should use that bracketed-link style for
+exactly this reason. Tracked as `work/bug-moves-refuses-footnote-definitions`.
+
 **Reserved files have no count to reconcile against.** `links.build()` iterates
 `bundle.concepts` only, so `index.md` and `log.md` are not link sources. Their
 bodies are scanned and repaired directly (otherwise every move would lose

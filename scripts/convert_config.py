@@ -4,7 +4,9 @@
 One direction only. `version: 1` is a **fresh format, not v3** -- there is no
 migration path inside `graph_works_core` (`workspace/manifest.py:18-20`), and
 `gw bootstrap` never overwrites an existing manifest (`workspace/init.py:326`),
-so this script is the only path from the old file to the new one.
+so this script converts only non-dispatch settings. Retired dispatch choices
+are refused before writes; remove them explicitly and recreate desired rules
+in the new shared/local dispatch documents.
 
 Design notes
 ------------
@@ -23,8 +25,7 @@ Design notes
 
 * **The manifest is rendered by hand, not dumped and not through
   `manifest.render_initial`.** That function cannot express
-  `layout.bundle_dir`, `workflow.auto_drive.*`, `state_gate` or the raw
-  `models` block; `manifest.py:475-480` already renders by hand for the same
+  `layout.bundle_dir`, operational `workflow.auto_drive.*`, or `state_gate`; `manifest.py:475-480` already renders by hand for the same
   reason.
 
 * **Four independent readers validate the result.** They disagree by design:
@@ -54,15 +55,14 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from code_wiki_okf.config import ConfigError, load_config
-from config_io import PlainYamlStore, StoreValidationError, dotted
-from graph_works_core.orchestrate.commands import ROUTING_VOCABULARIES
+from config_io import StoreValidationError, dotted
 from graph_works_core.workspace import manifest
+from graph_works_core.workspace.dispatch_config import validate_workspace_dispatch_layers
 from graph_works_core.workspace.errors import WorkspaceError, WorkspaceNotFound
 from graph_works_core.workspace.init import GITIGNORE_FILENAME
 from graph_works_core.workspace.init import _GITIGNORE_HEADER as GITIGNORE_HEADER
 from graph_works_core.workspace.layout import WorkspaceLayout, layout_for
 from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
-from subagents_io.routing import validate_rules
 
 V2_FILENAME = ".graph-wiki.yaml"
 V2_LOCAL_FILENAME = ".graph-wiki.local.yaml"
@@ -354,28 +354,21 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
                 "In the catalog (manifest.py:231-236).",
             )
         )
-    if "permission_mode" in auto_drive:
+    if "supervise_merges" in auto_drive:
         add(
             Disposition(
-                "workflow.auto_drive.permission_mode",
-                "workflow.auto_drive.permission_mode",
+                "workflow.auto_drive.supervise_merges",
+                "workflow.auto_drive.supervise_merges",
                 "carry",
-                auto_drive["permission_mode"],
-                "In the catalog (manifest.py:237-242).",
+                auto_drive["supervise_merges"],
+                "Operational merge supervision is preserved.",
             )
         )
-    models = auto_drive.get("models")
-    if isinstance(models, dict):
-        add(
-            Disposition(
-                "workflow.auto_drive.models",
-                "workflow.auto_drive.models",
-                "carry",
-                dict(models),
-                "Not catalog-expressible but genuinely consumed: _routing_rules reads it raw and "
-                "checks its keys against DISPATCH_PHASES. Carried 1:1.",
-            )
-        )
+    for key in ("models", "overrides", "permission_mode"):
+        if key in auto_drive:
+            refusals.append(f"workflow.auto_drive.{key}: retired dispatch setting; remove it and recreate rules explicitly.")
+    if "pipeline" in workflow:
+        refusals.append("workflow.pipeline: retired dispatch setting; remove it and recreate rules explicitly.")
 
     state_gate = raw.get("state_gate")
     if isinstance(state_gate, dict):
@@ -469,11 +462,10 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
     add(
         Disposition(
             None,
-            "workflow.pipeline.branch.prompt_tail",
+            "workflow.dispatch_rules",
             "seed",
-            RELAY_TAIL_SEED,
-            "The one override key with no packaged default: unset arms half the relay seam and a "
-            "relay worker drops into an interactive menu with nobody watching.",
+            "dispatch.yaml",
+            "Initialize new dispatch defaults; old launch choices are never translated.",
         )
     )
 
@@ -489,8 +481,7 @@ def _render(dispositions: list[Disposition]) -> str:
 
     Rendered by hand rather than dumped, and deliberately not through
     `manifest.render_initial` -- that function cannot express
-    `layout.bundle_dir`, `workflow.auto_drive.*`, `state_gate` or the raw
-    `models` block. Key order mirrors `render_initial`'s so a converted
+    `layout.bundle_dir`, operational `workflow.auto_drive.*`, or `state_gate`. Key order mirrors `render_initial`'s so a converted
     manifest reads like a bootstrapped one.
     """
     values = {d.target_key: d.value for d in dispositions if d.target_key is not None}
@@ -509,23 +500,13 @@ def _render(dispositions: list[Disposition]) -> str:
     # One `workflow:` block carrying both nested sub-blocks -- two would be a
     # duplicate key and the second would silently win.
     workflow_lines: list[str] = []
-    if "workflow.pipeline.branch.prompt_tail" in values:
-        workflow_lines.extend(
-            [
-                "  pipeline:",
-                "    branch:",
-                f"      prompt_tail: {_scalar(values['workflow.pipeline.branch.prompt_tail'])}",
-            ]
-        )
+    if "workflow.dispatch_rules" in values:
+        workflow_lines.append(f"  dispatch_rules: {_scalar(values['workflow.dispatch_rules'])}")
     auto_drive_lines: list[str] = []
-    for key in ("max_parallel", "permission_mode"):
+    for key in ("max_parallel", "supervise_merges"):
         dotted_key = f"workflow.auto_drive.{key}"
         if dotted_key in values:
             auto_drive_lines.append(f"    {key}: {_scalar(values[dotted_key])}")
-    models = values.get("workflow.auto_drive.models")
-    if isinstance(models, dict):
-        auto_drive_lines.append("    models:")
-        auto_drive_lines.extend(f"      {name}: {_scalar(model)}" for name, model in models.items())
     if auto_drive_lines:
         workflow_lines.append("  auto_drive:")
         workflow_lines.extend(auto_drive_lines)
@@ -611,14 +592,14 @@ def validate_manifest(layout: WorkspaceLayout) -> None:
                 "the value is resolved against the workspace root."
             )
 
-    # Reader 4 -- the carried `models` block is live, not dead. Mirrors
-    # `orchestrate/commands.py:_routing_rules` exactly.
-    explicit = PlainYamlStore(layout.manifest_path).read_explicit()
-    block = dotted.get(explicit, "workflow.auto_drive")
-    rules = block if isinstance(block, dict) else {}
-    errors = validate_rules(rules, ROUTING_VOCABULARIES, default_key="phase")
-    if errors:
-        raise ConversionRefused("workflow.auto_drive: " + "; ".join(errors))
+    # Reader 4 -- validate explicit manifest layers without restoring retired routing.
+    store = manifest.workspace_store(layout)
+    try:
+        validate_workspace_dispatch_layers(
+            layout, base=store.read_base_explicit(), overlay=store.read_overlay_explicit()
+        )
+    except WorkspaceError as exc:
+        raise ConversionRefused(f"dispatch configuration: {exc}") from exc
 
 
 def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
@@ -653,6 +634,22 @@ def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
             with path.open("a", encoding="utf-8", newline="") as handle:
                 handle.write(missing)
             created.append(path)
+    shared = layout.root / "dispatch.yaml"
+    if not shared.exists():
+        shared.write_text(
+            "pipeline:\n  rules:\n  - match: {variant: branch}\n    prompt_tail: " + json.dumps(RELAY_TAIL_SEED) + "\n",
+            encoding="utf-8", newline="",
+        )
+        created.append(shared)
+    root_ignore = layout.root / GITIGNORE_FILENAME
+    present = root_ignore.read_text(encoding="utf-8").splitlines() if root_ignore.exists() else []
+    missing = [entry for entry in ("workspace.local.yaml", "/dispatch.local.yaml") if entry not in present]
+    if missing:
+        with root_ignore.open("a", encoding="utf-8", newline="") as handle:
+            if root_ignore.stat().st_size and not root_ignore.read_bytes().endswith(b"\n"):
+                handle.write("\n")
+            handle.write("".join(entry + "\n" for entry in missing))
+        created.append(root_ignore)
     return created
 
 
@@ -740,6 +737,20 @@ def convert(
     Act order is load-bearing: the sync is last so the projection's sha256 of
     `workspace.yaml` is current, which is the freshness comparison every hook makes.
     """
+    # Reject each explicit source before the legacy shallow overlay can hide it.
+    for filename in (V2_FILENAME, V2_LOCAL_FILENAME):
+        source = root / filename
+        if not source.is_file():
+            continue
+        explicit = _load_mapping(source)
+        for key in (
+            "workflow.pipeline", "workflow.auto_drive.models", "workflow.auto_drive.overrides",
+            "workflow.auto_drive.permission_mode",
+        ):
+            if dotted.has(explicit, key):
+                raise ConversionRefused(
+                    f"{source}: {key}: retired dispatch setting; remove it and recreate rules explicitly."
+                )
     conversion = dispose(read_v2(root), root=root, options=options)  # acts 1-2
     if not conversion.ok:
         raise ConversionRefused("; ".join(conversion.refusals))

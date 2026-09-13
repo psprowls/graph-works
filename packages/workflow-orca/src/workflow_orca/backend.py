@@ -12,7 +12,7 @@ once, on the bind path only, because `check --run <id>` refuses with
 paths (`task-list`, `worker-list`) do not, and are not re-bound for.
 
 Three things Orca needs that the protocol does not name — releasing a settled
-worker's terminal, settling the task ledger, and nudging a worker whose prompt
+worker's resource, verifying successful completion, and nudging a worker whose prompt
 was typed but never submitted — are folded into `ack()`, `close()` and
 `wait()`. Nothing new is exported: an Orca-aware coordinator with extra methods
 to call is a coordinator that no longer swaps backends.
@@ -35,7 +35,8 @@ from subagents_io.backend import (
 from subagents_io.dispatch import DISPATCH_MODES, PlannedDispatch, WorktreeAction
 
 from workflow_orca._cli import OrcaCliError, OrcaResult, _subprocess_run, unwrap
-from workflow_orca._map import event_from_message, parse_task_result, worker_state
+from workflow_orca._launch import check_launch_receipt, decode_launch_spec, encode_launch_spec, launch_preferences
+from workflow_orca._map import event_from_message, normalize_message, parse_task_result, worker_state
 
 #: Every argv this package builds starts here.
 _ORCA = ("orca", "orchestration")
@@ -71,11 +72,9 @@ class OrcaBackend:
         self,
         *,
         run: Callable[[Sequence[str]], OrcaResult] = _subprocess_run,
-        agent: str = "claude",
         repo_selector: str | None = None,
     ) -> None:
         self._run = run
-        self._agent = agent
         #: Needed only by `create-top-level`, which is why it is optional
         #: rather than required.
         self._repo_selector = repo_selector
@@ -95,7 +94,6 @@ class OrcaBackend:
             name=name,
             run_id=run_id,
             run=self._run,
-            agent=self._agent,
             repo_selector=self._repo_selector,
         )
 
@@ -128,13 +126,11 @@ class OrcaSession:
         name: str,
         run_id: str,
         run: Callable[[Sequence[str]], OrcaResult],
-        agent: str,
         repo_selector: str | None,
     ) -> None:
         self.name = name
         self.run_id = run_id
         self._run = run
-        self._agent = agent
         self._repo_selector = repo_selector
         #: task id -> dispatch key, refreshed from `task-list`. `wait()` uses
         #: it to attribute a message to a key without a second walk.
@@ -147,10 +143,12 @@ class OrcaSession:
         #: Dispatch handles whose terminal `close()` still owes a release.
         self._unreleased: set[str] = set()
         #: dispatch handle -> agent terminal handle, refreshed from
-        #: `worker-list` on every `workers()` call. `_agent_terminal` reads
-        #: this first so the nudge probe does not re-derive with a second
-        #: per-dispatch call for data `workers()` already has.
+        #: matching worker-list/worker-show evidence on every enumeration.
+        #: An agent handle alone can also identify a terminal-free worker.
         self._agent_terminals: dict[str, str] = {}
+        #: Handles with verified durable launch receipts in the latest enumeration.
+        self._verified_launches: set[str] = set()
+        self._done_by_delivery: dict[str, tuple[WorkerDone, ...]] = {}
 
     def _call(self, argv: Sequence[str]) -> dict[str, Any]:
         full = [*_ORCA, *argv, "--run", self.run_id, "--json"]
@@ -170,7 +168,18 @@ class OrcaSession:
     def launch(self, dispatch: PlannedDispatch) -> WorkerRecord:
         if dispatch.mode not in DISPATCH_MODES:
             raise UnsupportedMode(f"{self.name}: mode {dispatch.mode!r} is not one of {sorted(DISPATCH_MODES)}")
+        preferences = launch_preferences(dispatch)
         worktree_flags = self._worktree_flags(dispatch.worktree)
+        spec = encode_launch_spec(dispatch, placement_argv=worktree_flags)
+        request = decode_launch_spec(spec)
+        if dispatch.model is not None:
+            status = self._call_top_level(["status"])
+            if "orchestration.worker-launch-preferences.v1" not in (status.get("runtime") or {}).get(
+                "capabilities", []
+            ):
+                raise BackendError(
+                    "Orca runtime lacks worker launch preferences; update or restart Orca before launching."
+                )
 
         # The session is the ledger: a settled key must reconstruct from
         # `task-list` alone, so a duplicate is refused here rather than
@@ -187,7 +196,7 @@ class OrcaSession:
             [
                 "task-create",
                 "--spec",
-                dispatch.prompt,
+                spec,
                 "--task-title",
                 dispatch.key,
                 # One identifier, not two. `--task-title` is load-bearing --
@@ -205,31 +214,35 @@ class OrcaSession:
         task_id = str(raw_task_id)
         self._keys_by_task[task_id] = dispatch.key
 
-        start_argv = ["worker-start", "--task", task_id, "--agent", self._agent, *worktree_flags]
-        if dispatch.model is not None:
-            start_argv += ["--model", dispatch.model]
-            # `--effort` requires `--model` on this CLI, so an effort with no
-            # model is dropped rather than passed and rejected.
-            if dispatch.reasoning_effort is not None:
-                start_argv += ["--effort", dispatch.reasoning_effort]
-        started = self._call(start_argv)
-
-        # A launch that "succeeded" with no handle would hand back a
-        # `WorkerRecord` no later call could ever address — unlike the
-        # read paths, this is a write that already started a real worker,
-        # so a missing handle is raised here rather than degraded to "".
+        start_argv = ["worker-start", "--task", task_id, *preferences, *worktree_flags]
+        try:
+            started = self._call(start_argv)
+        except OrcaCliError as exc:
+            exc.details.update(taskId=task_id, dispatchKey=dispatch.key, launchRequest=request)
+            exc.add_note(f"Task {task_id} remains reserved; inspect recovery evidence before any retry.")
+            raise
         raw_handle = started.get("dispatchId")
         if not raw_handle:
-            raise BackendError(f"{self.name}: worker-start for {dispatch.key!r} returned no dispatchId")
+            missing_handle = OrcaCliError(
+                start_argv,
+                returncode=0,
+                stderr="",
+                message=f"worker-start returned no dispatchId; task {task_id} requires recovery inspection",
+                receipt={"ok": True, "result": started},
+            )
+            missing_handle.details.update(taskId=task_id, dispatchKey=dispatch.key, launchRequest=request)
+            raise missing_handle
         handle = str(raw_handle)
+        launch = started.get("launch")
+        reason = check_launch_receipt(request, launch if isinstance(launch, dict) else {})
         self._unreleased.add(handle)
         worktree_path, worktree_branch = self._resolve_worktree(dispatch.worktree, started, handle)
         return WorkerRecord(
             key=dispatch.key,
             handle=handle,
-            state=worker_state(started.get("workerState")),
+            state=worker_state(started.get("workerState") or started.get("workerOutcome") or started.get("state")),
             last_heartbeat_at=None,
-            detail=started.get("dispatchStatus"),
+            detail=f"taskId={task_id}; dispatchId={handle}; {reason}" if reason else started.get("dispatchStatus"),
             worktree_path=worktree_path,
             worktree_branch=worktree_branch,
         )
@@ -241,12 +254,10 @@ class OrcaSession:
     def workers(self) -> list[WorkerRecord]:
         """Every worker ever launched in this session.
 
-        Costs `2 + L` calls, where `L` is the number of live workers — bounded
-        by the plan's `max_parallel` and small. `last_heartbeat_at` lives only
-        on `worker-show`, which is per-dispatch; returning `None` merely
-        because the value was not fetched would be a lie, and it is the
-        specific lie that matters, because the nudge probe treats "has ever
-        heartbeat" as a decisive veto.
+        Costs `2 + W` calls, where `W` counts workers with handles. Full task
+        specs and durable worker launch receipts are required even after
+        settlement. The same worker-show also supplies heartbeat and actual
+        terminal proof; lifecycle never depends on the presence of a terminal.
         """
         tasks = self._call(["task-list"]).get("tasks") or []
         rows = self._call(["worker-list"]).get("workers") or []
@@ -261,6 +272,8 @@ class OrcaSession:
 
         self._keys_by_task = {str(t["id"]): str(t.get("task_title") or "") for t in tasks}
         records: list[WorkerRecord] = []
+        self._agent_terminals.clear()
+        self._verified_launches.clear()
         for task in tasks:
             task_id = str(task["id"])
             key = self._keys_by_task[task_id]
@@ -269,20 +282,42 @@ class OrcaSession:
                 # `worker-start` died after `task-create` succeeded. That is
                 # what "unknown" is for.
                 records.append(
-                    WorkerRecord(key=key, handle="", state="unknown", last_heartbeat_at=None, detail=task.get("status"))
+                    WorkerRecord(
+                        key=key,
+                        handle="",
+                        state="unknown",
+                        last_heartbeat_at=None,
+                        detail=(
+                            f"taskId={task_id}; Launch configuration unverified: "
+                            "no worker receipt; inspect task recovery."
+                        ),
+                    )
                 )
                 continue
             handle = str(row.get("dispatchId") or "")
             state = worker_state(row.get("workerState"))
-            heartbeat = self._heartbeat(handle) if state in self._LIVE_STATES else None
+            shown = self._show(handle)
+            context = shown.get("dispatch") or {}
+            heartbeat = (
+                (context.get("lastHeartbeatAt") or context.get("last_heartbeat_at"))
+                if state in self._LIVE_STATES
+                else None
+            )
             detail = row.get("dispatchStatus") or parse_task_result(task.get("result")).get("outcome")
-            terminal = row.get("agentTerminalHandle")
-            if handle and terminal:
-                self._agent_terminals[handle] = str(terminal)
+            reason = self._launch_verification(task, shown)
+            if reason:
+                detail = f"taskId={task_id}; dispatchId={handle}; {reason}"
+            else:
+                self._verified_launches.add(handle)
+            terminal = shown.get("terminal")
+            if isinstance(terminal, dict):
+                terminal_handle = terminal.get("handle")
+                if handle and terminal_handle and terminal_handle == row.get("agentTerminalHandle"):
+                    self._agent_terminals[handle] = str(terminal_handle)
             records.append(
                 WorkerRecord(key=key, handle=handle, state=state, last_heartbeat_at=heartbeat, detail=detail)
             )
-            if state not in self._LIVE_STATES and handle:
+            if state in {"succeeded", "failed", "stopped"} and handle and not (state == "succeeded" and reason):
                 # `_unreleased` is not persisted, so a worker settled before
                 # this session object existed (e.g. across a coordinator
                 # restart) never went through `launch()`'s own `.add()` —
@@ -318,7 +353,7 @@ class OrcaSession:
         batch = self._call(
             ["check", "--wait", "--types", self._EVENT_TYPES, "--timeout-ms", str(int(timeout_s * 1000))]
         )
-        messages = batch.get("messages") or []
+        messages = [normalize_message(message) for message in (batch.get("messages") or [])]
         # Absent entirely on an empty batch — verified live.
         delivery_id = batch.get("deliveryId")
 
@@ -331,6 +366,8 @@ class OrcaSession:
             if event is not None:
                 events.append(event)
 
+        if delivery_id:
+            self._done_by_delivery[str(delivery_id)] = tuple(e for e in events if isinstance(e, WorkerDone))
         if not events:
             # Never in the hot path: an event delivered is itself proof of
             # life, so the probe runs only when nothing arrived.
@@ -384,21 +421,32 @@ class OrcaSession:
             self._call_top_level(["terminal", "send", "--terminal", terminal, "--text", "", "--enter"])
 
     def _agent_terminal(self, handle: str) -> str | None:
-        """`workers()`'s own `worker-list` walk already carries this field —
-        `None` here means that walk never saw this handle at all."""
+        """Only the matching actual terminal proven by the latest worker-show."""
         return self._agent_terminals.get(handle)
 
-    def _heartbeat(self, handle: str) -> str | None:
+    def _show(self, handle: str) -> dict[str, Any]:
         if not handle:
-            return None
+            return {}
         try:
-            shown = self._call_unscoped(["worker-show", "--dispatch", handle])
+            return self._call_unscoped(["worker-show", "--dispatch", handle])
         except OrcaCliError:
-            # An unreachable dispatch is `unknown`'s territory, not an
-            # exception's: enumerating a Run must not fail because one worker
-            # of many became unreadable.
-            return None
-        return (shown.get("dispatch") or {}).get("last_heartbeat_at")
+            return {}
+
+    @staticmethod
+    def _launch_verification(task: dict[str, Any], shown: dict[str, Any]) -> str | None:
+        try:
+            spec = task.get("spec")
+            if not isinstance(spec, str) or task.get("spec_truncated"):
+                raise BackendError("Missing full launch envelope; inspect the untruncated task spec.")
+            request = decode_launch_spec(spec)
+            if request["dispatch_key"] != task.get("task_title"):
+                raise BackendError("The launch envelope dispatch_key does not match the task title; inspect recovery.")
+        except BackendError as exc:
+            return f"Launch configuration unverified: {exc}"
+        worker = shown.get("worker")
+        options = worker.get("startOptions") if isinstance(worker, dict) else None
+        receipt = options.get("launch") if isinstance(options, dict) else None
+        return check_launch_receipt(request, receipt if isinstance(receipt, dict) else {})
 
     def _worktree_flags(self, worktree: WorktreeAction) -> list[str]:
         if worktree.action in ("reuse", "main"):
@@ -487,33 +535,39 @@ class OrcaSession:
             shown = self._call_unscoped(["worker-show", "--dispatch", handle])
         except OrcaCliError:
             return None
-        found = (shown.get("worker") or {}).get("worktree_id")
+        worker = shown.get("worker") or {}
+        found = worker.get("worktreeId") or worker.get("worktree_id")
         return str(found) if found else None
 
     def ack(self, event: WorkerEvent) -> None:
-        """Acknowledge a delivery, and — on a `WorkerDone` only — settle.
+        """Acknowledge a delivery and release a proven settled worker.
 
-        A `WorkerDone` is what proves the worker settled, so it is the one
-        event where `task-update` and `worker-release` are safe. Both are
-        Orca hygiene rather than protocol: a settled key that still looks live
-        to the next `workers()` call, and terminals that accumulate across a
-        long Run. Folding them here rather than exporting them is what keeps a
-        coordinator swappable.
+        Orca's accepted worker_done already owns task settlement. Successful
+        results with unverified launch choices stay unacknowledged for recovery.
         """
         if event.delivery_id is None:
             return
+        pending = list(self._done_by_delivery.get(event.delivery_id, ()))
+        if isinstance(event, WorkerDone) and event not in pending:
+            pending.append(event)
+        for done in pending:
+            self._verify_done(done)
         self._call(["check", "--ack", event.delivery_id])
-        if not isinstance(event, WorkerDone):
-            return
+        self._done_by_delivery.pop(event.delivery_id, None)
+        if isinstance(event, WorkerDone):
+            self._release(event.handle)
+
+    def _verify_done(self, event: WorkerDone) -> None:
         task_id = self._task_id_for(event.key)
         if task_id is None:
-            # A key this session's ledger has never heard of, even after a
-            # refresh, is a stale or corrupted event -- the same case
-            # LocalSession.ack() raises UnknownWorker for.
             raise UnknownWorker(f"{self.name}: no task tracked for key {event.key!r}")
-        status = "failed" if event.outcome == "failed" else "completed"
-        self._call(["task-update", "--id", task_id, "--status", status])
-        self._release(event.handle)
+        if event.outcome == "failed":
+            return
+        tasks = self._call(["task-list"]).get("tasks") or []
+        task: dict[str, Any] = next((t for t in tasks if str(t["id"]) == task_id), {})
+        reason = self._launch_verification(task, self._show(event.handle))
+        if reason:
+            raise BackendError(f"taskId={task_id}; dispatchId={event.handle}; deliveryId={event.delivery_id}; {reason}")
 
     def reply(self, reply_token: str, answer: str) -> None:
         """`reply --id <msg_id>`. The token is the question message's own id,
@@ -533,7 +587,11 @@ class OrcaSession:
         the durable session, and deleting it would destroy the resume path.
         """
         for record in self.workers():
-            if record.state in self._LIVE_STATES or not record.handle:
+            if (
+                record.state not in {"succeeded", "failed", "stopped"}
+                or not record.handle
+                or (record.state == "succeeded" and record.handle not in self._verified_launches)
+            ):
                 self._unreleased.discard(record.handle)
         for handle in sorted(self._unreleased):
             self._release(handle)

@@ -43,6 +43,7 @@ from graph_works_core.work.commands import (
     Transition,
 )
 from graph_works_core.work.reconcile import ReconcileContext
+from graph_works_core.workspace.dispatch import DispatchResolution
 
 from graph_works_cli import exit_codes
 
@@ -335,7 +336,40 @@ def descent_payload(result: NextResult) -> dict[str, Any] | None:
     }
 
 
-def next_blockers(result: NextResult, *, preflight: str | None = None) -> list[str]:
+def dispatch_payload(resolution: DispatchResolution) -> dict[str, Any]:
+    profile = resolution.profile
+    return {
+        "profile": {
+            "skill": profile.skill,
+            "mode": profile.mode,
+            "prompt_tail": profile.prompt_tail,
+            "agent": profile.agent,
+            "model": profile.model,
+            "reasoning_effort": profile.reasoning_effort,
+        },
+        "provenance": {
+            field: {
+                "rule": {"source": origin.rule.source, "index": origin.rule.index, "name": origin.rule.name},
+                "reason": origin.reason,
+            }
+            for field, origin in resolution.provenance.items()
+        },
+    }
+
+
+def _render_dispatch(profile: dict[str, Any], provenance: dict[str, Any]) -> None:
+    typer.echo(
+        f"  agent={profile['agent']} model={profile['model'] or 'default'} "
+        f"effort={profile['reasoning_effort'] or 'default'}"
+    )
+    for field, origin in provenance.items():
+        rule = origin["rule"]
+        typer.echo(
+            f"    {field}: {rule['source']} rule {rule['index']} ({rule['name'] or 'unnamed'}): {origin['reason']}"
+        )
+
+
+def next_blockers(result: NextResult) -> list[str]:
     """The route's blockers, plus the descent's own refusal and the dispatch
     preflight refusal when either exists.
 
@@ -344,7 +378,7 @@ def next_blockers(result: NextResult, *, preflight: str | None = None) -> list[s
     say nothing about why the walk stopped. The `--descend:` prefix is the
     marker the workflow skill matches on.
 
-    *preflight* is the same shape of thing one layer further out:
+    Configuration preflight is the same shape of thing one layer further out:
     `work-tracker-okf` declines the skill mapping by name, so `RouteResult`
     cannot know a configured skill is malformed. It is appended here for the
     same reason the descent refusal is -- a stop condition the routing table
@@ -354,14 +388,12 @@ def next_blockers(result: NextResult, *, preflight: str | None = None) -> list[s
     descent = result.descent
     if descent is not None and descent.leaf is None and descent.reason:
         blockers.append(f"--descend: {descent.reason}")
-    if preflight is not None:
-        blockers.append(preflight)
+    if result.dispatch_preflight is not None:
+        blockers.append(result.dispatch_preflight)
     return blockers
 
 
-def next_payload(
-    result: NextResult, *, bundle_root: Path, skill: str | None, preflight: str | None = None
-) -> dict[str, Any]:
+def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     """The `gw work next` contract: phase, status, blockers, on_complete,
     action, normalized, child_rollup -- plus the donor-compatible additions
     `gw next` (C6) wraps.
@@ -371,7 +403,8 @@ def next_payload(
     either key must not be handed a name or a transition for a dispatch that
     can never happen.
     """
-    dispatch = result.route.dispatch
+    resolution = result.dispatch_resolution
+    preflight = result.dispatch_preflight
     return {
         "requested_path": result.requested_path,
         "selected_path": result.selected_path,
@@ -380,12 +413,15 @@ def next_payload(
         "phase": result.state.phase,
         "effort": result.state.effort,
         "action": (
-            None if dispatch is None or preflight is not None else {"skill": skill, "reason": result.route.reason}
+            None
+            if resolution is None or preflight is not None
+            else {"skill": resolution.profile.skill, "reason": result.route.reason}
         ),
         "artifact": None if result.artifact is None else {"path": str(result.artifact.path(bundle_root))},
         "on_dispatch": None if preflight is not None else _transition(result.route.on_dispatch),
         "on_complete": _transition(result.route.on_complete),
-        "blockers": next_blockers(result, preflight=preflight),
+        "blockers": next_blockers(result),
+        "dispatch": None if resolution is None else dispatch_payload(resolution),
         "child_rollup": _rollup(result.child_rollup),
         "descent": descent_payload(result),
         "normalized": normalized_payload(result),
@@ -405,6 +441,8 @@ def render_next(result: NextResult, payload: dict[str, Any]) -> None:
         typer.echo(f"  descent: {' -> '.join(payload['descent']['path'])}")
     if payload["action"]:
         typer.echo(f"  dispatch: {payload['action']['skill']} — {payload['action']['reason']}")
+    if payload["dispatch"]:
+        _render_dispatch(payload["dispatch"]["profile"], payload["dispatch"]["provenance"])
     if payload["artifact"]:
         typer.echo(f"  artifact: {payload['artifact']['path']}")
     for blocker in payload["blockers"]:
@@ -697,7 +735,6 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         "terminal": result.terminal,
         "max_parallel": result.max_parallel,
         "slots_free": result.slots_free,
-        "permission_mode": result.permission_mode,
         "supervise_merges": result.supervise_merges,
         "live": list(result.live),
         "dispatches": [
@@ -709,7 +746,9 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                 "effort": dispatch.effort,
                 "skill": dispatch.skill,
                 "mode": dispatch.mode,
+                "agent": dispatch.agent,
                 "model": dispatch.model,
+                "provenance": dispatch_payload(result.plan.dispatch_resolutions[dispatch.key])["provenance"],
                 "reasoning_effort": dispatch.reasoning_effort,
                 "worktree": _worktree(dispatch.worktree),
                 "merge_target": dispatch.merge_target,
@@ -747,6 +786,7 @@ def render_orchestrate(payload: dict[str, Any]) -> None:
         header += " supervise_merges=True"
     typer.echo(header)
     for dispatch in payload["dispatches"]:
+        _render_dispatch(dispatch, dispatch["provenance"])
         typer.echo(
             f"  dispatch {dispatch['key']}: {dispatch['skill']} mode={dispatch['mode']} "
             f"model={dispatch['model']} worktree={dispatch['worktree']['action']}"

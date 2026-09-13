@@ -56,6 +56,8 @@ class FakeOrcaCLI:
         self.calls.append(argv)
         if len(argv) >= 2 and argv[1] == "terminal":
             return self._ok({})
+        if argv[1] == "status":
+            return self._ok({"runtime": {"capabilities": ["orchestration.worker-launch-preferences.v1"]}})
         sub = argv[2]
         handler = getattr(self, f"_cmd_{sub.replace('-', '_')}", None)
         if handler is None:
@@ -92,7 +94,14 @@ class FakeOrcaCLI:
     def _cmd_task_list(self, argv: Sequence[str]) -> OrcaResult:
         run_id = _after(argv, "--run")
         tasks = [
-            {"id": tid, "run_id": run_id, "task_title": t["task_title"], "status": t["status"], "result": None}
+            {
+                "id": tid,
+                "run_id": run_id,
+                "task_title": t["task_title"],
+                "status": t["status"],
+                "result": None,
+                "spec": t["spec"],
+            }
             for tid, t in self._tasks.items()
             if t["run_id"] == run_id
         ]
@@ -110,7 +119,8 @@ class FakeOrcaCLI:
             # The prompt IS the program both `_local` (a real subprocess) and
             # `_fake` (in-process) interpret; here it is what this fake's
             # workers step through one token per `check --wait` tick.
-            "steps": spec.split(),
+            "spec": spec,
+            "steps": spec.split("\n", 1)[1].split(),
         }
         return self._ok({"task": {"id": task_id, "run_id": run_id, "task_title": title}})
 
@@ -132,7 +142,15 @@ class FakeOrcaCLI:
         if task_id not in self._tasks:
             raise AssertionError(f"FakeOrcaCLI: worker-start against unknown task {task_id!r}")
         task = self._tasks[task_id]
+        # Synthetic receipt: field names observed in installed Orca 1.4.200.
+        selected = {
+            "agent": _after(argv, "--agent"),
+            "model": _after(argv, "--model") if "--model" in argv else None,
+            "effort": _after(argv, "--effort") if "--effort" in argv else None,
+        }
+        launch = {"requested": dict(selected), "effective": dict(selected)}
         self._workers[dispatch_id] = {
+            "launch": launch,
             "run_id": run_id,
             "task_id": task_id,
             "raw_state": "running",
@@ -144,6 +162,7 @@ class FakeOrcaCLI:
         }
         return self._ok(
             {
+                "launch": launch,
                 "dispatchId": dispatch_id,
                 "taskId": task_id,
                 "runId": run_id,
@@ -171,7 +190,14 @@ class FakeOrcaCLI:
 
     def _cmd_worker_show(self, argv: Sequence[str]) -> OrcaResult:
         handle = _after(argv, "--dispatch")
-        return self._ok({"dispatch": {"id": handle, "last_heartbeat_at": "2026-08-14T00:00:00Z"}})
+        worker = self._workers[handle]
+        return self._ok(
+            {
+                "dispatch": {"id": handle, "last_heartbeat_at": "2026-08-14T00:00:00Z"},
+                "worker": {"startOptions": {"launch": worker["launch"]}},
+                "terminal": {"handle": worker["terminal"]} if worker["terminal"] else None,
+            }
+        )
 
     def _cmd_worker_stop(self, argv: Sequence[str]) -> OrcaResult:
         handle = _after(argv, "--dispatch")
@@ -270,6 +296,7 @@ class FakeOrcaCLI:
         if kind == "done":
             worker["finished"] = True
             worker["raw_state"] = "succeeded" if arg == "succeeded" else "failed"
+            self._tasks[worker["task_id"]]["status"] = "completed" if arg == "succeeded" else "failed"
             payload |= {"outcome": worker["raw_state"], "filesModified": [], "reportPath": None}
         elif kind == "question":
             worker["blocked"] = True

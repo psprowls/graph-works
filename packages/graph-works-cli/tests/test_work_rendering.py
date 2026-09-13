@@ -11,6 +11,7 @@ import typer
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
+from graph_works_core.workspace.dispatch import resolve_dispatch
 
 
 @pytest.fixture(autouse=True)
@@ -82,6 +83,7 @@ def test_render_next_uses_path_and_work_status(capsys: pytest.CaptureFixture[str
         "phase": "design",
         "normalized": None,
         "descent": None,
+        "dispatch": None,
         "action": None,
         "artifact": None,
         "blockers": [],
@@ -172,6 +174,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "work_status": "open",
             "phase": "design",
             "descent": {"path": ["work/e", "work/a"]},
+            "dispatch": None,
             "action": {"skill": "superpowers:brainstorming", "reason": "design"},
             "artifact": {"path": "/tmp/01-design.md"},
             "blockers": ["one\ntwo"],
@@ -242,6 +245,9 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
                     "key": "work/a#execute",
                     "skill": "tdd",
                     "mode": "worktree",
+                    "agent": "codex",
+                    "reasoning_effort": None,
+                    "provenance": {},
                     "model": "m",
                     "worktree": {"action": "create"},
                 }
@@ -295,6 +301,7 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
         selected_path="work/a",
         descent=SimpleNamespace(path=("work/e", "work/a"), leaf=None, blocked_at="work/a", reason="blocked"),
         route=SimpleNamespace(blockers=("base",)),
+        dispatch_preflight=None,
     )
     assert rendering.descent_payload(result)["from"] == "work/e"
     assert rendering.next_blockers(result)[-1] == "--descend: blocked"
@@ -376,6 +383,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         effort="medium",
         skill="tdd",
         mode="worktree",
+        agent="codex",
         model="m",
         reasoning_effort="high",
         worktree=worktree,
@@ -387,10 +395,10 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         terminal=False,
         max_parallel=2,
         slots_free=1,
-        permission_mode="full",
         supervise_merges=False,
         live=("x",),
         dispatches=(dispatch,),
+        plan=SimpleNamespace(dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())}),
         advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b", mode="return"),),
         blocked=(SimpleNamespace(path="work/c", kind="dependency", reason="wait"),),
         decisions_owner_path="work/e",

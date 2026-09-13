@@ -19,6 +19,11 @@ TODAY = date(2026, 8, 23)
 
 def _workspace(tmp_path: Path, manifest: str = "version: 1\n"):
     tmp_path.mkdir(parents=True, exist_ok=True)
+    if "workflow:" in manifest:
+        manifest = manifest.replace("workflow:\n", "workflow:\n  dispatch_rules: dispatch.yaml\n")
+    else:
+        manifest += "workflow:\n  dispatch_rules: dispatch.yaml\n"
+    (tmp_path / "dispatch.yaml").write_text("pipeline:\n  rules: []\n", encoding="utf-8")
     (tmp_path / "workspace.yaml").write_text(manifest, encoding="utf-8")
     layout = layout_for(tmp_path)
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)

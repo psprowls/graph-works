@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 
 import pytest
-from orca_fakes import FakeRunner, fixture
+from orca_fakes import SyntheticEvidenceRunner as FakeRunner
+from orca_fakes import fixture
 from subagents_io.backend import Escalation, Heartbeat, UnknownWorker, WorkerDone, WorkerQuestion
 from workflow_orca import OrcaBackend
 from workflow_orca._cli import OrcaResult
@@ -131,22 +132,19 @@ def test_ack_on_an_event_with_no_delivery_id_emits_nothing():
     assert len(runner.calls) == before
 
 
-def test_a_worker_done_ack_settles_the_ledger_and_releases_the_terminal():
-    # Both are safe here and only here: a WorkerDone is what proves the
-    # worker settled. A settled key that still looks live to the next
-    # `workers()` call is what `task-update` prevents; terminals accumulate
-    # across a long Run without the release.
+def test_a_worker_done_ack_releases_after_runtime_owned_settlement():
+    # Accepted worker_done already settles the task in Orca. Ack verifies
+    # launch evidence and releases the settled resource without task-update.
     sess, runner = session(SETTLE)
     done = sess.wait(timeout_s=1.0)[0]
     sess.ack(done)
-    update = runner.calls_matching("task-update", "--id")[0]
-    assert runner.argv_after("--id", update) == "task_5ca8c19ffa5e"
-    assert runner.argv_after("--status", update) == "completed"
+    assert not runner.calls_matching("task-update")
+    assert runner.calls_matching("check", "--ack")
     release = runner.calls_matching("worker-release", "--dispatch")[0]
     assert runner.argv_after("--dispatch", release) == "ctx_817ed5bf5986"
 
 
-def test_a_failed_outcome_settles_the_task_as_failed():
+def test_a_failed_outcome_ack_preserves_runtime_settlement():
     sess, runner = session(SETTLE)
     done = sess.wait(timeout_s=1.0)[0]
     sess.ack(
@@ -160,7 +158,9 @@ def test_a_failed_outcome_settles_the_task_as_failed():
             report_path=None,
         )
     )
-    assert runner.argv_after("--status", runner.calls_matching("task-update")[0]) == "failed"
+    assert not runner.calls_matching("task-update")
+    assert runner.calls_matching("check", "--ack")
+    assert runner.calls_matching("worker-release")
 
 
 def test_a_heartbeat_ack_settles_nothing():
@@ -271,8 +271,9 @@ def test_ack_resolves_a_task_id_via_refresh_when_the_ledger_starts_cold():
         report_path=None,
     )
     sess.ack(done)
-    update = runner.calls_matching("task-update", "--id")[0]
-    assert runner.argv_after("--id", update) == "task_5ca8c19ffa5e"
+    assert runner.calls_matching("task-list")
+    assert runner.calls_matching("check", "--ack")
+    assert not runner.calls_matching("task-update")
 
 
 def test_ack_swallows_a_failed_worker_release():

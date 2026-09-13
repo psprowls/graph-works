@@ -32,6 +32,7 @@ ROUTES = [
 
 def planned(**overrides):
     fields = dict(
+        agent="claude",
         key="my-slug#execute",
         slug="my-slug",
         phase="execute",

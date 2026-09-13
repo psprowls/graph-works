@@ -210,7 +210,7 @@ from graph_works_core.workspace.layout import (
     layout_for,
 )
 from graph_works_core.workspace.manifest import CATALOG, MANIFEST_VERSION, WORKSPACE_DIR_ENV, Manifest
-from graph_works_core.workspace.pipeline import PipelineEntry, entry_for, pipeline_table
+from graph_works_core.workspace.pipeline import PipelineEntry
 
 __all__ = [
     "CATALOG",
@@ -280,14 +280,12 @@ __all__ = [
     "compute_stats",
     "drift_targets",
     "entity_matcher",
-    "entry_for",
     "filter_graph_tools",
     "find_repo_root",
     "graph_target",
     "layout_for",
     "make_llm",
     "orchestrate_plan",
-    "pipeline_table",
     "plan_ingest_brief",
     "plan_init",
     "propagation_candidates",

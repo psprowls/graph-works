@@ -47,6 +47,18 @@ class FakeRunner:
     def __call__(self, argv: Sequence[str]) -> OrcaResult:
         argv = tuple(argv)
         self.calls.append(argv)
+        if argv == ("orca", "status", "--json"):
+            # Synthetic capability response; observed capability spelling in 1.4.200.
+            return OrcaResult(
+                0,
+                json.dumps(
+                    {
+                        "ok": True,
+                        "result": {"runtime": {"capabilities": ["orchestration.worker-launch-preferences.v1"]}},
+                    }
+                ),
+                "",
+            )
         for pattern, name in self.routes:
             if _is_subsequence(pattern, argv):
                 return OrcaResult(returncode=0, stdout=fixture(name), stderr=self.stderr)
@@ -63,3 +75,34 @@ def _is_subsequence(pattern: Sequence[str], argv: Sequence[str]) -> bool:
     """Every token in `pattern`, in order, somewhere in `argv`."""
     it = iter(argv)
     return all(token in it for token in pattern)
+
+
+class SyntheticEvidenceRunner(FakeRunner):
+    """Add labeled synthetic launch/terminal proof to historical captures.
+
+    The on-disk fixtures remain verbatim captures from the older contract.
+    """
+
+    def __call__(self, argv):
+        result = super().__call__(argv)
+        body = json.loads(result.stdout)
+        payload = body.get("result", {})
+        if "task-list" in argv:
+            for task in payload.get("tasks", []):
+                frozen = {
+                    "version": 1,
+                    "dispatch_key": task["task_title"],
+                    "agent": "claude",
+                    "model": None,
+                    "reasoning_effort": None,
+                    "placement_argv": ["--worktree", "path:/synthetic"],
+                }
+                task["spec"] = "GW_LAUNCH_V1 " + json.dumps(frozen) + "\nSynthetic prompt."
+        if "worker-show" in argv and body.get("ok"):
+            selected = {"agent": "claude", "model": None, "effort": None}
+            payload.setdefault("worker", {})["startOptions"] = {
+                "launch": {"requested": dict(selected), "effective": dict(selected)}
+            }
+            # The existing worker-list running row's terminal, proven explicitly.
+            payload["terminal"] = {"handle": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53"}
+        return OrcaResult(result.returncode, json.dumps(body), result.stderr)

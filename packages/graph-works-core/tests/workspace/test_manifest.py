@@ -19,6 +19,7 @@ from graph_works_core.workspace.manifest import (
     checked_int,
     checked_str,
     defaults,
+    manifest_store,
     read,
     render_initial,
     resolve_checked_all,
@@ -54,11 +55,8 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "roles.*.region",
         "roles.*.max_tokens",
         "roles.*.max_concurrency",
-        "workflow.pipeline.*.skill",
-        "workflow.pipeline.*.mode",
-        "workflow.pipeline.*.prompt_tail",
+        "workflow.dispatch_rules",
         "workflow.auto_drive.max_parallel",
-        "workflow.auto_drive.permission_mode",
         "workflow.auto_drive.supervise_merges",
         "workspace.dir",
     ]
@@ -318,7 +316,7 @@ def test_every_wildcard_catalog_entry_is_a_role_pipeline_or_repository_entry():
     # dropped, and this test is what reports it.
     for entry in CATALOG:
         if "*" in entry.key:
-            assert entry.key.startswith(("roles.", "workflow.pipeline.", "repositories.")), entry.key
+            assert entry.key.startswith(("roles.", "repositories.")), entry.key
 
 
 def test_role_keys_expand_only_for_roles_present_in_the_file(tmp_path):
@@ -358,24 +356,11 @@ def _resolved(tmp_path, key, text):
     return resolve_key(CATALOG, key, store=store, environ={})
 
 
-def test_checked_refuses_a_value_outside_the_entrys_allowed(tmp_path):
-    resolved = _resolved(
-        tmp_path,
-        "workflow.pipeline.exploration.mode",
-        "version: 1\nworkflow:\n  pipeline:\n    exploration:\n      mode: yolo\n",
-    )
-    assert resolved.origin == "manifest"
-    with pytest.raises(WorkspaceError) as excinfo:
-        checked(resolved, source=tmp_path / "workspace.yaml")
-    assert "workflow.pipeline.exploration.mode" in str(excinfo.value)
-    assert "'yolo'" in str(excinfo.value)
-
-
 def test_checked_refuses_a_non_string_where_str_is_declared(tmp_path):
     resolved = _resolved(
         tmp_path,
-        "workflow.pipeline.single.skill",
-        "version: 1\nworkflow:\n  pipeline:\n    single:\n      skill: 3\n",
+        "workflow.dispatch_rules",
+        "version: 1\nworkflow:\n  dispatch_rules: 3\n",
     )
     with pytest.raises(WorkspaceError, match="expects a string"):
         checked(resolved, source=tmp_path / "workspace.yaml")
@@ -455,19 +440,18 @@ def test_checked_int_refuses_an_explicit_null(tmp_path):
         checked_int(layout, "workflow.auto_drive.max_parallel")
 
 
-def test_checked_str_reads_a_good_value_and_the_catalog_default(tmp_path):
-    assert checked_str(_layout(tmp_path), "workflow.auto_drive.permission_mode") == "bypassPermissions"
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    permission_mode: default\n")
-    assert checked_str(layout, "workflow.auto_drive.permission_mode") == "default"
+def test_checked_str_reads_a_good_dispatch_reference(tmp_path):
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  dispatch_rules: dispatch.yaml\n")
+    assert checked_str(layout, "workflow.dispatch_rules") == "dispatch.yaml"
 
 
 def test_checked_str_refuses_a_non_string_and_an_explicit_null(tmp_path):
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    permission_mode: 3\n")
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  dispatch_rules: 3\n")
     with pytest.raises(WorkspaceError, match="expects a string"):
-        checked_str(layout, "workflow.auto_drive.permission_mode")
-    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    permission_mode: null\n")
-    with pytest.raises(WorkspaceError, match="explicitly null"):
-        checked_str(layout, "workflow.auto_drive.permission_mode")
+        checked_str(layout, "workflow.dispatch_rules")
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  dispatch_rules: null\n")
+    with pytest.raises(WorkspaceError, match="expects a string"):
+        checked_str(layout, "workflow.dispatch_rules")
 
 
 def test_checked_bool_reads_a_good_value_and_the_catalog_default(tmp_path):
@@ -505,40 +489,13 @@ def test_resolve_checked_all_refuses_a_hand_edited_explicit_null(tmp_path):
         resolve_checked_all(layout, environ={})
 
 
-# --- the seeded relay tail --------------------------------------------------
-
-
-def test_the_initial_manifest_can_carry_a_relay_tail(tmp_path):
-    from graph_works_core.workspace.layout import layout_for
-    from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED, pipeline_table
-
-    text = render_initial(today=TODAY, relay_tail=RELAY_TAIL_SEED)
-    path = _write(tmp_path, text)
-    assert read(path).version == MANIFEST_VERSION
-    # The round trip is the point: it proves the seeded string is a value the
-    # catalog accepts and the table layers, not a string that merely got written.
-    assert pipeline_table(layout=layout_for(tmp_path))["branch"].prompt_tail == RELAY_TAIL_SEED
-
-
-def test_the_initial_manifest_omits_the_workflow_block_without_a_relay_tail(tmp_path):
+def test_initial_manifest_references_dispatch_document(tmp_path):
     text = render_initial(today=TODAY)
-    assert "workflow" not in text
     assert read(_write(tmp_path, text)).version == MANIFEST_VERSION
-
-
-@pytest.mark.parametrize("tail", ["", "   "])
-def test_a_blank_relay_tail_writes_no_key(tmp_path, tail):
-    # Same shape as the topic guard: blank is absent, not an empty string.
-    assert "workflow" not in render_initial(today=TODAY, relay_tail=tail)
-
-
-def test_a_relay_tail_needing_quoting_survives_the_hand_rendered_yaml(tmp_path):
-    from graph_works_core.workspace.layout import layout_for
-    from graph_works_core.workspace.pipeline import pipeline_table
-
-    hostile = "Auto-drive context: relay it  # not a comment; target {merge_target}"
-    _write(tmp_path, render_initial(today=TODAY, relay_tail=hostile))
-    assert pipeline_table(layout=layout_for(tmp_path))["branch"].prompt_tail == hostile
+    assert manifest_store(tmp_path / "workspace.yaml").read_explicit()["workflow"] == {
+        "dispatch_rules": "dispatch.yaml"
+    }
+    assert "prompt_tail" not in text
 
 
 def test_manifest_store_reads_the_file_it_is_handed(tmp_path):

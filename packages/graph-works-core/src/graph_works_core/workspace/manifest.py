@@ -43,7 +43,6 @@ from config_io import (
     resolve_key,
     set_key,
 )
-from subagents_io.dispatch import DISPATCH_MODES
 
 from graph_works_core.workspace.errors import WorkspaceError, WorkspaceNotFound
 from graph_works_core.workspace.layout import (
@@ -197,56 +196,18 @@ CATALOG: tuple[ConfigEntry, ...] = (
         default=None,
         description="Fan-out width for one role, read by the subagent pool's semaphore.",
     ),
-    # The dispatch table override. Keyed on `variant` alone, not
-    # `(stage, variant)`: the nine variants partition cleanly across the four
-    # stages, so variant is already a total key -- and `expand_wildcards`
-    # supports exactly one `*` segment, so a two-wildcard shape would not
-    # resolve at all.
-    #
-    # Every default is `None`, for `roles.*`'s reason: an unset field must stay
-    # absent rather than shadow the packaged value that `pipeline.py` layers
-    # under it.
     ConfigEntry(
-        key="workflow.pipeline.*.skill",
+        key="workflow.dispatch_rules",
         type="str",
         default=None,
-        description="Stage skill for one dispatch variant, overriding the packaged table.",
+        description="Shared dispatch-rules document, resolved relative to the workspace root.",
     ),
-    ConfigEntry(
-        key="workflow.pipeline.*.mode",
-        type="str",
-        default=None,
-        description="Whether a worker for this variant expects a human in the room.",
-        allowed=tuple(sorted(DISPATCH_MODES)),
-    ),
-    ConfigEntry(
-        key="workflow.pipeline.*.prompt_tail",
-        type="str",
-        default=None,
-        description=(
-            "Extra prompt line for this variant. The one place a vendor command may appear: "
-            "core assembles only vendor-neutral lines. "
-            "`{slug}`, `{key}`, `{phase}`, `{workspace}` and `{merge_target}` are substituted."
-        ),
-    ),
-    # The auto-drive shell's two scalars. Concrete rather than wildcard: the
-    # `models` / `overrides` rules block underneath is a nested list-of-mappings
-    # that no `ConfigEntry` type can express, so `run_orchestrate` reads it raw
-    # and hands it to `subagents_io.routing.validate_rules`. These two are the
-    # part that *is* expressible, and expressing them is what keeps
-    # `gw config set workflow.auto_drive.max_parallel 3` on config-io's
-    # validated, rollback-safe path.
+    # Operational controls are independent of dispatch profiles.
     ConfigEntry(
         key="workflow.auto_drive.max_parallel",
         type="int",
         default=2,
         description="How many workers auto-drive may have in flight at once.",
-    ),
-    ConfigEntry(
-        key="workflow.auto_drive.permission_mode",
-        type="str",
-        default="bypassPermissions",
-        description="Permission mode a dispatched worker session runs under.",
     ),
     ConfigEntry(
         key="workflow.auto_drive.supervise_merges",
@@ -372,6 +333,13 @@ def workspace_store(layout: WorkspaceLayout) -> LayeredYamlStore:
     return manifest_store(layout.manifest_path)
 
 
+def dispatch_store(path: str | Path) -> LayeredYamlStore:
+    """A dispatch document and its sibling machine-local overlay."""
+    shared_path = Path(path)
+    local_path = shared_path.with_name(f"{shared_path.stem}.local{shared_path.suffix}")
+    return LayeredYamlStore(base=PlainYamlStore(shared_path), overlay=PlainYamlStore(local_path))
+
+
 def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manifest:
     """Read and resolve *path*.
 
@@ -412,8 +380,7 @@ def read(path: str | Path, *, environ: Mapping[str, str] | None = None) -> Manif
 def checked(resolved: Resolved, *, source: Path) -> object:
     """A manifest-stored value that matches its own catalog entry, or a refusal.
 
-    `_routing_rules` in `commands/orchestrate.py` states the policy this
-    generalizes: a hand-edited manifest bypasses config-io's set-time checks,
+    A hand-edited manifest bypasses config-io's set-time checks,
     so a reader that trusts a stored value trusts a file nothing validated.
 
     **Only a stored origin is checked** — `STORED_ORIGINS`, which is
@@ -550,7 +517,6 @@ def render_initial(
     *,
     today: date,
     topic: str | None = None,
-    relay_tail: str | None = None,
     repositories: Mapping[str, str] | None = None,
     ignore: Sequence[str] = (),
 ) -> str:
@@ -569,27 +535,12 @@ def render_initial(
     default, so they are always rendered — an empty `repositories: {}` when
     there is no repo root, same as `_repositories_text` used to write.
 
-    **`relay_tail` is the exception among the *override* keys, and the
-    distinction is the reason it is safe.** `workflow.pipeline.branch.prompt_tail`
-    has **no packaged default**
-    (`pipeline.PACKAGED_PIPELINE["branch"].prompt_tail` is `None`), so an unset
-    key there is a *hole* rather than an inherited default — a `relay` worker
-    dispatched without it falls into an interactive menu with nobody watching.
-    The layout reasoning above applies to keys that have a real default to
-    inherit; this one does not. Apply that test, not the rule, to the next key.
+    The shared dispatch document is referenced explicitly; init owns its seed.
     """
     lines = [f"version: {MANIFEST_VERSION}", f"initialized_at: {json.dumps(today.isoformat())}"]
     if topic is not None and topic.strip():
         lines.append(f"topic: {json.dumps(topic)}")
-    if relay_tail is not None and relay_tail.strip():
-        lines.extend(
-            [
-                "workflow:",
-                "  pipeline:",
-                "    branch:",
-                f"      prompt_tail: {json.dumps(relay_tail)}",
-            ]
-        )
+    lines.extend(["workflow:", "  dispatch_rules: dispatch.yaml"])
     if repositories:
         lines.append("repositories:")
         for name, path in repositories.items():
@@ -618,6 +569,7 @@ __all__ = [
     "checked_int",
     "checked_str",
     "defaults",
+    "dispatch_store",
     "read",
     "render_initial",
     "resolve_checked_all",

@@ -16,9 +16,9 @@ from pathlib import Path
 
 from config_io import PROJECTION_FILENAME, write_projection
 from graph_works_core.agent_substrate import roles
-from graph_works_core.orchestrate import commands as orchestrate_commands
-from graph_works_core.workspace import manifest, pipeline
+from graph_works_core.workspace import manifest
 from graph_works_core.workspace.config import load_workspace_config
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.layout import layout_for
 
 MANIFEST = """\
@@ -43,11 +43,9 @@ roles:
   librarian:
     model_id: some-model
 workflow:
-  pipeline:
-    diagnosis:
-      skill: gw:custom-diagnosis
+  dispatch_rules: dispatch.yaml
   auto_drive:
-    permission_mode: bypassPermissions
+    max_parallel: 3
 quirk: yes
 """
 
@@ -59,6 +57,9 @@ def _workspace(tmp_path: Path):
     layout.manifest_path.write_text(MANIFEST, encoding="utf-8", newline="")
     (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
     layout.cache_dir.mkdir(parents=True, exist_ok=True)
+    (root / "dispatch.yaml").write_text(
+        "pipeline:\n  rules:\n  - match: {variant: diagnosis}\n    skill: gw:custom-diagnosis\n", encoding="utf-8"
+    )
     return layout
 
 
@@ -93,8 +94,8 @@ def test_the_role_pipeline_and_routing_readers_all_see_their_block(tmp_path: Pat
     layout = _workspace(tmp_path)
 
     assert roles.workspace_roles(layout)["librarian"]["model_id"] == "some-model"
-    assert pipeline.pipeline_table(layout=layout)["diagnosis"].skill == "gw:custom-diagnosis"
-    assert orchestrate_commands._routing_rules(layout)["permission_mode"] == "bypassPermissions"
+    assert load_dispatch_config(layout).rules[0].fields["skill"] == "gw:custom-diagnosis"
+    assert manifest.resolve_checked_key(layout, "workflow.auto_drive.max_parallel", environ={}).value == 3
 
 
 def test_the_projection_agrees_with_the_store(tmp_path: Path) -> None:

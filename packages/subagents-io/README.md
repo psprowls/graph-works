@@ -125,7 +125,14 @@ The field names spell work-item concepts â€” `slug`, `phase`, `kind`, `effort` â
 and that is deliberate. They are inert data. This package stores a string
 called `kind`; it never decides what a kind is.
 
-`routing.py` decides which model runs a dispatch:
+`PlannedDispatch.agent`, `model`, and `reasoning_effort` are already resolved
+launch preferences. `effort` separately carries the work-item estimate. Backends
+consume these values; this package does not choose an agent or permissions.
+
+`routing.py` remains available for generic callers using its existing
+first-match model-routing contract. Graph Works work-item dispatch instead uses
+core's ordered profile resolver; these two APIs have distinct semantics:
+
 
 ```python
 from subagents_io import resolve_model, validate_rules

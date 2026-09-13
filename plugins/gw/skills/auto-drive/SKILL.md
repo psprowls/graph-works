@@ -7,9 +7,9 @@ description: Use when driving a work item's full pipeline unattended via Orca-su
 
 Drive a work item's pipeline end-to-end by dispatching each ready stage as a
 supervised Orca worker and looping until the item is terminal. The CLI owns
-every decision (`gw work orchestrate` computes readiness, worktree, model,
+every decision (`gw work orchestrate` computes readiness, worktree, agent, model,
 and the full worker prompt) — this skill only relays: it never picks a
-worktree, a model, or a stage on its own.
+worktree, an agent, a model, or a stage on its own.
 
 **Announce at start:** "I'm using the auto-drive skill to run the coordinator
 loop for `<work-path>`."
@@ -92,23 +92,45 @@ crash/compaction resume the same code path as a normal cycle.
    `resource{…}`. This is the task→dispatch join. Task records carry **no**
    dispatch-id field of their own, so a per-task `worker-show --dispatch
    <id>` loop cannot even be constructed — this call replaces that loop.
-3. For each task not already marked `completed`/`failed` by a prior
-   `task-update` (§4.1), join it to `workers[]` by `taskId`. A task can have
-   several worker rows (retries via `--retry-of`) — use only the **most
-   recent** one.
-   - No worker row at all → **never dispatched**: not live, not dead. This
-     is an intentional skip record (§4.1's Skip branch) and must never
-     enter the failure flow — there is no dispatch id to check for it, so
-     don't try one.
-   - Otherwise classify on `workerState`: `ready`, `running`, or
-     **`succeeded`** (a settled worker whose own `task-update --completed`
-     hasn't landed yet; omitting it falls through both the live and dead
-     branches) → **live**. `failed`, `stopped`, or the dispatch is
-     unreachable (vanished terminal) → **failure flow** (§4.2).
+3. Save those full responses and run the shipped restart classifier:
+
+   ```
+   python3 references/launch-worker.py classify-restart \
+     --tasks <task-list-json> --workers <worker-list-json>
+   ```
+
+   It joins by `taskId` and uses the last worker row for retries. Its actions
+   are durable-state decisions, not guesses from terminal presence:
+   - `live`: `workerState` is `ready` or `running` and dispatch status is not
+     `outcome_unknown`.
+   - `settled`: `workerState` is `succeeded`, the full untruncated task spec
+     has a valid frozen envelope whose `dispatch_key` matches `task_title`,
+     and `worker-show --dispatch <dispatch_id> --json` supplies matching
+     `result.worker.startOptions.launch.requested` and `.effective` proof.
+     The classifier performs this read for each succeeded worker, comparing
+     the agent and every explicit model/effort choice against the envelope.
+   - `deliberate-skip`: task status is `blocked` and either no worker exists or
+     the latest attempt is positively terminal `failed`/`stopped`. The Skip
+     branch in §4.1 writes the durable marker after that terminal attempt.
+   - `recovery-inspection`: every other no-worker task, including a crash after
+     task reservation but before start; unmarked `failed`/`stopped` and unknown
+     worker states; `outcome_unknown` in either worker or dispatch state;
+     and succeeded workers with missing, malformed, truncated or mismatched
+     envelopes/receipts, or an unsuccessful worker-show read.
+     Live and unknown evidence takes precedence over a task's `blocked` status,
+     so a stale/partial skip update cannot hide an active or ambiguous attempt.
+
+   Recovery inspection retains and prints the known task and dispatch IDs.
+   Read the full task spec and the failed/ambiguous start recovery evidence.
+   With no worker row there may be no dispatch ID to inspect; that absence is
+   unresolved reservation state, never proof of a skip or authority to start a
+   replacement. Follow Orca's recovery verdict, or stop when no verdict can
+   establish whether resources were allocated. A missing terminal is normal
+   and never changes this classification.
 4. Build the `--live` key list for §2.2 from every task classified live.
-   `worker-show --dispatch <dispatch_id> --json` is now a targeted
-   follow-up for one dispatch's `result.dispatch.last_heartbeat_at` (used by
-   §3 step 4's probe), not an N-call sweep over every task.
+   The classifier reads worker-show for successful settlement proof. Other
+   worker-show calls are targeted liveness/recovery follow-ups, including
+   `result.dispatch.lastHeartbeatAt` used by §3 step 5's probe.
 
 ### 2.2 Plan
 
@@ -116,11 +138,13 @@ crash/compaction resume the same code path as a normal cycle.
 `GRAPH_WORKS_DIR`; omit `--live` on the very first plan call of a fresh
 Run — there's nothing live yet). The result:
 
-- `terminal` (bool), `max_parallel` / `slots_free` (ints), `permission_mode`
-  (str, default `bypassPermissions`), `live` (the echoed input list).
+- `terminal` (bool), `max_parallel` / `slots_free` (ints), and `live` (the
+  echoed input list).
 - `dispatches[]` — each entry: `key` (`<work-path>#<phase>`), `path`, `phase`,
   `kind`, `effort`, `skill`, `mode` (`autonomous` | `attend` | `relay`),
-  `model` (`null` = inherit, omit `--model`), `reasoning_effort`,
+  `agent`, `model` (`null` = selected agent default, omit `--model`),
+  `reasoning_effort`, `provenance` (the winning origin and reason for every
+  profile field),
   `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main`,
   `path`, `branch`, `base_branch`, `exists`), `merge_target`, `prompt`.
 - `advances[]` — each: `path`, `reason`, `worktree`/`branch` (the epic's
@@ -152,8 +176,9 @@ Run — there's nothing live yet). The result:
 
 ### 2.3 Terminal?
 
-`terminal: true` → go to Wrap-up (§5) and stop looping. Nothing else in this
-cycle runs.
+`terminal: true` → go to Wrap-up (§5), including its fresh launch-proof gate,
+then stop looping. A terminal plan does not establish successful launch proof.
+Nothing else in this cycle runs.
 
 ### 2.4 Advances
 
@@ -189,8 +214,10 @@ you know is out of date).
   something outside this loop, so report them once and don't wait on them.
   `relay-untailed` means a relay-mode variant has no `prompt_tail`, so a
   dispatched worker would drop into an interactive menu unattended — the fix
-  is `workflow.pipeline.<variant>.prompt_tail` in the manifest, and the
-  reason string names the variant. `worktree-unsupported` means the plan
+  is a matching rule with `prompt_tail` in the shared dispatch document named
+  by `workflow.dispatch_rules`, or its local sibling (`dispatch.local.yaml`
+  for the default path), followed by `gw config sync`. The reason string names
+  the variant. `worktree-unsupported` means the plan
   needs a worktree provisioned and the target backend can't; `gw work
   orchestrate` passes `provisions_worktrees=True` today and exposes no flag
   to change it, so this kind should not reach this skill through the CLI —
@@ -328,13 +355,13 @@ orca orchestration check --run <run_id> --wait \
   real response. Don't merge streams (`2>&1`) when capturing this call; if a
   merge is unavoidable, filter with `jq "select(._keepalive|not)"`. The
   `_heartbeat` alias inside this keepalive stream is unrelated to worker
-  heartbeat messages and to `last_heartbeat_at` (§3 step 3) — three
+  heartbeat messages and to `lastHeartbeatAt` (§3 step 5) — three
   unrelated things share the name.
 - **On timeout with nothing delivered:**
   `orca orchestration worker-show --dispatch <id> --json` for every
   still-live dispatch. Any `failed`/`stopped`/unreachable → failure flow
   (§4.2), then restart the cycle at §2.1. Still `ready`/`running` → before
-  looping back into another `--wait`, run §3 step 3's full probe on each
+  looping back into another `--wait`, run §3 step 5's full probe on each
   still-live dispatch — the same ordered probe as at initial dispatch, with
   the same heartbeat veto decisive: a dispatch that has *ever* heartbeat is
   never nudged here either, no matter how long it has looked idle. This is
@@ -347,21 +374,52 @@ orca orchestration check --run <run_id> --wait \
 
 ## 3. Dispatch mechanics
 
-For each planned-but-undispatched entry from §2.6:
+For each planned-but-undispatched entry from §2.6, first print its selected
+agent, model, and reasoning effort (`default` for a null model or effort), plus
+the corresponding winning entries from `provenance`. Permissions come from the
+selected agent's existing settings; dispatch rules do not select or promise a
+permission mode.
 
-1. ```
-   orca orchestration task-create --run <run_id> \
-     --spec "<dispatches[].prompt, verbatim>" \
-     --task-title "<key>" --display-name "<work-path> · <phase>" --json
+The executable recipe for this section is
+`references/launch-worker.py`. It transports a resolved dispatch and never
+matches or resolves rules. Treat model IDs and effort strings as opaque.
+
+1. Build the placement argv list exactly once from the worktree mapping below
+   and save it as a JSON list. Save the complete `dispatches[]` entry as JSON,
+   then encode the immutable task spec:
+
    ```
-   Capture `task_id` from the result. The `prompt` is exactly what
-   `gw work orchestrate` assembled — never edit, wrap, or re-word it; it
-   already contains the `Dispatch key:` line and the worker's own
-   `Send worker_done` instruction.
-2. `orca orchestration worker-start --task <task_id> --agent claude --run <run_id> --json` plus:
-   - `model` non-null → `--model <model>`; `reasoning_effort` non-null →
-     `--effort <reasoning_effort>` (only when `model` is also set —
-     `--effort` requires `--model` on this CLI).
+   python3 references/launch-worker.py encode \
+     --dispatch <dispatch-json> --placement <placement-json> > <spec-file>
+   ```
+
+   This writes `GW_LAUNCH_V1 ` plus compact version-1 JSON on the first line,
+   then the unchanged prompt. The envelope freezes the dispatch key, agent,
+   model, reasoning effort, and exact placement argv before any start. Effort
+   with a null model is refused; do not repair it locally.
+
+2. ```
+   python3 references/launch-worker.py create --spec <spec-file> \
+     --run <run_id> --task-title "<key>" \
+     --display-name "<work-path> · <phase>"
+   ```
+   Capture `task_id` from the forwarded JSON. The helper passes the spec as one
+   exact argument, including trailing newlines. Never use `task-list --brief`;
+   truncation destroys the durable launch proof.
+3. Launch from that same spec instead of rebuilding argv:
+
+   ```
+   python3 references/launch-worker.py launch --spec <spec-file> \
+     --task <task_id> --dispatch-key <key> --run <run_id>
+   ```
+
+   The recipe passes the planned agent, optional model/effort, and each
+   placement value as a distinct argv element. It checks the returned
+   `launch.requested` and `launch.effective` blocks against every explicit
+   choice (`reasoning_effort` maps to receipt `effort`). Missing or mismatched
+   proof enters recovery and never authorizes another worker.
+
+   Build placement argv as follows:
    - Worktree action `reuse` → `--worktree path:<worktree.path>` only — no
      creation flags (`--name`/`--repo`/`--base-branch`), which the CLI
      rejects for an existing worktree.
@@ -387,20 +445,16 @@ For each planned-but-undispatched entry from §2.6:
      unconditionally, for every `--name`, on every creation — and
      `worker-start`, `orca worktree create` and `orca worktree set` expose
      no branch control at all. A slash-containing `worktree.branch` is
-     therefore never the branch Orca creates. Do not compare the two; step 3
+     therefore never the branch Orca creates. Do not compare the two; step 4
      below defines what is verified instead.
-   - The plan's top-level `permission_mode` (default `bypassPermissions`) is
-     the intended permission mode for the launched agent — state it as
-     context, not a flag; `worker-start` has no `--permission-mode` flag
-     today.
    - A non-zero exit, or a result reporting `failed`/`outcome_unknown`, is a
      failed dispatch: go straight to the failure flow (§4.2) — surface the
      JSON's `stage`/`failedStage`/`recovery` hints to the user, don't
      silently retry.
-3. **Read back where the dispatch actually landed.** Do this *before* the
+4. **Read back where the dispatch actually landed.** Do this *before* the
    submission probe: nudging a worker that is sitting in the wrong worktree
    only makes it produce work nobody will look for. A failed placement never
-   reaches step 4.
+   reaches step 5.
 
    **Where the truth comes from** — prefer the response already in hand:
 
@@ -409,8 +463,8 @@ For each planned-but-undispatched entry from §2.6:
       When that entry is present the path is the segment after `::`, and
       **no extra Orca call is made.**
    2. Otherwise `orca orchestration worker-show --dispatch <dispatch_id> --json`
-      → `result.worker.worktree_id` (the full `<repoId>::<path>` value).
-   3. Then `orca worktree show --worktree id:<worktree_id> --json` for the
+      → `result.worker.worktreeId` (the full `<repoId>::<path>` value).
+   3. Then `orca worktree show --worktree id:<worktreeId> --json` for the
       fields the assertion needs: `path`, `branch`, `displayName`,
       `parentWorktreeId`, `isMainWorktree`.
 
@@ -464,7 +518,7 @@ For each planned-but-undispatched entry from §2.6:
 
    then go directly to the failure question — the same three options
    (*retry* / *skip this item* / *stop the run*) every other dead-or-wrong
-   dispatch gets — and **skip step 4's submission probe entirely** for this
+   dispatch gets — and **skip step 5's submission probe entirely** for this
    dispatch. This is a halt, not a raise: it routes into an existing
    human-decision path, so a false positive costs one question, not a lost
    run.
@@ -483,8 +537,15 @@ For each planned-but-undispatched entry from §2.6:
 
    Halting here would block legitimate dispatches over a cosmetic surprise.
 
-4. **Confirm the prompt was actually submitted.** `worker-start` exposes no
-   flag that guarantees submission, so this probe runs on every dispatch.
+5. **Confirm the prompt was actually submitted when a terminal exists.** A
+   terminal is optional. Worker-read/show, lifecycle state, and orchestration
+   messages are the normal progress path for every agent. If worker-show has
+   no real terminal object or terminal handle, do not run terminal commands
+   and do not infer failure.
+
+   When a real terminal handle exists, `worker-start` exposes no
+   flag that guarantees submission, so this probe runs on every dispatch that
+   has a proven terminal handle.
 
    A zero exit means the terminal was created and the prompt was typed into
    it, **not** that it was submitted. `worker-start` leaves the prompt
@@ -502,7 +563,7 @@ For each planned-but-undispatched entry from §2.6:
    Run this ordered probe. The first decisive answer wins — stop at it:
 
    1. `orca orchestration worker-show --dispatch <dispatch_id> --json`
-      → `result.dispatch.last_heartbeat_at` non-null ⇒ **submitted. Never
+      → `result.dispatch.lastHeartbeatAt` non-null ⇒ **submitted. Never
       nudge.** This is a hard veto: a worker that never submitted cannot
       have heartbeat, so any heartbeat, however late, proves submission —
       regardless of how idle the terminal looks.
@@ -541,15 +602,15 @@ For each planned-but-undispatched entry from §2.6:
    5. Re-run step 2. Non-empty transcript ⇒ recovered, continue normally.
       Two failed nudges → failure flow (§4.2), same three options.
 
-5. **Attend dispatches only** (`mode: attend` — the design stage), after a
+6. **Attend dispatches only** (`mode: attend` — the design stage), after a
    successful start:
-   - `orca worktree set --worktree <same worktree selector used above> --workspace-status in-review --comment "auto-drive: <work-path> design stage waiting for you — join <agent_terminal_handle>"`.
-   - Print the same join instruction directly in this session — the human
-     is already here, no orca call needed for that half.
+   - Set the worktree to `in-review`. Include a join instruction only when a
+     real terminal handle exists; otherwise report the dispatch ID and use
+     worker-read/show plus orchestration messages.
    - Remember this dispatch's key as attend-pending for this Run, so its
      `worker_done` (§4.1) triggers the flip-back to `in-progress`.
    - This is the one piece of session-local state in this skill — if the session crashes before `worker_done` arrives, flip the worktree back manually with `orca worktree set --worktree <selector> --workspace-status in-progress` if it looks stuck at `in-review` after a resume.
-6. `orca orchestration task-update --id <task_id> --status dispatched --run <run_id>`
+7. `orca orchestration task-update --id <task_id> --status dispatched --run <run_id>`
    so the next cycle's `task-list` (§2.1) reflects it as an existing task.
    (Valid `--status` values are `pending, ready, dispatched, completed,
    failed, blocked` — `in_progress` is not one of them; `dispatched` is the
@@ -562,9 +623,14 @@ before acking.
 
 ### 4.1 `worker_done`
 
-- **`outcome: succeeded`**:
-  `orca orchestration task-update --id <task_id> --status completed --run <run_id>`
-  → `orca orchestration worker-release --dispatch <dispatch_id>` (no `--run`
+- **`outcome: succeeded`**: refresh the full task-list and worker-list and run
+  §2.1's classifier before acknowledging the delivery. Require its `settled`
+  result for this exact task/dispatch pair: this validates the full frozen
+  envelope and key plus durable requested/effective proof from worker-show.
+  Missing or mismatched proof enters recovery with both IDs; do not ack or
+  release it. A valid `worker_done` already settles its Task and Dispatch;
+  never issue `task-update completed`. Then run
+  `orca orchestration worker-release --dispatch <dispatch_id>` (no `--run`
   flag — `worker-release` takes only `--dispatch` and `--retry-request`)
   → if this key was attend-pending (§3), flip the card back:
   `orca worktree set --worktree <selector> --workspace-status in-progress`
@@ -582,13 +648,34 @@ both identically, so it's specified once here, not duplicated.
 One `AskUserQuestion` with exactly three options — *retry* / *skip this
 item* / *stop the run*:
 
-- **Retry**: `orca orchestration worker-start --task <task_id> --retry-of <dispatch_id> --run <run_id> --json`,
-  repeating the *same* agent/model/effort/worktree placement as the original
-  dispatch — `--retry-of` links the replacement attempt but does not
-  inherit placement; you must repeat it explicitly.
-- **Skip**: do nothing. The task stays in the Run at its current status, so
-  §2.6's dispatch diff never re-proposes that key this run — the task
-  mirror itself is the skip record, no session memory involved.
+- **Retry**: retry only when Orca's failure response and recovery inspection
+  explicitly authorize it. Read the existing task from full
+  `task-list --run <run_id> --json`, save its untruncated `spec`, and validate
+  the envelope. Missing, malformed, truncated, or wrong-key state blocks
+  recovery. Never consult edited dispatch configuration or a fresh plan for
+  this task. Preserve the original requested placement and observed allocated
+  resource evidence; follow Orca's recovery verdict so an allocated worktree
+  is reused rather than duplicated. Then run:
+
+  ```
+  python3 references/launch-worker.py launch --spec <saved-task-spec> \
+    --task <task_id> --dispatch-key <task-title> --run <run_id> \
+    --retry-of <dispatch_id> \
+    --recovery-placement <recovery-approved-placement-json>
+  ```
+
+  The frozen envelope retains the originally requested placement; the explicit
+  recovery placement is the argv Orca authorized after accounting for observed
+  allocated resources (for example, `path:<allocated path>` instead of a second
+  `new-child`). The recipe repeats the frozen agent/model/effort and verifies
+  the new requested/effective receipt. `--retry-of` alone does not inherit
+  those values. Timeout, absent output, missing terminal, or ambiguous start never
+  authorizes retry; preserve task/dispatch identities and follow recovery.
+  An explicit reroute is a new deliberate dispatch decision and task identity.
+- **Skip**: `orca orchestration task-update --id <task_id> --status blocked
+  --run <run_id>`. The durable `blocked` status distinguishes this deliberate
+  choice from a task reserved before a crash but never started. The task stays
+  in the Run, so §2.6 never re-proposes the key.
 - **Stop the run**: exit the loop. Report run state (what's done, what's
   live, what's blocked). For each still-live dispatch, ask (plain text) if
   the user wants `orca orchestration worker-stop --dispatch <id>`,
@@ -657,9 +744,13 @@ resumes identically to one that's been running for hours.
 
 **Wrap-up** (§2.3 reported `terminal: true`):
 
-1. `orca orchestration worker-release --dispatch <id>` (no `--run` flag) for
-   any dispatch still holding a terminal that settled successfully but
-   wasn't released yet.
+1. Refresh the full task-list and worker-list and run §2.1's classifier again,
+   even when the plan reports `terminal: true`. Only dispatches classified `settled` by this fresh proof check may be released:
+   `orca orchestration worker-release --dispatch <id>` (no `--run` flag) for
+   each verified successful dispatch that still holds an unreleased terminal.
+   For `recovery-inspection`, retain and print its task/dispatch IDs, inspect
+   recovery, and stop without releasing it or reporting verified completion.
+   A missing terminal never substitutes for launch proof.
 2. Print a run summary: items resolved, branches merged back (from each
    settled dispatch's `merge_target`), anything skipped (§4.1's skip
    choices this run), anything left in `blocked[]`.

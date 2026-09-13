@@ -104,6 +104,7 @@ PROMPT = "Run /gw:workflow my-slug.\nDispatch key: my-slug#execute\nSend worker_
 
 def planned(**overrides):
     fields = dict(
+        agent="claude",
         key="gw-execute-my-slug-2f1a9c3d",
         slug="my-slug",
         phase="execute",
@@ -190,7 +191,7 @@ def test_the_prompt_reaches_spec_unedited():
     sess, runner = session()
     sess.launch(planned())
     create = runner.calls_matching("task-create")[0]
-    assert runner.argv_after("--spec", create) == PROMPT
+    assert runner.argv_after("--spec", create).split("\n", 1)[1] == PROMPT
     assert runner.argv_after("--task-title", create) == "gw-execute-my-slug-2f1a9c3d"
     assert runner.argv_after("--display-name", create) == "gw-execute-my-slug-2f1a9c3d"
 
@@ -215,14 +216,11 @@ def test_model_alone_emits_model_and_no_effort():
     assert "--effort" not in start
 
 
-def test_effort_without_model_emits_neither():
-    # `--effort requires --model` on this CLI, so an effort with no model is
-    # dropped rather than passed and rejected.
+def test_effort_without_model_is_refused_before_task_create():
     sess, runner = session()
-    sess.launch(planned(model=None, reasoning_effort="high"))
-    start = runner.calls_matching("worker-start")[0]
-    assert "--effort" not in start
-    assert "--model" not in start
+    with pytest.raises(BackendError, match="Set a model or clear reasoning_effort"):
+        sess.launch(planned(model=None, reasoning_effort="high"))
+    assert not runner.calls_matching("task-create")
 
 
 def test_model_and_effort_together_emit_both():

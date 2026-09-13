@@ -131,18 +131,10 @@ def test_reconcile_context_rejects_a_named_non_repo(workspace: Path, tmp_path: P
 
 
 def override_skill(workspace: Path, value: str) -> None:
-    """Hand-edit `workflow.pipeline.exploration.skill` into the manifest.
-
-    Written as text rather than through `gw config set`, because the case under
-    test *is* the hand-edited manifest that bypasses config-io's set-time
-    checks. Bootstrap already emits a `workflow: / pipeline: / branch:` block,
-    so this inserts a sibling variant rather than a second `workflow:` key.
-    """
-    path = workspace / "workspace.yaml"
-    text = path.read_text(encoding="utf-8")
-    assert "    branch:" in text, text
+    """Hand-edit the shared dispatch document, bypassing write-time validation."""
+    path = workspace / "dispatch.yaml"
     path.write_text(
-        text.replace("    branch:", f"    exploration:\n      skill: {json.dumps(value)}\n    branch:"),
+        f"pipeline:\n  rules:\n  - match: {{variant: exploration}}\n    skill: {json.dumps(value)}\n",
         encoding="utf-8",
     )
 
@@ -155,8 +147,8 @@ def test_next_reports_a_malformed_stage_skill_as_a_blocker(workspace: Path) -> N
     assert result.exit_code == exit_codes.GENERIC
     assert payload["action"] is None
     assert payload["on_dispatch"] is None
-    assert any("workflow.pipeline.exploration.skill" in blocker for blocker in payload["blockers"])
-    assert any("workspace.yaml" in blocker for blocker in payload["blockers"])
+    assert any("rule 0.skill" in blocker for blocker in payload["blockers"])
+    assert any("dispatch.yaml" in blocker for blocker in payload["blockers"])
 
 
 def test_next_reports_an_empty_stage_skill_as_a_blocker(workspace: Path) -> None:
@@ -196,7 +188,7 @@ def test_orchestrate_hard_fails_on_a_malformed_stage_skill(workspace: Path) -> N
     override_skill(workspace, "a:b:c")
     result = runner.invoke(app, ["work", "orchestrate", path, "--workspace", str(workspace), "--json"])
     assert result.exit_code == exit_codes.SCHEMA_MISMATCH
-    assert "workflow.pipeline.exploration.skill" in result.stderr
+    assert "rule 0.skill" in result.stderr
 
 
 def test_ingest_queue_lists_a_terminal_item_with_an_uningested_design(workspace: Path) -> None:
@@ -235,3 +227,34 @@ def test_ingest_queue_renders_an_empty_queue_in_human_mode(workspace: Path) -> N
 
     assert result.exit_code == 0, result.stdout
     assert "0 design spec(s) pending ingest" in result.stdout
+
+
+def test_next_and_orchestrate_json_share_profile_and_provenance(workspace: Path):
+    from okf_io import load
+
+    path = file_item(workspace, "Dispatch equivalence")
+    page = workspace / "okf" / f"{path}.md"
+    document = load(page)
+    document.set("affects", ["packages/a"])
+    page.write_text(document.serialize(), encoding="utf-8")
+    (workspace / "dispatch.yaml").write_text(
+        "pipeline:\n  rules:\n  - match: {}\n    model: original\n    reasoning_effort: high\n", encoding="utf-8"
+    )
+    (workspace / "dispatch.local.yaml").write_text(
+        "pipeline:\n  rules:\n  - name: local-agent\n    match: {}\n    agent: codex\n", encoding="utf-8"
+    )
+    next_response = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace), "--json"])
+    plan_response = runner.invoke(app, ["work", "orchestrate", path, "--workspace", str(workspace), "--json"])
+    assert next_response.exit_code == plan_response.exit_code == 0
+    payload = json.loads(next_response.stdout)
+    plan_payload = json.loads(plan_response.stdout)
+    planned = plan_payload["dispatches"][0]
+    assert payload["action"]["skill"] == planned["skill"]
+    for field in ("agent", "model", "reasoning_effort", "skill", "mode"):
+        assert payload["dispatch"]["profile"][field] == planned[field]
+    assert payload["dispatch"]["provenance"] == planned["provenance"]
+    assert payload["dispatch"]["provenance"]["model"]["reason"] == "agent-change"
+    assert "permission_mode" not in plan_payload
+    human = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace)])
+    assert "agent=codex model=default effort=default" in human.stdout
+    assert "local-agent" in human.stdout and "agent-change" in human.stdout

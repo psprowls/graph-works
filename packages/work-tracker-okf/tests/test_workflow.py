@@ -469,3 +469,13 @@ def test_an_epic_at_finish_offers_the_same_return() -> None:
 def test_no_stage_before_finish_offers_a_return() -> None:
     for phase in ("design", "plan", "execute"):
         assert route(_state(phase=phase, work_status="in-progress", effort="small")).on_return is None
+
+
+def test_blast_radius_is_routing_neutral_and_populated_from_item():
+    from work_helpers import make_item
+    from work_tracker_okf.workflow import state_for
+
+    item = make_item("feature-a", blast_radius="package")
+    state = state_for([item], item.path)
+    assert state.blast_radius == "package"
+    assert route(_state(blast_radius="system")) == route(_state(blast_radius=None))

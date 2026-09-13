@@ -77,7 +77,7 @@ add_local_manifest() {
 # Writes <workspace>/.gw/cache/config.json in the shape config_io.write_projection
 # emits (json.dumps(..., indent=2)). "-" records a null hash. Omitting the
 # fourth argument writes the two-key _meta a non-layered store produces — the
-# shape an older projection has, which the hook must not read as staleness.
+# legacy workspace metadata; dispatch input records below are always complete.
 write_projection() {
     local ws="$1" sha="$2" bundle="${3:-}" overlay="${4:-}"
     mkdir -p "$ws/.gw/cache"
@@ -103,6 +103,23 @@ write_projection() {
         else
             printf '\n'
         fi
+        printf ',\n    "dispatch_inputs": {\n'
+        for name in manifest manifest_local shared local; do
+            case "$name" in
+                manifest) input_path="$ws/workspace.yaml"; input_sha="$sha" ;;
+                manifest_local) input_path="$ws/workspace.local.yaml"; input_sha="${overlay:--}" ;;
+                shared) input_path="$ws/dispatch.yaml"; input_sha="-" ;;
+                local) input_path="$ws/dispatch.local.yaml"; input_sha="-" ;;
+            esac
+            printf '      "%s": {\n        "path": "%s",\n' "$name" "$input_path"
+            if [ "$input_sha" = "-" ]; then
+                printf '        "exists": false,\n        "sha256": null\n'
+            else
+                printf '        "exists": true,\n        "sha256": "%s"\n' "$input_sha"
+            fi
+            if [ "$name" = "local" ]; then printf '      }\n'; else printf '      },\n'; fi
+        done
+        printf '    }\n'
         printf '  }\n'
         printf '}\n'
     } > "$ws/.gw/cache/config.json"
@@ -280,11 +297,11 @@ ws_default="$(make_workspace ws_default)"
 out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
     CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_default")"
 assert_output \
-    "marked workspace, no projection: context names <ws>/okf/<work-path>/references/" \
+    "marked workspace, no projection: context and refresh notice" \
     "nested" "required" \
     "$ws_default/okf/<work-path>/references/" \
     "wiki/<work-path>/references/${US}raw/" \
-    "absent" "" \
+    "present" "gw config sync" \
     "$out"
 
 # --- 3b. namespaced payload carries the auto-file clause ------------------
@@ -303,7 +320,7 @@ assert_output \
     "nested" "required" \
     "AUTO-FILE (standalone brainstorming only)${US}gw:file${US}gw work advance <work-path> --effort${US}do not invoke writing-plans${US}/gw:workflow <work-path>${US}$ws_default/okf/<work-path>/references/${US}Filed as <work-path>" \
     "" \
-    "absent" "" \
+    "present" "gw config sync" \
     "$out"
 
 # The mode check must be in the clause: a pipeline-dispatched session has to be
@@ -313,7 +330,7 @@ assert_output \
     "nested" "required" \
     "STOP after writing the spec${US}work-item brief" \
     "" \
-    "absent" "" \
+    "present" "gw config sync" \
     "$out"
 
 # --- 4. projection overrides bundle_dir -----------------------------------
@@ -379,17 +396,16 @@ assert_output \
     "absent" "" \
     "$out"
 
-# A projection whose _meta carries a null source_sha256 is not evidence of
-# staleness — the check is skipped, routing still injects.
+# A missing source fingerprint now requires refresh while routing still injects.
 ws_nullsha="$(make_workspace ws_nullsha)"
 write_projection "$ws_nullsha" "-"
 out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
     CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_nullsha")"
 assert_output \
-    "null source_sha256: no staleness notice, context still injected" \
+    "null source fingerprint: refresh notice, context still injected" \
     "nested" "required" \
     "$ws_nullsha/okf/<work-path>/references/" "" \
-    "absent" "" \
+    "present" "gw config sync" \
     "$out"
 
 # --- 7b. overlay present and recorded correctly -> no notice ---------------
@@ -446,12 +462,19 @@ assert_output \
     "graph-works-config-stale${US}workspace.yaml${US}workspace.local.yaml${US}gw config sync" \
     "$out"
 
+# Legacy projections must never silently report fresh.
+ws_old="$(make_workspace ws_old)"
+mkdir -p "$ws_old/.gw/cache"
+printf '{"_meta":{"source_sha256":"%s"}}\n' "$(sha256_of "$ws_old/workspace.yaml")" > "$ws_old/.gw/cache/config.json"
+out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_old")"
+assert_output "old metadata requests refresh" "nested" "required" "" "" "present" "gw config sync" "$out"
+
 # --- 8. the three platform shapes ----------------------------------------
 out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
     CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_default")"
 assert_output \
     "Claude Code emits nested PreToolUse additionalContext" \
-    "nested" "required" "" "" "absent" "" \
+    "nested" "required" "" "" "present" "gw config sync" \
     "$out"
 
 out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
@@ -459,14 +482,14 @@ out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
     GRAPH_WORKS_DIR="$ws_default")"
 assert_output \
     "Cursor emits top-level additional_context only" \
-    "cursor" "required" "" "" "absent" "" \
+    "cursor" "required" "" "" "present" "gw config sync" \
     "$out"
 
 out="$(run_hook "$TEST_ROOT" "$MATCHING_PAYLOAD" \
     COPILOT_CLI=1 CLAUDE_PLUGIN_ROOT="$REPO_ROOT" GRAPH_WORKS_DIR="$ws_default")"
 assert_output \
     "Copilot CLI / SDK emits top-level additionalContext only" \
-    "sdk" "required" "" "" "absent" "" \
+    "sdk" "required" "" "" "present" "gw config sync" \
     "$out"
 
 # --- 9. regression: no hook imports the retired workspace_io / work_io ----

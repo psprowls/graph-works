@@ -4,8 +4,8 @@ Converts a workspace's `.graph-wiki.yaml` v2 into `workspace.yaml` v1 plus the
 `.gw/` control plane, and leaves behind a `.gw/cache/config.json` projection the
 plugin's hooks read correctly. `version: 1` is a **fresh format, not v3** — there
 is no migration path inside `graph-works-core`, and `gw bootstrap` never
-overwrites an existing manifest, so this script is the only path from the old
-file to the new one.
+replaces an authored manifest. This script converts non-dispatch settings;
+retired dispatch choices require explicit cleanup and reauthoring.
 
 **One direction only.** There is no reverse converter; the rollback is the frozen
 copy taken before the run.
@@ -24,7 +24,7 @@ uv run python scripts/convert_config.py "$WORKSPACE" --write
 
 Run it through `uv run` from the repo root, and make sure the environment is
 provisioned first (`just sync`, i.e. `uv sync --all-packages`). The script imports
-`graph_works_core`, `code_wiki_okf`, `config_io` and `subagents_io`, so a bare
+`graph_works_core`, `code_wiki_okf` and `config_io`, so a bare
 `python scripts/convert_config.py` gets
 `ModuleNotFoundError: No module named 'graph_works_core'` — the same trap
 `convert-wikilinks.md` documents. The default `--gw` is itself a
@@ -54,7 +54,12 @@ any refusal.
 
 1. **Read** `.graph-wiki.yaml`, plus `.graph-wiki.local.yaml` when present (the
    local file wins). Refuses any version but 2, and any top-level key without a
-   decided disposition.
+   decided disposition. Each explicit source is checked before overlay merging
+   for `workflow.pipeline`, `workflow.auto_drive.models`,
+   `workflow.auto_drive.overrides`, and `workflow.auto_drive.permission_mode`.
+   Any presence, including null/empty values, refuses conversion before writes.
+   Save the desired choices, remove these keys explicitly, and recreate rules
+   using the [dispatch guide](../packages/graph-works-core/docs/dispatch-rules.md).
 2. **Dispose** — one row per key: carry, re-express, seed or drop, each with its
    reason.
 3. **Report** the table. A dry run stops here.
@@ -64,10 +69,13 @@ any refusal.
 5. **Validate through four independent readers** — `manifest.read`,
    `manifest.resolve_checked_all` (the path `gw config list` takes),
    `code_wiki_okf.config.load_config`, and
-   `subagents_io.routing.validate_rules` over the carried `auto_drive` block.
+   `validate_workspace_dispatch_layers` for the new reference and retired-key refusal.
    A failure unlinks a manifest this run created and exits 1.
 6. **Create the control plane** — the four layout directories and
-   `.gw/.gitignore`. Nothing else.
+   `.gw/.gitignore`, a missing `dispatch.yaml` with the default branch relay
+   rule, and root ignore entries for local manifests/dispatch rules. Authored
+   dispatch files remain untouched. The manifest points at the shared file;
+   `max_parallel` and `supervise_merges` remain operational settings.
 7. **Sync** — `gw config sync --workspace <root>`, then three post-conditions:
    the projection exists, its `_meta.source_sha256` matches the manifest's, and
    it carries `layout.bundle_dir`. This is deliberately the **last** write, so

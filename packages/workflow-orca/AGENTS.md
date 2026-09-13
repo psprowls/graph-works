@@ -75,10 +75,14 @@ enforced here via a live Orca query rather than a local set.
 
 ### launch / enumerate / wait / resume, concretely
 
-- **launch**: `task-create --spec <prompt> --task-title <key>` then
+- **launch**: `task-create --spec <frozen-envelope + prompt> --task-title <key>` then
   `worker-start --task <id> --agent <agent> [worktree flags] [--model
   --effort]`. `--effort` is only ever sent alongside `--model` (Orca's CLI
-  rejects it alone) — `_worktree_flags` builds the four Orca worktree modes
+  rejects it alone); an effort-only dispatch is refused before task-create.
+  Agent/model/effort are per-dispatch, never session defaults. `_launch.py`
+  implements pure argv/envelope/receipt helpers; see README for the exact shared
+  `GW_LAUNCH_V1 ` schema and `reasoning_effort` → receipt `effort` mapping.
+  `_worktree_flags` builds the four Orca worktree modes
   (`reuse`/`main` → `path:<path>`, `fork-child` → `new-child`,
   `create-top-level` → `new-top-level` + `--repo`), which is why
   `OrcaBackend.provisions_worktrees = True`: Orca itself creates the
@@ -99,8 +103,8 @@ enforced here via a live Orca query rather than a local set.
   against the plan, never warns, and degrades every failure to `None`,
   because `launch()` has already started a real worker by then. Comparing
   actual against planned is a caller's business and is tracked separately.
-- **enumerate** (`workers()`): costs `2 + L` CLI calls (`task-list`,
-  `worker-list`, plus one `worker-show` per live worker) — read
+- **enumerate** (`workers()`): costs `2 + W` CLI calls (`task-list`,
+  `worker-list`, plus one `worker-show` per worker with a handle) — read
   `WorkerRecord.last_heartbeat_at`'s and `workers()`'s docstrings in
   `backend.py` before "optimizing" this away; the per-live-worker call is
   deliberate because a nudge decision (below) treats "has ever heartbeat" as
@@ -113,37 +117,39 @@ enforced here via a live Orca query rather than a local set.
 - **resume after a crash**: nothing to do beyond calling `open_session` again
   with the same name. A settled task's `result` field carries the entire
   `worker_done` payload (`parse_task_result` in `_map.py`), so a session
-  reconstructs completely from `task-list` with no live process anywhere —
-  this is the load-bearing design point, not an incidental convenience.
+  reconstructs lifecycle from durable task/worker data with no live process;
+  launch verification additionally reads full specs and worker-show evidence.
 
-### Three things folded into `ack()` / `close()` / `wait()`, not exported
+### Completion, release, and terminal-free workers
 
-The `DispatchSession` Protocol has eight methods and nothing else — no
-Orca-specific ninth method exists, deliberately, because a coordinator that
-needed one could no longer swap backends. Three pieces of Orca-specific
-housekeeping are folded into existing protocol calls instead:
+`worker_done` is Orca's task-settlement authority. `ack()` does not send
+`task-update`; it verifies the full frozen task envelope against durable
+`worker.startOptions.launch` before acknowledging successful completion.
+Unverified success keeps its delivery and resource for recovery. Because
+acknowledgements apply to entire deliveries, every successful completion in a
+batch is checked even when the caller acknowledges its heartbeat first.
+Failures still acknowledge and release according to actual settlement.
+`close()` releases settled workers except unverified successes; unknown state
+never proves settlement. `_verified_launches` is rebuilt from durable receipts
+on each enumeration; diagnostic text must never decide release eligibility.
 
-1. **Terminal release** — `ack()` calls `worker-release` after a
-   `WorkerDone`, and `close()` sweeps any handle enumeration proved settled
-   but never released (`_unreleased`, re-earned on every `workers()` call
-   rather than persisted — a worker that settled across a coordinator
-   restart never went through `launch()`'s own bookkeeping).
-2. **Ledger settlement** — `ack()` also calls `task-update --status
-   completed|failed` so a settled key stops looking live to the next
-   `workers()` call.
-3. **The unsent-prompt nudge** (`_nudge_sweep`, only run when `wait()`
-   returns nothing) — `worker-start` sometimes leaves a prompt typed but
-   never submitted, so the worker reports `running` forever and `wait()`
-   would block forever with no exit. The fix is a bare Enter
-   (`terminal send --text "" --enter`) into the worker's agent terminal, but
-   only after four ordered vetoes checked in `_nudge_sweep`: any heartbeat
-   ever (hard veto — an unsubmitted worker cannot have one), an unreadable
-   `worker-read`, a `"source": "terminal"` degraded read, or a non-empty
-   transcript (a dialog on screen is itself transcript activity). At most
-   one nudge per worker per session, tracked in `_nudged` — deliberately
-   **not** persisted, so a genuinely-hung worker stays nudgeable across the
-   coordinator restart that is the loop's own recovery path. `test_nudge.py`
-   is the map of these five outcomes if you need to change the ordering.
+`wait()` normalizes current JSON-string and historical mapping payloads through
+`_map.normalize_message` before attribution or batch proof. A malformed payload
+raises `BackendError` and leaves the delivery for recovery; dropping it could
+let a sibling heartbeat acknowledge an unchecked successful completion.
+
+`workers()` always fetches full task specs (no `--brief`) and worker evidence,
+including settled workers. Missing or malformed envelopes and missing/mismatched
+receipts report unverified configuration with task/dispatch IDs in `detail`.
+Actual lifecycle state is kept separately. The task title remains the durable
+duplicate-key guard across restarts; there is no new band-1 retry API.
+
+Nudging still happens only during an empty `wait()`, at most once per worker
+per session, after all existing heartbeat/read/transcript vetoes. It additionally
+requires an actual `worker-show.terminal` whose handle matches worker-list's
+`agentTerminalHandle`. The cache is cleared on every enumeration: a vanished
+terminal cannot leave stale proof. Structured workers may have an agent handle
+without a terminal; their lifecycle and reads use orchestration only.
 
 ### Other gotchas that need cross-file reading
 
@@ -159,7 +165,10 @@ housekeeping are folded into existing protocol calls instead:
   `_call_top_level` in `backend.py` and don't collapse them.
 - `unwrap()` in `_cli.py` is the single place an `{"id","ok","result"}`
   envelope is opened; a non-zero exit, `ok: false`, and non-JSON stdout all
-  become one `OrcaCliError`. `check --wait` interleaves a JSON keepalive on
+  become one `OrcaCliError`. Nonzero exits fail even with `ok: true`; the
+  full JSON stays in `.receipt` and recovery data in `.details`. Start errors
+  add the reserved task ID, dispatch key, and frozen request to `.details`.
+  `check --wait` interleaves a JSON keepalive on
   **stderr** every 15s while the real payload is on stdout — `OrcaResult`
   keeps the two streams apart for exactly this reason; never merge them in a
   custom runner.
@@ -170,6 +179,9 @@ housekeeping are folded into existing protocol calls instead:
   automatically — a change to Orca's JSON surfaces at the next live run, not
   at `just check`. If Orca's CLI output shape changes, these fixtures go
   stale silently.
+- Synthetic launch receipts in the new tests are labeled as such; see README.
+  Installed 1.4.200 uses `dispatch.lastHeartbeatAt` and `worker.worktreeId`
+  on worker-show; the historical captures use snake case. Both are read.
 - `test_boundaries.py` enforces by AST walk that this package imports at most
   one workspace package (`subagents_io`) and no third party at all — `orca`
   is reached only via `subprocess` inside `_cli.py`. Don't add a dependency

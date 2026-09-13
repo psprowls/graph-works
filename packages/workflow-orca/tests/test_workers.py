@@ -51,24 +51,22 @@ def test_two_worker_rows_on_one_task_resolve_to_the_last():
     assert executed.state == "succeeded"
 
 
-def test_worker_show_is_called_only_for_live_workers():
-    # A settled worker has no current heartbeat, so `None` is honest and the
-    # call is waste. `worker-list` carries no heartbeat at all, so the live
-    # ones genuinely need the extra call.
+def test_worker_show_reads_launch_proof_even_for_settled_workers():
+    # Settled workers still need durable launch evidence; live workers
+    # additionally use the same show call for heartbeat and terminal proof.
     sess, runner = session()
     sess.workers()
     shows = runner.calls_matching("worker-show", "--dispatch")
-    assert len(shows) == 1
-    assert runner.argv_after("--dispatch", shows[0]) == "ctx_320c498114b8"
+    assert {runner.argv_after("--dispatch", c) for c in shows} == {"ctx_320c498114b8", "ctx_817ed5bf5986"}
 
 
-def test_the_call_budget_is_two_plus_the_live_count():
+def test_the_call_budget_is_two_plus_the_worker_count():
     # Asserted on recorded argv, so the cost is part of the contract rather
     # than an implementation detail that can quietly become unbounded.
     sess, runner = session()
     before = len(runner.calls)
     sess.workers()
-    assert len(runner.calls) - before == 3  # task-list + worker-list + one live worker-show
+    assert len(runner.calls) - before == 4  # task-list + worker-list + two worker-show receipts
 
 
 def test_a_live_worker_reports_the_fetched_heartbeat():
@@ -82,7 +80,8 @@ def test_a_settled_worker_reports_none_honestly():
     sess, _ = session()
     settled = next(r for r in sess.workers() if r.key == EXECUTE)
     assert settled.last_heartbeat_at is None
-    assert settled.detail == "completed"
+    assert "unverified" in settled.detail
+    assert "launch envelope" in settled.detail
 
 
 def test_describe_finds_a_key_and_returns_none_for_an_unknown_one():
@@ -122,20 +121,20 @@ def test_a_worker_list_row_with_no_task_id_is_ignored():
 
 
 def test_a_live_worker_row_with_no_dispatch_id_skips_the_heartbeat_call():
-    # `_heartbeat` is a per-dispatch call; a live row that never carried a
+    # `worker-show` is a per-dispatch call; a live row that never carried a
     # handle has nothing to address it with, so the call is skipped rather
     # than made with an empty `--dispatch`.
     worker_list = json.loads(fixture("worker_list"))
     for row in worker_list["result"]["workers"]:
         if row["taskId"] == "task_338800a1fa14":
             row["dispatchId"] = ""
-    runner = _runner_with_worker_list(worker_list)
+    runner = _runner_with_worker_list(worker_list, (("worker-show",), "worker_show_live"))
     sess = OrcaBackend(run=runner).open_session(TARGET)
     records = sess.workers()
     finish = next(r for r in records if r.key == FINISH)
     assert finish.handle == ""
     assert finish.last_heartbeat_at is None
-    assert not runner.calls_matching("worker-show")
+    assert len(runner.calls_matching("worker-show")) == 1  # only the settled worker
 
 
 def test_worker_show_failing_reports_no_heartbeat_rather_than_raising():

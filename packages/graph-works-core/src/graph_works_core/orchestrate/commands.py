@@ -24,28 +24,31 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Literal
 
-from config_io import dotted
 from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
-from subagents_io.routing import resolve_model, validate_rules
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, nearest_parent
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.vocabulary import (
-    EFFORTS,
     PHASES,
     SLUG_PREFIXES,
     TERMINAL_STATUSES,
-    TYPES,
 )
 from work_tracker_okf.workflow import RouteResult, route, state_for
 
-from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.dispatch import (
+    DispatchProfileError,
+    DispatchResolution,
+    DispatchRule,
+    dispatch_attributes,
+    resolve_dispatch,
+)
+from graph_works_core.workspace.dispatch_artifacts import missing_design_source
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.manifest import checked_bool, checked_int, checked_str, workspace_store
-from graph_works_core.workspace.pipeline import PipelineEntry, pipeline_table
+from graph_works_core.workspace.manifest import checked_bool, checked_int
 from graph_works_core.workspace.provenance import default_base, run_git
 from graph_works_core.workspace.repos import resolve_repo
 
@@ -66,17 +69,6 @@ DISPATCH_COMMAND = "/gw:workflow"
 
 #: The workspace pointer a dispatched session reads at startup.
 WORKSPACE_VAR = "GRAPH_WORKS_DIR"
-
-#: What `run_orchestrate` hands `subagents_io.routing.validate_rules`. Bound
-#: here because the match keys are this module's choice, and the sets they are
-#: checked against are `work-tracker-okf`'s. Note `kind` carries a **`TYPES`**
-#: value (`Feature`, not `feature`): the projection's field is `type`, and the
-#: rules block names the dimension `kind`.
-ROUTING_VOCABULARIES: Mapping[str, frozenset[str]] = {
-    "phase": DISPATCH_PHASES,
-    "kind": TYPES,
-    "effort": EFFORTS,
-}
 
 #: Why a candidate is not dispatching. A closed vocabulary so a consumer can
 #: group by it; `BlockedItem.reason` is the sentence.
@@ -139,7 +131,6 @@ class OrchestratePlan:
     path: str
     terminal: bool
     max_parallel: int
-    permission_mode: str
     supervise_merges: bool
     live: tuple[str, ...]
     slots_free: int
@@ -147,6 +138,7 @@ class OrchestratePlan:
     advances: tuple[PlannedAdvance, ...]
     blocked: tuple[BlockedItem, ...]
     warnings: tuple[str, ...]
+    dispatch_resolutions: Mapping[str, DispatchResolution] = MappingProxyType({})
 
 
 #: The character budget for a session name. Orca renders it in a task row and
@@ -808,10 +800,8 @@ def plan(
     items: Sequence[WorkItem],
     root: str,
     *,
-    pipeline: Mapping[str, PipelineEntry],
-    auto_drive: Mapping[str, Any],
+    dispatch_rules: tuple[DispatchRule, ...],
     max_parallel: int,
-    permission_mode: str,
     supervise_merges: bool = False,
     live: tuple[str, ...] = (),
     worktree_exists: Mapping[str, bool | None] | None = None,
@@ -871,7 +861,6 @@ def plan(
             path=root,
             terminal=True,
             max_parallel=max_parallel,
-            permission_mode=permission_mode,
             supervise_merges=supervise_merges,
             live=tuple(live),
             slots_free=0,
@@ -948,6 +937,7 @@ def plan(
     accepted_worktrees: set[str] = set()
     epic_worktree_claimed = False
     dispatches: list[PlannedDispatch] = []
+    resolutions: dict[str, DispatchResolution] = {}
     for item, result in survivors:
         if len(dispatches) >= slots_free:
             blocked.append(BlockedItem(path=item.path, kind="capacity", reason="ready, but no worker slot free"))
@@ -963,20 +953,20 @@ def plan(
         # mode is the property that means "no human is in the room but a
         # decision is needed".
         variant = result.dispatch.variant
-        entry = pipeline[variant]
-        if entry.mode == "relay" and not (entry.prompt_tail or "").strip():
+        state = state_for(items, item.path, has_open_decision=item.path in held_decisions)
+        assert state is not None
+        try:
+            resolution = resolve_dispatch(dispatch_attributes(state, result.dispatch), rules=dispatch_rules)
+        except DispatchProfileError as exc:
             blocked.append(
                 BlockedItem(
                     path=item.path,
-                    kind="relay-untailed",
-                    reason=(
-                        f"variant {variant!r} dispatches in relay mode with no prompt tail, so a "
-                        "worker would fall into an interactive menu with nobody watching; set "
-                        f"workflow.pipeline.{variant}.prompt_tail"
-                    ),
+                    kind=exc.kind,
+                    reason=f"dispatch rules for variant {variant!r}: {exc}; check the shared/local dispatch file",
                 )
             )
             continue
+        entry = resolution.profile
 
         is_root = item.path == root
         action, claimed_now = _resolve_worktree(
@@ -1035,12 +1025,8 @@ def plan(
             accepted_worktrees.add(action.path)
 
         merge_target = epic_branch if item.path != root else default_base
-        resolution = resolve_model(
-            auto_drive,
-            {"phase": phase, "kind": item.type, "effort": item.effort},
-            default_key="phase",
-        )
         key = session_name(item.path, item.type, phase)
+        resolutions[key] = resolution
         dispatches.append(
             PlannedDispatch(
                 key=key,
@@ -1050,8 +1036,9 @@ def plan(
                 effort=item.effort,
                 skill=entry.skill,
                 mode=entry.mode,
-                model=resolution.model if resolution else None,
-                reasoning_effort=resolution.reasoning_effort if resolution else None,
+                agent=entry.agent,
+                model=entry.model,
+                reasoning_effort=entry.reasoning_effort,
                 worktree=action,
                 merge_target=merge_target,
                 prompt=_prompt(
@@ -1071,7 +1058,6 @@ def plan(
         path=root,
         terminal=False,
         max_parallel=max_parallel,
-        permission_mode=permission_mode,
         supervise_merges=supervise_merges,
         live=tuple(live),
         slots_free=slots_free,
@@ -1079,14 +1065,8 @@ def plan(
         advances=tuple(advances),
         blocked=tuple(blocked),
         warnings=tuple(warnings),
+        dispatch_resolutions=MappingProxyType(resolutions),
     )
-
-
-#: The manifest key holding the routing rules block. Read raw rather than
-#: through the catalog: `models` is a mapping and `overrides` a list of
-#: mappings, and no `ConfigEntry` type expresses either. The catalog owns the
-#: two scalars beside it; `validate_rules` owns the rest.
-AUTO_DRIVE_KEY = "workflow.auto_drive"
 
 
 @dataclass(frozen=True, slots=True)
@@ -1124,10 +1104,6 @@ class OrchestrateResult:
         return self.plan.max_parallel
 
     @property
-    def permission_mode(self) -> str:
-        return self.plan.permission_mode
-
-    @property
     def supervise_merges(self) -> bool:
         return self.plan.supervise_merges
 
@@ -1144,29 +1120,16 @@ class OrchestrateResult:
         return self.plan.dispatches
 
     @property
+    def dispatch_resolutions(self) -> Mapping[str, DispatchResolution]:
+        return self.plan.dispatch_resolutions
+
+    @property
     def advances(self) -> tuple[PlannedAdvance, ...]:
         return self.plan.advances
 
     @property
     def blocked(self) -> tuple[BlockedItem, ...]:
         return self.plan.blocked
-
-
-def _routing_rules(layout: WorkspaceLayout) -> Mapping[str, Any]:
-    """The raw `workflow.auto_drive` block, membership-checked.
-
-    A hand-edited manifest bypasses config-io's set-time checks, so this is the
-    startup gate the routing module's contract asks for: a rule naming a value
-    outside its vocabulary is a dead rule, and a dead rule silently routes the
-    wrong model.
-    """
-    raw = workspace_store(layout).read_explicit()
-    block = dotted.get(raw, AUTO_DRIVE_KEY)
-    rules: Mapping[str, Any] = block if isinstance(block, dict) else {}
-    errors = validate_rules(rules, ROUTING_VOCABULARIES, default_key="phase")
-    if errors:
-        raise WorkspaceError(f"{layout.manifest_path}: {AUTO_DRIVE_KEY}: " + "; ".join(errors))
-    return rules
 
 
 def _checkout_is_dirty(repo: Path) -> bool:
@@ -1310,7 +1273,6 @@ def run_orchestrate(
     live: tuple[str, ...] = (),
     repo: Path | None = None,
     repo_name: str | None = None,
-    pipeline: Mapping[str, PipelineEntry] | None = None,
     provisions_worktrees: bool = True,
 ) -> OrchestrateResult:
     """Compute the dispatch plan for *path*'s subtree. Read-only throughout.
@@ -1327,13 +1289,15 @@ def run_orchestrate(
     docstring; this shell resolves no backend itself; that is a caller's job.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    items = load_items(bundle)
-    rules = _routing_rules(layout)
+    items = tuple(
+        replace(item, has_design_artifact=True) if missing_design_source(bundle.root, item) is not None else item
+        for item in load_items(bundle)
+    )
+    config = load_dispatch_config(layout)
     # Checked, not coerced. A silent `2` from a mistyped `max_parallel` is
-    # indistinguishable from a deliberate `2`, and `_routing_rules` ten lines
-    # above already refuses a hand-edited manifest for the same threat.
+    # indistinguishable from a deliberate `2`. Dispatch configuration is
+    # independently validated above.
     max_parallel = checked_int(layout, "workflow.auto_drive.max_parallel")
-    permission_mode = checked_str(layout, "workflow.auto_drive.permission_mode")
     supervise_merges = checked_bool(layout, "workflow.auto_drive.supervise_merges")
 
     repo_note: str | None = None
@@ -1351,10 +1315,8 @@ def run_orchestrate(
     computed = plan(
         items,
         path,
-        pipeline=pipeline if pipeline is not None else pipeline_table(layout=layout),
-        auto_drive=rules,
+        dispatch_rules=config.rules,
         max_parallel=max_parallel,
-        permission_mode=permission_mode,
         supervise_merges=supervise_merges,
         live=live,
         worktree_exists=_stat_worktrees(items, repo_path),
@@ -1379,11 +1341,9 @@ def run_orchestrate(
 
 
 __all__ = [
-    "AUTO_DRIVE_KEY",
     "BLOCKED_KINDS",
     "DISPATCH_COMMAND",
     "DISPATCH_PHASES",
-    "ROUTING_VOCABULARIES",
     "WORKSPACE_VAR",
     "BlockedItem",
     "OrchestratePlan",

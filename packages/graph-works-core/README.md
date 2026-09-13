@@ -422,13 +422,16 @@ it.
 
 ## The dispatch seam
 
-`work-tracker-okf`'s `route()` returns a `Dispatch(stage, variant)` and names no
-skill — its README refuses that mapping by name. `workspace.pipeline` is where it
-lands: a packaged table total over the closed `Variant` set, overridable per
-field from `workflow.pipeline.<variant>.*` in `workspace.yaml`. Because the
-packaged table is total, an override can replace an entry but never leave a
-hole, and `workflow.pipeline.*.mode` carries `allowed=DISPATCH_MODES`, so a bad
-value is refused at `gw config set` time rather than at dispatch time.
+`work-tracker-okf`'s `route()` owns `Dispatch(stage, variant)` and names no
+skill. `workspace.dispatch.resolve_dispatch` folds complete packaged defaults,
+then shared and local ordered rules, into the same profile for attended
+reporting and orchestration. It records each field's origin and reset reason.
+`workspace.dispatch_config` owns loading, strict validation and explicit-layer
+writes; `workspace.dispatch_projection` owns cache freshness and publication.
+`workspace.pipeline` holds only packaged defaults and skill-name validation.
+
+See [Dispatch rules](docs/dispatch-rules.md) for YAML examples, matching and
+reset semantics, launch accounting, and exact manual cutover instructions.
 
 `orchestrate` splits the way `route()` does, across two modules. In
 `commands.py`, `plan()` is IO-free — plain `WorkItem` data in, an
@@ -467,17 +470,10 @@ fail an advance.
 assembles is four vendor-neutral lines; a vendor command can only enter through
 a variant's `prompt_tail`, which lives in workspace configuration.
 
-The `branch` variant's tail is therefore untailed in the packaged table on
-purpose, and that leaves a hole rather than an inherited default: a `relay`
-worker dispatched without one falls into an interactive menu with nobody
-watching. Two things close it. `init` seeds `pipeline.RELAY_TAIL_SEED` — a
-vendor-neutral string carrying both halves of the relay contract, the
-`Auto-drive context:` trigger and the `{merge_target}` placeholder — into a
-**new** workspace's manifest. And `plan()` blocks a `relay`-mode entry with no
-tail as `relay-untailed`, which is what catches every workspace already on
-disk; the manifest write `plan_init` proposes only occurs when it is absent, so
-re-applying over an existing workspace won't arm an old one. The manual fix is
-`gw config set workflow.pipeline.branch.prompt_tail "…"`.
+The `branch` variant has no packaged tail. Init seeds `pipeline.RELAY_TAIL_SEED`
+in a missing shared dispatch document; authored documents stay untouched.
+Final profile validation blocks any relay with a missing tail. Add the intended
+`prompt_tail` to a matching shared/local dispatch rule, then run `gw config sync`.
 
 **The code repo comes from `workspace.yaml`'s `repositories` block, not from a
 `.git` walk-up.** Both shells default `repo` to `resolve_repo(layout,

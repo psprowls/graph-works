@@ -127,3 +127,12 @@ Run the package gate from the repository root:
 uv run --package work-tracker-okf pytest packages/work-tracker-okf/tests \
   --cov=work_tracker_okf --cov-branch --cov-report=term-missing --cov-fail-under=95
 ```
+
+## Dispatch ownership
+
+`route(RouteState)` chooses only stage and variant and retains transition
+authority. `RouteState.has_spec_doc` and `has_plan_doc` expose the canonical
+artifact state used by routing so core can derive dispatch match booleans from
+the same snapshot. Core owns skill/agent/model/mode rules and per-field
+provenance. Work-item `effort` remains an estimate, separate from launch
+`reasoning_effort`.

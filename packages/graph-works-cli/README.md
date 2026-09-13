@@ -140,3 +140,13 @@ in `graph_works_core.hooks`.
 
 The interactive legacy `config init` wizard is intentionally absent. Guided onboarding belongs to
 the graph-works plugin and composes the individual commands above.
+
+## Dispatch configuration
+
+`gw work next <path> --json` exposes the resolved `dispatch.profile` and
+per-field provenance; orchestration dispatches expose the equivalent fields.
+Human output explains agent/model/effort and resets. `gw config sync` refreshes
+all shared/local dispatch inputs. Retired-key `gw config unset [--local]` is
+removal-only and defers sync until cleanup is complete. See the
+[dispatch guide](../graph-works-core/docs/dispatch-rules.md) for YAML examples
+and the explicit cutover procedure; no command translates old routing choices.

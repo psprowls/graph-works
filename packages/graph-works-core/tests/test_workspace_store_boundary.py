@@ -27,6 +27,7 @@ PACKAGES_DIR = Path(__file__).resolve().parents[3] / "packages"
 #: Every site in `packages/*/src` allowed to construct the base store, as
 #: `<import name>/<path within src>:<qualified function>`.
 PERMITTED = {
+    "graph_works_core/workspace/manifest.py:dispatch_store",
     "graph_works_core/workspace/manifest.py:manifest_store",
     "graph_works_core/workspace/manifest.py:set_value",
 }
@@ -84,5 +85,5 @@ def test_the_walk_finds_the_store_at_all() -> None:
     assert construction_sites()
 
 
-def test_only_the_two_write_sites_construct_the_base_store() -> None:
+def test_only_the_declared_store_factories_and_write_site_construct_the_base_store() -> None:
     assert construction_sites() == PERMITTED

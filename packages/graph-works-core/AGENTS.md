@@ -75,7 +75,7 @@ shell-syntax command string here.
 ### Module layout (three import-linter layers, per the package `__init__.py`)
 
 ```
-workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, repos, config, context_seed, transactions
+workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
 ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : wiki_stats/ : work/    layer 2, independent verticals
 ```
@@ -117,7 +117,7 @@ relocating `config_dir` moves the whole control plane as a unit and
 members.
 
 **3. The manifest (`workspace/manifest.py`)** — `<root>/workspace.yaml`, the
-workspace's **one** configuration file, read/written entirely through
+workspace's discovery authority, read/written entirely through
 `config-io`'s catalog (`CATALOG: tuple[ConfigEntry, ...]`) rather than
 hand-rolled validation. It carries: `version` (fixed at `1`, no migration
 path — a foreign version raises `WorkspaceError`), `initialized_at`,
@@ -126,8 +126,9 @@ path — a foreign version raises `WorkspaceError`), `initialized_at`,
 `config_dir`" when absent), the bundle declarations `code_wiki_okf.config.load_config`
 reads (`repositories.*.path`, `repositories.*.ignore`, `ignore`, `state_gate.*`),
 five `roles.*.<field>` wildcard entries (model/backend/region/max_tokens/max_concurrency
-overrides consumed by `agent_substrate.roles`), the `workflow.pipeline.*.<field>`
-dispatch-table overrides, and `workflow.auto_drive.*`. `graph_dir` and
+overrides consumed by `agent_substrate.roles`), `workflow.dispatch_rules` (the
+shared dispatch document reference), and operational `workflow.auto_drive`
+`max_parallel`/`supervise_merges`. `graph_dir` and
 `declarations_dir` are **not** stored in the manifest — they're resolved from
 the layout and supplied by the caller at read time. `Manifest` itself never
 holds a `Path`, only strings; turning overrides into resolved paths is
@@ -140,7 +141,7 @@ declared type/`allowed`; env and default origins are trusted.
 **One read seam, two write sites.** `manifest_store(path)` and
 `workspace_store(layout)` are how every *reader* of a `workspace.yaml` gets
 its store — `read`, `resolve_checked_key`, `resolve_checked_all`,
-`agent_substrate.roles`, `workspace.pipeline`, `orchestrate._routing_rules`,
+`agent_substrate.roles`, `workspace.dispatch_config`,
 `workspace.init`'s projection write, and `workspace.config`. Both forms exist
 because `discovery.resolve` calls `read(path)` before a layout exists.
 
@@ -154,13 +155,17 @@ it got back — `.base` or `.overlay` — rather than constructing its own
 `PlainYamlStore`. That is what let the seam's return type change (the layered
 read-only store) without any caller moving.
 
-A manifest-sourced `workflow.pipeline.<variant>.skill` is shape-checked at read
-time by `pipeline.check_skill_name`, beside `manifest.checked()` and for the
-same reason. A **bare** name is valid and used verbatim (user-level and
-repo-local skills carry no plugin prefix); empty, whitespace-only and
-malformed-qualification values (`a:`, `:b`, `a:b:c`) raise `WorkspaceError`.
-There is no charset rule. `PACKAGED_PIPELINE` is not checked at runtime — its
-shape is pinned by `test_pipeline.py` instead.
+`dispatch.parse_rules` validates every supplied rule before matching, including
+skill names and unsupported permission/backend fields. `dispatch_config` checks
+both explicit manifests for retired keys before overlay merging; local nulls
+cannot hide legacy shared settings. `dispatch.resolve_dispatch` is the single
+profile cascade and records all six field origins. The planner and next-stage
+reader derive attributes from work-tracker state via `dispatch_attributes`.
+
+`dispatch_projection` fingerprints both manifests and both dispatch documents,
+including absent local files, checks snapshots before publication, and never
+writes merged rules back. See [Dispatch rules](docs/dispatch-rules.md) and the
+focused `test_dispatch*.py` suites before changing this seam.
 
 **4. Init (`workspace/init.py`)** — `plan_init` / `apply_init`, a
 plan-then-apply pair with **no `dry_run` flag** (not calling `apply_init` is
@@ -168,12 +173,12 @@ the dry run, matching six other shipped writers across the workspace). In
 order, `apply_init` performs: (1) create directories (`root`, `.gw/`,
 `.gw/cache/`, `okf/`, `.gw/worktrees/`); (2) write `<config_dir>/.gitignore`
 (only the gitignored members — cache and worktrees dirs) and `<root>/.gitignore`
-(one line: `workspace.local.yaml`, the gitignored per-machine overlay); the
+(`workspace.local.yaml` and `/dispatch.local.yaml`, the per-machine overlays); the
 repo's own root `.gitignore` is never edited — in the `.works` shape
 `layout.root` is `<repo>/.works`, so the workspace's root gitignore is inside
-the workspace; (3) write `<root>/workspace.yaml` **only if absent,
-never overwritten** — this is where `repositories:`/`ignore:` get seeded
-from the detected repo root; (4) write `<root>/AGENTS.md` via `render_context_file` — the gw region above
+the workspace; (3) create a missing manifest, or insert only a missing dispatch
+reference into authored YAML; create a missing shared dispatch file with the
+relay-tail seed, preserving authored files; (4) write `<root>/AGENTS.md` via `render_context_file` — the gw region above
 `## Local Conventions` regenerated whole from `assets/AGENTS.md.template`,
 the tail beneath that heading carried verbatim — and `<root>/CLAUDE.md` as
 the one-line `@AGENTS.md` pointer, both at `layout.root` and never a repo
@@ -212,15 +217,11 @@ hand. `today` is always injected; nothing in this package reads the clock.
   — an explicit null reads as a deliberate setting, so it's treated as
   malformed rather than "unset".
 
-- **The relay-tail hole is deliberate, and only `init` closes it for new
-  workspaces.** The packaged dispatch table has no default
-  `prompt_tail` for the `branch` variant, so a `relay`-mode worker dispatched
-  without one falls into an interactive menu with nobody watching.
-  `plan_init` seeds `pipeline.RELAY_TAIL_SEED` into a fresh workspace's
-  manifest specifically because the manifest write only happens when
-  `workspace.yaml` is absent — re-running init over an existing workspace
-  never arms an old one retroactively. The fix for an existing workspace
-  without a tail is manual: `gw config set workflow.pipeline.branch.prompt_tail "…"`.
+- **The relay tail is workspace-owned.** Packaged branch defaults have no tail.
+  Init seeds `pipeline.RELAY_TAIL_SEED` in a missing shared dispatch document;
+  it preserves authored dispatch files. A final relay profile without a tail
+  blocks. Fix it with a matching rule in the shared/local dispatch document,
+  then sync. Init never translates or silently removes retired manifest keys.
 
 - **`init.WorkspacePlan.diff()` legitimately over-reports.** Each of the
   three installers previews the bundle scaffold independently, so a first

@@ -76,7 +76,11 @@ read are unchanged from `gw work next`.
   from `child_rollup.open_paths` suggesting `/gw:workflow <child-path>` for
   each, and **stop** (nothing to advance).
 - Otherwise announce the dispatch: item title, kind, phase, and the stage skill
-  from `action.skill`.
+  from `action.skill`. Also report `dispatch.profile`'s selected agent, model,
+  and reasoning effort (`default` for null), with their winning entries from
+  `dispatch.provenance`. This is reporting only: an attended workflow cannot
+  change the current session's agent, model, effort, or permissions, and must
+  not present a notice as if it performed a reroute.
 
 ### 2. Apply the dispatch transition (when present)
 

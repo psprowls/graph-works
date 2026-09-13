@@ -266,3 +266,22 @@ def test_bootstrap_text_output_shows_a_deletion(tmp_path: Path) -> None:
 
     assert result.exit_code == 0
     assert "- okf/AGENTS.md" in result.stdout.splitlines()
+
+
+def test_bootstrap_seeds_dispatch_and_refuses_old_settings(tmp_path):
+    root = tmp_path / "workspace"
+    args = ["bootstrap", "--workspace", str(root), "--topic", "Demo"]
+    first = runner.invoke(app, args)
+    assert first.exit_code == 0, first.output
+    assert (root / "dispatch.yaml").exists()
+    assert not (root / "dispatch.local.yaml").exists()
+    before = (root / "workspace.yaml").read_bytes()
+    second = runner.invoke(app, args)
+    assert second.exit_code == 0
+    assert "+ " not in second.stdout
+    assert (root / "workspace.yaml").read_bytes() == before
+    (root / "workspace.local.yaml").write_text("workflow: {pipeline: {}}\n", encoding="utf-8")
+    refused = runner.invoke(app, args)
+    assert refused.exit_code != 0
+    assert "retired key workflow.pipeline" in refused.output
+    assert (root / "workspace.yaml").read_bytes() == before

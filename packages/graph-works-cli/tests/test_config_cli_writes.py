@@ -18,7 +18,8 @@ runner = CliRunner()
 def _workspace(tmp_path: Path) -> Path:
     root = tmp_path / "workspace"
     root.mkdir()
-    (root / "workspace.yaml").write_text("version: 1\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text("version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\n", encoding="utf-8")
+    (root / "dispatch.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8")
     return root
 
 
@@ -36,10 +37,16 @@ def test_set_coerces_persists_and_refreshes_projection(tmp_path: Path) -> None:
     assert payload["value"] == 3
     assert payload["origin"] == "manifest"
     stored = PlainYamlStore(root / "workspace.yaml").read_explicit()
-    assert stored["workflow"] == {"auto_drive": {"max_parallel": 3}}
+    assert stored["workflow"] == {"dispatch_rules": "dispatch.yaml", "auto_drive": {"max_parallel": 3}}
     projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
     assert projection["workflow"]["auto_drive"]["max_parallel"] == 3
-    assert set(projection["_meta"]) == {"source_mtime", "source_sha256", "overlay_mtime", "overlay_sha256"}
+    assert set(projection["_meta"]) == {
+        "source_mtime",
+        "source_sha256",
+        "overlay_mtime",
+        "overlay_sha256",
+        "dispatch_inputs",
+    }
 
 
 def test_unset_removes_explicit_value_refreshes_projection_and_reports_default(tmp_path: Path) -> None:
@@ -59,9 +66,9 @@ def test_unset_removes_explicit_value_refreshes_projection_and_reports_default(t
     assert payload["value"] == 2
     assert payload["origin"] == "default"
     stored = PlainYamlStore(root / "workspace.yaml").read_explicit()
-    assert "workflow" not in stored
+    assert stored["workflow"] == {"dispatch_rules": "dispatch.yaml"}
     projection = json.loads((root / ".gw" / "cache" / "config.json").read_text(encoding="utf-8"))
-    assert "workflow" not in projection
+    assert projection["workflow"] == {"dispatch_rules": "dispatch.yaml"}
 
 
 def test_set_rejects_invalid_values_without_writing(tmp_path: Path) -> None:
@@ -74,7 +81,10 @@ def test_set_rejects_invalid_values_without_writing(tmp_path: Path) -> None:
 
     assert result.exit_code == exit_codes.GENERIC
     assert "expects an integer" in result.stderr
-    assert PlainYamlStore(root / "workspace.yaml").read_explicit() == {"version": 1}
+    assert PlainYamlStore(root / "workspace.yaml").read_explicit() == {
+        "version": 1,
+        "workflow": {"dispatch_rules": "dispatch.yaml"},
+    }
     assert not (root / ".gw" / "cache" / "config.json").exists()
 
 
@@ -137,7 +147,9 @@ def test_write_verbs_preserve_not_initialized_for_a_missing_workspace(tmp_path: 
 
 def test_sync_regenerates_projection_after_a_hand_edit(tmp_path: Path) -> None:
     root = _workspace(tmp_path)
-    PlainYamlStore(root / "workspace.yaml").write({"version": 1, "topic": "Hand edited"})
+    PlainYamlStore(root / "workspace.yaml").write(
+        {"version": 1, "topic": "Hand edited", "workflow": {"dispatch_rules": "dispatch.yaml"}}
+    )
 
     result = runner.invoke(config_app, ["sync", "--workspace", str(root)])
 
@@ -162,7 +174,9 @@ def test_set_does_not_reorder_the_manifest(tmp_path: Path) -> None:
     # landing anywhere but first is the symptom.
     root = _workspace(tmp_path)
     manifest = root / "workspace.yaml"
-    PlainYamlStore(manifest).write({"version": 1, "topic": "t", "ignore": ["tmp/**"]})
+    PlainYamlStore(manifest).write(
+        {"version": 1, "topic": "t", "ignore": ["tmp/**"], "workflow": {"dispatch_rules": "dispatch.yaml"}}
+    )
     before = [
         line.split(":", 1)[0]
         for line in manifest.read_text(encoding="utf-8").splitlines()
@@ -188,7 +202,7 @@ def test_sync_maps_a_registry_fault_to_the_generic_exit(tmp_path: Path, monkeypa
     def raise_registry_error(*_args: object, **_kwargs: object) -> object:
         raise RegistryError("no projection resolver for 'workflow.*'")
 
-    monkeypatch.setattr(config_main, "write_projection", raise_registry_error)
+    monkeypatch.setattr(config_main, "write_dispatch_projection", raise_registry_error)
 
     result = runner.invoke(config_app, ["sync", "--workspace", str(root)])
 
@@ -234,7 +248,7 @@ def test_set_local_shadows_a_committed_value_without_touching_it(tmp_path: Path)
     payload = json.loads(result.stdout)
     assert (payload["value"], payload["origin"], payload["shadowed"]) == (2, "local", 4)
     committed = PlainYamlStore(root / "workspace.yaml").read_explicit()
-    assert committed["workflow"] == {"auto_drive": {"max_parallel": 4}}
+    assert committed["workflow"] == {"dispatch_rules": "dispatch.yaml", "auto_drive": {"max_parallel": 4}}
 
 
 def test_set_without_local_still_writes_only_the_committed_file(tmp_path: Path) -> None:
@@ -294,3 +308,59 @@ def test_a_failed_first_local_write_leaves_no_local_file_behind(tmp_path: Path) 
     )
     assert result.exit_code != 0
     assert not (root / "workspace.local.yaml").exists()
+
+
+@pytest.mark.parametrize("local", [False, True])
+@pytest.mark.parametrize("document", [None, "pipeline: null\n", "pipeline: {rules: [{match: {}, agent: null}]}\n"])
+def test_reference_write_validates_selected_pair_before_mutation(tmp_path, local, document):
+    root = _workspace(tmp_path)
+    target = root / ("workspace.local.yaml" if local else "workspace.yaml")
+    before = target.read_bytes() if target.exists() else None
+    if document is not None:
+        (root / "other.yaml").write_text(document, encoding="utf-8", newline="")
+    result = runner.invoke(
+        config_app,
+        ["set", "workflow.dispatch_rules", "other.yaml", "--workspace", str(root), *(["--local"] if local else [])],
+    )
+    assert result.exit_code == exit_codes.SCHEMA_MISMATCH
+    assert (target.read_bytes() if target.exists() else None) == before
+    assert not (root / ".gw/cache/config.json").exists()
+
+
+def test_reference_write_validates_new_local_sibling_and_projects_provenance(tmp_path):
+    root = _workspace(tmp_path)
+    shared = root / "other.yml"
+    shared.write_text("# shared\npipeline: {rules: []}\n", encoding="utf-8", newline="")
+    sibling = root / "other.local.yml"
+    sibling.write_text("pipeline: null\n", encoding="utf-8", newline="")
+    args = ["set", "--local", "workflow.dispatch_rules", "other.yml", "--workspace", str(root)]
+    result = runner.invoke(config_app, args)
+    assert result.exit_code == exit_codes.SCHEMA_MISMATCH
+    assert not (root / "workspace.local.yaml").exists()
+    sibling.write_text("pipeline: {rules: []}\n", encoding="utf-8", newline="")
+    before = shared.read_bytes()
+    result = runner.invoke(config_app, args)
+    assert result.exit_code == 0, result.output
+    for verb in ["get", "list"]:
+        result = runner.invoke(
+            config_app,
+            [verb, *(["workflow.dispatch_rules"] if verb == "get" else []), "--workspace", str(root), "--json"],
+        )
+        value = json.loads(result.stdout)
+        row = value if verb == "get" else next(row for row in value if row["key"] == "workflow.dispatch_rules")
+        assert (row["origin"], row["value"], row["shadowed"]) == ("local", "other.yml", "dispatch.yaml")
+    payload = json.loads((root / ".gw/cache/config.json").read_bytes())
+    assert payload["dispatch"]["shared_path"] == str(shared)
+    assert payload["dispatch"]["local_path"] == str(sibling)
+    assert shared.read_bytes() == before
+
+
+def test_sync_refuses_invalid_rules_and_leaves_prior_projection_untouched(tmp_path):
+    root = _workspace(tmp_path)
+    assert runner.invoke(config_app, ["sync", "--workspace", str(root)]).exit_code == 0
+    target = root / ".gw/cache/config.json"
+    before = target.read_bytes()
+    (root / "dispatch.yaml").write_text("pipeline: {rules: [{match: {}, mode: null}]}\n", encoding="utf-8", newline="")
+    result = runner.invoke(config_app, ["sync", "--workspace", str(root)])
+    assert result.exit_code == exit_codes.SCHEMA_MISMATCH
+    assert target.read_bytes() == before

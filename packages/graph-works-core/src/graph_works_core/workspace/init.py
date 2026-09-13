@@ -12,10 +12,12 @@ manifest alone" is a plan you edit, not a flag you pass.
 1. Directories — `root`, `.gw/` (the config dir), `.gw/cache/`, `okf/`,
    `.gw/worktrees/`.
 2. `<config_dir>/.gitignore` — the gitignored members — and `<root>/.gitignore`,
-   whose one line is `workspace.local.yaml`, the per-machine overlay that must
-   never be committed. Both are self-contained inside the workspace; the repo's
+   which ignores `workspace.local.yaml` and `/dispatch.local.yaml`, the local
+   configuration layers that must never be committed. Both are self-contained inside the workspace; the repo's
    own root `.gitignore` is never edited.
-3. `<root>/workspace.yaml` — written when absent, never overwritten. Carries
+3. `<root>/workspace.yaml` — created when absent; only a missing dispatch reference
+   is inserted in authored manifests. `<root>/dispatch.yaml` seeds the branch
+   relay tail when absent. Existing dispatch documents are validated and preserved. Carries
    the `repositories:`/`ignore:` blocks alongside the four layout overrides
    and provenance -- the workspace's one configuration surface.
 4. `<root>/AGENTS.md` via `render_context_file` over the file's existing
@@ -43,22 +45,32 @@ clock.
 from __future__ import annotations
 
 import os
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date
+from io import StringIO
 from pathlib import Path
 from typing import Literal, Protocol
 
 import code_wiki_okf.init
 import doc_wiki_okf.init
 import work_tracker_okf.init
-from config_io import PROJECTION_FILENAME, write_projection
+from config_io import PROJECTION_FILENAME, Fingerprint, dotted
 from okf_ext.bundle import ApplyResult, ScaffoldPlan, apply, plan_scaffold
+from ruamel.yaml import YAML
+from ruamel.yaml.nodes import MappingNode
+from ruamel.yaml.tokens import FlowEntryToken
 
 from graph_works_core.workspace import anchors
 from graph_works_core.workspace.context_seed import CLAUDE_POINTER, render_context_file
 from graph_works_core.workspace.discovery import find_repo_root
-from graph_works_core.workspace.errors import InitError
+from graph_works_core.workspace.dispatch_config import (
+    check_dispatch_inputs,
+    load_prospective_dispatch_config,
+    source_fingerprint,
+)
+from graph_works_core.workspace.dispatch_projection import write_dispatch_projection
+from graph_works_core.workspace.errors import InitError, WorkspaceError
 from graph_works_core.workspace.layout import (
     LOCAL_MANIFEST_FILENAME,
     MANIFEST_FILENAME,
@@ -165,6 +177,8 @@ class WorkspacePlan:
     scaffold: ScaffoldPlan
     installs: tuple[InstallResult, ...]
     installers: tuple[Installer, ...]
+    source_fingerprints: Mapping[Path, Fingerprint | None]
+    notices: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -194,7 +208,7 @@ class WorkspacePlan:
         really does hold, and a renderer that hid it would disagree with the
         plan it renders.
         """
-        lines = [f"+ {path}/" for path in self.directories]
+        lines = list(self.notices) + [f"+ {path}/" for path in self.directories]
         lines += [f"- {write.label}" if write.mode == "delete" else f"+ {write.label}" for write in self.writes]
         lines += [f"+ {planned.member}" for planned in self.scaffold.writes]
         lines += [f"= {item.path}" for item in self.scaffold.skipped]
@@ -216,6 +230,7 @@ class WorkspaceInit:
     deleted: tuple[str, ...]
     scaffold: ApplyResult
     installs: tuple[InstallResult, ...]
+    notices: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -234,7 +249,7 @@ class WorkspaceInit:
         )
 
     def diff(self) -> str:
-        lines = [f"+ {path}/" for path in self.created]
+        lines = list(self.notices) + [f"+ {path}/" for path in self.created]
         lines += [f"+ {label}" for label in self.written]
         lines += [f"- {label}" for label in self.deleted]
         lines += [f"+ {member}" for member in self.scaffold.written]
@@ -271,37 +286,96 @@ def _gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
 
 
 def _root_gitignore_write(layout: WorkspaceLayout) -> PlannedWrite | None:
-    """`<root>/.gitignore` — the one line that keeps `workspace.local.yaml`
-    out of git.
-
-    A second gitignore, not an entry in the first: the local manifest is a
-    sibling of `workspace.yaml` at the root, and `<config_dir>/.gitignore`
-    cannot ignore what is not under it. In the in-repo `.works` shape
-    `layout.root` is `<repo>/.works`, so this is `<repo>/.works/.gitignore`
-    and the rule that the repo's own root `.gitignore` is never edited still
-    holds.
-
-    Same idempotence as `_gitignore_write`: created with the header and the
-    line when absent, the line appended when the file exists without it,
-    nothing written when it is already there.
-    """
+    """Append only missing local-file ignores inside this workspace."""
     path = layout.root / GITIGNORE_FILENAME
-    if not path.exists():
-        return PlannedWrite(
-            label=GITIGNORE_FILENAME,
-            path=path,
-            content=f"{_GITIGNORE_HEADER}{LOCAL_MANIFEST_FILENAME}\n",
-            mode="create",
-        )
-    present = {line.strip() for line in path.read_text(encoding="utf-8").splitlines()}
-    if LOCAL_MANIFEST_FILENAME in present:
+    entries = (LOCAL_MANIFEST_FILENAME, "/dispatch.local.yaml")
+    existing = path.read_bytes().decode("utf-8") if path.exists() else None
+    present = set(existing.splitlines()) if existing is not None else set()
+    missing = "".join(f"{entry}\n" for entry in entries if entry not in present)
+    if not missing:
         return None
     return PlannedWrite(
-        label=GITIGNORE_FILENAME,
-        path=path,
-        content=f"{LOCAL_MANIFEST_FILENAME}\n",
-        mode="append",
+        GITIGNORE_FILENAME,
+        path,
+        (_GITIGNORE_HEADER if existing is None else "") + missing,
+        "create" if existing is None else "append",
     )
+
+
+def _insert_dispatch_reference(text: str) -> str:
+    """Insert one YAML member using source marks; preserve every authored byte."""
+    reader = YAML(typ="safe")
+    root = reader.compose(text)
+    if not isinstance(root, MappingNode):
+        raise WorkspaceError("workspace.yaml must hold a mapping")
+    newline = "\r\n" if "\r\n" in text else "\n"
+    workflow = next((value for key, value in root.value if key.value == "workflow"), None)
+    node = workflow if workflow is not None else root
+    if not isinstance(node, MappingNode):
+        raise WorkspaceError("workspace.yaml: workflow must be a mapping")
+    member = "dispatch_rules: dispatch.yaml" if workflow is not None else "workflow: {dispatch_rules: dispatch.yaml}"
+    if node.flow_style:
+        index = node.end_mark.index - 1
+        # Composed alias nodes point back to their anchor, so their source
+        # marks cannot identify the final value or separator in this mapping.
+        preceding = [token for token in reader.scan(text) if token.start_mark.index < index]
+        trailing_comma = isinstance(preceding[-1], FlowEntryToken)
+        insertion = (" " if trailing_comma else ", " if node.value else "") + member
+    elif workflow is not None:
+        index = node.start_mark.index - node.start_mark.column
+        insertion = " " * node.start_mark.column + member + newline
+    else:
+        index = node.end_mark.index
+        insertion = (newline if index and text[index - 1] != "\n" else "") + member + newline
+    return text[:index] + insertion + text[index:]
+
+
+def _dispatch_init_writes(
+    layout: WorkspaceLayout, manifest_text: str | None
+) -> tuple[list[PlannedWrite], Mapping[Path, Fingerprint | None], tuple[str, ...]]:
+    store = workspace_store(layout)
+    base = YAML(typ="safe").load(manifest_text) if manifest_text is not None else store.read_base_explicit()
+    overlay = store.read_overlay_explicit()
+    combined = dotted.merge(base, overlay)
+    writes: list[PlannedWrite] = []
+    if not dotted.has(combined, "workflow.dispatch_rules"):
+        # Retired-key validation is still performed on both raw layers below.
+        text = manifest_text if manifest_text is not None else layout.manifest_path.read_bytes().decode("utf-8")
+        updated = _insert_dispatch_reference(text)
+        prospective = YAML(typ="safe").load(updated)
+        current_workflow = base.get("workflow", {})
+        if not isinstance(current_workflow, Mapping):
+            raise WorkspaceError(f"{layout.manifest_path}: workflow must be a mapping")
+        expected = {**base, "workflow": {**current_workflow, "dispatch_rules": "dispatch.yaml"}}
+        if prospective != expected:
+            raise WorkspaceError(
+                f"{layout.manifest_path}: cannot insert dispatch reference without changing authored settings; "
+                "add workflow.dispatch_rules explicitly"
+            )
+        base = prospective
+        writes.append(PlannedWrite(MANIFEST_FILENAME, layout.manifest_path, updated, "create"))
+    elif manifest_text is not None:
+        writes.append(PlannedWrite(MANIFEST_FILENAME, layout.manifest_path, manifest_text, "create"))
+    seed: dict[str, object] = {
+        "pipeline": {"rules": [{"match": {"variant": "branch"}, "prompt_tail": RELAY_TAIL_SEED}]}
+    }
+    config = load_prospective_dispatch_config(layout, base=base, overlay=overlay, seed=seed)
+    if config.source_fingerprints[config.shared_path] is None:
+        buffer = StringIO()
+        writer = YAML()
+        writer.default_flow_style = False
+        writer.dump(seed, buffer)
+        label = os.path.relpath(config.shared_path, layout.root)
+        writes.append(PlannedWrite(label, config.shared_path, buffer.getvalue(), "create"))
+    notices = (
+        ()
+        if config.local_path == layout.root / "dispatch.local.yaml"
+        else (
+            f"! Local dispatch path: {config.local_path}; add /{config.local_path.name} "
+            f"to {config.local_path.parent / '.gitignore'} (not edited).",
+        )
+    )
+    return writes, config.source_fingerprints, notices
 
 
 def _workspace_relative(target: Path, root: Path) -> str:
@@ -411,6 +485,7 @@ def plan_init(
         raise InitError(anchors._hard_link_refusal_message(root))
 
     manifest_path = root / MANIFEST_FILENAME
+    manifest_inputs = {path: source_fingerprint(path) for path in (manifest_path, root / LOCAL_MANIFEST_FILENAME)}
     manifest = read(manifest_path) if manifest_path.exists() else defaults()
     layout = layout_for(
         root,
@@ -428,24 +503,16 @@ def plan_init(
     root_gitignore = _root_gitignore_write(layout)
     if root_gitignore is not None:
         writes.append(root_gitignore)
+    manifest_text = None
     if not layout.manifest_path.exists():
         repositories: dict[str, str] = {}
         if layout.repo_root is not None:
             repositories[layout.repo_root.name] = _workspace_relative(layout.repo_root, layout.root)
-        writes.append(
-            PlannedWrite(
-                label=MANIFEST_FILENAME,
-                path=layout.manifest_path,
-                content=render_initial(
-                    today=today,
-                    topic=topic,
-                    relay_tail=RELAY_TAIL_SEED,
-                    repositories=repositories,
-                    ignore=layout.scanner_excludes,
-                ),
-                mode="create",
-            )
+        manifest_text = render_initial(
+            today=today, topic=topic, repositories=repositories, ignore=layout.scanner_excludes
         )
+    dispatch_writes, dispatch_inputs, notices = _dispatch_init_writes(layout, manifest_text)
+    writes.extend(dispatch_writes)
     writes.extend(
         _context_writes(
             layout,
@@ -454,6 +521,8 @@ def plan_init(
         )
     )
     writes.extend(_stale_bundle_context_deletes(layout))
+    check_dispatch_inputs(manifest_inputs)
+    check_dispatch_inputs(dispatch_inputs)
 
     return WorkspacePlan(
         layout=layout,
@@ -471,11 +540,17 @@ def plan_init(
             for installer in installers
         ),
         installers=tuple(installers),
+        source_fingerprints={
+            **{write.path: source_fingerprint(write.path) for write in writes if write.mode != "delete"},
+            **dispatch_inputs,
+        },
+        notices=notices,
     )
 
 
 def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
     """Perform *plan*, in the order the acts have to happen in."""
+    check_dispatch_inputs(plan.source_fingerprints)
     for directory in plan.directories:
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -490,20 +565,21 @@ def apply_init(plan: WorkspacePlan) -> WorkspaceInit:
         if write.mode == "create":
             write.path.write_text(write.content, encoding="utf-8", newline="")
         else:
-            existing = write.path.read_text(encoding="utf-8")
+            existing = write.path.read_bytes().decode("utf-8")
             separator = "" if existing.endswith("\n") or not existing else "\n"
             write.path.write_text(existing + separator + write.content, encoding="utf-8", newline="")
         written.append(write.label)
 
     projection_path = plan.layout.cache_dir / PROJECTION_FILENAME
     before = projection_path.read_bytes() if projection_path.exists() else None
-    write_projection(workspace_store(plan.layout), projection_path)
+    write_dispatch_projection(plan.layout)
     if projection_path.read_bytes() != before:
         written.append(f"{plan.layout.cache_dir.name}/{PROJECTION_FILENAME}")
 
     return WorkspaceInit(
         layout=plan.layout,
         created=plan.directories,
+        notices=plan.notices,
         written=tuple(written),
         deleted=tuple(deleted),
         scaffold=apply(plan.scaffold),

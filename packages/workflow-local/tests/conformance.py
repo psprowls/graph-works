@@ -86,6 +86,7 @@ def make_dispatch(
 ) -> PlannedDispatch:
     """A dispatch whose `prompt` IS the program both backends interpret."""
     return PlannedDispatch(
+        agent="claude",
         key=key,
         slug=slug,
         phase=phase,

@@ -125,14 +125,13 @@ gw config set layout.config_dir .gw
 gw config set layout.cache_dir .gw/cache
 gw config set layout.worktrees_dir .gw/worktrees
 
-# Per-variant pipeline dispatch overrides
-gw config set workflow.pipeline.<variant>.skill <[plugin:]skill>
-gw config set workflow.pipeline.<variant>.mode <mode>
-gw config set workflow.pipeline.<variant>.prompt_tail "<line>"
+# Shared dispatch rules (default reference; optional sibling: dispatch.local.yaml)
+gw config get workflow.dispatch_rules
+# Edit pipeline.rules in the referenced document or its local sibling, then:
+gw config sync
 
 # The auto-drive shell
 gw config set workflow.auto_drive.max_parallel 2
-gw config set workflow.auto_drive.permission_mode bypassPermissions
 
 # Per-role model overrides for the Python subagent pool
 gw config set roles.<role>.model_id <model-id>
@@ -141,6 +140,13 @@ gw config set roles.<role>.region <region>
 gw config set roles.<role>.max_tokens <n>
 gw config set roles.<role>.max_concurrency <n>
 ```
+
+Dispatch rules select skill, mode, prompt_tail, agent, model and reasoning_effort
+with a `match` mapping (for example, `{variant: planned}`). Shared rules apply
+first; `dispatch.local.yaml` appends machine-local rules for the default path.
+For a custom reference, use its `.local` sibling. Permissions remain the selected agent's existing settings;
+configure them in that agent's settings. See
+`../auto-drive/references/dispatch-configuration.md` for the dispatch guide.
 
 Do not commit. Do not re-ask any question.
 

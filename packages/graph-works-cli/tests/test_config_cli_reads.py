@@ -226,3 +226,71 @@ def test_the_marker_table_covers_every_origin_a_resolved_can_carry() -> None:
     for origin in ("env", "local", "manifest", "default"):
         rendered = render_resolved_list([Resolved("topic", "x", origin, entry)], json_output=False)
         assert "topic = 'x'" in rendered
+
+
+@pytest.mark.parametrize(
+    "change", ["shared", "local-create", "local-delete", "manifest", "manifest-local", "reference", "quoted-path"]
+)
+def test_sync_and_real_hook_detect_every_input_change(tmp_path, change):
+    import os
+    import subprocess
+
+    root = _workspace(tmp_path)
+    if change == "quoted-path":
+        root = root.rename(root.with_name('workspace "quoted" café'))
+    shared = root / "dispatch.yaml"
+    local = root / "dispatch.local.yaml"
+    manifest_path = root / "workspace.yaml"
+    with manifest_path.open("a", encoding="utf-8", newline="") as handle:
+        handle.write("workflow: {dispatch_rules: dispatch.yaml}\n")
+    shared.write_text(
+        "# authored\npipeline:\n  rules:\n    - match: {}\n      model: original\n", encoding="utf-8", newline=""
+    )
+    if change == "local-delete":
+        local.write_text("pipeline: {rules: []}\n", encoding="utf-8", newline="")
+    before = shared.read_bytes()
+    result = runner.invoke(config_app, ["sync", "--workspace", str(root)])
+    assert result.exit_code == 0, result.output
+    projection = json.loads((root / ".gw/cache/config.json").read_bytes())
+    assert projection["dispatch"]["rules"][0]["origin"]["source"] == str(shared)
+    assert projection["_meta"]["dispatch_inputs"]["local"]["exists"] is (change == "local-delete")
+    hook = Path(__file__).resolve().parents[3] / "plugins/gw/hooks/skill-doc-routing"
+
+    def invoke_hook():
+        return subprocess.run(
+            ["bash", str(hook)],
+            input='{"tool_input":{"skill":"brainstorming"}}',
+            text=True,
+            capture_output=True,
+            env={**os.environ, "GRAPH_WORKS_DIR": str(root)},
+            check=True,
+        ).stdout
+
+    assert "gw config sync" not in invoke_hook()
+    if change == "local-create":
+        local.write_text("pipeline: {rules: []}\n", encoding="utf-8", newline="")
+    elif change == "local-delete":
+        local.unlink()
+    else:
+        path = (
+            shared
+            if change == "shared"
+            else root / "workspace.local.yaml"
+            if change == "manifest-local"
+            else manifest_path
+        )
+        stat = path.stat() if path.exists() else None
+        if change == "reference":
+            (root / "alternate.yaml").write_bytes(shared.read_bytes())
+            path.write_bytes(path.read_bytes().replace(b"dispatch.yaml", b"alternate.yaml"))
+        else:
+            with path.open("a", encoding="utf-8", newline="") as handle:
+                handle.write("\n# edit preserving mtime\n")
+        if stat:
+            os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns))
+    assert "gw config sync" in invoke_hook()
+    if change != "shared":
+        assert shared.read_bytes() == before
+    result = runner.invoke(config_app, ["sync", "--workspace", str(root)])
+    assert result.exit_code == 0, result.output
+    assert "gw config sync" not in invoke_hook()

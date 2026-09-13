@@ -47,11 +47,21 @@ class OrcaCliError(BackendError):
         stderr: str,
         code: str | None = None,
         message: str | None = None,
+        receipt: dict[str, Any] | None = None,
     ) -> None:
         self.argv: tuple[str, ...] = tuple(argv)
         self.returncode = returncode
         self.stderr = stderr
         self.code = code
+        self.receipt = receipt or {}
+        error = self.receipt.get("error")
+        error = error if isinstance(error, dict) else {}
+        details = error.get("details")
+        payload = self.receipt.get("result")
+        self.details: dict[str, Any] = {
+            **(payload if isinstance(payload, dict) else {}),
+            **(details if isinstance(details, dict) else {}),
+        }
         detail = message or stderr.strip() or "(no detail)"
         prefix = f"{code}: " if code else ""
         super().__init__(f"{' '.join(self.argv)} failed (exit {returncode}): {prefix}{detail}")
@@ -83,12 +93,14 @@ def unwrap(argv: Sequence[str], result: OrcaResult) -> dict[str, Any]:
             stderr=result.stderr,
             message="envelope was not an object",
         )
-    if not body.get("ok"):
-        error = body.get("error") or {}
+    if result.returncode != 0 or not body.get("ok"):
+        error = body.get("error")
+        error = error if isinstance(error, dict) else {}
         raise OrcaCliError(
             argv,
             returncode=result.returncode,
             stderr=result.stderr,
+            receipt=body,
             code=error.get("code"),
             message=error.get("message"),
         )
@@ -99,5 +111,6 @@ def unwrap(argv: Sequence[str], result: OrcaResult) -> dict[str, Any]:
             returncode=result.returncode,
             stderr=result.stderr,
             message="envelope carried no result object",
+            receipt=body,
         )
     return payload

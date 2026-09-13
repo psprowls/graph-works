@@ -41,6 +41,7 @@ def dispatch(
         exists=True,
     )
     return PlannedDispatch(
+        agent="claude",
         key=key,
         slug=slug,
         phase=phase,

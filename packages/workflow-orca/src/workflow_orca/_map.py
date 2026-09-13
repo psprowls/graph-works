@@ -15,6 +15,7 @@ import json
 from typing import Any
 
 from subagents_io.backend import (
+    BackendError,
     Escalation,
     Heartbeat,
     WorkerDone,
@@ -54,6 +55,27 @@ def parse_task_result(raw: str | None) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def normalize_message(message: dict[str, Any]) -> dict[str, Any]:
+    """Decode current embedded JSON before attribution or batch completion checks.
+
+    Historical receipts already carry a mapping. Malformed payloads refuse the
+    whole delivery: silently dropping a success could let a sibling ack it.
+    """
+    payload = message.get("payload")
+    if payload is None:
+        payload = {}
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError as exc:
+            raise BackendError(
+                f"Invalid message payload for {message.get('id')!r}; inspect delivery recovery."
+            ) from exc
+    if not isinstance(payload, dict):
+        raise BackendError(f"Invalid message payload for {message.get('id')!r}; inspect delivery recovery.")
+    return {**message, "payload": payload}
 
 
 def _tuple_of_str(value: object) -> tuple[str, ...]:

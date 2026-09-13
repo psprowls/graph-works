@@ -186,7 +186,7 @@ def test_a_hand_written_root_gitignore_gains_only_the_missing_line(tmp_path):
     # Pins the actual line set, not just substring presence: a separator-less
     # append ("*.tmpworkspace.local.yaml") would still satisfy weaker
     # `in`/`count` checks but corrupts the pre-existing line.
-    assert text.splitlines() == ["*.tmp", "workspace.local.yaml"]
+    assert text.splitlines() == ["*.tmp", "workspace.local.yaml", "/dispatch.local.yaml"]
 
 
 def test_a_root_gitignore_that_already_has_the_line_is_not_rewritten(tmp_path):
@@ -223,6 +223,7 @@ def test_a_fresh_bootstrap_produces_exactly_the_gw_tree(tmp_path):
 
     assert {path.name for path in root.iterdir()} == {
         "workspace.yaml",
+        "dispatch.yaml",
         ".gitignore",
         ".gw",
         "okf",
@@ -650,24 +651,20 @@ def test_a_plan_over_a_customized_workspace_previews_that_workspace(tmp_path):
 
 
 def test_a_fresh_workspace_is_born_with_a_relay_tail(tmp_path):
-    from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED, pipeline_table
+    from graph_works_core.workspace.dispatch import resolve_dispatch
+    from graph_works_core.workspace.dispatch_config import load_dispatch_config
+    from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
 
     result = _init(tmp_path / "works")
-    text = (result.layout.root / "workspace.yaml").read_text(encoding="utf-8")
-    assert "prompt_tail" in text
-    # The round trip, not just the write: this is what proves the seeded string
-    # is a value the catalog accepts and `_prompt` will substitute.
-    assert pipeline_table(layout=result.layout)["branch"].prompt_tail == RELAY_TAIL_SEED
-
-
-def test_the_seeded_tail_carries_the_relay_trigger(tmp_path):
-    result = _init(tmp_path / "works")
-    from graph_works_core.workspace.pipeline import pipeline_table
-
-    tail = pipeline_table(layout=result.layout)["branch"].prompt_tail
-    assert tail is not None
-    assert tail.startswith("Auto-drive context:")
-    assert "{merge_target}" in tail
+    config = load_dispatch_config(result.layout)
+    assert len(config.rules) == 1
+    assert config.rules[0].fields["prompt_tail"] == RELAY_TAIL_SEED
+    assert (
+        resolve_dispatch({"stage": "finish", "variant": "branch"}, rules=config.rules).profile.prompt_tail
+        == RELAY_TAIL_SEED
+    )
+    assert RELAY_TAIL_SEED.startswith("Auto-drive context:")
+    assert "{merge_target}" in RELAY_TAIL_SEED
 
 
 # --- the plan's own renderer -------------------------------------------------
@@ -721,3 +718,164 @@ def test_a_refused_plan_renders_the_refusal(tmp_path):
 
     assert not plan.ok
     assert [line for line in plan.diff().splitlines() if line.startswith("! index.md: ")]
+
+
+def test_init_adds_only_missing_reference_preserving_authored_bytes(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    authored = "# heading\r\nversion: 1\r\nworkflow:\r\n  auto_drive: {max_parallel: 3} # keep\r\n# end\r\n"
+    (root / "workspace.yaml").write_bytes(authored.encode())
+    shared = root / "dispatch.yaml"
+    shared.write_bytes(b"# custom\npipeline: {rules: []}\n")
+    before = shared.read_bytes()
+    plan = plan_init(root, today=TODAY)
+    apply_init(plan)
+    updated = (root / "workspace.yaml").read_bytes().decode()
+    assert updated.replace("  dispatch_rules: dispatch.yaml\r\n", "") == authored
+    assert shared.read_bytes() == before
+    assert "/dispatch.local.yaml" in (root / ".gitignore").read_text()
+    assert not (root / "dispatch.local.yaml").exists()
+    assert plan_init(root, today=TODAY).is_empty
+
+
+def test_init_refuses_retired_settings_without_mutation(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    root = tmp_path / "works"
+    root.mkdir()
+    manifest = root / "workspace.yaml"
+    manifest.write_text("version: 1\nworkflow: {pipeline: {}}\n", encoding="utf-8")
+    before = manifest.read_bytes()
+    with pytest.raises(WorkspaceError, match="retired key"):
+        plan_init(root, today=TODAY)
+    assert manifest.read_bytes() == before
+    assert list(root.iterdir()) == [manifest]
+
+
+def test_init_refuses_stale_plan_before_any_write(tmp_path):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    root = tmp_path / "works"
+    plan = plan_init(root, today=TODAY)
+    root.mkdir()
+    (root / "dispatch.local.yaml").write_text("pipeline: {rules: []}\n", encoding="utf-8")
+    with pytest.raises(WorkspaceError, match="changed"):
+        apply_init(plan)
+    assert not (root / "workspace.yaml").exists()
+
+
+@pytest.mark.parametrize(
+    "authored,inserted",
+    [
+        ("{version: 1, workflow: {auto_drive: {max_parallel: 3}}}\n", ", dispatch_rules: dispatch.yaml"),
+        ("version: 1\n...\n", "workflow: {dispatch_rules: dispatch.yaml}\n"),
+        ("version: 1", "\nworkflow: {dispatch_rules: dispatch.yaml}\n"),
+    ],
+)
+def test_init_narrow_reference_insert_handles_authored_yaml_styles(tmp_path, authored, inserted):
+    root = tmp_path / "works"
+    root.mkdir()
+    manifest = root / "workspace.yaml"
+    manifest.write_bytes(authored.encode())
+    apply_init(plan_init(root, today=TODAY))
+    assert manifest.read_bytes().decode().replace(inserted, "") == authored
+
+
+def test_init_reports_alternate_local_ignore_without_editing_external_repo(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    alternate = tmp_path / "other-repo"
+    alternate.mkdir()
+    ignore = alternate / ".gitignore"
+    ignore.write_text("# user\n", encoding="utf-8")
+    shared = alternate / "rules.yml"
+    shared.write_text("pipeline: {rules: []}\n", encoding="utf-8")
+    (root / "workspace.yaml").write_text(f"version: 1\nworkflow: {{dispatch_rules: {shared}}}\n", encoding="utf-8")
+    plan = plan_init(root, today=TODAY)
+    assert str(alternate / "rules.local.yml") in plan.diff()
+    assert "/rules.local.yml" in plan.diff()
+    apply_init(plan)
+    assert ignore.read_bytes() == b"# user\n"
+    assert not (alternate / "rules.local.yml").exists()
+
+
+def test_init_refuses_manifest_changed_while_planning(tmp_path, monkeypatch):
+    import importlib
+
+    module = importlib.import_module("graph_works_core.workspace.init")
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    root = tmp_path / "works"
+    root.mkdir()
+    manifest = root / "workspace.yaml"
+    manifest.write_text("version: 1\n# original\n", encoding="utf-8")
+    real = module.load_prospective_dispatch_config
+
+    def changing(layout, **kwargs):
+        manifest.write_text("version: 1\n# concurrent author\n", encoding="utf-8")
+        return real(layout, **kwargs)
+
+    monkeypatch.setattr(module, "load_prospective_dispatch_config", changing)
+    with pytest.raises(WorkspaceError, match="changed"):
+        plan_init(root, today=TODAY)
+    assert "# concurrent author" in manifest.read_text()
+
+
+def test_applied_init_reports_alternate_ignore_advice(tmp_path):
+    root = tmp_path / "works"
+    root.mkdir()
+    (root / "workspace.yaml").write_text("version: 1\nworkflow: {dispatch_rules: custom.yml}\n", encoding="utf-8")
+    result = apply_init(plan_init(root, today=TODAY))
+    assert str(root / "custom.local.yml") in result.diff()
+    assert "/custom.local.yml" in result.diff()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "version: 1\ndefaults: &settings {auto_drive: {max_parallel: 3}}\nworkflow: *settings\n",
+        "version: 1\ndefaults: &settings {workflow: {auto_drive: {max_parallel: 3}}}\n<<: *settings\n",
+    ],
+)
+def test_init_refuses_reference_insertion_that_changes_aliased_settings(tmp_path, text):
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    root = tmp_path / "works"
+    root.mkdir()
+    manifest = root / "workspace.yaml"
+    manifest.write_bytes(text.encode())
+    with pytest.raises(WorkspaceError, match="without changing authored"):
+        plan_init(root, today=TODAY)
+    assert manifest.read_bytes() == text.encode()
+
+
+@pytest.mark.parametrize(
+    "authored,inserted",
+    [
+        ("{version: 1,}\n", " workflow: {dispatch_rules: dispatch.yaml}"),
+        ("version: 1\nworkflow: {auto_drive: {max_parallel: 3},}\n", " dispatch_rules: dispatch.yaml"),
+    ],
+)
+def test_init_preserves_trailing_commas_in_authored_flow_maps(tmp_path, authored, inserted):
+    root = tmp_path / "works"
+    root.mkdir()
+    manifest = root / "workspace.yaml"
+    manifest.write_bytes(authored.encode())
+    apply_init(plan_init(root, today=TODAY))
+    assert manifest.read_bytes().decode().replace(inserted, "") == authored
+    assert plan_init(root, today=TODAY).is_empty
+
+
+@pytest.mark.parametrize("separator", ["", ",", ", # trailing separator\n"])
+def test_init_preserves_flow_mapping_with_aliased_last_value(tmp_path, separator):
+    authored = (
+        "{version: 1, settings: &settings {max_parallel: 3}, workflow: {auto_drive: *settings" + separator + "}}\n"
+    )
+    root = tmp_path / "works"
+    root.mkdir()
+    manifest = root / "workspace.yaml"
+    manifest.write_bytes(authored.encode())
+    apply_init(plan_init(root, today=TODAY))
+    insertion = (" " if separator else ", ") + "dispatch_rules: dispatch.yaml"
+    assert manifest.read_bytes().decode().replace(insertion, "") == authored
+    assert plan_init(root, today=TODAY).is_empty

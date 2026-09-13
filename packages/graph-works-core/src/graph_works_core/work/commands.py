@@ -96,6 +96,10 @@ from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
+from graph_works_core.workspace.dispatch import DispatchResolution, dispatch_attributes, resolve_dispatch
+from graph_works_core.workspace.dispatch_artifacts import missing_design_source
+from graph_works_core.workspace.dispatch_config import load_dispatch_config
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repo
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
@@ -386,6 +390,8 @@ class NextResult:
     descent: DescendResult | None
     normalizations: tuple[SourceNormalization, ...]
     artifact: ArtifactRef | None = None
+    dispatch_resolution: DispatchResolution | None = None
+    dispatch_preflight: str | None = None
     application: NextApplication = NextApplication()
     warnings: tuple[str, ...] = ()
 
@@ -404,11 +410,10 @@ def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNorma
     """Plan the canonical design stamp when the artifact exists and no
     authored source already owns that id.
     """
-    if item.has_design_artifact:
+    missing = missing_design_source(bundle_root, item)
+    if missing is None:
         return None
-    ref, title = stamp_for(bundle_root, item, SPEC_SOURCE_ID)
-    if not ref.path(bundle_root).exists():
-        return None
+    ref, title = missing
     return SourceNormalization(path=item.path, page=bundle_root / item.page_path, ref=ref, title=title)
 
 
@@ -460,6 +465,18 @@ def _stage_artifact(bundle_root: Path, item: WorkItem, result: RouteResult) -> A
         return None
     ref, _title = stamp_for(bundle_root, item, result.on_complete.stamp_source)
     return ref
+
+
+def _resolve_next_dispatch(
+    layout: WorkspaceLayout, state: RouteState, computed: RouteResult
+) -> tuple[DispatchResolution | None, str | None]:
+    if computed.dispatch is None:
+        return None, None
+    try:
+        config = load_dispatch_config(layout)
+        return resolve_dispatch(dispatch_attributes(state, computed.dispatch), rules=config.rules), None
+    except WorkspaceError as exc:
+        return None, str(exc)
 
 
 def run_next(
@@ -521,7 +538,8 @@ def run_next(
         artifact=_stage_artifact(bundle.root, selected, computed),
     )
     if dry_run:
-        return preview
+        resolution, preflight = _resolve_next_dispatch(layout, state, computed)
+        return replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)
 
     application, warnings = _apply_normalizations(layout, normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
@@ -537,8 +555,11 @@ def run_next(
     )
     assert persisted_state is not None
     persisted_route = route(persisted_state)
+    resolution, preflight = _resolve_next_dispatch(layout, persisted_state, persisted_route)
     return replace(
         preview,
+        dispatch_resolution=resolution,
+        dispatch_preflight=preflight,
         state=persisted_state,
         route=persisted_route,
         child_rollup=persisted_state.child_rollup,

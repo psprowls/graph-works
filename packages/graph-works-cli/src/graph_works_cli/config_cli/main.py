@@ -9,19 +9,17 @@ from typing import Never
 
 import typer
 from config_io import (
-    PROJECTION_FILENAME,
     LayeredYamlStore,
     RegistryError,
     StoreValidationError,
     resolve_key,
-    set_key,
-    unset_key,
-    write_projection,
 )
 from graph_works_core.hooks import Action, HooksSettingsError
 from graph_works_core.hooks import apply as apply_hooks
 from graph_works_core.workspace import manifest
 from graph_works_core.workspace.discovery import find_repo_root
+from graph_works_core.workspace.dispatch_config import is_retired_config_key, remove_retired_config_key
+from graph_works_core.workspace.dispatch_projection import mutate_workspace_config, write_dispatch_projection
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import workspace_store
@@ -76,11 +74,8 @@ def _layout(workspace: str) -> WorkspaceLayout:
 def _store(workspace: str) -> tuple[WorkspaceLayout, LayeredYamlStore]:
     """Resolve a workspace and bind both config layers through core's seam.
 
-    The one seam every `gw config` verb goes through now, read or write:
-    `sync` projects straight from what this returns, and `set`/`unset` write
-    through `.base` or `.overlay` before re-projecting from the whole layered
-    store. `workspace_store` is typed `-> LayeredYamlStore` precisely because
-    this file is the one caller that needs `.base`/`.overlay`.
+    Writes and sync use core's validated dispatch projection assembly. The
+    layered store remains the effective-value read seam after a mutation.
     """
     layout = _layout(workspace)
     return layout, workspace_store(layout)
@@ -176,14 +171,7 @@ def set_cmd(
     """Set a catalog key and refresh `.gw/cache/config.json`."""
     try:
         layout, store = _store(workspace)
-        # `projection=` is deliberately not passed: set_key would regenerate
-        # from the single layer it just wrote, losing the merged body and the
-        # other layer's fingerprint. Project from the layered store instead.
-        result = set_key(manifest.CATALOG, key, value, store=store.overlay if local else store.base)
-        write_projection(store, layout.cache_dir / PROJECTION_FILENAME)
-        # set_key reports its own write as "manifest"; re-resolving through the
-        # layered store is what makes the rendered origin honest — a base write
-        # can still be shadowed by an existing workspace.local.yaml value.
+        mutate_workspace_config(layout, key, value, local=local)
         result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
     except RegistryError as exc:
         _exit_config_error(exc, code=exit_codes.GENERIC)
@@ -202,9 +190,11 @@ def unset_cmd(
     """Remove an explicit key, refresh the projection, and show its fallback."""
     try:
         layout, store = _store(workspace)
-        unset_key(manifest.CATALOG, key, store=store.overlay if local else store.base)
-        write_projection(store, layout.cache_dir / PROJECTION_FILENAME)
-        result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
+        if is_retired_config_key(key):
+            result = remove_retired_config_key(layout, key, local=local)
+        else:
+            mutate_workspace_config(layout, key, None, local=local)
+            result = resolve_key(manifest.CATALOG, key, store=store, environ=os.environ)
     except RegistryError as exc:
         _exit_config_error(exc, code=exit_codes.GENERIC)
     except (StoreValidationError, WorkspaceError) as exc:
@@ -219,8 +209,7 @@ def sync(
 ) -> None:
     """Regenerate `.gw/cache/config.json` after an out-of-band manifest edit."""
     try:
-        layout, store = _store(workspace)
-        target = write_projection(store, layout.cache_dir / PROJECTION_FILENAME)
+        target = write_dispatch_projection(_layout(workspace))
     except RegistryError as exc:
         _exit_config_error(exc, code=exit_codes.GENERIC)
     except (StoreValidationError, WorkspaceError) as exc:

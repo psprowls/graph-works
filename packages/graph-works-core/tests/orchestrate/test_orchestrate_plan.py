@@ -8,7 +8,6 @@ import re
 from unittest import mock
 
 from graph_works_core.orchestrate import commands as orchestrate
-from graph_works_core.workspace.pipeline import PACKAGED_PIPELINE
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import WorkItem
 
@@ -66,10 +65,8 @@ def test_worktree_refusal_kinds_are_in_the_closed_vocabulary() -> None:
 
 def _plan(items: tuple[WorkItem, ...], root: str, **overrides: object):
     kwargs: dict[str, object] = {
-        "pipeline": PACKAGED_PIPELINE,
-        "auto_drive": {},
+        "dispatch_rules": (),
         "max_parallel": 2,
-        "permission_mode": "bypassPermissions",
         "live": (),
         "worktree_exists": {},
         "workspace": "/ws",
@@ -238,10 +235,8 @@ def test_plan_blocks_an_unprovable_item_without_consuming_a_slot() -> None:
     computed = orchestrate.plan(
         (root, child),
         "work/epic-r",
-        pipeline=PACKAGED_PIPELINE,
-        auto_drive={},
+        dispatch_rules=(),
         max_parallel=2,
-        permission_mode="bypassPermissions",
         workspace="/ws",
         default_base="main",
         repo_path="/repo",
@@ -268,10 +263,8 @@ def test_plan_dispatches_into_an_adopted_worktree() -> None:
     computed = orchestrate.plan(
         (root, child),
         "work/epic-r",
-        pipeline=PACKAGED_PIPELINE,
-        auto_drive={},
+        dispatch_rules=(),
         max_parallel=2,
-        permission_mode="bypassPermissions",
         workspace="/ws",
         default_base="main",
         repo_path="/repo",
@@ -290,10 +283,8 @@ def test_plan_defaults_to_an_empty_inventory() -> None:
     computed = orchestrate.plan(
         (child,),
         "work/lone-bug",
-        pipeline=PACKAGED_PIPELINE,
-        auto_drive={},
+        dispatch_rules=(),
         max_parallel=1,
-        permission_mode="bypassPermissions",
         workspace="/ws",
         default_base="main",
     )
@@ -1480,3 +1471,39 @@ def test_a_read_only_dispatch_does_not_occupy_the_slot_for_a_later_dispatch() ->
     assert by_slug[second_child].worktree.path == "/epic"
     assert by_slug[code_child].worktree.action == "reuse"
     assert by_slug[code_child].worktree.path == "/epic"
+
+
+def test_dispatch_profile_errors_preserve_relay_blocker_and_do_not_claim_placement():
+    from graph_works_core.workspace.dispatch import parse_rules
+
+    root = "work/epic-a"
+    child = f"{root}/children/feature-a"
+    rules = parse_rules(
+        [{"match": {"variant": "single"}, "mode": "relay"}],
+        source="/ws/dispatch.yaml",
+        attributes=frozenset({"variant"}),
+    )
+    result = _plan(
+        (_item(root, type="Epic", phase="execute", active_child_paths=(child,)), _item(child)),
+        root,
+        dispatch_rules=rules,
+    )
+    assert result.dispatches == ()
+    assert result.dispatch_resolutions == {}
+    assert any(block.kind == "relay-untailed" for block in result.blocked), result.blocked
+    assert "dispatch" in next(block.reason for block in result.blocked if block.kind == "relay-untailed")
+
+
+def test_resolved_tail_formats_known_placeholders_and_preserves_literal_braces():
+    from graph_works_core.workspace.dispatch import parse_rules
+
+    path = "work/feature-a"
+    rules = parse_rules(
+        [{"match": {}, "prompt_tail": "{workspace} {path} {merge_target} {literal}", "agent": "codex"}],
+        source="/ws/dispatch.yaml",
+        attributes=frozenset(),
+    )
+    result = _plan((_item(path, phase="design"),), path, dispatch_rules=rules)
+    planned = result.dispatches[0]
+    assert "/ws work/feature-a main {literal}" in planned.prompt
+    assert planned.agent == "codex"

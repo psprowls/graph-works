@@ -22,7 +22,6 @@ from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.pipeline import entry_for
 from graph_works_core.workspace.repos import resolve_repo
 
 from graph_works_cli import exit_codes
@@ -301,20 +300,7 @@ def next_stage(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    # `entry_for` reads the manifest, so a malformed configured skill raises
-    # here -- outside the `try` above. It is *not* a hard failure: this command
-    # owns a blockers channel, and step 1 of the workflow skill already reports
-    # blockers and stops. `advance` and `orchestrate` have no such channel and
-    # keep their SCHEMA_MISMATCH mapping.
-    dispatch = result.route.dispatch
-    skill: str | None = None
-    preflight: str | None = None
-    if dispatch is not None:
-        try:
-            skill = entry_for(dispatch.variant, layout=layout).skill
-        except WorkspaceError as exc:
-            preflight = str(exc)
-    payload = rendering.next_payload(result, bundle_root=layout.bundle_dir, skill=skill, preflight=preflight)
+    payload = rendering.next_payload(result, bundle_root=layout.bundle_dir)
     if json_output:
         rendering.emit(payload)
         for warning in result.warnings:

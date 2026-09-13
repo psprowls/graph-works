@@ -201,6 +201,8 @@ test-plugin:
     #!/usr/bin/env bash
     set -euo pipefail
     cd plugins/gw
+    echo "--- test-dispatch-profile-contract"
+    bash tests/test-dispatch-profile-contract.sh
     echo "--- codex/test-marketplace-manifest"
     bash tests/codex/test-marketplace-manifest.sh
     echo "--- codex/test-package-codex-plugin"

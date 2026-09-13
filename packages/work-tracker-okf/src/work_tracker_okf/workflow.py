@@ -67,6 +67,7 @@ class RouteState:
     work_status: str
     phase: str | None = None
     effort: str | None = None
+    blast_radius: str | None = None
     has_plan_doc: bool = False
     has_spec_doc: bool = False
     has_open_decision: bool = False
@@ -466,6 +467,7 @@ def state_for(
         work_status=item.work_status,
         phase=item.phase,
         effort=effort or item.effort,
+        blast_radius=item.blast_radius,
         has_plan_doc=item.has_plan_artifact,
         has_spec_doc=item.has_design_artifact,
         has_open_decision=has_open_decision,

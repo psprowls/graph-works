@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import json
 
-from orca_fakes import FakeRunner, fixture
+from orca_fakes import SyntheticEvidenceRunner as FakeRunner
+from orca_fakes import fixture
 from workflow_orca import OrcaBackend
 from workflow_orca._cli import OrcaResult
 
@@ -150,4 +151,25 @@ def test_the_sweep_does_not_run_when_events_arrived():
     )
     OrcaBackend(run=runner).open_session(TARGET).wait(timeout_s=0.1)
     assert not runner.calls_matching("worker-read")
+    assert not runner.calls_matching("terminal", "send")
+
+
+def test_terminal_free_worker_handle_is_never_sent_terminal_input():
+    """Synthetic structured worker: agentTerminalHandle alone is not terminal proof."""
+
+    class TerminalFreeRunner(FakeRunner):
+        def __call__(self, argv):
+            result = super().__call__(argv)
+            if "worker-show" in argv:
+                body = json.loads(result.stdout)
+                body["result"]["terminal"] = None
+                return OrcaResult(0, json.dumps(body), "")
+            return result
+
+    runner = TerminalFreeRunner(
+        [(("worker-read",), "worker_read_empty"), (("worker-show",), "worker_show_settled"), *BASE]
+    )
+    session = OrcaBackend(run=runner).open_session(TARGET)
+    session.wait(timeout_s=0)
+    assert runner.calls_matching("worker-read")
     assert not runner.calls_matching("terminal", "send")

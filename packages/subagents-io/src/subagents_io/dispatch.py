@@ -53,7 +53,8 @@ class PlannedDispatch:
     effort: str | None
     skill: str
     mode: str  # one of DISPATCH_MODES
-    model: str | None  # None = inherit the session model
+    agent: str  # inert agent identifier; validated by the planner
+    model: str | None  # None = use the selected agent's default
     reasoning_effort: str | None
     worktree: WorktreeAction
     merge_target: str

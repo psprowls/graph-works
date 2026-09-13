@@ -135,3 +135,11 @@ MIT.
 ## Related
 - [Karpathy's original gist](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
 - Vannevar Bush, "As We May Think" (1945) — the Memex
+
+## Worker dispatch preferences
+
+Attended workflow and auto-drive consume the same core-resolved dispatch
+profile. Shared/local rules choose Claude or Codex per stage, with agent-owned
+permissions and frozen retry preferences. See
+[Dispatch configuration](../auto-drive/references/dispatch-configuration.md)
+for the plugin launch/accounting contract and the source configuration guide.

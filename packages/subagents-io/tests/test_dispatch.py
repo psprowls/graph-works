@@ -31,6 +31,7 @@ PLANNED_DISPATCH_FIELDS = [
     ("effort", "str | None"),
     ("skill", "str"),
     ("mode", "str"),
+    ("agent", "str"),
     ("model", "str | None"),
     ("reasoning_effort", "str | None"),
     ("worktree", "WorktreeAction"),
@@ -79,6 +80,7 @@ def test_value_equality():
 def test_planned_dispatch_composes_a_worktree_action():
     worktree = WorktreeAction(action="fork-child", path=None, branch="b", base_branch="main", exists=None)
     dispatch = PlannedDispatch(
+        agent="arbitrary-inert-agent",
         key="slug#plan",
         slug="slug",
         phase="plan",
@@ -92,6 +94,7 @@ def test_planned_dispatch_composes_a_worktree_action():
         merge_target="main",
         prompt="do the thing",
     )
+    assert dispatch.agent == "arbitrary-inert-agent"
     assert dispatch.worktree is worktree
     assert dispatch.mode in DISPATCH_MODES
     assert dispatch.worktree.action in WORKTREE_ACTIONS

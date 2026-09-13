@@ -235,13 +235,15 @@ def test_cross_drive_repo_directory_is_refused_not_crashed(tmp_path: Path, monke
 def test_auto_drive_scalars_carry(tmp_path: Path) -> None:
     conversion = convert_agent_workspace(tmp_path)
     assert by_target(conversion, "workflow.auto_drive.max_parallel").value == 4
-    assert by_target(conversion, "workflow.auto_drive.permission_mode").value == "bypassPermissions"
+    assert any("permission_mode" in reason for reason in conversion.refusals)
+    assert "permission_mode" not in conversion.manifest_text
 
 
-def test_auto_drive_models_block_carries_raw(tmp_path: Path) -> None:
-    d = by_target(convert_agent_workspace(tmp_path), "workflow.auto_drive.models")
-    assert d.action == "carry"
-    assert d.value == {"design": "opus", "plan": "opus", "execute": "sonnet", "finish": "sonnet"}
+def test_auto_drive_models_require_explicit_cutover(tmp_path: Path) -> None:
+    conversion = convert_agent_workspace(tmp_path)
+    assert not conversion.ok
+    assert any("workflow.auto_drive.models" in reason for reason in conversion.refusals)
+    assert "models:" not in conversion.manifest_text
 
 
 def test_bundle_dir_is_seeded_explicitly(tmp_path: Path) -> None:
@@ -265,12 +267,11 @@ def test_ignore_is_seeded_empty_never_the_whole_scan(tmp_path: Path) -> None:
     assert "./**" not in conversion.manifest_text
 
 
-def test_relay_tail_is_seeded_byte_equal_to_the_packaged_seed(tmp_path: Path) -> None:
-    from graph_works_core.workspace.pipeline import RELAY_TAIL_SEED
-
-    d = by_target(convert_agent_workspace(tmp_path), "workflow.pipeline.branch.prompt_tail")
-    assert (d.action, d.value) == ("seed", RELAY_TAIL_SEED)
-    assert json.dumps(RELAY_TAIL_SEED) in convert_agent_workspace(tmp_path).manifest_text
+def test_new_dispatch_reference_replaces_retired_manifest_tail(tmp_path: Path) -> None:
+    conversion = convert_agent_workspace(tmp_path)
+    d = by_target(conversion, "workflow.dispatch_rules")
+    assert (d.action, d.value) == ("seed", "dispatch.yaml")
+    assert "pipeline:" not in conversion.manifest_text
 
 
 def test_no_layout_keys_beyond_bundle_dir_are_written(tmp_path: Path) -> None:
@@ -367,14 +368,9 @@ def good_body() -> str:
         'layout:\n'
         '  bundle_dir: "wiki"\n'
         'workflow:\n'
+        '  dispatch_rules: dispatch.yaml\n'
         '  auto_drive:\n'
         '    max_parallel: 4\n'
-        '    permission_mode: "bypassPermissions"\n'
-        '    models:\n'
-        '      design: "opus"\n'
-        '      plan: "opus"\n'
-        '      execute: "sonnet"\n'
-        '      finish: "sonnet"\n'
         'repositories:\n'
         '  "graph-works":\n'
         '    path: "../../graph-works"\n'
@@ -398,10 +394,9 @@ def test_validate_rejects_a_mistyped_catalog_scalar(tmp_path: Path) -> None:
         validate_manifest(written(tmp_path, body))
 
 
-def test_validate_rejects_a_models_key_that_is_not_a_dispatch_phase(tmp_path: Path) -> None:
-    # `done` is in PHASES but not DISPATCH_PHASES, so the rule is dead.
-    body = good_body().replace('      finish: "sonnet"', '      done: "sonnet"')
-    with pytest.raises(ConversionRefused, match="done"):
+def test_validate_rejects_retired_models_even_when_empty(tmp_path: Path) -> None:
+    body = good_body().replace("  auto_drive:", "  auto_drive:\n    models: {}")
+    with pytest.raises(ConversionRefused, match="retired key"):
         validate_manifest(written(tmp_path, body))
 
 
@@ -534,6 +529,16 @@ def live_workspace(tmp_path: Path) -> Path:
     (root / ".graph-wiki.yaml").write_bytes(
         (FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes()
     )
+    # Successful conversion fixtures represent explicit operator cleanup;
+    # the verbatim old files remain separately covered by refusal tests.
+    from ruamel.yaml import YAML
+
+    source = root / ".graph-wiki.yaml"
+    raw = YAML(typ="safe").load(source.read_text(encoding="utf-8"))
+    raw["workflow"]["auto_drive"].pop("models")
+    raw["workflow"]["auto_drive"].pop("permission_mode")
+    with source.open("w", encoding="utf-8", newline="") as stream:
+        YAML().dump(raw, stream)
     return root
 
 
@@ -618,3 +623,56 @@ def test_no_sync_leaves_no_projection_and_says_so(
     out = capsys.readouterr().out
     assert "--no-sync" in out
     assert "gw config sync" in out
+
+
+@pytest.mark.parametrize("key", ["pipeline", "models", "overrides", "permission_mode"])
+@pytest.mark.parametrize("value", [None, {}])
+def test_conversion_refuses_retired_dispatch_before_writes(tmp_path: Path, key: str, value: object) -> None:
+    from ruamel.yaml import YAML
+
+    root = tmp_path / "legacy"
+    root.mkdir()
+    workflow = {"pipeline": value} if key == "pipeline" else {"auto_drive": {key: value}}
+    source = root / ".graph-wiki.yaml"
+    with source.open("w", encoding="utf-8", newline="") as stream:
+        YAML().dump({"version": 2, "repo-directory": str(tmp_path), "workflow": workflow}, stream)
+    before = source.read_bytes()
+    assert main([str(root), "--write"]) == 1
+    assert source.read_bytes() == before
+    assert list(root.iterdir()) == [source]
+
+
+def test_new_conversion_seeds_consumable_dispatch_and_preserves_authored_file(tmp_path: Path) -> None:
+    from graph_works_core.workspace.dispatch_config import load_dispatch_config
+    from graph_works_core.workspace.dispatch_projection import write_dispatch_projection
+
+    root = tmp_path / "clean"
+    root.mkdir()
+    (root / "wiki").mkdir()
+    (root / ".graph-wiki.yaml").write_text(
+        "version: 2\nrepo-directory: .\nworkflow:\n  auto_drive: {max_parallel: 4, supervise_merges: false}\n",
+        encoding="utf-8", newline="",
+    )
+    assert main([str(root), "--write", "--no-sync"]) == 0
+    layout = layout_for(root, bundle_dir="wiki")
+    config = load_dispatch_config(layout)
+    assert config.shared_path == root / "dispatch.yaml"
+    assert config.rules[0].fields["prompt_tail"]
+    assert "/dispatch.local.yaml" in (root / ".gitignore").read_text(encoding="utf-8")
+    projection = json.loads(write_dispatch_projection(layout).read_text(encoding="utf-8"))
+    assert projection["workflow"]["auto_drive"] == {"max_parallel": 4, "supervise_merges": False}
+    authored = b"# authored\npipeline: {rules: []}\n"
+    (root / "dispatch.yaml").write_bytes(authored)
+    assert main([str(root), "--write", "--no-sync"]) == 0
+    assert (root / "dispatch.yaml").read_bytes() == authored
+
+
+def test_conversion_overlay_cannot_hide_retired_shared_keys(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    root = tmp_path / "legacy"
+    root.mkdir()
+    source = root / ".graph-wiki.yaml"
+    source.write_text("version: 2\nrepo-directory: .\nworkflow: {auto_drive: {models: {}}}\n", encoding="utf-8", newline="")
+    (root / ".graph-wiki.local.yaml").write_text("workflow: {}\n", encoding="utf-8", newline="")
+    assert main([str(root), "--write"]) == 1
+    assert str(source) in capsys.readouterr().err
+    assert not (root / "workspace.yaml").exists()

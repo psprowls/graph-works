@@ -255,6 +255,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "advances": [{"path": "work/a", "reason": "ready", "mode": "advance"}],
             "blocked": [{"path": "work/b", "kind": "dependency", "reason": "one\ntwo"}],
             "decisions": {"open": [decision]},
+            "holds": [],
             "warnings": ["partial"],
         }
     )
@@ -349,6 +350,9 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         decided="user",
         supersedes=None,
         prose="Answer",
+        hold=None,
+        phase=None,
+        checkpoint=None,
     )
     owner = SimpleNamespace(owner_path="work/e", redirected_from="work/a", ledger=tmp_path / "ledger.md")
     plan = SimpleNamespace(primary=entry, superseded=SimpleNamespace(id="D-000"), refusal=None)
@@ -374,7 +378,9 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     )
     assert rendering.overturn_payload(overturn)["follow_up_filed"] is True
 
-    worktree = SimpleNamespace(action="create", path="/tmp/w", branch="b", base_branch="main", exists=False)
+    worktree = SimpleNamespace(
+        action="create", path="/tmp/w", branch="b", base_branch="main", exists=False, parent_path="/tmp/parent"
+    )
     dispatch = SimpleNamespace(
         key="work/a#execute",
         slug="work/a",
@@ -406,12 +412,17 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         open_decisions=(entry,),
         assumed_decisions=(entry,),
         decision_counts={"open": 1},
+        holds=(),
         warnings=("w",),
+        code_repo="/code",
     )
     orchestrate_result = rendering.orchestrate_payload(orchestration)
     assert orchestrate_result["dispatches"][0]["path"] == "work/a"
+    assert orchestrate_result["dispatches"][0]["worktree"]["parent_path"] == "/tmp/parent"
     assert orchestrate_result["advances"][0]["mode"] == "return"
     assert orchestrate_result["supervise_merges"] is False
+    assert orchestrate_result["holds"] == []
+    assert orchestrate_result["repo"] == {"path": "/code"}
 
 
 def test_fail_preserves_an_explicit_cause(capsys: pytest.CaptureFixture[str]) -> None:
@@ -435,6 +446,7 @@ def test_render_orchestrate_prints_supervise_merges_only_when_true(
         "advances": [],
         "blocked": [],
         "decisions": {"open": []},
+        "holds": [],
         "warnings": [],
     }
     rendering.render_orchestrate(payload)
@@ -442,3 +454,82 @@ def test_render_orchestrate_prints_supervise_merges_only_when_true(
 
     rendering.render_orchestrate({**payload, "supervise_merges": True})
     assert "supervise_merges=True" in capsys.readouterr().out
+
+
+def test_orchestrate_payload_and_render_carry_holds(capsys: pytest.CaptureFixture[str]) -> None:
+    decision = SimpleNamespace(
+        id="D-004",
+        number=4,
+        question="resume?",
+        status="open",
+        affects=("work/f",),
+        decided=None,
+        supersedes=None,
+        prose="",
+        hold="park",
+        phase="execute",
+        checkpoint="/work/f/references/03-execute-checkpoint-D-004.md",
+    )
+    hold = SimpleNamespace(
+        path="work/f", owner_path="work/f", ledger_path="/ws/okf/work/f/references/00-decisions.md", decision=decision
+    )
+    result = SimpleNamespace(
+        path="work/e",
+        terminal=False,
+        slots_free=0,
+        max_parallel=1,
+        supervise_merges=False,
+        live=(),
+        dispatches=(),
+        advances=(),
+        blocked=(),
+        decisions_owner_path="work/e",
+        decisions_ledger_path="ledger",
+        open_decisions=(),
+        assumed_decisions=(),
+        decision_counts={},
+        holds=(hold,),
+        warnings=(),
+        code_repo=None,
+    )
+    payload = rendering.orchestrate_payload(result)
+    assert payload["holds"] == [
+        {
+            "path": "work/f",
+            "owner_path": "work/f",
+            "ledger_path": "/ws/okf/work/f/references/00-decisions.md",
+            "decision": {
+                "id": "D-004",
+                "number": 4,
+                "question": "resume?",
+                "status": "open",
+                "affects": ["work/f"],
+                "decided": None,
+                "supersedes": None,
+                "prose": "",
+                "hold": "park",
+                "phase": "execute",
+                "checkpoint": "/work/f/references/03-execute-checkpoint-D-004.md",
+            },
+        }
+    ]
+    rendering.render_orchestrate(payload)
+    assert "  hold work/f D-004 (park at execute): resume?" in capsys.readouterr().out
+
+
+def test_decision_list_shows_the_hold_shape(capsys: pytest.CaptureFixture[str]) -> None:
+    rendering.render_decision_list(
+        {
+            "owner_path": "work/f",
+            "requested_path": "work/f",
+            "ledger_path": "l",
+            "counts": {"open": 2},
+            "entries": [
+                {"id": "D-001", "status": "open", "question": "q", "hold": "skip", "phase": "plan"},
+                {"id": "D-002", "status": "open", "question": "r", "hold": None, "phase": None},
+            ],
+        }
+    )
+    out = capsys.readouterr().out
+    assert "  D-001  open  [skip at plan] — q" in out
+    assert "  D-002  open — r" in out

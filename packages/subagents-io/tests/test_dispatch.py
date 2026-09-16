@@ -21,6 +21,7 @@ WORKTREE_ACTION_FIELDS = [
     ("branch", "str"),
     ("base_branch", "str | None"),
     ("exists", "bool | None"),
+    ("parent_path", "str | None"),
 ]
 
 PLANNED_DISPATCH_FIELDS = [
@@ -65,20 +66,34 @@ def test_no_field_carries_a_default(cls):
 
 
 def test_instances_are_frozen_at_runtime():
-    action = WorktreeAction(action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True)
+    action = WorktreeAction(action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True, parent_path=None)
     with pytest.raises(AttributeError):
         action.branch = "other"  # type: ignore[misc]
 
 
 def test_value_equality():
     def make():
-        return WorktreeAction(action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True)
+        return WorktreeAction(
+            action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True, parent_path=None
+        )
 
     assert make() == make()
 
 
+def test_parent_path_round_trips():
+    action = WorktreeAction(
+        action="fork-child", path=None, branch="b", base_branch="epic/x", exists=None, parent_path="/wt/epic"
+    )
+    assert action.parent_path == "/wt/epic"
+    assert action != WorktreeAction(
+        action="fork-child", path=None, branch="b", base_branch="epic/x", exists=None, parent_path=None
+    )
+
+
 def test_planned_dispatch_composes_a_worktree_action():
-    worktree = WorktreeAction(action="fork-child", path=None, branch="b", base_branch="main", exists=None)
+    worktree = WorktreeAction(
+        action="fork-child", path=None, branch="b", base_branch="main", exists=None, parent_path=None
+    )
     dispatch = PlannedDispatch(
         agent="arbitrary-inert-agent",
         key="slug#plan",

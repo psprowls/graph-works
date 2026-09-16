@@ -1,4 +1,4 @@
-"""Rules for Release, Epic, and Feature decision ledgers.
+"""Rules for parent-capable and self-owned lone-item decision ledgers (D-001).
 
 The fifth topic. Its prefix had to clear eighteen taken names — okf-io's eight
 (`computation`, `frontmatter`, `legacy`, `lifecycle`, `links`, `provenance`,
@@ -11,8 +11,8 @@ is a bundle member rather than a repo path: `repo_root` injection exists because
 the *code repo* is unknown to a bundle, not because a rule may not do I/O
 (`targets.affects-missing` is an `.exists()` call). So this topic injects
 nothing. `ledger-missing` does no I/O at all — `ctx.bundle.has_member` sees
-ignored members under `references/` — and the four content rules read
-`ctx.bundle.root / ref.rel`.
+ignored members under `references/` — and the content rules read
+ledger members plus validated, bundle-contained checkpoint paths.
 
 `_SPEC` cites this module rather than a spec section: a parent whose ledger has
 a gap is a perfectly conformant OKF v0.2 document, and inventing a section
@@ -27,11 +27,12 @@ from collections.abc import Iterable, Iterator
 
 from okf_io import Finding, Rule, RuleContext, Severity
 
+from work_tracker_okf import checkpoints
 from work_tracker_okf._rules._common import LaneConfig, active, items
-from work_tracker_okf.decisions import VALID_STATUSES, LedgerParse, id_number, load
-from work_tracker_okf.hierarchy import nearest_parent
+from work_tracker_okf.decisions import HOLD_PHASES, HOLD_SHAPES, VALID_STATUSES, Decision, LedgerParse, id_number, load
+from work_tracker_okf.hierarchy import decision_owner
 from work_tracker_okf.items import WorkItem
-from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref, checkpoint_ref, parse_item_path
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID
 
 CODES: tuple[str, ...] = (
@@ -40,6 +41,9 @@ CODES: tuple[str, ...] = (
     "decisions.cite-missing",
     "decisions.open-at-finish",
     "decisions.supersedes-invalid",
+    "decisions.hold-invalid",
+    "decisions.hold-phase-stale",
+    "decisions.checkpoint-invalid",
 )
 
 _SPEC = "work_tracker_okf._rules.decisions"
@@ -57,7 +61,7 @@ _ID_RE = re.compile(r"\bD-\d+\b")
 #: Parser warnings the explicit sub-checks already surface at `error`. Filtered
 #: out of the `warn` passthrough, so one bad entry is one root cause and one
 #: finding, at the higher severity.
-_ALREADY_REPORTED = ("invalid status", "missing status", "duplicate id")
+_ALREADY_REPORTED = ("invalid status", "missing status", "duplicate id", "invalid hold", "invalid phase")
 
 
 def _finding(code: str, severity: Severity, item: WorkItem, message: str) -> Finding:
@@ -72,11 +76,20 @@ def _ledger_ref(item_path: str) -> ArtifactRef:
 
 
 def _entry_findings(item: WorkItem, parsed: LedgerParse) -> Iterator[Finding]:
-    """33: three sub-checks at `error`, then the residual warnings at `warn`."""
+    """33: explicit metadata checks at `error`, then residual warnings at `warn`."""
     seen: set[int] = set()
     numbers: list[int] = []
     for entry in parsed.entries:
         numbers.append(entry.number)
+        # Hold-shaped entries report phase errors through `_hold_findings`.
+        # Questions need a replacement too before we suppress parser warnings.
+        if not _is_hold_shaped(entry) and entry.phase is not None and entry.phase not in HOLD_PHASES:
+            yield _finding(
+                "decisions.entry-invalid",
+                "error",
+                item,
+                f"decision {entry.id}: phase {entry.phase!r} not in {sorted(HOLD_PHASES)}",
+            )
         if entry.status not in VALID_STATUSES:
             # `parse` blanks the status when the raw text was missing or
             # unrecognized, so the raw value is not recoverable here — reuse the
@@ -150,20 +163,98 @@ def _supersedes_findings(item: WorkItem, parsed: LedgerParse) -> Iterator[Findin
             )
 
 
-def ledger(ctx: RuleContext) -> Iterable[Finding]:
-    """32, 33, 35, 36: the four facts about an epic's own ledger.
+def _is_hold_shaped(entry: Decision) -> bool:
+    return entry.hold is not None or entry.checkpoint is not None
 
-    One function for four codes because it is one ledger read per epic, and
-    splitting it would mean four reads of the same file.
 
-    Only active epics are checked. An archived page is frozen, and telling
-    anyone its ledger has a gap asks them to do nothing.
-    """
-    for item in active(ctx):
-        if item.type not in PARENT_TYPES:
+def _hold_findings(
+    ctx: RuleContext, item: WorkItem, parsed: LedgerParse, by_path: dict[str, WorkItem]
+) -> Iterator[Finding]:
+    for entry in parsed.entries:
+        if not _is_hold_shaped(entry):
             continue
+        problems: list[str] = []
+        if entry.hold is not None and entry.hold not in HOLD_SHAPES:
+            problems.append(f"hold {entry.hold!r} not in {sorted(HOLD_SHAPES)}")
+        if entry.hold == "park" and not entry.checkpoint:
+            problems.append("a park carries no checkpoint")
+        if entry.hold == "skip" and entry.checkpoint:
+            problems.append("a skip carries a checkpoint")
+        if len(entry.affects) != 1:
+            problems.append(f"a hold names exactly one item, not {len(entry.affects)}")
+        if entry.phase is None or entry.phase not in HOLD_PHASES:
+            problems.append(f"phase {entry.phase!r} not in {sorted(HOLD_PHASES)}")
+        elif entry.hold == "park" and entry.phase == "entry":
+            problems.append("a park cannot sit at entry")
+        for problem in problems:
+            yield _finding("decisions.hold-invalid", "error", item, f"decision {entry.id}: {problem}")
+        target = by_path.get(entry.affects[0]) if len(entry.affects) == 1 else None
+        if (
+            entry.status == "open"
+            and entry.hold is not None
+            and target is not None
+            and entry.phase in HOLD_PHASES
+            and (target.phase or "entry") != entry.phase
+        ):
+            yield _finding(
+                "decisions.hold-phase-stale",
+                "warn",
+                item,
+                f"open decision {entry.id} holds {target.path} at {entry.phase!r}, "
+                f"but it is at {target.phase or 'entry'!r}",
+            )
+        if entry.checkpoint:
+            yield from _checkpoint_findings(ctx, item, entry)
+
+
+def _checkpoint_findings(ctx: RuleContext, item: WorkItem, entry: Decision) -> Iterator[Finding]:
+    """Validate content-derived identity and containment before opening a file."""
+    try:
+        if len(entry.affects) != 1 or parse_item_path(entry.affects[0]) is None:
+            raise ValueError("checkpoint requires exactly one valid item path")
+        ref = checkpoint_ref(entry.affects[0], entry.phase or "", entry.id)
+        if entry.checkpoint != ref.resource:
+            raise ValueError(f"checkpoint resource {entry.checkpoint!r} must be {ref.resource!r}")
+        root = ctx.bundle.root.resolve()
+        path = ref.path(root).resolve()
+        if not path.is_relative_to(root):
+            raise ValueError(f"checkpoint {entry.checkpoint!r} resolves outside the bundle")
+    except (OSError, RuntimeError, ValueError) as error:
+        yield _finding("decisions.checkpoint-invalid", "error", item, f"decision {entry.id}: {error}")
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        yield _finding(
+            "decisions.checkpoint-invalid",
+            "error",
+            item,
+            f"decision {entry.id}: checkpoint {entry.checkpoint!r} is missing or unreadable",
+        )
+        return
+    problems = checkpoints.validate(
+        checkpoints.parse(text),
+        item_path=entry.affects[0],
+        phase=entry.phase or "",
+        decision_id=entry.id,
+    )
+    for problem in problems:
+        yield _finding("decisions.checkpoint-invalid", "error", item, f"decision {entry.id}: checkpoint {problem}")
+
+
+def ledger(ctx: RuleContext) -> Iterable[Finding]:
+    """32-36 (except citations), plus hold-invalid, hold-phase-stale and
+    checkpoint-invalid: one ledger read per active owner.
+
+    Parent-capable items and existing self-owned lone-item ledgers are checked.
+    Only parents require a ledger; archived pages and their ledgers are frozen.
+    """
+    by_path = {entry.path: entry for entry in items(ctx)}
+    for item in active(ctx):
         ref = _ledger_ref(item.path)
-        if item.phase in _LEDGER_PHASES and not ctx.bundle.has_member(ref.rel):
+        if item.type not in PARENT_TYPES and not ctx.bundle.has_member(ref.rel):
+            continue
+        if item.type in PARENT_TYPES and item.phase in _LEDGER_PHASES and not ctx.bundle.has_member(ref.rel):
             subject = "`type: Epic`" if item.type == "Epic" else f"`type: {item.type}`"
             yield _finding(
                 "decisions.ledger-missing",
@@ -182,6 +273,7 @@ def ledger(ctx: RuleContext) -> Iterable[Finding]:
                 f"`phase: finish` with {len(open_ids)} open decision(s): {', '.join(open_ids)}",
             )
         yield from _supersedes_findings(item, parsed)
+        yield from _hold_findings(ctx, item, parsed, by_path)
 
 
 def _spec_text(ctx: RuleContext, item: WorkItem) -> str | None:
@@ -226,7 +318,7 @@ def citations(ctx: RuleContext) -> Iterable[Finding]:
         text = _spec_text(ctx, item)
         if text is None:
             continue
-        owner_path = nearest_parent(everything, item.path)
+        owner_path = decision_owner(everything, item.path)
         if owner_path is None:
             continue
         if owner_path not in known:

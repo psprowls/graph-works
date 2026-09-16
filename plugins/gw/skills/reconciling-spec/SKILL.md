@@ -108,13 +108,14 @@ a contradiction it could not resolve.
      hold from silently advancing is not that this skill withholds the call:
      the workflow skill that dispatched you still runs `gw work advance
      <work-path>` unconditionally once you return. What actually blocks it is the
-     `open` decision you just filed — the routing table's design-stage gate
-     refuses to advance an item with an open decision, so that call fails with
-     ``open decision(s) block re-dispatch: answer via `gw work decision answer
-     <work-path> D-nnn --answer ...`, then re-run`` instead of stamping `plan`. The
-     item stays at `phase: design` until a human answers it
-     (`gw work decision answer <work-path> D-nnn --answer ...`), so a hold costs one
-     human touch, not a burned worker slot every auto-drive cycle.
+     `open` decision you just filed: any open decision naming an item holds it at
+     every phase, and `gw work advance` refuses a held item. That call is refused
+     `blocked` with
+     ``open decision D-nnn (question) holds <work-path>: answer via `gw work decision answer <work-path> D-nnn --answer ...`, then re-run``
+     (route reason: `open decision D-nnn holds this item (question at design)`)
+     instead of stamping `plan`. The item stays at `phase: design` until a human
+     answers it (`gw work decision answer <work-path> D-nnn --answer ...`), so a
+     hold costs one human touch, not a burned worker slot every auto-drive cycle.
 
 ## Appended section template
 

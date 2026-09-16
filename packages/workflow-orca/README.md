@@ -11,7 +11,10 @@ this one drives Orca.
 
 `OrcaBackend(*, run=…, repo_selector=None)` opens a named,
 durable session over an Orca Run — `open_session(name)` binds an existing Run
-whose `objective` equals `name`, or creates one. `OrcaSession` implements the
+whose `objective` equals `name`, or creates one. `repo_selector` is required
+for any dispatch that creates a worktree (`fork-child` or `create-top-level`),
+since both launch top-level in that repository; a planned `parent_path` is
+then linked with `orca worktree set`. `OrcaSession` implements the
 eight `DispatchSession` methods. Agent, model and reasoning effort come from each
 `PlannedDispatch`; there is no session-wide agent choice. Explicit models require
 `orchestration.worker-launch-preferences.v1` on `orca status --json`. Model IDs

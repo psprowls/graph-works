@@ -20,18 +20,19 @@ from datetime import date
 from pathlib import Path
 from types import MappingProxyType
 
-from okf_io import load_bundle
+from okf_io import Bundle, load_bundle
 from work_tracker_okf.advance import RefusalReason
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
+from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.results import render as render_results
 from work_tracker_okf.sources import upsert
-from work_tracker_okf.workflow import route, state_for
 
 from graph_works_core.workspace import anchor, provenance
+from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repo
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
@@ -79,56 +80,20 @@ class StageAdvance:
         return self.outcome.changed
 
 
-def _stage_phase(items: Sequence[WorkItem], item: WorkItem, *, effort: str | None) -> str | None:
-    """The phase whose stage just ran, for an advance that is completing it.
+def _infers_from_cwd(item: WorkItem) -> bool:
+    """Whether an attended advance may fall back to a cwd-inferred stamp.
 
-    `item.phase` when it is set. A never-advanced item has no recorded phase,
-    and its stage is the one its entry transition is about to open -- `design`
-    for a Bug or Feature, `execute` for a TestGap routed straight at code.
-    Reading that destination is what keeps the suppression below from also
-    silencing a first-ever `execute`, which `item.phase is None` alone cannot
-    distinguish from a first-ever `design`.
+    Only a physically top-level item may. A descendant's placement is recorded
+    by its coordinator from Orca's observed readback (`gw work record-placement`,
+    D-006), never inferred from wherever a worker happens to stand. The former
+    code-phase inference left placement ownership with the advancing worker
+    instead of the coordinator that observed the dispatch.
+
+    This is a conservative attended fallback. A nested orchestration root is a
+    descendant here and is recorded explicitly, and a supervised worker disables
+    inference outright with `infer_worktree=False` (`--no-infer-worktree`).
     """
-    if item.phase is not None:
-        return item.phase
-    state = state_for(items, item.path, effort=effort)
-    if state is None:  # pragma: no cover -- `item` was drawn from `items`, so `state_for`
-        # cannot fail to find it there
-        return None
-    entry = route(state).on_dispatch
-    return entry.phase if entry is not None else None
-
-
-def _infers_from_cwd(items: Sequence[WorkItem], item: WorkItem, *, effort: str | None) -> bool:
-    """Whether a cwd-inferred stamp may be written for this advance.
-
-    **A stage that cannot produce a commit must not acquire a placement
-    stamp.** `design` and `plan` write only into the vault, yet a stamp taken
-    there pins `execute` and `finish` -- the phases that do commit -- to
-    whatever directory a vault-only stage happened to sit in. Suppressing the
-    inference here is the enforcement site that matters: a worker running a
-    bare `gw work advance` from inside a shared epic worktree re-stamps the
-    item regardless of what the planner emitted, so no change confined to
-    `commands.py` would prevent it.
-
-    The subtree root is exempt at every phase. `_epic_stamp` prefers the
-    root's own stamp over its acknowledged-unstable descendant-scan fallback,
-    and an epic's `execute` phase dispatches *children* rather than a worker
-    for the epic itself -- so a root that did not stamp at `design` or `plan`
-    would never stamp at all, and no descendant would have an anchor to
-    resolve against.
-
-    `parent_path is None` stands in for "is the subtree root of this run".
-    This module is `gw work advance`'s shell and has no run root to compare
-    against, and the two coincide for every epic-and-children shape in this
-    vault. Where they would not -- a run rooted at a nested epic -- the
-    planner already tells every root dispatch to pass `--worktree`/`--branch`
-    explicitly (`commands._prompt`), and an explicit pair wins over inference
-    unconditionally. This test is the backstop, not the mechanism.
-    """
-    if item.parent_path is None:
-        return True
-    return _stage_phase(items, item, effort=effort) in RESULTS_PHASES
+    return item.parent_path is None
 
 
 def run_stage_advance(
@@ -142,6 +107,7 @@ def run_stage_advance(
     released_at: date | None = None,
     worktree: str | None = None,
     branch: str | None = None,
+    infer_worktree: bool = True,
     cwd: Path | None = None,
     repo: Path | None = None,
     repo_name: str | None = None,
@@ -161,13 +127,12 @@ def run_stage_advance(
     only when the recorded path is unset or gone -- so an advance run from an
     unrelated cwd cannot silently repoint a live item. Inference also cannot
     see the main checkout at all (`provenance.worktree_state` answers `None`
-    when `--git-dir` and `--git-common-dir` agree), which is why a main-mode
-    worker is told to pass the pair explicitly.
+    when `--git-dir` and `--git-common-dir` agree).
 
-    Inference is suppressed outright for a **read-only stage of a non-root
-    item** -- see `_infers_from_cwd`. A `design` or `plan` stage leaves no
-    commit, so the directory it ran in is not a placement, and letting it
-    become one pins every later code phase to a directory nothing chose.
+    Inference runs only for a top-level item (`_infers_from_cwd`) and only when
+    `infer_worktree` is true. Every supervised worker passes
+    `infer_worktree=False`: its coordinator records the observed placement
+    separately, and a worker's cwd is not evidence of where its stage runs.
 
     `start_sha` is a **caller argument**, not a frontmatter field. The reference
     implementation stamped a `phase_started_commit` key; adding one here is a
@@ -196,9 +161,85 @@ def run_stage_advance(
     call plans and writes nothing -- not the page, not the stub, not the
     pointer. The commit gate below is bound by the same rule: a dry run
     inspects no worktree and refuses nothing.
+
+    Live advances hold the decision owner's lock across the read, hold
+    resolution, routing, commit gate and mutation. Dry runs resolve holds
+    without locking. On win32, `okf_ext.locking` gives up after ten one-second
+    retries and raises `OSError` naming the lock; the CLI reports it as `io`.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
+    if dry_run or not any(item.path == path for item in items):
+        return _advance(
+            layout,
+            bundle,
+            items,
+            path,
+            hold=hold_for(items, bundle.root, path) if dry_run else None,
+            dry_run=dry_run,
+            today=today,
+            effort=effort,
+            owner=owner,
+            resolved_in=resolved_in,
+            released_at=released_at,
+            worktree=worktree,
+            branch=branch,
+            infer_worktree=infer_worktree,
+            cwd=cwd,
+            repo=repo,
+            repo_name=repo_name,
+            start_sha=start_sha,
+            return_=return_,
+        )
+    # The whole read -> route -> gate -> write sequence shares hold filing's
+    # owner lock. A waiting writer sees the hold or phase the first committed.
+    # Release only after apply_mutation (and the pointer write) returns.
+    with locked_decision_owner(layout, path) as context:
+        return _advance(
+            layout,
+            context.bundle,
+            context.items,
+            path,
+            hold=hold_in(context, path),
+            dry_run=False,
+            today=today,
+            effort=effort,
+            owner=owner,
+            resolved_in=resolved_in,
+            released_at=released_at,
+            worktree=worktree,
+            branch=branch,
+            infer_worktree=infer_worktree,
+            cwd=cwd,
+            repo=repo,
+            repo_name=repo_name,
+            start_sha=start_sha,
+            return_=return_,
+        )
+
+
+def _advance(
+    layout: WorkspaceLayout,
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+    path: str,
+    *,
+    hold: HoldFact | None,
+    today: date,
+    effort: str | None,
+    owner: str | None,
+    resolved_in: str | None,
+    released_at: date | None,
+    worktree: str | None,
+    branch: str | None,
+    infer_worktree: bool,
+    cwd: Path | None,
+    repo: Path | None,
+    repo_name: str | None,
+    start_sha: str | None,
+    return_: bool,
+    dry_run: bool,
+) -> StageAdvance:
     item = next((candidate for candidate in items if candidate.path == path), None)
     old_phase = item.phase if item is not None else None
     repo_note: str | None = None
@@ -210,7 +251,7 @@ def run_stage_advance(
     stamped_branch: str | None = None
     if worktree and branch:
         stamped_worktree, stamped_branch = worktree, branch
-    elif item is not None and resolved_repo is not None and _infers_from_cwd(items, item, effort=effort):
+    elif infer_worktree and item is not None and resolved_repo is not None and _infers_from_cwd(item):
         recorded = item.worktree
         if not recorded or not Path(recorded).is_dir():
             detected = provenance.worktree_state(cwd or Path.cwd(), resolved_repo)
@@ -228,6 +269,7 @@ def run_stage_advance(
         worktree=stamped_worktree,
         branch=stamped_branch,
         return_=return_,
+        hold=hold,
         dry_run=True,
     )
     if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
@@ -320,8 +362,8 @@ def run_stage_advance(
         validate_paths=(path,),
         directory_preconditions=conditions,
     )
-    # `bundle` (line 200) is still the live, un-reloaded IGNORE-loaded bundle --
-    # the line-252 reload only extracted one document and is not this one.
+    # `bundle` is the lock-held projection (or the dry-run read), loaded with
+    # `IGNORE`, so it satisfies `apply_mutation`'s baseline precondition.
     application = apply_mutation(layout, mutation, repo_root=resolved_repo, baseline_bundle=bundle)
     if application.ok:
         outcome = replace(outcome, written=True)

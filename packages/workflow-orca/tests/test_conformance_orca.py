@@ -85,8 +85,8 @@ def test_provisions_worktrees_is_declared(case: BackendCase, tmp_path: Path) -> 
     # shared suite has not generalized that assertion to read the expectation
     # off `case` yet, so importing it verbatim would report a real capability
     # (`OrcaBackend.provisions_worktrees is True`, via `worker-start
-    # --worktree new-child|new-top-level`) as a failure. This is a gap in the
-    # shared test's generality, not in `OrcaBackend` or in the Protocol
+    # --worktree new-top-level --repo id:<repo>`) as a failure. This is a gap
+    # in the shared test's generality, not in `OrcaBackend` or in the Protocol
     # (`provisions_worktrees` already exists on `DispatchBackend` for exactly
     # this), so it is fixed locally rather than carried to the README as
     # Protocol friction.

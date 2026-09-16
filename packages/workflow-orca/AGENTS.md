@@ -83,8 +83,11 @@ enforced here via a live Orca query rather than a local set.
   implements pure argv/envelope/receipt helpers; see README for the exact shared
   `GW_LAUNCH_V1 ` schema and `reasoning_effort` → receipt `effort` mapping.
   `_worktree_flags` builds the four Orca worktree modes
-  (`reuse`/`main` → `path:<path>`, `fork-child` → `new-child`,
-  `create-top-level` → `new-top-level` + `--repo`), which is why
+  (`reuse`/`main` → `path:<path>`; `fork-child` and `create-top-level` →
+  `new-top-level` + `--repo`, with a planned `parent_path` linked afterwards by
+  `orca worktree set --parent-worktree path:<parent_path>` — Orca's child mode
+  is never used because it takes repository and parent from the calling
+  terminal), which is why
   `OrcaBackend.provisions_worktrees = True`: Orca itself creates the
   worktree, this backend does not.
 
@@ -97,7 +100,9 @@ enforced here via a live Orca query rather than a local set.
   id:<id>`) — one, if the `worker-start` payload ever carries the id itself —
   to record the real `worktree_path` / `worktree_branch` on the
   returned `WorkerRecord`. `reuse`/`main` pay neither call: they report the
-  path they were handed and leave the branch `None`.
+  path they were handed and leave the branch `None`. A creation with a
+  `parent_path` costs one more (`worktree set`); a failed link is reported in
+  `WorkerRecord.detail`, never raised.
 
   This is **read-back only** — `_resolve_worktree` never compares the result
   against the plan, never warns, and degrades every failure to `None`,

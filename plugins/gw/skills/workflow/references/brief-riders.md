@@ -241,33 +241,46 @@ and omit it when either is absent.
 
 ## Rider: finishing-a-development-branch
 
-**What it carries.** The on-trunk two-option menu.
-
-The rider carries no cleanup-ownership widening: worktree lifecycle here is
-managed by Orca, so there is no workspace-level worktrees tree for stock's
-narrower ownership test to fail to clean.
+**What it carries.** Merge-target resolution, an on-target confirmation menu,
+and an explicit outcome line for workflow step 5. Only verified integration
+resolves an item; the rider leaves the stock skill unmodified.
 
 **Rider.**
 
-> Before presenting Step 4's menu, run the on-trunk check. If
-> `git rev-parse --git-dir` equals `git rev-parse --git-common-dir` (a normal
-> repo, not a linked worktree) **and** `git branch --show-current` equals the
-> base branch, this session's commits already sit on the base — there is nothing
-> to merge. Present exactly two options instead of three:
+> **Merge target.** Read the item's canonical ownership ancestors in the
+> workspace. Use the `branch:` stamp from the nearest Epic or Release ancestor whose frontmatter carries `branch:`
+> as the merge target. If there is no such ancestor (including a root item),
+> use the repository's default base. Use this concrete target as Step 3's base
+> branch, name it, and have the human confirm it before proceeding; do not guess
+> a child's target from `git merge-base`. Integrating a child into its epic's
+> branch resolves the child; merging the epic onward is the parent's finish.
 >
-> 1. Push as new branch and create a Pull Request — this is Step 5's Option 2 in
->    its detached-HEAD form (`git push origin HEAD:refs/heads/<new-branch>`),
->    because there is no existing feature branch to push.
-> 2. Leave it as-is — Step 5's Option 3, unchanged.
+> **On-target check.** Before Step 4's menu, compare
+> `git branch --show-current` with the confirmed merge target, in any checkout, including a linked worktree.
+> When they match, present exactly these three options:
 >
-> No new execution prose: both options are Step 5's existing ones.
-
-**Why the check is scoped to the normal-repo case,** and it is not the obvious
-reason: it is *not* that a worktree can never be on the base branch — a shared
-epic worktree is, which is exactly why `finishing-relay` needs its own trunk
-case. It is that the configuration only arises under auto-drive, and step 3's
-relay override already routes auto-drive's finish stage to
-`gw:finishing-relay` instead of here.
+> 1. **Confirm integrated.** The stage's commits are already on `<merge target>`.
+>    After the human confirms, report `confirm` with `resolved_in` equal to
+>    `git rev-parse HEAD`. Step 1's tests must be green and the stage's work
+>    committed; this option performs no git mutation or cleanup.
+> 2. **Push as new branch and create a Pull Request.** Execute stock Step 5's
+>    Option 2 using `git push origin HEAD:refs/heads/<new-branch>` and create
+>    the PR against the merge target.
+> 3. **Leave as-is.** Execute stock Step 5's Option 3 unchanged.
+>
+> Off target, keep the stock menu with the confirmed merge target as its base.
+> Detached HEAD keeps the stock reduced menu; it cannot confirm integration.
+>
+> **Outcome report.** End the stage with this one line, including after a stop:
+> `Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>`
+>
+> Use `merge` only after a clean merge and green tests on the merged result,
+> with the target's resulting commit SHA as `resolved_in`. Use `confirm` only
+> for the confirmed on-target case, with HEAD's SHA. Use `pr` for PR creation,
+> `keep` for keep-as-is, and `discard` for a confirmed discard; their
+> `resolved_in` is `none`. Failing tests, a stopped stage, or no choice made
+> produces `none` with `resolved_in: none`. Creating a PR never supplies a
+> resolution ref. Workflow step 5 owns the attended advance.
 
 ---
 

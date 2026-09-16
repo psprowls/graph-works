@@ -37,7 +37,7 @@ def dispatch():
         agent="claude",
         model=None,
         reasoning_effort=None,
-        worktree=WorktreeAction("reuse", "/tmp/example", "feature/example", None, True),
+        worktree=WorktreeAction("reuse", "/tmp/example", "feature/example", None, True, None),
         merge_target="main",
         prompt="Perform the test task.",
     )
@@ -334,8 +334,8 @@ def test_current_runtime_worktree_id_readback(dispatch):
             return super().__call__(argv)
 
     cli = CurrentContractCLI()
-    session = OrcaBackend(run=cli).open_session("test")
-    action = WorktreeAction("fork-child", None, "planned", "main", None)
+    session = OrcaBackend(run=cli, repo_selector="name:repo").open_session("test")
+    action = WorktreeAction("fork-child", None, "planned", "main", None, None)
     record = session.launch(replace(dispatch, worktree=action))
     assert record.worktree_path == "/actual/path"
     assert record.worktree_branch == "actual"

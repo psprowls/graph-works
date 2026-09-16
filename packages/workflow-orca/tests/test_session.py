@@ -115,7 +115,7 @@ def planned(**overrides):
         model=None,
         reasoning_effort=None,
         worktree=WorktreeAction(
-            action="reuse", path="/tmp/wt", branch="psprowls/my-slug", base_branch=None, exists=True
+            action="reuse", path="/tmp/wt", branch="psprowls/my-slug", base_branch=None, exists=True, parent_path=None
         ),
         merge_target="main",
         prompt=PROMPT,
@@ -146,7 +146,7 @@ def test_main_passes_a_path_selector_exactly_like_reuse():
     # "main" is the repo's own checkout: already on disk, never created by
     # Orca, so it takes the path selector and none of the creation flags.
     sess, runner = session()
-    action = WorktreeAction(action="main", path="/repo", branch="main", base_branch=None, exists=True)
+    action = WorktreeAction(action="main", path="/repo", branch="main", base_branch=None, exists=True, parent_path=None)
     sess.launch(planned(worktree=action))
     start = runner.calls_matching("worker-start")[0]
     assert runner.argv_after("--worktree", start) == "path:/repo"
@@ -159,25 +159,40 @@ def test_main_without_a_path_is_refused():
     # The same guard `reuse` carries. A pathless "main" is a planner bug, and
     # launching it would silently start the worker in the coordinator's cwd.
     sess, _ = session()
-    action = WorktreeAction(action="main", path=None, branch="main", base_branch=None, exists=None)
+    action = WorktreeAction(action="main", path=None, branch="main", base_branch=None, exists=None, parent_path=None)
     with pytest.raises(WorktreeNotProvisioned):
         sess.launch(planned(worktree=action))
 
 
-def test_fork_child_asks_orca_to_create_the_worktree():
-    sess, runner = session()
-    action = WorktreeAction(action="fork-child", path=None, branch="psprowls/child", base_branch="epic/x", exists=None)
+def test_fork_child_creates_a_top_level_worktree_in_the_named_repo():
+    # Orca's child mode takes repository and parent from the calling terminal;
+    # the planner's parent is linked explicitly after start instead.
+    sess, runner = session(repo_selector="name:agent-workspace")
+    action = WorktreeAction(
+        action="fork-child", path=None, branch="psprowls/child", base_branch="epic/x", exists=None, parent_path=None
+    )
     sess.launch(planned(worktree=action))
     start = runner.calls_matching("worker-start")[0]
-    assert runner.argv_after("--worktree", start) == "new-child"
+    assert runner.argv_after("--worktree", start) == "new-top-level"
     assert runner.argv_after("--name", start) == "psprowls/child"
     assert runner.argv_after("--base-branch", start) == "epic/x"
+    assert runner.argv_after("--repo", start) == "name:agent-workspace"
+    assert "new-child" not in start
+
+
+def test_fork_child_without_a_repo_selector_is_refused():
+    sess, _ = session()
+    action = WorktreeAction(
+        action="fork-child", path=None, branch="psprowls/child", base_branch="epic/x", exists=None, parent_path=None
+    )
+    with pytest.raises(BackendError, match="repo_selector"):
+        sess.launch(planned(worktree=action))
 
 
 def test_create_top_level_adds_the_repo_selector():
     sess, runner = session(repo_selector="name:agent-workspace")
     action = WorktreeAction(
-        action="create-top-level", path=None, branch="psprowls/top", base_branch="main", exists=None
+        action="create-top-level", path=None, branch="psprowls/top", base_branch="main", exists=None, parent_path=None
     )
     sess.launch(planned(worktree=action))
     start = runner.calls_matching("worker-start")[0]
@@ -255,7 +270,7 @@ def test_a_mode_outside_the_set_is_refused():
 
 def test_reuse_with_no_path_is_refused():
     sess, _ = session()
-    action = WorktreeAction(action="reuse", path=None, branch="b", base_branch=None, exists=None)
+    action = WorktreeAction(action="reuse", path=None, branch="b", base_branch=None, exists=None, parent_path=None)
     with pytest.raises(WorktreeNotProvisioned):
         sess.launch(planned(worktree=action))
 
@@ -270,7 +285,9 @@ def test_a_duplicate_key_is_refused():
 
 def test_create_top_level_without_a_repo_selector_is_refused():
     sess, _ = session()
-    action = WorktreeAction(action="create-top-level", path=None, branch="b", base_branch="main", exists=None)
+    action = WorktreeAction(
+        action="create-top-level", path=None, branch="b", base_branch="main", exists=None, parent_path=None
+    )
     with pytest.raises(BackendError, match="repo_selector"):
         sess.launch(planned(worktree=action))
 
@@ -279,14 +296,18 @@ def test_fork_child_with_no_base_branch_is_refused():
     # `WorktreeAction.base_branch` is `str | None` at the protocol level; a
     # `None` here must not silently become `--base-branch ""` on the CLI.
     sess, _ = session()
-    action = WorktreeAction(action="fork-child", path=None, branch="psprowls/child", base_branch=None, exists=None)
+    action = WorktreeAction(
+        action="fork-child", path=None, branch="psprowls/child", base_branch=None, exists=None, parent_path=None
+    )
     with pytest.raises(BackendError, match="base_branch"):
         sess.launch(planned(worktree=action))
 
 
 def test_create_top_level_with_no_base_branch_is_refused():
     sess, _ = session(repo_selector="name:agent-workspace")
-    action = WorktreeAction(action="create-top-level", path=None, branch="b", base_branch=None, exists=None)
+    action = WorktreeAction(
+        action="create-top-level", path=None, branch="b", base_branch=None, exists=None, parent_path=None
+    )
     with pytest.raises(BackendError, match="base_branch"):
         sess.launch(planned(worktree=action))
 
@@ -296,7 +317,7 @@ def test_an_unknown_worktree_action_is_refused():
     # backend does not trust that at runtime — an action outside the three
     # it knows must fail loudly rather than build a flag it invented.
     sess, _ = session()
-    action = WorktreeAction(action="teleport", path=None, branch="b", base_branch=None, exists=None)
+    action = WorktreeAction(action="teleport", path=None, branch="b", base_branch=None, exists=None, parent_path=None)
     with pytest.raises(BackendError, match="unknown worktree action"):
         sess.launch(planned(worktree=action))
 

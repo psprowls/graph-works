@@ -90,6 +90,12 @@ dispatching: run `gw work advance <work-path>`, supplying any flag named in
 ask the user if no owner is known). Do not special-case stages; the CLI encodes
 which transitions happen at dispatch time.
 
+**Supervised dispatch.** When the prompt that launched this session carries a
+`Dispatch key:` line, a coordinator dispatched it and records where it runs.
+Every `gw work advance` this skill runs then adds `--no-infer-worktree` and
+never `--worktree`/`--branch` — here, and at step 5. An attended session
+(no `Dispatch key:` line) keeps today's behavior.
+
 ### 3. Dispatch the stage skill
 
 Invoke the stage skill named by `action.skill` via the Skill tool, using the
@@ -163,7 +169,7 @@ another stage, same as the stock skill it replaces.
 | `planning-epics` | plan (epic) | Its STOP line |
 | `subagent-driven-development` | execute | Positive authorization + mandatory isolation |
 | `test-driven-development` | execute | Positive authorization + mandatory isolation |
-| `finishing-a-development-branch` | finish | The on-trunk two-option menu |
+| `finishing-a-development-branch` | finish | Merge target, on-target confirmation, and explicit outcome report |
 
 <!-- rider-table:end -->
 
@@ -185,27 +191,33 @@ already be there. If the skill instead wrote elsewhere, move the file to
 
 ### 5. Advance
 
-Run `gw work advance <work-path>` with whatever flags the stage produced
-(`--effort` if the command demands it, `--resolved-in <ref>` when completing
-the finish stage). Report the lint findings it returns — they are the item's
-health check, not noise. If the command errors with *effort required*, ask the
-user to size the item as in step 1 — never pick an effort yourself — then retry.
+For non-finish stages and satisfied gates, run `gw work advance <work-path>`
+with whatever flags the stage produced (`--effort` if the command demands it).
+Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to the finish-outcome rows below too.
 
-**Relay no-advance outcomes.** If the just-completed stage was
-`gw:finishing-relay`, skip this step's own `gw work advance` call
-entirely for **every** relay outcome, including `merge` — the relay skill
-already settled the item's state: for `merge`, its own R5 step already ran
-`gw work advance <work-path> --resolved-in <ref>`; for `pr`/`hold`/`discard`, R5
-deliberately chose not to advance. Calling `gw work advance` again here for
-the `merge` outcome would double-advance an already-advanced item and error.
-Because step 5 isn't calling advance itself in the `merge` case, it won't
-naturally observe a `phase: done` / `work_status: resolved` landing either — to
-decide whether **Terminal handling** applies, check the item's resulting
-state directly (re-run `gw work next <work-path> --json`, or trust relay's own
-`worker_done` report) instead of relying on this step's advance call to
-surface it. For the `pr`/`hold`/`discard` outcomes the item deliberately
-stays at `phase: finish`, so skip Terminal handling and go straight to step
-6 — but see step 6's carve-out below before using its stock hand-off text.
+**Finish outcomes: only a verified integration resolves.** Apply this table
+for every item type, using the attended rider's outcome line or relay's result:
+
+| Stage | Outcome | Step 5 does |
+|---|---|---|
+| Attended finish | `merge` (clean merge, tests green on the merged result) | `gw work advance <work-path> --resolved-in <merge commit SHA>` |
+| Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --resolved-in <HEAD SHA>` |
+| Attended finish | `pr`, `keep`, `discard`, `none` | **No advance** — stay at `phase: finish` and use step 6's held-item hand-off. |
+| `gw:finishing-relay` | Any | **No advance** — relay R5 already settled the item: `merge` advanced; `pr`/`hold`/`discard` held. |
+
+If the attended outcome line is missing or ambiguous, treat it as `none`.
+Failing tests, stopping, or making no choice also means `none`. A `merge` or
+`confirm` without its verified SHA is incomplete evidence: hold as `none`.
+Never infer integration from a PR URL or advance on an inferred integration.
+
+Do not double-advance relay `merge`. To decide whether **Terminal handling**
+applies after that outcome, re-run `gw work next <work-path> --json` to check
+the resulting state. Every held finish outcome skips Terminal handling and
+uses step 6's held-item hand-off.
+
+Report lint findings from any advance — they are the item's health check,
+not noise. If the command errors with *effort required*, ask the user to size
+the item as in step 1 — never pick an effort yourself — then retry.
 
 If the advance lands the item at `phase: done` and `work_status: resolved`, run
 **Terminal handling** (below) instead of the step 6 hand-off.
@@ -215,11 +227,18 @@ If the advance lands the item at `phase: done` and `work_status: resolved`, run
 End with: "Phase advanced to `<phase>`. Clear context (`/clear`) and run
 `/gw:workflow <work-path>` to continue."
 
-**Relay no-advance hand-off.** For a `gw:finishing-relay` stage that
-reported `pr`, `hold`, or `discard`, the stock hand-off text above is wrong —
-nothing advanced. Say instead: "`<work-path>` stays at `phase: finish` pending an
-attended pass (relay outcome: `<pr|hold|discard>`). Clear context (`/clear`)
-and run `/gw:workflow <work-path>` when ready to continue attended."
+**Held-item hand-off.** For any no-advance finish outcome, attended or relay,
+say instead: "`<work-path>` stays at `phase: finish`
+(outcome: `<pr|keep|hold|discard|none>`; merge target: `<merge target>`).
+Once the work is integrated into `<merge target>` — for a PR, after it merges —
+clear context (`/clear`) and run `/gw:workflow <work-path>`, then choose merge
+when off target (a no-op if it already landed), or confirm when already on
+target. For a discard, set
+`work_status: wontfix` instead."
+
+Use the target resolved by the attended rider or supplied to relay. A later
+attended merge may be a no-op if the PR already landed; no PR discovery or
+vault-recorded PR URL is required.
 
 (Items that have reached a terminal state are handled by **Terminal handling**
 below, not this hand-off.)

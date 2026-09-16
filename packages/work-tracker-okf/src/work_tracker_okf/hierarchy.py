@@ -84,6 +84,17 @@ def nearest_parent(items: Sequence[WorkItem], path: str) -> str | None:
     return None
 
 
+def decision_owner(items: Sequence[WorkItem], path: str) -> str | None:
+    """Who owns *path*'s decision ledger (D-001): the nearest Release, Epic or
+    Feature containing it, or -- when there is none -- the item itself, so a
+    lone Bug, TechDebt, TestGap or Spike can record decisions and holds.
+    `None` only for an unknown path."""
+    owner = nearest_parent(items, path)
+    if owner is not None:
+        return owner
+    return path if path in path_index(items) else None
+
+
 def archive_held_by_ancestor(items: Sequence[WorkItem], item: WorkItem) -> bool:
     """Whether *item* is a child the archive policy holds in place.
 
@@ -200,6 +211,7 @@ __all__ = [
     "archive_held_by_ancestor",
     "child_gated",
     "child_rollup",
+    "decision_owner",
     "descend",
     "nearest_epic",
     "nearest_parent",

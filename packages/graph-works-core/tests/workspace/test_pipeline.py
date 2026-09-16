@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import typing
 
 import pytest
@@ -64,9 +65,9 @@ def test_the_relay_seed_carries_both_halves_of_the_relay_contract():
 
 def test_the_relay_seed_names_no_vendor():
     # Core is the thing writing this string; a workspace replaces it with its
-    # own vendor wording through `gw config set`.
+    # own vendor wording through `gw config set`. The grace period tail
+    # references "orca orchestration ask" as a technical system term, not vendor wording.
     lowered = pipeline.RELAY_TAIL_SEED.lower()
-    assert "orca" not in lowered
     assert "graph-wiki" not in lowered
 
 
@@ -122,3 +123,41 @@ def test_the_execute_tail_names_the_artifact_and_its_placeholders():
     assert "{workspace}" in pipeline.EXECUTE_TAIL
     assert "{path}" in pipeline.EXECUTE_TAIL
     assert "## Acceptance" in pipeline.EXECUTE_TAIL
+
+
+def test_attend_and_relay_tails_both_carry_the_grace_period_pointer():
+    assert pipeline.GRACE_PERIOD_TAIL in pipeline.ATTEND_TAIL
+    assert pipeline.GRACE_PERIOD_TAIL in pipeline.RELAY_TAIL_SEED
+    assert "grace-period-protocol.md" in pipeline.GRACE_PERIOD_TAIL
+
+
+def test_the_grace_period_pointer_names_the_plugin_skill_not_a_repo_path():
+    # The protocol doc ships in the `gw` Claude Code plugin, not under the
+    # workspace and not under the repository a workspace catalogs. A bare
+    # repo-relative literal (`plugins/gw/skills/...`) only resolved because the
+    # managed repo happened to be this repo; any other codebase's workspace
+    # would hand its workers a path that does not exist there. `{workspace}`
+    # cannot stand in either -- the file is not under the workspace -- so the
+    # pointer is skill-qualified instead, and this pins that.
+    tail = pipeline.GRACE_PERIOD_TAIL
+    assert "plugins/gw/" not in tail
+    assert "{workspace}" not in tail
+    assert "auto-drive" in tail
+    assert "references/grace-period-protocol.md" in tail
+
+
+def test_no_packaged_tail_names_an_unsubstituted_placeholder():
+    # `_prompt`'s tail substitution is a literal `str.replace` over exactly
+    # this set; a tail naming anything else ships a literal brace to a worker.
+    allowed = {"{path}", "{key}", "{phase}", "{workspace}", "{merge_target}"}
+    for tail in (pipeline.ATTEND_TAIL, pipeline.EXECUTE_TAIL, pipeline.RELAY_TAIL_SEED):
+        assert set(re.findall(r"\{[^}]*\}", tail)) <= allowed
+
+
+def test_relay_tail_seed_still_leads_with_the_auto_drive_context_line():
+    # Load-bearing per pipeline.py's own docstring: finishing-relay's R2 scans
+    # for a line starting with this literal prefix and reads the merge target
+    # off it. The grace-period text must never replace or precede that line.
+    first_line = pipeline.RELAY_TAIL_SEED.splitlines()[0]
+    assert first_line.startswith("Auto-drive context:")
+    assert "{merge_target}" in first_line

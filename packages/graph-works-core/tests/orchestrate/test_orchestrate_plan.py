@@ -7,6 +7,7 @@ import hashlib
 import re
 from unittest import mock
 
+import pytest
 from graph_works_core.orchestrate import commands as orchestrate
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import WorkItem
@@ -301,6 +302,21 @@ def test_backend_without_worktree_provisioning_blocks_a_pathless_action() -> Non
     assert [(blocked.path, blocked.kind) for blocked in result.blocked] == [(path, "worktree-unsupported")]
 
 
+def test_a_worktree_creation_without_a_known_code_repo_blocks() -> None:
+    path = "work/feature-a"
+    result = _plan((_item(path, phase="design"),), path, repo_known=False)
+    assert result.dispatches == ()
+    assert [(blocked.path, blocked.kind) for blocked in result.blocked] == [(path, "worktree-unprovable")]
+    assert "no code repository was resolved" in result.blocked[0].reason
+
+
+def test_an_existing_worktree_dispatches_without_a_known_code_repo() -> None:
+    path = "work/feature-a"
+    item = _item(path, worktree="/wt/feature-a", branch="feature/a")
+    result = _plan((item,), path, repo_known=False, worktree_exists={"/wt/feature-a": True})
+    assert result.dispatches[0].worktree.action == "reuse"
+
+
 def test_existing_worktree_reuse_does_not_require_backend_provisioning() -> None:
     path = "work/feature-a"
     item = _item(path, worktree="/wt/feature-a", branch="feature/a")
@@ -370,6 +386,7 @@ def test_shared_stamp_never_forks_a_branch_from_itself() -> None:
     assert action.action == "fork-child"
     assert action.base_branch == derived
     assert action.branch == f"{derived}-plan"
+    assert action.parent_path == "/wt/shared"
 
 
 def test_frontier_depth_cap_blocks_a_path_instead_of_walking_forever(monkeypatch) -> None:
@@ -780,6 +797,7 @@ def test_worktree_adoption_forks_when_the_adopted_path_is_occupied() -> None:
     assert isinstance(action, orchestrate.WorktreeAction)
     assert action.action == "fork-child"
     assert action.base_branch == planned
+    assert action.parent_path == "/wt/bug-x"
 
 
 def test_worktree_ambiguity_surfaces_as_a_refusal() -> None:
@@ -826,7 +844,7 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
         repo_path="/repo",
         **common,
     )
-    assert action is not None and action.action == "main" and not claimed
+    assert action is not None and action.action == "main" and not claimed and action.parent_path is None
 
     action, _ = orchestrate._resolve_worktree(
         main_item,
@@ -836,7 +854,12 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
         repo_path="/repo",
         **common,
     )
-    assert action is not None and action.action == "fork-child" and action.base_branch == "main"
+    assert (
+        action is not None
+        and action.action == "fork-child"
+        and action.base_branch == "main"
+        and action.parent_path is None
+    )
 
     dedicated = _item(path, worktree="/dedicated", branch="feature/a")
     action, _ = orchestrate._resolve_worktree(
@@ -860,6 +883,7 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
     )
     assert isinstance(action, orchestrate.WorktreeAction)
     assert action.action == "reuse" and action.exists is True
+    assert action.parent_path is None
 
     action, _ = orchestrate._resolve_worktree(
         dedicated,
@@ -869,7 +893,12 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
         repo_path="/repo",
         **common,
     )
-    assert action is not None and action.action == "fork-child" and action.base_branch == "feature/a"
+    assert (
+        action is not None
+        and action.action == "fork-child"
+        and action.base_branch == "feature/a"
+        and action.parent_path == "/dedicated"
+    )
 
     unstamped = _item(path)
     action, _ = orchestrate._resolve_worktree(
@@ -880,7 +909,7 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
         repo_path="/repo",
         **common,
     )
-    assert action is not None and action.action == "reuse"
+    assert action is not None and action.action == "reuse" and action.parent_path is None
     action, _ = orchestrate._resolve_worktree(
         unstamped,
         epic_worktree_path="/repo",
@@ -889,7 +918,7 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
         repo_path="/repo",
         **common,
     )
-    assert action is not None and action.action == "main"
+    assert action is not None and action.action == "main" and action.parent_path is None
     action, _ = orchestrate._resolve_worktree(
         unstamped,
         epic_worktree_path="/epic",
@@ -898,7 +927,12 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
         repo_path="/repo",
         **common,
     )
-    assert action is not None and action.action == "fork-child" and action.base_branch == "epic/root"
+    assert (
+        action is not None
+        and action.action == "fork-child"
+        and action.base_branch == "epic/root"
+        and action.parent_path == "/epic"
+    )
 
     action, claimed = orchestrate._resolve_worktree(
         unstamped,
@@ -923,6 +957,7 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
     )
     assert isinstance(action, orchestrate.WorktreeAction)
     assert action.action == "create-top-level" and claimed
+    assert action.parent_path is None
     action, claimed = orchestrate._resolve_worktree(
         unstamped,
         epic_worktree_path=None,
@@ -933,10 +968,87 @@ def test_worktree_resolution_covers_main_reuse_eviction_inheritance_and_cold_sta
     )
     assert isinstance(action, orchestrate.WorktreeAction)
     assert action.action == "create-top-level" and claimed
+    assert action.parent_path is None
 
 
-def test_prompt_substitutes_tail_and_explains_main_checkout() -> None:
-    action = orchestrate.WorktreeAction("main", "/repo", "main", None, True)
+def test_a_fork_off_an_epic_anchored_in_the_main_checkout_carries_no_parent() -> None:
+    """Trunk work is never a child of the repository's own checkout (design D5)."""
+    item = _item("work/epic-r/children/bug-x", type="Bug", phase="execute")
+
+    action, _ = orchestrate._resolve_worktree(
+        item,
+        epic_worktree_path="/repo",
+        epic_branch="epic/root",
+        live_worktree_owners={},
+        accepted_worktrees=set(),
+        epic_worktree_claimed=False,
+        worktree_exists={"/repo": True},
+        default_base="main",
+        phase="execute",
+        is_root=False,
+        repo_path="/repo",
+        inventory={},
+    )
+
+    assert isinstance(action, orchestrate.WorktreeAction)
+    assert action.action == "fork-child" and action.base_branch == "epic/root"
+    assert action.parent_path is None
+
+
+def test_a_fork_off_a_dirty_main_checkout_still_carries_no_parent() -> None:
+    """`repo_path` is withheld (`None`) whenever the checkout is dirty
+    (`run_orchestrate`'s `_checkout_is_dirty` guard), but the resolved
+    repository itself -- `code_repo` -- is still known and still un-withheld.
+    A fork off that repository is trunk work regardless of whether its
+    checkout happened to be dirty at plan time, so it must still carry no
+    parent (design D5) -- comparing against a withheld `repo_path` alone lets
+    this slip through and silently link trunk work beneath the main checkout.
+    """
+    item = _item("work/epic-r/children/bug-x", type="Bug", phase="execute")
+
+    action, _ = orchestrate._resolve_worktree(
+        item,
+        epic_worktree_path="/repo",
+        epic_branch="epic/root",
+        live_worktree_owners={},
+        accepted_worktrees=set(),
+        epic_worktree_claimed=False,
+        worktree_exists={"/repo": True},
+        default_base="main",
+        phase="execute",
+        is_root=False,
+        repo_path=None,
+        code_repo="/repo",
+        inventory={},
+    )
+
+    assert isinstance(action, orchestrate.WorktreeAction)
+    assert action.action == "fork-child" and action.base_branch == "epic/root"
+    assert action.parent_path is None
+
+
+def test_a_planned_fork_carries_its_parent_through_plan() -> None:
+    root = "work/epic-r"
+    child = f"{root}/children/bug-x"
+    items = (
+        _item(
+            root,
+            type="Epic",
+            phase="execute",
+            worktree="/epic",
+            branch="epic/root",
+            affects=("packages/r",),
+            active_child_paths=(child,),
+        ),
+        _item(child, type="Bug", phase="execute", affects=("packages/x",)),
+    )
+    result = _plan(items, root, worktree_exists={"/epic": True}, repo_path="/repo")
+    forks = [d for d in result.dispatches if d.slug == child]
+    assert forks and forks[0].worktree.action == "fork-child"
+    assert forks[0].worktree.parent_path == "/epic"
+
+
+def test_prompt_substitutes_tail() -> None:
     prompt = orchestrate._prompt(
         path="work/feature-a",
         key="work/feature-a#execute",
@@ -944,60 +1056,12 @@ def test_prompt_substitutes_tail_and_explains_main_checkout() -> None:
         workspace="/ws",
         merge_target="main",
         tail="{path} {key} {phase} {workspace} {merge_target} {literal}",
-        worktree=action,
-        is_root=False,
     )
     assert "work/feature-a work/feature-a#execute execute /ws main {literal}" in prompt
-    assert "main checkout" in prompt
-
-
-def test_prompt_asks_a_root_dispatch_to_record_its_worktree_for_every_action() -> None:
-    reuse = orchestrate.WorktreeAction("reuse", "/wt/epic-r", "epic/root-1a2b3c4d", None, True)
-
-    root_prompt = orchestrate._prompt(
-        path="work/epic-r",
-        key="work/epic-r#design",
-        phase="design",
-        workspace="/ws",
-        merge_target="main",
-        tail=None,
-        worktree=reuse,
-        is_root=True,
+    assert orchestrate.WORKER_PLACEMENT_LINE in prompt
+    assert prompt.endswith(
+        "work/feature-a work/feature-a#execute execute /ws main {literal}\n" + orchestrate.WORKER_PLACEMENT_LINE
     )
-    assert "Record the worktree as `/wt/epic-r`" in root_prompt
-
-    child_prompt = orchestrate._prompt(
-        path="work/epic-r/children/bug-x",
-        key="work/epic-r/children/bug-x#design",
-        phase="design",
-        workspace="/ws",
-        merge_target="epic/root-1a2b3c4d",
-        tail=None,
-        worktree=reuse,
-        is_root=False,
-    )
-    assert "Record the worktree" not in child_prompt
-
-
-def test_prompt_pathless_root_asks_to_record_wherever_the_worker_lands() -> None:
-    """The epic-anchor freeze's primary case: an epic's first-ever dispatch
-    has no stamp and `repo_path` is unresolved, so the action is a pathless
-    `create-top-level`. The instruction must not render the literal `None`."""
-    action = orchestrate.WorktreeAction("create-top-level", None, "epic/root-1a2b3c4d", "main", None)
-
-    prompt = orchestrate._prompt(
-        path="work/epic-r",
-        key="work/epic-r#design",
-        phase="design",
-        workspace="/ws",
-        merge_target="main",
-        tail=None,
-        worktree=action,
-        is_root=True,
-    )
-
-    assert "None" not in prompt
-    assert "Record the worktree you end up in, and the branch as `epic/root-1a2b3c4d`" in prompt
 
 
 def test_an_execute_dispatch_prompt_carries_the_coverage_obligation() -> None:
@@ -1010,18 +1074,67 @@ def test_an_execute_dispatch_prompt_carries_the_coverage_obligation() -> None:
         workspace="/ws",
         merge_target="main",
         tail=EXECUTE_TAIL,
-        worktree=orchestrate.WorktreeAction("create-top-level", "/wt", "feature/a", None, True),
-        is_root=False,
     )
     assert "/ws/okf/work/feature-a/references/03-execute-coverage.md" in prompt
     assert "{workspace}" not in prompt and "{path}" not in prompt
 
 
-def test_plan_blocks_items_without_affects_and_ignores_unknown_live_owner() -> None:
+@pytest.mark.parametrize("unknown", ["work/feature-a#plan", "gw-plan-a-00000000"])
+@pytest.mark.parametrize("work_status", ["open", "resolved"])
+def test_unknown_live_key_refuses_even_a_terminal_plan(unknown: str, work_status: str) -> None:
     path = "work/feature-a"
-    result = _plan((_item(path, affects=()),), path, live=("work/missing#plan",))
+    with pytest.raises(ValueError, match="unknown live dispatch key") as caught:
+        _plan((_item(path, work_status=work_status),), path, live=(unknown,))
+    assert unknown in str(caught.value)
+
+
+def test_mixed_live_keys_refuse_and_report_all_unknown_keys_once_in_input_order() -> None:
+    path = "work/feature-a"
+    known = orchestrate.session_name(path, "Feature", "plan")
+    with pytest.raises(ValueError, match="unknown live dispatch key") as caught:
+        _plan((_item(path),), path, live=("unknown-z", known, "unknown-a", "unknown-z"))
+    message = str(caught.value)
+    assert message.count("unknown-z") == message.count("unknown-a") == 1
+    assert message.index("unknown-z") < message.index("unknown-a")
+    assert known not in message
+
+
+def test_collision_dropped_live_key_refuses_with_ambiguous_owners() -> None:
+    first = _item("work/feature-a")
+    second = _item("work/feature-b")
+    collision = "gw-design-collision-deadbeef"
+
+    def fake(path: str, type_: str, phase: str) -> str:
+        return collision if phase == "design" else f"gw-{phase}-{path}"
+
+    with mock.patch.object(orchestrate, "session_name", fake):
+        with pytest.raises(ValueError, match="unknown live dispatch key") as caught:
+            _plan((first, second), first.path, live=(collision,))
+        ordinary = _plan((first, second), first.path)
+    message = str(caught.value)
+    assert collision in message
+    assert "ambiguous" in message
+    assert first.path in message and second.path in message
+    assert any(collision in warning and "ambiguous" in warning for warning in ordinary.warnings)
+
+
+@pytest.mark.parametrize("owner_path", ["work/feature-a", "work/feature-outside"])
+def test_known_prior_phase_live_key_keeps_affects_reserved(owner_path: str) -> None:
+    path = "work/feature-a"
+    candidate = _item(path, phase="execute", has_plan_artifact=True)
+    items = (candidate,) if owner_path == path else (candidate, _item(owner_path, phase="finish"))
+    live = orchestrate.session_name(owner_path, "Feature", "design")
+    result = _plan(items, path, live=(live,))
+    assert result.slots_free == 1
+    assert result.dispatches == ()
     assert any(blocked.path == path and blocked.kind == "affects-overlap" for blocked in result.blocked)
-    assert "matches no known item" in result.warnings[0]
+    assert result.warnings == ()
+
+
+def test_plan_blocks_items_without_affects() -> None:
+    path = "work/feature-a"
+    result = _plan((_item(path, affects=()),), path)
+    assert any(blocked.path == path and blocked.kind == "affects-overlap" for blocked in result.blocked)
 
 
 def test_frontier_reports_a_parent_cycle_in_a_gated_tree() -> None:
@@ -1241,6 +1354,7 @@ def test_a_descendant_at_execute_forks_off_the_epic_branch_instead_of_reusing_it
     assert action.base_branch == "epic/root"
     assert action.path is None
     assert not claimed
+    assert action.parent_path == "/epic"
 
 
 def test_a_descendant_at_finish_forks_off_the_epic_branch_too() -> None:
@@ -1251,6 +1365,7 @@ def test_a_descendant_at_finish_forks_off_the_epic_branch_too() -> None:
     assert isinstance(action, orchestrate.WorktreeAction)
     assert action.action == "fork-child"
     assert action.base_branch == "epic/root"
+    assert action.parent_path == "/epic"
 
 
 def test_a_descendant_at_a_read_only_phase_still_reuses_the_epic_anchor() -> None:
@@ -1345,56 +1460,6 @@ def test_a_descendant_cold_start_refuses_with_no_repo_path_either() -> None:
     assert action.kind == "worktree-unprovable"
 
 
-def _main_prompt(phase: str, *, is_root: bool) -> str:
-    return orchestrate._prompt(
-        path="work/epic-r/children/bug-x" if not is_root else "work/epic-r",
-        key="gw-k",
-        phase=phase,
-        workspace="/ws",
-        merge_target="main",
-        tail=None,
-        worktree=orchestrate.WorktreeAction("main", "/repo", "main", None, True),
-        is_root=is_root,
-    )
-
-
-def test_a_read_only_descendant_in_the_main_checkout_is_not_told_to_record_it() -> None:
-    """Suppressing the stamp at the planner is half the fix; the other half is
-    not instructing the worker to write it by hand."""
-    for phase in sorted(orchestrate.READ_ONLY_PHASES):
-        assert "Record the worktree" not in _main_prompt(phase, is_root=False), phase
-
-
-def test_a_code_stage_descendant_in_the_main_checkout_is_still_told_to_record_it() -> None:
-    for phase in ("execute", "finish"):
-        prompt = _main_prompt(phase, is_root=False)
-        assert "Record the worktree as `/repo`" in prompt, phase
-        assert "cannot be detected from where you are" in prompt, phase
-
-
-def test_the_subtree_root_is_told_to_record_its_placement_at_every_phase() -> None:
-    for phase in ("design", "plan", "execute", "finish"):
-        assert "Record the worktree as `/repo`" in _main_prompt(phase, is_root=True), phase
-
-
-def test_the_subtree_root_records_a_pathless_mint_at_a_read_only_phase() -> None:
-    """The cold-start mint is a `design`-phase root dispatch with no path yet;
-    this is the line that gets the epic anchor written at all."""
-    prompt = orchestrate._prompt(
-        path="work/epic-r",
-        key="gw-k",
-        phase="design",
-        workspace="/ws",
-        merge_target="main",
-        tail=None,
-        worktree=orchestrate.WorktreeAction("create-top-level", None, "epic/root-1a2b3c4d", "main", None),
-        is_root=True,
-    )
-
-    assert "Record the worktree you end up in" in prompt
-    assert "epic/root-1a2b3c4d" in prompt
-
-
 def test_a_child_design_dispatch_reuses_the_epic_anchor_and_records_nothing() -> None:
     """The reproduction this item was filed from, at the `plan()` level: a
     `design` dispatch of a child against a stamped epic anchor plans a reuse
@@ -1420,6 +1485,7 @@ def test_a_child_design_dispatch_reuses_the_epic_anchor_and_records_nothing() ->
     assert dispatch.worktree.action == "reuse"
     assert dispatch.worktree.path == "/epic"
     assert "Record the worktree" not in dispatch.prompt
+    assert orchestrate.WORKER_PLACEMENT_LINE in dispatch.prompt
 
 
 def test_a_read_only_dispatch_does_not_occupy_the_slot_for_a_later_dispatch() -> None:
@@ -1507,3 +1573,428 @@ def test_resolved_tail_formats_known_placeholders_and_preserves_literal_braces()
     planned = result.dispatches[0]
     assert "/ws work/feature-a main {literal}" in planned.prompt
     assert planned.agent == "codex"
+
+
+# --- affects are reserved only by emitted dispatches ------------------------
+#
+# Every fixture below is an execute-phase epic with a stamped, existing anchor
+# and first-sorted child A followed by B (and C), all sharing
+# `packages/shared`. A plan-phase child with no stamp of its own reuses the
+# epic anchor, so B's route, profile and placement are always dispatchable;
+# the only thing that can stop B is A's reservation.
+
+_RESERVE_ROOT = "work/epic-reserve"
+_SHARED = ("packages/shared",)
+_GONE_STAMP: dict[str, object] = {
+    "phase": "execute",
+    "has_plan_artifact": True,
+    "worktree": "/wt/gone",
+    "branch": "feature/a",
+}
+
+
+def _overlapping_children(*names: str, first: dict[str, object] | None = None) -> tuple[tuple, tuple[str, ...]]:
+    paths = tuple(f"{_RESERVE_ROOT}/children/{name}" for name in names)
+    epic = _item(
+        _RESERVE_ROOT,
+        type="Epic",
+        phase="execute",
+        active_child_paths=paths,
+        affects=("packages/root",),
+        worktree="/wt/epic",
+        branch="epic/reserve",
+    )
+    children = tuple(
+        _item(path, affects=_SHARED, **((first or {}) if index == 0 else {})) for index, path in enumerate(paths)
+    )
+    return (epic, *children), paths
+
+
+def _blocked_kinds(result) -> set[tuple[str, str]]:
+    return {(blocked.path, blocked.kind) for blocked in result.blocked}
+
+
+@pytest.mark.parametrize(
+    ("claimants", "kind"),
+    [((), "worktree-unprovable"), (("alice", "bob"), "worktree-ambiguous")],
+)
+def test_refused_placement_reserves_no_affects(claimants: tuple[str, ...], kind: str) -> None:
+    items, (first, second) = _overlapping_children("feature-a", "feature-b", first=_GONE_STAMP)
+    flat = orchestrate.branch_name(first, "Feature").replace("/", "-")
+    result = _plan(
+        items,
+        _RESERVE_ROOT,
+        repo_path="/repo",
+        worktree_exists={"/wt/gone": False, "/wt/epic": True, "/wt/alice": True, "/wt/bob": True},
+        worktree_inventory={f"{who}/{flat}": f"/wt/{who}" for who in claimants},
+    )
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+    assert (first, kind) in _blocked_kinds(result)
+    assert (second, "affects-overlap") not in _blocked_kinds(result)
+    assert set(result.dispatch_resolutions) == {result.dispatches[0].key}
+
+
+def test_dispatch_profile_error_reserves_no_affects() -> None:
+    from graph_works_core.workspace.dispatch import parse_rules
+
+    rules = parse_rules(
+        [{"match": {"type": "Bug"}, "mode": "relay"}],
+        source="/ws/dispatch.yaml",
+        attributes=frozenset({"variant", "type"}),
+    )
+    items, (first, second) = _overlapping_children("bug-a", "feature-b", first={"type": "Bug"})
+    result = _plan(items, _RESERVE_ROOT, dispatch_rules=rules, worktree_exists={"/wt/epic": True})
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+    assert (first, "relay-untailed") in _blocked_kinds(result)
+    assert set(result.dispatch_resolutions) == {result.dispatches[0].key}
+
+
+def test_unsupported_provisioning_reserves_no_affects() -> None:
+    # A is an execute-phase descendant: it forks a child branch, a pathless
+    # action this backend cannot provision. B reuses the existing anchor.
+    items, (first, second) = _overlapping_children(
+        "feature-a", "feature-b", first={"phase": "execute", "has_plan_artifact": True}
+    )
+    result = _plan(items, _RESERVE_ROOT, provisions_worktrees=False, worktree_exists={"/wt/epic": True})
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+    assert (first, "worktree-unsupported") in _blocked_kinds(result)
+
+
+def test_pending_placement_reserves_no_affects_and_no_slot() -> None:
+    # A controlled resolver return isolates the planner's acceptance contract;
+    # the real placement rules are exercised for B, unchanged.
+    items, (first, second) = _overlapping_children("feature-a", "feature-b")
+    real = orchestrate._resolve_worktree
+    resolved: list[str] = []
+
+    def resolve(item, **kwargs):
+        resolved.append(item.path)
+        return (None, False) if item.path == first else real(item, **kwargs)
+
+    with mock.patch.object(orchestrate, "_resolve_worktree", side_effect=resolve):
+        result = _plan(items, _RESERVE_ROOT, max_parallel=1, worktree_exists={"/wt/epic": True})
+    assert resolved == [first, second]
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+    assert _blocked_kinds(result) == {(first, "worktree-pending")}
+
+
+def test_zero_capacity_candidates_do_not_overlap_each_other() -> None:
+    items, (first, second) = _overlapping_children("feature-a", "feature-b")
+    result = _plan(items, _RESERVE_ROOT, max_parallel=0, worktree_exists={"/wt/epic": True})
+    assert result.dispatches == ()
+    assert _blocked_kinds(result) == {(first, "capacity"), (second, "capacity")}
+
+
+def test_capacity_dropped_candidates_reserve_nothing_when_a_slot_is_filled_by_unrelated_work() -> None:
+    items, (first, second) = _overlapping_children("feature-a", "feature-b")
+    outside = _item("work/feature-outside", phase="finish", affects=("packages/other",))
+    live = orchestrate.session_name(outside.path, "Feature", "execute")
+    result = _plan((*items, outside), _RESERVE_ROOT, max_parallel=1, live=(live,), worktree_exists={"/wt/epic": True})
+    assert result.dispatches == ()
+    assert _blocked_kinds(result) == {(first, "capacity"), (second, "capacity")}
+
+
+def test_accepted_dispatch_still_serializes_an_overlapping_sibling() -> None:
+    items, (first, second) = _overlapping_children("feature-a", "feature-b")
+    result = _plan(items, _RESERVE_ROOT, worktree_exists={"/wt/epic": True})
+    assert [dispatch.slug for dispatch in result.dispatches] == [first]
+    assert _blocked_kinds(result) == {(second, "affects-overlap")}
+
+
+@pytest.mark.parametrize("reverse_input", [False, True])
+def test_a_sibling_accepted_after_a_refusal_reserves_for_later_overlaps(reverse_input: bool) -> None:
+    items, (first, second, third) = _overlapping_children("feature-a", "feature-b", "feature-c", first=_GONE_STAMP)
+    if reverse_input:
+        items = tuple(reversed(items))
+    result = _plan(items, _RESERVE_ROOT, max_parallel=3, worktree_exists={"/wt/gone": False, "/wt/epic": True})
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+    assert _blocked_kinds(result) == {(first, "worktree-unprovable"), (third, "affects-overlap")}
+    assert "packages/shared" in next(blocked.reason for blocked in result.blocked if blocked.path == third)
+
+
+def test_a_refused_candidate_never_lets_capacity_be_exceeded() -> None:
+    items, (first, second) = _overlapping_children("feature-a", "feature-b", first=_GONE_STAMP)
+    third = f"{_RESERVE_ROOT}/children/feature-c"
+    epic = dataclasses.replace(items[0], active_child_paths=(first, second, third))
+    items = (epic, *items[1:], _item(third, affects=("packages/other",)))
+    result = _plan(items, _RESERVE_ROOT, max_parallel=1, worktree_exists={"/wt/gone": False, "/wt/epic": True})
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+    assert _blocked_kinds(result) == {(first, "worktree-unprovable"), (third, "capacity")}
+
+
+def test_empty_affects_candidate_reserves_nothing() -> None:
+    items, (first, second) = _overlapping_children("feature-a", "feature-b")
+    items = (items[0], dataclasses.replace(items[1], affects=()), items[2])
+    result = _plan(items, _RESERVE_ROOT, worktree_exists={"/wt/epic": True})
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+    assert _blocked_kinds(result) == {(first, "affects-overlap")}
+
+
+# --- a stamped root finishes its integration branch (D-002) ---------------
+
+
+def _branch_tail_rules():
+    from graph_works_core.workspace.dispatch import parse_rules
+
+    return parse_rules(
+        [{"match": {"variant": "branch"}, "prompt_tail": "Auto-drive context: merge target is `{merge_target}`."}],
+        source="/ws/dispatch.yaml",
+        attributes=frozenset({"variant"}),
+    )
+
+
+def _root_at_finish(type_: str, **overrides: object) -> tuple[str, tuple[WorkItem, ...]]:
+    root = "work/epic-int"
+    child = f"{root}/children/feature-done"
+    parent = _item(
+        root,
+        type=type_,
+        phase="finish",
+        work_status="in-progress",
+        active_child_paths=(child,),
+        affects=("packages/root",),
+        **overrides,
+    )
+    done = _item(child, phase="done", work_status="resolved", worktree="/wt/child", branch="feature/done-1a2b3c4d")
+    return root, (parent, done)
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+def test_regression_a_stamped_root_at_finish_dispatches_its_integration_instead_of_resolving(type_: str) -> None:
+    """The reported run: every child merged into the epic branch, the root
+    reached `finish`, and the planner handed the coordinator a bare done/resolved
+    advance. A stamped root must instead get a relay finish in its own worktree,
+    merging into the default base."""
+    root, items = _root_at_finish(type_, worktree="/wt/epic-int", branch="epic/int-1a2b3c4d")
+    result = _plan(items, root, dispatch_rules=_branch_tail_rules(), worktree_exists={"/wt/epic-int": True})
+    assert result.advances == ()
+    assert result.blocked == ()
+    [dispatch] = result.dispatches
+    assert (dispatch.slug, dispatch.phase, dispatch.skill, dispatch.mode) == (
+        root,
+        "finish",
+        "superpowers:finishing-a-development-branch",
+        "relay",
+    )
+    assert (dispatch.worktree.action, dispatch.worktree.path) == ("reuse", "/wt/epic-int")
+    assert dispatch.merge_target == "main"
+    assert "merge target is `main`" in dispatch.prompt
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+def test_an_unstamped_root_at_finish_keeps_its_planned_advance(type_: str) -> None:
+    root, items = _root_at_finish(type_)
+    result = _plan(items, root, dispatch_rules=_branch_tail_rules())
+    assert result.dispatches == ()
+    assert [(advance.path, advance.reason, advance.mode) for advance in result.advances] == [
+        (root, f"{type_.lower()} at finish stage", "advance")
+    ]
+
+
+def test_a_stamped_root_whose_placement_cannot_be_proved_blocks_rather_than_resolving() -> None:
+    root, items = _root_at_finish("Epic", worktree="/wt/epic-int", branch="epic/int-1a2b3c4d")
+    result = _plan(
+        items,
+        root,
+        dispatch_rules=_branch_tail_rules(),
+        worktree_exists={"/wt/epic-int": False},
+        worktree_inventory={},
+    )
+    assert result.dispatches == ()
+    assert result.advances == ()
+    assert [(blocked.path, blocked.kind) for blocked in result.blocked] == [(root, "worktree-unprovable")]
+
+
+def test_a_nested_stamped_epic_finishes_into_its_parent_integration_branch() -> None:
+    root = "work/epic-int"
+    mid = f"{root}/children/epic-mid"
+    leaf = f"{mid}/children/feature-leaf"
+    items = (
+        _item(
+            root,
+            type="Epic",
+            phase="execute",
+            work_status="in-progress",
+            active_child_paths=(mid,),
+            worktree="/wt/epic-int",
+            branch="epic/int-1a2b3c4d",
+            affects=("packages/root",),
+        ),
+        _item(
+            mid,
+            type="Epic",
+            phase="finish",
+            work_status="in-progress",
+            active_child_paths=(leaf,),
+            worktree="/wt/epic-mid",
+            branch="epic/mid-5e6f7a8b",
+            affects=("packages/mid",),
+        ),
+        _item(leaf, phase="done", work_status="resolved"),
+    )
+    result = _plan(
+        items,
+        root,
+        dispatch_rules=_branch_tail_rules(),
+        worktree_exists={"/wt/epic-int": True, "/wt/epic-mid": True},
+    )
+    assert result.advances == ()
+    assert [(d.slug, d.worktree.action, d.worktree.path, d.merge_target) for d in result.dispatches] == [
+        (mid, "reuse", "/wt/epic-mid", "epic/int-1a2b3c4d")
+    ]
+
+
+def test_only_the_root_advance_carries_the_epic_pair() -> None:
+    """D-006: a descendant's coordinator-applied advance must not acquire the
+    shared epic anchor, or the planner later reuses it instead of forking.
+    The middle item is an Epic so execute routes to an automatic advance."""
+    root = "work/epic-r"
+    mid = f"{root}/children/epic-mid"
+    leaf = f"{mid}/children/bug-leaf"
+    items = (
+        _item(
+            root,
+            type="Epic",
+            phase="execute",
+            work_status="in-progress",
+            worktree="/epic",
+            branch="epic/r",
+            active_child_paths=(mid,),
+            affects=("packages/root",),
+        ),
+        _item(
+            mid,
+            type="Epic",
+            phase="execute",
+            work_status="in-progress",
+            active_child_paths=(leaf,),
+            ancestor_paths=(root,),
+        ),
+        _item(leaf, type="Bug", phase="done", work_status="resolved", parent_path=mid, ancestor_paths=(mid, root)),
+    )
+
+    result = _plan(items, root, worktree_exists={"/epic": True})
+
+    by_path = {advance.path: advance for advance in result.advances}
+    assert mid in by_path, (result.advances, result.blocked)
+    assert (by_path[mid].worktree, by_path[mid].branch) == (None, None)
+
+
+@pytest.mark.parametrize("root", ["work/epic-r", "work/epic-outer/children/epic-r"])
+def test_the_root_advance_still_carries_the_epic_pair(root: str) -> None:
+    """Root means the explicit orchestration root, including a nested subtree."""
+    child = f"{root}/children/bug-done"
+    items = (
+        _item(
+            root,
+            type="Epic",
+            phase="execute",
+            work_status="in-progress",
+            worktree="/epic",
+            branch="epic/r",
+            active_child_paths=(child,),
+            affects=("packages/root",),
+        ),
+        _item(child, type="Bug", phase="done", work_status="resolved"),
+    )
+
+    result = _plan(items, root, worktree_exists={"/epic": True})
+
+    [advance] = [a for a in result.advances if a.path == root]
+    assert (advance.worktree, advance.branch) == ("/epic", "epic/r")
+
+
+def test_a_nested_return_advance_carries_no_epic_pair() -> None:
+    """A nested Epic at finish repairs to execute when a later child opens."""
+    root = "work/epic-r"
+    mid = f"{root}/children/epic-mid"
+    leaf = f"{mid}/children/bug-late"
+    items = (
+        _item(
+            root,
+            type="Epic",
+            phase="execute",
+            work_status="in-progress",
+            worktree="/epic",
+            branch="epic/r",
+            active_child_paths=(mid,),
+            affects=("packages/root",),
+        ),
+        _item(
+            mid,
+            type="Epic",
+            phase="finish",
+            work_status="in-progress",
+            active_child_paths=(leaf,),
+            ancestor_paths=(root,),
+        ),
+        _item(
+            leaf,
+            type="Bug",
+            phase=None,
+            work_status="open",
+            parent_path=mid,
+            ancestor_paths=(mid, root),
+            affects=("packages/leaf",),
+        ),
+    )
+
+    result = _plan(items, root, worktree_exists={"/epic": True})
+
+    returns = [a for a in result.advances if a.mode == "return"]
+    assert [a.path for a in returns] == [mid], (result.advances, result.blocked)
+    assert (returns[0].worktree, returns[0].branch) == (None, None)
+
+
+@pytest.mark.parametrize("phase", ["design", "plan", "execute", "finish"])
+@pytest.mark.parametrize("is_root", [True, False])
+def test_every_dispatch_prompt_hands_placement_to_the_coordinator(phase: str, is_root: bool) -> None:
+    """Root: a lone Feature dispatching itself. Descendant: a Bug under a
+    stamped Epic at `execute`. Either way the worker is told to stay out of
+    placement, and nobody is told to record one. The workspace relay tail
+    enables finish routing, preserving all four phases for both placements."""
+    if is_root:
+        slug = "work/feature-solo"
+        items: tuple[WorkItem, ...] = (
+            _item(
+                slug,
+                phase=phase,
+                work_status="in-progress",
+                owner="pat",
+                worktree="/repo",
+                branch="main",
+                has_plan_artifact=True,
+            ),
+        )
+        root = slug
+    else:
+        root = "work/epic-r"
+        slug = f"{root}/children/bug-x"
+        items = (
+            _item(
+                root,
+                type="Epic",
+                phase="execute",
+                work_status="in-progress",
+                worktree="/epic",
+                branch="epic/r",
+                active_child_paths=(slug,),
+                affects=("packages/root",),
+            ),
+            _item(slug, type="Bug", phase=phase, work_status="in-progress", owner="pat", has_plan_artifact=True),
+        )
+
+    result = _plan(
+        items,
+        root,
+        worktree_exists={"/epic": True, "/repo": True},
+        repo_path="/repo",
+        dispatch_rules=_branch_tail_rules(),
+    )
+
+    matches = [d for d in result.dispatches if d.slug == slug]
+    assert len(matches) == 1, (result.dispatches, result.blocked)
+    [dispatch] = matches
+    assert orchestrate.WORKER_PLACEMENT_LINE in dispatch.prompt
+    assert "Record the worktree" not in dispatch.prompt
+    assert "--worktree`/`--branch` explicitly" not in dispatch.prompt

@@ -73,6 +73,35 @@ def test_leaf_decision_redirects_to_nearest_feature_owner(tmp_path: Path) -> Non
     assert result.application is None
 
 
+def test_lone_bug_owns_its_own_ledger(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    lone = "work/bug-lone"
+    _write(layout, lone, "Bug")
+    result = work.run_decision_add(
+        layout,
+        lone,
+        question="Why?",
+        affects=(lone,),
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert result.owner.owner_path == lone
+    assert result.owner.redirected_from is None
+    assert result.application is not None and result.application.ok
+    assert (layout.bundle_dir / f"{lone}/references/00-decisions.md").exists()
+    assert any(source.id == "decisions" for source in load(layout.bundle_dir / f"{lone}.md").fm.sources)
+
+
+def test_items_under_parents_keep_their_nearest_owner(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    epic = "work/release-v1/children/epic-a"
+    epic_child = f"{epic}/children/bug-b"
+    _write(layout, epic_child, "Bug")
+    assert work.run_decision_list(layout, epic_child).owner.owner_path == epic
+    assert work.run_decision_list(layout, OWNER).owner.owner_path == OWNER
+
+
 def test_live_decision_is_journaled_and_registers_ledger(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     result = work.run_decision_add(

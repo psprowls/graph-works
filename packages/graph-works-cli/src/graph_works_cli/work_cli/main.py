@@ -17,6 +17,7 @@ from datetime import UTC, date, datetime
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.commands import run_orchestrate
+from graph_works_core.orchestrate.placement import run_record_placement
 from graph_works_core.orchestrate.stage_advance import run_stage_advance
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
@@ -320,6 +321,11 @@ def advance(
     released_at: str = typer.Option("", "--released-at", help="Release date (YYYY-MM-DD)."),
     worktree: str = typer.Option("", "--worktree", help="The item's worktree path, when the caller knows it."),
     branch: str = typer.Option("", "--branch", help="The item's branch, paired with --worktree."),
+    no_infer_worktree: bool = typer.Option(
+        False,
+        "--no-infer-worktree",
+        help="Never infer the worktree/branch from the current directory (every supervised worker passes this).",
+    ),
     start_sha: str = typer.Option(
         "", "--start-sha", help="Where this phase started; required for a finish-stage results stub."
     ),
@@ -333,7 +339,9 @@ def advance(
     The pipeline's single mutation point. An explicit `--worktree`/`--branch`
     pair is applied unconditionally -- it is the caller's own resolved
     decision, which is what lets an item be evicted out of a shared main
-    checkout; without the pair, provenance falls back to cwd inference.
+    checkout; without the pair, a top-level item falls back to cwd inference
+    unless `--no-infer-worktree` is given; a descendant never infers — its
+    coordinator records placement with `gw work record-placement`.
 
     `--start-sha` names where the phase being completed began. Out of `execute`
     it is optional — core derives one from the worktree's merge base against the
@@ -360,6 +368,7 @@ def advance(
             released_at=_optional_date(released_at, "--released-at"),
             worktree=worktree or None,
             branch=branch or None,
+            infer_worktree=not no_infer_worktree,
             start_sha=start_sha or None,
             return_=return_,
             dry_run=dry_run,
@@ -394,6 +403,65 @@ def advance(
         typer.echo(result.outcome.plan.diff())
         return
     rendering.render_advance(payload)
+
+
+@work_app.command(name="record-placement")
+def record_placement(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    root: str = typer.Option(..., "--root", help="The orchestration subtree root this dispatch belongs to."),
+    phase: str = typer.Option(..., "--phase", help="The phase of the dispatch being recorded."),
+    worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
+    branch: str = typer.Option(..., "--branch", help="The observed branch name, without `refs/heads/`."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the placement record as JSON."),
+) -> None:
+    """Record where a dispatched stage runs. Never advances PATH.
+
+    Writes only `worktree`, `branch` and `updated`. Refuses -- writing nothing --
+    when PATH is not ROOT or its descendant, when a descendant is recorded at
+    `design` or `plan`, when PATH's phase is no longer `--phase`, and for an
+    invalid or terminal item or an invalid observation. An identical pair is a
+    no-op. The values must be observed, never the planner's requested names.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_record_placement(
+            layout,
+            path,
+            root=root,
+            phase=phase,
+            worktree=worktree,
+            branch=branch,
+            today=_today(),
+            dry_run=dry_run,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except ValueError as exc:
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+
+    payload = rendering.placement_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if payload["applied"] and (payload["rolled_back"] or payload["failures"]):
+        for failure in payload["failures"]:
+            rendering.warn(failure)
+        rendering.fail(f"{path}: apply was incomplete", reason="incomplete-apply", payload=payload)
+    for warning in payload["warnings"]:
+        rendering.warn(warning)
+    if json_output:
+        rendering.emit(payload)
+        if payload["repo_note"]:
+            rendering.warn(payload["repo_note"])
+        return
+    rendering.render_placement(payload)
 
 
 @work_app.command()

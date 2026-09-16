@@ -33,6 +33,12 @@ class WorktreeAction:
     the main checkout, so `--git-dir` and `--git-common-dir` agree and every
     detector answers "not a worktree". A planner that emits `"main"` therefore
     owes the worker its path and branch explicitly.
+
+    `parent_path` names the existing worktree a *created* worktree
+    (`fork-child`) is to be linked beneath, as data. It is `None` for every
+    action that creates nothing, for a fresh top-level worktree, and for a
+    fork whose source is the repository's own checkout. A backend must never
+    fill it from wherever its caller happens to be running.
     """
 
     action: str  # one of WORKTREE_ACTIONS
@@ -40,6 +46,7 @@ class WorktreeAction:
     branch: str
     base_branch: str | None  # set for fork-child / create-top-level
     exists: bool | None  # best-effort stat; None when the path is unknown or the stat failed
+    parent_path: str | None  # the worktree a created one is linked beneath; None = no lineage
 
 
 @dataclass(frozen=True)

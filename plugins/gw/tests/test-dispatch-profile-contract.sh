@@ -25,6 +25,34 @@ grep -F 'Preflight — confirm the skill resolves.' "$WORKFLOW" >/dev/null || fa
 grep -F '<!-- rider-table:start -->' "$WORKFLOW" >/dev/null || fail "workflow preserves stage riders"
 grep -F 'One stage per invocation' "$WORKFLOW" >/dev/null || fail "workflow preserves one-stage advancement"
 grep -F 'This is reporting only' "$WORKFLOW" >/dev/null || fail "workflow reports routing without changing session"
+# Finish outcomes must not resolve unintegrated work or double-advance relay.
+RIDERS="$PLUGIN_ROOT/skills/workflow/references/brief-riders.md"
+RELAY="$PLUGIN_ROOT/skills/finishing-relay/SKILL.md"
+grep -F '| Attended finish | `merge` (clean merge, tests green on the merged result) |' "$WORKFLOW" >/dev/null || fail "attended merge requires verified integration"
+grep -F '| Attended finish | `confirm` (commits already on the merge target) |' "$WORKFLOW" >/dev/null || fail "attended confirm resolves already integrated commits"
+grep -F '| Attended finish | `pr`, `keep`, `discard`, `none` | **No advance**' "$WORKFLOW" >/dev/null || fail "attended non-integration outcomes hold"
+grep -F '| `gw:finishing-relay` | Any | **No advance**' "$WORKFLOW" >/dev/null || fail "relay owns its advance"
+grep -F 'missing or ambiguous, treat it as `none`' "$WORKFLOW" >/dev/null || fail "missing finish evidence holds"
+grep -F 'attended or relay' "$WORKFLOW" >/dev/null || fail "held-item hand-off covers both finish paths"
+grep -F 'merge target: `<merge target>`' "$WORKFLOW" >/dev/null || fail "held-item hand-off names the target"
+grep -F 'nearest Epic or Release ancestor whose frontmatter carries `branch:`' "$RIDERS" >/dev/null || fail "attended target follows ancestor branch stamp"
+grep -F '**Confirm integrated.**' "$RIDERS" >/dev/null || fail "on-target menu can confirm integration"
+grep -F 'in any checkout, including a linked worktree' "$RIDERS" >/dev/null || fail "on-target check includes shared epic worktrees"
+grep -F 'Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>' "$RIDERS" >/dev/null || fail "attended finish reports an explicit outcome"
+grep -F 'only a verified integration resolves — same rule' "$RELAY" >/dev/null || fail "relay cites the shared integration rule"
+grep -F 'Include the merge target in every held-outcome body' "$RELAY" >/dev/null || fail "relay held reports preserve the target"
+# A stamped Epic/Release root finishes its own integration branch (D-002).
+grep -F '**Integration-branch case**' "$RELAY" >/dev/null || fail "relay merges any branch that differs from its target"
+grep -F 'a stamped Epic or Release root finishing its own integration branch' "$RELAY" >/dev/null || fail "relay covers a stamped root's integration branch"
+grep -F 'Never merge a branch into itself.' "$RELAY" >/dev/null || fail "relay never self-merges a same-target stamp"
+grep -F 'No worktree has the merge target checked out, or more than one does' "$RELAY" >/dev/null || fail "relay escalates an unresolvable target checkout"
+grep -F 'Never invent a release date' "$RELAY" >/dev/null || fail "relay obtains a real release date"
+grep -F -- '--released-at <date>' "$RELAY" >/dev/null || fail "relay passes the release date to the resolving advance"
+if grep -Fq 'Forked-child case' "$RELAY"; then fail "relay must not limit merging to forked children"; fi
+grep -F 'The coordinator performs no merge at wrap-up.' "$AUTO_DRIVE" >/dev/null || fail "wrap-up never merges the epic branch"
+grep -F 'whose frontmatter carries `branch:` owns an integration branch' "$AUTO_DRIVE" >/dev/null || fail "stamped root finish owns integration"
+grep -F 'An unstamped Epic or Release root owns no branch' "$AUTO_DRIVE" >/dev/null || fail "unstamped root keeps its direct finish"
+if grep -Fq 'epic branch to `develop`' "$AUTO_DRIVE"; then fail "wrap-up must not hardcode a merge target"; fi
 if grep -Fq -- '--agent claude' "$AUTO_DRIVE"; then fail "auto-drive must use the planned agent"; fi
 if grep -Fq 'permission_mode' "$AUTO_DRIVE"; then fail "auto-drive must not promise permission-mode control"; fi
 ONBOARD="$PLUGIN_ROOT/skills/onboard/SKILL.md"
@@ -37,6 +65,71 @@ for document in "$AUTO_DRIVE" "$ONBOARD"; do
 done
 grep -F "Permissions remain the selected agent's existing settings" "$ONBOARD" >/dev/null || fail "onboarding preserves agent-owned permissions"
 grep -F 'Only dispatches classified `settled` by this fresh proof check may be released' "$AUTO_DRIVE" >/dev/null || fail "wrap-up rechecks launch proof before release"
+# Final-review protocol: each real operation journals intent and its original identity.
+for operation in worker-stop worker-release task-update; do
+  grep -F "Before invoking $operation, persist its intent" "$AUTO_DRIVE" >/dev/null || fail "$operation journals intent before invocation"
+  grep -F "After $operation returns, append its original request ID" "$AUTO_DRIVE" >/dev/null || fail "$operation journals its original receipt"
+done
+grep -F 'If invocation or receipt persistence is interrupted with no original request ID' "$AUTO_DRIVE" >/dev/null || fail "interrupted operations preserve unknown identity"
+grep -F 'Never invent a request ID or pass a new ID as a first-use `--retry-request`' "$AUTO_DRIVE" >/dev/null || fail "unknown identity never becomes a fabricated retry"
+grep -F 'A refusal-only annotation changes only `history` and `unresolved`' "$AUTO_DRIVE" >/dev/null || fail "historical refusal cannot launder protected proof"
+grep -F 'Record-derived success requires fresh `projection.liveness.verdict: exited`' "$AUTO_DRIVE" >/dev/null || fail "recovery requires positive current liveness evidence"
+
+# Rejected or unprovable worker_done: evidence-gated settlement recovery (§4.1.1).
+grep -F 'classify-report --message <message-json>' "$AUTO_DRIVE" >/dev/null || fail "worker_done reports are classified before their outcome"
+grep -F '### 4.1.1 Completion claimed, settlement unconfirmed' "$AUTO_DRIVE" >/dev/null || fail "auto-drive has a claimed-but-unsettled branch"
+grep -F 'record-write --path <record-file> --record <record-json>' "$AUTO_DRIVE" >/dev/null || fail "recovery records are written through the helper"
+grep -F -- '--recovery-record <record-json>' "$AUTO_DRIVE" >/dev/null || fail "restart classification reads recovery records"
+grep -F 'spec-hash --tasks <task-list-json> --task <task_id>' "$AUTO_DRIVE" >/dev/null || fail "records bind the full task spec"
+grep -F 'references/orca-settlement/<dispatch_id>.json' "$AUTO_DRIVE" >/dev/null || fail "recovery records live under the dispatched item"
+grep -F 'never infer identity from a terminal-handle prefix' "$AUTO_DRIVE" >/dev/null || fail "caller identity is never guessed"
+grep -F 'A failed stop never authorizes release' "$AUTO_DRIVE" >/dev/null || fail "release needs verified settlement"
+grep -F 'There is no automatic abandon fallback' "$AUTO_DRIVE" >/dev/null || fail "abandon is not cleanup"
+grep -F 'Task completed plus worker stopped alone never earns it' "$AUTO_DRIVE" >/dev/null || fail "recovered-settled needs a verified record"
+grep -F 'never issue a second `worker-release` for `recovered-settled`' "$AUTO_DRIVE" >/dev/null || fail "recovered terminals are not released twice"
+grep -F 'A timeout never launches a replacement' "$AUTO_DRIVE" >/dev/null || fail "unresolved recovery never relaunches"
+grep -F 'coordinator-recovered completions' "$AUTO_DRIVE" >/dev/null || fail "wrap-up distinguishes recovered completion"
+grep -F 'retry-request' "$AUTO_DRIVE" >/dev/null || fail "lost mutation responses retry by request identity"
+grep -F "A lost mutation response is recovered with Orca's request-show / \`--retry-request\`" "$AUTO_DRIVE" >/dev/null || fail "lost mutation responses use request identity"
+grep -F 'historical caller-identity cause remains unverified' "$AUTO_DRIVE" >/dev/null || fail "auto-drive keeps the evidence limit explicit"
+
+WORKFLOW="$PLUGIN_ROOT/skills/workflow/SKILL.md"
+grep -F 'gw work record-placement <slug> --root <work-path> --phase <dispatch phase>' "$AUTO_DRIVE" >/dev/null || fail "auto-drive records observed placement"
+grep -F 'git -C <observed path> branch --show-current' "$AUTO_DRIVE" >/dev/null || fail "auto-drive verifies the observed branch in git"
+grep -F 'Never record the planned `worktree.branch` in its place.' "$AUTO_DRIVE" >/dev/null || fail "auto-drive records observed, not requested, branches"
+grep -F 'A descendant dispatched at `design` or `plan` is never recorded' "$AUTO_DRIVE" >/dev/null || fail "auto-drive skips read-only descendants"
+grep -F 'binds to this `task_id`/`dispatch_id`' "$AUTO_DRIVE" >/dev/null || fail "auto-drive binds placement to the current attempt"
+grep -F 'PLACEMENT UNRECORDED <key>' "$AUTO_DRIVE" >/dev/null || fail "auto-drive reports an unrecorded placement"
+grep -F 'Do not call `gw work advance` to stamp it' "$AUTO_DRIVE" >/dev/null || fail "phase mismatch never advances to stamp"
+grep -F 'do not start another fork' "$AUTO_DRIVE" >/dev/null || fail "phase mismatch never relaunches"
+grep -F 'A lost response is not a refusal' "$AUTO_DRIVE" >/dev/null || fail "lost record responses are inspected first"
+grep -F 'record its observed placement exactly as §3 step 4 does' "$AUTO_DRIVE" >/dev/null || fail "retries record placement"
+grep -F -- '--no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator advances never infer"
+
+# Placement never depends on where the coordinator runs.
+grep -F 'launch-worker.py place --dispatch <dispatch-json>' "$AUTO_DRIVE" >/dev/null || fail "auto-drive resolves placement through the helper"
+grep -F 'launch-worker.py settle-placement --dispatch <dispatch-json>' "$AUTO_DRIVE" >/dev/null || fail "auto-drive settles lineage through the helper"
+grep -F "No launch reads the coordinator's location." "$AUTO_DRIVE" >/dev/null || fail "auto-drive states launches are location-independent"
+grep -F 'references/orca-placement/<key>.json' "$AUTO_DRIVE" >/dev/null || fail "place results survive a restart"
+grep -F '> <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json' "$AUTO_DRIVE" >/dev/null \
+  || fail "auto-drive redirects place's stdout to the durable placement-result file"
+grep -F '`parent_path`' "$AUTO_DRIVE" >/dev/null || fail "auto-drive documents the planned parent"
+if grep -Fq 'new-child' "$AUTO_DRIVE"; then fail "auto-drive must never launch Orca's caller-context child mode"; fi
+if grep -Fq "coordinator's own worktree context" "$AUTO_DRIVE"; then fail "auto-drive must not infer parentage from the coordinator"; fi
+if grep -Fq 'find the entry whose path matches the' "$AUTO_DRIVE"; then fail "the repo selector comes from the plan, not §0"; fi
+
+if grep -Fq 'Do not substitute the observed values downstream' "$AUTO_DRIVE"; then fail "observed placement is recorded now"; fi
+if grep -Fq 'explicitly on its own' "$AUTO_DRIVE"; then fail "no worker is told to state its own placement"; fi
+grep -F 'Dispatch key:' "$WORKFLOW" >/dev/null || fail "workflow detects a supervised dispatch"
+grep -F -- '`--no-infer-worktree`' "$WORKFLOW" >/dev/null || fail "supervised workflow advances never infer"
+# Each worker transition must independently opt out; a flag elsewhere is insufficient.
+for step in 2 5; do
+  sed -n "/^### $step\. /,/^### $((step + 1))\. /p" "$WORKFLOW" | grep -F -- '`--no-infer-worktree`' >/dev/null || fail "supervised workflow step $step advances never infer"
+done
+
+# Scope the opt-out to R5's resolving command, retaining both integration arguments.
+sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance opts out and preserves integration arguments"
+
 
 cat >"$FIXTURE/dispatch.json" <<'JSON'
 {"key":"work/example#execute","agent":"codex","model":"provider model/id","reasoning_effort":"high","prompt":"Do the work.\r\nKeep this line.\r\n\r\n"}
@@ -372,5 +465,7 @@ class RestartProofTests(unittest.TestCase):
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])
 PY
+
+python3 "$PLUGIN_ROOT/tests/test_settlement_recovery.py" || fail "settlement recovery helper suite"
 
 echo "dispatch profile contract: ok"

@@ -41,6 +41,15 @@ def placement_directories(schema_set: SchemaSet) -> dict[str, str]:
 
 @dataclass(frozen=True, slots=True)
 class WorkItem:
+    """Tolerant item view, retaining lossy phase/effort projection failures.
+
+    `invalid_optional_fields` names authored phase/effort values that were
+    neither null nor nonempty text. Their projected values remain `None`
+    for existing readers; placement must distinguish them from absence.
+    This is read metadata, never a frontmatter field. Direct constructors
+    may omit it; vocabulary validation still checks their supplied values.
+    """
+
     path: str
     page_path: str
     basename: str
@@ -75,6 +84,7 @@ class WorkItem:
     version: str | None
     target_date: str | None
     released_at: str | None
+    invalid_optional_fields: tuple[str, ...] = ()
 
 
 def _text(value: object) -> str:
@@ -131,6 +141,11 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
         version=_optional_text(data.get("version")),
         target_date=_optional_text(data.get("target_date")),
         released_at=_optional_text(data.get("released_at")),
+        invalid_optional_fields=tuple(
+            field
+            for field in ("phase", "effort")
+            if data.get(field) is not None and _optional_text(data[field]) is None
+        ),
     )
 
 

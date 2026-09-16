@@ -2313,15 +2313,17 @@ def _validate_postconditions(
     repo_root: Path | None = None,
     baseline: _ValidationState | None = None,
     excused: list[str] | None = None,
+    allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> tuple[str, ...]:
     """Fail on what *this* mutation broke, not on what was already broken.
 
     With a *baseline* in hand the gate is differential: a `(path, code)` or
     `(path, kind)` pair fails only where its post-mutation count exceeds the
     baseline count, and the surplus-free remainder is appended to *excused*
-    for the caller to report.  Without one it is the absolute gate it always
-    was.  The lane-index staleness check is absolute either way -- a stale
-    index after the mutation is always the mutation's fault.
+    for the caller to report. Explicit *allowed_new_findings* budgets excuse
+    surplus findings separately, only with a baseline. Without one it is the
+    absolute gate it always was. The lane-index staleness check is absolute
+    either way -- a stale index after the mutation is always the mutation's fault.
     """
     close_root = root is None
     if root is None:
@@ -2359,6 +2361,9 @@ def _validate_postconditions(
         return (f"postcondition validation setup failed: {exc}",)
     notes = excused if excused is not None else []
     count_before = len(notes)
+    intentional_notes: list[str] = []
+    # An unavailable baseline disables even explicit exceptions: fail closed.
+    intentional_allowance = Counter(allowed_new_findings) if baseline is not None else Counter()
     finding_allowance = Counter(baseline.findings) if baseline is not None else Counter()
     condition_allowance = Counter(baseline.conditions) if baseline is not None else Counter()
 
@@ -2371,6 +2376,12 @@ def _validate_postconditions(
         if finding_allowance[key] > 0:
             finding_allowance[key] -= 1
             notes.append(f"pre-existing, not caused by this operation: {detail}")
+            continue
+        if intentional_allowance[key] > 0:
+            intentional_allowance[key] -= 1
+            intentional_notes.append(
+                f"operation-specific validation allowance: {detail}; remains an error in `gw lint`"
+            )
             continue
         failures.append(detail)
     for path in plan.validate_paths:
@@ -2391,6 +2402,8 @@ def _validate_postconditions(
     excused_here = len(notes) - count_before
     if excused_here:
         notes.append(f"{excused_here} pre-existing validation failure(s) excused; run `gw lint` for bundle health")
+
+    notes.extend(intentional_notes)
 
     for member in _affected_index_members(plan):
         lane = PurePosixPath(member).parent.as_posix()
@@ -2579,6 +2592,7 @@ def _apply_mutation_locked(
     *,
     repo_root: Path | None = None,
     baseline_bundle: Bundle | None = None,
+    allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> MutationApplication:
     transaction_root = layout.cache_dir / "work-mutations"
     resolved_bundle = layout.bundle_dir.resolve(strict=True)
@@ -2663,6 +2677,8 @@ def _apply_mutation_locked(
                 "validate_paths": list(plan.validate_paths),
                 "writes": [write.member for write in plan.writes],
             }
+            if allowed_new_findings:
+                planned_details["allowed_new_findings"] = [list(key) for key in allowed_new_findings]
             planned_record = _journal_record("planned", planned_details)
             _append_journal(
                 journal_storage,
@@ -2801,6 +2817,7 @@ def _apply_mutation_locked(
                         repo_root=repo_root,
                         baseline=baseline,
                         excused=excused,
+                        allowed_new_findings=allowed_new_findings,
                     )
                     if postcondition_failures:
                         raise ValueError("; ".join(postcondition_failures))
@@ -2909,6 +2926,7 @@ def apply_mutation(
     *,
     repo_root: Path | None = None,
     baseline_bundle: Bundle | None = None,
+    allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> MutationApplication:
     """Apply *plan* atomically, retaining durable recovery evidence in cache.
 
@@ -2924,6 +2942,18 @@ def apply_mutation(
     Callers in `work/commands.py` that load with `ignore=()` or a lane-narrowed
     set (`run_reparent`, `run_release_adoption`) must NOT pass one; omitting
     it restores the second load and is always correct.
+
+    *allowed_new_findings* is an explicit operation-specific exception to
+    ADR-0040's default no-surplus guarantee. Each (post-mutation member, code)
+    occurrence permits one surplus error after consuming the real baseline;
+    it never excuses structural conditions, reload failures or stale indexes.
+    The caller must establish the operation's semantic preconditions under its
+    lock. Currently only intentional finish-hold filing grants an exception.
+    Baseline capture failure disables exceptions, preserving the absolute
+    fallback. Used allowances are warnings distinct from pre-existing errors;
+    the planned journal records the requested budget before any live effect.
+    Rollback and terminal-complete evidence verification retain that record;
+    it grants no authority to replay or complete an interrupted transaction.
 
     A plan with no writes, mkdirs, moves, deletes or directory preconditions
     (`_is_wholly_empty`) still opens the bundle root, takes `_bundle_root_lock`,
@@ -2951,7 +2981,14 @@ def apply_mutation(
     root = _open_root(layout.bundle_dir)
     try:
         with _bundle_root_lock(root):
-            return _apply_mutation_locked(layout, plan, root, repo_root=repo_root, baseline_bundle=baseline_bundle)
+            return _apply_mutation_locked(
+                layout,
+                plan,
+                root,
+                repo_root=repo_root,
+                baseline_bundle=baseline_bundle,
+                allowed_new_findings=allowed_new_findings,
+            )
     finally:
         root.close()
 

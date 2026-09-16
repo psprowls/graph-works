@@ -183,6 +183,11 @@ Two halves:
   no) — a planner emitting `"main"` owes the worker its path/branch
   explicitly rather than leaving it to self-discovery.
 
+  `WorktreeAction.parent_path` is the other placement fact a planner owes a
+  backend: the existing worktree a created one is linked beneath, or `None`.
+  It is data precisely so no backend derives lineage from the terminal or
+  directory its caller runs in.
+
 - `backend.py` is what a **backend** *is*: two `runtime_checkable` Protocols,
   `DispatchBackend` (`name`, `supported_modes: frozenset[str]`,
   `provisions_worktrees: bool`, `open_session(name) -> DispatchSession`) and
@@ -220,8 +225,9 @@ contract, not code:
   Collapsing it into `"failed"` makes a recoverable worker unrecoverable.
 - `provisions_worktrees` is `False` on every backend this package ships (i.e.
   none — this is documentation for implementers). It exists so a backend that
-  obtains its **own** worktrees (Orca's `worker-start --worktree new-child`,
-  per `workflow-orca`) can declare that capability on the shared Protocol
+  obtains its **own** worktrees (Orca's `worker-start --worktree
+  new-top-level --repo id:<repo>`, per `workflow-orca`) can declare that
+  capability on the shared Protocol
   instead of growing a new method — a coordinator checks the flag before
   planning, rather than discovering the gap when a `PlannedDispatch` that
   worked against one backend raises `WorktreeNotProvisioned` against another.

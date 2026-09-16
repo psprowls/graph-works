@@ -26,9 +26,10 @@ error — an unknown status, an id naming no entry, editing an entry that has be
 superseded. That is the door `paths.source_id_for` already opened, and the same
 category: arguments a caller composed, not text a vault contained.
 
-It imports `work_tracker_okf.paths` and nothing else from the package. The
-module never discovers a workspace root: every file function takes a resolved
-ledger `Path` and an explicit cache lock `Path`.
+It imports `work_tracker_okf.paths` and `work_tracker_okf.vocabulary` and
+nothing else from the package. The module never discovers a workspace root:
+every file function takes a resolved ledger `Path` and an explicit cache lock
+`Path`.
 """
 
 from __future__ import annotations
@@ -45,6 +46,7 @@ from typing import Literal
 from okf_ext.locking import locked as _locked_file
 
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, ArtifactRef, artifact_ref
+from work_tracker_okf.vocabulary import PHASES
 
 VALID_STATUSES = frozenset({"answered", "assumed", "open", "superseded"})
 
@@ -55,6 +57,13 @@ DecisionRefusal = Literal[
     "transition-disallowed",
     "unknown-decision",
     "superseded-decision",
+    "hold-status",
+    "hold-affects",
+    "hold-phase-mismatch",
+    "hold-terminal",
+    "hold-checkpoint",
+    "checkpoint-invalid",
+    "checkpoint-exists",
 ]
 
 
@@ -65,7 +74,14 @@ def ledger_ref(owner_path: str) -> ArtifactRef:
 
 #: Recognized keys, in canonical render order. Anything else round-trips through
 #: `Decision.extra_keys` rather than being dropped.
-RECOGNIZED_KEYS = ("status", "affects", "decided", "supersedes")
+RECOGNIZED_KEYS = ("status", "affects", "decided", "supersedes", "hold", "phase", "checkpoint")
+
+#: The explicit hold shapes. An open entry with no `hold` key is the
+#: `question` shape: every open decision naming an item holds it (D-002).
+HOLD_SHAPES: frozenset[str] = frozenset({"park", "skip"})
+
+#: `entry` means the held item had no `phase` yet. Only a `skip` may sit there.
+HOLD_PHASES: frozenset[str] = frozenset(PHASES | {"entry"})
 
 #: `## D-014 — question`. The separator/question tail is optional; an em dash, an
 #: en dash, or one-or-more hyphens all work, because agents type all three.
@@ -100,13 +116,20 @@ class Decision:
     #: Opaque, e.g. `"2026-08-11 by user"`.
     decided: str | None = None
     supersedes: str | None = None
+    #: `"park"`, `"skip"`, or `None` for the `question` shape. An unrecognized
+    #: value is kept verbatim (and warned): a malformed hold still holds.
+    hold: str | None = None
+    #: The item phase the hold was filed at, from `HOLD_PHASES`.
+    phase: str | None = None
+    #: Root-absolute resource of a park's checkpoint artifact.
+    checkpoint: str | None = None
     prose: str = ""
     #: Unknown keys, order preserved.
     extra_keys: tuple[tuple[str, str], ...] = ()
-    #: Which of `affects`/`decided`/`supersedes` were actually present in the
-    #: source (or set via `_present_keys_for` when a Decision is built in code
-    #: rather than parsed). `status` always renders regardless. Omitting this on
-    #: a code-constructed Decision silently drops that field's value on
+    #: Which recognized conditional keys were actually present in the source
+    #: (or set via `_present_keys_for` when a Decision is built in code rather
+    #: than parsed). `status` always renders regardless. Omitting this on a
+    #: code-constructed Decision silently drops that field's value on
     #: `render()` — route every construction site through `_present_keys_for`.
     _present_keys: frozenset[str] = field(default_factory=frozenset, compare=False, repr=False)
 
@@ -170,15 +193,21 @@ def _optional(raw: str) -> str | None:
 
 
 def _present_keys_for(
-    *, affects: Sequence[str] = (), decided: str | None = None, supersedes: str | None = None
+    *,
+    affects: Sequence[str] = (),
+    decided: str | None = None,
+    supersedes: str | None = None,
+    hold: str | None = None,
+    phase: str | None = None,
+    checkpoint: str | None = None,
 ) -> frozenset[str]:
     """`Decision._present_keys` for an entry built by CODE, not parsed from text.
 
-    `status` always renders regardless of this set — only `affects`, `decided`
-    and `supersedes` are conditional. A key counts as present when given a
-    meaningful value (a non-empty `affects`, or a non-`None`
-    `decided`/`supersedes`). Every construction site routes through here, which
-    is what retires `work-io`'s hand-maintained duplicate of this rule.
+    `status` always renders regardless of this set — only `affects`, `decided`,
+    `supersedes`, `hold`, `phase`, and `checkpoint` are conditional. A key
+    counts as present when given a meaningful value (a non-empty `affects`, or
+    a non-`None` scalar). Every construction site routes through here, which is
+    what retires `work-io`'s hand-maintained duplicate of this rule.
     """
     keys: set[str] = set()
     if affects:
@@ -187,6 +216,12 @@ def _present_keys_for(
         keys.add("decided")
     if supersedes is not None:
         keys.add("supersedes")
+    if hold is not None:
+        keys.add("hold")
+    if phase is not None:
+        keys.add("phase")
+    if checkpoint is not None:
+        keys.add("checkpoint")
     return frozenset(keys)
 
 
@@ -239,6 +274,14 @@ def _parse_entry(block: list[str]) -> tuple[Decision, list[str]]:
         warnings.append(f"{entry_id}: invalid status {status!r}; expected one of {sorted(VALID_STATUSES)}")
         status = ""
 
+    hold = _optional(known.get("hold", ""))
+    if hold is not None and hold not in HOLD_SHAPES:
+        warnings.append(f"{entry_id}: invalid hold {hold!r}; expected one of {sorted(HOLD_SHAPES)}")
+    phase = _optional(known.get("phase", ""))
+    if phase is not None and phase not in HOLD_PHASES:
+        warnings.append(f"{entry_id}: invalid phase {phase!r}; expected one of {sorted(HOLD_PHASES)}")
+    checkpoint = _optional(known.get("checkpoint", ""))
+
     prose = "\n".join(block[index:]).strip("\n")
 
     return (
@@ -250,6 +293,9 @@ def _parse_entry(block: list[str]) -> tuple[Decision, list[str]]:
             affects=_parse_affects(known.get("affects", "")),
             decided=_optional(known.get("decided", "")),
             supersedes=_optional(known.get("supersedes", "")),
+            hold=hold,
+            phase=phase,
+            checkpoint=checkpoint,
             prose=prose,
             extra_keys=tuple(extra),
             _present_keys=frozenset(present_keys),
@@ -296,6 +342,12 @@ def _render_entry(decision: Decision) -> str:
         lines.append(f"decided: {decision.decided or '—'}")
     if "supersedes" in decision._present_keys:
         lines.append(f"supersedes: {decision.supersedes or '—'}")
+    if "hold" in decision._present_keys:
+        lines.append(f"hold: {decision.hold or '—'}")
+    if "phase" in decision._present_keys:
+        lines.append(f"phase: {decision.phase or '—'}")
+    if "checkpoint" in decision._present_keys:
+        lines.append(f"checkpoint: {decision.checkpoint or '—'}")
 
     lines.extend(f"{key}: {value}" for key, value in decision.extra_keys)
     body = "\n".join(lines)
@@ -506,7 +558,7 @@ def _require(entries: list[Decision], decision_id: str) -> tuple[Decision, int]:
     raise ValueError(f"no decision {decision_id!r} in this ledger; known ids: {known}")
 
 
-def _next_id(entries: list[Decision]) -> tuple[str, int]:
+def next_id(entries: Sequence[Decision]) -> tuple[str, int]:
     """Always max-plus-one, never gap-filling: a manually deleted entry's id is
     never reused, which is what makes a gap a genuine lost-entry signal."""
     number = max((d.number for d in entries), default=0) + 1
@@ -540,6 +592,14 @@ def _plan_refusal(
     )
 
 
+def plan_refusal(ledger: Path, refusal: DecisionRefusal, detail: str) -> DecisionPlan:
+    """A refused, write-free plan over the ledger's current snapshot -- for a
+    caller whose refusal depends on facts this module cannot see (the held
+    item's phase, a checkpoint draft)."""
+    snapshot = LedgerSnapshot(_read_text(ledger))
+    return _plan_refusal(ledger, snapshot, parse(snapshot.text), refusal, detail)
+
+
 def plan_append(
     ledger: Path,
     *,
@@ -551,6 +611,9 @@ def plan_append(
     affects: Sequence[str],
     on: date,
     decided_by: str,
+    hold: str | None = None,
+    phase: str | None = None,
+    checkpoint: str | None = None,
 ) -> DecisionPlan:
     """Plan a decision append from an immutable byte-for-byte snapshot."""
     snapshot = LedgerSnapshot(_read_text(ledger))
@@ -563,6 +626,14 @@ def plan_append(
             "status-disallowed",
             f"status {status!r} cannot be appended",
         )
+    if hold is not None and status != "open":
+        return _plan_refusal(
+            ledger,
+            snapshot,
+            parsed,
+            "hold-status",
+            f"a hold must be filed open, not {status!r}",
+        )
     if status in {"assumed", "answered"} and (answer is None or not answer.strip()):
         return _plan_refusal(ledger, snapshot, parsed, "answer-required", f"status {status!r} requires an answer")
     if status == "assumed" and (if_wrong is None or not if_wrong.strip()):
@@ -574,7 +645,7 @@ def plan_append(
             "status 'assumed' requires an if-wrong consequence",
         )
 
-    entry_id, number = _next_id(parsed.entries)
+    entry_id, number = next_id(parsed.entries)
     decided = decided_stamp(on, decided_by) if status in {"answered", "assumed"} else None
     entry = Decision(
         id=entry_id,
@@ -583,8 +654,17 @@ def plan_append(
         status=status,
         affects=tuple(affects),
         decided=decided,
+        hold=hold,
+        phase=phase,
+        checkpoint=checkpoint,
         prose=compose_prose(answer=answer, rationale=rationale, if_wrong=if_wrong),
-        _present_keys=_present_keys_for(affects=affects, decided=decided),
+        _present_keys=_present_keys_for(
+            affects=affects,
+            decided=decided,
+            hold=hold,
+            phase=phase,
+            checkpoint=checkpoint,
+        ),
     )
     before = tuple(parsed.entries)
     return DecisionPlan(
@@ -708,7 +788,7 @@ def plan_supersede(
     if not answer.strip():
         return _plan_refusal(ledger, snapshot, parsed, "answer-required", "answer must not be empty")
 
-    entry_id, number = _next_id(parsed.entries)
+    entry_id, number = next_id(parsed.entries)
     retired = replace(old, status="superseded")
     final_affects = tuple(affects) if affects is not None else old.affects
     stamp = decided_stamp(on, decided_by)
@@ -798,7 +878,7 @@ def append(
     def plan() -> DecisionPlan:
         snapshot = LedgerSnapshot(_read_text(ledger))
         parsed = parse(snapshot.text)
-        entry_id, number = _next_id(parsed.entries)
+        entry_id, number = next_id(parsed.entries)
         entry = Decision(
             id=entry_id,
             number=number,
@@ -935,7 +1015,7 @@ def supersede(
         old, index = _require(parsed.entries, old_id)
         if old.status == "superseded":
             raise ValueError(f"{old.id} is already superseded; supersede the entry that replaced it instead")
-        entry_id, number = _next_id(parsed.entries)
+        entry_id, number = next_id(parsed.entries)
         retired = replace(old, status="superseded")
         final_affects = tuple(affects) if affects is not None else old.affects
         replacement = Decision(
@@ -972,6 +1052,28 @@ def supersede(
 # ---------------------------------------------------------------------------
 # Query (pure, over already-parsed entries)
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class HoldFact:
+    """The projection routing reads: enough for a stable, specific blocker.
+    `shape` is `"question"` when the entry has no `hold` key, and the raw value
+    when it has an unrecognized one -- a malformed hold fails closed."""
+
+    path: str
+    decision_id: str
+    shape: str
+    phase: str | None
+
+
+def hold_fact(decision: Decision, path: str) -> HoldFact:
+    return HoldFact(path=path, decision_id=decision.id, shape=decision.hold or "question", phase=decision.phase)
+
+
+def holds_for(entries: Sequence[Decision], path: str) -> tuple[Decision, ...]:
+    """Every open entry naming *path*, lowest id first. The single hold query:
+    shape is deliberately not consulted, so any open decision holds (D-002)."""
+    return tuple(sorted((d for d in entries if d.status == "open" and path in d.affects), key=lambda d: d.number))
 
 
 def _cited_numbers(decision: Decision) -> set[int]:
@@ -1022,6 +1124,8 @@ def counts(entries: Sequence[Decision]) -> dict[str, int]:
 
 
 __all__ = [
+    "HOLD_PHASES",
+    "HOLD_SHAPES",
     "RECOGNIZED_KEYS",
     "UNSET",
     "VALID_STATUSES",
@@ -1029,6 +1133,7 @@ __all__ = [
     "DecisionApplication",
     "DecisionPlan",
     "DecisionRefusal",
+    "HoldFact",
     "LedgerParse",
     "LedgerSnapshot",
     "Unset",
@@ -1038,12 +1143,16 @@ __all__ = [
     "counts",
     "decided_stamp",
     "extract_cited_decisions",
+    "hold_fact",
+    "holds_for",
     "id_number",
     "ledger_ref",
     "load",
     "merge_prose",
+    "next_id",
     "parse",
     "plan_append",
+    "plan_refusal",
     "plan_supersede",
     "plan_update",
     "prose_block",

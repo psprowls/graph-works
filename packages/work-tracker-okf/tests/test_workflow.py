@@ -1,6 +1,8 @@
+import dataclasses
 import itertools
 
 import pytest
+from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge, DependencyFact, DependencyIssue
 from work_tracker_okf.hierarchy import ChildRollup
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORK_STATUSES
@@ -9,6 +11,7 @@ from work_tracker_okf.workflow import (
     Dispatch,
     RouteState,
     Transition,
+    hold_blocker,
     route,
 )
 
@@ -25,6 +28,15 @@ NINE_PAIRS = {
     ("execute", "planned"),
     ("execute", "unplanned"),
     ("finish", "branch"),
+}
+
+#: One routable state per phase slot, each of which dispatches when unheld.
+_PHASE_STATES = {
+    "entry": {"type": "Feature", "work_status": "open", "phase": None},
+    "design": {"type": "Feature", "work_status": "open", "phase": "design"},
+    "plan": {"type": "Feature", "work_status": "open", "phase": "plan"},
+    "execute": {"type": "Feature", "work_status": "accepted", "phase": "execute"},
+    "finish": {"type": "Feature", "work_status": "in-progress", "phase": "finish"},
 }
 
 
@@ -244,28 +256,51 @@ def test_a_pre_seeded_spec_beats_epic_design_for_an_epic():
         ), type_
 
 
-def test_an_open_decision_blocks_design_redispatch():
-    """A held item (a contradiction filed as an open decision by a previous
-    reconciling-spec pass) must never fall through to another dispatch --
-    that is the infinite-redispatch loop this gate exists to stop."""
-    result = route(_state(type="Feature", phase="design", has_open_decision=True))
+@pytest.mark.parametrize("slot", sorted(_PHASE_STATES))
+@pytest.mark.parametrize("shape", ["question", "park", "skip"])
+def test_a_held_item_never_dispatches_at_any_phase(slot: str, shape: str) -> None:
+    unheld = route(RouteState(**_PHASE_STATES[slot]))
+    assert unheld.dispatch is not None  # the pin: every slot dispatches when unheld
+    hold = HoldFact("work/feature-a", "D-007", shape, None if shape == "question" else slot)
+    result = route(RouteState(**_PHASE_STATES[slot], hold=hold))
     assert result.dispatch is None
-    assert "open decision" in result.blockers[0]
+    assert (result.on_dispatch, result.on_complete, result.on_return, result.repair) == (None, None, None, None)
+    assert result.reason == f"open decision D-007 holds this item ({shape} at {slot})"
+    assert result.blockers == (hold_blocker(hold),)
+    assert result.blockers[0] == (
+        f"open decision D-007 ({shape}) holds work/feature-a: answer via "
+        "`gw work decision answer work/feature-a D-007 --answer ...`, then re-run"
+    )
 
 
-def test_an_open_decision_takes_priority_over_the_spec_doc_branch():
-    """Checked before has_spec_doc, deliberately: an item with both a spec and
-    an open decision is still held, not silently reconciled."""
-    result = route(_state(type="Feature", phase="design", has_open_decision=True, has_spec_doc=True))
-    assert result.dispatch is None
-    assert "open decision" in result.blockers[0]
+def test_a_held_epic_at_a_satisfied_execute_gate_offers_no_completion() -> None:
+    rollup = ChildRollup(total=1, terminal=1, open_paths=())
+    satisfied = _state(type="Epic", work_status="accepted", phase="execute", child_rollup=rollup)
+    assert route(satisfied).on_complete is not None
+    held = route(
+        _state(
+            type="Epic",
+            work_status="accepted",
+            phase="execute",
+            child_rollup=rollup,
+            hold=HoldFact("work/epic-a", "D-001", "skip", "execute"),
+        )
+    )
+    assert held.on_complete is None and held.blockers
 
 
-def test_an_open_decision_does_not_block_first_entry():
-    """The gate exists for RE-dispatch specifically -- first entry into design
-    has no prior reconcile pass to have filed the decision from."""
-    result = route(_state(type="Feature", has_open_decision=True))
-    assert result.dispatch == Dispatch("design", "exploration")
+def test_the_hold_beats_a_dependency_blocker() -> None:
+    state = state_with_edge(phase="design", blocks="design")
+    assert route(state).reason.startswith("blocked on dependencies")
+    held = route(dataclasses.replace(state, hold=HoldFact("work/x", "D-002", "question", None)))
+    assert held.reason.startswith("open decision D-002")
+
+
+def test_validation_and_terminal_checks_still_run_before_the_hold() -> None:
+    hold = HoldFact("work/x", "D-001", "skip", "execute")
+    assert route(_state(type="Nope", hold=hold)).reason == "invalid item"
+    assert route(_state(work_status="resolved", phase="done", hold=hold)).reason == "pipeline complete"
+    assert route(_state(work_status="wontfix", phase="execute", hold=hold)).reason == "disposition is human-owned"
 
 
 def test_entry_sets_the_design_phase_on_dispatch():
@@ -451,6 +486,107 @@ def test_an_epic_at_finish_with_no_open_descendants_still_resolves():
     assert result.repair is None
     assert result.on_complete is not None
     assert (result.on_complete.phase, result.on_complete.work_status) == ("done", "resolved")
+
+
+# --- branch ownership follows the stamp, not the type (D-002) -------------
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+def test_a_branch_stamped_parent_at_finish_dispatches_the_branch_and_needs_a_ref(type_: str) -> None:
+    result = route(_state(type=type_, phase="finish", work_status="in-progress", has_branch=True))
+    assert result.dispatch == Dispatch("finish", "branch")
+    assert result.reason == f"{type_} at finish stage"
+    assert result.blockers == ()
+    assert result.repair is None
+    assert result.on_complete == Transition(phase="done", work_status="resolved", requires=("resolved_in",))
+    assert result.on_return == Transition(phase="execute", work_status="in-progress")
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+def test_an_unstamped_parent_at_finish_keeps_its_direct_resolution(type_: str) -> None:
+    result = route(_state(type=type_, phase="finish", work_status="in-progress"))
+    assert result.dispatch is None
+    assert result.reason == f"{type_.lower()} at finish stage"
+    assert result.blockers == ()
+    assert result.repair is None
+    assert result.on_complete == Transition(phase="done", work_status="resolved")
+    assert result.on_return == Transition(phase="execute", work_status="in-progress")
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+@pytest.mark.parametrize("has_branch", [False, True])
+@pytest.mark.parametrize("descendant", ["work/parent/children/late", "work/parent/children/done/children/late"])
+def test_a_parent_reopened_at_finish_repairs_whether_or_not_it_is_stamped(
+    type_: str, has_branch: bool, descendant: str
+) -> None:
+    result = route(
+        _state(
+            type=type_,
+            phase="finish",
+            work_status="in-progress",
+            has_branch=has_branch,
+            open_descendants=(descendant,),
+        )
+    )
+    assert result.dispatch is None
+    assert result.on_complete is None
+    assert result.repair == Transition(phase="execute", work_status="in-progress")
+    assert result.on_return == Transition(phase="execute", work_status="in-progress")
+    assert any(descendant in blocker for blocker in result.blockers)
+
+
+@pytest.mark.parametrize("type_", ["Feature", "Bug"])
+@pytest.mark.parametrize("has_branch", [False, True])
+def test_branch_ownership_does_not_change_an_ordinary_finish(type_: str, has_branch: bool) -> None:
+    result = route(_state(type=type_, phase="finish", work_status="in-progress", has_branch=has_branch))
+    assert result.dispatch == Dispatch("finish", "branch")
+    assert result.on_complete is not None
+    assert result.on_complete.requires == ("resolved_in",)
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+@pytest.mark.parametrize("has_branch", [False, True])
+def test_a_parent_still_holds_on_a_finish_dependency_regardless_of_branch_ownership(
+    type_: str, has_branch: bool
+) -> None:
+    state = dataclasses.replace(
+        state_with_edge(phase="finish", type=type_, work_status="in-progress", blocks="finish"),
+        has_branch=has_branch,
+        open_descendants=("work/parent/children/late",),
+    )
+    result = route(state)
+    assert result.dispatch is None
+    assert result.on_complete is None
+    assert result.repair is None
+    assert result.on_return is None
+    assert result.reason == "blocked on dependencies (finish)"
+    assert result.blockers
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+@pytest.mark.parametrize("has_branch", [False, True])
+@pytest.mark.parametrize("competing_gate", ["none", "dependency", "descendant"])
+def test_a_held_parent_at_finish_blocks_before_other_gates_regardless_of_branch_ownership(
+    type_: str, has_branch: bool, competing_gate: str
+) -> None:
+    hold = HoldFact("work/parent", "D-008", "skip", "finish")
+    state = _state(type=type_, phase="finish", work_status="in-progress")
+    if competing_gate == "dependency":
+        state = state_with_edge(phase="finish", type=type_, work_status="in-progress", blocks="finish")
+    state = dataclasses.replace(
+        state,
+        hold=hold,
+        has_branch=has_branch,
+        open_descendants=("work/parent/children/late",) if competing_gate == "descendant" else (),
+    )
+    result = route(state)
+    assert result.reason == "open decision D-008 holds this item (skip at finish)"
+    assert result.blockers == (hold_blocker(hold),)
+    assert result.dispatch is None
+    assert result.on_dispatch is None
+    assert result.on_complete is None
+    assert result.on_return is None
+    assert result.repair is None
 
 
 # --- the way home ---------------------------------------------------------

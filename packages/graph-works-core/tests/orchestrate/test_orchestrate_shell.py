@@ -62,10 +62,22 @@ def _initialized_workspace(tmp_path: Path):
     return layout
 
 
-def test_lone_item_shell_returns_canonical_dispatch(tmp_path: Path) -> None:
+def _declare_repo(monkeypatch, tmp_path: Path) -> Path:
+    """Stand in for a declared code repository with a plain directory.
+
+    Not a git checkout, so the dirty check fails closed (the checkout is
+    withheld) and `default_base` falls back -- a cold start still mints."""
+    code = tmp_path / "code"
+    code.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(orchestrate, "resolve_repo", lambda *args, **kwargs: (code, None))
+    return code
+
+
+def test_lone_item_shell_returns_canonical_dispatch(tmp_path: Path, monkeypatch) -> None:
     layout = _workspace(tmp_path)
     path = "work/feature-a"
     _write(layout, path, phase="design")
+    _declare_repo(monkeypatch, tmp_path)
     result = orchestrate.run_orchestrate(layout, path)
     assert [dispatch.slug for dispatch in result.dispatches] == [path]
     assert result.path == path
@@ -84,21 +96,22 @@ def test_orchestration_keys_are_session_names_and_live_tokens_match(tmp_path: Pa
     assert not [w for w in result.plan.warnings if "matches no known item" in w]
 
 
-def test_an_unknown_live_key_is_reported_not_resolved(tmp_path: Path) -> None:
+def test_an_unknown_live_key_refuses_the_shell_plan(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     path = "work/release-cutover"
     _write(layout, path)
-    result = orchestrate.run_orchestrate(layout, path, live=("gw-plan-nobody-00000000",))
-    assert [w for w in result.plan.warnings if "matches no known item" in w]
+    with pytest.raises(ValueError, match="gw-plan-nobody-00000000"):
+        orchestrate.run_orchestrate(layout, path, live=("gw-plan-nobody-00000000",))
 
 
-def test_nearest_feature_owns_decision_context(tmp_path: Path) -> None:
+def test_nearest_feature_owns_decision_context(tmp_path: Path, monkeypatch) -> None:
     layout = _workspace(tmp_path)
     owner = "work/epic-a/children/feature-a"
     child = f"{owner}/children/bug-a"
     _write(layout, "work/epic-a", type="Epic", phase="execute")
     _write(layout, owner, phase="execute")
     _write(layout, child, type="Bug", phase="design")
+    _declare_repo(monkeypatch, tmp_path)
     result = orchestrate.run_orchestrate(layout, child)
     assert result.decisions_owner_path == owner
     assert result.decisions_ledger_path == str(layout.bundle_dir / f"{owner}/references/00-decisions.md")
@@ -226,6 +239,7 @@ def test_explicit_repo_skips_declared_repo_resolution(tmp_path: Path, monkeypatc
     assert result.dispatches[0].worktree.action == "create-top-level"
     assert result.dispatches[0].worktree.path is None
     assert result.dispatches[0].merge_target == "trunk"
+    assert result.code_repo == str(repo)
 
 
 def test_declared_repo_resolution_note_is_preserved(tmp_path: Path, monkeypatch) -> None:
@@ -235,6 +249,28 @@ def test_declared_repo_resolution_note_is_preserved(tmp_path: Path, monkeypatch)
     monkeypatch.setattr(orchestrate, "resolve_repo", lambda *args, **kwargs: (None, "repo unavailable"))
     result = orchestrate.run_orchestrate(layout, path)
     assert "repo unavailable" in result.warnings
+
+
+def test_the_declared_code_repo_is_reported_even_when_its_checkout_is_withheld(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path / "workspace")
+    path = "work/feature-a"
+    _write(layout, path, phase="design")
+    code = _declare_repo(monkeypatch, tmp_path)
+    result = orchestrate.run_orchestrate(layout, path)
+    assert result.code_repo == str(code)
+    assert result.dispatches[0].worktree.action == "create-top-level"
+
+
+def test_no_declared_code_repo_reports_null_and_blocks_a_worktree_creation(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path, phase="design")
+    monkeypatch.setattr(orchestrate, "resolve_repo", lambda *args, **kwargs: (None, "repo unavailable"))
+    result = orchestrate.run_orchestrate(layout, path)
+    assert result.code_repo is None
+    assert "repo unavailable" in result.warnings
+    assert result.dispatches == ()
+    assert [blocked.kind for blocked in result.blocked] == ["worktree-unprovable"]
 
 
 def test_worktree_inventory_parses_porcelain_output(monkeypatch) -> None:
@@ -755,7 +791,8 @@ def test_the_coverage_registration_rides_the_page_write(tmp_path: Path) -> None:
     assert result.application.written == (f"{path}.md",)
 
 
-def test_run_orchestrate_reads_supervise_merges_from_the_manifest(tmp_path: Path) -> None:
+def test_run_orchestrate_reads_supervise_merges_from_the_manifest(tmp_path: Path, monkeypatch) -> None:
+    _declare_repo(monkeypatch, tmp_path)
     layout = _workspace(tmp_path)
     _write(layout, "work/feature-a", phase="design")
     assert orchestrate.run_orchestrate(layout, "work/feature-a").supervise_merges is False
@@ -822,9 +859,12 @@ def test_a_subtree_root_read_only_advance_still_stamps_from_cwd(tmp_path: Path, 
     assert changes["branch"] == "detected/branch"
 
 
-def test_a_descendant_code_phase_advance_still_stamps_from_cwd(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize("phase", ["execute", "finish"])
+def test_a_descendant_code_phase_advance_never_stamps_from_cwd(tmp_path: Path, monkeypatch, phase: str) -> None:
+    """D-006: the coordinator records a descendant's observed placement; a
+    worker's cwd never does, at any phase."""
     layout = _stamping_workspace(tmp_path)
-    _write(layout, "work/epic-a/children/feature-a", phase="finish")
+    _write(layout, "work/epic-a/children/feature-a", phase=phase)
     _detects(monkeypatch)
 
     result = stage.run_stage_advance(
@@ -832,12 +872,15 @@ def test_a_descendant_code_phase_advance_still_stamps_from_cwd(tmp_path: Path, m
         "work/epic-a/children/feature-a",
         today=TODAY,
         repo=tmp_path / "repo",
-        resolved_in="pr-1",
+        owner="pat",
+        resolved_in="pr-1" if phase == "finish" else None,
         dry_run=False,
     )
 
-    assert result.outcome.plan.refusal is None
-    assert _stamped(result)["worktree"] == "/wt/detected"
+    assert result.outcome.plan.refusal is None, result.outcome.plan.detail
+    assert "worktree" not in _stamped(result) and "branch" not in _stamped(result)
+    written = load(layout.bundle_dir / "work/epic-a/children/feature-a.md").fm_data()
+    assert written.get("worktree") is None
 
 
 def test_an_explicit_pair_overrides_the_read_only_suppression(tmp_path: Path, monkeypatch) -> None:
@@ -860,23 +903,70 @@ def test_an_explicit_pair_overrides_the_read_only_suppression(tmp_path: Path, mo
     assert changes["branch"] == "explicit/branch"
 
 
-def test_a_never_advanced_descendant_reads_its_entry_phase_not_its_missing_one(tmp_path: Path) -> None:
-    """`old_phase is None` is ambiguous on its own -- a Bug enters at `design`
-    (read-only), a TestGap enters straight at `execute` (a code phase). The
-    routing table's entry transition is what tells them apart."""
+def test_only_a_top_level_item_may_infer_from_cwd(tmp_path: Path) -> None:
+    """Inference is the attended top-level fallback. A never-entered TestGap
+    routed straight to `execute` is a descendant like any other."""
     from okf_io import load_bundle
     from work_tracker_okf.items import IGNORE, load_items
 
     layout = _stamping_workspace(tmp_path)
     _write(layout, "work/epic-a/children/bug-x", type="Bug", phase=None)
     _write(layout, "work/epic-a/children/gap-x", type="TestGap", phase=None)
-    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
-    by_path = {item.path: item for item in items}
+    by_path = {item.path: item for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
 
-    assert stage._stage_phase(items, by_path["work/epic-a/children/bug-x"], effort="medium") == "design"
-    assert stage._stage_phase(items, by_path["work/epic-a/children/gap-x"], effort="small") == "execute"
-    assert not stage._infers_from_cwd(items, by_path["work/epic-a/children/bug-x"], effort="medium")
-    assert stage._infers_from_cwd(items, by_path["work/epic-a/children/gap-x"], effort="small")
+    assert stage._infers_from_cwd(by_path["work/epic-a"])
+    assert stage._infers_from_cwd(by_path["work/feature-solo"])
+    for path in ("work/epic-a/children/feature-a", "work/epic-a/children/bug-x", "work/epic-a/children/gap-x"):
+        assert not stage._infers_from_cwd(by_path[path]), path
+
+
+def test_a_direct_entry_test_gap_descendant_does_not_stamp_from_cwd(tmp_path: Path, monkeypatch) -> None:
+    layout = _stamping_workspace(tmp_path)
+    _write(layout, "work/epic-a/children/gap-x", type="TestGap", phase=None)
+    _detects(monkeypatch)
+
+    result = stage.run_stage_advance(
+        layout,
+        "work/epic-a/children/gap-x",
+        today=TODAY,
+        repo=tmp_path / "repo",
+        effort="small",
+        owner="pat",
+        dry_run=False,
+    )
+
+    assert result.outcome.plan.refusal is None, result.outcome.plan.detail
+    assert "worktree" not in _stamped(result)
+
+
+def test_a_supervised_root_advance_with_the_opt_out_infers_nothing(tmp_path: Path, monkeypatch) -> None:
+    layout = _stamping_workspace(tmp_path)
+    monkeypatch.setattr(stage.provenance, "worktree_state", lambda cwd, repo: pytest.fail("opt-out must not probe"))
+
+    result = stage.run_stage_advance(
+        layout, "work/feature-solo", today=TODAY, repo=tmp_path / "repo", infer_worktree=False, dry_run=False
+    )
+
+    assert result.outcome.plan.refusal is None
+    assert "worktree" not in _stamped(result) and "branch" not in _stamped(result)
+
+
+def test_the_opt_out_still_applies_a_deliberate_explicit_pair(tmp_path: Path, monkeypatch) -> None:
+    layout = _stamping_workspace(tmp_path)
+    _detects(monkeypatch)
+
+    result = stage.run_stage_advance(
+        layout,
+        "work/feature-solo",
+        today=TODAY,
+        repo=tmp_path / "repo",
+        worktree="/wt/explicit",
+        branch="explicit/branch",
+        infer_worktree=False,
+        dry_run=False,
+    )
+
+    assert _stamped(result)["worktree"] == "/wt/explicit"
 
 
 def test_the_read_only_and_results_phases_are_complements() -> None:
@@ -887,3 +977,17 @@ def test_the_read_only_and_results_phases_are_complements() -> None:
 
     assert frozenset() == orchestrate.READ_ONLY_PHASES & stage.RESULTS_PHASES
     assert PHASES - {"done"} == orchestrate.READ_ONLY_PHASES | stage.RESULTS_PHASES
+
+
+def test_an_open_decision_at_design_stops_advance_stamping_plan(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    path = "work/feature-held"
+    _write(layout, path, phase="design")
+    spec = layout.bundle_dir / f"{path}/references/01-design.md"
+    spec.parent.mkdir(parents=True)
+    spec.write_text("# Design\n", encoding="utf-8", newline="")
+    ledger = spec.parent / "00-decisions.md"
+    ledger.write_text(f"## D-001 — contradiction\nstatus: open\naffects: [{path}]\n", encoding="utf-8", newline="")
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+    assert result.outcome.plan.refusal == "blocked"
+    assert load(layout.bundle_dir / f"{path}.md").fm_data()["phase"] == "design"

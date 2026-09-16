@@ -66,11 +66,18 @@ git worktree list --porcelain
   with): the stage's commits already sit on the merge target — there is
   nothing to merge. The `merge` choice in R4 resolves to "confirm and
   advance" with `resolved_in` = current HEAD SHA (`git rev-parse HEAD`).
-- **Forked-child case** (current branch differs from the merge target, not
-  detached): find the worktree that has the merge target checked out by
-  scanning `git worktree list --porcelain` for the block whose `branch`
-  line reads `refs/heads/<merge target>`. The R4 merge executes there, not
-  in this worker's own worktree.
+  Never merge a branch into itself.
+- **Integration-branch case** (current branch differs from the merge target,
+  not detached): this worker's branch must be merged into the merge target.
+  That covers a forked child merging into its epic's branch and a stamped Epic or Release root finishing its own integration branch
+  into the base its dispatch named. The mechanics are identical, and the
+  target is always the one the `Auto-drive context:` line names. Find the
+  worktree that has the merge target checked out by scanning
+  `git worktree list --porcelain` for the block whose `branch` line reads
+  `refs/heads/<merge target>`. The R4 merge executes there, not in this
+  worker's own worktree. No worktree has the merge target checked out, or more than one does:
+  enter the **Escalation path**. Never check the target out yourself and
+  never merge from this worker's worktree.
 
 **Dirty state has no automated check.** R2 does not run `git status`. Every
 stage ends with a commit, so uncommitted changes at finish-stage are
@@ -78,7 +85,7 @@ anomalous — if you notice them, enter the **Escalation path** rather than
 proceeding.
 
 Carry forward into R3: the merge target, the classified case, the target
-worktree path (forked-child case only), the current HEAD SHA (`git rev-parse
+worktree path (integration-branch case only), the current HEAD SHA (`git rev-parse
 HEAD`; this is `resolved_in` for the trunk-case merge), the
 full commit list with commit count and one-line summary (`git log
 <merge-base>..HEAD --oneline` against the merge target — the full list feeds
@@ -103,6 +110,17 @@ is no separate poll/fetch step. If the call times out or disconnects, check
 `orca orchestration ask --help` for the resume syntax before sending a
 second, duplicate question — never re-send blind.
 
+**If it times out:** follow
+`../auto-drive/references/grace-period-protocol.md`'s loop — re-arm with
+`ask --resume` for the remaining grace-period budget, and if the budget
+is exhausted, checkpoint and park exactly as that doc describes rather than
+giving up. Do not call `worker_done` while this question is unanswered: the
+finish stage has already verified tests and detected merge state by the time
+R3 sends its ask (R1/R2), so a park's `## Completed work` section is "tests
+verified, merge target `<target>`, ready to settle" and its `## Remaining
+actions` section is "re-send R3's ask (or resume from the recorded answer)
+and execute R4/R5."
+
 The reply body is one of the option labels (`merge`, `pr`, `hold`,
 `discard`). Any other reply text: treat it as `hold` and note the verbatim
 reply in the R5 report — don't guess at unrecognized intent.
@@ -114,7 +132,7 @@ reply in the R5 report — don't guess at unrecognized intent.
 - **Trunk case:** no-op merge — the commits are already on the merge
   target. Skip straight to R5 with `resolved_in` = the HEAD SHA captured in
   R2.
-- **Forked-child case:**
+- **Integration-branch case:**
   ```bash
   git -C <target worktree path from R2> merge <this worker's branch>
   ```
@@ -169,9 +187,24 @@ orca orchestration ask --from <this session's --from> \
 
 ## R5 — Settle the item and report
 
+The shared rule is: only a verified integration resolves — same rule
+as attended `workflow` step 5. The trunk-case confirmation counts as
+integration into the merge target; PR, hold and discard do not.
+
 - **`merge`:**
+  **Release items only — the date.** `gw work advance` refuses to resolve a
+  Release without `released_at`. Read the item's frontmatter first: if
+  `released_at:` is set to a valid `YYYY-MM-DD` date, advance as below. A
+  malformed frontmatter date enters the **Escalation path**. If the date is
+  missing, send one `orca orchestration ask` (this session's own `--from` /
+  `--dispatch-capability`) asking for the release date as `YYYY-MM-DD`, and add
+  `--released-at <date>` to the advance. Never invent a release date, and never
+  retry an advance that refused `released_at required`; a missing or malformed
+  reply enters the **Escalation path**, whose body must say the merge already
+  happened (or, in the trunk case, the commits were already on the target).
+  `pr`, `hold` and `discard` do not resolve, so they never need a date.
   ```bash
-  gw work advance <work-path> --resolved-in <resolved_in from R4>
+  gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]
   ```
   Then send `worker_done --outcome succeeded` (this session's own dispatch
   preamble command, `--task-id`/`--dispatch-id` filled in from it) with a
@@ -188,10 +221,14 @@ orca orchestration ask --from <this session's --from> \
   - `discard` (downgraded to hold) → the branch name and the verbatim reply
     that caused the downgrade.
 
+  Include the merge target in every held-outcome body so a later attended
+  pass knows which branch must contain the work before the item can resolve.
+
 ## Escalation path (failure handling)
 
-Entered from R1 (failing tests) and R4 (merge conflicts, post-merge test
-failure):
+Entered from R1 (failing tests), R2 (no single worktree has the merge target
+checked out), R4 (merge conflicts, post-merge test failure) and R5 (no usable
+release date):
 
 1. Send an escalation with the concrete failure output (test failures,
    conflict file list) in the body:

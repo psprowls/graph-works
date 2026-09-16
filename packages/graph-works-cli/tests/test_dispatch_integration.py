@@ -71,6 +71,12 @@ def rules(workspace):
         "pipeline:\n  rules:\n  - name: local-execute\n    match: {stage: execute}\n    agent: codex\n",
         encoding="utf-8",
     )
+    code = workspace.parent / "code"
+    code.mkdir(exist_ok=True)
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("repositories: {}", f'repositories:\n  code:\n    path: "{code}"'),
+        encoding="utf-8",
+    )
 
 
 @pytest.mark.parametrize(

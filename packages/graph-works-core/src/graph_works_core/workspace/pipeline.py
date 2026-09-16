@@ -15,7 +15,34 @@ from graph_works_core.workspace.errors import WorkspaceError
 #: opposite case -- it is a value the workspace owns -- so it stays `None` in
 #: the packaged table and is seeded into a new workspace's dispatch file instead
 #: (`RELAY_TAIL_SEED`, below).
-ATTEND_TAIL = "The user may join this session to answer this stage's questions; ask normally."
+_ATTEND_BASE = "The user may join this session to answer this stage's questions; ask normally."
+
+#: Shared by every dispatch mode whose worker may block on an
+#: `orca orchestration ask` a human might not answer before its grace period
+#: (design item bug-relayed-answer-arrives-after-ask-timeout, D-004). One
+#: constant so `ATTEND_TAIL` and `RELAY_TAIL_SEED` can never drift apart on
+#: what "giving up" means -- both fold it in below rather than duplicating it.
+#:
+#: The protocol doc is named **plugin-relatively, never by filesystem path**.
+#: It ships inside the `gw` Claude Code plugin, not inside the workspace and
+#: not inside the repository the workspace catalogs, so neither a bare
+#: repo-relative literal nor a `{workspace}`-substituted one (the shape
+#: `EXECUTE_TAIL` uses for an artifact that *does* live under the workspace)
+#: can locate it: a workspace cataloguing any other codebase would hand its
+#: workers a path that does not exist there. Every dispatched worker already
+#: runs a `gw` plugin skill, so the skill-qualified name resolves wherever the
+#: plugin is installed.
+GRACE_PERIOD_TAIL = (
+    "If an `orca orchestration ask` question of yours times out, follow the "
+    "grace-period protocol in the `gw` plugin's `auto-drive` skill -- its "
+    "`references/grace-period-protocol.md`, which you read through that "
+    "installed skill rather than by repository path -- before giving up on "
+    "it. Never end this Dispatch (no `worker_done`, and never call "
+    "`worker-stop` or `worker-abandon` yourself -- only the coordinator may) "
+    "while a question you asked is still unanswered."
+)
+
+ATTEND_TAIL = f"{_ATTEND_BASE}\n{GRACE_PERIOD_TAIL}"
 
 #: The obligation both execute variants carry. A packaged default rather than
 #: config for `ATTEND_TAIL`'s reason -- it names no vendor. It is *reported,
@@ -41,10 +68,23 @@ EXECUTE_TAIL = (
 #: Both halves are load-bearing and neither may be dropped: the relay skill
 #: triggers on the literal `Auto-drive context:` prefix, and reads the merge
 #: target verbatim out of the same line. A tail carrying one without the other
-#: arms half the seam.
+#: arms half the seam. The grace-period line is a third, independent
+#: obligation appended after both -- finishing-relay's R2 only ever reads the
+#: first line, so appending here cannot disturb it.
+#:
+#: **Seeding is `init`-only, and there is no migration.** `init.plan_init`
+#: writes this value into a *missing* shared dispatch document and preserves an
+#: authored one, so a workspace that already exists keeps whatever relay tail
+#: its `dispatch.yaml` was written with -- the grace-period obligation above is
+#: inert for it. An operator upgrading an existing workspace must append
+#: `GRACE_PERIOD_TAIL`'s text to that file's `branch`-variant `prompt_tail`
+#: by hand and run `gw config sync`; nothing here does it for them. Building a
+#: rewriter is deliberately out of scope: the tail is a workspace-owned value,
+#: and core does not edit values a workspace owns.
 RELAY_TAIL_SEED = (
     "Auto-drive context: relay the merge/PR/hold/discard decision to your coordinator "
-    "rather than asking interactively; merge target is {merge_target}."
+    "rather than asking interactively; merge target is {merge_target}.\n"
+    f"{GRACE_PERIOD_TAIL}"
 )
 
 

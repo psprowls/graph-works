@@ -11,9 +11,9 @@ and the `WorkItem` projection every other module in the lane reads.
     bundle = load_bundle(root, ignore=IGNORE)
     items = load_items(bundle)
 
-The decision layer is five submodules, importing strictly downward:
+The decision layer's submodules import strictly downward:
 
-    items -> hierarchy -> workflow -> {advance, children, projection}
+    items -> hierarchy -> workflow -> {advance, children, placement, projection}
 
     from work_tracker_okf.workflow import route, state_for
     from work_tracker_okf.advance import advance, apply
@@ -23,9 +23,12 @@ what says which `route`, which `apply` and which `rollup` is meant, and
 hoisting them would put `apply` and `rollup` at the package's front door as
 bare names.
 
-The layout and writer surface is six more, on the same rule:
+`workflow` reads `decisions.HoldFact` to gate every phase on open holds.
 
-    paths -> {filing, sources, results, mutation, reparent, archive, decisions}
+The layout and writer surface follows the same rule:
+
+    paths -> {filing, sources, results, mutation, reparent, archive, decisions, checkpoints}
+    decisions, checkpoints -> holds
 
     from work_tracker_okf.paths import artifact_ref, item_page
     from work_tracker_okf.filing import plan_filing

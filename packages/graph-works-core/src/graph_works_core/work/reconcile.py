@@ -36,7 +36,7 @@ from pathlib import Path
 from okf_io import load_bundle
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.decisions import ledger_ref
-from work_tracker_okf.hierarchy import nearest_parent
+from work_tracker_okf.hierarchy import decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.vocabulary import TERMINAL_STATUSES
@@ -184,7 +184,7 @@ def run_reconcile_context(
     if repo is None:
         warnings.append("no repo resolved; code drift unavailable")
 
-    owner_path = nearest_parent(items, path)
+    owner_path = decision_owner(items, path)
     if owner_path is None:
         warnings.append(f"no decision owner for {path!r}; ledger drift unavailable")
 
@@ -212,8 +212,8 @@ def run_reconcile_context(
         )
         diff_command = f"git diff {commit_range} -- {' '.join(touched_paths)}"
 
-    # ONE read. `commands.py:_has_open_decision` reloads the ledger from disk,
-    # and a second read is a second non-atomic snapshot -- the precise
+    # ONE read. `workspace.decision_owner.hold_for` reloads the ledger from
+    # disk, and a second read is a second non-atomic snapshot -- the precise
     # inconsistency `OrchestrateResult`'s docstring records for the orchestrate
     # path. Having the parse in hand makes reuse free and a re-read pure
     # downside.
@@ -249,7 +249,7 @@ def run_reconcile_context(
         commits_since=commits_since,
         cited_decisions=cited_decisions,
         contradictions=tuple(entry for entry in cited_decisions if entry.status == "superseded"),
-        has_open_decision=bool(_decisions.query(entries, status="open", affects=path)),
+        has_open_decision=bool(_decisions.holds_for(entries, path)),
         diff_command=diff_command,
         warnings=tuple(warnings),
     )

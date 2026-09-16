@@ -110,6 +110,7 @@ def test_orchestrate_is_path_keyed_and_read_only(workspace: Path) -> None:
     assert result.exit_code == 0, result.output
     assert payload["path"] == path
     assert "owner_path" in payload["decisions"]
+    assert payload["repo"] is None
 
 
 def test_reconcile_context_degrades_to_warnings_with_path_keys(workspace: Path) -> None:
@@ -242,6 +243,13 @@ def test_next_and_orchestrate_json_share_profile_and_provenance(workspace: Path)
     )
     (workspace / "dispatch.local.yaml").write_text(
         "pipeline:\n  rules:\n  - name: local-agent\n    match: {}\n    agent: codex\n", encoding="utf-8"
+    )
+    code = workspace.parent / "code"
+    code.mkdir()
+    manifest = workspace / "workspace.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("repositories: {}", f'repositories:\n  code:\n    path: "{code}"'),
+        encoding="utf-8",
     )
     next_response = runner.invoke(app, ["work", "next", path, "--workspace", str(workspace), "--json"])
     plan_response = runner.invoke(app, ["work", "orchestrate", path, "--workspace", str(workspace), "--json"])

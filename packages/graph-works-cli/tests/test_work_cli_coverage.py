@@ -160,7 +160,10 @@ def test_next_advance_and_orchestrate_map_failures(
     monkeypatch.setattr(main, "warn_if_stale_routing", lambda: None)
     for target, call in (
         ("run_next", lambda: main.next_stage("work/a", False, "", False)),
-        ("run_stage_advance", lambda: main.advance("work/a", "", "", "", "", "", "", "", False, False, "", False)),
+        (
+            "run_stage_advance",
+            lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", False),
+        ),
         ("run_orchestrate", lambda: main.orchestrate("work/a", "", "", False)),
     ):
         owner = main.work if target == "run_next" else main
@@ -191,12 +194,12 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
         "repo_note": "note",
     }
     monkeypatch.setattr(rendering, "advance_payload", lambda *args: payload)
-    main.advance("work/a", "", "", "", "", "", "", "", False, False, "", True)
+    main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", True)
     assert "note" in capsys.readouterr().err
-    main.advance("work/a", "", "", "", "", "", "", "", False, True, "", False)
+    main.advance("work/a", "", "", "", "", "", "", False, "", False, True, "", False)
     assert "preview" in capsys.readouterr().out
     payload["refusal"] = {"reason": "bad", "detail": "why"}
-    assert _exit_code(lambda: main.advance("work/a", "", "", "", "", "", "", "", False, False, "", False)) == 1
+    assert _exit_code(lambda: main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", False)) == 1
 
 
 def test_regen_index_all_output_policies(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
@@ -378,7 +381,7 @@ def test_advance_forwards_start_sha_to_core(monkeypatch: pytest.MonkeyPatch) -> 
             "repo_note": None,
         },
     )
-    main.advance("work/a", "", "", "", "", "", "", "abc1234", False, True, "", False)
+    main.advance("work/a", "", "", "", "", "", "", False, "abc1234", False, True, "", False)
     assert seen["start_sha"] == "abc1234"
 
 
@@ -406,5 +409,5 @@ def test_advance_forwards_no_start_sha_as_none(monkeypatch: pytest.MonkeyPatch) 
             "repo_note": None,
         },
     )
-    main.advance("work/a", "", "", "", "", "", "", "", False, True, "", False)
+    main.advance("work/a", "", "", "", "", "", "", False, "", False, True, "", False)
     assert seen["start_sha"] is None

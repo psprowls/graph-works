@@ -48,8 +48,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -59,7 +58,6 @@ from typing import Literal
 from code_wiki_okf.config import Config
 from doc_wiki_okf.sources import SOURCE_TYPE, normalize_origin
 from okf_ext.bundle import SECTIONS_DIRNAME
-from okf_ext.locking import locked as _locked_file
 from okf_ext.shape import load_sections
 from okf_io import Bundle, load_bundle, parse
 from okf_io import validate as okf_validate
@@ -80,8 +78,9 @@ from work_tracker_okf.dependencies import (
     parse_dependencies,
 )
 from work_tracker_okf.filing import FilingSeed
-from work_tracker_okf.hierarchy import ChildRollup, DescendResult, nearest_parent
+from work_tracker_okf.hierarchy import ChildRollup, DescendResult, decision_owner
 from work_tracker_okf.hierarchy import descend as descend_to_leaf
+from work_tracker_okf.holds import check_hold, prepare_checkpoint
 from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
 from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items, unreadable_detail
 from work_tracker_okf.mutation import (
@@ -89,13 +88,20 @@ from work_tracker_okf.mutation import (
     PlannedWrite,
     WorkMutationPlan,
 )
-from work_tracker_okf.paths import ArtifactRef, child_lane, item_page
+from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page
 from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
 from work_tracker_okf.reparent import plan_release_adoption, plan_reparent
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
+from graph_works_core.workspace.decision_owner import (
+    DecisionContext,
+    DecisionOwner,
+    decision_context,
+    hold_for,
+    locked_decision_owner,
+)
 from graph_works_core.workspace.dispatch import DispatchResolution, dispatch_attributes, resolve_dispatch
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
@@ -396,16 +402,6 @@ class NextResult:
     warnings: tuple[str, ...] = ()
 
 
-def _has_open_decision(items: Sequence[WorkItem], bundle_root: Path, path: str) -> bool:
-    """Whether an OPEN decision in *path*'s nearest owner ledger names *path*."""
-    owner = nearest_parent(items, path)
-    if owner is None:
-        return False
-    ledger = ledger_ref(owner).path(bundle_root)
-    entries = _decisions.load(ledger).entries
-    return bool(_decisions.query(entries, status="open", affects=path))
-
-
 def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNormalization | None:
     """Plan the canonical design stamp when the artifact exists and no
     authored source already owns that id.
@@ -488,10 +484,10 @@ def run_next(
 ) -> NextResult:
     """Plan what to dispatch for *path* and optionally descend to its leaf.
 
-    Resolves `has_open_decision` for *this path* specifically, not just "the
-    owner has some open decision" — the behavioral improvement over the
-    standalone `work_tracker_okf.cli`, which does not resolve decision holds
-    from a real ledger.
+    Resolves the hold for *this path* specifically, not just "the owner has
+    some open decision" — the behavioral improvement over the standalone
+    `work_tracker_okf.cli`, which does not resolve decision holds from a real
+    ledger.
 
     Dry-run is the default. An `effort=` override is not exposed here or by the
     standalone CLI.
@@ -523,7 +519,7 @@ def run_next(
     state = state_for(
         planned_items,
         selected_path,
-        has_open_decision=_has_open_decision(planned_items, bundle.root, selected_path),
+        hold=hold_for(planned_items, bundle.root, selected_path),
     )
     assert state is not None
     computed = route(state)
@@ -547,7 +543,7 @@ def run_next(
     persisted_state = state_for(
         persisted_items,
         selected_path,
-        has_open_decision=_has_open_decision(
+        hold=hold_for(
             persisted_items,
             persisted_bundle.root,
             selected_path,
@@ -723,15 +719,6 @@ def run_release_adoption(
 
 
 @dataclass(frozen=True, slots=True)
-class DecisionOwner:
-    """The nearest Release/Epic/Feature ledger owner for a requested path."""
-
-    owner_path: str
-    redirected_from: str | None
-    ledger: Path
-
-
-@dataclass(frozen=True, slots=True)
 class DecisionCommandResult:
     """Domain-native decision entries, rollup, and optional mutation outcome."""
 
@@ -741,15 +728,6 @@ class DecisionCommandResult:
     warnings: tuple[str, ...]
     plan: DecisionPlan | None = None
     application: MutationApplication | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class DecisionContext:
-    """One bundle projection and its nearest decision owner for a command."""
-
-    owner: DecisionOwner
-    bundle: Bundle
-    items: tuple[WorkItem, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -782,50 +760,6 @@ class OverturnApplyError(OSError):
     """Retained result error type for callers that choose to reject a failed journal."""
 
 
-def _decision_lock_path(layout: WorkspaceLayout, owner_path: str) -> Path:
-    digest = hashlib.sha256(owner_path.encode("utf-8")).hexdigest()
-    return layout.cache_dir / "decisions" / f"{digest}.lock"
-
-
-@contextmanager
-def _decision_lock(layout: WorkspaceLayout, owner_path: str) -> Iterator[None]:
-    """Serialize decision composition on caller-owned, replace-stable cache state."""
-    with _locked_file(_decision_lock_path(layout, owner_path)):
-        yield
-
-
-def _decision_context(layout: WorkspaceLayout, path: str) -> DecisionContext:
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    items = load_items(bundle)
-    selected = path_index(items)
-    requested = selected.get(path)
-    if requested is None:
-        raise ValueError(f"unknown work item {path!r}")
-    owner_path = nearest_parent(tuple(selected.values()), path)
-    if owner_path is None:
-        raise ValueError(f"{path!r} has no Release, Epic, or Feature decision owner")
-    ledger = ledger_ref(owner_path).path(bundle.root)
-    return DecisionContext(
-        owner=DecisionOwner(owner_path, None if path == owner_path else path, ledger),
-        bundle=bundle,
-        items=items,
-    )
-
-
-@contextmanager
-def _locked_decision_context(layout: WorkspaceLayout, path: str) -> Iterator[DecisionContext]:
-    """Lock a candidate owner, then retain only a matching fresh projection."""
-    while True:
-        candidate = _decision_context(layout, path)
-        candidate_owner = candidate.owner.owner_path
-        with _decision_lock(layout, candidate_owner):
-            current = _decision_context(layout, path)
-            if current.owner.owner_path != candidate_owner:
-                continue
-            yield current
-            return
-
-
 def _optional_bytes(path: Path) -> bytes | None:
     try:
         return path.read_bytes()
@@ -837,6 +771,7 @@ def _decision_mutation(
     context: DecisionContext,
     plan: DecisionPlan,
     ledger_before: bytes | None,
+    extra_writes: Sequence[PlannedWrite] = (),
 ) -> WorkMutationPlan:
     owner_path = context.owner.owner_path
     owner_page = item_page(owner_path).path(context.bundle.root)
@@ -852,6 +787,7 @@ def _decision_mutation(
         (
             _planned_write(ledger_member, ledger_before, ledger_text.encode("utf-8")),
             _planned_write(owner_member, owner_before, owner_document.serialize().encode("utf-8")),
+            *extra_writes,
         ),
         validate_paths=(owner_path,),
         warnings=plan.warnings,
@@ -863,14 +799,18 @@ def _apply_decision(
     context: DecisionContext,
     plan: DecisionPlan,
     ledger_before: bytes | None,
+    extra_writes: Sequence[PlannedWrite] = (),
+    *,
+    allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> MutationApplication | None:
     if plan.refusal is not None:
         return None
     return apply_mutation(
         layout,
-        _decision_mutation(context, plan, ledger_before),
+        _decision_mutation(context, plan, ledger_before, extra_writes),
         repo_root=_repo_root(layout),
         baseline_bundle=context.bundle,
+        allowed_new_findings=allowed_new_findings,
     )
 
 
@@ -880,7 +820,7 @@ def _decision_result(
     application: MutationApplication | None,
 ) -> DecisionCommandResult:
     entries = plan.after
-    warnings = plan.warnings
+    warnings = plan.warnings if application is None else application.warnings
     if application is not None and not application.ok:
         persisted = _decisions.load(context.owner.ledger)
         entries = tuple(persisted.entries)
@@ -907,32 +847,107 @@ def run_decision_add(
     affects: Sequence[str] = (),
     on: date,
     decided_by: str,
+    hold: str | None = None,
+    phase: str | None = None,
+    checkpoint: Path | None = None,
     dry_run: bool = True,
 ) -> DecisionCommandResult:
-    """Plan an append in *path*'s nearest owner ledger and optionally apply it."""
+    """Plan an append in *path*'s owner ledger and optionally apply it.
 
-    def planned(context: DecisionContext) -> DecisionPlan:
-        return _decisions.plan_append(
-            context.owner.ledger,
+    With `hold`, the entry is a typed hold (design §6). Every hold check runs
+    against the projection re-read inside the decision-owner lock -- the lock
+    `gw work advance` also takes -- and the ledger entry plus a park's
+    checkpoint are applied as one journaled mutation before it is released.
+    """
+    if hold is None and (phase is not None or checkpoint is not None):
+        raise ValueError("--phase and --checkpoint are only valid with --hold park|skip")
+    if hold is not None and hold not in _decisions.HOLD_SHAPES:
+        raise ValueError(f"unknown hold {hold!r}; expected one of {sorted(_decisions.HOLD_SHAPES)}")
+    draft = checkpoint.read_bytes().decode("utf-8") if checkpoint is not None else None
+    target_affects = tuple(affects) or ((path,) if hold is not None else ())
+
+    def planned(context: DecisionContext) -> tuple[DecisionPlan, tuple[PlannedWrite, ...]]:
+        ledger = context.owner.ledger
+        checkpoint_ref_value: str | None = None
+        extra: tuple[PlannedWrite, ...] = ()
+        if hold is not None:
+            item = path_index(context.items)[path]
+            refused = check_hold(
+                item,
+                status=status,
+                hold=hold,
+                phase=phase,
+                affects=target_affects,
+                has_checkpoint=draft is not None,
+            )
+            if refused is not None:
+                return _decisions.plan_refusal(ledger, refused.refusal, refused.detail), ()
+            if hold == "park":
+                assert phase is not None and draft is not None
+                decision_id, _number = _decisions.next_id(_decisions.load(ledger).entries)
+                ref = checkpoint_ref(path, phase, decision_id)
+                if ref.path(context.bundle.root).exists():
+                    detail = f"{ref.rel} already exists; checkpoints are never overwritten"
+                    return _decisions.plan_refusal(ledger, "checkpoint-exists", detail), ()
+                stamped, invalid = prepare_checkpoint(
+                    draft,
+                    item_path=path,
+                    phase=phase,
+                    decision_id=decision_id,
+                )
+                if invalid is not None:
+                    return _decisions.plan_refusal(ledger, invalid.refusal, invalid.detail), ()
+                checkpoint_ref_value = ref.resource
+                extra = (_planned_write(ref.rel, None, stamped.encode("utf-8")),)
+        plan = _decisions.plan_append(
+            ledger,
             question=question,
             status=status,
             answer=answer,
             rationale=rationale,
             if_wrong=if_wrong,
-            affects=affects,
+            affects=target_affects,
             on=on,
             decided_by=decided_by,
+            hold=hold,
+            phase=phase,
+            checkpoint=checkpoint_ref_value,
         )
+        if checkpoint_ref_value is not None and plan.primary is not None:
+            assert checkpoint_ref_value.endswith(f"-{plan.primary.id}.md"), "allocation moved under the lock"
+        return plan, extra
 
     if dry_run:
-        context = _decision_context(layout, path)
-        plan = planned(context)
+        context = decision_context(layout, path)
+        plan, _extra = planned(context)
         application = None
     else:
-        with _locked_decision_context(layout, path) as context:
+        with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
-            plan = planned(context)
-            application = _apply_decision(layout, context, plan, ledger_before)
+            plan, extra = planned(context)
+            allowed_new_findings: tuple[tuple[str, str], ...] = ()
+            owner_path = context.owner.owner_path
+            owner_item = path_index(context.items)[owner_path]
+            entry = plan.primary
+            # A finish owner reports the finding even when the affected item
+            # is a child. Only a real, nonterminal hold in this owner's ledger
+            # earns the exception; unnamed/unresolvable questions do not.
+            if (
+                owner_item.phase == "finish"
+                and entry is not None
+                and any(
+                    not item.archived
+                    and item.work_status not in TERMINAL_STATUSES
+                    and item.phase != "done"
+                    and _decisions.holds_for((entry,), item.path)
+                    and decision_owner(context.items, item.path) == owner_path
+                    for item in context.items
+                )
+            ):
+                allowed_new_findings = ((item_page(owner_path).rel, "decisions.open-at-finish"),)
+            application = _apply_decision(
+                layout, context, plan, ledger_before, extra, allowed_new_findings=allowed_new_findings
+            )
     return _decision_result(context, plan, application)
 
 
@@ -960,11 +975,11 @@ def run_decision_answer(
         )
 
     if dry_run:
-        context = _decision_context(layout, path)
+        context = decision_context(layout, path)
         plan = planned(context)
         application = None
     else:
-        with _locked_decision_context(layout, path) as context:
+        with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan = planned(context)
             application = _apply_decision(layout, context, plan, ledger_before)
@@ -980,7 +995,7 @@ def run_decision_list(
     cites: str | None = None,
 ) -> DecisionCommandResult:
     """Read and filter *path*'s nearest-owner ledger without writing."""
-    context = _decision_context(layout, path)
+    context = decision_context(layout, path)
     parsed = _decisions.load(context.owner.ledger)
     selected = tuple(_decisions.query(parsed.entries, status=status, affects=affects, cites=cites))
     return DecisionCommandResult(
@@ -1019,11 +1034,11 @@ def run_decision_supersede(
         )
 
     if dry_run:
-        context = _decision_context(layout, path)
+        context = decision_context(layout, path)
         plan = planned(context)
         application = None
     else:
-        with _locked_decision_context(layout, path) as context:
+        with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan = planned(context)
             application = _apply_decision(layout, context, plan, ledger_before)
@@ -1101,10 +1116,10 @@ def run_decision_overturn(
         return OverturnPlan(decision=decision, filing=filing_outcome.plan, refusal=refusal)
 
     if dry_run:
-        context = _decision_context(layout, path)
+        context = decision_context(layout, path)
         combined = planned(context)
         return OverturnResult(owner=context.owner, plan=combined)
-    with _locked_decision_context(layout, path) as context:
+    with locked_decision_owner(layout, path) as context:
         ledger_before = _optional_bytes(context.owner.ledger)
         combined = planned(context)
         if combined.refusal is not None:
@@ -1127,6 +1142,7 @@ __all__ = [
     "ChildRollup",
     "Decision",
     "DecisionCommandResult",
+    "DecisionContext",
     "DecisionOwner",
     "DependencyEdge",
     "DependencyIssue",

@@ -46,7 +46,7 @@ from okf_io import (
 
 from work_tracker_okf.advance import AdvancePlan, advance
 from work_tracker_okf.advance import apply as apply_advance
-from work_tracker_okf.decisions import DecisionApplication, DecisionPlan, apply_plan, ledger_ref
+from work_tracker_okf.decisions import DecisionApplication, DecisionPlan, HoldFact, apply_plan, ledger_ref
 from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, _materialize_frontmatter, plan_filing
 from work_tracker_okf.filing import apply as apply_filing
 from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
@@ -332,6 +332,7 @@ def advance_and_stamp(
     branch: str | None = None,
     return_: bool = False,
     dry_run: bool = True,
+    hold: HoldFact | None = None,
 ) -> AdvanceOutcome:
     """Advance *path*, stamp its artifact, ensure its plan row -- in **one save**.
 
@@ -373,6 +374,7 @@ def advance_and_stamp(
         branch=branch,
         return_=return_,
         unreadable=bundle.unreadable,
+        hold=hold,
     )
     if plan.refusal is not None:
         return AdvanceOutcome(plan=plan, stamped=None, stamp_title=None, plan_row=False, written=False)

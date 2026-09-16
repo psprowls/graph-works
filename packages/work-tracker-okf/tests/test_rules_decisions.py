@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+from test_checkpoints import VALID as CHECKPOINT_DRAFT
 from work_helpers import lane_report, write_item
+from work_tracker_okf import checkpoints
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
 
 _EPIC = "work/epic-ledger-owner"
@@ -115,6 +118,15 @@ def test_a_residual_parser_warning_passes_through_at_warn(tmp_path: Path) -> Non
         if finding.code == "decisions.entry-invalid" and finding.severity == "warn"
     ]
     assert [finding.message for finding in warns] == ["ledger parse warning: D-001: heading has no question text"]
+
+
+def test_a_question_with_an_invalid_phase_is_an_error(tmp_path: Path) -> None:
+    _epic(tmp_path)
+    _ledger(tmp_path, f"## D-001 — q\nstatus: open\naffects: [{_EPIC}]\nphase: someday\n")
+    findings = [finding for finding in lane_report(tmp_path).findings if finding.code.startswith("decisions.")]
+    assert [(finding.code, finding.severity) for finding in findings] == [("decisions.entry-invalid", "error")]
+    assert "D-001" in findings[0].message
+    assert "phase 'someday'" in findings[0].message
 
 
 def test_one_bad_entry_is_one_finding_not_two(tmp_path: Path) -> None:
@@ -253,7 +265,7 @@ def test_a_second_child_under_the_same_epic_reuses_the_cached_ledger(tmp_path: P
     assert "D-009" in messages[0]
 
 
-def test_same_named_attachment_under_a_leaf_is_opaque(tmp_path: Path) -> None:
+def test_a_self_owned_leaf_ledger_is_linted(tmp_path: Path) -> None:
     leaf = "work/bug-leaf"
     write_item(
         tmp_path,
@@ -264,7 +276,7 @@ def test_same_named_attachment_under_a_leaf_is_opaque(tmp_path: Path) -> None:
     attachment = artifact_ref(leaf, MANAGED_ARTIFACTS["decisions"]).path(tmp_path)
     attachment.parent.mkdir(parents=True)
     attachment.write_text("## D-001 — q\nstatus: maybe\n", encoding="utf-8")
-    assert _codes(tmp_path, "decisions.entry-invalid") == []
+    assert any("maybe" in m for m in _codes(tmp_path, "decisions.entry-invalid"))
 
 
 def test_an_epic_citing_its_own_ledger_is_checked_too(tmp_path: Path) -> None:
@@ -284,3 +296,209 @@ def test_an_epic_citing_its_own_ledger_is_checked_too(tmp_path: Path) -> None:
     spec = tmp_path / _EPIC / "references" / "01-design.md"
     spec.write_text("# Spec\n\nSee D-009.\n", encoding="utf-8")
     assert any("D-009" in message for message in _codes(tmp_path, "decisions.cite-missing"))
+
+
+_LONE = "work/bug-lone-holder"
+_PARK_REF = f"/{_LONE}/references/03-execute-checkpoint-D-001.md"
+
+
+def _lone(root: Path, *, phase: str = "execute") -> None:
+    write_item(
+        root,
+        _LONE,
+        f"type: Bug\nstatus: stable\nwork_status: in-progress\nowner: fixture\nphase: {phase}\n"
+        "effort: medium\nopened: 2026-07-01\nupdated: 2026-08-01\n",
+    )
+
+
+def _checkpoint(root: Path, decision_id: str = "D-001", phase: str = "execute") -> None:
+    text = checkpoints.stamp(CHECKPOINT_DRAFT.replace("work/epic-a/children/feature-b", _LONE), decision_id)
+    target = root / f"{_LONE}/references/03-execute-checkpoint-{decision_id}.md"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text.replace("phase: execute", f"phase: {phase}"), encoding="utf-8", newline="")
+
+
+def test_a_valid_park_on_a_self_owned_ledger_is_clean(tmp_path: Path) -> None:
+    _lone(tmp_path)
+    _ledger(
+        tmp_path,
+        f"## D-001 — q\nstatus: open\naffects: [{_LONE}]\nhold: park\nphase: execute\ncheckpoint: {_PARK_REF}\n",
+        owner=_LONE,
+    )
+    _checkpoint(tmp_path)
+    for code in (
+        "decisions.hold-invalid",
+        "decisions.hold-phase-stale",
+        "decisions.checkpoint-invalid",
+        "decisions.entry-invalid",
+        "decisions.ledger-missing",
+    ):
+        assert _codes(tmp_path, code) == [], code
+
+
+def test_a_lone_item_without_a_ledger_is_normal(tmp_path: Path) -> None:
+    _lone(tmp_path)
+    assert _codes(tmp_path, "decisions.ledger-missing") == []
+
+
+@pytest.mark.parametrize(
+    "entry",
+    [
+        "hold: pause\nphase: execute\n",
+        "hold: park\nphase: execute\n",  # park without checkpoint
+        f"hold: skip\nphase: execute\ncheckpoint: {_PARK_REF}\n",  # skip with checkpoint
+        "hold: skip\n",  # missing phase
+        "hold: skip\nphase: someday\n",  # phase outside HOLD_PHASES
+        f"hold: park\nphase: entry\ncheckpoint: {_PARK_REF}\n",  # park at entry
+    ],
+)
+def test_malformed_holds_are_errors(tmp_path: Path, entry: str) -> None:
+    _lone(tmp_path)
+    _ledger(tmp_path, f"## D-001 — q\nstatus: open\naffects: [{_LONE}]\n{entry}", owner=_LONE)
+    _checkpoint(tmp_path)
+    assert _codes(tmp_path, "decisions.hold-invalid")
+    assert not [m for m in _codes(tmp_path, "decisions.entry-invalid") if "invalid hold" in m or "invalid phase" in m]
+
+
+def test_a_hold_naming_two_items_is_an_error(tmp_path: Path) -> None:
+    _lone(tmp_path)
+    _ledger(
+        tmp_path,
+        f"## D-001 — q\nstatus: open\naffects: [{_LONE}, work/other]\nhold: skip\nphase: execute\n",
+        owner=_LONE,
+    )
+    assert _codes(tmp_path, "decisions.hold-invalid")
+
+
+def test_answered_history_keeps_its_hold_keys_validly(tmp_path: Path) -> None:
+    _lone(tmp_path, phase="finish")
+    _ledger(
+        tmp_path,
+        f"## D-001 — q\nstatus: answered\naffects: [{_LONE}]\ndecided: 2026-09-01 by user\n"
+        f"hold: park\nphase: execute\ncheckpoint: {_PARK_REF}\n\n**Answer:** go\n",
+        owner=_LONE,
+    )
+    _checkpoint(tmp_path)
+    assert _codes(tmp_path, "decisions.hold-invalid") == []
+    assert _codes(tmp_path, "decisions.hold-phase-stale") == []  # stale is judged on open holds only
+
+
+def test_an_open_hold_at_a_stale_phase_warns(tmp_path: Path) -> None:
+    _lone(tmp_path, phase="finish")
+    _ledger(tmp_path, f"## D-001 — q\nstatus: open\naffects: [{_LONE}]\nhold: skip\nphase: execute\n", owner=_LONE)
+    messages = _codes(tmp_path, "decisions.hold-phase-stale")
+    assert messages and "finish" in messages[0]
+
+
+def test_missing_or_invalid_checkpoints_are_errors(tmp_path: Path) -> None:
+    _lone(tmp_path)
+    _ledger(
+        tmp_path,
+        f"## D-001 — q\nstatus: open\naffects: [{_LONE}]\nhold: park\nphase: execute\ncheckpoint: {_PARK_REF}\n",
+        owner=_LONE,
+    )
+    assert any("missing" in m for m in _codes(tmp_path, "decisions.checkpoint-invalid"))
+    _checkpoint(tmp_path, phase="plan")
+    assert any("phase" in m for m in _codes(tmp_path, "decisions.checkpoint-invalid"))
+
+
+@pytest.mark.parametrize(
+    "resource",
+    [
+        _PARK_REF.removeprefix("/"),
+        f"/{_LONE}/references/../../../outside.md",
+        f"/{_LONE}/references/../references/03-execute-checkpoint-D-001.md",
+        f"/{_LONE}/references/03-execute-checkpoint-D-002.md",
+        f"/{_LONE}/references/02-plan-checkpoint-D-001.md",
+        f"/{_LONE}/references/checkpoint.md",
+        f"/{_PARK_REF}",
+    ],
+)
+def test_checkpoint_resources_must_be_canonical_before_reading(tmp_path: Path, resource: str, monkeypatch) -> None:
+    _lone(tmp_path)
+    _ledger(
+        tmp_path,
+        f"## D-001 — q\nstatus: open\naffects: [{_LONE}]\nhold: park\nphase: execute\ncheckpoint: {resource}\n",
+        owner=_LONE,
+    )
+    _checkpoint(tmp_path)
+    read_text = Path.read_text
+
+    def guarded_read(path, *args, **kwargs):
+        if path.name != "00-decisions.md" and ("checkpoint" in path.name or path.name == "outside.md"):
+            pytest.fail(f"read an invalid checkpoint resource: {path}")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read)
+    assert _codes(tmp_path, "decisions.checkpoint-invalid")
+
+
+@pytest.mark.parametrize(
+    "phase, affects",
+    [
+        ("entry", _LONE),
+        ("someday", _LONE),
+        ("", _LONE),
+        ("execute", ""),
+        ("execute", f"{_LONE}, work/other"),
+        ("execute", "../outside"),
+        ("execute", "/work/bug-lone-holder"),
+    ],
+)
+def test_bad_checkpoint_identity_is_reported_tolerantly(tmp_path: Path, phase: str, affects: str) -> None:
+    _lone(tmp_path)
+    _ledger(
+        tmp_path,
+        f"## D-001 — q\nstatus: open\naffects: [{affects}]\nhold: park\nphase: {phase}\ncheckpoint: {_PARK_REF}\n",
+        owner=_LONE,
+    )
+    _checkpoint(tmp_path)
+    assert _codes(tmp_path, "decisions.checkpoint-invalid")
+
+
+@pytest.mark.parametrize("directory_link", [False, True])
+def test_checkpoint_symlinks_outside_the_bundle_are_rejected(tmp_path: Path, directory_link: bool, monkeypatch) -> None:
+    root = tmp_path / "bundle"
+    _lone(root)
+    _ledger(
+        root,
+        f"## D-001 — q\nstatus: open\naffects: [{_LONE}]\nhold: park\nphase: execute\ncheckpoint: {_PARK_REF}\n",
+        owner=_LONE,
+    )
+    outside = tmp_path / "outside"
+    _checkpoint(outside)
+    target = outside / _PARK_REF.removeprefix("/")
+    link = root / _PARK_REF.removeprefix("/")
+    if directory_link:
+        # Keep the ledger at its usual path; only the held item's owned
+        # checkpoint directory points outside the bundle.
+        _epic(root)
+        _ledger(root, (root / _LONE / "references/00-decisions.md").read_text(encoding="utf-8"))
+        (root / _LONE / "references/00-decisions.md").unlink()
+        link.parent.rmdir()
+        link, target = link.parent, target.parent
+    try:
+        link.symlink_to(target, target_is_directory=directory_link)
+    except (OSError, NotImplementedError) as error:
+        pytest.skip(f"symlinks unavailable: {error}")
+    read_text = Path.read_text
+
+    def guarded_read(path, *args, **kwargs):
+        if path.name.endswith("checkpoint-D-001.md"):
+            pytest.fail(f"read an outside checkpoint: {path}")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", guarded_read)
+    assert any("outside" in m for m in _codes(root, "decisions.checkpoint-invalid"))
+
+
+@pytest.mark.parametrize("content", [b"\xff", b"not a checkpoint"])
+def test_unreadable_or_malformed_checkpoint_content_is_reported(tmp_path: Path, content: bytes) -> None:
+    _lone(tmp_path)
+    _ledger(
+        tmp_path,
+        f"## D-001 — q\nstatus: open\naffects: [{_LONE}]\nhold: park\nphase: execute\ncheckpoint: {_PARK_REF}\n",
+        owner=_LONE,
+    )
+    (tmp_path / _PARK_REF.removeprefix("/")).write_bytes(content)
+    assert _codes(tmp_path, "decisions.checkpoint-invalid")

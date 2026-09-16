@@ -1,4 +1,7 @@
-from work_helpers import make_item
+from pathlib import Path
+
+import pytest
+from work_helpers import load_written_items, make_item, write_item
 from work_tracker_okf.dependencies import DependencyEdge, DependencyFact
 from work_tracker_okf.hierarchy import ChildRollup
 from work_tracker_okf.workflow import route, state_for
@@ -146,3 +149,46 @@ def test_effort_override_and_projected_fields_are_preserved() -> None:
     assert state is not None
     assert (state.type, state.work_status, state.phase, state.effort) == ("Bug", "in-progress", "execute", "large")
     assert state.has_plan_doc and state.has_spec_doc
+
+
+_PARENT_AT_FINISH = "type: Epic\nwork_status: in-progress\nphase: finish\n"
+
+
+@pytest.mark.parametrize(
+    ("stamp", "expected"),
+    [
+        ("branch: epic/integration-1a2b3c4d\nworktree: /wt/integration\n", True),
+        ("branch: epic/integration-1a2b3c4d\n", True),
+        ("worktree: /wt/integration\n", False),
+        ("", False),
+        ("branch:\n", False),
+        ('branch: ""\n', False),
+        ("branch: 42\n", False),
+        ('branch: "   "\n', True),
+    ],
+    ids=[
+        "branch-and-worktree",
+        "branch-only",
+        "worktree-only",
+        "absent",
+        "null",
+        "empty",
+        "non-string",
+        "whitespace",
+    ],
+)
+def test_state_for_carries_branch_ownership_from_frontmatter(tmp_path: Path, stamp: str, expected: bool) -> None:
+    """Only `branch:` establishes ownership, by the existing tolerant projection:
+    a worktree alone does not, and whitespace is still a (projected) stamp."""
+    write_item(tmp_path, "parent", _PARENT_AT_FINISH + stamp)
+    state = state_for(load_written_items(tmp_path), "work/parent")
+    assert state is not None
+    assert state.has_branch is expected
+
+
+def test_state_for_carries_branch_ownership_for_every_type() -> None:
+    for type_name in ("Epic", "Release", "Feature", "Bug"):
+        stamped = state_for([make_item("item", type=type_name, branch="b/x-1")], "work/item")
+        unstamped = state_for([make_item("item", type=type_name)], "work/item")
+        assert stamped is not None and stamped.has_branch is True
+        assert unstamped is not None and unstamped.has_branch is False

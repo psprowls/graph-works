@@ -189,7 +189,8 @@ def test_open_owner_decision_blocks_exact_affected_path(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     result = work.run_next(layout, CHILD)
-    assert result.state.has_open_decision is True
+    assert result.state.hold is not None and result.state.hold.decision_id == "D-001"
+    assert result.state.hold.shape == "question"
     assert result.route.dispatch is None
 
 

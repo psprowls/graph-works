@@ -39,6 +39,7 @@ def dispatch(
         branch="b",
         base_branch=None,
         exists=True,
+        parent_path=None,
     )
     return PlannedDispatch(
         agent="claude",

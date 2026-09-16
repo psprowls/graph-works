@@ -163,6 +163,7 @@ from graph_works_core.orchestrate.commands import (
     run_orchestrate,
 )
 from graph_works_core.orchestrate.commands import plan as orchestrate_plan
+from graph_works_core.orchestrate.placement import PlacementRecord, run_record_placement
 from graph_works_core.orchestrate.stage_advance import StageAdvance, run_stage_advance
 from graph_works_core.query.adapters import LOOP_REGISTRY, REGISTRY
 from graph_works_core.scan.commands import (
@@ -242,6 +243,7 @@ __all__ = [
     "OrchestratePlan",
     "OrchestrateResult",
     "PipelineEntry",
+    "PlacementRecord",
     "PlannedAdvance",
     "PlannedWrite",
     "PlatformReport",
@@ -301,6 +303,7 @@ __all__ = [
     "run_mechanical",
     "run_orchestrate",
     "run_propagate_drift",
+    "run_record_placement",
     "run_scan",
     "run_stage_advance",
     "run_tokens_update",

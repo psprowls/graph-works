@@ -335,7 +335,7 @@ class DispatchBackendProvider:
 #: `okf_ext.locking`, which is what keeps this list from rotting.
 LOCK_SITES = (
     "work_tracker_okf/decisions.py",
-    "graph_works_core/work/commands.py",
+    "graph_works_core/workspace/decision_owner.py",
     "okf_ext/logs/__init__.py",
 )
 

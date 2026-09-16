@@ -207,6 +207,8 @@ test-plugin:
     cd plugins/gw
     echo "--- test-dispatch-profile-contract"
     bash tests/test-dispatch-profile-contract.sh
+    echo "--- test_launch_placement"
+    python3 tests/test_launch_placement.py
     echo "--- codex/test-marketplace-manifest"
     bash tests/codex/test-marketplace-manifest.sh
     echo "--- codex/test-package-codex-plugin"

@@ -50,12 +50,10 @@ explanation — no degraded mode, no partial loop:
    succeeds. `gw work status` fails loudly if not — treat that failure as a
    precondition failure, not a mid-loop error.
 
-Resolve the repo selector once here, too — it's static for the whole
-session: `orca repo list --json`, find the entry whose path matches the
-resolved repo, and remember its selector for `--repo` in dispatch mechanics
-(§3). This is environment lookup, not orchestration state, so caching it for
-the session does not violate the "never trust session memory" rule below —
-that rule is about *Run/task* state, not static repo identity.
+No repository selector is resolved here. A creation's repository comes from
+the plan's own top-level `repo.path` (§2.2), matched to an Orca repository by
+`launch-worker.py place` at launch time (§3).
+No launch reads the coordinator's location.
 
 ## 1. Run bind
 
@@ -83,21 +81,47 @@ crash/compaction resume the same code path as a normal cycle.
 ### 2.1 Derive live keys
 
 1. `orca orchestration task-list --run <run_id> --json`. Every task's
-   `--task-title` was set to a dispatch key (`<work-path>#<phase>`) at creation
-   (§3) — this task mirror is the dedupe ledger for the whole loop and the
-   §2.6 dispatch-diff source.
-2. `orca orchestration worker-list --run <run_id> --json` — one call for the
-   whole Run, returning `workers[]` of `dispatchId`, `taskId`, `runId`,
-   `workerState`, `dispatchStatus`, `agentTerminalHandle`, `terminalState`,
-   `resource{…}`. This is the task→dispatch join. Task records carry **no**
-   dispatch-id field of their own, so a per-task `worker-show --dispatch
-   <id>` loop cannot even be constructed — this call replaces that loop.
-3. Save those full responses and run the shipped restart classifier:
+   `--task-title` was copied exactly from `dispatches[].key` at creation (§3).
+   The key is the planner's session name, `gw-<phase>-<stem>` (maximum 64
+   characters, retaining the phase and eight-hex path hash). Copy that same
+   value back for dedupe and `--live`; never reconstruct a key from a path.
+   This task mirror is the dedupe ledger for the whole loop and the §2.6
+   dispatch-diff source.
+2. Start with `orca orchestration worker-list --run <run_id> --json`, then
+   follow each opaque `result.page.nextCursor` with another `worker-list`
+   call using `--cursor <nextCursor>` until `result.page.hasMore` is false.
+   Require every page's `total` to be the same exact non-negative integer,
+   every nonterminal page to add workers and advance to a new nonempty cursor,
+   and the final collected worker count to equal that stable total. Assemble
+   one full snapshot containing all collected `workers[]`; only after every
+   page was read set its truthful final metadata to `hasMore: false`,
+   `nextCursor: null` and `total` equal to the assembled worker count. Do not
+   inspect worker-show or any terminal metadata until this pagination is
+   complete. The rows contain `dispatchId`, `taskId`, `runId`, `workerState`,
+   `dispatchStatus`, `agentTerminalHandle`, `terminalState`, `resource{…}`
+   and `projection.liveness`.
+   This is the task→dispatch join. Task records carry **no** dispatch-id field
+   of their own, so a per-task `worker-show --dispatch <id>` loop cannot even
+   be constructed before this full snapshot exists.
+3. Save those full responses. First discover every settlement recovery record
+   beneath the driven subtree —
+   `find <workspace>/okf/<work-path> -path '*/references/orca-settlement/*.json' -type f`
+   — then every park checkpoint beneath it —
+   `find <workspace>/okf/<work-path> -path '*/references/*-checkpoint-D-*.md' -type f`
+   — and pass each resolved file with its own flag (path discovery stays here;
+   the helper only receives files):
 
    ```
    python3 references/launch-worker.py classify-restart \
-     --tasks <task-list-json> --workers <worker-list-json>
+     --tasks <task-list-json> --workers <worker-list-json> \
+     --recovery-record <record-json> [--recovery-record <record-json> ...] \
+     --checkpoint <checkpoint-md> [--checkpoint <checkpoint-md> ...]
    ```
+
+   A checkpoint file is named `NN-<phase>-checkpoint-D-nnn.md` and its
+   frontmatter names the `item:` and `phase:` it was written for; the helper
+   joins those against each Task's `display_name` (`<work-path> · <phase>`,
+   written by §3 step 2) because a dispatch key is not reversible to a path.
 
    It joins by `taskId` and uses the last worker row for retries. Its actions
    are durable-state decisions, not guesses from terminal presence:
@@ -110,8 +134,20 @@ crash/compaction resume the same code path as a normal cycle.
      The classifier performs this read for each succeeded worker, comparing
      the agent and every explicit model/effort choice against the envelope.
    - `deliberate-skip`: task status is `blocked` and either no worker exists or
-     the latest attempt is positively terminal `failed`/`stopped`. The Skip
-     branch in §4.1 writes the durable marker after that terminal attempt.
+     the latest attempt is positively terminal `failed`/`stopped`, **and no
+     park checkpoint claims this task's `(path, phase)`**. The Skip branch in
+     §4.1 writes the durable marker after that terminal attempt.
+   - `parked`: everything `deliberate-skip` requires, plus one of the
+     `--checkpoint` files naming this task's own `(path, phase)`. A park and a
+     skip leave bit-for-bit identical Orca state — §2.5.2's `worker-stop`
+     produces `workerState: stopped`, `dispatchStatus: failed`, Task
+     `blocked`, exactly the skip signature — and §2.5.2 writes no marker of
+     its own, so without the checkpoint join a restarted coordinator would
+     report every parked item as "skipped by a human." It is neither: it is
+     work waiting on an answer. Never re-dispatch a `parked` key as a fresh
+     dispatch and never count it as a skip in §5's summary; §2.6's resume
+     amendment owns it, and it is the **one** key class exempt from §2.6's
+     dedupe rule.
    - `recovery-inspection`: every other no-worker task, including a crash after
      task reservation but before start; unmarked `failed`/`stopped` and unknown
      worker states; `outcome_unknown` in either worker or dispatch state;
@@ -119,6 +155,23 @@ crash/compaction resume the same code path as a normal cycle.
      envelopes/receipts, or an unsuccessful worker-show read.
      Live and unknown evidence takes precedence over a task's `blocked` status,
      so a stale/partial skip update cannot hide an active or ambiguous attempt.
+   - `recovered-settled`: a recovery record (§4.1.1) for the latest attempt
+     is at `completed-verified` with no unresolved reason, and fresh state
+     re-verifies it. Run, Task, Dispatch, frozen key and spec hash match. The
+     Dispatch is positively settled. `terminalState` and
+     `resource.releaseState` are `released`. The Task is `completed`. Every
+     recorded file hash and commit re-verifies. Worker-show launch proof
+     passes. Task completed plus worker stopped alone never earns it. This is
+     finished stage work whose terminal is already released: never retry it,
+     release it again, or advance its item again.
+   - Any row a record names carries `recovery: {checkpoint, reason}`. A
+     matching record takes precedence over the `deliberate-skip` rule:
+     stopped/blocked pending recovery is recovery inspection, not a skip.
+     `live` and accepted `settled` evidence still win over every record — a
+     `live` row carrying `recovery` stays in `--live` and keeps its affects
+     reservation. A `live` or `recovery-inspection` row carrying `recovery`
+     resumes §4.1.1 from its saved checkpoint rather than Orca start recovery
+     or the failure question.
 
    Recovery inspection retains and prints the known task and dispatch IDs.
    Read the full task spec and the failed/ambiguous start recovery evidence.
@@ -136,17 +189,26 @@ crash/compaction resume the same code path as a normal cycle.
 
 `gw work orchestrate <work-path> --live <key,...> --json` (workspace resolves via
 `GRAPH_WORKS_DIR`; omit `--live` on the very first plan call of a fresh
-Run — there's nothing live yet). The result:
+Run — there's nothing live yet). An unknown `--live` key makes the command
+exit nonzero and yields no usable plan. Stop dispatching from that result,
+inspect each named key against the task and vault state, and correct the
+mismatch before replanning. Do not silently omit the key or retry with an
+empty live list. On success, the result contains:
 
 - `terminal` (bool), `max_parallel` / `slots_free` (ints), and `live` (the
   echoed input list).
-- `dispatches[]` — each entry: `key` (`<work-path>#<phase>`), `path`, `phase`,
+- `repo` — `{"path": "<code repository>"}`, the repository `workspace.yaml`
+  declares, or `null` when none resolves. A `null` repo never plans a
+  creation: those items arrive in `blocked[]` as `worktree-unprovable`.
+- `dispatches[]` — each entry: `key` (the exact planner session name,
+  `gw-<phase>-<stem>`, at most 64 characters with the path hash retained), `path`, `phase`,
   `kind`, `effort`, `skill`, `mode` (`autonomous` | `attend` | `relay`),
   `agent`, `model` (`null` = selected agent default, omit `--model`),
   `reasoning_effort`, `provenance` (the winning origin and reason for every
   profile field),
   `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main`,
-  `path`, `branch`, `base_branch`, `exists`), `merge_target`, `prompt`.
+  `path`, `branch`, `base_branch`, `exists`, `parent_path` — the existing
+  worktree a created one is linked beneath, `null` when none), `merge_target`, `prompt`.
 - `advances[]` — each: `path`, `reason`, `worktree`/`branch` (the epic's
   already-known worktree, when one exists — `null` otherwise, e.g. before any
   worker has ever been dispatched for this epic).
@@ -158,9 +220,9 @@ Run — there's nothing live yet). The result:
   `graph_works_core.orchestrate.commands` — if a `kind` arrives that isn't in
   this list, treat it as this skill being out of date, print it, and act on
   nothing.
-- `warnings[]` — plain strings (e.g. a stale `--live` key matching nothing, or
-  a malformed decisions-ledger entry). Print these as notes; they are not
-  blockers.
+- `warnings[]` — plain strings (e.g. a malformed decisions-ledger entry).
+  Print these as notes; they are not blockers. Unknown live keys are command
+  refusals, not warnings.
 - `decisions` — the ledger resolved from the nearest owning parent:
   `owner_path` (str or `null`), `ledger_path` (absolute path or `null`),
   `open[]` / `assumed[]`
@@ -173,6 +235,25 @@ Run — there's nothing live yet). The result:
   but a fully-zeroed six-key dict when the epic exists and only its ledger
   file is missing. Read it with `.get()`; indexing `counts["open"]`
   directly will fail in the first case.
+- `holds[]` — every item in the planned subtree currently held by an open
+  decision, from any owning ledger (not just this root's own — unlike
+  `open_decisions`/`assumed_decisions`, which are scoped to the nearest
+  owning ledger only). Each entry: `path`, `owner_path`, `ledger_path`,
+  `decision` (the full entry: `id`, `number`, `question`, `status`,
+  `affects`, `decided`, `supersedes`, `hold` — `"park"`, `"skip"`, or `null`
+  for a plain `question` hold — `phase`, `checkpoint` — a park's checkpoint
+  resource, root-absolute, or `null` — `prose`). A held item never appears in
+  `dispatches[]`: holding excludes it from the candidate set. It **does**
+  appear in `blocked[]`, as a `"decisions"`-kind entry keyed by the *item*
+  path — the routing layer returns a blocker for a held item, exactly as it
+  does for one blocked on an unanswered plain decision. So a held item prints
+  **two** lines per cycle, and that is correct, not a duplicate: the
+  `blocked[]` line says *this item cannot be dispatched and why*, keyed by
+  item path; the `holds[]` entry says *which decision on which ledger is
+  holding it*, keyed by `owner_path`, and is the only place the `hold` shape,
+  `phase` and `checkpoint` are carried. §2.5's park/skip rendering and
+  §2.5.2's park handling both read `holds[]` for exactly those three fields;
+  `blocked[]` has none of them.
 
 ### 2.3 Terminal?
 
@@ -182,15 +263,15 @@ Nothing else in this cycle runs.
 
 ### 2.4 Advances
 
-For every entry in `advances[]`: `gw work advance <path from entry>`, adding
-`--worktree <entry.worktree> --branch <entry.branch>` whenever the entry
-carries them (non-`null`). **This is applied from the coordinator's own
-checkout, not from inside any worktree** — without the explicit flags, the
-item's worktree/branch provenance and git-derived facts (`phase_started_commit`,
-execute-results) silently go unstamped or get recorded against the wrong
-checkout. Omit the flags only when the entry's `worktree`/`branch` are `null`
-(no worker has been dispatched for this epic yet, so there's nothing to
-pass). If `advances[]` was non-empty, the plan you just read is now stale —
+For every entry in `advances[]`: `gw work advance <path from entry> --no-infer-worktree`,
+adding `--worktree <entry.worktree> --branch <entry.branch>` only when the entry
+carries them (non-`null`). **`--no-infer-worktree` is what keeps it location-independent**: the advance
+never infers a placement from wherever the coordinator happens to be running.
+Only the orchestration root's entry can carry a
+pair — `plan()` never attaches the epic worktree to a descendant's advance, and
+a descendant's own recorded placement survives an advance that names none.
+
+If `advances[]` was non-empty, the plan you just read is now stale —
 restart the cycle at §2.1 (skip §2.5–2.7 this iteration; don't act on a plan
 you know is out of date).
 
@@ -199,7 +280,8 @@ you know is out of date).
 - **`effort-required`**: ask the user — via `AskUserQuestion`, this is the
   coordinator's own human, not a worker relay — to size the item
   (xtra-small / small / medium / large / xtra-large). Run
-  `gw work advance <work-path> --effort <value>`, then restart the cycle at §2.1.
+  `gw work advance <work-path> --effort <value> --no-infer-worktree`, then restart the cycle at §2.1.
+  Never add `--worktree`/`--branch` to it: sizing is not a placement.
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
   `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `invalid`): print one line each
@@ -255,6 +337,21 @@ you know is out of date).
   Print nothing at all when both lists are empty, and note that
   `decisions.owner_path: null` (a lone item with no owning parent) is normal,
   not a fault — ledgers are epic-owned.
+
+- **Holds**: after the decision lines, print one line per `holds[]` entry
+  (§2.2) whose `path` was not just handled by §2.5.2's stop:
+
+  ```
+  hold <path> <decision.id> (park at <decision.phase>): resumable from checkpoint <decision.checkpoint> -- answer via `gw work decision answer <owner_path> <decision.id> --answer ...`
+  hold <path> <decision.id> (skip at <decision.phase>): deliberately skipped -- answer to re-enable
+  ```
+
+  Pick the line by `decision.hold`. For a plain `question` hold
+  (`decision.hold` is `null`), print `work_tracker_okf.workflow.hold_reason`'s
+  own rendered text instead of inventing new wording — that function is
+  already shape-generic (`hold.shape` defaults to `"question"`), so its output
+  for this case already reads correctly; do not duplicate its logic here.
+  Informational only, exactly like the decision lines — take no action.
 
 ### 2.5.1 Decision confirm / overturn (human-initiated)
 
@@ -328,12 +425,206 @@ After either call:
    was `blocked` on the now-settled entry may be dispatchable on the very next
    plan call. Never act on a plan you already know is stale.
 
+### 2.5.2 Park handling: stop a dispatch that just parked
+
+**Unconditional, every cycle — not human-initiated, unlike §2.5.1.** Cross-
+reference this cycle's `holds[]` (§2.2) against §2.1's live-key map.
+
+**Resolving a live key back to a work path — use the Task's `display_name`.**
+A key (`gw-<phase>-<stem>`) is a one-way hash-bearing name: nothing recovers a
+path by parsing one, and `graph_works_core.orchestrate.commands` says so
+outright (`session_index` is the only reverse, and it is a planner-internal
+map this session never holds). The durable route is the one §3 step 2 already
+creates: every Task is created with
+`--display-name "<work-path> · <phase>"`, and §2.1's `task-list --run <run_id>
+--json` returns that string verbatim in each row's `display_name`. Split it on
+the first ` · ` — the left half is the canonical work path, the right half the
+phase. Join on that path, never on the key. A row whose `display_name` is
+missing or does not split (a Task created before this convention, or by
+something other than §3) cannot be resolved: print it and skip it here rather
+than guessing.
+
+For every live key whose resolved path has a `holds[]` entry with
+`decision.hold == "park"`:
+
+1. This dispatch has already stopped working (it followed
+   `references/grace-period-protocol.md`) but its Dispatch is still live in
+   Orca's model — nothing else in this cycle reflects that yet.
+2. `orca orchestration worker-stop --dispatch <dispatch_id> --json`, using the
+   `dispatch_id` §2.1's live-derivation already bound to this key. This is the
+   coordinator's exclusive authority: `worker-stop --help` takes no `--from`/
+   `--dispatch-capability`, unlike `ask`/`send`, so a dispatched worker's own
+   session could never have called this itself even if it tried.
+3. `worker-stop` settles the Task to `blocked` as a side effect (spike O4-O7:
+   `workerState: stopped`, `dispatchStatus: failed`, Task `blocked`) — issue no
+   separate `task-update` call for this.
+4. Do not release the worker (`worker-release`) here. A park is not a
+   completion; leave the terminal/resource alone until a resume (§2.6) or an
+   explicit human decision.
+5. Print `parked <key>: stopped <dispatch_id>, hold <decision.id> at
+   <decision.checkpoint>` for the scrollback.
+
+A key whose dispatch was already stopped in an earlier cycle has already left
+the live-key map (its Task is `blocked`), so this step is naturally a no-op for
+it on later cycles — nothing to track session-locally.
+
 ### 2.6 Dispatch diff
 
 Dispatch only `dispatches[]` entries whose `key` has **no existing task** in
 §2.1's `task-list` output — the task mirror is the sole dedupe ledger. A key
 with a task is live, settled, or an intentional skip (§4.1); in every case,
 leave it alone. For each undispatched entry, run Dispatch mechanics (§3).
+
+**Exactly one exemption:** a key §2.1 classified `parked`. Its Task exists and
+is `blocked`, so this rule would filter it out, but it is none of those three
+things — it is a stopped attempt holding a checkpoint. See "Resuming a
+previously-parked item," below, which owns those keys entirely.
+
+A `recovered-settled` key already has its Task, so it is left alone like any
+other; an unresolved recovery keeps its Task too, so nothing re-proposes it.
+
+**Resuming a previously-parked item.**
+
+**The dedupe rule above does not apply to a `parked` key.** This is its one
+exemption, and it has to be stated explicitly: a parked item's Task still
+exists (§2.5.2 stopped it to `blocked`; it was never deleted), so the ordinary
+"a key with a task is live, settled, or an intentional skip — leave it alone"
+rule would filter every parked item out before this amendment could ever see
+it, and the answer a human just gave would never reach anything. §2.1's
+`parked` classification is what makes the exemption decidable rather than a
+judgement call: a `parked` key is none of those three things.
+
+So: for each `dispatches[]` entry whose `key` §2.1 classified `parked`, run
+this amendment instead of both the dedupe rule and the ordinary §3 mechanics.
+Every other key obeys the dedupe rule unchanged, and an entry with no `parked`
+classification is an ordinary fresh dispatch — run §3 unmodified.
+
+1. Read the checkpoint §2.1 joined to this key: its frontmatter (`item`,
+   `phase`, `dispatch_key`, `decision`, `created`) and its `## Question`
+   section.
+2. Find the checkpointed attempt's Task/Dispatch: refresh
+   `task-list --run <run_id> --json`, find the Task whose title equals the
+   checkpoint's `dispatch_key`, and take its latest same-Run Dispatch id and
+   its full untruncated `spec` text — the same lookup the Failure Question's
+   Retry branch (§4.1) already performs, reused here rather than
+   re-implemented. Save that spec text to a temp file; it is step 5's
+   `--spec`.
+3. Read the decision named by the checkpoint's `decision:` key:
+   `gw work decision list <owner-path> --json`. **Still `open` → stop here and
+   leave the key alone**; the park is still waiting and §2.5's hold line
+   already reports it. `answered` → take the entry's `prose` `**Answer:**`
+   block as the answer text and continue.
+4. **Has this checkpoint already been resumed?** Check before launching
+   anything. Nothing writes a "resumed" marker, and `answered` is permanent —
+   a decision is never un-answered — so without this check a resumed attempt
+   that parks again or dies would leave the same answered decision and the
+   same checkpoint on disk and be resumed again every cycle, forever, at
+   `check --wait` intervals. Derive the answer from the Task's own Dispatch
+   history rather than adding a new write path: every Dispatch on this Task is
+   already in §2.1's worker-list snapshot (rows joined by `taskId`). For each,
+   read `orca orchestration worker-show --dispatch <id> --json` →
+   `result.dispatch.createdAt`, and compare it against the checkpoint's
+   `created:` instant. Normalize both to UTC first — Orca renders some of
+   these as `YYYY-MM-DD HH:MM:SS` with no zone suffix, and those are UTC.
+   The parked attempt necessarily started *before* it wrote its own
+   checkpoint, so **any Dispatch created at or after the checkpoint's
+   `created` instant is a resume that already ran.** If one exists, leave this
+   key alone and print
+   `parked <key>: already resumed as <dispatch_id>, leaving it alone` —
+   ordinary state (live, or blocked again with a *new* checkpoint and a *new*
+   open decision) governs it from here.
+5. Run `place` for this cycle's own `dispatches[]` entry for this path (its
+   `action` will read `reuse`, like any other re-dispatch of an item with a
+   recorded placement), redirecting stdout exactly as §3 step 1 does:
+
+   ```
+   python3 references/launch-worker.py place --dispatch <dispatch-json> \
+     --repo-path <plan repo.path> --out-placement <placement-json-file> \
+     > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
+   ```
+
+   `settle-placement` hard-requires `--placement-result` to exist and parse
+   — even for `reuse`/`main` — so this redirect is not optional here either.
+   `<placement-json-file>` holds `["--worktree", "path:<worktree.path>"]` —
+   `launch --recovery-placement` opens its argument **as a path** and will
+   not accept an inline JSON literal. Then build the resume spec:
+   ```
+   python3 references/launch-worker.py resume-spec \
+     --spec <the original spec file from step 2> \
+     --checkpoint <the checkpoint file path> \
+     --answer "<the answer text from step 3>" \
+     --placement <placement-json-file> \
+     > <new-spec-file>
+   ```
+6. Launch as a retry of the **same** Task, not a fresh one — skip §3 steps 1-2
+   (build/encode/create) entirely for this key:
+   ```
+   python3 references/launch-worker.py launch --spec <new-spec-file> \
+     --task <task_id from step 2> --dispatch-key <key> --run <run_id> \
+     --retry-of <dispatch_id from step 2> \
+     --recovery-placement <the same placement-json-file from step 5> > <start-json>
+   ```
+7. **Send the resume context to the new dispatch. This step is what actually
+   delivers the answer — without it the resume is a no-op.** `--retry-of`
+   reuses the **original, frozen** Task spec and its original prompt:
+   `worker-start`'s `--task` and `--spec` are mutually exclusive, and a retry
+   takes `--task`, so nothing in `<new-spec-file>`'s *prompt* half ever
+   reaches the worker. (The file is still required — `launch` reads the
+   frozen `agent`/`model`/`effort` envelope out of it, and `resume-spec`
+   composes the resume text in exactly one place.) The resumed worker
+   therefore starts on the unmodified original prompt and, left alone, would
+   re-ask the very question this whole protocol exists to stop it re-asking.
+   Take the new dispatch id from step 6's `worker-start` JSON, slice the
+   `## Resume after park` section out of `<new-spec-file>` (everything from
+   that heading to end of file), and send it down the dispatch handle — the
+   same mechanism, and the same flag shape, §4.4 already uses to answer an
+   escalation:
+   ```
+   orca orchestration send --to dispatch:<new dispatch_id> --type status \
+     --subject "Resume after park: <decision.id>" \
+     --body "<the ## Resume after park section from <new-spec-file>>" \
+     --run <run_id>
+   ```
+   A non-zero exit here is a failed resume, not a cosmetic one: say so and
+   route the dispatch into the failure flow (§4.2) rather than leaving a
+   worker running on a prompt that does not know the answer.
+8. Continue at §3 step 4 (`settle-placement` with this cycle's `place` result
+   and `<start-json>`, then verify and record observed placement) — everything
+   from there is identical to an ordinary dispatch.
+
+### 2.6.1 Self-park: stop the run when only parked work remains
+
+Checked at the end of every cycle, **after** §2.6 has finished dispatching and
+resuming, and **before** entering §2.7's wait. Stop the run when all three
+hold at once:
+
+- Nothing is live: no dispatch was started or resumed this cycle, and §2.1's
+  live-key list is empty.
+- At least one item is parked: some key is classified `parked` (§2.1), or some
+  `holds[]` entry has `decision.hold == "park"`.
+- Nothing independent is left to dispatch: every remaining `dispatches[]`
+  entry was consumed above or is `parked`-and-still-`open`, and every
+  `blocked[]` kind present is one that cannot clear without a human
+  (`decisions`, `deps`, `affects-overlap`, `human`, `invalid`,
+  `relay-untailed`, `worktree-unsupported`) — a `capacity` or
+  `worktree-pending` blocker means slots or worktrees free up on their own, so
+  keep looping.
+
+When all three hold, the loop has nothing to wait *for*: `check --wait` would
+block for its full ten minutes with zero live dispatches, time out, re-derive
+an identical plan, and do it again indefinitely — never escalating to the one
+human whose answer is the only thing that can unblock it. So **stop the run**,
+reusing the failure question's Stop branch shape exactly (§4.1): exit the loop
+and report run state (what's done, what's live — nothing, by this condition's
+own precondition — and what's blocked). Name every parked item explicitly with
+its checkpoint path, its decision id, and the question text, and say plainly
+that answering those decisions (`gw work decision answer <owner-path> D-nnn
+--answer "..."`) and re-running `/gw:auto-drive <work-path>` is what resumes
+them. There is no live dispatch left to offer a `worker-stop` for.
+
+This is D-004's "the coordinator parks itself when nothing else can proceed."
+It is not a terminal plan — §2.3's `terminal: true` path and §5's wrap-up are
+for finished work, and a parked run is not finished. Do not run §5.
 
 ### 2.7 Wait
 
@@ -350,6 +641,14 @@ orca orchestration check --run <run_id> --wait \
   future runtime version reports the id under a different key, read it off
   the first real `check --wait --json` response rather than trusting this
   name blindly. Restart the cycle at §2.1.
+- **Rejected or unprovable completion:** a delivery holding a
+  `claimed-unconfirmed` report (§4.1) may be acked only once that report's
+  recovery record is written with its identities, the evidence so far, and
+  either an `unresolved` reason or a later checkpoint, and every other
+  message in the batch is processed. Without that record, do not ack — the
+  replayed delivery is the only copy. After the ack, each cycle's §2.1 row
+  carrying `recovery` resumes §4.1.1. A timeout never launches a replacement,
+  and an unresolved active worker keeps its live key.
 - **stderr note:** `--wait` emits JSON keepalive lines to **stderr** every
   15s so the caller can tell the process is alive — stdout carries only the
   real response. Don't merge streams (`2>&1`) when capturing this call; if a
@@ -384,9 +683,32 @@ The executable recipe for this section is
 `references/launch-worker.py`. It transports a resolved dispatch and never
 matches or resolves rules. Treat model IDs and effort strings as opaque.
 
-1. Build the placement argv list exactly once from the worktree mapping below
-   and save it as a JSON list. Save the complete `dispatches[]` entry as JSON,
-   then encode the immutable task spec:
+1. Save the complete `dispatches[]` entry as JSON, then resolve its placement
+   before anything is created:
+
+   ```
+   python3 references/launch-worker.py place --dispatch <dispatch-json> \
+     --repo-path <plan repo.path> --out-placement <placement-json> \
+     > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
+   ```
+
+   Omit `--repo-path` only when the plan's `repo` is `null` (then only `reuse`
+   and `main` can be planned). Create the `orca-placement/` directory first.
+   The result file is durable on purpose: §5 re-reads it to repair lineage
+   after a restart. A non-zero exit prints `PLACEMENT REFUSED <key>: <reason>`:
+   nothing was created and no task exists. Print it, delete the (truncated,
+   empty) redirected result file, create no task, plan nothing that depends
+   on this item, and surface it to the user; the key is re-proposed once the
+   cause is fixed. Only a genuine plan/reality contradiction refuses: a
+   cross-repo parent, or a repository-resolution problem (unregistered or
+   duplicated Orca repository, or no code repository known at all). An
+   unknown-to-Orca or main-checkout parent does *not* refuse — `place`
+   degrades that to a parentless top-level creation with a note on stderr, so
+   see step 4 for how a placement gains no lineage without failing anything.
+   Never fall back to the coordinator's repository, the wiki repository or
+   trunk.
+
+   Then encode the immutable task spec from the placement `place` wrote:
 
    ```
    python3 references/launch-worker.py encode \
@@ -410,7 +732,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 
    ```
    python3 references/launch-worker.py launch --spec <spec-file> \
-     --task <task_id> --dispatch-key <key> --run <run_id>
+     --task <task_id> --dispatch-key <key> --run <run_id> > <start-json>
    ```
 
    The recipe passes the planned agent, optional model/effort, and each
@@ -419,27 +741,36 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    choice (`reasoning_effort` maps to receipt `effort`). Missing or mismatched
    proof enters recovery and never authorizes another worker.
 
-   Build placement argv as follows:
-   - Worktree action `reuse` → `--worktree path:<worktree.path>` only — no
-     creation flags (`--name`/`--repo`/`--base-branch`), which the CLI
-     rejects for an existing worktree.
-   - Worktree action `fork-child` → `--worktree new-child --name <worktree.branch> --base-branch <worktree.base_branch>`.
-     `worker-start` has no `--parent-worktree` flag: `new-child` infers its
-     parent from this coordinator's own worktree context, which is the epic
-     worktree. Step 3's assertion is what verifies where it landed.
-   - Worktree action `create-top-level` → `--worktree new-top-level --name <worktree.branch> --base-branch <worktree.base_branch> --repo <repo selector resolved in §0>`.
-   - Worktree action `main` → `--worktree path:<worktree.path>`, same mapping
-     as `reuse` — the main checkout already exists, there is nothing to
-     create. Its `dispatches[].prompt` carries an extra line telling the
-     worker to pass `--worktree`/`--branch` explicitly on its own
-     `gw work advance` calls, since it is running directly in the main
-     checkout and cwd-based worktree inference cannot detect that case.
+   What `place` produces, and why:
+
+   `place` builds the placement argv; never assemble it by hand. No launch
+   reads the coordinator's location — a coordinator in the code repository's
+   primary checkout, the wiki repository or the epic worktree issues identical
+   calls. (Orca's caller context is the Orca terminal's worktree, not the
+   shell's cwd, so `cd` would not change it either.)
+   - `reuse` and `main` → `--worktree path:<worktree.path>` only, with no Orca
+     call — no creation flags (`--name`/`--repo`/`--base-branch`), which the
+     CLI rejects for an existing worktree.
+   - `fork-child` and `create-top-level` → `--worktree new-top-level --name
+     <worktree.branch> --base-branch <worktree.base_branch> --repo id:<repo
+     id>`, where the repo id is the single `orca repo list --json` entry whose
+     path resolves to the plan's `repo.path` (zero or several matches refuse).
+     Orca's caller-context child mode is never used: it takes both the
+     repository and the parent from the calling terminal. For a non-null
+     `worktree.parent_path`, `place` also resolves `orca worktree show
+     --worktree path:<parent_path>`. A parent in another Orca repository
+     refuses outright — plan and reality genuinely contradict. A parent Orca
+     doesn't know, or that is the repository's own checkout, instead
+     degrades: the creation still launches top-level, but with no
+     `parent_worktree_id` and a note on stderr — lineage is presentational,
+     the repository is what's load-bearing. The lineage itself is set after
+     start, in step 4.
+   - `main` is the repository's own checkout —
      `_resolve_worktree` in
      `packages/graph-works-core/src/graph_works_core/orchestrate/commands.py`
      chooses `main` over `reuse` whenever the resolved worktree equals the
-     code repo's own checkout, and `_prompt` in the same module appends the
-     extra "record the worktree as … and the branch as …" line the worker
-     needs.
+     code repo's own checkout. No worker states or infers its own placement in
+     either case; step 4 records what Orca actually placed.
    - `--name` is a *display* name, not a branch name. Orca derives the git
      branch itself as `<host git user slug>/slugify(name)` —
      unconditionally, for every `--name`, on every creation — and
@@ -456,21 +787,27 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    only makes it produce work nobody will look for. A failed placement never
    reaches step 5.
 
-   **Where the truth comes from** — prefer the response already in hand:
+   **Where the truth comes from, and lineage.** Run:
 
-   1. `worker-start --json`'s `effects[]`. A worktree effect reads
-      `{kind: "worktree", action: "created_child" | …, id: "<repoId>::<path>"}`.
-      When that entry is present the path is the segment after `::`, and
-      **no extra Orca call is made.**
-   2. Otherwise `orca orchestration worker-show --dispatch <dispatch_id> --json`
-      → `result.worker.worktreeId` (the full `<repoId>::<path>` value).
-   3. Then `orca worktree show --worktree id:<worktreeId> --json` for the
-      fields the assertion needs: `path`, `branch`, `displayName`,
-      `parentWorktreeId`, `isMainWorktree`.
+   ```
+   python3 references/launch-worker.py settle-placement --dispatch <dispatch-json> \
+     --placement-result <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json \
+     --start <start-json>
+   ```
 
-   `branch` comes back fully qualified (`refs/heads/<name>`). **Strip
-   `refs/heads/` before printing it** — a raw paste reads as a different
-   name than the one the human will see in `git branch`.
+   It takes the worktree id from `worker-start`'s `effects[]` (else
+   `orchestration worker-show --dispatch <dispatch_id>`), reads `orca worktree
+   show --worktree id:<id> --json`, and for a creation asserts the observed
+   `repoId` is the placed repository and `isMainWorktree` is false. When
+   `place` resolved a parent and the new worktree has none, it runs `orca
+   worktree set --worktree id:<created id> --parent-worktree id:<parent id>`
+   exactly once and re-reads; the observed `parentWorktreeId` must then equal
+   the placed parent id, or be `null` when none was placed. For `reuse`/`main`
+   it compares paths only. It prints `path`, `branch` (already stripped of
+   `refs/heads/`), `display_name`, `repo_id`, `parent_worktree_id` and
+   `lineage_set`. A non-zero exit prints `PLACEMENT MISMATCH <key>: <reason>`
+   — halt into §4.2 exactly as below. Re-running it is safe: it repairs a
+   missing parent and never launches anything.
 
    **The assertion — never a branch-name comparison.** The upstream slug
    transform is undocumented and unversioned; an assertion built on it would
@@ -479,9 +816,8 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 
    | Planned `worktree.action` | Assertion |
    |---|---|
-   | `reuse`, `main` | The observed `path` equals the planned `worktree.path`, compared after resolving symlinks on both sides. No worktree was created, so nothing else is checked. |
-   | `fork-child` | `parentWorktreeId` is non-null; the observed `path` is not one already claimed by another dispatch this Run; and `worktree.base_branch` resolves in the observed worktree and is an ancestor of its HEAD — one `git -C <observed path> merge-base --is-ancestor <base_branch> HEAD`. |
-   | `create-top-level` | `isMainWorktree` is false; the observed `path` is unclaimed this Run; and the same base-branch ancestry check. |
+   | `reuse`, `main` | `settle-placement`: the observed `path` equals the planned `worktree.path`, compared after resolving symlinks on both sides. No worktree was created, so nothing else is checked. |
+   | `fork-child`, `create-top-level` | `settle-placement`: observed `repoId` is the placed repository, `isMainWorktree` is false, and `parentWorktreeId` equals the placed parent (`null` when `parent_path` was `null`). Then, here: the observed `path` is not one already claimed by another dispatch this Run; and `worktree.base_branch` resolves in the observed worktree and is an ancestor of its HEAD — one `git -C <observed path> merge-base --is-ancestor <base_branch> HEAD`. |
 
    The ancestry check is what replaces the branch-name comparison: it asks
    the question the name was only ever a proxy for — *is this worker forked
@@ -499,15 +835,14 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    dispatched <key> -> <observed path> on <observed branch>
    ```
 
-   The coordinator plans a branch name but never sees the one Orca actually
-   creates, so this line is its only record. It means a human reading the
-   scrollback hours later can find the branch a stage's work is on without
-   reconstructing anything.
+   This line lets a human reading the scrollback hours later find the branch
+   a stage's work is on without reconstructing anything. The verified pair
+   is also recorded on eligible items below.
 
-   **Do not substitute the observed values downstream.** §2.4's
-   `gw work advance --worktree/--branch` and §5's merge-back summary keep
-   using the planner's values; reconciling the two is the planner lane's
-   work, not this read-back's.
+   **Observed placement is provenance; the merge target is not.** The item
+   records the observed pair (below). The requested placement, the frozen
+   launch envelope and `merge_target` stay the planner's values in every
+   report and in §5's merge-back summary.
 
    **On assertion failure, halt into §4.2.** Print the mismatch loudly:
 
@@ -536,6 +871,71 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    ```
 
    Halting here would block legitimate dispatches over a cosmetic surprise.
+
+   **Record the observed placement** — once the assertion passes, before
+   step 5 and before any other dispatch this cycle:
+
+   1. **Bind.** The observation binds to this `task_id`/`dispatch_id`: the
+      Task's latest same-Run worker row is this Dispatch and its `task_title`
+      is the frozen dispatch key. If a newer attempt supersedes it, or identity
+      cannot be established, record nothing — report every ID you have and
+      enter inspection.
+   2. **Verify the branch.** Normalize the readback by stripping `refs/heads/`.
+      Where the observed path is reachable from this host, run
+      `git -C <observed path> branch --show-current`; it must print exactly the
+      normalized branch. Empty output (detached HEAD), a missing branch, a
+      disagreement or unverifiable evidence is a placement mismatch: halt into
+      §4.2 as above. Never record the planned `worktree.branch` in its place.
+   3. **Record, or skip.** For the orchestration root (the dispatch `slug`
+      equals `<work-path>`) at any phase, and for a descendant dispatched at
+      `execute` or `finish`, run:
+
+      ```
+      gw work record-placement <slug> --root <work-path> --phase <dispatch phase> \
+        --worktree <observed path> --branch <normalized branch> --json
+      ```
+
+      A descendant dispatched at `design` or `plan` is never recorded: it only
+      reads from the shared epic worktree and must not be pinned to it.
+   4. **Check.** Success is exit 0 with `refusal: null` and `after` equal to the
+      observation. Re-read with the same command plus `--dry-run`: `changed:
+      false` proves the item now carries the pair. Keep a receipt reference
+      (the command and where its JSON is kept) with this dispatch's evidence;
+      never store a preamble or a dispatch capability.
+   5. **Refused.** When `refusal` is non-null, print
+      `PLACEMENT UNRECORDED <key>: <refusal.reason> — <refusal.detail>` and
+      halt this item into inspection. `phase-mismatch` means the worker took
+      the item lock and finished its stage first. Preserve the task, the
+      dispatch key and the allocated worktree; plan nothing that depends on
+      this item; surface the mismatch to the user. Do not call `gw work advance` to stamp it,
+      do not re-record with the new phase, do not start another fork, and do
+      not stop or release the worker without the authority §4.1.1 requires.
+      Independent items continue only where live-key and hold rules already
+      allow. `unknown-path`, `unknown-root`, `outside-root`, `invalid-item`,
+      `invalid-phase`, `invalid-pair`, `terminal`, `entry-unprovable` and
+      `read-only-descendant` are the same inspection halt: each means the
+      coordinator's own reading of this dispatch is wrong.
+
+   6. **Application failed or other non-success.** Every other non-success,
+      including when `refusal: null`, enters inspection: a failed application,
+      nonzero exit, malformed or missing JSON, mismatched `after`, or failed dry-run verification.
+      Print `PLACEMENT UNRECORDED <key>: <failure details>` with the exit status
+      and available JSON; do not read `refusal.reason` from a null refusal.
+      Preserve the task, dispatch key and allocated worktree; plan nothing
+      that depends on this item and surface the failure to the user.
+      Do not call `gw work advance` to stamp it, do not start another fork,
+      do not re-record with a new phase, and do not stop or release the worker
+      without the authority §4.1.1 requires. Independent items continue only
+      where live-key and hold rules already allow.
+
+   A lost response is not a refusal. After a timeout, disconnect or restart,
+   repeat step 1 and the `--dry-run` read before recording again; an
+   identical replay is a no-op only once attempt, phase and observation are
+   re-established. Until then, enter inspection and preserve the task,
+   dispatch key and allocated worktree. Do not call `gw work advance` to stamp it,
+   do not start another fork, and do not stop or release the worker without
+   the authority §4.1.1 requires. Step 5's submission probe runs only after recording
+   succeeded, or for a read-only descendant that records nothing.
 
 5. **Confirm the prompt was actually submitted when a terminal exists.** A
    terminal is optional. Worker-read/show, lifecycle state, and orchestration
@@ -623,20 +1023,238 @@ before acking.
 
 ### 4.1 `worker_done`
 
-- **`outcome: succeeded`**: refresh the full task-list and worker-list and run
+Classify each `worker_done` before reading its outcome. Save the message
+object from `result.messages[]` and run:
+
+```
+python3 references/launch-worker.py classify-report --message <message-json>
+```
+
+It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
+`_orcaLifecycleRejection` marker **first** — a rejected report keeps type
+`worker_done` and its original `outcome: succeeded`:
+
+- `accepted-success` → **Success branch** below.
+- `accepted-failure` → the **failure question**, below.
+- `claimed-unconfirmed` — a rejection marker, a malformed marker, a legacy
+  `Rejected worker_done:` subject, an unreadable payload, or missing identity
+  → §4.1.1. Never the failure question by default: retry/skip/stop is wrong
+  for work that may already be done.
+
+- **Success branch**: refresh the full task-list and worker-list and run
   §2.1's classifier before acknowledging the delivery. Require its `settled`
   result for this exact task/dispatch pair: this validates the full frozen
   envelope and key plus durable requested/effective proof from worker-show.
   Missing or mismatched proof enters recovery with both IDs; do not ack or
   release it. A valid `worker_done` already settles its Task and Dispatch;
-  never issue `task-update completed`. Then run
+  never issue `task-update completed` (§4.1.1 step 5 is the single recorded
+  coordinator exception). Then run
   `orca orchestration worker-release --dispatch <dispatch_id>` (no `--run`
   flag — `worker-release` takes only `--dispatch` and `--retry-request`)
   → if this key was attend-pending (§3), flip the card back:
   `orca worktree set --worktree <selector> --workspace-status in-progress`
   → nothing else; the next cycle's plan (§2.2) picks up the new state
   naturally.
-- **`outcome: failed`**: run the **failure question**, below.
+
+### 4.1.1 Completion claimed, settlement unconfirmed
+
+A rejected completion is still a claim that stage work finished, but neither
+its delivery nor its `outcome` settles the Dispatch. Orca's caller checks —
+capability, pane/leaf, process incarnation — are authority boundaries: never
+resend the report for the worker, never rewrite `--from`, and
+never infer identity from a terminal-handle prefix.
+The historical caller-identity cause remains unverified upstream; this branch
+recovers without explaining it.
+
+Recovery records live at
+`<workspace>/okf/<dispatched-item-path>/references/orca-settlement/<dispatch_id>.json`
+and are written only through:
+
+```
+python3 references/launch-worker.py record-write --path <record-file> --record <record-json>
+```
+
+`record-write` validates the schema and keeps identity immutable. It refuses
+checkpoint regression, history/mutation rewrites, evidence changes without a
+`reattested:` history note, and any Dispatch capability. It replaces the file
+atomically (UTF-8, LF). For `stopped-verified`, `released-verified` and
+`completed-verified` it re-reads `task-list` and every `worker-list` page
+itself, rechecks file hashes and commits at every verified checkpoint, and
+checks worker-show launch proof at completion only after assembling the full
+worker snapshot. It refuses renewed verification unless current state proves
+the checkpoint. A refused write stops the sequence; it is not a formatting
+problem. Every changed write appends one `history` entry naming the checkpoint
+and what was observed; identical verified writes still recheck current proof.
+
+A refusal-only annotation changes only `history` and `unresolved`, retaining the same checkpoint and every protected identity, evidence, judgment, placement, mutation and stop-authority field.
+This narrow append-only write does not reverify historical progress, so a
+later artifact drift or unavailable readback can be recorded even at
+`completed-verified`. Keep the latest nonempty refusal reason; never move
+backward or advance to an unperformed checkpoint to save it. Clearing a
+refusal or advancing requires fresh proof of the last verified checkpoint;
+changing evidence still requires a new `reattested:` history note and cannot
+use the refusal-only exception. An unresolved record never earns
+`recovered-settled`.
+
+Record-derived success requires fresh `projection.liveness.verdict: exited`; explicit `live` keeps the key live, and missing, malformed or `unverifiable` evidence keeps recovery inspection and occupancy.
+The helper conservatively does not implement execution-host overrides: even
+a saved exit/stop authorization or a live PTY cannot turn a missing fleet
+verdict into exit proof. If the version-served recovery guide permits stronger
+execution-host evidence, inspect it explicitly and refresh the fleet snapshot;
+until it proves exit this helper cannot verify a recovery checkpoint.
+
+1. **Bind identity.** Refresh full `task-list --run <run_id> --json`, assemble
+   the complete paginated `worker-list --run <run_id> --json` snapshot exactly
+   as in §2.1, and only then run
+   `worker-show --dispatch <dispatch_id> --json`. The report's
+   `taskId`/`dispatchId` must name a Task in this Run whose latest worker
+   row is that Dispatch, whose `task_title` is the frozen dispatch key, and
+   whose full untruncated spec validates. A late report from an earlier
+   attempt cannot recover, stop or complete the current one. Missing
+   identity (a legacy wrapper without payload IDs) is unresolved inspection:
+   report every ID you have to the user.
+2. **Check for accepted success.** Run §2.1's classifier. `settled` for this
+   exact pair means the rejection was a stale duplicate: take the Success
+   branch. With a record supplied, this requires current Task `completed`,
+   latest same-Run Dispatch `completed`, worker `succeeded`, and the existing
+   frozen-spec/launch proof. This accepted completion is independent of a
+   saved recovery claim: its reporting agent may still idle live awaiting
+   normal release. A lone `workerState: succeeded` and launch receipt cannot
+   bypass recovery liveness checks when Task/Dispatch acceptance disagrees.
+   Legacy classification without records keeps its existing behavior.
+   A `ready`/`running` latest worker is still live: keep waiting, or
+   ask the user for an explicit stop decision. A timeout, the rejection,
+   a missing terminal, a null agent wait or unverifiable liveness is never
+   stop authority.
+3. **Earn the judgment.** Inspect the dispatched item
+   (`gw work next <item-path> --json`), its required stage artifact and phase
+   transition, and — in its worktree — the branch, commits and validation
+   evidence the stage's acceptance criteria require. An existing file, an
+   advanced phase or the worker's prose is not enough. Bind the evidence to
+   this attempt: an independent actor may have advanced the item. A finish
+   stage keeps merge/PR/hold/discard semantics, and Task completion never
+   resolves a graph-works item. Compute the spec hash with
+   `python3 references/launch-worker.py spec-hash --tasks <task-list-json> --task <task_id>`
+   and file hashes with `shasum -a 256 <file>`; commits are full 40-hex ids.
+4. **Record inspection before any mutation.** Write the record at
+   `inspection`:
+
+   ```json
+   {
+     "schema": "gw-orca-settlement", "version": 1,
+     "run_id": "<run_id>", "task_id": "<task_id>", "dispatch_id": "<dispatch_id>",
+     "dispatch_key": "<task_title>", "work_path": "<dispatched item path>", "phase": "<dispatched phase>",
+     "spec_sha256": "<spec-hash output>",
+     "placement": {"worktree": "<observed worktree>", "branch": "<observed branch or null>"},
+     "report": {"message_id": "<message id>", "outcome": "<succeeded|failed|null>",
+                "rejection": {"code": "<code>", "reason": "<reason>"}, "reason": "<classify-report reason>"},
+     "evidence": [
+       {"kind": "file", "path": "<absolute artifact path>", "sha256": "<hash>"},
+       {"kind": "commit", "repo": "<absolute worktree>", "sha": "<40-hex commit>"},
+       {"kind": "validation", "command": "<command>", "exit": 0, "receipt": "<where its output is kept>"}
+     ],
+     "judgment": "<succeeded|unestablished>",
+     "stop_authority": null,
+     "checkpoint": "inspection",
+     "mutations": [],
+     "history": [{"checkpoint": "inspection", "at": "<UTC time>", "note": "<what was inspected>"}],
+     "unresolved": "<what is still missing, or null>"
+   }
+   ```
+
+   Store receipt *references*, never raw preambles or capabilities. If
+   success cannot be established, keep `judgment: unestablished`, set
+   `unresolved`, ask the user for the missing evidence or disposition, and do
+   not complete the Task. Stop authority is one of:
+   - `exit-evidence`: positive exit as the version-served Orca recovery
+     reference defines it, honouring its execution-host precedence when
+     worker-show PTY status and fleet agent liveness disagree.
+   - `user-authorized`: an explicit user decision to stop a known live
+     worker.
+   - `already-settled`.
+
+   Unverifiable stays unverifiable.
+5. **Settle, release, complete — each verified.** Only with judgment
+   `succeeded`, file or commit evidence, and stop authority recorded:
+   1. Refresh every worker-list page as in §2.1, assemble and validate the
+      complete snapshot, then refresh worker-show; confirm no newer attempt
+      exists.
+   2. If the latest attempt is not already positively settled:
+      Before invoking worker-stop, persist its intent at `stop-requested` using the operation journal below.
+      Run `orca orchestration worker-stop --dispatch <dispatch_id> --json`.
+      After worker-stop returns, append its original request ID and sanitized receipt reference using the operation journal below.
+      Never issue a redundant stop against a settled attempt.
+   3. Record `stopped-verified`. The tested control read `workerState:
+      stopped`, `dispatchStatus: failed` and Task `blocked`; a zero exit code
+      alone is not settlement.
+   4. Before invoking worker-release, persist its intent at `release-requested` using the operation journal below.
+      Run `orca orchestration worker-release --dispatch <dispatch_id> --json`.
+      After worker-release returns, append its original request ID and sanitized receipt reference using the operation journal below.
+      Then record `released-verified`. Treat `retained`/`identity_unproven`,
+      `release_pending`, `release_unknown` or an unverifiable outcome as
+      unresolved resource recovery: follow the receipt's literal next action
+      and set `unresolved`. There is no automatic abandon fallback.
+   5. Before invoking task-update, persist its intent at `completion-requested` using the operation journal below.
+      Then run
+      `orca orchestration task-update --id <task_id> --status completed --run <run_id> --json`
+      — the one recorded coordinator exception to "never issue
+      `task-update completed`", not a second `worker_done`.
+      After task-update returns, append its original request ID and sanitized receipt reference using the operation journal below.
+      Then record `completed-verified`.
+
+   **Operation journal (all three actual mutations).** Before invocation,
+   atomically write the requested checkpoint and append a `mutations` entry
+   with the exact `action`, `request_id: null`, `receipt` naming a durable
+   sanitized output location reserved for this invocation, and UTC `at`.
+   Append history recording intent and the exact nonsecret command arguments
+   (Run/Task/Dispatch are already bound), and set `unresolved` to
+   `original request identity unknown: <action>`. If this write fails, do not
+   invoke the command. An already positively settled attempt skips stop and
+   creates no fictitious stop intent or request ID.
+
+   Capture the command's output durably at that location, including refusals.
+   After return, extract the original `result.mutation.requestId` (or the
+   request identity explicitly named by the runtime's error receipt), verify
+   its association with this operation, and append a second entry for the
+   same action with that ID and the sanitized receipt reference. Append
+   same-checkpoint history; never replace the null intent entry. Persist this
+   receipt before proceeding to verification or another operation. At the
+   same requested checkpoint, appending only receipt/history entries while
+   retaining `unresolved` needs no renewed state proof; unavailable readback
+   must not prevent saving the original identity. Keep a refusal in
+   `unresolved`; clear it only after the original identity is known
+   and fresh state/evidence proves historical progress. A successful command
+   exit or recovered request ID alone does not verify settlement.
+
+   If invocation or receipt persistence is interrupted with no original request ID, retain the requested checkpoint, null-ID intent and unresolved reason; inspect the reserved output and supported runtime evidence to recover that exact original identity.
+   If no original identity can be recovered, stay unresolved even if current
+   state looks settled. Do not advance, retry, or launch a replacement. A crash
+   before invocation is intentionally indistinguishable from a lost response
+   until supported evidence resolves it. The helper can validate the journal
+   and block unknown IDs; the coordinator must establish receipt provenance.
+   Never invent a request ID or pass a new ID as a first-use `--retry-request`; the current public guide/help establishes retries of existing identities, not request preallocation.
+   With the original ID recovered and durably appended, use
+   `orca orchestration request-show --request <original_request_id> --json`:
+   `completed` means inspect its recorded receipt and fresh state without
+   rerunning; `pending` means wait for a still-running original command, or
+   follow the runtime's recovery direction with the original command and
+   `--retry-request <original_request_id>`; `absent` requires inspection,
+   since it does not prove nothing happened. Journal each recovered/replayed
+   receipt with the same original identity before proceeding. Keep the
+   unknown-ID reason if request identity remains unproven.
+
+   Any refusal interrupts the sequence. Record `unresolved` with the refusal,
+   re-read fresh state, then decide. A failed stop never authorizes release;
+   only an independent readback that establishes settlement meets the
+   release precondition, so never replay the historical stop-refused →
+   release-succeeds ordering as a ritual. A lost mutation response is recovered with Orca's request-show / `--retry-request` using the recorded request id, never a blind new mutation.
+6. **Finish.** Restore an attend-pending card as in the Success branch. Do
+   not run `gw work advance` — the worker already advanced the item. The next
+   cycle's classifier reports this key `recovered-settled`.
+
+A replayed delivery or a restart re-enters at step 1 and resumes from the
+record's checkpoint against fresh state. It never repeats a verified stop,
+release, Task completion or stage advance.
 
 ### Failure question
 
@@ -661,17 +1279,29 @@ item* / *stop the run*:
   python3 references/launch-worker.py launch --spec <saved-task-spec> \
     --task <task_id> --dispatch-key <task-title> --run <run_id> \
     --retry-of <dispatch_id> \
-    --recovery-placement <recovery-approved-placement-json>
+    --recovery-placement <recovery-approved-placement-json> > <start-json>
   ```
+
+  `--recovery-placement` opens its argument **as a path** holding a bare JSON
+  argv list — the same shape `place --out-placement` writes, not the keyed
+  object its stdout redirect produces. Get that argv the sanctioned way: either
+  re-run `place` against the recovery-approved worktree to regenerate it, or
+  lift the `placement_argv` array out of the saved `place` result
+  (`references/orca-placement/<key>.json`) into its own file. Never
+  hand-assemble it (§3).
 
   The frozen envelope retains the originally requested placement; the explicit
   recovery placement is the argv Orca authorized after accounting for observed
   allocated resources (for example, `path:<allocated path>` instead of a second
-  `new-child`). The recipe repeats the frozen agent/model/effort and verifies
+  creation). The recipe repeats the frozen agent/model/effort and verifies
   the new requested/effective receipt. `--retry-of` alone does not inherit
   those values. Timeout, absent output, missing terminal, or ambiguous start never
   authorizes retry; preserve task/dispatch identities and follow recovery.
   An explicit reroute is a new deliberate dispatch decision and task identity.
+  Then run `settle-placement` with the original dispatch's saved `place`
+  result (`references/orca-placement/<key>.json`) and the retry's
+  `<start-json>`: the allocated worktree still owes its planned lineage. Once
+  the retry's own placement assertion passes, record its observed placement exactly as §3 step 4 does; never change its frozen envelope.
 - **Skip**: `orca orchestration task-update --id <task_id> --status blocked
   --run <run_id>`. The durable `blocked` status distinguishes this deliberate
   choice from a task reserved before a crash but never started. The task stays
@@ -701,6 +1331,43 @@ deciding what the options mean is the worker's job.
    the original message was sent *from*, and Orca relays a reply on a
    `dispatch:…` handle into the live worker session, unblocking its
    blocking `ask` call.
+2a. **If `reply` refuses `dispatch_inactive`:** the question's Dispatch has
+    ended. **Do not assume that means a park.** All four Dispatch-ending
+    events close a pending question the same way — accepted success, accepted
+    failure, `worker-stop`, and `worker-abandon` — so a worker that gave up
+    the legacy way (`worker_done --outcome failed`, no checkpoint, no hold)
+    produces this identical refusal. Treating that as "parked, answer saved"
+    would report a real failure as resumable and silently drop the answer.
+    Verify before you classify:
+
+    1. **Resolve the path.** The message's sender handle is `dispatch:<id>`;
+       join that dispatch id to its `taskId` through §2.1's worker-list
+       snapshot, then read that Task's `display_name` from `task-list` and
+       split it on the first ` · ` (§2.5.2's key-to-path rule — a key is not
+       reversible, the display name is the only durable carrier).
+    2. **Re-read hold state fresh — never this cycle's snapshot.** The park
+       hold is filed by the worker *after* the question was sent and *after*
+       the human spent time answering, so it cannot be in a plan taken before
+       the `AskUserQuestion` was even raised. Run
+       `gw work orchestrate <work-path> --json` again now (or
+       `gw work decision list <owner-path> --json` when the owner is already
+       known) and look for an entry naming this path with
+       `decision.hold == "park"` and a non-null `decision.checkpoint`.
+    3. **Park found** → the answer is not lost. Write it as that hold's
+       decision answer:
+       ```
+       gw work decision answer <owner_path> <decision.id> --answer "<the user's answer>" --json
+       ```
+       Report that the item is now resumable and will be picked up on the
+       coordinator's next planning cycle (§2.6's resume amendment) — do not
+       report the reply itself as delivered, since it was refused.
+    4. **No park found** → this is a non-park closure, not a park: the
+       Dispatch ended by failure, success, stop or abandon with the question
+       still open. Say so plainly, name the answer the human gave so it is at
+       least in the scrollback, and route this dispatch into the failure flow
+       (§4.2) — its failure question is where retry / skip / stop gets
+       decided. Never write the answer into an unrelated ledger entry to make
+       it look saved.
 3. A typed-`discard` confirmation some finish flows require is just a
    second question/reply round-trip initiated by the worker — handle it the
    same way, no special-casing here.
@@ -738,9 +1405,17 @@ wait-timeout.
 **Resume** is just re-running `/gw:auto-drive <work-path>` (§1 re-binds
 the same Run by objective). Cycle 1's live-derivation (§2.1) classifies
 every existing task — live, settled, or dead — before anything else
-happens; dead dispatches enter the failure flow immediately. Nothing is
+happens; dead dispatches enter the failure flow immediately, except rows
+carrying `recovery`, which resume §4.1.1 from their checkpoint. Nothing is
 reconstructed from conversation memory: a fresh session with zero context
 resumes identically to one that's been running for hours.
+A dispatch whose placement is unrecorded after a restart re-enters §3 step 4:
+write `{"ok": true, "result": {"dispatchId": "<dispatch_id>"}}` as
+`<start-json>` (the helper then finds the worktree through `worker-show`),
+re-run `settle-placement` against its saved
+`references/orca-placement/<key>.json` (a crash between start and the lineage
+`set` leaves a correctly based child with no parent, which this repairs
+without launching anything), then enter the record block at its step 1.
 
 **Wrap-up** (§2.3 reported `terminal: true`):
 
@@ -751,17 +1426,36 @@ resumes identically to one that's been running for hours.
    For `recovery-inspection`, retain and print its task/dispatch IDs, inspect
    recovery, and stop without releasing it or reporting verified completion.
    A missing terminal never substitutes for launch proof.
+   `recovered-settled` is already released: never issue a second `worker-release` for `recovered-settled`.
+   A `recovery-inspection` row carrying `recovery` is unresolved: print its
+   task/dispatch IDs, record path, checkpoint and reason, and stop without
+   reporting verified completion.
 2. Print a run summary: items resolved, branches merged back (from each
    settled dispatch's `merge_target`), anything skipped (§4.1's skip
-   choices this run), anything left in `blocked[]`.
+   choices this run — keys the fresh classifier calls `deliberate-skip`, not
+   `parked`), anything **parked** (keys classified `parked`, each with the
+   checkpoint and the decision id still awaiting an answer — say plainly that
+   these are not skips and that answering the decision resumes them),
+   anything left in `blocked[]`. Report accepted worker
+   completions (`settled`), coordinator-recovered completions
+   (`recovered-settled`, naming each record), and unresolved recovery
+   records as three separate lists.
 3. Print the §2.5 decision lines one final time from the terminal plan's
    JSON. §2.3 routes a terminal plan straight here without running §2.5, so
    without this an `assumed` decision nobody ever confirmed would go
    unmentioned at the end of the run — "epic finished with assumed decisions
    nobody looked at" is exactly the silent failure the ledger exists to
    prevent. Printing costs nothing; skip only when both lists are empty.
-4. Stop. Merging the epic branch to `develop` is **not** this coordinator's
-   job — it happens inside the root item's finish-relay stage, not here.
+4. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
+   whose frontmatter carries `branch:` owns an integration branch its children
+   merged into, so `gw work orchestrate` plans a finish dispatch for it rather
+   than an advance. That worker (`gw:finishing-relay`) merges the branch into
+   the `merge_target` its dispatch named and resolves the root only after
+   verified integration; a `pr`, `hold` or `discard` outcome leaves the root at
+   `phase: finish`, so the plan is not terminal. An unstamped Epic or Release root owns no branch
+   and resolves through a planned advance with nothing to merge. Report the
+   root's integration, from its settled finish dispatch's `merge_target` and
+   `resolved_in`, in step 2's summary; never merge it again here.
 
 **User stop** (mid-run, on explicit instruction): exit the loop between
 cycles — never mid-dispatch. Live workers keep running independently; offer
@@ -787,3 +1481,6 @@ before exiting — same mechanics as the failure question's Stop branch
 - Auto-retry of failed stages, and automatic merge-conflict resolution for
   parallel forks — both explicit policy (see the failure question and the
   `affects`-disjoint rule), not gaps.
+- Explaining or fixing why Orca rejected a historical `worker_done` (the
+  caller pane/leaf/incarnation divergence). That is upstream; the design's
+  upstream report draft is not filed by this skill, and §4.1.1 only recovers.

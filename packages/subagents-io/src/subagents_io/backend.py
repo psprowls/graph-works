@@ -175,8 +175,9 @@ class DispatchBackend(Protocol):
 
     `provisions_worktrees` is `False` on every backend this package ships.
     It exists so a future backend that obtains its own worktrees (Orca's
-    `worker-start --worktree new-child`, see the `workflow-orca` sibling) can
-    declare that capability on the shared Protocol instead of a new method —
+    `worker-start --worktree new-top-level --repo id:<repo>`, see the
+    `workflow-orca` sibling) can declare that capability on the shared
+    Protocol instead of a new method —
     a coordinator checks the flag before it plans, rather than discovering the
     gap when a `PlannedDispatch` that worked on one backend raises
     `WorktreeNotProvisioned` on another.

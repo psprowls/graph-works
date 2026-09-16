@@ -24,6 +24,12 @@ MANAGED_ARTIFACTS: Mapping[str, str] = MappingProxyType(
     }
 )
 
+#: The managed-artifact ordinal each parkable phase's own artifacts carry
+#: (``01-design.md``, ``02-plan.md``, ``03-execute-*``, ``04-finish-*``).
+PHASE_ORDINALS: Mapping[str, str] = MappingProxyType({"design": "01", "plan": "02", "execute": "03", "finish": "04"})
+
+_DECISION_ID_RE = re.compile(r"D-\d+")
+
 
 @dataclass(frozen=True, slots=True)
 class ArtifactRef:
@@ -142,11 +148,29 @@ def artifact_ref(item_path: str, filename: str) -> ArtifactRef:
     )
 
 
+def checkpoint_ref(item_path: str, phase: str, decision_id: str) -> ArtifactRef:
+    """Reference a park checkpoint named by phase and decision id.
+
+    This is built directly rather than through :func:`artifact_ref`: the
+    uppercase ``D-`` is not a kebab-case source id, and checkpoints are not
+    stamped into ``sources[]``. The ledger entry's ``checkpoint:`` is their
+    pointer.
+    """
+    ordinal = PHASE_ORDINALS.get(phase)
+    if ordinal is None:
+        raise ValueError(f"no checkpoint for phase {phase!r}; expected one of {sorted(PHASE_ORDINALS)}")
+    if _DECISION_ID_RE.fullmatch(decision_id) is None:
+        raise ValueError(f"malformed decision id {decision_id!r}; expected a form like 'D-014'")
+    return ArtifactRef(rel=f"{references_dir(item_path).rel}/{ordinal}-{phase}-checkpoint-{decision_id}.md")
+
+
 __all__ = [
     "MANAGED_ARTIFACTS",
+    "PHASE_ORDINALS",
     "ArtifactRef",
     "ItemLocation",
     "artifact_ref",
+    "checkpoint_ref",
     "child_lane",
     "item_page",
     "owned_dir",

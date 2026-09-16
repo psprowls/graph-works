@@ -303,6 +303,36 @@ stale, no follow-up is filed. If filing fails after partial effects, the raised
 partial filing application, with the original `FilingApplyError` as its
 `__cause__`; this is observable partial-effect reporting, not rollback.
 
+### Intentional holds while the ledger owner is at finish
+
+A named open question, skip, or park can be filed while its ledger owner is at
+`finish`. Filing retains the shared decision-owner lock and applies the ledger,
+owner source, and any park checkpoint in one rollback-journaled transaction.
+The affected item stays held until all its open entries are answered or
+superseded. The owner can differ from the affected child; standalone fallback
+owners use the same policy.
+
+This is an explicit operation-specific exception to ADR-0040's default
+no-surplus postcondition guarantee. Only decision append grants a budget of
+one `(owner page member, decisions.open-at-finish)` surplus finding, and only
+when the new entry names an existing, non-archived, nonterminal item whose
+resolved ledger owner is that owner. Unnamed, missing-target, terminal-target,
+and foreign-owner questions receive no exception. Answer, supersede, and stage
+advance receive none either. The real baseline is consumed first; all other
+findings, structural checks, and absolute index checks keep their existing
+behavior. If baseline capture fails, the allowance is disabled and the
+absolute fallback applies.
+
+The ordinary lint catalog is unchanged: `decisions.open-at-finish` remains an
+error. Consumed allowances appear in command warnings as operation-specific,
+separately from pre-existing findings. The `planned` journal record stores the
+exact counted allowance before effects begin, and completion-evidence checking
+includes it. Any unrelated failure restores the entire snapshot, including a
+park checkpoint. An interrupted journal keeps its existing recovery treatment;
+an allowance is evidence of requested validation policy, never permission to
+replay effects or declare completion. Validation still runs on both sides of
+the mutation; the additional cost is a small counter and a journal field.
+
 ## The graph surface
 
 `code-graph-io` takes a resolved `graph_dir` and raises typed exceptions. A
@@ -433,25 +463,41 @@ writes; `workspace.dispatch_projection` owns cache freshness and publication.
 See [Dispatch rules](docs/dispatch-rules.md) for YAML examples, matching and
 reset semantics, launch accounting, and exact manual cutover instructions.
 
-`orchestrate` splits the way `route()` does, across two modules. In
+`orchestrate` splits planning, stage advancement and placement across three modules. In
 `commands.py`, `plan()` is IO-free — plain `WorkItem` data in, an
 `OrchestratePlan` out — so every rule (affects serialization, capacity, the
 four worktree rules, model resolution) is a table test, and `run_orchestrate()`
 is the shell around it that reads config, stats worktrees and runs git.
 `stage_advance.py` holds `run_stage_advance()`, the separate shell `gw work
-advance` routes through. Neither module re-exports the other.
+advance` routes through, and `placement.py` holds `run_record_placement()`,
+behind `gw work record-placement`. None re-exports another.
 
-**A stage that cannot produce a commit does not acquire a placement stamp.**
-`design` and `plan` write only into the vault, so a descendant at either phase
-reuses the epic worktree as a *read* context and records nothing — neither the
-planner's prompt nor `run_stage_advance`'s cwd inference stamps it. At
-`execute` and `finish` the same descendant forks a child branch off the epic
-branch and stamps normally. The **subtree root is exempt at every phase**: its
-stamp is the epic anchor every descendant resolves against, and an epic's
-`execute` dispatches children rather than a worker for itself, so a root that
-skipped `design` and `plan` would never stamp at all. `worktree` therefore
-means exactly "a code stage ran here". An explicit `--worktree`/`--branch`
-pair still wins over all of it — a stated placement is never a guess.
+**A reservation describes an emitted dispatch, not a candidate.** `plan()`
+walks the sorted candidates once and checks each against every gate in order —
+declared affects, overlap with live or already-emitted dispatches, capacity,
+dispatch profile, placement, backend provisioning. Only a candidate that
+passes all of them consumes a slot, claims a worktree, or reserves its
+`affects`. A candidate refused at any gate reserves nothing, so an overlapping
+sibling behind it can still dispatch in the same cycle. Live dispatches always
+reserve. A dispatch the coordinator chooses not to launch after planning is
+outside `plan()`'s view: it still reserved in that plan.
+
+**Placement is recorded from observation, not inferred (D-006).** Orca's actual
+worktree and branch are knowable only after launch, and the recorded pair
+selects every later stage's placement. The coordinator therefore records the
+observed pair with `gw work record-placement` (`orchestrate/placement.py`),
+which writes only `worktree`, `branch` and `updated`, never fires a routing
+transition, and runs under the same decision-owner lock as `gw work advance`.
+It refuses when the item's phase no longer matches the recorded dispatch, so a
+worker that finishes first produces a visible refusal instead of a stamp on the
+wrong stage. The subtree root is recorded at every phase — its stamp is the
+anchor descendants resolve against — and a descendant only at `execute` and
+`finish`: a `design` or `plan` stage writes only into the vault and reuses the
+epic worktree as a read context. `plan()` attaches the epic pair only to the
+root's planned advance. `run_stage_advance` infers a pair from cwd only for a
+top-level item, and never with `infer_worktree=False` (`--no-infer-worktree`),
+which every supervised worker passes. An explicit `--worktree`/`--branch` pair
+on an attended advance is still applied as stated.
 
 **Cold start mints the epic worktree; there is no opportunistic main-checkout
 placement.** `default_base` is trunk, and a stage dispatched onto trunk commits

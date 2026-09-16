@@ -96,7 +96,9 @@ def make_dispatch(
         mode=mode,
         model=None,
         reasoning_effort=None,
-        worktree=WorktreeAction(action="reuse", path=worktree_path, branch="b", base_branch=None, exists=True),
+        worktree=WorktreeAction(
+            action="reuse", path=worktree_path, branch="b", base_branch=None, exists=True, parent_path=None
+        ),
         merge_target="main",
         prompt=" ".join(program),
     )

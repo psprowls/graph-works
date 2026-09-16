@@ -166,6 +166,57 @@ assert_skill_dir "epic-design" \
 assert_contains "skills/file/SKILL.md" "## Auto-file mode (hook-triggered)" \
     "the file skill carries the section the hook's auto-file clause names"
 
+# The grace-period protocol doc is referenced by GRACE_PERIOD_TAIL and must
+# document the key CLI calls that workers use to implement it.
+assert_contains "skills/auto-drive/references/grace-period-protocol.md" "gw work decision add" \
+    "grace-period-protocol.md must document the --hold park CLI call"
+
+assert_contains "skills/auto-drive/references/grace-period-protocol.md" "orca orchestration ask --resume" \
+    "grace-period-protocol.md must document the --resume re-arm call"
+
+grep -q "grace-period-protocol.md" "$PLUGIN_ROOT/skills/finishing-relay/SKILL.md" \
+  || fail "finishing-relay/SKILL.md R3 must point at the shared grace-period protocol"
+
+# --- park/resume seam assertions -----------------------------------------
+# These four pin seams that the whole grace-period feature hangs off and that
+# nothing else can catch: each one is prose that has to agree with a mechanism
+# living somewhere else, and a silent edit to either side breaks resume with no
+# test failure anywhere.
+
+# `launch --retry-of` reuses the ORIGINAL frozen Task spec -- `worker-start`'s
+# --task and --spec are mutually exclusive -- so `resume-spec`'s augmented
+# prompt never reaches the resumed worker. The `send --to dispatch:<new id>`
+# follow-up is the only thing that actually delivers the answer; without it the
+# resumed worker re-asks the question this feature exists to stop it re-asking.
+assert_contains "skills/auto-drive/SKILL.md" "orca orchestration send --to dispatch:<new dispatch_id>" \
+    "auto-drive §2.6 sends the resume context to the newly-launched dispatch"
+
+# A parked item's Task still exists, so §2.6's ordinary dedupe rule would
+# filter it out before the resume amendment ever ran. The exemption has to be
+# written down, keyed on the classifier action the helper actually emits.
+assert_contains "skills/auto-drive/SKILL.md" '- `parked`:' \
+    "auto-drive §2.1 documents the parked classification"
+assert_contains "skills/auto-drive/references/launch-worker.py" '"parked"' \
+    "launch-worker.py's classifier emits the parked action §2.1 documents"
+
+# D-004's "the coordinator parks itself when nothing else can proceed": without
+# an explicit exit the loop spins on `check --wait` forever with nothing live.
+assert_contains "skills/auto-drive/SKILL.md" "### 2.6.1 Self-park" \
+    "auto-drive has a main-cycle exit for a run with only parked work left"
+
+# A dispatch key is one-way. `--display-name "<work-path> · <phase>"` is the
+# only durable key-to-path carrier, and both §2.5.2 and §4.3 depend on it.
+assert_contains "skills/auto-drive/SKILL.md" 'split it on the first ` · `' \
+    "auto-drive resolves a key back to a work path through the Task display name"
+
+# `launch --recovery-placement` opens its argument as a FILE PATH; an inline
+# JSON literal fails. §2.6 must hand it the temp file, not a quoted array.
+if grep -Fq -- "--recovery-placement '" "$PLUGIN_ROOT/skills/auto-drive/SKILL.md"; then
+    fail "auto-drive passes --recovery-placement a file path, never an inline JSON literal"
+else
+    pass "auto-drive passes --recovery-placement a file path, never an inline JSON literal"
+fi
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

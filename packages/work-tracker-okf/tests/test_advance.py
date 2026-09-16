@@ -5,6 +5,7 @@ import pytest
 from okf_io import Bundle, parse
 from work_helpers import make_item
 from work_tracker_okf.advance import AdvancePlan, FieldChange, advance, apply
+from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import load_items
 from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition
@@ -33,6 +34,139 @@ def test_release_finish_records_released_at_and_resolves():
     assert plan.refusal is None
     assert FieldChange("work_status", "in-progress", "resolved") in plan.changes
     assert FieldChange("released_at", None, released_at) in plan.changes
+
+
+# --- a stamped parent resolves only with a resolution ref (D-002) ---------
+
+_STAMP = {"branch": "epic/integration-1a2b3c4d", "worktree": "/wt/integration"}
+
+
+def _stamped(type_: str, **overrides):
+    return make_item(
+        "work/parent-int", type=type_, phase="finish", work_status="in-progress", **{**_STAMP, **overrides}
+    )
+
+
+def test_a_stamped_epic_cannot_finish_without_a_resolution_ref():
+    item = _stamped("Epic")
+    plan = advance((item,), item.path, today=TODAY)
+    assert plan.refusal == "resolved-in-required"
+    assert plan.changes == ()
+
+
+def test_a_stamped_epic_resolves_with_a_resolution_ref():
+    item = _stamped("Epic")
+    plan = advance((item,), item.path, today=TODAY, resolved_in="abc1234")
+    assert plan.refusal is None
+    assert FieldChange("phase", "finish", "done") in plan.changes
+    assert FieldChange("work_status", "in-progress", "resolved") in plan.changes
+    assert FieldChange("resolved_in", None, "abc1234") in plan.changes
+
+
+def test_an_unstamped_epic_still_resolves_with_nothing_supplied():
+    item = make_item("work/parent-int", type="Epic", phase="finish", work_status="in-progress")
+    plan = advance((item,), item.path, today=TODAY)
+    assert plan.refusal is None
+    assert FieldChange("work_status", "in-progress", "resolved") in plan.changes
+    assert "resolved_in" not in _keys(plan)
+
+
+def test_a_stamped_release_refuses_its_missing_date_first():
+    item = _stamped("Release")
+    plan = advance((item,), item.path, today=TODAY)
+    assert plan.refusal == "released-at-required"
+    assert plan.changes == ()
+
+
+def test_a_stamped_release_with_a_date_still_needs_a_resolution_ref():
+    item = _stamped("Release")
+    plan = advance((item,), item.path, today=TODAY, released_at=date(2026, 8, 9))
+    assert plan.refusal == "resolved-in-required"
+    assert plan.changes == ()
+
+
+def test_a_stamped_release_resolves_with_its_date_and_a_resolution_ref():
+    item = _stamped("Release")
+    released_at = date(2026, 8, 9)
+    plan = advance((item,), item.path, today=TODAY, released_at=released_at, resolved_in="abc1234")
+    assert plan.refusal is None
+    assert FieldChange("phase", "finish", "done") in plan.changes
+    assert FieldChange("work_status", "in-progress", "resolved") in plan.changes
+    assert FieldChange("released_at", None, released_at) in plan.changes
+    assert FieldChange("resolved_in", None, "abc1234") in plan.changes
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+def test_a_stamped_parent_with_an_open_child_is_blocked_not_resolved(type_: str):
+    child_path = "work/parent-int/children/bug-late"
+    parent = _stamped(type_, active_child_paths=(child_path,))
+    child = make_item(
+        child_path,
+        type="Bug",
+        parent_path=parent.path,
+        ancestor_paths=(parent.path,),
+        work_status="open",
+        phase="execute",
+    )
+    plan = advance((parent, child), parent.path, today=TODAY, resolved_in="abc1234", released_at=TODAY)
+    assert plan.refusal == "blocked"
+    assert child.path in plan.detail
+    assert plan.changes == ()
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+@pytest.mark.parametrize("has_branch", [False, True])
+def test_a_parent_with_an_open_grandchild_is_blocked_regardless_of_branch_ownership(type_: str, has_branch: bool):
+    child_path = "work/parent-int/children/feature-done"
+    grandchild_path = f"{child_path}/children/bug-late"
+    parent = _stamped(type_, branch=_STAMP["branch"] if has_branch else None, active_child_paths=(child_path,))
+    child = make_item(
+        child_path,
+        type="Feature",
+        parent_path=parent.path,
+        ancestor_paths=(parent.path,),
+        active_child_paths=(grandchild_path,),
+        work_status="resolved",
+        phase="done",
+    )
+    grandchild = make_item(
+        grandchild_path,
+        type="Bug",
+        parent_path=child.path,
+        ancestor_paths=(parent.path, child.path),
+        work_status="open",
+        phase="execute",
+    )
+    plan = advance((parent, child, grandchild), parent.path, today=TODAY, resolved_in="abc1234", released_at=TODAY)
+    assert plan.refusal == "blocked"
+    assert grandchild.path in plan.detail
+    assert plan.changes == ()
+    assert plan.route is not None
+    assert plan.route.dispatch is None
+    assert plan.route.on_complete is None
+    assert plan.route.repair == Transition(phase="execute", work_status="in-progress")
+
+
+@pytest.mark.parametrize("type_", ["Epic", "Release"])
+@pytest.mark.parametrize("has_branch", [False, True])
+@pytest.mark.parametrize("return_", [False, True])
+def test_a_held_parent_cannot_finish_or_return_regardless_of_branch_ownership(
+    type_: str, has_branch: bool, return_: bool
+):
+    item = _stamped(type_, branch=_STAMP["branch"] if has_branch else None)
+    hold = HoldFact(item.path, "D-009", "skip", "finish")
+    plan = advance(
+        (item,),
+        item.path,
+        today=TODAY,
+        hold=hold,
+        return_=return_,
+        resolved_in=None if return_ else "abc1234",
+        released_at=TODAY,
+    )
+    assert plan.refusal == "blocked"
+    assert "open decision D-009 (skip)" in plan.detail
+    assert plan.changes == ()
 
 
 # --- refusals -------------------------------------------------------------
@@ -64,6 +198,24 @@ def test_a_blocked_route_is_refused_with_the_blockers_as_detail():
     plan = _plan_for([make_item("a", type="Widget")], "a")
     assert plan.refusal == "blocked"
     assert "Widget" in plan.detail
+
+
+@pytest.mark.parametrize(
+    ("phase", "work_status", "kwargs"),
+    [
+        (None, "open", {}),
+        ("design", "open", {}),
+        ("finish", "in-progress", {"return_": True}),
+    ],
+)
+def test_advance_refuses_a_held_item_in_every_mode(phase, work_status, kwargs) -> None:
+    item = make_item("work/feature-a", type="Feature", phase=phase, work_status=work_status, effort="medium")
+    assert advance((item,), item.path, today=TODAY, **kwargs).refusal is None
+    hold = HoldFact(item.path, "D-003", "skip", phase or "entry")
+    plan = advance((item,), item.path, today=TODAY, hold=hold, **kwargs)
+    assert plan.refusal == "blocked"
+    assert "open decision D-003 (skip) holds work/feature-a" in plan.detail
+    assert plan.changes == ()
 
 
 def test_advance_only_blocks_at_the_dependency_edge_phase() -> None:

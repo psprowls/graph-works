@@ -7,6 +7,7 @@ from work_tracker_okf.hierarchy import (
     archive_held_by_ancestor,
     child_gated,
     child_rollup,
+    decision_owner,
     descend,
     nearest_epic,
     nearest_parent,
@@ -84,6 +85,28 @@ def test_hierarchy_queries_handle_unknown_missing_archived_and_cycles() -> None:
     assert nearest_parent(items, "work/unknown") is None
     assert nearest_epic(items, bug.path) is None
     assert nearest_epic(items, "work/unknown") is None
+
+
+def test_decision_owner_prefers_the_nearest_parent_and_falls_back_to_the_item() -> None:
+    epic = make_item(
+        "work/epic-a",
+        type="Epic",
+        active_child_paths=("work/epic-a/children/bug-a",),
+    )
+    bug = make_item(
+        "work/epic-a/children/bug-a",
+        type="Bug",
+        parent_path=epic.path,
+        ancestor_paths=(epic.path,),
+    )
+    lone = make_item("work/bug-lone", type="Bug")
+    feature = make_item("work/feature-f", type="Feature")
+    items = (epic, bug, lone, feature)
+
+    assert decision_owner(items, bug.path) == epic.path
+    assert decision_owner(items, feature.path) == feature.path
+    assert decision_owner(items, lone.path) == lone.path
+    assert decision_owner(items, "work/unknown") is None
 
 
 def test_dispatch_helpers_cover_gating_unknown_edges_and_blocked_descent() -> None:

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 from work_tracker_okf import paths
-from work_tracker_okf.paths import ArtifactRef
+from work_tracker_okf.paths import PHASE_ORDINALS, ArtifactRef, checkpoint_ref
 
 
 def test_nested_archive_path_derives_owner_and_ancestors() -> None:
@@ -122,3 +122,20 @@ def test_the_coverage_artifact_is_a_canonical_member_that_moves() -> None:
     from work_tracker_okf.mutation import _CANONICAL_FILENAMES
 
     assert "03-execute-coverage.md" in _CANONICAL_FILENAMES
+
+
+def test_checkpoint_ref_uses_the_phase_ordinal_and_decision_id() -> None:
+    ref = checkpoint_ref("work/epic-a/children/feature-b", "execute", "D-007")
+    assert ref.rel == "work/epic-a/children/feature-b/references/03-execute-checkpoint-D-007.md"
+    assert ref.resource == "/work/epic-a/children/feature-b/references/03-execute-checkpoint-D-007.md"
+    assert ref.source_id is None
+    assert dict(PHASE_ORDINALS) == {"design": "01", "plan": "02", "execute": "03", "finish": "04"}
+
+
+@pytest.mark.parametrize(
+    ("phase", "decision_id"),
+    [("entry", "D-001"), ("done", "D-001"), ("plan", "pending")],
+)
+def test_checkpoint_ref_rejects_unparkable_phases_and_ids(phase: str, decision_id: str) -> None:
+    with pytest.raises(ValueError):
+        checkpoint_ref("work/a", phase, decision_id)

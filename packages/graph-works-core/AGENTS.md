@@ -75,7 +75,7 @@ shell-syntax command string here.
 ### Module layout (three import-linter layers, per the package `__init__.py`)
 
 ```
-workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions
+workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
 ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : wiki_stats/ : work/    layer 2, independent verticals
 ```
@@ -84,8 +84,8 @@ Each layer-2 vertical owns one command entry point (`commands.py` when that
 name doesn't collide with the vertical's own name, otherwise a flat module
 like `lint_drift/lint.py`), its own prompts, and nothing else reaches across
 verticals except through `workspace/` — `orchestrate` is the exception,
-split across `commands.py` and `stage_advance.py` at its planner/stage-advance
-seam; see "The dispatch seam" in the README.
+split across `commands.py`, `stage_advance.py` and `placement.py` for planning,
+stage advancement and observed placement; see "The dispatch seam" in the README.
 
 ### The four things "what a workspace is" means concretely
 
@@ -245,10 +245,12 @@ hand. `today` is always injected; nothing in this package reads the clock.
   a `WriteFailure`/`InstallResult` entry in the plan's result.
 
 - **`orchestrate.commands` walks the whole vault on every `plan()` call**
-  (decision-hold scan) and reads the owning epic's decisions ledger *twice*
+  (hold scan via `workspace.decision_owner.holds_by_path`) and reads the owning epic's decisions ledger *twice*
   per plan (once for the routing gate, once for the plan's own decision
   fields) — not one atomic snapshot. Both are known, accepted limits
   documented in the README rather than bugs to fix reflexively.
+
+- `gw work advance` and `gw work decision *` share the decision owner's lock (`workspace.decision_owner.locked_decision_owner`). It is always taken before `apply_mutation`'s locks, never while holding them, and a non-dry-run advance holds it across route, commit gate and write.
 
 - **`__init__.py`'s hoisting rules are intentional, not an oversight if a
   name seems "missing" from the top level.** `manifest`, `roles`, and

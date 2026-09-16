@@ -1,7 +1,8 @@
-"""`gw work decision` — the epic-owned decisions ledger, nested under `gw work`.
+"""`gw work decision` — the decisions ledger, nested under `gw work`.
 
 Every verb accepts any canonical path and core resolves its nearest
-Release/Epic/Feature decision owner, so a fan-out worker need not know it.
+Release/Epic/Feature decision owner, else the item itself, so a fan-out
+worker need not know it.
 
 `overturn` is one logical operation, not two commands: it retires the old
 decision, records its replacement, and files the follow-up work item
@@ -12,6 +13,7 @@ before either write, so an expected refusal leaves both untouched.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import typer
 from graph_works_core.work import commands as work
@@ -40,9 +42,7 @@ def _config(layout: WorkspaceLayout) -> WorkspaceConfig:
 
 
 def _unknown_target(exc: ValueError) -> typer.Exit:
-    """`run_decision_*` raises `ValueError` for an unknown path or one
-    with no decision owner. Both are unresolved targets, so both land on
-    `AMBIGUOUS` -- the message distinguishes them, the exit code does not."""
+    """Unknown decision targets land on `AMBIGUOUS`."""
     rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
 
 
@@ -70,12 +70,17 @@ def add(
     rationale: str = typer.Option("", "--rationale", help="Renders as a **Rationale:** block."),
     if_wrong: str = typer.Option("", "--if-wrong", help="Blast radius; renders as an **If wrong:** block."),
     affects: str = typer.Option("", "--affects", help="Comma-separated child slugs this decision affects."),
+    hold: str = typer.Option("", "--hold", help="park|skip: file this open decision as a typed hold on PATH."),
+    phase: str = typer.Option(
+        "", "--phase", help="PATH's current phase (`entry` when it has none); required with --hold."
+    ),
+    checkpoint: str = typer.Option("", "--checkpoint", help="Draft checkpoint file a park copies under references/."),
     decided_by: str = typer.Option("user", "--decided-by", help="Actor recorded in `decided`."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Plan the append without writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option(""),
 ) -> None:
-    """Append a decision to the owning epic's ledger."""
+    """Append a decision (or a typed hold) to the owner's ledger."""
     layout = resolve_workspace(workspace)
     try:
         result = work.run_decision_add(
@@ -87,6 +92,9 @@ def add(
             rationale=rationale or None,
             if_wrong=if_wrong or None,
             affects=rendering.split_csv(affects),
+            hold=hold or None,
+            phase=phase or None,
+            checkpoint=Path(checkpoint) if checkpoint else None,
             on=_today(),
             decided_by=decided_by,
             dry_run=dry_run,

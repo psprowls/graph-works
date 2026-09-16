@@ -19,6 +19,7 @@ from typing import Literal
 
 from okf_io import Document
 
+from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import active_nonterminal_descendants
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.vocabulary import PARENT_TYPES
@@ -105,6 +106,7 @@ def advance(
     branch: str | None = None,
     return_: bool = False,
     unreadable: Mapping[str, str] | None = None,
+    hold: HoldFact | None = None,
 ) -> AdvancePlan:
     """Plan the next transition for *path*. Mutates nothing, reads no clock.
 
@@ -126,7 +128,7 @@ def advance(
     the OS reason instead of collapsing into `unknown-path`.
     """
     item = next((candidate for candidate in items if candidate.path == path), None)
-    state = state_for(items, path, effort=effort)
+    state = state_for(items, path, effort=effort, hold=hold)
     if item is None or state is None:
         detail = (unreadable or {}).get(f"{path}.md")
         if detail is not None:

@@ -6,10 +6,13 @@ warn	state.archive-eligible	work/bug-superseded-orphan.md	work_tracker_okf._rule
 error	state.superseded-without-link	work/bug-superseded-orphan.md	work_tracker_okf._rules.state	`work_status: superseded` with no `superseded_by`
 error	structure.owned-directory-missing	work/bug-superseded-orphan.md	work_tracker_okf._rules.structure	parent-capable item has no owned directory at `work/bug-superseded-orphan`
 warn	structure.prefix-type-mismatch	work/bug-superseded-orphan.md	work_tracker_okf._rules.structure	basename carries no `feature` prefix, which `type: Feature` implies
+error	decisions.checkpoint-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-006: checkpoint '/work/epic-ledger-at-finish/references/03-execute-checkpoint-D-006.md' is missing or unreadable
 error	decisions.entry-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-002: invalid status 'maybe'; expected one of ['answered', 'assumed', 'open', 'superseded']
 error	decisions.entry-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id 'D-002' is duplicated in the ledger
-error	decisions.entry-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id sequence has a gap: [3] missing between D-001 and D-004
-error	decisions.open-at-finish	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	`phase: finish` with 1 open decision(s): D-002
+error	decisions.entry-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision id sequence has a gap: [3] missing between D-001 and D-006
+error	decisions.hold-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-005: hold 'pause' not in ['park', 'skip']
+warn	decisions.hold-phase-stale	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	open decision D-006 holds work/epic-ledger-at-finish at 'execute', but it is at 'finish'
+error	decisions.open-at-finish	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	`phase: finish` with 2 open decision(s): D-002, D-006
 error	decisions.supersedes-invalid	work/epic-ledger-at-finish.md	work_tracker_okf._rules.decisions	decision D-004 supersedes 'D-009', which does not exist in the ledger
 error	decisions.cite-missing	work/epic-ledger-at-finish/children/feature-ledger-citation.md	work_tracker_okf._rules.decisions	design spec cites 'D-011', which is not in owner 'work/epic-ledger-at-finish/children/feature-ledger-citation''s ledger
 warn	decisions.ledger-missing	work/epic-stalled-decomposition.md	work_tracker_okf._rules.decisions	`type: Epic` at `phase: execute` has no decisions ledger at `work/epic-stalled-decomposition/references/00-decisions.md`

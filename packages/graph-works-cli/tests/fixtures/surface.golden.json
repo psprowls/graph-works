@@ -2096,6 +2096,7 @@
         "next",
         "orchestrate",
         "reconcile-context",
+        "record-placement",
         "regen-index",
         "reparent",
         "status"
@@ -2173,7 +2174,7 @@
     },
     {
       "name": "gw work advance",
-      "help": "Apply the routing table's next transition for PATH.\n\nThe pipeline's single mutation point. An explicit `--worktree`/`--branch`\npair is applied unconditionally -- it is the caller's own resolved\ndecision, which is what lets an item be evicted out of a shared main\ncheckout; without the pair, provenance falls back to cwd inference.\n\n`--start-sha` names where the phase being completed began. Out of `execute`\nit is optional \u2014 core derives one from the worktree's merge base against the\ndefault branch, then from the spec's own anchors. Out of `finish` there is no\nderivation: a guessed range there would sweep in the whole execute range, so\nthe stub is written only when this flag is given.\n\n`--return` is the way home: it walks the routing table's one backwards\ntransition, `finish` -> `execute`, for an item that reached `finish`\nbefore the commit gate existed, that the relay put on hold, or that a\nlater stage-gate sends back. It is refused from any other phase, and is\nmutually exclusive with `--resolved-in`.",
+      "help": "Apply the routing table's next transition for PATH.\n\nThe pipeline's single mutation point. An explicit `--worktree`/`--branch`\npair is applied unconditionally -- it is the caller's own resolved\ndecision, which is what lets an item be evicted out of a shared main\ncheckout; without the pair, a top-level item falls back to cwd inference\nunless `--no-infer-worktree` is given; a descendant never infers \u2014 its\ncoordinator records placement with `gw work record-placement`.\n\n`--start-sha` names where the phase being completed began. Out of `execute`\nit is optional \u2014 core derives one from the worktree's merge base against the\ndefault branch, then from the spec's own anchors. Out of `finish` there is no\nderivation: a guessed range there would sweep in the whole execute range, so\nthe stub is written only when this flag is given.\n\n`--return` is the way home: it walks the routing table's one backwards\ntransition, `finish` -> `execute`, for an item that reached `finish`\nbefore the commit gate existed, that the relay put on hold, or that a\nlater stage-gate sends back. It is refused from any other phase, and is\nmutually exclusive with `--resolved-in`.",
       "short_help": "Apply the routing table's next transition for PATH.",
       "usage": [
         "[OPTIONS]",
@@ -2252,6 +2253,17 @@
           "required": false,
           "default": "",
           "is_flag": false
+        },
+        {
+          "name": "no_infer_worktree",
+          "opts": [
+            "--no-infer-worktree"
+          ],
+          "secondary_opts": [],
+          "help": "Never infer the worktree/branch from the current directory (every supervised worker passes this).",
+          "required": false,
+          "default": false,
+          "is_flag": true
         },
         {
           "name": "start_sha",
@@ -2395,8 +2407,8 @@
     },
     {
       "name": "gw work decision add",
-      "help": "Append a decision to the owning epic's ledger.",
-      "short_help": "Append a decision to the owning epic's ledger.",
+      "help": "Append a decision (or a typed hold) to the owner's ledger.",
+      "short_help": "Append a decision (or a typed hold) to the owner's ledger.",
       "usage": [
         "[OPTIONS]",
         "{path}"
@@ -2471,6 +2483,39 @@
           ],
           "secondary_opts": [],
           "help": "Comma-separated child slugs this decision affects.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "hold",
+          "opts": [
+            "--hold"
+          ],
+          "secondary_opts": [],
+          "help": "park|skip: file this open decision as a typed hold on PATH.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "phase",
+          "opts": [
+            "--phase"
+          ],
+          "secondary_opts": [],
+          "help": "PATH's current phase (`entry` when it has none); required with --hold.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "checkpoint",
+          "opts": [
+            "--checkpoint"
+          ],
+          "secondary_opts": [],
+          "help": "Draft checkpoint file a park copies under references/.",
           "required": false,
           "default": "",
           "is_flag": false
@@ -3405,6 +3450,106 @@
       "path": [
         "work",
         "reconcile-context"
+      ]
+    },
+    {
+      "name": "gw work record-placement",
+      "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites only `worktree`, `branch` and `updated`. Refuses -- writing nothing --\nwhen PATH is not ROOT or its descendant, when a descendant is recorded at\n`design` or `plan`, when PATH's phase is no longer `--phase`, and for an\ninvalid or terminal item or an invalid observation. An identical pair is a\nno-op. The values must be observed, never the planner's requested names.",
+      "short_help": "Record where a dispatched stage runs.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "root",
+          "opts": [
+            "--root"
+          ],
+          "secondary_opts": [],
+          "help": "The orchestration subtree root this dispatch belongs to.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "phase",
+          "opts": [
+            "--phase"
+          ],
+          "secondary_opts": [],
+          "help": "The phase of the dispatch being recorded.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "worktree",
+          "opts": [
+            "--worktree"
+          ],
+          "secondary_opts": [],
+          "help": "The observed absolute worktree path.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "branch",
+          "opts": [
+            "--branch"
+          ],
+          "secondary_opts": [],
+          "help": "The observed branch name, without `refs/heads/`.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Print the plan instead of writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the placement record as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "record-placement"
       ]
     },
     {

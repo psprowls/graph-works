@@ -22,3 +22,21 @@ status: answered
 supersedes: D-009
 
 **Answer:** Yes: D-003 is missing, and D-009 names no entry at all.
+
+## D-005 — Is a malformed hold reported?
+status: answered
+affects: [work/epic-ledger-at-finish]
+decided: 2026-07-13 by fixture-author
+hold: pause
+phase: finish
+
+**Answer:** Yes, at error.
+
+## D-006 — Is a stale park with a missing checkpoint reported?
+status: open
+affects: [work/epic-ledger-at-finish]
+hold: park
+phase: execute
+checkpoint: /work/epic-ledger-at-finish/references/03-execute-checkpoint-D-006.md
+
+**Answer:** Yes: stale at warn, the checkpoint at error, and it is open at finish.

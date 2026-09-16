@@ -53,8 +53,9 @@ package):
 Two strictly-downward stacks, both documented in `__init__.py`:
 
 ```
-items -> hierarchy -> workflow -> {advance, children, projection}
-paths -> {filing, sources, results, mutation, reparent, archive, decisions}
+items -> hierarchy -> workflow -> {advance, children, placement, projection}
+paths -> {filing, sources, results, mutation, reparent, archive, decisions, checkpoints}
+decisions, checkpoints -> holds
 ```
 
 `filing.apply` and `advance.apply` are deliberately different functions with
@@ -96,8 +97,7 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
   cited artifact is inside the moved set — see
   `okf-ext/README.md`'s "reference-style link refuses the whole plan" and
   `work/bug-moves-refuses-footnote-definitions`.
-- Decision ledgers belong to the nearest parent-capable item (`Release`,
-  `Epic`, `Feature`), addressed via `decisions.ledger_ref(owner_path)`.
+- Decision ledgers belong to `hierarchy.decision_owner(items, path)`: the nearest parent-capable item (`Release`, `Epic`, `Feature`), or the item itself when it has none (D-001). They are addressed via `decisions.ledger_ref(owner_path)`. Any open entry naming an item holds it at every phase; `hold: park|skip`, `phase` and `checkpoint` type it, and a park's checkpoint lives at `paths.checkpoint_ref` (never overwritten, never in `sources[]`).
 - Path mutations cover a complete owned subtree, opaque attachments included:
   `Bundle.ignored` files beneath an owned subtree count as members during a
   mutation, so unregistered `references/` content moves with the item while

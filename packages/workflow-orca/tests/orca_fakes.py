@@ -3,7 +3,7 @@
 Argv is the actual contract with Orca, so the suite asserts it directly rather
 than asserting a façade's method calls. `FakeRunner` matches an argv
 subsequence — `("task-list",)` matches any `task-list` call, and
-`("worker-start", "--worktree", "new-child")` matches only that one — so a
+`("worker-start", "--worktree", "new-top-level")` matches only that one — so a
 test states the discriminating flags and stays silent about the rest.
 
 An unmatched call is an `AssertionError` naming the argv, never a default

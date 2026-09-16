@@ -8,13 +8,21 @@ import pytest
 from okf_io import load as load_document
 from work_tracker_okf import compose, decisions
 from work_tracker_okf.decisions import (
+    HOLD_PHASES,
+    HOLD_SHAPES,
+    RECOGNIZED_KEYS,
+    HoldFact,
     append,
     apply_plan,
     counts,
+    hold_fact,
+    holds_for,
     ledger_ref,
     load,
+    next_id,
     parse,
     plan_append,
+    plan_refusal,
     plan_supersede,
     plan_update,
     query,
@@ -32,6 +40,32 @@ status: open
 affects: [work/feature-a]
 
 **Rationale:** pending
+"""
+
+HELD = """\
+# Decisions
+
+## D-001 — Resume where?
+status: open
+affects: [work/feature-a]
+hold: park
+phase: execute
+checkpoint: /work/feature-a/references/03-execute-checkpoint-D-001.md
+
+**Rationale:** parked mid-stage
+
+## D-002 — Stop dispatching?
+status: open
+affects: [work/feature-a]
+hold: skip
+phase: execute
+
+## D-003 — Old question
+status: answered
+affects: [work/feature-a]
+decided: 2026-09-01 by user
+hold: skip
+phase: plan
 """
 
 
@@ -58,6 +92,117 @@ def test_parse_render_round_trip_is_stable() -> None:
     parsed = parse(CANONICAL)
     assert parsed.warnings == []
     assert render(parsed.preamble, parsed.entries) == CANONICAL
+
+
+def test_hold_keys_are_recognized_in_canonical_order() -> None:
+    assert RECOGNIZED_KEYS == ("status", "affects", "decided", "supersedes", "hold", "phase", "checkpoint")
+    assert frozenset({"park", "skip"}) == HOLD_SHAPES
+    assert frozenset({"design", "plan", "execute", "finish", "done", "entry"}) == HOLD_PHASES
+
+
+def test_hold_keys_round_trip_byte_stable() -> None:
+    parsed = parse(HELD)
+    assert parsed.warnings == []
+    park, skip, history = parsed.entries
+    assert (park.hold, park.phase, park.checkpoint) == (
+        "park",
+        "execute",
+        "/work/feature-a/references/03-execute-checkpoint-D-001.md",
+    )
+    assert (skip.hold, skip.phase, skip.checkpoint) == ("skip", "execute", None)
+    assert (history.hold, history.phase) == ("skip", "plan")
+    assert all(entry.extra_keys == () for entry in parsed.entries)
+    assert render(parsed.preamble, parsed.entries) == HELD
+
+
+def test_hand_written_hold_keys_normalize_into_canonical_order() -> None:
+    text = "## D-001 — q\nphase: plan\nhold: skip\nstatus: open\naffects: [work/a]\n"
+    parsed = parse(text)
+    assert render(parsed.preamble, parsed.entries) == (
+        "## D-001 — q\nstatus: open\naffects: [work/a]\nhold: skip\nphase: plan\n"
+    )
+
+
+def test_unknown_hold_and_phase_values_warn_and_are_kept() -> None:
+    parsed = parse("## D-001 — q\nstatus: open\naffects: [work/a]\nhold: pause\nphase: someday\n")
+    entry = parsed.entries[0]
+    assert (entry.hold, entry.phase) == ("pause", "someday")
+    assert any("invalid hold 'pause'" in warning for warning in parsed.warnings)
+    assert any("invalid phase 'someday'" in warning for warning in parsed.warnings)
+
+
+def test_holds_for_returns_open_entries_naming_the_path_in_id_order() -> None:
+    entries = parse(HELD).entries
+    assert [entry.id for entry in holds_for(list(reversed(entries)), "work/feature-a")] == ["D-001", "D-002"]
+    assert holds_for(entries, "work/other") == ()
+
+
+def test_hold_fact_projects_shape_with_question_default() -> None:
+    park = parse(HELD).entries[0]
+    assert hold_fact(park, "work/feature-a") == HoldFact("work/feature-a", "D-001", "park", "execute")
+    question = parse(CANONICAL).entries[0]
+    assert hold_fact(question, "work/feature-a") == HoldFact("work/feature-a", "D-001", "question", None)
+
+
+def test_malformed_hold_shape_still_projects_as_a_hold() -> None:
+    entry = parse("## D-001 — q\nstatus: open\naffects: [work/a]\nhold: pause\n").entries[0]
+    assert hold_fact(entry, "work/a").shape == "pause"
+    assert holds_for([entry], "work/a") == (entry,)
+
+
+def test_next_id_is_max_plus_one() -> None:
+    assert next_id(parse(HELD).entries) == ("D-004", 4)
+    assert next_id([]) == ("D-001", 1)
+
+
+def test_plan_append_records_hold_keys(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    plan = plan_append(
+        ledger,
+        question="Stop?",
+        status="open",
+        answer=None,
+        rationale=None,
+        if_wrong=None,
+        affects=("work/feature-a",),
+        on=DAY,
+        decided_by="coordinator",
+        hold="park",
+        phase="execute",
+        checkpoint="/work/feature-a/references/03-execute-checkpoint-D-001.md",
+    )
+    assert plan.refusal is None and plan.primary is not None
+    rendered = render("", plan.after)
+    assert (
+        "hold: park\nphase: execute\ncheckpoint: /work/feature-a/references/03-execute-checkpoint-D-001.md" in rendered
+    )
+
+
+def test_plan_append_refuses_a_non_open_hold(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    plan = plan_append(
+        ledger,
+        question="Stop?",
+        status="answered",
+        answer="yes",
+        rationale=None,
+        if_wrong=None,
+        affects=("work/feature-a",),
+        on=DAY,
+        decided_by="user",
+        hold="skip",
+        phase="plan",
+    )
+    assert plan.refusal == "hold-status"
+    assert plan.after == plan.before
+
+
+def test_plan_refusal_snapshots_without_writing(tmp_path: Path) -> None:
+    ledger = _ledger(tmp_path)
+    ledger.write_text(HELD, encoding="utf-8", newline="")
+    plan = plan_refusal(ledger, "checkpoint-exists", "already there")
+    assert (plan.refusal, plan.detail, plan.snapshot.text) == ("checkpoint-exists", "already there", HELD)
+    assert plan.primary is None and plan.after == plan.before
 
 
 def test_parse_render_round_trip_is_idempotent_on_a_second_pass() -> None:

@@ -29,7 +29,8 @@ from typing import Literal
 from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from work_tracker_okf import decisions as _decisions
-from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, nearest_parent
+from work_tracker_okf.decisions import HoldFact
+from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.vocabulary import (
     PHASES,
@@ -38,6 +39,7 @@ from work_tracker_okf.vocabulary import (
 )
 from work_tracker_okf.workflow import RouteResult, route, state_for
 
+from graph_works_core.workspace.decision_owner import HoldReport, holds_by_path, open_holds
 from graph_works_core.workspace.dispatch import (
     DispatchProfileError,
     DispatchResolution,
@@ -215,9 +217,9 @@ def session_index(items: Iterable[WorkItem]) -> tuple[dict[str, WorkItem], tuple
     **Ambiguity is detected, never resolved by guessing.** Two pairs can
     collide only through an eight-hex `sha256` prefix collision or a
     `session_name` truncation collision. Either way the entry is dropped and
-    a warning is returned: a `--live` key that names it then reports
-    `matches no known item`, which is a true statement, where binding it to
-    whichever item happened to be enumerated first would be a false one.
+    a warning is returned. A `--live` key that names it then refuses the
+    entire plan: its owner cannot be resolved safely, so neither affects
+    nor worktree occupancy can be reserved for it.
     """
     index: dict[str, WorkItem] = {}
     collisions: dict[str, list[str]] = {}
@@ -273,7 +275,7 @@ def _children_of(items: Sequence[WorkItem]) -> dict[str, list[WorkItem]]:
 
 
 def _frontier(
-    items: Sequence[WorkItem], root: str, *, held_decisions: frozenset[str] = frozenset()
+    items: Sequence[WorkItem], root: str, *, holds: Mapping[str, HoldFact] = MappingProxyType({})
 ) -> tuple[list[tuple[WorkItem, RouteResult]], list[PlannedAdvance], list[BlockedItem]]:
     """Every actionable node at or below *root*. Cycle-safe and depth-capped.
 
@@ -314,7 +316,7 @@ def _frontier(
             )
             continue
         children = children_of.get(path, [])
-        state = state_for(items, path, has_open_decision=path in held_decisions)
+        state = state_for(items, path, hold=holds.get(path))
         if state is None:  # pragma: no cover -- `path` came out of `by_path`
             continue
         result = route(state)
@@ -466,6 +468,7 @@ def _resolve_worktree(
     is_root: bool,
     repo_path: str | None,
     inventory: Mapping[str, str],
+    code_repo: str | None = None,
 ) -> tuple[WorktreeAction | _Refusal | None, bool]:
     """The four rules, in order: reuse the item's own stamp; else reuse the epic
     worktree when unoccupied and this dispatch is entitled to it; else fork a
@@ -484,14 +487,26 @@ def _resolve_worktree(
     consuming a slot.
 
     A stamp equal to `repo_path` resolves to `"main"` rather than `"reuse"`
-    every time. The distinction is not cosmetic: a worker in the main checkout
-    cannot detect its own worktree (git reports none), so `_prompt` owes it an
-    explicit instruction that only the `"main"` label triggers.
+    every time. This distinguishes the main checkout from a dedicated worktree;
+    the coordinator records the observed placement for either action.
 
     Both fork targets go through `_fork_branch`, which keeps them distinct from
     their own base: rule 1's base is the item's stamped branch (or `default_base`
     when evicting out of the main checkout) and rule 2/3's is the epic branch,
     and either can already equal the item's derived name.
+
+    Every fork also names its `parent_path` -- the worktree whose branch it
+    forks -- so the launch links lineage from the plan, never from the
+    coordinator's location.
+
+    `_fork_parent` compares its source against `code_repo`, not the possibly-
+    withheld `repo_path`: `repo_path` goes `None` whenever `run_orchestrate`'s
+    dirty-checkout guard fires, but the repository itself is still known and
+    still the thing that decides "is this trunk work" -- a withheld `repo_path`
+    must not let a fork off a dirty main checkout slip through with a parent.
+    `repo_path` remains the source of truth for `"main"` vs `"reuse"`
+    (`WorktreeAction.parent_path`, unrelated to `WorkItem.parent_path`), which
+    is deliberately unaffected by this.
 
     A `_Refusal` is the third return shape: the placement could not be proved
     and no worktree was findable to adopt (`worktree-unprovable`), or more than
@@ -510,6 +525,17 @@ def _resolve_worktree(
         # between a dispatch and its own advance. Its own stamp must never read
         # as "held by someone else", or it forks off itself.
         return bool(live_worktree_owners.get(path, set()) - {item.path}) or path in accepted_worktrees
+
+    def _fork_parent(source: str) -> str | None:
+        # The worktree a fork is linked beneath, as data, so no launch has to
+        # take it from wherever its coordinator is running. A fork off the
+        # repository's own checkout is trunk work, not a child of that
+        # checkout, so it gets no lineage -- the eviction rule, generalized.
+        # Compare against `code_repo` when the caller resolved it separately
+        # from `repo_path` -- `repo_path` alone can be `None` (withheld by a
+        # dirty checkout) while the repository itself is still known.
+        against = code_repo if code_repo is not None else repo_path
+        return None if against is not None and source == against else source
 
     def _adopted_action(reason: str) -> tuple[WorktreeAction | _Refusal, bool]:
         """Search for the item's real worktree; the action to take, or a refusal."""
@@ -534,6 +560,7 @@ def _resolve_worktree(
                     branch=_fork_branch(item.path, item.type, base=branch, phase=phase),
                     base_branch=branch,
                     exists=None,
+                    parent_path=_fork_parent(path),
                 ),
                 False,
             )
@@ -545,6 +572,7 @@ def _resolve_worktree(
                 branch=branch,
                 base_branch=None,
                 exists=worktree_exists.get(path, True),
+                parent_path=None,
             ),
             is_main,
         )
@@ -559,6 +587,7 @@ def _resolve_worktree(
                         branch=item.branch,
                         base_branch=None,
                         exists=worktree_exists.get(item.worktree),
+                        parent_path=None,
                     ),
                     False,
                 )
@@ -572,6 +601,7 @@ def _resolve_worktree(
                     branch=_fork_branch(item.path, item.type, base=default_base, phase=phase),
                     base_branch=default_base,
                     exists=None,
+                    parent_path=None,
                 ),
                 False,
             )
@@ -591,6 +621,7 @@ def _resolve_worktree(
                     branch=item.branch,
                     base_branch=None,
                     exists=worktree_exists.get(item.worktree),
+                    parent_path=None,
                 ),
                 False,
             )
@@ -607,6 +638,7 @@ def _resolve_worktree(
                 branch=_fork_branch(item.path, item.type, base=item.branch, phase=phase),
                 base_branch=item.branch,
                 exists=None,
+                parent_path=_fork_parent(item.worktree),
             ),
             False,
         )
@@ -636,6 +668,7 @@ def _resolve_worktree(
                     branch=epic_branch,
                     base_branch=None,
                     exists=worktree_exists.get(epic_worktree_path),
+                    parent_path=None,
                 ),
                 False,
             )
@@ -646,6 +679,7 @@ def _resolve_worktree(
                 branch=_fork_branch(item.path, item.type, base=epic_branch, phase=phase),
                 base_branch=epic_branch,
                 exists=None,
+                parent_path=_fork_parent(epic_worktree_path),
             ),
             False,
         )
@@ -702,9 +736,21 @@ def _resolve_worktree(
             branch=epic_branch,
             base_branch=default_base,
             exists=None,
+            parent_path=None,
         ),
         True,
     )
+
+
+#: Every supervised worker's placement instruction (D-006). Its coordinator
+#: records the observed worktree/branch with `gw work record-placement` right
+#: after launch, so a worker neither infers a placement from its cwd nor
+#: states one. Appended to every dispatch, root and descendant alike, after any
+#: workspace-authored tail so authored prose cannot swallow it.
+WORKER_PLACEMENT_LINE = (
+    "Your coordinator records where this stage runs. Run every `gw work advance` with "
+    "`--no-infer-worktree` and without `--worktree`/`--branch`."
+)
 
 
 def _prompt(
@@ -715,10 +761,8 @@ def _prompt(
     workspace: str,
     merge_target: str,
     tail: str | None,
-    worktree: WorktreeAction,
-    is_root: bool,
 ) -> str:
-    """Four vendor-neutral lines, plus the variant's tail.
+    """Four vendor-neutral lines, the variant's tail, then the placement line.
 
     The tail is substituted with `str.replace` over a fixed placeholder set
     rather than `str.format`: a tail is workspace-authored text that may
@@ -727,24 +771,13 @@ def _prompt(
 
     The command and workspace lines are built from `DISPATCH_COMMAND` and
     `WORKSPACE_VAR` -- the native `graph-works` namespace, matching this
-    package's own `GRAPH_WORKS_DIR`-based resolution (`discovery.py`). No
-    emission in this package names the legacy `graph-wiki` plugin or
-    `GRAPH_WIKI_WORKSPACE` any more.
+    package's own `GRAPH_WORKS_DIR`-based resolution (`discovery.py`).
 
-    A `"main"` action appends one further line, and so does a dispatch of the
-    subtree **root**, for two different reasons that produce the same
-    instruction. The `"main"` case is a detection gap: git reports no worktree
-    for the main checkout, so the worker genuinely cannot find its own. The
-    root case is an anchoring one: `_epic_stamp` prefers the root's own stamp
-    over its unstable descendant-scan fallback, and asking every root worker to
-    record its placement is what gets that stamp written -- once, on the epic's
-    first dispatch, after which the anchor never moves again. Both are per
-    *dispatch* rather than per pipeline *variant*, so no workspace-authored
-    `prompt_tail` could express either; both are appended after the tail so
-    authored prose cannot swallow them. Neither is appended for a read-only
-    **descendant** dispatch: a `design` or `plan` stage writes no code, so the
-    placement it happens to occupy is not a fact worth recording -- and recording
-    it would pin the item's later code phases to it.
+    No dispatch is told to record its own placement any more, including a
+    root or a main-checkout worker: the placement a worker would have named
+    was the planner's requested one, not the one Orca created. The
+    coordinator records the observation instead; `WORKER_PLACEMENT_LINE`
+    tells the worker to stay out of it.
     """
     lines = [
         f"Run {DISPATCH_COMMAND} {path}.",
@@ -762,37 +795,7 @@ def _prompt(
         ):
             tail = tail.replace(placeholder, value)
         lines.append(tail)
-    # A read-only *descendant* is told nothing: it is sitting in the epic
-    # worktree (or the checkout) purely to read, and a stamp acquired there
-    # would pin its own later code phases to a directory a vault-only stage
-    # happened to occupy. The root keeps the line at every phase -- its stamp
-    # is the epic anchor every descendant resolves against, and an epic's
-    # `execute` dispatches children rather than a worker for itself, so a root
-    # that skipped `design`/`plan` would never stamp at all.
-    if is_root or (worktree.action == "main" and phase not in READ_ONLY_PHASES):
-        if worktree.action == "main":
-            line = (
-                f"This stage runs in the main checkout on `{worktree.branch}`; no dedicated worktree "
-                f"exists. Record the worktree as `{worktree.path}` and the branch as `{worktree.branch}` "
-                "explicitly when you advance — it cannot be detected from where you are."
-            )
-        elif worktree.path is None:
-            # A pathless root action (`create-top-level` or `fork-child`): the
-            # epic's first-ever dispatch has no stamp yet and no known worktree
-            # to name, so ask for whatever the worker ends up in instead of
-            # rendering the literal `None`.
-            line = (
-                f"Record the worktree you end up in, and the branch as `{worktree.branch}`, "
-                "explicitly when you advance — this is the subtree root, and its stamp is what "
-                "every later dispatch in this epic resolves its placement against."
-            )
-        else:
-            line = (
-                f"Record the worktree as `{worktree.path}` and the branch as `{worktree.branch}` "
-                "explicitly when you advance — this is the subtree root, and its stamp is what "
-                "every later dispatch in this epic resolves its placement against."
-            )
-        lines.append(line)
+    lines.append(WORKER_PLACEMENT_LINE)
     return "\n".join(lines)
 
 
@@ -805,20 +808,22 @@ def plan(
     supervise_merges: bool = False,
     live: tuple[str, ...] = (),
     worktree_exists: Mapping[str, bool | None] | None = None,
-    held_decisions: frozenset[str] = frozenset(),
+    holds: Mapping[str, HoldFact] = MappingProxyType({}),
     provisions_worktrees: bool = True,
     workspace: str,
     default_base: str,
     repo_path: str | None = None,
     worktree_inventory: Mapping[str, str] | None = None,
+    repo_known: bool = True,
+    code_repo: str | None = None,
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
-    `held_decisions` is the set of canonical paths currently named in an
-    *open* decision (resolved by `run_orchestrate` from the nearest owner's ledger, since a
-    ledger read is IO and this function stays pure) -- a design-stage item in
-    that set is blocked rather than redispatched, which is what stops a
-    reconciling-spec pass from looping on a question only a human can answer.
+    `holds` maps every canonical path currently named in an *open* decision to
+    its lowest hold (resolved by `run_orchestrate` from the decision owner's
+    ledger, since a ledger read is IO and this function stays pure). A held
+    item at any phase is blocked with kind `decisions`, never becomes a
+    candidate, and therefore reserves nothing.
 
     `provisions_worktrees` mirrors `subagents_io.backend.DispatchBackend`'s
     flag of the same name -- the caller resolves which backend a plan's
@@ -833,8 +838,8 @@ def plan(
     `repo_path` is the resolved code repository's own checkout, when the caller
     knows it. It labels an item whose *stamp* (rule 1), inherited epic anchor
     (rule 2) or adopted worktree is that checkout as a `"main"` action rather
-    than a `"reuse"`, because a worker there cannot detect its own worktree and
-    `_prompt` owes it an explicit instruction. It no longer influences cold
+    than a `"reuse"`. The coordinator records either observed placement, and
+    every worker receives the same placement instruction. It no longer influences cold
     start: a cold start mints the epic worktree whether or not a checkout is
     known.
 
@@ -844,16 +849,36 @@ def plan(
     and it defaults to `{}` -- with no inventory the rules that would search
     refuse instead, which is still an improvement on naming a directory that
     holds nothing, but adoption is the point.
+
+    `repo_known` says whether the caller resolved the code repository at all
+    (independently of whether its checkout is withheld as `repo_path`). A
+    creation -- an action with no `path` -- names its repository only through
+    that resolution, so with `repo_known=False` it blocks as
+    `worktree-unprovable` rather than leaving a backend to place it wherever
+    its caller runs. Defaults `True` so direct callers are unaffected.
+
+    `code_repo` is the resolved code repository itself, un-withheld even when
+    `repo_path` is `None` because the checkout was dirty. `_fork_parent` (see
+    `_resolve_worktree`) compares against `code_repo` when given, so a fork
+    off a dirty main checkout still carries no parent (design D5) instead of
+    silently linking trunk work beneath it. Defaults `None`, which falls back
+    to comparing against `repo_path` -- unchanged behaviour for a direct
+    caller that only ever passed `repo_path`.
     """
     exists = worktree_exists or {}
     inventory = worktree_inventory or {}
     by_path = {item.path: item for item in items}
     # A session name carries a hash, so nothing recovers a path by parsing
-    # one -- `session_index` is the only reverse there is, and its own
-    # ambiguity warnings ride the same channel.
+    # one -- `session_index` is the only reverse there is. Validate every
+    # live owner before planning, including for an already-terminal root.
     by_session, warnings_list = session_index(items)
+    unknown = tuple(dict.fromkeys(key for key in live if key not in by_session))
+    if unknown:
+        message = f"unknown live dispatch key(s): {', '.join(unknown)}; use exact dispatch keys emitted by orchestrate"
+        if warnings_list:
+            message += "; " + "; ".join(warnings_list)
+        raise ValueError(message)
     warnings = [*warnings_list]
-    warnings += [f"live key {key!r} matches no known item" for key in live if key not in by_session]
 
     root_item = by_path.get(root)
     if root_item is not None and (root_item.work_status in TERMINAL_STATUSES or root_item.phase == "done"):
@@ -870,7 +895,7 @@ def plan(
             warnings=tuple(warnings),
         )
 
-    candidates, advances, blocked = _frontier(items, root, held_decisions=held_decisions)
+    candidates, advances, blocked = _frontier(items, root, holds=holds)
     candidates = _sorted(candidates)
     slots_free = max(0, max_parallel - len(live))
 
@@ -887,9 +912,7 @@ def plan(
     live_affects: set[str] = set()
     live_worktree_owners: dict[str, set[str]] = {}
     for key in live:
-        item = by_session.get(key)
-        if item is None:
-            continue
+        item = by_session[key]
         live_affects.update(item.affects)
         if item.worktree:
             live_worktree_owners.setdefault(item.worktree, set()).add(item.path)
@@ -898,17 +921,27 @@ def plan(
     epic_worktree_path = stamp[0] if stamp else None
     epic_branch = stamp[1] if stamp else branch_name(root, root_item.type if root_item else "")
 
-    # Carry the epic's known worktree onto every planned advance: a
-    # coordinator-applied advance dispatches no worker, so it has no cwd inside
-    # the worktree to infer one from, and would otherwise silently skip the
-    # stamp. Only when a real path is known -- `epic_branch` alone is a name,
-    # not somewhere to cd.
+    # Carry the epic's known worktree onto the *root's* planned advance only.
+    # A coordinator-applied advance has no worker cwd to infer from, and the
+    # root's stamp is the anchor. A descendant never inherits it: stamping the
+    # shared epic pair onto a child makes the next plan reuse the epic worktree
+    # where it should fork (D-006). Its own placement, when it has one, is
+    # recorded from observation and left intact by an advance that carries no pair.
     if epic_worktree_path is not None:
-        advances = [replace(a, worktree=epic_worktree_path, branch=epic_branch) for a in advances]
+        advances = [
+            replace(a, worktree=epic_worktree_path, branch=epic_branch) if a.path == root else a for a in advances
+        ]
 
-    # Pass 1: affects serialization, over ALL candidates, in sorted order.
+    # One ordered acceptance loop. Every reservation -- affects, the epic
+    # worktree slot, `accepted_worktrees`, a slot -- describes a dispatch this
+    # call actually emits, never a candidate still on its way through the
+    # gates: reserving for a candidate that a later gate refuses starves every
+    # overlapping sibling behind it, identically on each cycle.
     accepted_affects: set[str] = set()
-    survivors: list[tuple[WorkItem, RouteResult]] = []
+    accepted_worktrees: set[str] = set()
+    epic_worktree_claimed = False
+    dispatches: list[PlannedDispatch] = []
+    resolutions: dict[str, DispatchResolution] = {}
     for item, result in candidates:
         affects = set(item.affects)
         if not affects:
@@ -930,19 +963,10 @@ def plan(
                 )
             )
             continue
-        survivors.append((item, result))
-        accepted_affects |= affects
-
-    # Pass 2: the first `slots_free` survivors dispatch; the rest block.
-    accepted_worktrees: set[str] = set()
-    epic_worktree_claimed = False
-    dispatches: list[PlannedDispatch] = []
-    resolutions: dict[str, DispatchResolution] = {}
-    for item, result in survivors:
         if len(dispatches) >= slots_free:
             blocked.append(BlockedItem(path=item.path, kind="capacity", reason="ready, but no worker slot free"))
             continue
-        assert result.dispatch is not None, "every survivor carries a dispatch (see _frontier)"
+        assert result.dispatch is not None, "every candidate carries a dispatch (see _frontier)"
         on_dispatch_phase = result.on_dispatch.phase if result.on_dispatch else None
         phase = item.phase or on_dispatch_phase or result.dispatch.stage
 
@@ -953,7 +977,7 @@ def plan(
         # mode is the property that means "no human is in the room but a
         # decision is needed".
         variant = result.dispatch.variant
-        state = state_for(items, item.path, has_open_decision=item.path in held_decisions)
+        state = state_for(items, item.path, hold=holds.get(item.path))
         assert state is not None
         try:
             resolution = resolve_dispatch(dispatch_attributes(state, result.dispatch), rules=dispatch_rules)
@@ -982,6 +1006,7 @@ def plan(
             is_root=is_root,
             repo_path=repo_path,
             inventory=inventory,
+            code_repo=code_repo,
         )
         if isinstance(action, _Refusal):
             # Consumes no slot and claims no worktree: a refused item is not a
@@ -1005,6 +1030,18 @@ def plan(
                     reason=(
                         f"{action.action} needs a backend that provisions its own worktrees; "
                         "the target backend does not"
+                    ),
+                )
+            )
+            continue
+        if action.path is None and not repo_known:
+            blocked.append(
+                BlockedItem(
+                    path=item.path,
+                    kind="worktree-unprovable",
+                    reason=(
+                        f"{action.action} creates a worktree, but no code repository was resolved; "
+                        "declare one under `repositories` in workspace.yaml"
                     ),
                 )
             )
@@ -1048,11 +1085,10 @@ def plan(
                     workspace=workspace,
                     merge_target=merge_target,
                     tail=entry.prompt_tail,
-                    worktree=action,
-                    is_root=item.path == root,
                 ),
             )
         )
+        accepted_affects |= affects
 
     return OrchestratePlan(
         path=root,
@@ -1071,16 +1107,19 @@ def plan(
 
 @dataclass(frozen=True, slots=True)
 class OrchestrateResult:
-    """The plan, plus the nearest decision owner's open questions.
+    """The plan, the nearest owner's decisions, and every hold in the subtree.
 
-    The decision fields are empty for an item with no parent-capable owner -- the
-    lone-item case -- which is a shape, not an error.
+    `holds` covers every item in the planned subtree, from any ledger, unlike
+    the root-owner decision fields (`open_decisions` and `assumed_decisions`).
 
-    **The ledger is read twice per plan**: once by whatever consults it for the
-    routing gate, once here. The two reads are not one atomic snapshot, so a
+    Routing, root-owner decisions, and subtree holds read ledgers separately.
+    These reads are not one atomic snapshot, so a
     decision answered between them leaves this response internally
     inconsistent. Deduplicating means threading parsed ledger state out of the
     frontier walk, and is deliberately not done.
+
+    `code_repo` is the resolved code repository, reported even when the
+    dirty-checkout rule withholds it from `plan()`.
     """
 
     plan: OrchestratePlan
@@ -1090,6 +1129,8 @@ class OrchestrateResult:
     assumed_decisions: tuple[_decisions.Decision, ...] = ()
     decision_counts: Mapping[str, int] = MappingProxyType({})
     warnings: tuple[str, ...] = ()
+    holds: tuple[HoldReport, ...] = ()
+    code_repo: str | None = None
 
     @property
     def path(self) -> str:
@@ -1224,12 +1265,13 @@ class _Decisions:
 
 
 def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, path: str) -> _Decisions:
-    """The nearest parent-capable owner's open and assumed decisions.
+    """The decision owner's open and assumed decisions.
 
-    Empty throughout when *path* has no parent-capable owner -- a shape rather
-    than an error. Release, Epic, and Feature items own their own ledgers.
+    Empty throughout when *path* is unknown -- a shape rather than an error.
+    Release, Epic, and Feature items own their own ledgers, while a lone leaf
+    owns itself.
     """
-    owner = nearest_parent(items, path)
+    owner = decision_owner(items, path)
     if owner is None:
         return _Decisions()
     ledger = _decisions.ledger_ref(owner).path(bundle_root)
@@ -1242,28 +1284,6 @@ def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, path: str) 
         counts=MappingProxyType(_decisions.counts(parsed.entries)),
         warnings=tuple(parsed.warnings),
     )
-
-
-def _held_decisions(items: Sequence[WorkItem], bundle_root: Path) -> frozenset[str]:
-    """Every canonical path currently named in an *open* decision's `affects`, across the
-    whole item set -- what `plan()`'s `held_decisions` gates re-dispatch on.
-
-    One ledger read per distinct owner, not per item: every leaf under the same
-    owner shares the same ledger, and `_resolve_decisions` already pays this
-    same one-read-per-owner cost for the root alone.
-    """
-    entries_by_owner: dict[str, tuple[_decisions.Decision, ...]] = {}
-    held: set[str] = set()
-    for item in items:
-        owner = nearest_parent(items, item.path)
-        if owner is None:
-            continue
-        if owner not in entries_by_owner:
-            ledger = _decisions.ledger_ref(owner).path(bundle_root)
-            entries_by_owner[owner] = tuple(_decisions.load(ledger).entries)
-        if _decisions.query(entries_by_owner[owner], status="open", affects=item.path):
-            held.add(item.path)
-    return frozenset(held)
 
 
 def run_orchestrate(
@@ -1305,11 +1325,13 @@ def run_orchestrate(
     if resolved_repo is None:
         resolved_repo, repo_note = resolve_repo(layout, repo_name=repo_name)
 
-    repo_path = str(resolved_repo) if resolved_repo is not None else None
+    code_repo = str(resolved_repo) if resolved_repo is not None else None
+    repo_path = code_repo
     if resolved_repo is not None and _checkout_is_dirty(resolved_repo):
         # Withhold the checkout rather than dispatch into someone's edits.
         # `None` is the fully-supported "behave as before" value, so this
-        # degrades to today's create-top-level cold start.
+        # degrades to today's create-top-level cold start. The repository
+        # itself is still known and still reported.
         repo_path = None
 
     computed = plan(
@@ -1320,15 +1342,18 @@ def run_orchestrate(
         supervise_merges=supervise_merges,
         live=live,
         worktree_exists=_stat_worktrees(items, repo_path),
-        held_decisions=_held_decisions(items, bundle.root),
+        holds=holds_by_path(items, bundle.root),
         provisions_worktrees=provisions_worktrees,
         workspace=str(layout.root),
         default_base=default_base(resolved_repo),
         repo_path=repo_path,
         worktree_inventory=_worktree_inventory(resolved_repo),
+        repo_known=code_repo is not None,
+        code_repo=code_repo,
     )
 
     decisions = _resolve_decisions(items, bundle.root, path)
+    subtree = {path, *(item.path for item in _descendants(items, path))}
     return OrchestrateResult(
         plan=computed,
         decisions_owner_path=decisions.owner_path,
@@ -1337,6 +1362,8 @@ def run_orchestrate(
         assumed_decisions=decisions.assumed,
         decision_counts=decisions.counts,
         warnings=computed.warnings + decisions.warnings + ((repo_note,) if repo_note else ()),
+        holds=open_holds(items, bundle.root, subtree),
+        code_repo=code_repo,
     )
 
 
@@ -1344,8 +1371,10 @@ __all__ = [
     "BLOCKED_KINDS",
     "DISPATCH_COMMAND",
     "DISPATCH_PHASES",
+    "WORKER_PLACEMENT_LINE",
     "WORKSPACE_VAR",
     "BlockedItem",
+    "HoldReport",
     "OrchestratePlan",
     "OrchestrateResult",
     "PlannedAdvance",

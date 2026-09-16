@@ -15,6 +15,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
+from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import (
     DependencyEdge,
     DependencyFact,
@@ -55,13 +56,17 @@ Variant = Literal[
 
 @dataclass(frozen=True, slots=True)
 class RouteState:
-    """The ten facts the table reads. Narrow on purpose (C3-B): it is what
+    """The facts the table reads. Narrow on purpose (C3-B): it is what
     keeps the table testable as a table, and some of the fields are properties
     of a graph (or of a decisions ledger) rather than of one item.
 
-    `has_open_decision` and `has_spec_doc` are both booleans a caller resolves
-    and passes in -- this module stays pure and never reads a decisions ledger
-    or the filesystem itself."""
+    `hold` is resolved by the caller from a ledger read; this module stays pure
+    and never reads a decisions ledger or the filesystem itself.
+
+    `has_branch` is branch *ownership* only, from the item's `branch:` stamp: a
+    stamped Epic or Release owns the integration branch its descendants merged
+    into, so it finishes like any other branch (D-002). Never a name, never a
+    Git read."""
 
     type: str
     work_status: str
@@ -70,12 +75,13 @@ class RouteState:
     blast_radius: str | None = None
     has_plan_doc: bool = False
     has_spec_doc: bool = False
-    has_open_decision: bool = False
+    hold: HoldFact | None = None
     dependency_edges: tuple[DependencyEdge, ...] = ()
     dependency_facts: tuple[DependencyFact, ...] = ()
     dependency_issues: tuple[DependencyIssue, ...] = ()
     child_rollup: ChildRollup | None = None
     open_descendants: tuple[str, ...] = ()
+    has_branch: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,8 +134,8 @@ class RouteResult:
 
 def route(state: RouteState) -> RouteResult:
     """The table. Order is load-bearing: validation first so a malformed page
-    reports *what* is malformed, and the dependency gate after the terminal
-    checks so a resolved item blocked on a dep reports 'resolved'."""
+    reports *what* is malformed, terminal checks next so a resolved item says
+    so, then the hold gate before every phase-specific branch."""
     blockers = _validate(state)
     if blockers:
         return RouteResult(dispatch=None, reason="invalid item", blockers=tuple(blockers))
@@ -147,6 +153,16 @@ def route(state: RouteState) -> RouteResult:
                 f"work_status {state.work_status!r} never dispatches; set it to 'open' to re-enter the pipeline",
             ),
         )
+    # Every phase, one place (D-002): after validation and the terminal
+    # checks so a malformed or finished item still says so, and before any
+    # branch so a held item gets no dispatch, no transition and no repair.
+    # The literal `open decision` prefix is what `orchestrate._classify` keys on.
+    if state.hold is not None:
+        return RouteResult(
+            dispatch=None,
+            reason=hold_reason(state.hold, state.phase),
+            blockers=(hold_blocker(state.hold),),
+        )
     if state.phase is None:
         return _entry(state)
     branches: dict[str, Callable[[RouteState], RouteResult]] = {
@@ -156,6 +172,24 @@ def route(state: RouteState) -> RouteResult:
         "finish": _finish,
     }
     return branches[state.phase](state)
+
+
+def hold_blocker(hold: HoldFact) -> str:
+    """The one hold blocker string.
+
+    Public because reconciling-spec quotes it and a test pins the quote to
+    this function (design §9).
+    """
+    return (
+        f"open decision {hold.decision_id} ({hold.shape}) holds {hold.path}: answer via "
+        f"`gw work decision answer {hold.path} {hold.decision_id} --answer ...`, then re-run"
+    )
+
+
+def hold_reason(hold: HoldFact, current_phase: str | None) -> str:
+    return (
+        f"open decision {hold.decision_id} holds this item ({hold.shape} at {hold.phase or current_phase or 'entry'})"
+    )
 
 
 def _validate(state: RouteState) -> list[str]:
@@ -278,22 +312,10 @@ def _design_complete(state: RouteState) -> Transition:
 
 
 def _design(state: RouteState) -> RouteResult:
-    # Order matters: a held item (a contradiction filed as an open decision by
-    # a previous reconciling-spec pass) must never fall through to another
-    # dispatch -- that is the infinite-redispatch loop this gate exists to
-    # stop. Checked before the spec-doc branch, deliberately.
+    # Phase-specific dependency checks happen inside each branch.
     blocker = _dependency_blocker(state, "design")
     if blocker is not None:
         return blocker
-    if state.has_open_decision:
-        return RouteResult(
-            dispatch=None,
-            reason="design blocked: open decision needs a human answer",
-            blockers=(
-                "open decision(s) block re-dispatch: answer via "
-                "`gw work decision answer <path> D-nnn --answer ...`, then re-run",
-            ),
-        )
     reason = (
         f"{state.type} at design stage with an existing spec: reconciling"
         if state.has_spec_doc
@@ -393,7 +415,6 @@ def _finish(state: RouteState) -> RouteResult:
     if blocker is not None:
         return blocker
     if state.type in {"Release", "Epic"}:
-        # Releases and epics own no branch -- their descendants carry `resolved_in`.
         if state.open_descendants:
             # A child filed after this item reached `finish` reopens the gate:
             # `advance()`'s children-open guard would refuse `on_complete` here,
@@ -405,12 +426,18 @@ def _finish(state: RouteState) -> RouteResult:
                 on_return=RETURN_TO_EXECUTE,
                 repair=RETURN_TO_EXECUTE,
             )
-        return RouteResult(
-            dispatch=None,
-            reason=f"{state.type.lower()} at finish stage",
-            on_complete=Transition(phase="done", work_status="resolved"),
-            on_return=RETURN_TO_EXECUTE,
-        )
+        if not state.has_branch:
+            # An unstamped (hand-driven) parent owns no branch -- its
+            # descendants carry `resolved_in`.
+            return RouteResult(
+                dispatch=None,
+                reason=f"{state.type.lower()} at finish stage",
+                on_complete=Transition(phase="done", work_status="resolved"),
+                on_return=RETURN_TO_EXECUTE,
+            )
+        # A stamped parent owns an integration branch (D-002): use branch
+        # finish and require a resolution reference. The reference alone
+        # is not proof of Git integration (D-003).
     return RouteResult(
         dispatch=Dispatch("finish", "branch"),
         reason=f"{state.type} at finish stage",
@@ -424,7 +451,7 @@ def _finish(state: RouteState) -> RouteResult:
 
 
 def state_for(
-    items: Sequence[WorkItem], path: str, *, effort: str | None = None, has_open_decision: bool = False
+    items: Sequence[WorkItem], path: str, *, effort: str | None = None, hold: HoldFact | None = None
 ) -> RouteState | None:
     """The `RouteState` for *path*, or `None` when no item has that path.
 
@@ -442,10 +469,9 @@ def state_for(
     `effort=` overrides the item's own value: it is what lets a caller resolve
     the design-complete fork in the same call that supplies the size.
 
-    `has_open_decision=` is resolved by the caller, never by this module: a
-    decisions ledger read is IO, and this function stays pure. Default `False`
-    is correct for every caller that has no ledger to consult (a lone item, or
-    `advance`/`cli.next_stage`, neither of which currently resolves one).
+    `hold=` is resolved by the caller, never by this module: a decisions ledger
+    read is IO, and this function stays pure. Default `None` is correct for
+    callers that have no ledger to consult.
     """
     item = next((candidate for candidate in items if candidate.path == path), None)
     if item is None:
@@ -470,12 +496,13 @@ def state_for(
         blast_radius=item.blast_radius,
         has_plan_doc=item.has_plan_artifact,
         has_spec_doc=item.has_design_artifact,
-        has_open_decision=has_open_decision,
+        hold=hold,
         dependency_edges=item.dependency_edges,
         dependency_facts=resolve_facts(items, item.dependency_edges),
         dependency_issues=(*item.dependency_issues, *structural_issues),
         child_rollup=rollup,
         open_descendants=open_descendants,
+        has_branch=bool(item.branch),
     )
 
 
@@ -487,6 +514,8 @@ __all__ = [
     "Stage",
     "Transition",
     "Variant",
+    "hold_blocker",
+    "hold_reason",
     "route",
     "state_for",
 ]

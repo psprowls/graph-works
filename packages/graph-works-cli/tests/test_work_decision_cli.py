@@ -176,3 +176,135 @@ def test_unknown_path_is_ambiguous_and_emits_the_envelope(workspace: tuple[Path,
     assert result.exit_code == exit_codes.AMBIGUOUS
     doc = json.loads(result.stdout)
     assert set(doc) == {"error"} and doc["error"]["reason"] == "unresolved"
+
+
+def test_add_files_a_skip_hold_on_the_entry_phase(workspace: tuple[Path, str, str]) -> None:
+    root, _epic, child = workspace
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "add",
+            child,
+            "--question",
+            "stop?",
+            "--hold",
+            "skip",
+            "--phase",
+            "entry",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    entry = json.loads(result.stdout)["entry"]
+    assert (entry["status"], entry["hold"], entry["phase"], entry["checkpoint"], entry["affects"]) == (
+        "open",
+        "skip",
+        "entry",
+        None,
+        [child],
+    )
+
+
+def test_a_hold_phase_mismatch_is_a_refusal_envelope(workspace: tuple[Path, str, str]) -> None:
+    root, _epic, child = workspace
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "add",
+            child,
+            "--question",
+            "stop?",
+            "--hold",
+            "skip",
+            "--phase",
+            "execute",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "hold-phase-mismatch" in result.output
+
+
+def test_an_unknown_hold_shape_is_an_unresolved_target(workspace: tuple[Path, str, str]) -> None:
+    root, _epic, child = workspace
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "add",
+            child,
+            "--question",
+            "q",
+            "--hold",
+            "pause",
+            "--phase",
+            "entry",
+            "--workspace",
+            str(root),
+        ],
+    )
+    assert result.exit_code == exit_codes.AMBIGUOUS
+
+
+def test_plain_decisions_render_null_hold_keys(workspace: tuple[Path, str, str]) -> None:
+    root, epic, _child = workspace
+    entry = add(root, epic)["entry"]
+    assert isinstance(entry, dict)
+    assert (entry["hold"], entry["phase"], entry["checkpoint"]) == (None, None, None)
+
+
+def test_add_park_copies_the_checkpoint_file(workspace: tuple[Path, str, str]) -> None:
+    root, _epic, child = workspace
+    page = root / "okf" / f"{child}.md"
+    page.write_text(
+        page.read_text(encoding="utf-8").replace("---\n", "---\nphase: design\n", 1),
+        encoding="utf-8",
+        newline="",
+    )
+    draft = root / "draft.md"
+    draft.write_text(
+        f"---\ntitle: Checkpoint\nitem: {child}\ndecision: pending\nphase: design\n"
+        "dispatch_key: design-child\nbranch: feature/child\nworktree: /tmp/wt\nbase: main\n"
+        "head: none\ncreated: 2026-09-13T10:00:00Z\n---\n\n"
+        "## Completed work\n\nhalf\n\n## Remaining actions\n\nrest\n\n"
+        "## Question\n\nwhich?\n\n## Placement\n\nclean\n\n## Validation evidence\n\nnone run\n",
+        encoding="utf-8",
+        newline="",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "decision",
+            "add",
+            child,
+            "--question",
+            "which?",
+            "--hold",
+            "park",
+            "--phase",
+            "design",
+            "--checkpoint",
+            str(draft),
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    entry = json.loads(result.stdout)["entry"]
+    assert entry["hold"] == "park"
+    assert entry["checkpoint"] == f"/{child}/references/01-design-checkpoint-D-001.md"
+    checkpoint = root / "okf" / entry["checkpoint"].lstrip("/")
+    assert checkpoint.read_text(encoding="utf-8") == draft.read_text(encoding="utf-8").replace(
+        "decision: pending", "decision: D-001"
+    )

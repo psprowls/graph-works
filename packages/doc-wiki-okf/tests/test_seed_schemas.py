@@ -4,7 +4,7 @@ import importlib.resources
 from datetime import date
 from pathlib import Path
 
-from okf_ext.schemas import load_schemas, schema_rule
+from okf_ext.schemas import declared_members, load_schemas, schema_rule
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
 
@@ -138,6 +138,36 @@ def test_source_admits_the_vault_keys_it_does_not_declare() -> None:
     """`additionalProperties: true` keeps the 18 `last_sync_commit` skill pages
     and the 8 `source_url` pages valid without declaring vault keys."""
     assert _schema_set().schemas["Source"]["additionalProperties"] is True
+
+
+def test_source_path_is_the_one_declared_member_property() -> None:
+    """C1: `source_path` must name a bundle member (the ingest contract's
+    `sources/references/` copy). No other shipped property is annotated."""
+    assert declared_members(_schema_set()) == {"Source": ("source_path",)}
+
+
+_SOURCE = "type: Source\ntitle: S\ndescription: A source.\nsource_path: {path}\n"
+
+
+def _source_findings(tmp_path: Path, source_path: str, *, with_target: bool) -> list[str]:
+    root = tmp_path / "bundle"
+    (root / "sources" / "references").mkdir(parents=True)
+    (root / "index.md").write_text("---\nokf_version: 0.2\n---\n\n# bundle\n", encoding="utf-8", newline="")
+    if with_target:
+        (root / "sources" / "references" / "2026-08-x.md").write_text("# X\n", encoding="utf-8", newline="")
+    (root / "sources" / "2026-08-x.md").write_text(
+        f"---\n{_SOURCE.format(path=source_path)}---\n\n# S\n", encoding="utf-8", newline=""
+    )
+    report = okf_validate(load_bundle(root), today=date(2026, 8, 12), extra_rules=[schema_rule(_schema_set())])
+    return [finding.path for finding in report.by_code("schemas.unresolved-member")]
+
+
+def test_a_dangling_source_path_is_reported(tmp_path: Path) -> None:
+    assert _source_findings(tmp_path, "sources/references/2026-08-x.md", with_target=False) == ["sources/2026-08-x.md"]
+
+
+def test_a_copied_source_path_is_quiet(tmp_path: Path) -> None:
+    assert _source_findings(tmp_path, "sources/references/2026-08-x.md", with_target=True) == []
 
 
 _COMPLETE_SOURCE = (

@@ -16,7 +16,7 @@ from jsonschema.exceptions import ValidationError
 from jsonschema.validators import validator_for
 from okf_io import Finding, Rule, RuleContext, Severity
 
-from okf_ext.schemas.loader import build_registry
+from okf_ext.schemas.loader import build_registry, declared_members
 from okf_ext.schemas.model import SchemaSet
 
 #: The topic prefix this rule set claims. `validate()` raises the moment an
@@ -28,11 +28,12 @@ TOPIC = "schemas"
 CODES = (
     "schemas.invalid",  # frontmatter does not satisfy the schema for its type
     "schemas.no-schema-for-type",  # the loaded set has no schema for this type
+    "schemas.unresolved-member",  # an `x-okf-member` property names no bundle member
 )
 
 #: Unpacked from `CODES` rather than re-typed, so a code-string edit to one
 #: cannot silently drift from the other -- the habit `tags/vocabulary.py` set.
-_CODE_INVALID, _CODE_NO_SCHEMA = CODES
+_CODE_INVALID, _CODE_NO_SCHEMA, _CODE_UNRESOLVED = CODES
 
 
 def _sort_key(error: ValidationError) -> tuple[list[str], str]:
@@ -56,6 +57,21 @@ def _where(error: ValidationError) -> str:
     return " at `" + ".".join(str(part) for part in error.absolute_path) + "`"
 
 
+def _member_target(value: object) -> str | None:
+    """The bundle-relative path an `x-okf-member` value claims, or `None`.
+
+    `None` only for absent or non-string values: `required` and `type` are
+    `schemas.invalid`'s job. Every authored string is checked, including blank
+    strings that may satisfy a schema without a useful member name. The only
+    normalization is stripping **one** leading `/`, so the vault's root-absolute
+    spelling and the bare bundle-relative spelling both resolve. Nothing else:
+    no `..`, no URL handling, no percent-decoding.
+    """
+    if not isinstance(value, str):
+        return None
+    return value[1:] if value.startswith("/") else value
+
+
 def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
     """Build an `okf_io.Rule` that validates frontmatter against *schema_set*.
 
@@ -71,6 +87,11 @@ def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
     `schemas.no-schema-for-type` is **always `warn`** regardless: it reports a
     coverage gap in the schema set, not a violation by the document.
 
+    `schemas.unresolved-member` reports a property annotated
+    `"x-okf-member": true` whose string value names no member of the bundle
+    (`Bundle.has_member`, so ignored members and assets count). It follows
+    `severity` like `schemas.invalid`.
+
     Frontmatter is read through `Document.fm_data(dates="iso")`, so dates arrive
     as ISO strings and `additionalProperties: false` still sees every key the
     document actually carries. Documents okf-io could not parse are skipped
@@ -84,6 +105,7 @@ def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
         type_name: validator_for(dict(schema))(dict(schema), registry=registry)
         for type_name, schema in schema_set.schemas.items()
     }
+    members = declared_members(schema_set)
     set_name = schema_set.root.name or str(schema_set.root)
 
     def rule(context: RuleContext) -> Iterable[Finding]:
@@ -120,6 +142,21 @@ def schema_rule(schema_set: SchemaSet, *, severity: Severity = "warn") -> Rule:
                     spec=source,
                     path=path,
                     line=document.frontmatter_line(*error.absolute_path),
+                )
+            for field in members.get(type_name, ()):
+                target = _member_target(data.get(field))
+                if target is None or context.bundle.has_member(target):
+                    continue
+                yield Finding(
+                    code=_CODE_UNRESOLVED,
+                    severity=severity,
+                    message=(
+                        f"`{field}` `{data[field]}` names no member of the bundle "
+                        f"(declared `x-okf-member` in `{source}`)."
+                    ),
+                    spec=source,
+                    path=path,
+                    line=document.frontmatter_line(field),
                 )
 
     return rule

@@ -145,49 +145,32 @@ Concepts are cross-cutting technical patterns — naming conventions, middleware
 
 ### Dependency pages
 
-`/gw:scan` writes one graph-derived dependency page per dep into `dependencies/<ecosystem>/<name>.md`, using the scanner-owned shape from `entity-dependency.md` (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use` — no `category`, `provider`, or `load_bearing`). The `category: dependency` / `kind: package|service` shape below is a **hand-authored curated-page shape** that no lint check reads — `gw wiki lint` is a fixed pipeline with no group selection, and nothing in it validates these fields. It does not apply to scanner-generated `dependencies/<ecosystem>/<name>.md` pages, and `load_bearing: true` on such a page has no reader.
+`/gw:scan` writes one graph-derived page per dependency into
+`dependencies/<ecosystem>/<name>.md`. The `Dependency` shape is shipped by
+`code-wiki-okf` and installed at `.gw/schema/Dependency.schema.json` and
+`.gw/sections/Dependency.yaml`.
 
-**`kind: package`** (e.g., `dependencies/npm/react.md`):
+**Required frontmatter:** `type: Dependency`, `title`, `resource`, `ecosystem`.
+**Optional:** `description`, `tags`, `implemented_by`, `used_by`, `versions_in_use`.
+**Provenance, scanner-owned:** `generated` (`by`, `at`), `last_updated_commit`, `tokens`.
+**Sections:** `## Why we depend on this` (required), then `## Gotchas / workarounds`.
 
 ```yaml
 ---
+type: Dependency
 title: React
-category: dependency
-kind: package
-package_name: react
-ecosystem: npm                  # npm | pypi | cargo | go | brew | system
-versions_in_use: ["19.0.0", "18.3.1"]
-used_by: [web-next-ts, app-expo-ts]
-upstream_url: https://react.dev
-load_bearing: true
-quirks: []
+resource: dependency:npm/react
+ecosystem: npm
+description: UI library used by the web application.
 tags: [frontend, ui]
-updated: 2026-04-20
+implemented_by: []
+used_by: ["repo:acme/web"]
+versions_in_use: ["react>=19"]
+generated:
+  by: code-wiki-okf/0.5.0
+  at: '2026-09-09T21:37:46.643280+00:00'
 ---
 ```
-
-**`kind: service`** (e.g., `dependencies/mongodb-atlas.md`):
-
-```yaml
----
-title: MongoDB Atlas
-category: dependency
-kind: service
-service_name: MongoDB Atlas
-provider: mongodb-atlas         # aws | gcp | azure | mongodb-atlas | cloudflare | github | …
-used_by: [location-aws-node-ts, healthkit-aws-node-ts]
-upstream_url: https://www.mongodb.com/atlas
-load_bearing: true
-quirks: [region-locked-us-west-2]
-tags: [database, infra]
-updated: 2026-04-20
----
-```
-
-Field divergences:
-
-- `package` uses `ecosystem:`; `service` uses `provider:`.
-- `versions_in_use` applies only to `package`. Services aren't versioned the same way.
 
 ### Work pages
 
@@ -452,20 +435,30 @@ The index groups pages by category, alphabetized by title. Each entry is one lin
 
 ## Log discipline
 
-`<workspace>/okf/log.md` is append-only. Every entry starts with a standardized header so `grep "^## \[" log.md | tail -5` returns the last 5 entries.
+`<workspace>/okf/log.md` is append-only. Use one `## YYYY-MM-DD` section per day,
+newest dates first, and one `- **<op>** <title> — <detail>` list item per operation.
+Indent continuation paragraphs and nested bullets under their entry. Bold labels
+are a graph-works convention, not an OKF requirement.
+
+Prefer `gw util log --op <op> --title <title> --detail <detail>` in the intended
+workspace to append. For read-only retrieval and entry/date/operation filters,
+follow the [log skill](../../log/SKILL.md#read-only-retrieval); headings count days,
+not operations.
 
 ```
-## [2026-04-20] scan | detected 3 new packages
-Added repositories/my-monorepo/packages/timeline-data-node-ts.md,
-repositories/my-monorepo/packages/timeline-domain-ts.md,
-repositories/my-monorepo/packages/timeline-native-ts.md. No renames or deletions.
+## 2026-04-20
 
-## [2026-04-20] ingest | Auth Migration Spec
-Added sources/2026-04-auth-migration-spec.md. Updated concepts/global-context,
-repositories/my-monorepo/packages/shared-aws-node-ts.md,
-repositories/my-monorepo/packages/shared-native-ts.md,
-concepts/request-flow, adrs/0014-jwt-sessions (new). Flagged contradiction
-with concepts/global-context on session shape.
+- **scan** detected 3 new packages
+  Added repositories/my-monorepo/packages/timeline-data-node-ts.md,
+  repositories/my-monorepo/packages/timeline-domain-ts.md,
+  repositories/my-monorepo/packages/timeline-native-ts.md. No renames or deletions.
+
+- **ingest** Auth Migration Spec
+  Added sources/2026-04-auth-migration-spec.md. Updated concepts/global-context,
+  repositories/my-monorepo/packages/shared-aws-node-ts.md,
+  repositories/my-monorepo/packages/shared-native-ts.md,
+  concepts/request-flow, adrs/0014-jwt-sessions (new). Flagged contradiction
+  with concepts/global-context on session shape.
 ```
 
 Valid ops: `scan`, `ingest`, `query`, `lint`, `create`, `update`, `delete`, `note`.

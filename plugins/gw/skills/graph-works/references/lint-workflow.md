@@ -8,35 +8,53 @@ Keep the wiki healthy and **keep it in sync with the code**. Surface problems fo
 
 ## Pass 1 — mechanical checks (script)
 
-`gw wiki lint` runs each check group in turn; pass `--check <group>` to run an optional group on top of the defaults.
-
-### Default check groups (always run)
-
 ```bash
-gw wiki lint
+gw wiki lint --json
 ```
 
-(Workspace and repo are discovered automatically via `gw`.)
+Workspace and repo are resolved by `gw`.
 
-Default report:
+`gw wiki lint --json` emits exactly five top-level keys:
 
-- **Orphans** — pages with zero inbound links
-- **Broken links** — wikilinks pointing to non-existent pages
-- **Stale pages** — pages whose `updated:` frontmatter is older than 90 days (tune via `--stale-days`)
-- **Missing frontmatter** — curated pages lacking `title`/`category`/`summary`; entity pages (under `repositories/<repo>/` or `dependencies/`) lacking `uri`/`kind` (entity pages use the scanner-owned frontmatter contract, not `category`/`tokens`/`title`/`updated`)
-- **Duplicate titles** — two or more pages sharing the same title
-- **Log gap** — no log entry in the last 14 days (tune via `--log-gap-days`)
-- **Code drift** (monorepo-specific) — packages/apps/agent_plugins on disk vs. their pages under `repositories/<repo>/` (matched by entity `kind` + `uri`; covers `kind: package`, `kind: app`, and `kind: agent_plugin`; `packages/<slug>/` pages are also recognized). Pages declaring `status: planned` in frontmatter are excluded from `orphaned_in_vault` and surfaced separately under `planned_in_vault`, so deliberately seeded pages don't drown the signal.
-- **Semantic** (JSON key `semantic`) — a real LLM pass `gw wiki lint` runs itself, not a script: an array of `{group, message, page, model}`, grouped `page_quality`, `adr_chain`, `stale_claims`. This already covers vault↔vault and vault↔code contradictions, stale-claim flags, and ADR chain health — Pass 2 reads and presents these findings rather than re-deriving them.
-- **`package_sync` drift** (`lint/package_sync.py`) — for ingest-tracked package/app pages, runs `git diff --name-only <last_sync_commit>..HEAD` against `package_path` / `app_path`. Graph-derived entity pages don't carry `last_sync_commit`, so code drift (above) is the entity-layout freshness signal; re-run `/gw:scan` to refresh them.
-- **`file_map` drift** (`lint/file_map.py`) — `## File map` entries that no longer exist on disk.
-- **Obsidian render** (`lint/obsidian_render.py`, JSON key `obsidian_render_findings`) — markdown that breaks Obsidian's renderer: bare angle-bracket placeholders, malformed callouts, malformed wikilinks/embeds, unescaped table pipes. Covers `index.md` files too.
-- **Guidance frontmatter** (`guidance_io.lint`, JSON key `guidance_lint_findings`) — invalid frontmatter, non-allowlisted tags, keyword shape, and topic placement for Diátaxis-lane pages.
-- **Work lifecycle** (`gw work lint`) — the current state, plan, graph, structure, target, and decision catalogs over every path-native item beneath the configured OKF bundle's `work/` tree.
-- **Scanner heading drift** (`lint/scanner_heading.py`, JSON key `scanner_heading_drift`) — entity pages missing an expected deterministic section for their kind (e.g. a human renamed `## Referenced in wiki`).
-- **Source path drift** (JSON key `source_path_drift`) — `sources/` pages whose `sources/references/` copy no longer exists on disk.
+| Key | How to read it |
+| --- | --- |
+| `ok` | True when there are no pipeline errors and every mechanical lane report is OK. Semantic findings are advisory. |
+| `mechanical` | Array of `{lane, findings}`. Traverse each lane's findings and retain `code`, `severity`, `message`, `spec`, `path`, and `line`. Work lifecycle findings are in the `work` lane. |
+| `semantic` | Array of `{group, message, page, model}`; groups include `page_quality`, `adr_chain`, and `stale_claims`. Present these model findings directly. |
+| `open_proposals` | Backlog summary with `count`, `oldest` (ISO date or null), `malformed`, and `ages`. |
+| `errors` | Array of pipeline error strings, including lane and semantic failures. Surface every error and identify incomplete checks. |
 
-The last five run fail-soft: an unexpected per-check exception is reported as `{"error": "<msg>"}` under that JSON key instead of killing the pass. These keys are what give `/gw:lint` mechanical parity with `gw wiki lint`.
+An empty findings array does not prove a failed or unavailable check succeeded.
+If the command fails without a usable JSON report, report that failure explicitly.
+For each mechanical finding, show its lane, dotted code, severity, message, and
+available location. A `sync.missing-page` finding can have `path: null`; retain
+its message instead of dropping the finding.
+
+### Rule families and prerequisites
+
+Built-in OKF validation accompanies each lane, including document, link, index,
+and lifecycle checks. Wiki rules are composed as follows:
+
+| Concern | Codes and conditions |
+| --- | --- |
+| Graph-backed page sync | `sync.missing-page`, `sync.stale-page`, `sync.orphan-page`; requires a graph reader. |
+| Obsidian rendering | `render.angle-bracket`, `render.callout`, `render.wikilink`, `render.wikilink-target`, `render.table-pipe`; always included. |
+| Declared headings | `sections.missing`, `sections.unfilled`, `sections.unexpected`, `sections.no-declaration-for-type`; requires section declarations. |
+| Wiki health | `health.uncited`, `health.duplicate-title`, `health.log-gap`; always included. |
+| Placement, schema, vocabulary | Code-wiki placement always applies; schema and vocabulary checks require their declaration files. |
+
+Absent wiki declarations leave the corresponding checks inactive; malformed
+ones produce lane errors. Work-lane schema and section declarations are required,
+so missing ones also produce lane errors. Report the returned work findings
+without assuming a fixed catalog size.
+
+Commit-derived sync staleness uses `last_updated_commit`; it is distinct from
+OKF `lifecycle.stale`. Suggest `/gw:scan` for graph-backed page drift, preserving
+the finding's explanation. Sync findings do not carry changed-file counts or
+an export-specific result.
+
+The lint CLI exposes `--json`, `--workspace`, and `--help`. There are no optional
+check-group or threshold flags.
 
 ### Other helpers
 
@@ -54,7 +72,7 @@ Grep for concept-shaped phrases repeated across 3+ package/concept pages but wit
 
 ### B. Cross-reference gaps
 
-For each recently-touched page, check: do all package/dependency mentions have wikilinks? If something is referenced as plain text in 3+ places, promote it to a wikilink (and create a stub page if needed).
+For each recently-touched page, check: do package/dependency mentions have root-absolute markdown links? If something is referenced as plain text in 3+ places, suggest a root-absolute markdown link and, if needed, a stub page.
 
 ### C. Index drift
 
@@ -82,38 +100,38 @@ For each target, open the cited entity narrative(s) in `candidates` and the cura
 
 ## Pass 4 — report
 
-Present findings to the user as a single markdown report:
+Present findings as a single markdown report. This is an illustrative structure; include only actual findings and use the returned messages and severities:
 
 ```markdown
 # Code Wiki lint — 2026-04-20
 
-**Total pages:** 142  **Components:** 1  **Last log:** 2026-04-19
-**Code drift:** 2 new packages un-documented, 1 package page orphaned
+**Total pages:** 142  **Components:** 1
+**Lint OK:** false  **Open proposals:** 2
 
 ## Wiki lint
 
 ### Found
-- ⚠️ 4 packages drifted since last sync: `common-aws-node-ts` (12 files), …
-- ⚠️ 2 packages on disk missing wiki pages: `timeline-native-ts`, `timeline-data-node-ts`
-- ⚠️ 1 dep-stub-detail-page: `dependencies/npm/lodash` has 3 body lines — flesh out or delete
-- ⚠️ Work lifecycle: 2 findings across 14 items (1 error, 1 warn): `<work-path>: [<rule-id>] …`
-- ⚠️ 1 Obsidian render finding: `<page>: [obsidian-render-angle-bracket] …`
-- ⚠️ 1 guidance lint finding: `<topic>/<page>: [guidance-invalid-frontmatter] …`
-- 3 orphan wiki pages
-- 4 concepts mentioned across 3+ pages without their own page
-- 2 drift candidates reviewed: `checkout-flow` — narrative overtaken by `payments-service` refactor; `auth-model` — still accurate
+- wiki [sync.missing-page]: <message identifying an entity with no page; path is null>
+- wiki [sync.stale-page]: <page>: <commit-derived staleness message>
+- wiki [render.angle-bracket]: <page>:<line>: <message>
+- wiki [sections.missing]: <page>: <missing declared section>
+- work [<returned dotted code>]: <work-path>: <severity>: <message>
+- semantic [page_quality]: <page>: <message>
+- Pipeline errors: <errors entries; identify any incomplete checks>
+- Residual review: 4 concepts mentioned across 3+ pages without their own page
+- Curated drift review: `checkout-flow` — overtaken; `auth-model` — still accurate
 
 ### Suggested actions
-1. Run `/gw:scan` to create stubs for missing packages
-2. Re-read the drifted packages
-3. Investigate orphans
+1. Run `/gw:scan` to reconcile reported graph-backed page drift.
+2. Review the cited render, section, and work findings.
+3. Review semantic and curated-page findings before editing.
 ```
 
 Append a `lint` entry to `log.md` summarizing what was found and what was fixed.
 
 ## Frequency
 
-- **Weekly** — light pass, default groups only
+- **Weekly** — run the four passes
 - **After every `/gw:scan`** — full code-drift pass
-- **After batch ingests** — full pass with all `--check` groups enabled
+- **After batch ingests** — full pass
 - **Before sharing the wiki with onboarding devs / agents** — full pass plus extra review

@@ -97,16 +97,16 @@ def _locate(text: str) -> _Anchor | None:
     for index, line in enumerate(lines):
         bare = line.rstrip("\r\n")
         if index == 0:
-            # A UTF-8 BOM sits ahead of the first line's own bytes. Stripping
-            # it here rather than in the caller keeps the anchor's line
-            # numbers the file's own -- the splice re-attaches the BOM by
-            # never touching line 1's leading bytes at all.
-            bare = bare.lstrip("﻿")
+            # Strip exactly one BOM, matching the splice's saved prefix.
+            # The empty-flow rewrite can replace line 1; the splice restores
+            # that prefix explicitly after editing it.
+            bare = bare.removeprefix("﻿")
         match = _TAGS_KEY.match(bare)
         if match is not None:
+            if key_index is not None:
+                return None  # multiple anchors leave ownership ambiguous
             key_index = index
             flow_empty = match.group(1) is not None
-            break
     if key_index is None:
         return None
 

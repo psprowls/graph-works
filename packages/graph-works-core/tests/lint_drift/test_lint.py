@@ -5,6 +5,7 @@ regenerated golden honest."""
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -12,6 +13,7 @@ from code_wiki_okf.config import load_config
 from graph_works_core import apply_init, plan_init
 from graph_works_core.lint_drift.lint import LaneReport, LintReport, run_mechanical
 from okf_ext.tags import VOCABULARY_FILENAME
+from okf_io import Document, load_bundle
 
 TODAY = date(2026, 8, 13)
 
@@ -442,7 +444,6 @@ async def test_a_wiki_lane_that_never_loaded_says_the_semantic_pass_did_not_run(
 # --------------------------------------------------------------------------
 
 from graph_works_core.lint_drift.lint import PAGE_QUALITY_WINDOW, _group_pages  # noqa: E402
-from okf_io import load_bundle  # noqa: E402
 
 
 def _write(workspace, relative: str, *, body: str = "Body.\n") -> None:
@@ -769,3 +770,153 @@ def test_render_returns_text_and_writes_nothing(tmp_path, monkeypatch):
     rendered = report.render()
     assert isinstance(rendered, str)
     assert set(tmp_path.iterdir()) == before
+
+
+async def _semantic_reply(tmp_path, ids, reply):
+    # Synthetic keys allow collisions even on case/normalization-insensitive disks.
+    bundle = replace(
+        load_bundle(tmp_path),
+        concepts={key: Document.parse("---\ntype: Explanation\ntitle: Test\n---\nBody.") for key in ids},
+    )
+    return await lint_module._semantic_pass(
+        bundle,
+        _bind(_FakeLLM(reply)),
+        today=TODAY,
+        trace_dir=tmp_path / "traces",
+        project_context="",
+    )
+
+
+@pytest.mark.parametrize(
+    "head",
+    [
+        "adrs/0027-member-identity-is-raw-disk-bytes-matched-nFC-insensitively",
+        "ADRS/0027-MEMBER-IDENTITY-IS-RAW-DISK-BYTES-MATCHED-NFC-INSENSITIVELY",
+        "/adrs/0027-member-identity-is-raw-disk-bytes-matched-nfc-insensitively",
+        "adrs/0027-member-identity-is-raw-disk-bytes-matched-nfc-insensitively.md",
+        "/ADRS/0027-member-identity-is-raw-disk-bytes-matched-nFC-insensitively.MD",
+    ],
+)
+async def test_semantic_page_spelling_variants_preserve_attribution(tmp_path, head):
+    key = "adrs/0027-member-identity-is-raw-disk-bytes-matched-nfc-insensitively"
+    findings, errors = await _semantic_reply(tmp_path, [key], f"{head}: No description provided.")
+    assert findings
+    assert {(f.page, f.message) for f in findings} == {(key, "No description provided.")}
+    assert errors == ()
+
+
+@pytest.mark.parametrize(
+    ("keys", "head", "expected"),
+    [
+        (["cafe\u0301"], "CAFÉ", "cafe\u0301"),
+        (["café"], "cafe\u0301", "café"),
+        (["j\u030c"], "J\u030c", "j\u030c"),
+        (["Root", "root"], "Root", "Root"),
+        (["Root", "root"], "/root.md", "root"),
+        (["café", "cafe\u0301"], "café", "café"),
+        (["name", "name.md"], "name.md", "name.md"),
+        (["name", "name.md"], "/name.md", "name.md"),
+        (["root"], "root", "root"),
+    ],
+)
+async def test_semantic_page_resolution_preserves_raw_and_exact_keys(tmp_path, keys, head, expected):
+    findings, errors = await _semantic_reply(tmp_path, keys, f"{head}: concern: details")
+    assert [(f.page, f.message) for f in findings] == [(expected, "concern: details")]
+    assert errors == ()
+
+
+@pytest.mark.parametrize(
+    ("keys", "head", "reason", "candidates"),
+    [
+        (["Root", "root"], "ROOT", "ambiguous page", ["Root", "root"]),
+        (["café", "cafe\u0301"], "CAFÉ", "ambiguous page", ["cafe\u0301", "café"]),
+        (["concepts/A", "concepts/a"], "/CONCEPTS/A.md", "ambiguous page", ["concepts/A", "concepts/a"]),
+        (["root"], "concepts/missing", "unknown page", []),
+        (["root"], "missing.MD", "unknown page", []),
+        (["root"], "//root", "unknown page", []),
+        (["root"], "root.md.md", "unknown page", []),
+    ],
+)
+async def test_unresolved_semantic_pages_retain_text_and_report_reason(tmp_path, keys, head, reason, candidates):
+    line = f"{head}: concern"
+    findings, errors = await _semantic_reply(tmp_path, keys, line)
+    assert [(f.page, f.message) for f in findings] == [(None, line)]
+    assert len(errors) == 1
+    assert all(value in errors[0] for value in ["page_quality", "fake.model.v1", head, reason])
+    if candidates:
+        assert ", ".join(candidates) in errors[0]
+
+
+@pytest.mark.parametrize(
+    "line",
+    [
+        "Summary: cross-page concern",
+        "Unknown: concern",
+        "ordinary prose",
+        "use `code` here",
+        "~~~ ordinary prose here",
+        "``` two words",
+    ],
+)
+async def test_global_semantic_prose_remains_whole(tmp_path, line):
+    findings, errors = await _semantic_reply(tmp_path, ["root"], line)
+    assert [(f.page, f.message) for f in findings] == [(None, line)]
+    assert errors == ()
+
+
+@pytest.mark.parametrize("fence", ["```", "````", "```text", "``` markdown", "~~~", "~~~~json"])
+async def test_semantic_fences_are_skipped_but_contents_survive(tmp_path, fence):
+    findings, errors = await _semantic_reply(tmp_path, ["root"], f"  {fence}  \nroot: concern\n{fence}\n")
+    assert [(f.page, f.message) for f in findings] == [("root", "concern")]
+    assert errors == ()
+
+
+async def test_all_clean_sentinels_and_blank_lines_are_skipped(tmp_path):
+    findings, errors = await _semantic_reply(
+        tmp_path,
+        ["root"],
+        "\n  \nNo page quality issues found.\nNo ADR chain issues found.\nNo stale claim issues found.\n",
+    )
+    assert findings == errors == ()
+
+
+async def test_parser_errors_propagate_without_losing_other_groups_or_mechanical_findings(curated, monkeypatch):
+    class _ByGroup(_FakeLLM):
+        async def ainvoke(self, messages):
+            system = str(messages[0].content)
+            if "ADR chain checks" in system:
+                raise RuntimeError("the model refused")
+            if "Stale claim checks" in system:
+                return _Reply("/CONCEPTS/CITED.MD: valid concern")
+            return _Reply("concepts/missing: unresolved concern")
+
+    monkeypatch.setattr(lint_module, "role_binding", lambda *a, **k: _bind(_ByGroup()))
+    report = await _lint(curated)
+    assert report.mechanical == _run(curated).mechanical
+    assert any(f.group == "stale_claims" and f.page == "concepts/cited" for f in report.semantic)
+    assert any(f.page is None and f.message == "concepts/missing: unresolved concern" for f in report.semantic)
+    assert len(report.errors) == 2
+    assert any("unknown page" in e for e in report.errors)
+    assert any("the model refused" in e for e in report.errors)
+    assert not report.ok
+
+
+@pytest.mark.parametrize(("head", "ok"), [("/ROOT.MD", True), ("/missing.md", False)])
+async def test_page_parser_errors_alone_fail_an_otherwise_clean_lint(workspace, monkeypatch, head, ok):
+    (workspace.layout.bundle_dir / "root.md").write_text(
+        "---\ntype: Explanation\ntitle: Root\ndescription: A root page.\n---\nBody.\n",
+        encoding="utf-8",
+        newline="",
+    )
+    monkeypatch.setattr(lint_module, "role_binding", lambda *a, **k: _bind(_FakeLLM(f"{head}: concern")))
+    report = await _lint(workspace)
+    assert _run(workspace).ok
+    assert report.mechanical == _run(workspace).mechanical
+    assert report.semantic
+    if ok:
+        assert report.errors == ()
+        assert all(f.page == "root" for f in report.semantic)
+    else:
+        assert len(report.errors) == 1 and "unknown page" in report.errors[0]
+        assert all(f.page is None and f.message == f"{head}: concern" for f in report.semantic)
+    assert report.ok is ok

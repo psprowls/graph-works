@@ -283,11 +283,14 @@ def plan_propose(
     Idempotence surfaces as an empty plan: incoming sources already present,
     with the title and description unchanged, plan nothing at all.
 
-    *render* defaults to this capability's own `render_body`, so every
-    pre-existing caller is unaffected. It is used on both the create body and
-    the merge body -- always from the merged/deduped `sources[]`, never the
-    raw incoming ones, so an injected renderer sees the same ledger a reader
-    of the resulting document would.
+    *render* defaults to this capability's own `render_body`. Both create
+    and replacement bodies use the merged/deduped `sources[]`. On a
+    changed merge, it is first called with the old description and sources
+    to verify it can reproduce the current body exactly. A mismatch refuses
+    with `unrenderable-body` and plans no writes. This conservatively protects
+    body-only prose and renderer/context differences; reconcile the document
+    under a separate reviewed operation before retrying. The shared `HEADER`
+    is not proof that a renderer can reproduce a body.
     """
     stamp = _require_aware(at)
     normalized = _normalize_target(target)
@@ -376,6 +379,27 @@ def plan_propose(
         return ProposalPlan(root=root, target=normalized, proposal=live.member, writes=(), refusals=())
 
     document = bundle.concepts[live.concept_id]
+    newline = dominant_newline(document.body)
+    if render(description=live.description, sources=live.sources, newline=newline) != document.body:
+        return ProposalPlan(
+            root=root,
+            target=normalized,
+            proposal=live.member,
+            writes=(),
+            refusals=(
+                Refusal(
+                    path=live.member,
+                    kind="unrenderable-body",
+                    detail=(
+                        f"the supplied renderer does not reproduce `{live.member}`'s current body from that "
+                        "proposal's own `description` and `sources[]`, so a merge could discard unmatched content; "
+                        "reconcile the document against the renderer that wrote it, or move the "
+                        "unmatched prose into `sources[]`, before retrying"
+                    ),
+                ),
+            ),
+        )
+
     frontmatter: dict[str, Any] = {"sources": merged}
     if title.strip():
         frontmatter["title"] = title.strip()
@@ -384,7 +408,7 @@ def plan_propose(
     body = render(
         description=frontmatter.get("description", live.description),
         sources=merged,
-        newline=dominant_newline(document.body),
+        newline=newline,
     )
     return ProposalPlan(
         root=root,

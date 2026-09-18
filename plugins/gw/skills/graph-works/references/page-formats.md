@@ -427,61 +427,39 @@ Adopt short-lived JWTs signed by Cognito. Validation in middleware; refresh on t
 
 ## 7. Dependency page
 
-`/gw:scan` writes one graph-derived dependency page per dep the monorepo touches into `dependencies/<ecosystem>/<name>.md`, using the scanner-owned `entity-dependency.md` template shape (`uri`, `kind: dependency`, `graph_name`, `last_scan_at`, `ecosystem`, `used_by`, `versions_in_use`). The `kind: package | service` example below is a **hand-authored curated-page shape** that no lint check reads. It is not what the scanner writes. See `wiki-schema.md` for the `kind: service` variant.
+`/gw:scan` writes one graph-derived page per dependency into
+`dependencies/<ecosystem>/<name>.md`. The `Dependency` shape is shipped by
+`code-wiki-okf` and installed at `.gw/schema/Dependency.schema.json` and
+`.gw/sections/Dependency.yaml`.
+
+**Required frontmatter:** `type: Dependency`, `title`, `resource`, `ecosystem`.
+**Optional:** `description`, `tags`, `implemented_by`, `used_by`, `versions_in_use`.
+**Provenance, scanner-owned:** `generated` (`by`, `at`), `last_updated_commit`, `tokens`.
+**Sections:** `## Why we depend on this` (required), then `## Gotchas / workarounds`.
 
 ```markdown
 ---
+type: Dependency
 title: React
-category: dependency
-kind: package
-package_name: react
+resource: dependency:npm/react
 ecosystem: npm
-versions_in_use: ["19.0.0", "18.3.1"]
-used_by: [web-next-ts, app-expo-ts, shared-ui-react-ts, shared-ui-native-ts]
-upstream_url: https://react.dev
-load_bearing: true
-quirks: []
+description: UI library used by the web application.
 tags: [frontend, ui]
-updated: 2026-04-20
+implemented_by: []
+used_by: ["repo:acme/web"]
+versions_in_use: ["react>=19"]
+generated:
+  by: code-wiki-okf/0.5.0
+  at: '2026-09-09T21:37:46.643280+00:00'
 ---
 
 # React
 
-## What it is
-One paragraph: what this library does, why we use it, which surfaces.
-
-## Versions in use
-| Version | Used in | Notes |
-|---|---|---|
-| 19.0.0 | [web-next-ts](/repositories/<repo>/packages/web-next-ts.md), [shared-ui-react-ts](/repositories/<repo>/packages/shared-ui-react-ts.md) | Migrated 2026-Q1 |
-| 18.3.1 | [app-expo-ts](/repositories/<repo>/packages/app-expo-ts.md), [shared-ui-native-ts](/repositories/<repo>/packages/shared-ui-native-ts.md) | Pinned by RN 0.76 |
-
-## Used by
-- [web-next-ts](/repositories/<repo>/packages/web-next-ts.md)
-- [app-expo-ts](/repositories/<repo>/packages/app-expo-ts.md)
-- [shared-ui-react-ts](/repositories/<repo>/packages/shared-ui-react-ts.md)
-- [shared-ui-native-ts](/repositories/<repo>/packages/shared-ui-native-ts.md)
-
-## Key patterns in this repo
-- Functional components only; no class components.
-- Suspense + Server Components in `[web-next-ts](/repositories/<repo>/packages/web-next-ts.md)` (Next 15 App Router).
-- `use client` directive boundaries — see [nextjs-client-boundary](/concepts/nextjs-client-boundary.md).
+## Why we depend on this
+React provides the component model for the web application.
 
 ## Gotchas / workarounds
-- ⚠️ React 19 `useEffect` runs twice in dev (Strict Mode) — see [bug-double-mount-in-dev](/work/release-web-platform/children/epic-react-19/children/bug-double-mount-in-dev.md).
-- Expo pins React 18; can't bump until RN catches up.
-
-## Upgrade history
-- **2026-02** — bumped web surfaces to 19.0. See [2026-02-react-19-migration-pr](/sources/2026-02-react-19-migration-pr.md).
-- **2025-09** — initial adoption of concurrent features.
-
-## Decisions
-- [0011-react-19-on-web-only](/adrs/0011-react-19-on-web-only.md)
-
-## Related
-- [react-native](/dependencies/npm/react-native.md)
-- [server-state-vs-client-state](/concepts/server-state-vs-client-state.md)
-- [rn-0-77-upgrade](/work/rn-0-77-upgrade.md)
+Record known issues, version pins, or workarounds this dependency needs.
 ```
 
 ## 8. Work page

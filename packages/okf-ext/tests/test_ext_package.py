@@ -64,8 +64,11 @@ def test_version_is_static_and_pinned():
     patch.
 
     `0.4.13` adds `severity=` to `vocabulary_rule`, defaulted to `"warn"` so
-    nothing observable changes -- additive, so a patch too."""
-    assert okf_ext.__version__ == "0.4.13"
+    nothing observable changes -- additive, so a patch too.
+
+    `0.4.14` prevents lossy proposal body regeneration with an explicit
+    refusal; safe merges keep their behavior, so this is a safety patch."""
+    assert okf_ext.__version__ == "0.4.14"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

@@ -58,7 +58,7 @@ cd ~/my-repo
 | `app` | `<workspace>/okf/repositories/<repo>/apps/web-next-ts.md` — Next.js app: platform, routes, deployment |
 | `package` | `<workspace>/okf/repositories/<repo>/packages/common-aws-node-ts.md` — Lambda handlers, middleware, exports |
 | `concept` | `<workspace>/okf/concepts/global-context.md` — cross-cutting pattern; or `kind: architecture` for high-level syntheses, `kind: pattern` for reusable patterns |
-| `dependency` | `<workspace>/okf/dependencies/npm/react.md` — external lib: versions in use, upgrade notes, gotchas (`kind: package | service`) |
+| `dependency` | `<workspace>/okf/dependencies/npm/react.md` — external lib: versions in use, upgrade notes, gotchas |
 | `source` | `<workspace>/okf/sources/2026-04-auth-migration-spec.md` — ingested spec with claims + citations |
 | `adr` | `<workspace>/okf/adrs/0012-move-to-esm.md` — dated decision with context + consequences |
 

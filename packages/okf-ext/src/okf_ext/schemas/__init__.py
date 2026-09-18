@@ -31,6 +31,7 @@ from okf_ext.schemas.loader import (
     SCHEMA_SUFFIXES,
     build_registry,
     declared_directories,
+    declared_members,
     load_schemas,
 )
 from okf_ext.schemas.model import SchemaError, SchemaSet
@@ -57,6 +58,7 @@ __all__ = [
     "SchemaSet",
     "build_registry",
     "declared_directories",
+    "declared_members",
     "load_schemas",
     "schema_rule",
 ]

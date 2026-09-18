@@ -150,6 +150,29 @@ def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
     assert not any(finding.code == "placement.directory-mismatch" for finding in report.findings)
 
 
+def test_the_wiki_lane_reports_an_unresolved_source_path(workspace):
+    """C1: `schema_rule` already rides the wiki lane, so the shipped
+    `x-okf-member` on `Source.source_path` reaches lint with no `lanes.py`
+    edit. A path into `work/` -- ignored by this lane -- still resolves."""
+    bundle_dir = workspace.layout.bundle_dir
+    (bundle_dir / "sources").mkdir(exist_ok=True)
+    (bundle_dir / "work" / "item" / "references").mkdir(parents=True, exist_ok=True)
+    (bundle_dir / "work" / "item" / "references" / "01-design.md").write_text("# D\n", encoding="utf-8", newline="")
+    for name, source_path in (
+        ("dead", "sources/references/gone.md"),
+        ("live", "work/item/references/01-design.md"),
+    ):
+        (bundle_dir / "sources" / f"2026-08-{name}.md").write_text(
+            f"---\ntype: Source\ntitle: {name}\ndescription: A source.\nsource_path: {source_path}\n---\n\n# {name}\n",
+            encoding="utf-8",
+            newline="",
+        )
+    wiki, _work = _compose(workspace).lanes
+    bundle = load_bundle(wiki.root, ignore=wiki.ignore)
+    report = validate(bundle, today=TODAY, extra_rules=wiki.rules)
+    assert [f.path for f in report.by_code("schemas.unresolved-member")] == ["sources/2026-08-dead.md"]
+
+
 def test_the_wiki_lane_rejects_the_retired_flat_package_lane(workspace):
     bundle_dir = workspace.layout.bundle_dir
     page = bundle_dir / "packages" / "widgets.md"

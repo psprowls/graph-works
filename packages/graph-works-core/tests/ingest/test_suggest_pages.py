@@ -459,30 +459,39 @@ async def test_a_classify_refusal_drops_the_suggestion_and_records_the_reason(tm
 
 
 async def test_mode_is_derived_from_the_bundle_not_proposed(tmp_path, monkeypatch):
-    """Same lane+title both times; the second filing's description differs.
+    """An existing target selects update mode regardless of model suggestions."""
+    root = make_bundle(tmp_path)
+    (root / "explanations" / "repeatable.md").write_text(
+        "---\ntype: Explanation\ntitle: Repeatable\ndescription: d\n---\n\nbody\n",
+        encoding="utf-8",
+        newline="",
+    )
+    payload = json.dumps({"suggestions": [_suggestion(title="Repeatable", mode="create_new")]})
+    reports, _ = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
+    proposal = (root / reports[0]["proposal"]).read_text(encoding="utf-8")
+    assert "Update existing Explanation page" in proposal
+    assert reports[0]["target"] == "explanations/repeatable.md"
 
-    `plan_propose` dedups incoming `sources[]` by `resource` (`_merge_sources`
-    in `okf_ext.proposals.plan`): a second filing with an identical resource,
-    title *and* description is a true no-op and plans no `Write` at all -- so
-    the body is never re-rendered and the first call's wording would survive
-    untouched no matter what `ReviewRenderer.mode` a fresh `plan_file` call
-    computes. Varying the description makes `metadata_changed` true, which is
-    what actually exercises the merge branch and its freshly-derived mode.
-    """
+
+async def test_a_changed_renderer_context_refuses_without_replacing_the_proposal(tmp_path, monkeypatch):
+    """A target appearing changes renderer output; reconcile before merging."""
     root = make_bundle(tmp_path)
     payload = json.dumps({"suggestions": [_suggestion(title="Repeatable")]})
     first, _ = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
-    assert first[0]["target"] == "explanations/repeatable.md"
+    note = root / first[0]["proposal"]
+    before = note.read_bytes()
     (root / "explanations" / "repeatable.md").write_text(
-        "---\ntype: Explanation\ntitle: Repeatable\ndescription: d\n---\n\nbody\n", encoding="utf-8"
+        "---\ntype: Explanation\ntitle: Repeatable\ndescription: d\n---\n\nbody\n",
+        encoding="utf-8",
+        newline="",
     )
     second_payload = json.dumps(
         {"suggestions": [_suggestion(title="Repeatable", description="A new angle on the same page.")]}
     )
-    second, _ = await _phase(root, extractor_payload=second_payload, monkeypatch=monkeypatch)
-    proposal = (root / second[0]["proposal"]).read_text(encoding="utf-8")
-    assert "Update existing Explanation page" in proposal
-    assert second[0]["target"] == "explanations/repeatable.md"
+    reports, status = await _phase(root, extractor_payload=second_payload, monkeypatch=monkeypatch)
+    assert reports == []
+    assert status["refused"] == ["Repeatable: unrenderable-body"]
+    assert note.read_bytes() == before
 
 
 async def test_a_reasoner_failure_writes_nothing(tmp_path, monkeypatch):

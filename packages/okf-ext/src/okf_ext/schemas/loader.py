@@ -164,3 +164,36 @@ def declared_directories(schema_set: SchemaSet) -> dict[str, str]:
         if isinstance(directory, str) and directory.strip():
             found[type_name] = directory
     return found
+
+
+def declared_members(schema_set: SchemaSet) -> dict[str, tuple[str, ...]]:
+    """`{type: (property, ...)}` for every type declaring an `x-okf-member` property.
+
+    `"x-okf-member": true` on a property says its string value must name a
+    member of the bundle. It is the vocabulary half of
+    `schemas.unresolved-member`: the rule ships the mechanism, the schema's
+    owner declares which fields it applies to -- the same split
+    `x-okf-directory` makes for placement.
+
+    Only **top-level** `properties` are scanned, and only a literal JSON `true`
+    counts. Nested properties, `$ref`-reached properties and array items are
+    not scanned: nothing needs them, and this boundary is stated so it is not
+    a surprise. Properties are sorted by name; a type declaring none is
+    omitted. As with `x-okf-directory`, an odd or missing annotation is
+    ignored rather than reported.
+    """
+    found: dict[str, tuple[str, ...]] = {}
+    for type_name, schema in schema_set.schemas.items():
+        properties = schema.get("properties")
+        if not isinstance(properties, Mapping):
+            continue
+        fields = tuple(
+            sorted(
+                name
+                for name, sub_schema in properties.items()
+                if isinstance(sub_schema, Mapping) and sub_schema.get("x-okf-member") is True
+            )
+        )
+        if fields:
+            found[type_name] = fields
+    return found

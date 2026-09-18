@@ -128,6 +128,18 @@ every future rule to import a writer or parser through a rule module. If
 you're tempted to add a `Finding` inside one of these four, that's a signal
 the rule belongs in a different capability (or tier 3) instead.
 
+`proposals` fails closed on a changed merge. Before `plan_propose` plans a
+replacement body it asks the supplied renderer to reproduce the live
+proposal's current body from that proposal's own `description` and
+`sources[]`, and refuses with `unrenderable-body` on anything but an exact
+match. This is the one place the capability declines work it could have done,
+and it is deliberate: `HEADER` is shared by every renderer and a body can hold
+prose no ledger field carries, so a mismatch is the only signal available that
+a replacement would drop bytes. The guard runs *after* the malformed,
+`already-decided` and unchanged/no-op paths, so idempotence and the older
+refusals both outrank it. It calls the renderer it was given and knows nothing
+about lanes or headings — keep it that way.
+
 ### The two-axis ownership safety property (generators)
 
 `generators` is the one capability that both reads a declaration (`shape`)

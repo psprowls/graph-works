@@ -21,19 +21,38 @@ fail() {
 # File-level allowlist: files that legitimately contain a denylisted string
 # for a reason unrelated to layout-claim staleness. Extend this list ONLY
 # with a comment explaining why the match is not drift.
-ALLOWLIST=(
+LAYOUT_ALLOWLIST=(
     "RELEASE-NOTES.md"                        # vendored upstream history
     "hooks/skill-doc-routing"                 # raw/ describes the donor CLI, for contrast, not this repo's layout
     "tests/hooks/test-skill-doc-routing.sh"    # raw/ + wiki/<work-path>/references/ are EXPECT_NOT_CONTAINS fixture strings
     "tests/test-doc-layout-claims.sh"         # this file's own denylist-pattern definition and explanatory comments necessarily contain the literal denylisted substrings — not drift
 )
 
-is_allowlisted() {
-    local rel="$1" entry
-    for entry in "${ALLOWLIST[@]}"; do
-        [[ "$rel" == "$entry" || "$rel" == */"$entry" ]] && return 0
-    done
-    return 1
+# Each sweep owns its exemptions; layout history must not exempt other drift.
+# Trailing allowlist arguments work on macOS bash 3.2 (no namerefs).
+sweep_denylist() {
+    local name="$1" pattern="$2" message="$3"
+    shift 3
+    local file rel entry hits allowed before="$FAILURES"
+    while IFS= read -r -d '' file; do
+        rel="${file#"$PLUGIN_ROOT"/}"
+        allowed=false
+        for entry in "$@"; do
+            if [[ "$rel" == "$entry" || "$rel" == */"$entry" ]]; then
+                allowed=true
+                break
+            fi
+        done
+        "$allowed" && continue
+        hits="$(grep -nE -- "$pattern" "$file" || true)"
+        if [[ -n "$hits" ]]; then
+            fail "$rel $message"
+            echo "$hits" | sed 's/^/      /'
+        fi
+    done < <(find "$PLUGIN_ROOT" -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
+    if [[ "$FAILURES" -eq "$before" ]]; then
+        pass "$name: no retired claims outside its allowlist"
+    fi
 }
 
 # Positive assertions: pointers that must not go stale. The denylist above
@@ -65,22 +84,26 @@ assert_skill_dir() {
 }
 
 DENYLIST_PATTERN='workspace>/wiki|repo>/graph-works|wiki/entities|knowledge/|raw/|(^|[^a-zA-Z_.>/-])wiki/[a-z]'
+RETIRED_DEPENDENCY_SHAPE='load_bearing|category: dependency|package_name|service_name|upstream_url|quirks|provider:|kind: ?package ?\| ?service'
+RETIRED_LINT_KEYS='missing_in_vault|orphaned_in_vault|exports_drift|scanner_heading_drift|source_path_drift|guidance_lint_findings'
+RETIRED_LOG_HEADING='##[[:space:]]+\[(YYYY-MM-DD|[0-9]{4}-[0-9]{2}-[0-9]{2})\]'
+RETIRED_LOG_GREP='\^## \\\['
 
 echo "doc-layout-claims guard test"
 
-while IFS= read -r -d '' file; do
-    rel="${file#"$PLUGIN_ROOT"/}"
-    is_allowlisted "$rel" && continue
-    hits="$(grep -nE "$DENYLIST_PATTERN" "$file" || true)"
-    if [[ -n "$hits" ]]; then
-        fail "$rel carries a stale layout claim"
-        echo "$hits" | sed 's/^/      /'
-    fi
-done < <(find "$PLUGIN_ROOT" -type f -not -path '*/node_modules/*' -not -path '*/.git/*' -print0)
+# Each definition necessarily contains its own retired vocabulary.
+DEPENDENCY_ALLOWLIST=("tests/test-doc-layout-claims.sh")
+LINT_ALLOWLIST=("tests/test-doc-layout-claims.sh")
+LOG_ALLOWLIST=("tests/test-doc-layout-claims.sh")
 
-if [[ "$FAILURES" -eq 0 ]]; then
-    pass "no stale layout claims outside the allowlist"
-fi
+sweep_denylist "layout" "$DENYLIST_PATTERN" \
+    "carries a stale layout claim" "${LAYOUT_ALLOWLIST[@]}"
+sweep_denylist "dependency" "$RETIRED_DEPENDENCY_SHAPE" \
+    "carries a retired dependency-page shape" "${DEPENDENCY_ALLOWLIST[@]}"
+sweep_denylist "lint" "$RETIRED_LINT_KEYS" \
+    "carries a retired lint payload key" "${LINT_ALLOWLIST[@]}"
+sweep_denylist "log" "$RETIRED_LOG_HEADING|$RETIRED_LOG_GREP" \
+    "carries a retired log heading or retrieval recipe" "${LOG_ALLOWLIST[@]}"
 
 # --- Rider-presence assertion (work/epic-unforked-plugin-skill-dispatch/
 # children/feature-move-to-brief-behaviors, D-004) ---
@@ -151,6 +174,26 @@ assert_riders_match() {
 
 assert_riders_match
 
+# Canonical authoring and retrieval must stay documented as well as retiring
+# the incompatible shape. The executable recipe is exercised separately.
+for reader in "skills/log/SKILL.md" "skills/graph-works/references/wiki-schema.md"; do
+    assert_contains "$reader" '## YYYY-MM-DD' "$reader documents ISO day headings"
+    assert_contains "$reader" '- **<op>** <title>' "$reader documents list entries"
+done
+for contract in 'parse_log' '--last' '--op' '--since' 'case-insensitive' 'inclusive' 'outermost'; do
+    assert_contains "skills/log/SKILL.md" "$contract" "log skill documents $contract retrieval"
+done
+
+# Lint readers must explain the real lane report, not merely omit old fields.
+for reader in "skills/lint/SKILL.md" "skills/graph-works/references/lint-workflow.md"; do
+    for key in ok mechanical semantic open_proposals errors; do
+        assert_contains "$reader" "\`$key\`" "$reader documents lint key $key"
+    done
+    for code in sync.missing-page render.angle-bracket sections.missing; do
+        assert_contains "$reader" "$code" "$reader documents finding $code"
+    done
+done
+
 # --- pointer-presence assertions -----------------------------------------
 # The packaged pipeline table (graph_works_core.workspace.pipeline) dispatches
 # the `epic-design` variant to a skill of this name. A table entry pointing at
@@ -216,6 +259,75 @@ if grep -Fq -- "--recovery-placement '" "$PLUGIN_ROOT/skills/auto-drive/SKILL.md
 else
     pass "auto-drive passes --recovery-placement a file path, never an inline JSON literal"
 fi
+
+assert_not_matches() {
+    local rel="$1" pattern="$2" description="$3" hits
+    if [[ ! -f "$PLUGIN_ROOT/$rel" ]]; then
+        fail "$description"
+        echo "      missing file: $rel"
+        return
+    fi
+    hits="$(grep -nE -- "$pattern" "$PLUGIN_ROOT/$rel" || true)"
+    if [[ -n "$hits" ]]; then
+        fail "$description"
+        echo "$hits" | sed 's/^/      /'
+    else
+        pass "$description"
+    fi
+}
+
+# --- proposal ledger shape assertions -------------------------------------
+# work/epic-wiki-lint-okf-io-correctness/children/
+# bug-proposal-disposition-ledger-shape. The two documents that read a
+# proposal note described frontmatter the shipped writer has never emitted:
+# `status`, `origins[]`, `kind`, `target_slug`, `mode`, `concept_kind`. Every
+# one is a key the reader would find missing at runtime, and no other gate
+# looks at document shape -- plugin-contract checks verbs, flags and
+# identifiers only.
+#
+# The negative patterns are written narrowly on purpose. `## Origins` is a
+# LEGITIMATE body heading rendered from `sources[]`, and a destination page's
+# own `status:` frontmatter is ordinary; only the frontmatter key `origins[]`
+# and the proposal-note spelling `status: <page state>` are drift. Hence the
+# `[^a-z_]` guard, which lets `page_status: approved` through and stops
+# `status: approved`.
+
+LEDGER_READERS=(
+    "skills/graph-works/references/proposal-disposition.md"
+    "skills/proposals/SKILL.md"
+)
+
+OBSOLETE_LEDGER_KEYS='origins\[\]|target_slug|concept_kind|create_new|update_existing|proposal promote'
+OBSOLETE_STATUS_KEY='(^|[^a-z_])status: (approved|created|proposed|rejected)'
+
+for reader in "${LEDGER_READERS[@]}"; do
+    assert_not_matches "$reader" "$OBSOLETE_LEDGER_KEYS" \
+        "$reader names no frontmatter key the proposal writer never emits"
+    assert_not_matches "$reader" "$OBSOLETE_STATUS_KEY" \
+        "$reader spells the note's state key page_status, not status"
+    assert_contains "$reader" "page_status" \
+        "$reader reads the page_status key the writer actually emits"
+    assert_contains "$reader" "sources[]" \
+        "$reader reads sources[], the key that carries a proposal's arguments"
+done
+
+# Identity is the target path: `approve`/`reject` resolve their argument
+# through `_find_by_target`, never through the note's filename slug.
+assert_contains "skills/graph-works/references/proposal-disposition.md" \
+    "gw wiki proposal approve <target>" \
+    "the disposition reference calls approve with a target, not a slug"
+
+# `approved` is archive-eligible -- doc_wiki_okf.archive._sweep takes every
+# proposal whose page_status is not `proposed`. A bare sweep eats an
+# approved-but-unauthored note, so the preview is not optional.
+assert_contains "skills/graph-works/references/proposal-disposition.md" \
+    "gw wiki archive --dry-run" \
+    "the disposition reference previews the sweep before running it"
+
+# `## Origins` must stay allowed: it is what the review renderer writes.
+assert_contains "skills/graph-works/references/proposal-disposition.md" \
+    "## Origins" \
+    "the disposition reference still recognises the Origins body heading"
 
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"

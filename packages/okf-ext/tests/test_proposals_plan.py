@@ -9,7 +9,7 @@ import pytest
 from okf_ext.proposals.apply import apply
 from okf_ext.proposals.model import Proposal
 from okf_ext.proposals.plan import list_proposals, plan_decide, plan_propose
-from okf_ext.proposals.render import render_body
+from okf_ext.proposals.render import HEADER, render_body
 from okf_io import load_bundle
 
 AT = datetime(2026, 8, 8, 12, 0, tzinfo=UTC)
@@ -340,3 +340,209 @@ def test_placement_is_a_deprecated_alias_of_proposal_path():
     from okf_ext.proposals import placement, proposal_path
 
     assert placement is proposal_path
+
+
+def _sections(*, description, sources, newline="\n"):
+    """A stand-in for a richer renderer: same `BodyRenderer` shape, different
+    contract. Local rather than imported -- okf-ext must not know a lane
+    vocabulary, so the crossover is proved with a shape, not with
+    `doc_wiki_okf.proposals.ReviewRenderer`."""
+    lines = [HEADER, "", "## Summary", "", description, "", "## Entries", ""]
+    lines.extend(f"**{source.get('id')}**" for source in sources)
+    return newline.join(lines) + newline
+
+
+def test_a_merge_whose_renderer_cannot_reproduce_the_body_refuses(tmp_path):
+    """The crossover case: a note written by one renderer, merged by another.
+    Replacing the body would drop every byte the second renderer does not
+    know how to write, and nothing in the ledger could reconstruct them."""
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    plan = plan_propose(
+        bundle,
+        "pages/live.md",
+        [NEW_SOURCE],
+        title="Live",
+        description="why",
+        by=BY,
+        at=AT,
+        render=_sections,
+    )
+    assert not plan.ok
+    assert [r.kind for r in plan.refusals] == ["unrenderable-body"]
+    assert plan.refusals[0].path == "proposals/live.md"
+    assert plan.writes == ()
+
+
+def test_a_refused_merge_plans_no_write_and_changes_no_byte(tmp_path):
+    """A refusal is inert: `plan_propose` writes nothing anyway, and `apply`
+    is never reached because the plan is not `ok`."""
+    root = ext_helpers.proposed_copy(tmp_path)
+    before = ext_helpers.snapshot(root)
+    bundle = load_bundle(root)
+    plan = plan_propose(
+        bundle,
+        "pages/live.md",
+        [NEW_SOURCE],
+        title="Live",
+        description="why",
+        by=BY,
+        at=AT,
+        render=_sections,
+    )
+    assert plan.is_empty
+    assert ext_helpers.snapshot(root) == before
+
+
+def test_a_body_carrying_prose_no_ledger_field_holds_refuses_its_own_renderer(tmp_path):
+    """The migration case, and the reason the guard is not "is this renderer
+    the one that wrote it": `hand-edited.md`'s body IS `render_body`'s output
+    plus a paragraph the ledger does not carry, so even the correct renderer
+    cannot reproduce it."""
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    plan = plan_propose(
+        bundle,
+        "pages/hand-edited.md",
+        [NEW_SOURCE],
+        title="Hand edited",
+        description="why",
+        by=BY,
+        at=AT,
+    )
+    assert [r.kind for r in plan.refusals] == ["unrenderable-body"]
+    assert "reconcile" in plan.refusals[0].detail
+
+
+def test_a_same_renderer_merge_still_plans_its_update(tmp_path):
+    """The guard's other arm: every proposal in the corpus whose body the
+    default renderer reproduces exactly still merges, so the check costs a
+    conforming ledger nothing."""
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    plan = plan_propose(bundle, "pages/live.md", [NEW_SOURCE], title="Live", description="why", by=BY, at=AT)
+    assert plan.ok
+    (write,) = plan.writes
+    assert write.mode == "update"
+    assert write.digest is not None
+
+
+def test_the_guard_reads_the_old_ledger_not_the_incoming_one(tmp_path):
+    """The preimage is rendered from the proposal's OWN description and
+    sources. Rendering the incoming ones instead would refuse every real
+    merge, because an incoming source is by definition not in the old body."""
+    seen: list[tuple[str, tuple[str, ...]]] = []
+
+    def recording(*, description, sources, newline="\n"):
+        seen.append((description, tuple(str(s.get("id")) for s in sources)))
+        return render_body(description=description, sources=sources, newline=newline)
+
+    root = ext_helpers.proposed_copy(tmp_path)
+    bundle = load_bundle(root)
+    plan = plan_propose(
+        bundle,
+        "pages/live.md",
+        [NEW_SOURCE],
+        title="Live",
+        description="A proposal still open, whose target does not exist.",
+        by=BY,
+        at=AT,
+        render=recording,
+    )
+    assert plan.ok
+    assert seen[0] == ("A proposal still open, whose target does not exist.", ("src-a",))
+    assert seen[-1][1] == ("src-a", "src-c")
+
+
+def test_a_crlf_body_is_compared_on_its_own_terminator(tmp_path):
+    """`dominant_newline` is read once and used for both the preimage and the
+    replacement, so a CRLF ledger neither refuses spuriously nor gains LF
+    lines."""
+    root = ext_helpers.proposed_copy(tmp_path)
+    live = root / "proposals" / "live.md"
+    live.write_bytes(live.read_bytes().replace(b"\n", b"\r\n"))
+    bundle = load_bundle(root)
+    plan = plan_propose(bundle, "pages/live.md", [NEW_SOURCE], title="Live", description="why", by=BY, at=AT)
+    assert plan.ok
+    assert plan.writes[0].body is not None
+    assert "\r\n" in plan.writes[0].body
+    assert "\n" not in plan.writes[0].body.replace("\r\n", "")
+
+
+def _evidence_body(*, description, sources, newline="\n"):
+    lines = [HEADER, "", "## Review", "", description, ""]
+    for source in sources:
+        lines.extend([str(source["resource"]), *source.get("evidence", ())])
+    return newline.join(lines) + newline
+
+
+@pytest.mark.parametrize("hand_edited", [False, True])
+def test_rich_body_is_preserved_on_crossover_or_unmatched_prose(tmp_path, hand_edited):
+    root = tmp_path / "bundle"
+    root.mkdir()
+    bundle = load_bundle(root)
+    source = {"id": "old", "resource": "/sources/old.md", "evidence": ["Original evidence"]}
+    creation = plan_propose(
+        bundle,
+        "pages/rich.md",
+        [source],
+        title="Rich",
+        description="Summary",
+        by=BY,
+        at=AT,
+        render=_evidence_body,
+    )
+    assert apply(bundle, creation).ok
+    note = root / creation.proposal
+    if hand_edited:
+        with note.open("a", encoding="utf-8", newline="") as stream:
+            stream.write("\nBody-only counterexample.\n")
+    before = ext_helpers.snapshot(root)
+    plan = plan_propose(
+        load_bundle(root),
+        "pages/rich.md",
+        [NEW_SOURCE],
+        title="Rich",
+        description="Updated",
+        by=BY,
+        at=AT,
+        render=_evidence_body if hand_edited else render_body,
+    )
+    assert [r.kind for r in plan.refusals] == ["unrenderable-body"]
+    assert plan.writes == ()
+    assert ext_helpers.snapshot(root) == before
+
+
+def test_custom_same_renderer_merge_preserves_old_and_new_evidence(tmp_path):
+    root = tmp_path / "bundle"
+    root.mkdir()
+    old = {"id": "old", "resource": "/sources/old.md", "evidence": ["Original evidence"]}
+    new = {"id": "new", "resource": "/sources/new.md", "evidence": ["New evidence"]}
+    bundle = load_bundle(root)
+    creation = plan_propose(
+        bundle,
+        "pages/rich.md",
+        [old],
+        title="Rich",
+        description="Summary",
+        by=BY,
+        at=AT,
+        render=_evidence_body,
+    )
+    assert apply(bundle, creation).ok
+    bundle = load_bundle(root)
+    plan = plan_propose(
+        bundle,
+        "pages/rich.md",
+        [new],
+        title="Rich",
+        description="Updated",
+        by=BY,
+        at=AT,
+        render=_evidence_body,
+    )
+    assert plan.ok
+    assert apply(bundle, plan).ok
+    body = load_bundle(root).concepts[creation.proposal.removesuffix(".md")].body
+    assert "Original evidence" in body
+    assert "New evidence" in body

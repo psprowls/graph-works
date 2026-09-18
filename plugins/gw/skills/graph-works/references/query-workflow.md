@@ -78,7 +78,9 @@ If yes:
 - Use the appropriate template (`concept-architecture.md`, `concept-pattern.md`, or `concept.md`)
 - Add frontmatter with `category`, `summary`, `updated` (and `kind` if applicable)
 - Update `<workspace>/okf/index.md`
-- Append a `## [YYYY-MM-DD] create | <question>` entry to `log.md` with the filed response path.
+- Run `gw util log --op create --title "<question>" --detail "<filed response path>"`
+  in the intended workspace. It appends a `- **create** <question> — <filed response path>`
+  list item under the day's `## YYYY-MM-DD` heading in `log.md`.
 
 ## Output formats
 

@@ -8,7 +8,7 @@
     "title": { "type": "string", "minLength": 1 },
     "description": { "type": "string", "minLength": 1 },
     "source_kind": { "enum": ["spec", "article", "ticket", "skill", "doc", "transcript", "code-review"] },
-    "source_path": { "type": "string", "minLength": 1 },
+    "source_path": { "type": "string", "minLength": 1, "x-okf-member": true },
     "origin": { "type": "string" },
     "ingested": { "type": "string", "format": "date" },
     "source_date": { "type": "string", "format": "date" },

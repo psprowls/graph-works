@@ -356,6 +356,7 @@ PROPOSED_EXPECTED = {
     "proposals/approved-broken-target": "approved, target present but unparseable -- the `unreadable-target` refusal",
     "proposals/rejected": "decided -- `already-decided` on propose, `not-approved` on promote",
     "proposals/created": "the terminal state -- decided, and its target is present",
+    "proposals/hand-edited": "proposed body with hand-carried prose absent from the ledger",
     "proposals/no-target": "malformed: no `target` at all, so it never joins target lookup",
     "proposals/bad-status": "malformed: a `page_status` outside the enum",
     "proposals/escaping": (

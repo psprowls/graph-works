@@ -21,7 +21,7 @@ $lint                      # Codex
 No arguments. The staleness and log-gap thresholds are `gw wiki lint`'s own, not
 something this command threads through.
 
-Workspace and repo are discovered automatically via `workspace_io`.
+Workspace and repo are resolved by `gw`.
 
 ## Dispatch
 
@@ -37,7 +37,7 @@ context — the body below is written to work either way.
 
 You audit the Code Wiki and surface problems for the user to fix. You do NOT silently auto-fix structural issues; you report and suggest. The user decides.
 
-Code Wiki lint adds **code-drift detection** to the generic wiki health check: packages on disk vs. in the vault, deleted packages with orphan vault pages, exports-frontmatter mismatch.
+Code Wiki lint reports missing, stale, and orphaned graph-backed pages alongside wiki health and work lifecycle findings.
 
 Spawned per-lint-pass.
 
@@ -45,7 +45,7 @@ Spawned per-lint-pass.
 
 | Trigger | Pass |
 |---|---|
-| Weekly | Mechanical only |
+| Weekly | Four passes |
 | After `/gw:scan` | Full — catches drift |
 | After batch ingest | Full |
 | Monthly | Full + structural review |
@@ -64,31 +64,57 @@ gw wiki stats --json > /tmp/stats.json
 
 (Workspace and repo are resolved by `gw`.)
 
-Parse the JSON. Capture:
-- Orphans, broken links, stale, missing frontmatter, duplicate titles, log gap
-- Connected components, hubs, sinks (from `/tmp/stats.json`)
-- **Code drift**: `missing_in_vault`, `orphaned_in_vault`, `exports_drift`
-- **Semantic**: `semantic` — an array of `{group, message, page, model}`, already produced by a real LLM pass inside `gw wiki lint`; groups are `page_quality`, `adr_chain`, `stale_claims`. Report these directly rather than re-deriving them by hand.
-- **Work lifecycle**: `work_lifecycle` — `{total_items, findings}`, all 32 lifecycle rules (same set as `gw work lint`)
-- **Obsidian render**: `obsidian_render_findings` — markdown that breaks Obsidian's renderer
-- **Guidance lint**: `guidance_lint_findings` — frontmatter/tag/placement findings for Diátaxis-lane pages
-- **Scanner heading drift**: `scanner_heading_drift` — entity pages missing a deterministic section
-- **Source path drift**: `source_path_drift` — `sources/` pages whose `sources/references/` copy is missing on disk
+`gw wiki lint --json` emits exactly five top-level keys:
 
-Any of the last five may fail-soft as `{"error": "<msg>"}` — report the error line, don't skip the section silently.
+| Key | How to read it |
+| --- | --- |
+| `ok` | True when there are no pipeline errors and every mechanical lane report is OK. Semantic findings are advisory. |
+| `mechanical` | Array of `{lane, findings}`. Traverse each lane's findings and retain `code`, `severity`, `message`, `spec`, `path`, and `line`. Work lifecycle findings are in the `work` lane. |
+| `semantic` | Array of `{group, message, page, model}`; groups include `page_quality`, `adr_chain`, and `stale_claims`. Present these model findings directly. |
+| `open_proposals` | Backlog summary with `count`, `oldest` (ISO date or null), `malformed`, and `ages`. |
+| `errors` | Array of pipeline error strings, including lane and semantic failures. Surface every error and identify incomplete checks. |
 
-Beyond the mechanical and semantic checks above, `gw wiki lint` runs `check_package_sync_drift`. Package sync drift is actionable: a package/app page whose source code has changed since its `last_sync_commit` should be re-scanned.
+An empty findings array does not prove a failed or unavailable check succeeded.
+If the command fails without a usable JSON report, report that failure explicitly.
+For each mechanical finding, show its lane, dotted code, severity, message, and
+available location. A `sync.missing-page` finding can have `path: null`; retain
+its message instead of dropping the finding.
 
-- **Package sync drift** — package/app pages whose source code has changed since their `last_sync_commit`. Surface the count of changed files and one example path; suggest running `/gw:scan` on a clean main checkout.
-- **Never-synced packages** — pages with no `last_sync_commit`, such as a freshly-created stub. The first clean-on-main `/gw:scan` records one.
-- **Sync commit unreachable** — page records a `last_sync_commit` that isn't an ancestor of HEAD (typically means a feature-branch SHA, or main was rebased). Surface as: `<page>: last_sync_commit <sha> not reachable from HEAD`. Suggest re-running `/gw:scan` on a clean main checkout.
+### Rule families and prerequisites
+
+Built-in OKF validation accompanies each lane, including document, link, index,
+and lifecycle checks. Wiki rules are composed as follows:
+
+| Concern | Codes and conditions |
+| --- | --- |
+| Graph-backed page sync | `sync.missing-page`, `sync.stale-page`, `sync.orphan-page`; requires a graph reader. |
+| Obsidian rendering | `render.angle-bracket`, `render.callout`, `render.wikilink`, `render.wikilink-target`, `render.table-pipe`; always included. |
+| Declared headings | `sections.missing`, `sections.unfilled`, `sections.unexpected`, `sections.no-declaration-for-type`; requires section declarations. |
+| Wiki health | `health.uncited`, `health.duplicate-title`, `health.log-gap`; always included. |
+| Placement, schema, vocabulary | Code-wiki placement always applies; schema and vocabulary checks require their declaration files. |
+
+Absent wiki declarations leave the corresponding checks inactive; malformed
+ones produce lane errors. Work-lane schema and section declarations are required,
+so missing ones also produce lane errors. Report the returned work findings
+without assuming a fixed catalog size.
+
+Commit-derived sync staleness uses `last_updated_commit`; it is distinct from
+OKF `lifecycle.stale`. Suggest `/gw:scan` for graph-backed page drift, preserving
+the finding's explanation. Sync findings do not carry changed-file counts or
+an export-specific result.
+
+The lint CLI exposes `--json`, `--workspace`, and `--help`. There are no optional
+check-group or threshold flags.
+
+Read structural statistics separately from `/tmp/stats.json`; they are not lint
+payload fields. See the workflow reference for the stats keys.
 
 ### Pass 2 — Residual semantic (read and think)
 
 The `semantic` array captured in Pass 1 already covers contradictions (vault↔vault and vault↔code), stale claims, and ADR chain health (`page_quality`, `stale_claims`, `adr_chain`). Read those findings and present them in the report; Pass 2 is only what that array doesn't cover:
 
 - **Concept gaps** — grep for concept-shaped phrases across 3+ pages without a dedicated page
-- **Cross-reference gaps** — plain-text mentions of packages/deps that should be wikilinks
+- **Cross-reference gaps** — plain-text mentions of packages/deps that should have root-absolute markdown links
 - **Index drift** — `gw wiki index` already reconciles `index.md` mechanically (dead entries pruned, missing ones added); this pass is for drift it wouldn't catch — e.g. a page that should exist but doesn't
 
 ### Pass 3 — Drift (`gw wiki drift`)
@@ -113,44 +139,40 @@ The graph reflects the last `gw scan`, not necessarily HEAD. Running `gw scan` f
 
 ### Pass 4 — Report
 
-The report MUST be structured as:
+Use this report structure, including only findings actually returned or observed:
 
 ```markdown
 # Code Wiki lint — <date>
 
-**Total pages:** N  **Components:** N  **Last log:** <date>
-**Code drift:** <missing> new packages un-documented, <orphan> orphan package pages
+**Total pages:** <stats total_pages>  **Components:** <stats component_count>
+**Lint OK:** <ok>  **Open proposals:** <open_proposals.count>
 
 ## Wiki lint
 
 ### Found
-- ⚠️ <N> packages on disk missing vault pages: <names>
-- ⚠️ <N> vault package pages for non-existent packages: <names>
-- ⚠️ <N> contradictions vault↔code
-- ⚠️ Work lifecycle: <N> findings across <M> items (<E> error / <W> warn): <work-path>: [<rule_id>] …
-- ⚠️ <N> Obsidian render findings: <page>: [<rule_id>] …
-- ⚠️ <N> guidance lint findings: <slug>: [<rule_id>] …
-- ⚠️ <N> scanner heading drift: <page> missing '<heading>'
-- ⚠️ <N> source path drift: <page> → <raw path> gone
-- <N> orphan vault pages
-- <N> broken links
-- <N> stale pages
-- <N> concept gaps (mentioned across 3+ pages)
-- <N> ADR chain issues
-- <N> drift candidates reviewed: `<concept>` — <overtaken / still accurate, one line why>
+- wiki [sync.missing-page]: <message; retain even without a path>
+- wiki [sync.stale-page]: <page>: <message>
+- wiki [sync.orphan-page]: <page>: <message>
+- wiki [render.angle-bracket]: <page>:<line>: <message>
+- wiki [sections.missing]: <page>: <message>
+- work [<returned dotted code>]: <work-path>: <severity>: <message>
+- semantic [<group>]: <page>: <message>
+- Pipeline errors: <each errors entry, or none; name incomplete checks>
+- Residual review: <concept gaps, cross-reference gaps, index drift>
+- Curated drift review: <target>: <overtaken / still accurate, with reason>
 
 ### Suggested actions
-1. Run `/gw:scan` to stub <package> and <package>
-2. Re-run `/gw:scan` — it deletes the entity page for `<old-pkg>` automatically when its graph node is gone
-3. Re-run `/gw:scan` to refresh `repositories/<repo>/packages/<pkg>.md` graph-derived frontmatter from current code
-4. Revise the affected canonical `<work-path>` or update its `work_status`
-5. Create concept pages for: <names>
-6. Fix broken link in `[<page>](/<page>.md)`
+1. Run `/gw:scan` to reconcile the reported graph-backed page drift.
+2. Review render and declared-section findings at their reported locations.
+3. Revise the affected work item based on its returned lifecycle finding.
+4. Review semantic findings and proposed concept or link additions.
 
 Want me to run these in order, or pick specific ones?
 ```
 
-Then append a `## [YYYY-MM-DD] lint | <date> health check` entry to `log.md` with the findings summary.
+Then run `gw util log --op lint --title "<date> health check" --detail "<findings summary>"`
+in the intended workspace. It appends a `- **lint** <title> — <detail>` list item
+under the day's `## YYYY-MM-DD` heading in `log.md`.
 
 ## Rules
 

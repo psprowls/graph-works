@@ -6,7 +6,14 @@ import sys
 
 import pytest
 from ext_helpers import write
-from okf_ext.schemas import DEFAULT_IGNORE, DEFAULT_SCHEMA_DIRNAME, SchemaError, declared_directories, load_schemas
+from okf_ext.schemas import (
+    DEFAULT_IGNORE,
+    DEFAULT_SCHEMA_DIRNAME,
+    SchemaError,
+    declared_directories,
+    declared_members,
+    load_schemas,
+)
 from okf_ext.schemas.loader import build_registry
 
 BASE = """
@@ -308,3 +315,78 @@ def test_the_result_is_a_plain_mutable_dict(tmp_path):
     found = declared_directories(_annotated_set(tmp_path, Widget="widgets/"))
     found["Extra"] = "extra/"
     assert found == {"Widget": "widgets/", "Extra": "extra/"}
+
+
+# --- declared_members -------------------------------------------------------
+
+
+def _member_set(tmp_path, properties, *, name="Widget", extra=None):
+    """One schema whose top-level `properties` the caller chooses verbatim."""
+    root = tmp_path / "schema"
+    root.mkdir(exist_ok=True)
+    document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"type": {"const": name}, **properties},
+    }
+    document.update(extra or {})
+    write(root / f"{name}.schema.json", json.dumps(document))
+    return load_schemas(root)
+
+
+def test_declared_members_collects_literal_true_top_level_annotations_sorted(tmp_path):
+    schema_set = _member_set(
+        tmp_path,
+        {
+            "zeta": {"type": "string", "x-okf-member": True},
+            "alpha": {"type": "string", "x-okf-member": True},
+            "plain": {"type": "string"},
+        },
+    )
+    assert declared_members(schema_set) == {"Widget": ("alpha", "zeta")}
+
+
+@pytest.mark.parametrize("value", [False, "true", 1, None])
+def test_only_the_literal_json_true_counts(tmp_path, value):
+    schema_set = _member_set(tmp_path, {"path": {"type": "string", "x-okf-member": value}})
+    assert declared_members(schema_set) == {}
+
+
+def test_a_non_mapping_sub_schema_is_ignored_not_reported(tmp_path):
+    """`true` is a valid JSONSchema sub-schema; it carries no annotation."""
+    schema_set = _member_set(tmp_path, {"anything": True})
+    assert declared_members(schema_set) == {}
+
+
+def test_nested_and_array_item_properties_are_not_scanned(tmp_path):
+    """A stated boundary (spec §3.1): only top-level `properties`."""
+    schema_set = _member_set(
+        tmp_path,
+        {
+            "owner": {"type": "object", "properties": {"path": {"type": "string", "x-okf-member": True}}},
+            "paths": {"type": "array", "items": {"type": "string", "x-okf-member": True}},
+        },
+    )
+    assert declared_members(schema_set) == {}
+
+
+def test_a_ref_reached_property_is_not_scanned(tmp_path):
+    root = tmp_path / "schema"
+    root.mkdir()
+    write(
+        root / "_base.schema.json",
+        json.dumps({"properties": {"path": {"type": "string", "x-okf-member": True}}}),
+    )
+    write(
+        root / "Widget.schema.json",
+        json.dumps({"$ref": "_base.schema.json", "properties": {"type": {"const": "Widget"}}}),
+    )
+    assert declared_members(load_schemas(root)) == {}
+
+
+def test_a_type_with_no_member_property_is_omitted(tmp_path):
+    root = tmp_path / "schema"
+    root.mkdir()
+    write(root / "A.schema.json", json.dumps({"properties": {"p": {"x-okf-member": True}}}))
+    write(root / "B.schema.json", json.dumps({"properties": {"p": {"type": "string"}}}))
+    assert declared_members(load_schemas(root)) == {"A": ("p",)}

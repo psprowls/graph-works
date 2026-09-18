@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from okf_ext.context import DEFAULT_NORMALIZATION, ExtContext, NormalizationPolicy
 
-__version__ = "0.4.13"
+__version__ = "0.4.14"
 
 __all__ = [
     "DEFAULT_NORMALIZATION",

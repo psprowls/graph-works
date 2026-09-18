@@ -64,7 +64,10 @@ def _schema_set():
 
 def _codes(tmp_path: Path, frontmatter: str) -> list[str]:
     root = tmp_path / "bundle"
-    (root / "sources").mkdir(parents=True, exist_ok=True)
+    (root / "sources" / "references").mkdir(parents=True, exist_ok=True)
+    (root / "sources" / "references" / "2026-08-design-spec-scaffold-okf-ext.md").write_text(
+        "# Design spec\n", encoding="utf-8", newline=""
+    )
     (root / "index.md").write_text("---\nokf_version: 0.2\n---\n\n# bundle\n", encoding="utf-8")
     (root / "sources" / "2026-08-a.md").write_text(f"---\n{frontmatter}---\n\n{LIVE_BODY}", encoding="utf-8")
     report = okf_validate(load_bundle(root), today=date(2026, 8, 12), extra_rules=[schema_rule(_schema_set())])

@@ -5,6 +5,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from pathlib import Path
+from typing import get_args
 
 import pytest
 from okf_ext.proposals.model import (
@@ -15,6 +16,7 @@ from okf_ext.proposals.model import (
     Proposal,
     ProposalPlan,
     Refusal,
+    RefusalKind,
     Write,
     source_ids,
 )
@@ -147,3 +149,20 @@ def test_source_ids_returns_ids_in_order_blanks_included():
     """Extract every `id` from sources in order, blanks as empty strings."""
     sources = ({"id": "src-a"}, {"id": "  "}, {"resource": "/x.md"})
     assert source_ids(sources) == ("src-a", "", "")
+
+
+def test_the_refusal_vocabulary_is_closed_and_ordered():
+    """A ninth member, appended rather than inserted: the order is the order
+    `test_proposals_roundtrip.py`'s reachability parametrize reads, and the
+    two deliberate extensions beyond the design spec's seven sit last."""
+    assert get_args(RefusalKind) == (
+        "already-decided",
+        "not-proposed",
+        "not-approved",
+        "target-exists",
+        "missing-render",
+        "target-escapes-bundle",
+        "malformed-proposal",
+        "unreadable-target",
+        "unrenderable-body",
+    )

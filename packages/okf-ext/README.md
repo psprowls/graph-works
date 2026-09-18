@@ -504,6 +504,27 @@ considered and deliberately deferred, not forgotten (see `_locate`'s
 docstring in `regenerate.py`). Supplying content that cannot be mistaken for
 a declared heading is the caller's responsibility.
 
+**A `proposals` merge refuses rather than replacing a body it cannot first
+reproduce, and the refusal has no override.** `plan_propose`'s changed-merge
+branch renders the live proposal's own `description` and `sources[]` through
+the renderer it was handed and requires the result to equal the body on disk
+byte for byte. Anything else refuses with `unrenderable-body` and plans
+nothing. The check is deliberately blunt, because the two signals that would
+let it be subtler do not exist: `HEADER` is shared by every renderer, so it
+cannot say which contract wrote a body, and a body may carry prose — a
+migration-era counterexample, a hand-added qualification — that no `sources[]`
+key holds, so no renderer can reconstruct it from the ledger.
+
+The cost is that a legitimate change refuses too. A renderer whose output
+depends on context that has since moved (a proposal whose target has appeared
+since it was filed, so a mode-sensitive renderer now writes "Update existing"
+where the body says "Create new"), a whitespace difference, or a hand-edited
+body all refuse identically. There is deliberately **no force flag and no
+corpus-repair command**: the recovery is to open the document, decide what the
+unmatched bytes are worth, move anything worth keeping into `sources[]`, and
+re-render it under a separate reviewed operation. A refusal is recoverable in
+a way a silent replacement is not.
+
 ## Design notes
 
 **`WriteFailure` carries a machine-readable `kind`, not only rendered prose.**

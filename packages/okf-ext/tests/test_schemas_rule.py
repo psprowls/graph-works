@@ -191,6 +191,125 @@ def test_strict_promotes_the_house_rule_with_no_second_namespace(tmp_path):
     assert {f.severity for f in found} == {"error"}
 
 
+# --- x-okf-member: schemas.unresolved-member --------------------------------
+
+CITED = """
+type: object
+required: [type, title]
+properties:
+  type: {const: Cited}
+  title: {type: string}
+  source_path: {type: string, minLength: 1, x-okf-member: true}
+  origin: {type: string}
+"""
+
+
+def cited(source_path: str) -> str:
+    return f"---\ntype: Cited\ntitle: C\nsource_path: {source_path}\n---\n\n# C\n"
+
+
+def run_cited(tmp_path, files, *, severity="warn", ignore=(), scope=None):
+    """A `Cited` schema beside a bundle of *files* (bundle-relative path -> text)."""
+    schema_dir = tmp_path / "schema"
+    schema_dir.mkdir()
+    write(schema_dir / "Cited.schema.yaml", CITED)
+    bundle_dir = tmp_path / "bundle"
+    for relative, text in files.items():
+        target = bundle_dir / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        write(target, text)
+    report = validate(
+        load_bundle(bundle_dir, ignore=ignore),
+        today=TODAY,
+        extra_rules=[schema_rule(load_schemas(schema_dir), severity=severity)],
+        scope=scope,
+    )
+    return [f for f in report.findings if f.code == "schemas.unresolved-member"]
+
+
+def test_a_dangling_member_path_is_reported_with_path_line_severity_and_spec(tmp_path):
+    found = run_cited(tmp_path, {"page.md": cited("refs/gone.md")})
+    assert len(found) == 1
+    finding = found[0]
+    assert finding.path == "page.md"
+    assert finding.line == 4
+    assert finding.severity == "warn"
+    assert finding.spec == "Cited.schema.yaml"
+    assert finding.message == (
+        "`source_path` `refs/gone.md` names no member of the bundle (declared `x-okf-member` in `Cited.schema.yaml`)."
+    )
+
+
+@pytest.mark.parametrize(
+    "files",
+    [
+        {"page.md": cited("other.md"), "other.md": "---\ntitle: O\n---\n\n# O\n"},  # a concept
+        {"page.md": cited("refs/data.csv"), "refs/data.csv": "a,b\n"},  # an asset
+        {"page.md": cited("/refs/data.csv"), "refs/data.csv": "a,b\n"},  # root-absolute spelling
+    ],
+)
+def test_a_resolving_member_path_is_quiet(tmp_path, files):
+    assert run_cited(tmp_path, files) == []
+
+
+def test_an_ignored_member_still_resolves(tmp_path):
+    """`has_member` counts ignored members: a wiki page pointing into `work/`,
+    which the wiki lane ignores, has a working `source_path`."""
+    files = {"page.md": cited("work/item/references/01-design.md"), "work/item/references/01-design.md": "# D\n"}
+    assert run_cited(tmp_path, files, ignore=("work/*",)) == []
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "/Users/pat/okf/sources/references/x.md",  # absolute filesystem path
+        "https://example.com/x.md",  # a URL
+        "../outside.md",  # never resolved
+        "//double.md",  # only one leading slash is stripped
+    ],
+)
+def test_shapes_that_are_never_members_are_reported(tmp_path, value):
+    files = {"page.md": cited(value), "outside.md": "# O\n", "double.md": "# D\n", "x.md": "# X\n"}
+    assert len(run_cited(tmp_path, files)) == 1
+
+
+@pytest.mark.parametrize("line", ["source_path: 7\n", "source_path: ['a.md']\n", ""])
+def test_a_non_string_or_absent_value_is_left_to_schemas_invalid(tmp_path, line):
+    text = f"---\ntype: Cited\ntitle: C\n{line}---\n\n# C\n"
+    assert run_cited(tmp_path, {"page.md": text}) == []
+
+
+@pytest.mark.parametrize(
+    "line",
+    ["source_path: ''\n", "source_path: ' '\n", "source_path: /\n", "source_path: '/ '\n"],
+)
+def test_a_blank_string_is_still_an_unresolved_member(tmp_path, line):
+    text = f"---\ntype: Cited\ntitle: C\n{line}---\n\n# C\n"
+    assert len(run_cited(tmp_path, {"page.md": text})) == 1
+
+
+def test_an_unannotated_property_is_never_checked(tmp_path):
+    text = "---\ntype: Cited\ntitle: C\norigin: nowhere/at/all.md\n---\n\n# C\n"
+    assert run_cited(tmp_path, {"page.md": text}) == []
+
+
+def test_scope_narrows_the_member_check(tmp_path):
+    files = {"a.md": cited("gone.md"), "b.md": cited("gone.md")}
+    found = run_cited(tmp_path, files, scope=frozenset({"b.md"}))
+    assert [f.path for f in found] == ["b.md"]
+
+
+def test_the_severity_knob_applies_to_the_member_check(tmp_path):
+    found = run_cited(tmp_path, {"page.md": cited("gone.md")}, severity="error")
+    assert [f.severity for f in found] == ["error"]
+
+
+def test_an_undeclared_type_is_never_member_checked(tmp_path):
+    """No schema means `no-schema-for-type`, and nothing else."""
+    text = "---\ntype: Unknown\ntitle: U\nsource_path: gone.md\n---\n\n# U\n"
+    assert run_cited(tmp_path, {"page.md": text}) == []
+
+
 # --- The topic contract -----------------------------------------------------
 
 
@@ -200,14 +319,15 @@ def test_every_code_starts_with_the_topic_prefix():
 
 
 def test_every_emitted_code_is_a_member_of_codes(tmp_path):
-    emitted = {
-        f.code
-        for f in run(
-            tmp_path,
-            orphan="---\ntype: Metric\ntitle: O\n---\n\n# O\n",
-            term="---\ntype: Glossary\ntitle: C\n---\n\n# C\n",
-        )
-    }
+    bundle, schema_set = build(
+        tmp_path,
+        orphan="---\ntype: Metric\ntitle: O\n---\n\n# O\n",
+        term="---\ntype: Glossary\ntitle: C\n---\n\n# C\n",
+        page=cited("gone.md"),
+    )
+    write(schema_set.root / "Cited.schema.yaml", CITED)
+    report = validate(bundle, today=TODAY, extra_rules=[schema_rule(load_schemas(schema_set.root))])
+    emitted = {f.code for f in report.findings if f.code.startswith(f"{TOPIC}.")}
     assert emitted == set(CODES)
 
 

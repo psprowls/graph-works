@@ -118,7 +118,9 @@ Command-layer ingest/scan flows update indexes automatically. If you edited page
 
 ### 11. Append to `log.md`
 
-`gw util log` appends a `## [YYYY-MM-DD] ingest | <title>` entry with the touched pages.
+Run `gw util log --op ingest --title "<title>" --detail "<touched pages>"` in the
+intended workspace. It appends a `- **ingest** <title> — <detail>` list item
+under the day's `## YYYY-MM-DD` heading.
 
 ### 12. Copy the source material
 

@@ -180,6 +180,7 @@ def test_both_doors_write_the_same_page_but_for_verified(tmp_path):
         "target-escapes-bundle",
         "malformed-proposal",
         "unreadable-target",
+        "unrenderable-body",
     ],
 )
 def test_every_refusal_kind_is_reachable(kind, tmp_path):
@@ -200,6 +201,9 @@ def test_every_refusal_kind_is_reachable(kind, tmp_path):
         ),
         "unreadable-target": lambda: proposals.plan_promote(
             bundle, by_id["proposals/approved-broken-target"], RENDER, by=AGENT, at=AT
+        ),
+        "unrenderable-body": lambda: proposals.plan_propose(
+            bundle, "pages/hand-edited.md", [], title="Hand edited", description="a new spin", by=AGENT, at=AT
         ),
     }[kind]()
     assert [r.kind for r in produced.refusals] == [kind]
@@ -234,3 +238,37 @@ def test_a_full_cycle_costs_no_finding(tmp_path):
     written = {member, "pages/clean.md"}
     offenders = [f"{f.code} {f.path}" for f in report.findings if f.path in written]
     assert not offenders, offenders
+
+
+def test_an_unchanged_refile_of_an_unrenderable_body_is_still_a_no_op(tmp_path):
+    """The guard sits after the no-op return, so a ledger nobody is changing
+    is never told its body is unrenderable. Idempotence outranks the check."""
+    bundle = _bundle(tmp_path)
+    plan = proposals.plan_propose(
+        bundle,
+        "pages/hand-edited.md",
+        [{"id": "src-b", "resource": "/sources/b.md", "title": "Second source"}],
+        title="Hand edited",
+        description="A proposed proposal whose body carries prose no ledger field holds.",
+        by=AGENT,
+        at=AT,
+    )
+    assert plan.ok
+    assert plan.is_empty
+
+
+def test_a_decided_unrenderable_body_still_refuses_as_already_decided(tmp_path):
+    """Decided outranks unrenderable: the body of a decided proposal stopped
+    being machine-owned at the flip, so the older refusal is the honest one
+    and the guard must never reach a decided document."""
+    root = ext_helpers.proposed_copy(tmp_path)
+    note = root / "proposals" / "hand-edited.md"
+    note.write_text(
+        note.read_text(encoding="utf-8").replace("page_status: proposed", "page_status: rejected"),
+        encoding="utf-8",
+        newline="",
+    )
+    plan = proposals.plan_propose(
+        load_bundle(root), "pages/hand-edited.md", [], title="Hand edited", description="a new spin", by=AGENT, at=AT
+    )
+    assert [r.kind for r in plan.refusals] == ["already-decided"]

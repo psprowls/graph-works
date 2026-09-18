@@ -15,9 +15,65 @@ import difflib
 import ext_helpers
 import pytest
 from okf_ext.body import split_lines
-from okf_ext.tags import TagDefinition, load_vocabulary, plan_vocabulary_merge
+from okf_ext.tags import TagDefinition, apply_vocabulary, load_vocabulary, plan_vocabulary_merge
 
 NEW = TagDefinition(name="security", description="A defect with a security impact.")
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("trailing", [False, True])
+@pytest.mark.parametrize(
+    "text",
+    [
+        "version: 1\ntags:\n  - name: alpha\n    description: First.\ntags:\n  - name: beta\n    description: Second.",
+        "\ufeff\ufefftags: []\nversion: 1",
+    ],
+    ids=["duplicate-keys", "double-bom"],
+)
+def test_malformed_anchors_are_repeatedly_refused_without_changing_bytes(tmp_path, text, newline, trailing):
+    path = tmp_path / "tags.yaml"
+    original = (text.replace("\n", newline) + (newline if trailing else "")).encode("utf-8")
+    path.write_bytes(original)
+    for _ in range(2):
+        plan = plan_vocabulary_merge(path, [NEW])
+        assert plan.added == ()
+        assert plan.before == plan.after == original.decode("utf-8")
+        assert len(plan.refusals) == 1
+        assert plan.refusals[0].kind == "foreign-content"
+        result = apply_vocabulary(plan)
+        assert result.written == ()
+        assert result.failed == plan.refusals
+        assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("trailing", [False, True])
+def test_single_bom_empty_flow_merge_preserves_bytes_and_is_idempotent(tmp_path, newline, trailing):
+    path = tmp_path / "tags.yaml"
+    ending = newline if trailing else ""
+    original = ("\ufefftags: []" + newline + "version: 1" + ending).encode("utf-8")
+    path.write_bytes(original)
+    plan = plan_vocabulary_merge(path, [NEW])
+    assert plan.added == ("security",)
+    assert plan.refusals == ()
+    expected = (
+        "\ufefftags:"
+        + newline
+        + "  - name: security"
+        + newline
+        + "    description: A defect with a security impact."
+        + newline
+        + "version: 1"
+        + ending
+    ).encode("utf-8")
+    assert plan.after.encode("utf-8") == expected
+    assert apply_vocabulary(plan).written == ("tags.yaml",)
+    assert path.read_bytes() == expected
+    assert load_vocabulary(path).allowed == frozenset({"security"})
+    second = plan_vocabulary_merge(path, [NEW])
+    assert second.added == ()
+    assert second.refusals == ()
+    assert second.after.encode("utf-8") == expected
 
 
 def definitions_already_in(path) -> list[TagDefinition]:

@@ -219,6 +219,8 @@ test-plugin:
     bash tests/hooks/test-skill-doc-routing.sh
     echo "--- test-doc-layout-claims"
     bash tests/test-doc-layout-claims.sh
+    echo "--- test_log_recipe"
+    uv run --package graph-works-cli python tests/test_log_recipe.py
     echo "--- test-entry-point-skills"
     bash tests/test-entry-point-skills.sh
     echo "--- skills/shared/resolve-workspace"

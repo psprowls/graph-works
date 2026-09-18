@@ -130,7 +130,9 @@ If the source shifts a high-level synthesis, revise the relevant `explanations/`
 Command-layer ingest/scan flows update indexes automatically. If you edited wiki pages by hand, reconcile with `gw wiki index` rather than editing `index.md` yourself.
 
 ### 11. Log
-`gw util log` appends a `## [YYYY-MM-DD] ingest | <title>` entry to `log.md` with the touched pages and notable contradictions.
+Run `gw util log --op ingest --title "<title>" --detail "<touched pages and notable contradictions>"`
+in the intended workspace. It appends a `- **ingest** <title> — <detail>` list item
+under the day's `## YYYY-MM-DD` heading in `log.md`.
 
 ### 12. Copy the source material
 The CLI's `claude_code` backend (the default) computes a brief and writes nothing — under it, you perform this copy yourself: copy the source material to `<workspace>/okf/sources/references/<YYYY-MM>-<slug>.<ext>` (Bash `cp`, or the Write tool for text). The original file, wherever it lives, is never moved or edited. If a copy already exists at that destination, replace it (re-ingest semantics; old versions are recoverable via workspace git). The source page's `source_path` frontmatter (step 4) must equal this copy destination.

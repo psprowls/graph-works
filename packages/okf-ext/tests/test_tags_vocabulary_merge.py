@@ -133,6 +133,25 @@ def test_a_bom_does_not_hide_a_tags_key_on_the_first_line():
     assert _locate("﻿tags:\nversion: 1\n") is not None
 
 
+@pytest.mark.parametrize("first", ["tags:\n  - name: alpha\n", "tags: []\n"])
+@pytest.mark.parametrize("second", ["tags:\n  - name: beta\n", "tags: []\n"])
+def test_locate_refuses_duplicate_column_zero_keys(first, second):
+    assert _locate("version: 1\n" + first + "\n# another group\n" + second) is None
+
+
+def test_locate_does_not_treat_nested_or_commented_keys_as_duplicates():
+    text = "tags:\n  - name: alpha\n    tags: []\n# tags: []\nversion: 1\n"
+    assert _locate(text) == _Anchor(key_line=1, insert_line=4, indent="  ", flow_empty=False)
+
+
+def test_locate_refuses_a_doubled_bom_empty_flow_key():
+    assert _locate("\ufeff\ufefftags: []\nversion: 1\n") is None
+
+
+def test_locate_accepts_a_single_bom_empty_flow_key():
+    assert _locate("\ufefftags: []\nversion: 1\n") == _Anchor(key_line=1, insert_line=2, indent="  ", flow_empty=True)
+
+
 @pytest.mark.parametrize(
     "text",
     [

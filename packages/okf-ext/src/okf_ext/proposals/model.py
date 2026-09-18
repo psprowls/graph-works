@@ -61,6 +61,15 @@ Mode = Literal["create", "update"]
 #: only place that can be caught before a preview claims a write it should not
 #: make -- `apply`'s own `parse-error` guard fires too late to keep the plan
 #: honest.
+#: `unrenderable-body` is the second such extension. `plan_propose`'s
+#: changed-merge branch replaces the whole body with the supplied renderer's
+#: output. `HEADER` is shared by every renderer and so cannot identify which
+#: contract wrote a body, and a migration-era body can carry prose no
+#: `sources[]` key holds at all -- so a merge that cannot first reproduce the
+#: existing body from the existing ledger would be dropping bytes nothing can
+#: reconstruct. Refusing is the only honest answer available at plan time:
+#: `apply`'s digest guard catches a body that changed *after* planning, not one
+#: the planner was never able to write in the first place.
 RefusalKind = Literal[
     "already-decided",
     "not-proposed",
@@ -70,6 +79,7 @@ RefusalKind = Literal[
     "target-escapes-bundle",
     "malformed-proposal",
     "unreadable-target",
+    "unrenderable-body",
 ]
 
 _EMPTY_FM: Mapping[str, Any] = MappingProxyType({})

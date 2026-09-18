@@ -387,14 +387,17 @@ def test_the_documented_vocabulary_merge_types_are_present() -> None:
 def test_the_documented_schemas_surface_is_present() -> None:
     """Spec §5 of the schemas work item: two functions, two values, two codes.
     `declared_directories` is the third function, added for `okf_ext.placement`
-    to compose against -- the capability may not import this one."""
+    to compose against -- the capability may not import this one.
+    `declared_members` is the fourth, and `schemas.unresolved-member` the third
+    code: the `x-okf-member` annotation, checked by `schema_rule` itself."""
     from okf_ext import schemas
 
     assert callable(schemas.load_schemas)
     assert callable(schemas.schema_rule)
     assert callable(schemas.declared_directories)
+    assert callable(schemas.declared_members)
     assert schemas.TOPIC == "schemas"
-    assert schemas.CODES == ("schemas.invalid", "schemas.no-schema-for-type")
+    assert schemas.CODES == ("schemas.invalid", "schemas.no-schema-for-type", "schemas.unresolved-member")
     assert schemas.DEFAULT_SCHEMA_DIRNAME == "schema"
     assert schemas.DEFAULT_IGNORE == ("schema/*", "*/schema/*")
 

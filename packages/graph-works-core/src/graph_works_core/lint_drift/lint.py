@@ -24,6 +24,7 @@ a revisit condition about the backlog's *age*, which an integer cannot answer.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time
@@ -37,6 +38,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from models_io.pricing import cost_for_usage
 from okf_ext import proposals
 from okf_io import Bundle, Document, Finding, Report, build_link_graph, load_bundle, validate
+from okf_io.bundle import canonical_id
 from subagents_io import SubagentPool, TaskResult
 from subagents_io.roles import RoleBinding
 
@@ -501,33 +503,68 @@ def _systems(project_context: str) -> dict[str, str]:
     }
 
 
-def _split_page(line: str, bundle: Bundle) -> tuple[str | None, str]:
-    """`("concepts/x", "the rest")` when the line names a page, else `(None, line)`.
+def _page_key(value: str) -> str:
+    """Canonical comparison only; never replace a stored concept ID."""
+    return canonical_id(canonical_id(value).casefold())
 
-    Derived from the `<page id>: ` prefix the output-format block asks for, and
-    only when that prefix actually names a concept in the bundle — a message
-    that merely happens to contain a colon keeps its text whole.
+
+def _split_page(line: str, bundle: Bundle, lookup: Mapping[str, Sequence[str]]) -> tuple[str | None, str, str | None]:
+    """Resolve a reply prefix, preserving unresolved text and diagnosing page IDs.
+
+    Unknown extensionless root labels are indistinguishable from ordinary
+    colon prose, so only slash/suffix-shaped unknowns produce diagnostics.
+    Ambiguity is always diagnostic-worthy, even for a bare root label.
     """
     head, separator, tail = line.partition(": ")
-    if separator and head in bundle.concepts:
-        return head, tail.strip()
-    return None, line
+    if not separator:
+        return None, line, None
+    candidate = head
+    if candidate in bundle.concepts:
+        return candidate, tail.strip(), None
+    candidate = candidate.removeprefix("/")
+    if candidate in bundle.concepts:
+        return candidate, tail.strip(), None
+    if candidate.lower().endswith(".md"):
+        candidate = candidate[:-3]
+        if candidate in bundle.concepts:
+            return candidate, tail.strip(), None
+    matches = lookup.get(_page_key(candidate), ())
+    if len(matches) == 1:
+        return matches[0], tail.strip(), None
+    if matches:
+        return None, line, f"ambiguous page {head!r}: candidates: {', '.join(sorted(matches))}"
+    if "/" in head or head.lower().endswith(".md"):
+        return None, line, f"unknown page {head!r}"
+    return None, line, None
 
 
-def _findings_from(reply: str, *, group: str, model: str, bundle: Bundle) -> tuple[SemanticFinding, ...]:
-    """One finding per non-empty line, the ported parse.
+_FENCE_LINE = re.compile(r"(?:`{3,}|~{3,})(?:[ \t]*[A-Za-z0-9_+.-]+)?")
 
-    A line that is exactly one of the "no issues found" sentinels is skipped
-    like an empty line: it is the model reporting a clean group, not a finding.
+
+def _findings_from(
+    reply: str,
+    *,
+    group: str,
+    model: str,
+    bundle: Bundle,
+    lookup: Mapping[str, Sequence[str]],
+) -> tuple[tuple[SemanticFinding, ...], tuple[str, ...]]:
+    """Keep judgments, skipping blanks, clean sentinels and fence delimiters.
+
+    Parser diagnostics accompany the original finding rather than replacing
+    it; callers surface them through the existing report errors channel.
     """
     found: list[SemanticFinding] = []
+    errors: list[str] = []
     for raw in reply.splitlines():
         line = raw.strip()
-        if not line or line in _NO_ISSUES_SENTINELS:
+        if not line or line in _NO_ISSUES_SENTINELS or _FENCE_LINE.fullmatch(line):
             continue
-        page, message = _split_page(line, bundle)
+        page, message, error = _split_page(line, bundle, lookup)
         found.append(SemanticFinding(group=group, message=message, page=page, model=model))
-    return tuple(found)
+        if error is not None:
+            errors.append(f"{group} ({model}): {error}")
+    return tuple(found), tuple(errors)
 
 
 async def _semantic_pass(
@@ -568,11 +605,18 @@ async def _semantic_pass(
         max_concurrency=binding.spec.max_concurrency,
     )
 
+    lookup: dict[str, list[str]] = {}
+    for concept_id in bundle.concepts:
+        lookup.setdefault(_page_key(concept_id), []).append(concept_id)
     findings: list[SemanticFinding] = []
+    errors = [f"{failure.item[0]}: {failure.exception}" for failure in fan.errors]
     for item, reply in fan.successes:
-        findings.extend(_findings_from(reply, group=item[0], model=binding.spec.model_id, bundle=bundle))
-    errors = tuple(f"{failure.item[0]}: {failure.exception}" for failure in fan.errors)
-    return tuple(findings), errors
+        parsed, diagnostics = _findings_from(
+            reply, group=item[0], model=binding.spec.model_id, bundle=bundle, lookup=lookup
+        )
+        findings.extend(parsed)
+        errors.extend(diagnostics)
+    return tuple(findings), tuple(errors)
 
 
 async def run_lint(

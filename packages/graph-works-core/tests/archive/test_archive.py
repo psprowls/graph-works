@@ -258,3 +258,24 @@ def test_split_topology_archive_validates_referring_item_against_the_declared_co
     result = archive.run_archive(layout, paths=(DONE,), today=TODAY, dry_run=False)
     assert result.result is not None
     assert result.result.ok, result.result.failures
+
+
+def test_two_declared_repos_archive_validates_against_every_declared_repo(tmp_path: Path) -> None:
+    """Two declared repositories no longer refuse: the referring item's
+    `affects` resolves under the second repo, and the postcondition gate
+    checks it against every declared root."""
+    layout = _split_layout(tmp_path)
+    other = tmp_path / "other"
+    other.mkdir()
+    code = tmp_path / "code"
+    layout.manifest_path.write_text(
+        "version: 1\nrepositories:\n"
+        f'  "other":\n    path: {json.dumps(str(other))}\n'
+        f'  "code":\n    path: {json.dumps(str(code))}\n',
+        encoding="utf-8",
+    )
+    _write(layout, DONE, work_status="resolved", phase="done")
+    _write_referring(layout, OPEN, work_status="open", phase="execute", type_="Bug", refers_to="feature-done.md")
+    result = archive.run_archive(layout, paths=(DONE,), today=TODAY, dry_run=False)
+    assert result.result is not None
+    assert result.result.ok, result.result.failures

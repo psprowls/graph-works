@@ -117,6 +117,26 @@ def worktree_state(cwd: Path, repo: Path) -> tuple[str, str] | None:
     return top.strip(), branch.strip()
 
 
+def repository_of(cwd: Path, repos: Sequence[Path]) -> Path | None:
+    """The first of *repos* that *cwd* belongs to, or `None`.
+
+    "Belongs to" is `worktree_state`'s own identity test: the two paths'
+    `--git-common-dir`s agree. So *cwd* anywhere inside a repo's main checkout
+    or any linked worktree of it names that repo, and a repo that is itself a
+    linked worktree is matched too. `None` when *cwd* is in no repository or in
+    none of *repos*.
+    """
+    common_raw = run_git(cwd, "rev-parse", "--git-common-dir")
+    common = _absolute(common_raw, cwd) if common_raw is not None else None
+    if common is None:
+        return None
+    for repo in repos:
+        repo_raw = run_git(Path(repo), "rev-parse", "--git-common-dir")
+        if repo_raw is not None and _absolute(repo_raw, Path(repo)) == common:
+            return repo
+    return None
+
+
 def head_sha(repo: Path) -> str | None:
     """*repo*'s `HEAD`, or `None` when it is not a repo or has no commits."""
     out = run_git(repo, "rev-parse", "HEAD")
@@ -365,6 +385,7 @@ __all__ = [
     "dirty_paths",
     "head_sha",
     "merge_base",
+    "repository_of",
     "results_facts",
     "run_git",
     "spec_anchor_commit",

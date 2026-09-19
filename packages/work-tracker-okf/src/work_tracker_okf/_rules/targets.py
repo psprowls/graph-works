@@ -73,18 +73,23 @@ def artifacts(ctx: RuleContext) -> Iterable[Finding]:
             )
 
 
-def _affects(repo_root: Path) -> Rule:
-    """10: an `affects` entry naming a repo path that does not exist."""
+def _affects(repo_roots: tuple[Path, ...]) -> Rule:
+    """10: an `affects` entry naming a repo path that exists under no repo root.
+
+    Several roots are a multi-repository workspace: an entry is good when it
+    resolves under any one of them.
+    """
+    where = "the repo root" if len(repo_roots) == 1 else "any repo root"
 
     def rule(ctx: RuleContext) -> Iterable[Finding]:
         for item in active(ctx):
             for target in item.affects:
-                if not target or (repo_root / target).exists():
+                if not target or any((root / target).exists() for root in repo_roots):
                     continue
                 yield Finding(
                     code="targets.affects-missing",
                     severity="error",
-                    message=f"`affects` entry {target!r} does not exist under the repo root",
+                    message=f"`affects` entry {target!r} does not exist under {where}",
                     spec=_SPEC,
                     path=item.page_path,
                     line=None,
@@ -94,8 +99,8 @@ def _affects(repo_root: Path) -> Rule:
 
 
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
-    """`repo_root=None` **skips** `targets.affects-missing`, as it skips
+    """No repo root at all **skips** `targets.affects-missing`, as it skips
     `plan.action-target-missing`, for the same reason."""
-    if config.repo_root is None:
+    if not config.code_roots:
         return (artifacts,)
-    return (artifacts, _affects(config.repo_root))
+    return (artifacts, _affects(config.code_roots))

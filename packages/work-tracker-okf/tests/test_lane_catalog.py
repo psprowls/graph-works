@@ -108,6 +108,10 @@ def test_lane_rules_is_sixteen_functions_with_a_repo_root(tmp_path: Path) -> Non
     assert len(lane_rules(repo_root=tmp_path)) == 16
 
 
+def test_lane_rules_is_sixteen_functions_with_several_repo_roots(tmp_path: Path) -> None:
+    assert len(lane_rules(repo_roots=(tmp_path, tmp_path / "other"))) == 16
+
+
 def test_lane_rules_drops_the_two_repo_rules_without_one() -> None:
     assert len(lane_rules()) == 14
 

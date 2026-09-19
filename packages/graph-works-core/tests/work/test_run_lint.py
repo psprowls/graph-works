@@ -161,6 +161,20 @@ def test_repo_root_none_skips_the_affects_check_but_a_real_root_enforces_it(tmp_
     assert not with_root.ok
 
 
+def test_repo_roots_accepts_a_path_under_any_declared_root(tmp_path):
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    (second / "packages/a").mkdir(parents=True)
+
+    only_first = work.run_lint(layout, _config(layout), today=TODAY, repo_roots=(first,))
+    assert any(f.code == "targets.affects-missing" for f in only_first.findings)
+
+    both = work.run_lint(layout, _config(layout), today=TODAY, repo_roots=(first, second))
+    assert not any(f.code == "targets.affects-missing" for f in both.findings)
+
+
 def test_lint_reports_bad_edge_without_crashing(tmp_path) -> None:
     layout = _workspace(tmp_path)
     _write(layout, "feature-a", _FEATURE)

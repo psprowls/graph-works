@@ -90,7 +90,7 @@ def table(ctx: RuleContext) -> Iterable[Finding]:
             )
 
 
-def _actions(repo_root: Path | None, vault_root: Path | None) -> Rule:
+def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
     """11: an action cell naming a path that exists under neither root.
 
     Only rows of an `ok` table are scanned, and only the `Action` column --
@@ -101,17 +101,20 @@ def _actions(repo_root: Path | None, vault_root: Path | None) -> Rule:
 
     A token is checked against **either** configured root, not just one: a
     hand-written action naming a code file ("Edit packages/foo/bar.py")
-    resolves under *repo_root*, while the one boilerplate "Execute
+    resolves under a repo root, while the one boilerplate "Execute
     implementation plan: ..." row every plan-stage item carries names its own
     plan artifact's vault path, which resolves under *vault_root*. In a
     co-located topology the two roots are the same directory and this
     collapses to a single check; in a split topology (workspace and code repo
     are different git repos) they are not, and a token existing under either
-    is enough.
+    is enough. *repo_roots* holds every declared code repository -- one in
+    the common case, several in a multi-repository workspace -- and a token
+    under any one of them is enough too.
     """
 
-    _roots = (("the repo root", repo_root), ("the vault root", vault_root))
-    root_names = " or ".join(name for name, root in _roots if root is not None) or "the repo root"
+    repo_name = "the repo root" if len(repo_roots) <= 1 else "any repo root"
+    _roots = ((repo_name, bool(repo_roots)), ("the vault root", vault_root is not None))
+    root_names = " or ".join(name for name, present in _roots if present) or "the repo root"
 
     def rule(ctx: RuleContext) -> Iterable[Finding]:
         for item, document in with_documents(ctx):
@@ -126,7 +129,7 @@ def _actions(repo_root: Path | None, vault_root: Path | None) -> Rule:
                     if match is None:
                         continue
                     token = match.group()
-                    if repo_root is not None and (repo_root / token).exists():
+                    if any((root / token).exists() for root in repo_roots):
                         continue
                     if vault_root is not None and (vault_root / token).exists():
                         continue
@@ -145,6 +148,6 @@ def rules(config: LaneConfig) -> tuple[Rule, ...]:
     reporting it as a failure: not knowing where a root is says nothing about
     whether the paths under it are good. work-io's behaviour, and the right
     one."""
-    if config.repo_root is None and config.vault_root is None:
+    if not config.code_roots and config.vault_root is None:
         return (table,)
-    return (table, _actions(config.repo_root, config.vault_root))
+    return (table, _actions(config.code_roots, config.vault_root))

@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 import typer
 from graph_works_core.lint_drift.lint import run_lint
 from graph_works_core.workspace.config import load_workspace_config
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import resolve_repos
 
 from graph_works_cli.wiki_cli.errors import exit_error
 from graph_works_cli.wiki_cli.rendering import lint_payload
@@ -20,7 +20,11 @@ def lint(
     json_output: bool = typer.Option(False, "--json"),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
-    """Run the workspace's mechanical and semantic lint pipeline."""
+    """Run the workspace's mechanical and semantic lint pipeline.
+
+    The work lane checks repo paths against every repository `workspace.yaml`
+    declares: a path under any one of them is good.
+    """
     layout = resolve_workspace(workspace)
     try:
         config = load_workspace_config(layout)
@@ -29,8 +33,7 @@ def lint(
 
     today = datetime.now(UTC).date()
     try:
-        repo_root, _ = resolve_repo(layout)
-        report = asyncio.run(run_lint(layout, config, today=today, repo_root=repo_root))
+        report = asyncio.run(run_lint(layout, config, today=today, repo_roots=resolve_repos(layout)))
     except (OSError, ValueError, RuntimeError) as exc:
         exit_error(str(exc), cause=exc)
 

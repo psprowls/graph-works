@@ -2166,13 +2166,22 @@ class _ValidationState:
     conditions: Mapping[tuple[str, str], int]
 
 
-def _extra_rules(layout: WorkspaceLayout, repo_root: Path | None) -> tuple[Rule, ...]:
-    """The one rule set both sides of the differential gate validate against."""
+def _extra_rules(
+    layout: WorkspaceLayout, repo_root: Path | None, repo_roots: tuple[Path, ...] = ()
+) -> tuple[Rule, ...]:
+    """The one rule set both sides of the differential gate validate against.
+
+    *repo_root* and *repo_roots* together are the code roots a repo path may
+    resolve under (any one suffices); with neither, `layout.repo_root`.
+    """
     validation_root = layout.bundle_dir
     declarations_dir = layout.config_dir if (layout.config_dir / "schema").is_dir() else validation_root
+    roots = repo_roots if repo_root is None else (repo_root, *repo_roots)
+    if not roots and layout.repo_root is not None:
+        roots = (layout.repo_root,)
     return rule_set(
         validation_root,
-        repo_root=repo_root if repo_root is not None else layout.repo_root,
+        repo_roots=roots,
         vault_root=layout.root,
         declarations_dir=declarations_dir,
     )
@@ -2227,6 +2236,7 @@ def _capture_validation_state(
     root: Anchor,
     *,
     repo_root: Path | None,
+    repo_roots: tuple[Path, ...] = (),
     bundle: Bundle | None = None,
 ) -> _ValidationState:
     """Validate the bundle as it stands and key the outcome post-mutation.
@@ -2288,7 +2298,7 @@ def _capture_validation_state(
     report = validate(
         bundle,
         today=date.max,
-        extra_rules=_extra_rules(layout, repo_root),
+        extra_rules=_extra_rules(layout, repo_root, repo_roots),
         scope=_baseline_scope(plan),
     )
     _assert_root_identity(validation_root, root)
@@ -2311,6 +2321,7 @@ def _validate_postconditions(
     root: Anchor | None = None,
     *,
     repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
     baseline: _ValidationState | None = None,
     excused: list[str] | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
@@ -2351,7 +2362,7 @@ def _validate_postconditions(
         report = validate(
             bundle,
             today=date.max,
-            extra_rules=_extra_rules(layout, repo_root),
+            extra_rules=_extra_rules(layout, repo_root, repo_roots),
             scope=gate_scope,
         )
         _assert_root_identity(validation_root, root)
@@ -2591,6 +2602,7 @@ def _apply_mutation_locked(
     locked_root: Anchor,
     *,
     repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
     baseline_bundle: Bundle | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> MutationApplication:
@@ -2724,7 +2736,7 @@ def _apply_mutation_locked(
                     _verify_directory_modes(root, directory_modes)
                     try:
                         baseline = _capture_validation_state(
-                            layout, plan, root, repo_root=repo_root, bundle=baseline_bundle
+                            layout, plan, root, repo_root=repo_root, repo_roots=repo_roots, bundle=baseline_bundle
                         )
                     except (OSError, ValueError) as exc:
                         baseline = None
@@ -2815,6 +2827,7 @@ def _apply_mutation_locked(
                         plan,
                         root,
                         repo_root=repo_root,
+                        repo_roots=repo_roots,
                         baseline=baseline,
                         excused=excused,
                         allowed_new_findings=allowed_new_findings,
@@ -2925,6 +2938,7 @@ def apply_mutation(
     plan: WorkMutationPlan,
     *,
     repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
     baseline_bundle: Bundle | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> MutationApplication:
@@ -2936,6 +2950,10 @@ def apply_mutation(
     split topology -- workspace and code repo separate. A caller that already
     resolved the code repo (`workspace.repos.resolve_repo`) passes it here so
     validation checks `affects` paths against the code repo, not the vault.
+    *repo_roots* is the multi-repository form: a caller validating against
+    every declared repo (`workspace.repos.resolve_repos`) passes them all, and
+    a path resolving under any one of them -- or under *repo_root* -- is good.
+    With neither given, validation falls back to `layout.repo_root`.
 
     *baseline_bundle* is an optimisation with a hard precondition: it MUST have
     been loaded from `layout.bundle_dir` with `ignore=work_tracker_okf.items.IGNORE`.
@@ -2986,6 +3004,7 @@ def apply_mutation(
                 plan,
                 root,
                 repo_root=repo_root,
+                repo_roots=repo_roots,
                 baseline_bundle=baseline_bundle,
                 allowed_new_findings=allowed_new_findings,
             )

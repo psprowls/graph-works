@@ -222,18 +222,66 @@ def _read_package_json(path: Path) -> dict[str, Any] | None:
     }
 
 
+def _tracked_manifest_paths(repo_root: Path) -> frozenset[str]:
+    """Repo-relative, git-tracked file paths; empty outside a git repo.
+
+    `git ls-files` reports what's in the **index**, not what's merely visible
+    on disk and not gitignored — so this excludes an untracked-but-not-ignored
+    manifest exactly as it excludes a gitignored one. A brand-new package's
+    `pyproject.toml`/`package.json` is invisible to `_discover_manifests`
+    below until it's `git add`ed (staged is enough; it need not be committed),
+    the same structural-lane rule `structural_nodes._tracked_files` already
+    enforces for entity discovery generally — this is not a narrower rule
+    invented for manifests.
+
+    An empty result signals "no usable git context" — the caller then falls
+    back to its pre-existing, unfiltered rglob behavior over the whole
+    filesystem tree, exactly like `structural_nodes.emit`'s `if not tracked:`
+    FS-walk fallback (a fresh `git init` with nothing staged yet has to
+    discover manifests too, not just a non-git directory). Mirrors
+    `structural_nodes._tracked_files`, which the structural lane already uses
+    to keep entity discovery scoped to tracked content; deferred import to
+    avoid the `update` <-> `packages` cycle (`update.py` imports `packages` at
+    module load time, so `packages.py` cannot import `update` at module load
+    time — see this package's AGENTS.md on the deferred-import idiom).
+    """
+    from code_graph_io.update import NotInGitRepoError, _git
+
+    try:
+        out = _git(["ls-files"], cwd=repo_root)
+    except NotInGitRepoError:
+        return frozenset()
+    return frozenset(line for line in out.splitlines() if line)
+
+
 def _discover_manifests(
     repo_root: Path, skip_dirs: frozenset[str], ignore: _ignore.IgnoreSpec | None = None
 ) -> list[tuple[Path, dict[str, Any]]]:
+    """Every `pyproject.toml`/`package.json` under *repo_root*, tracked-gated.
+
+    `tracked` (see `_tracked_manifest_paths`) is `git ls-files`, so a manifest
+    that exists on disk but is merely untracked — not committed, not even
+    `git add`ed, whether or not it's also gitignored — is skipped just like a
+    gitignored one: a brand-new package is only discovered once its manifest
+    is staged. When `tracked` comes back empty (no git context: outside a
+    repo, or a fresh `git init` with nothing staged yet), the `tracked and ...`
+    guard short-circuits and every filter below falls back to the plain,
+    unfiltered `rglob` walk.
+    """
     found: list[tuple[Path, dict[str, Any]]] = []
+    tracked = _tracked_manifest_paths(repo_root)
     for manifest_path in repo_root.rglob("pyproject.toml"):
         if _should_skip(manifest_path, repo_root, skip_dirs, ignore):
+            continue
+        if tracked and manifest_path.relative_to(repo_root).as_posix() not in tracked:
             continue
         info = _read_pyproject(manifest_path)
         if info:
             found.append((manifest_path.parent, info))
     for manifest_path in repo_root.rglob("package.json"):
         if _should_skip(manifest_path, repo_root, skip_dirs, ignore):
+            continue
+        if tracked and manifest_path.relative_to(repo_root).as_posix() not in tracked:
             continue
         info = _read_package_json(manifest_path)
         if info:

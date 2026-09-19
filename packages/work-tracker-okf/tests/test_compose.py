@@ -243,6 +243,13 @@ def test_rule_set_with_repo_root_adds_both_path_rules(conformant_root: Path) -> 
     )
 
 
+def test_rule_set_with_repo_roots_adds_both_path_rules(conformant_root: Path) -> None:
+    assert (
+        len(compose.rule_set(conformant_root, repo_roots=(conformant_root, conformant_root / "work")))
+        == len(compose.rule_set(conformant_root)) + 2
+    )
+
+
 def test_rule_set_reports_a_tag_outside_the_vocabulary(root: Path) -> None:
     (root / VOCABULARY_FILENAME).write_text(
         "version: 1\ntags:\n  - name: graph-works\n",

@@ -182,6 +182,55 @@ def test_split_topology_files_against_the_declared_code_repo_not_the_vault(tmp_p
     assert outcome.application.ok, outcome.application.failures
 
 
+def _two_repo_workspace(tmp_path):
+    """A split vault declaring two code repositories, each owning one path."""
+    layout = _split_workspace(tmp_path)
+    other = tmp_path / "other"
+    (other / "apps/ui").mkdir(parents=True)
+    code = tmp_path / "code"
+    layout.manifest_path.write_text(
+        "version: 1\nrepositories:\n"
+        f'  "code":\n    path: {json.dumps(str(code))}\n'
+        f'  "other":\n    path: {json.dumps(str(other))}\n',
+        encoding="utf-8",
+    )
+    return layout
+
+
+def test_two_declared_repos_file_against_every_declared_repo(tmp_path) -> None:
+    layout = _two_repo_workspace(tmp_path)
+    outcome = work.run_file(
+        layout,
+        _config(layout),
+        type="Feature",
+        title="Two-repo filing",
+        description="d",
+        on=TODAY,
+        affects=("packages/foo", "apps/ui"),
+        dry_run=False,
+    )
+    assert outcome.plan.filing.refusal is None
+    assert outcome.application is not None
+    assert outcome.application.ok, outcome.application.failures
+
+
+def test_two_declared_repos_still_refuse_a_path_under_neither(tmp_path) -> None:
+    layout = _two_repo_workspace(tmp_path)
+    outcome = work.run_file(
+        layout,
+        _config(layout),
+        type="Feature",
+        title="Two-repo filing",
+        description="d",
+        on=TODAY,
+        affects=("apps/gone",),
+        dry_run=False,
+    )
+    assert outcome.application is not None
+    assert not outcome.application.ok
+    assert any("targets.affects-missing" in failure for failure in outcome.application.failures)
+
+
 def test_the_vertical_is_not_hoisted_to_the_front_door():
     # Deliberate: `graph_works_core.work.commands.run_lint` would collide
     # with the already-hoisted `graph_works_core.run_lint` (from

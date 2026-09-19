@@ -90,6 +90,41 @@ def test_an_affects_entry_naming_a_real_repo_path_is_silent(tmp_path: Path) -> N
     assert lane_report(vault, today=TODAY, repo_root=_repo(tmp_path)).by_code("targets.affects-missing") == ()
 
 
+def _second_repo(tmp_path: Path) -> Path:
+    other = tmp_path / "other"
+    (other / "apps" / "ui").mkdir(parents=True)
+    return other
+
+
+def _several_roots_report(vault: Path, roots: tuple[Path, ...]):
+    from okf_io import load_bundle, validate
+    from work_tracker_okf.items import IGNORE
+    from work_tracker_okf.rules import lane_rules
+
+    return validate(load_bundle(vault, ignore=IGNORE), today=TODAY, extra_rules=lane_rules(repo_roots=roots))
+
+
+def test_an_affects_entry_under_any_of_several_repo_roots_is_silent(tmp_path: Path) -> None:
+    """A multi-repository workspace: each entry need resolve under one declared root."""
+    vault = tmp_path / "vault"
+    write_item(
+        vault,
+        "work/feature-x",
+        "type: Feature\nwork_status: open\naffects:\n  - packages/example\n  - apps/ui\n",
+    )
+    roots = (_repo(tmp_path), _second_repo(tmp_path))
+    assert _several_roots_report(vault, roots).by_code("targets.affects-missing") == ()
+
+
+def test_an_affects_entry_under_none_of_several_repo_roots_is_an_error(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    write_item(vault, "work/feature-x", "type: Feature\nwork_status: open\naffects:\n  - apps/gone\n")
+    roots = (_repo(tmp_path), _second_repo(tmp_path))
+    findings = _several_roots_report(vault, roots).by_code("targets.affects-missing")
+    assert [finding.severity for finding in findings] == ["error"]
+    assert findings[0].message == "`affects` entry 'apps/gone' does not exist under any repo root"
+
+
 def test_no_repo_root_skips_the_code_entirely(tmp_path: Path) -> None:
     write_item(tmp_path, "work/feature-x", "type: Feature\nwork_status: open\naffects:\n  - packages/gone\n")
     assert lane_report(tmp_path, today=TODAY).by_code("targets.affects-missing") == ()
@@ -108,3 +143,10 @@ def test_the_factory_adds_exactly_one_rule_when_a_repo_root_is_injected(tmp_path
 
     assert len(targets.rules(LaneConfig())) == 1
     assert len(targets.rules(LaneConfig(repo_root=tmp_path))) == 2
+
+
+def test_the_factory_adds_the_same_one_rule_for_repo_roots(tmp_path: Path) -> None:
+    from work_tracker_okf._rules import targets
+    from work_tracker_okf._rules._common import LaneConfig
+
+    assert len(targets.rules(LaneConfig(repo_roots=(tmp_path, tmp_path / "other")))) == 2

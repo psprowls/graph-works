@@ -216,6 +216,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
         plan: WorkMutationPlan,
         *,
         repo_root: Path | None = None,
+        repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
     ) -> transactions.MutationApplication:
@@ -224,6 +225,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
             layout,
             plan,
             repo_root=repo_root,
+            repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
         )
@@ -278,6 +280,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
         plan: WorkMutationPlan,
         *,
         repo_root: Path | None = None,
+        repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
     ) -> transactions.MutationApplication:
@@ -288,6 +291,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
             layout,
             plan,
             repo_root=repo_root,
+            repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
         )
@@ -445,3 +449,74 @@ def test_raw_absent_or_null_effort_still_records_existing_phase(tmp_path: Path, 
         assert record.application is None and _snapshot(layout) == before
     else:
         assert load(layout.bundle_dir / f"{CHILD}.md").fm_data().get("effort") is None
+
+
+def _declare_two_repos(layout: WorkspaceLayout, tmp_path: Path) -> None:
+    code, ui = tmp_path / "code", tmp_path / "ui"
+    (code / "packages/a").mkdir(parents=True)
+    ui.mkdir()
+    text = layout.manifest_path.read_text(encoding="utf-8")
+    seeded = 'repositories:\n  "repo":\n    path: ".."\n'
+    assert seeded in text
+    declared = f'repositories:\n  code:\n    path: "{code.as_posix()}"\n  ui:\n    path: "{ui.as_posix()}"\n'
+    layout.manifest_path.write_text(text.replace(seeded, declared), encoding="utf-8")
+
+
+def test_several_declared_repos_still_refuse_without_a_repo_name(tmp_path: Path) -> None:
+    """Placement keeps `resolve_repo`'s strict resolution: no inference."""
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    with pytest.raises(WorkspaceError, match="repo_name"):
+        _record(layout)
+
+
+def test_a_repo_name_selects_among_several_declared_repos(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo_name="code", dry_run=False
+    )
+    assert record.written
+    assert record.repo_note is None
+
+
+def test_a_selected_repo_lacking_affects_needs_every_declared_repo_when_the_baseline_gate_falls_back(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`repo_name` selects strictly (no inference), but postcondition
+    validation must still check `affects` against every declared repo, not
+    only the selected one -- matching `work file`/`work advance`
+    (`stage_advance._advance`'s `repo_root=resolved_repo, repo_roots=declared`).
+
+    The differential postcondition gate excuses a pre-existing
+    `targets.affects-missing` as "not caused by this operation" either way --
+    placement never touches `affects`, so the finding (if any) is identical
+    in the baseline and post-mutation passes and never blocks by itself
+    (`test_pre_existing_error_on_a_targeted_item_is_excused_and_reported` in
+    `test_transactions.py` pins that general behaviour). The selected-vs-every
+    distinction this fix makes only surfaces when baseline capture itself
+    fails and `_validate_postconditions` falls back to its documented
+    absolute form (no excusal at all) -- forced here the same way
+    `test_a_stale_preimage_refuses_without_a_partial_pair` forces a related
+    edge. There, validating only the selected `ui` repo (which lacks
+    `CHILD.affects`'s `packages/a`) raises `affects-missing`; validating
+    against every declared repo, as `stage_advance` does, does not.
+    """
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    monkeypatch.setattr(
+        transactions,
+        "_capture_validation_state",
+        lambda *a, **k: (_ for _ in ()).throw(ValueError("forced baseline capture failure")),
+    )
+
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo_name="ui", dry_run=False
+    )
+
+    assert record.repo_note is None
+    assert record.application is not None, record.plan.refusal
+    assert record.application.ok, record.application.failures
+    assert record.written

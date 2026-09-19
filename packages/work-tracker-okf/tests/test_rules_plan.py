@@ -136,6 +136,35 @@ def test_an_action_naming_a_present_path_is_silent(tmp_path: Path) -> None:
     assert lane_report(vault, today=TODAY, repo_root=_repo(tmp_path)).by_code("plan.action-target-missing") == ()
 
 
+def test_an_action_naming_a_path_under_any_of_several_repo_roots_is_silent(tmp_path: Path) -> None:
+    from okf_io import load_bundle, validate
+    from work_tracker_okf.items import IGNORE
+    from work_tracker_okf.rules import lane_rules
+
+    vault = tmp_path / "vault"
+    other = tmp_path / "other"
+    (other / "apps" / "ui").mkdir(parents=True)
+    (other / "apps" / "ui" / "main.ts").write_text("export {}\n", encoding="utf-8")
+    body = (
+        "\n## Plan\n\n"
+        "| Action | Done when | Rationale |\n"
+        "| --- | --- | --- |\n"
+        "| Edit packages/example/module.py | It compiles | Because |\n"
+        "| Edit apps/ui/main.ts | It builds | Because |\n"
+        "| Edit apps/ui/gone.ts | It builds | Because |\n"
+    )
+    write_item(vault, "2026-08-01-feature-x", "type: Feature\nwork_status: open\n", body=body)
+    report = validate(
+        load_bundle(vault, ignore=IGNORE),
+        today=TODAY,
+        extra_rules=lane_rules(repo_roots=(_repo(tmp_path), other)),
+    )
+    findings = report.by_code("plan.action-target-missing")
+    assert [finding.message for finding in findings] == [
+        "plan action names `apps/ui/gone.ts`, which does not exist under any repo root"
+    ]
+
+
 def test_an_http_token_is_skipped(tmp_path: Path) -> None:
     vault = tmp_path / "vault"
     body = (
@@ -189,3 +218,10 @@ def test_the_factory_adds_exactly_one_rule_when_a_repo_root_is_injected(tmp_path
 
     assert len(plan.rules(LaneConfig())) == 1
     assert len(plan.rules(LaneConfig(repo_root=tmp_path))) == 2
+
+
+def test_the_factory_adds_the_same_one_rule_for_repo_roots(tmp_path: Path) -> None:
+    from work_tracker_okf._rules import plan
+    from work_tracker_okf._rules._common import LaneConfig
+
+    assert len(plan.rules(LaneConfig(repo_roots=(tmp_path,)))) == 2

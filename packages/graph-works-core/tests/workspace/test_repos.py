@@ -1,7 +1,8 @@
 """`resolve_repo`: what code this workspace catalogs, and why sometimes nothing.
 
 Moved down out of `orchestrate` with the function. The assertions are unchanged
-on purpose — the point of this file is that the move is a move.
+on purpose — the point of this file is that the move is a move. `resolve_repos`,
+its every-declared-root sibling, is tested at the bottom.
 """
 
 from __future__ import annotations
@@ -98,3 +99,44 @@ def test_resolve_repo_refuses_a_malformed_declarations_file(tmp_path):
 
 def test_resolve_repo_is_exported():
     assert "resolve_repo" in repos.__all__
+
+
+def test_resolve_repos_returns_every_declared_repository(tmp_path):
+    layout = _workspace(tmp_path)
+    one, two = tmp_path / "one", tmp_path / "two"
+    one.mkdir()
+    two.mkdir()
+    _repositories(layout, f'repositories:\n  one:\n    path: "{one}"\n  two:\n    path: "{two}"\n')
+    assert repos.resolve_repos(layout) == (one.resolve(), two.resolve())
+
+
+def test_resolve_repos_returns_the_one_declared_repository(tmp_path):
+    layout = _workspace(tmp_path)
+    code = tmp_path / "code"
+    code.mkdir()
+    _repositories(layout, f'repositories:\n  code:\n    path: "{code}"\n')
+    assert repos.resolve_repos(layout) == (code.resolve(),)
+
+
+def test_resolve_repos_is_empty_when_none_are_declared(tmp_path):
+    layout = _workspace(tmp_path)
+    _repositories(layout, "repositories: {}\n")
+    assert repos.resolve_repos(layout) == ()
+
+
+def test_resolve_repos_is_empty_when_the_file_is_missing(tmp_path):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    layout = layout_for(tmp_path)
+    (layout.bundle_dir / "work").mkdir(parents=True, exist_ok=True)
+    assert repos.resolve_repos(layout) == ()
+
+
+def test_resolve_repos_refuses_a_malformed_declarations_file(tmp_path):
+    layout = _workspace(tmp_path)
+    layout.manifest_path.write_text("version: 1\nrepositories: [not, a, mapping]\n", encoding="utf-8")
+    with pytest.raises(WorkspaceError, match=r"workspace\.yaml"):
+        repos.resolve_repos(layout)
+
+
+def test_resolve_repos_is_exported():
+    assert "resolve_repos" in repos.__all__

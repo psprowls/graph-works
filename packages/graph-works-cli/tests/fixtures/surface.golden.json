@@ -1433,7 +1433,7 @@
     },
     {
       "name": "gw wiki drift",
-      "help": "Propose curated-page updates for entities whose code moved.\n\nReads the code graph as of the last `gw scan` -- it does not rebuild the\ngraph itself. Run `gw scan` first if the graph needs refreshing.",
+      "help": "Propose curated-page updates for entities whose code moved.\n\nReads the code graph as of the last `gw scan` -- it does not rebuild the\ngraph itself. Run `gw scan` first if the graph needs refreshing.\n\n`--repo-name` selects the declared repository drift falls back to for an\nentity no declared checkout contains. Required when `workspace.yaml`\ndeclares several; optional with one.",
       "short_help": "Propose curated-page updates for entities whose code moved.",
       "usage": [
         "[OPTIONS]"
@@ -1496,6 +1496,17 @@
           "required": false,
           "default": "",
           "is_flag": false
+        },
+        {
+          "name": "repo_name",
+          "opts": [
+            "--repo-name"
+          ],
+          "secondary_opts": [],
+          "help": "Select among several declared repositories.",
+          "required": false,
+          "default": "",
+          "is_flag": false
         }
       ],
       "commands": [],
@@ -1533,7 +1544,7 @@
     },
     {
       "name": "gw wiki lint",
-      "help": "Run the workspace's mechanical and semantic lint pipeline.",
+      "help": "Run the workspace's mechanical and semantic lint pipeline.\n\nThe work lane checks repo paths against every repository `workspace.yaml`\ndeclares: a path under any one of them is good.",
       "short_help": "Run the workspace's mechanical and semantic lint pipeline.",
       "usage": [
         "[OPTIONS]"
@@ -3331,7 +3342,7 @@
     },
     {
       "name": "gw work orchestrate",
-      "help": "Compute the auto-drive dispatch plan for PATH's subtree. Read-only.\n\nA planner, not an executor: it never launches a dispatch, mutates an item,\nprovisions a worktree, or edits the manifest.",
+      "help": "Compute the auto-drive dispatch plan for PATH's subtree. Read-only.\n\nA planner, not an executor: it never launches a dispatch, mutates an item,\nprovisions a worktree, or edits the manifest.\n\n`--repo-name` selects the code repository when `workspace.yaml` declares\nseveral; without it such a workspace refuses rather than guess.",
       "short_help": "Compute the auto-drive dispatch plan for PATH's subtree.",
       "usage": [
         "[OPTIONS]",
@@ -3352,6 +3363,17 @@
           ],
           "secondary_opts": [],
           "help": "Comma-separated running dispatch keys (session names, gw-<phase>-<slug>).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "repo_name",
+          "opts": [
+            "--repo-name"
+          ],
+          "secondary_opts": [],
+          "help": "Select among several declared repositories.",
           "required": false,
           "default": "",
           "is_flag": false
@@ -3454,7 +3476,7 @@
     },
     {
       "name": "gw work record-placement",
-      "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites only `worktree`, `branch` and `updated`. Refuses -- writing nothing --\nwhen PATH is not ROOT or its descendant, when a descendant is recorded at\n`design` or `plan`, when PATH's phase is no longer `--phase`, and for an\ninvalid or terminal item or an invalid observation. An identical pair is a\nno-op. The values must be observed, never the planner's requested names.",
+      "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites only `worktree`, `branch` and `updated`. Refuses -- writing nothing --\nwhen PATH is not ROOT or its descendant, when a descendant is recorded at\n`design` or `plan`, when PATH's phase is no longer `--phase`, and for an\ninvalid or terminal item or an invalid observation. An identical pair is a\nno-op. The values must be observed, never the planner's requested names.\n\n`--repo-name` selects the code repository when `workspace.yaml` declares\nseveral; without it such a workspace refuses rather than guess.",
       "short_help": "Record where a dispatched stage runs.",
       "usage": [
         "[OPTIONS]",
@@ -3510,6 +3532,17 @@
           "help": "The observed branch name, without `refs/heads/`.",
           "required": true,
           "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "repo_name",
+          "opts": [
+            "--repo-name"
+          ],
+          "secondary_opts": [],
+          "help": "Select among several declared repositories.",
+          "required": false,
+          "default": "",
           "is_flag": false
         },
         {

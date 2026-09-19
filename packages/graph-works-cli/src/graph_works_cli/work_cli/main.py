@@ -23,7 +23,7 @@ from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import resolve_repos
 
 from graph_works_cli import exit_codes
 from graph_works_cli.provenance import warn_if_stale_routing
@@ -260,8 +260,7 @@ def lint(
     layout = resolve_workspace(workspace)
     config = _config(layout)
     try:
-        repo_root, _ = resolve_repo(layout)
-        report = work.run_lint(layout, config, repo_root=repo_root, strict=strict, today=_today())
+        report = work.run_lint(layout, config, repo_roots=resolve_repos(layout), strict=strict, today=_today())
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
@@ -412,6 +411,7 @@ def record_placement(
     phase: str = typer.Option(..., "--phase", help="The phase of the dispatch being recorded."),
     worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
     branch: str = typer.Option(..., "--branch", help="The observed branch name, without `refs/heads/`."),
+    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the placement record as JSON."),
@@ -423,6 +423,9 @@ def record_placement(
     `design` or `plan`, when PATH's phase is no longer `--phase`, and for an
     invalid or terminal item or an invalid observation. An identical pair is a
     no-op. The values must be observed, never the planner's requested names.
+
+    `--repo-name` selects the code repository when `workspace.yaml` declares
+    several; without it such a workspace refuses rather than guess.
     """
     layout = resolve_workspace(workspace)
     try:
@@ -434,6 +437,7 @@ def record_placement(
             worktree=worktree,
             branch=branch,
             today=_today(),
+            repo_name=repo_name or None,
             dry_run=dry_run,
         )
     except WorkspaceError as exc:
@@ -470,6 +474,7 @@ def orchestrate(
     live: str = typer.Option(
         "", "--live", help="Comma-separated running dispatch keys (session names, gw-<phase>-<slug>)."
     ),
+    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the dispatch plan as JSON."),
 ) -> None:
@@ -477,11 +482,14 @@ def orchestrate(
 
     A planner, not an executor: it never launches a dispatch, mutates an item,
     provisions a worktree, or edits the manifest.
+
+    `--repo-name` selects the code repository when `workspace.yaml` declares
+    several; without it such a workspace refuses rather than guess.
     """
     warn_if_stale_routing()
     layout = resolve_workspace(workspace)
     try:
-        result = run_orchestrate(layout, path, live=tuple(rendering.split_csv(live)))
+        result = run_orchestrate(layout, path, live=tuple(rendering.split_csv(live)), repo_name=repo_name or None)
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:

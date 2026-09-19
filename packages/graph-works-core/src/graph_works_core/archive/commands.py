@@ -45,7 +45,7 @@ from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
@@ -190,7 +190,7 @@ def run_archive(
 
     # `bundle` (line 166) was loaded with a wider ignore set than IGNORE
     # (ARCHIVE_IGNORE + WIKI_ARCHIVE_IGNORE) -- not eligible as baseline_bundle.
-    result = apply_mutation(layout, plan, repo_root=resolve_repo(layout)[0])
+    result = apply_mutation(layout, plan, repo_roots=resolve_repos(layout))
     if not result.ok:
         return ArchiveRun(plan=plan, wiki_plan=wiki_plan, result=result, logged=logged)
 

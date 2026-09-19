@@ -37,10 +37,22 @@ class LaneConfig:
     Either field being `None` **skips** its rule rather than reporting a
     failure: not knowing where a root is says nothing about whether the
     paths under it are good.
+
+    A workspace may declare several code repositories. *repo_roots* carries
+    them all, and a repo path is good when it resolves under **any** of them;
+    *repo_root* stays as the single-root spelling. `code_roots` is the one
+    place the two forms are joined -- rules read that, never either field.
     """
 
     repo_root: Path | None = None
     vault_root: Path | None = None
+    repo_roots: tuple[Path, ...] = ()
+
+    @property
+    def code_roots(self) -> tuple[Path, ...]:
+        """*repo_root* then *repo_roots*, in order, each root once. Empty when none."""
+        head = () if self.repo_root is None else (self.repo_root,)
+        return tuple(dict.fromkeys((*head, *self.repo_roots)))
 
 
 def items(ctx: RuleContext) -> tuple[WorkItem, ...]:

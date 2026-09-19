@@ -41,6 +41,39 @@ def _run(workspace, **kwargs) -> LintReport:
     )
 
 
+def _affects_under(workspace, target: str) -> None:
+    """One active work item whose single `affects` entry is *target*."""
+    page = workspace.layout.bundle_dir / "work/feature-spans.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Feature\ntitle: Spans\ndescription: d\nstatus: stable\nwork_status: open\n"
+        f"phase: execute\neffort: medium\nopened: 2026-08-01\nupdated: 2026-08-01\naffects:\n- {target}\n---\n",
+        encoding="utf-8",
+    )
+
+
+def test_the_work_lane_checks_affects_against_every_given_repo_root(workspace, tmp_path):
+    """A multi-repository workspace: `repo_roots` carries every declared repo,
+    and a path under any one of them is good."""
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    (second / "apps/ui").mkdir(parents=True)
+    _affects_under(workspace, "apps/ui")
+    layout = workspace.layout
+    config = load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
+
+    only_first = run_mechanical(layout, config, today=TODAY, repo_roots=(first,))
+    assert "targets.affects-missing" in _codes(only_first)
+
+    both = run_mechanical(layout, config, today=TODAY, repo_roots=(first, second))
+    assert "targets.affects-missing" not in _codes(both)
+
+
 def _codes(report: LintReport) -> set[str]:
     return {finding.code for lane in report.mechanical for finding in lane.report.findings}
 

@@ -107,7 +107,7 @@ from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
@@ -115,15 +115,17 @@ def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
-def _repo_root(layout: WorkspaceLayout) -> Path | None:
-    """The code repo `workspace.yaml` declares, for `apply_mutation`'s
+def _repo_roots(layout: WorkspaceLayout) -> tuple[Path, ...]:
+    """Every code repo `workspace.yaml` declares, for `apply_mutation`'s
     postcondition validation -- never `layout.repo_root`, which is a `.git`
-    walk-up that lands on the vault in a split topology. Matches
-    `orchestrate/commands.py`'s own resolution exactly; every `apply_mutation`
-    call site in this module calls this instead of re-deriving it.
+    walk-up that lands on the vault in a split topology. All of them, not
+    one: a path resolving under any declared repo is good, so a workspace
+    declaring several never has to choose (and never refuses) here. Every
+    `apply_mutation` call site in this module calls this instead of
+    re-deriving it. Empty when none are declared, which `apply_mutation`
+    treats as no override.
     """
-    resolved, _note = resolve_repo(layout)
-    return resolved
+    return resolve_repos(layout)
 
 
 def _materialize(value: object) -> object:
@@ -269,7 +271,7 @@ def run_file(
         application=apply_mutation(
             layout,
             _filing_mutation(bundle, outcome.plan),
-            repo_root=_repo_root(layout),
+            repo_roots=_repo_roots(layout),
             baseline_bundle=bundle,
         ),
     )
@@ -435,7 +437,7 @@ def _apply_normalizations(
                     (_planned_write(member, before, document.serialize().encode("utf-8")),),
                     validate_paths=(change.path,),
                 )
-                application = apply_mutation(layout, mutation, repo_root=_repo_root(layout), baseline_bundle=bundle)
+                application = apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
                 if application.ok:
                     normalized.append(change.path)
                 else:
@@ -570,6 +572,7 @@ def run_lint(
     config: Config,
     *,
     repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
     strict: bool = False,
     today: date,
 ) -> Report:
@@ -581,9 +584,11 @@ def run_lint(
     `graph_works_core.lint_drift.lint.run_mechanical`'s two-lane workspace
     check; it is the fast, synchronous, LLM-free "does the work lane conform"
     check `work_tracker_okf.cli` already provides, now
-    `WorkspaceLayout`-shaped. `repo_root=None` skips
-    `targets.affects-missing` / `plan.action-target-missing`, the same
-    contract `work_tracker_okf.compose.rule_set` documents.
+    `WorkspaceLayout`-shaped. `repo_root=None` with no `repo_roots` skips
+    `targets.affects-missing` (`plan.action-target-missing` still checks the
+    vault root), the same contract `work_tracker_okf.compose.rule_set`
+    documents. `repo_roots` is every declared repo in a multi-repository
+    workspace: a path resolving under any of them is good.
 
     `strict=True` promotes every warning to an error first, which fails even
     a conformant vault. A caller wiring this into an acceptance gate wants
@@ -591,7 +596,11 @@ def run_lint(
     """
     bundle = load_bundle(layout.bundle_dir, ignore=_work_only_ignore(layout))
     rules = rule_set(
-        layout.bundle_dir, repo_root=repo_root, vault_root=layout.root, declarations_dir=config.declarations_dir
+        layout.bundle_dir,
+        repo_root=repo_root,
+        repo_roots=repo_roots,
+        vault_root=layout.root,
+        declarations_dir=config.declarations_dir,
     )
     return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
 
@@ -673,7 +682,7 @@ def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> Regen
         ),
     )
     application = (
-        None if dry_run else apply_mutation(layout, mutation, repo_root=_repo_root(layout), baseline_bundle=bundle)
+        None if dry_run else apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
     )
     return RegenIndexesResult(plans=plans, mutation=mutation, application=application)
 
@@ -698,7 +707,7 @@ def run_reparent(
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
     return PathMutationResult(
-        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_root=_repo_root(layout))
+        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout))
     )
 
 
@@ -714,7 +723,7 @@ def run_release_adoption(
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
     return PathMutationResult(
-        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_root=_repo_root(layout))
+        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout))
     )
 
 
@@ -808,7 +817,7 @@ def _apply_decision(
     return apply_mutation(
         layout,
         _decision_mutation(context, plan, ledger_before, extra_writes),
-        repo_root=_repo_root(layout),
+        repo_roots=_repo_roots(layout),
         baseline_bundle=context.bundle,
         allowed_new_findings=allowed_new_findings,
     )
@@ -1129,7 +1138,7 @@ def run_decision_overturn(
             _decision_mutation(context, combined.decision, ledger_before),
             _filing_mutation(context.bundle, combined.filing),
         )
-        application = apply_mutation(layout, mutation, repo_root=_repo_root(layout), baseline_bundle=context.bundle)
+        application = apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=context.bundle)
     return OverturnResult(
         owner=context.owner,
         plan=combined,

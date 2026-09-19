@@ -822,8 +822,122 @@ def _detects(monkeypatch, pair=("/wt/detected", "detected/branch")) -> None:
     monkeypatch.setattr(stage.provenance, "worktree_state", lambda cwd, repo: pair)
 
 
+def _captured_repo_roots(monkeypatch) -> list[Path | None]:
+    """Records the `repo_root` every `apply_mutation` call inside an advance
+    receives, without changing its behaviour -- this is the value postcondition
+    validation actually treats as the resolved repo, which nothing on
+    `StageAdvance` otherwise exposes."""
+    real = stage.apply_mutation
+    calls: list[Path | None] = []
+
+    def _capture(*args, **kwargs):
+        calls.append(kwargs.get("repo_root"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(stage, "apply_mutation", _capture)
+    return calls
+
+
 def _stamped(result) -> dict[str, object]:
     return {change.key: change.after for change in result.outcome.plan.changes}
+
+
+def _git_repo(path: Path) -> Path:
+    """A real repository with one commit on `main`."""
+    import subprocess
+
+    (path / "packages/a").mkdir(parents=True)
+    (path / "packages/a/x.py").write_text("one\n", encoding="utf-8")
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "T"),
+        ("add", "."),
+        ("commit", "-m", "first"),
+    ):
+        subprocess.run(["git", *args], cwd=path, check=True, capture_output=True, text=True)
+    return path
+
+
+def _two_repo_stamping_workspace(tmp_path: Path):
+    """`_stamping_workspace`, declaring two real code repositories."""
+    layout = _stamping_workspace(tmp_path)
+    code, ui = _git_repo(tmp_path / "code"), _git_repo(tmp_path / "ui")
+    text = layout.manifest_path.read_text(encoding="utf-8")
+    seeded = 'repositories:\n  "repo":\n    path: ".."\n'
+    assert seeded in text
+    declared = f"repositories:\n  code:\n    path: {json.dumps(str(code))}\n  ui:\n    path: {json.dumps(str(ui))}\n"
+    layout.manifest_path.write_text(text.replace(seeded, declared), encoding="utf-8")
+    return layout, code, ui
+
+
+def test_a_two_repo_advance_infers_from_the_declared_repo_holding_the_cwd(tmp_path: Path) -> None:
+    """Several declared repos and no name: the one whose repository the cwd
+    belongs to -- here through a linked worktree of it -- is the repo."""
+    import subprocess
+
+    layout, _code, ui = _two_repo_stamping_workspace(tmp_path)
+    linked = tmp_path / "ui-linked"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feature/ui", str(linked)], cwd=ui, check=True, capture_output=True, text=True
+    )
+
+    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, cwd=linked, dry_run=False)
+
+    assert result.outcome.plan.refusal is None
+    assert result.repo_note is None
+    changes = _stamped(result)
+    assert Path(str(changes["worktree"])).resolve() == linked.resolve()
+    assert changes["branch"] == "feature/ui"
+    assert result.application is not None and result.application.ok, result.application.failures
+
+
+def test_a_two_repo_advance_from_a_declared_main_checkout_resolves_that_repo(tmp_path: Path, monkeypatch) -> None:
+    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
+    calls = _captured_repo_roots(monkeypatch)
+
+    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, cwd=code / "packages", dry_run=False)
+
+    assert result.outcome.plan.refusal is None
+    assert result.repo_note is None
+    assert "worktree" not in _stamped(result)  # a main checkout is not a linked worktree
+    assert result.outcome.written
+    # The repo actually used for postcondition validation is the declared
+    # repo cwd is in -- `code`, not `ui` -- not merely "a repo, any repo".
+    assert calls and calls[-1] is not None and calls[-1].resolve() == code.resolve()
+
+
+def test_a_two_repo_advance_outside_every_declared_repo_skips_inference(tmp_path: Path) -> None:
+    """No declared repo holds the cwd: inference is skipped, never refused."""
+    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+
+    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, cwd=elsewhere, dry_run=False)
+
+    assert result.outcome.plan.refusal is None
+    changes = _stamped(result)
+    assert "worktree" not in changes and "branch" not in changes
+    assert result.repo_note is not None and "2 repositories declared" in result.repo_note
+    assert result.outcome.written
+
+
+def test_a_two_repo_advance_with_a_repo_name_uses_that_repo(tmp_path: Path, monkeypatch) -> None:
+    layout, _code, ui = _two_repo_stamping_workspace(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    calls = _captured_repo_roots(monkeypatch)
+
+    result = stage.run_stage_advance(
+        layout, "work/feature-solo", today=TODAY, cwd=elsewhere, repo_name="ui", dry_run=False
+    )
+
+    assert result.outcome.plan.refusal is None
+    assert result.repo_note is None
+    assert result.outcome.written
+    # `repo_name="ui"` must select `ui`, not merely "some repo" -- the named
+    # repo is what postcondition validation actually receives.
+    assert calls and calls[-1] is not None and calls[-1].resolve() == ui.resolve()
 
 
 def test_a_descendant_read_only_advance_does_not_stamp_from_cwd(tmp_path: Path, monkeypatch) -> None:

@@ -34,7 +34,7 @@ from work_tracker_okf.sources import upsert
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import resolve_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 #: The phases whose *completion* produces a results stub. A design or plan
@@ -57,10 +57,11 @@ class StageAdvance:
     corresponding capture degraded -- provenance never fails an advance, so
     "nothing was written" is a normal outcome, not an error.
 
-    `repo_note` carries `resolve_repo`'s note: the reason no code repo was
-    resolved. Named for exactly that and not for a general provenance log --
-    when it is set, every git-derived field above it is `None` for one known
-    reason rather than for an unknown one.
+    `repo_note` carries the reason no code repo was resolved: `resolve_repo`'s
+    note, or that several are declared and the cwd is in none of them. Named
+    for exactly that and not for a general provenance log -- when it is set,
+    every git-derived field above it is `None` for one known reason rather
+    than for an unknown one.
 
     `warnings` carries what the `execute -> finish` commit gate could not
     evaluate. The gate fails **open**: an advance that cannot see a repo, or
@@ -150,7 +151,11 @@ def run_stage_advance(
     workspace's own repo, and both `worktree_state` and `results_facts` then
     degrade to `None` without a word. An explicit `repo` wins and skips the
     config read. `repo_name` selects among several declared repositories and
-    is ignored when `repo` is given.
+    is ignored when `repo` is given. With several declared and no name, the
+    repo is the declared one *cwd*'s repository belongs to, and none at all
+    (a `repo_note`, never a refusal) when it belongs to none -- see
+    `_resolve_repo`. Postcondition validation checks `affects` against every
+    declared repo either way.
 
     `return_=True` walks the routing table's one backwards transition,
     `finish -> execute`. It writes no results stub: a return is not a stage
@@ -244,8 +249,9 @@ def _advance(
     old_phase = item.phase if item is not None else None
     repo_note: str | None = None
     resolved_repo = repo
+    declared: tuple[Path, ...] = ()
     if resolved_repo is None:
-        resolved_repo, repo_note = resolve_repo(layout, repo_name=repo_name)
+        resolved_repo, repo_note, declared = _resolve_repo(layout, repo_name=repo_name, cwd=cwd)
 
     stamped_worktree: str | None = None
     stamped_branch: str | None = None
@@ -364,7 +370,7 @@ def _advance(
     )
     # `bundle` is the lock-held projection (or the dry-run read), loaded with
     # `IGNORE`, so it satisfies `apply_mutation`'s baseline precondition.
-    application = apply_mutation(layout, mutation, repo_root=resolved_repo, baseline_bundle=bundle)
+    application = apply_mutation(layout, mutation, repo_root=resolved_repo, repo_roots=declared, baseline_bundle=bundle)
     if application.ok:
         outcome = replace(outcome, written=True)
         if result_member is not None:
@@ -381,6 +387,36 @@ def _advance(
         application=application,
         warnings=warnings,
     )
+
+
+def _resolve_repo(
+    layout: WorkspaceLayout, *, repo_name: str | None, cwd: Path | None
+) -> tuple[Path | None, str | None, tuple[Path, ...]]:
+    """`(repo, note, declared)`: the code repo this advance reads, and every
+    declared one for postcondition validation.
+
+    One declared repo, or a *repo_name*, is `resolve_repo`'s answer. Several
+    declared and no name is where `resolve_repo` would refuse; an advance
+    instead takes the declared repo *cwd*'s repository belongs to
+    (`provenance.repository_of` -- a linked worktree of it counts). When none
+    does, the repo is `None` with a note: the same degrade as a workspace that
+    declares no repo, so inference is skipped and the commit gate fails open.
+    An advance never refuses over which repo it is in.
+    """
+    declared = resolve_repos(layout)
+    if repo_name is None and len(declared) > 1:
+        here = cwd or Path.cwd()
+        match = provenance.repository_of(here, declared)
+        if match is not None:
+            return match, None, declared
+        return (
+            None,
+            f"{layout.manifest_path}: {len(declared)} repositories declared and {here} is in none of them, "
+            "so no code repo was resolved",
+            declared,
+        )
+    resolved, note = resolve_repo(layout, repo_name=repo_name)
+    return resolved, note, declared
 
 
 def _commit_gate(

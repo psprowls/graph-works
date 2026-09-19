@@ -23,6 +23,18 @@ def test_lane_config_defaults_to_no_repo_root() -> None:
     assert _common.LaneConfig().repo_root is None
 
 
+def test_lane_config_defaults_to_no_repo_roots() -> None:
+    assert _common.LaneConfig().repo_roots == ()
+    assert _common.LaneConfig().code_roots == ()
+
+
+def test_lane_config_code_roots_joins_both_forms_in_order_without_duplicates() -> None:
+    one, two = Path("/one"), Path("/two")
+    assert _common.LaneConfig(repo_root=one).code_roots == (one,)
+    assert _common.LaneConfig(repo_roots=(one, two)).code_roots == (one, two)
+    assert _common.LaneConfig(repo_root=two, repo_roots=(one, two)).code_roots == (two, one)
+
+
 def test_lane_config_is_frozen() -> None:
     config = _common.LaneConfig(repo_root=Path("/tmp"))
     with pytest.raises(AttributeError):

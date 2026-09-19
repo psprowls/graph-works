@@ -1,10 +1,11 @@
 """Which code repository this workspace describes.
 
-One question, one function. It sits at layer 0 rather than inside
-`orchestrate/` because two verticals now ask it — `orchestrate` for dispatch,
-`work` for reconciliation evidence — and the verticals-never-import-each-other
-contract in the root `pyproject.toml` forbids the second reaching across for
-the first's copy.
+One question, two answers: `resolve_repo` for "which one repo" (strict on
+ambiguity) and `resolve_repos` for "every declared repo". It sits at layer 0
+rather than inside `orchestrate/` because two verticals now ask it —
+`orchestrate` for dispatch, `work` for reconciliation evidence — and the
+verticals-never-import-each-other contract in the root `pyproject.toml`
+forbids the second reaching across for the first's copy.
 
 It is not folded into `discovery.py`, which answers "where is the workspace".
 This answers "what code does that workspace catalog": a different question,
@@ -64,4 +65,22 @@ def resolve_repo(layout: WorkspaceLayout, *, repo_name: str | None = None) -> tu
     return config.repos[0].path, None
 
 
-__all__ = ["resolve_repo"]
+def resolve_repos(layout: WorkspaceLayout) -> tuple[Path, ...]:
+    """Every code repo this workspace declares, in declaration order.
+
+    The multi-repository sibling of `resolve_repo`, for callers whose question
+    is about *any* declared repo rather than about one: postcondition
+    validation accepts a path that resolves under any of them, so it needs
+    them all and never has to choose. Resolution is `resolve_repo`'s, root for
+    root. Zero declared, or the file missing, is `()` -- the same degrade, with
+    no note because an empty tuple already says it. Malformed raises
+    `WorkspaceError` exactly as `resolve_repo` does.
+    """
+    try:
+        config = load_workspace_config(layout)
+    except OSError:
+        return ()
+    return tuple(entry.path for entry in config.repos)
+
+
+__all__ = ["resolve_repo", "resolve_repos"]

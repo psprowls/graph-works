@@ -64,7 +64,7 @@ def test_lint_passes_one_captured_utc_date_to_the_typed_core_call(
             "layout": layout,
             "config": lint_module.load_workspace_config(layout),
             "today": date(2026, 8, 18),
-            "repo_root": layout.repo_root,
+            "repo_roots": (),
         }
     ]
     assert result.stdout == report.render() + "\n"

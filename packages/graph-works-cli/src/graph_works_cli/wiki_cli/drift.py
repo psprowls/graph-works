@@ -27,11 +27,16 @@ def drift(
     dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run"),
     json_output: bool = typer.Option(False, "--json"),
     workspace: str = typer.Option("", "--workspace"),
+    repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
 ) -> None:
     """Propose curated-page updates for entities whose code moved.
 
     Reads the code graph as of the last `gw scan` -- it does not rebuild the
     graph itself. Run `gw scan` first if the graph needs refreshing.
+
+    `--repo-name` selects the declared repository drift falls back to for an
+    entity no declared checkout contains. Required when `workspace.yaml`
+    declares several; optional with one.
     """
     layout = resolve_workspace(workspace)
     try:
@@ -44,8 +49,14 @@ def drift(
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
+    if not repo_name and len(config.repos) > 1:
+        declared = sorted(entry.name for entry in config.repos)
+        exit_error(
+            f"{layout.manifest_path}: {len(config.repos)} repositories declared ({declared}); "
+            "pass --repo-name to choose one"
+        )
     try:
-        repo_root, _ = resolve_repo(layout)
+        repo_root, _ = resolve_repo(layout, repo_name=repo_name or None)
     except ValueError as exc:
         exit_error(str(exc), cause=exc)
 

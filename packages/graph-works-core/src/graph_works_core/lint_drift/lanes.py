@@ -203,11 +203,14 @@ def _compose_wiki(layout: WorkspaceLayout, config: Config, reader: GraphReader |
     return Lane(name=WIKI_LANE, root=layout.bundle_dir, ignore=_wiki_ignore(), rules=_wiki_rules(config, reader, at=at))
 
 
-def _compose_work(layout: WorkspaceLayout, config: Config, *, repo_root: Path | None) -> Lane:
-    """The work lane. `repo_root=None` is not an error — `rule_set`'s own
-    `lane_rules` component skips the two rules that ask a question about a
-    repository, which is its documented behaviour and the right one: not
-    knowing where the repo is says nothing about whether the paths are good.
+def _compose_work(
+    layout: WorkspaceLayout, config: Config, *, repo_root: Path | None, repo_roots: tuple[Path, ...] = ()
+) -> Lane:
+    """The work lane. `repo_root=None` with no `repo_roots` is not an error —
+    `rule_set`'s own `lane_rules` component skips the two rules that ask a
+    question about a repository, which is its documented behaviour and the
+    right one: not knowing where the repo is says nothing about whether the
+    paths are good.
 
     Rules come from `work_tracker_okf.compose.rule_set`, not bare
     `lane_rules(repo_root=...)` — the same function
@@ -228,7 +231,9 @@ def _compose_work(layout: WorkspaceLayout, config: Config, *, repo_root: Path | 
         name=WORK_LANE,
         root=layout.bundle_dir,
         ignore=_work_ignore(layout),
-        rules=rule_set(layout.bundle_dir, repo_root=repo_root, declarations_dir=config.declarations_dir),
+        rules=rule_set(
+            layout.bundle_dir, repo_root=repo_root, repo_roots=repo_roots, declarations_dir=config.declarations_dir
+        ),
     )
 
 
@@ -236,11 +241,16 @@ def compose_lanes(
     layout: WorkspaceLayout,
     config: Config,
     *,
-    repo_root: Path | None,
+    repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
     at: datetime,
     reader: GraphReader | None = None,
 ) -> LaneSet:
     """Every lane this workspace lints, with its rules.
+
+    *repo_root* and *repo_roots* are where the work lane resolves repo paths
+    (`affects`, plan actions); a multi-repository workspace passes every
+    declared repo as *repo_roots*, and a path under any one of them is good.
 
     *reader* is optional because the mechanical pass is useful without a graph:
     with no reader the `sync` capability contributes no rule, exactly as an
@@ -250,7 +260,7 @@ def compose_lanes(
     errors: list[str] = []
     builders: tuple[tuple[str, Callable[[], Lane]], ...] = (
         (WIKI_LANE, lambda: _compose_wiki(layout, config, reader, at=at)),
-        (WORK_LANE, lambda: _compose_work(layout, config, repo_root=repo_root)),
+        (WORK_LANE, lambda: _compose_work(layout, config, repo_root=repo_root, repo_roots=repo_roots)),
     )
     for name, build in builders:
         try:

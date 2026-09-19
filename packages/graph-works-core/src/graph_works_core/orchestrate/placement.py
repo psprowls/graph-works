@@ -31,7 +31,7 @@ from work_tracker_okf.placement import PlacementPlan, apply_placement, plan_plac
 
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import resolve_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
@@ -58,9 +58,21 @@ def run_record_placement(
     worktree: str,
     branch: str,
     today: date,
+    repo_name: str | None = None,
     dry_run: bool = True,
 ) -> PlacementRecord:
     """Record (*worktree*, *branch*) on *path* for its *phase* dispatch under *root*.
+
+    The code repo for postcondition validation is `resolve_repo(layout,
+    repo_name=repo_name)` -- strict: several declared repositories and no
+    *repo_name* raise `WorkspaceError` rather than guess. Selection stays
+    strict, but the validation itself checks `affects` against every
+    declared repo (`resolve_repos(layout)`), not only the selected one --
+    matching `work file`/`work advance` (`stage_advance._advance`'s
+    `repo_root=resolved_repo, repo_roots=declared`). The differential
+    postcondition gate excuses a pre-existing `affects-missing` finding
+    either way, so this only bites when baseline capture itself fails and
+    the gate falls back to its absolute form.
 
     Dry runs and unknown paths plan without locking, like `run_stage_advance`.
     A live record takes the decision owner's lock, re-plans against the
@@ -80,9 +92,13 @@ def run_record_placement(
         )
         if plan.refusal is not None or not plan.changed:
             return PlacementRecord(plan=plan)
-        repo, repo_note = resolve_repo(layout)
+        repo, repo_note = resolve_repo(layout, repo_name=repo_name)
         application = apply_mutation(
-            layout, _mutation(context.bundle, plan), repo_root=repo, baseline_bundle=context.bundle
+            layout,
+            _mutation(context.bundle, plan),
+            repo_root=repo,
+            repo_roots=resolve_repos(layout),
+            baseline_bundle=context.bundle,
         )
         return PlacementRecord(plan=plan, application=application, repo_note=repo_note)
 

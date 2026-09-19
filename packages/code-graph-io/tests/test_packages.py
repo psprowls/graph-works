@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -1093,6 +1094,73 @@ def test_js_npm_dependency_parity_full_monorepo(tmp_path: Path, conn: sqlite3.Co
     ).fetchall()
     assert len(dop_rows) == 1, f"exactly one depends_on_package edge expected; got {dop_rows}"
     assert dop_rows[0] == ("jspkg", "jslib")
+
+
+# ============================================================================
+# Git-ignored manifest exclusion
+# ============================================================================
+
+
+@pytest.mark.parametrize("manifest_name", ["package.json", "pyproject.toml"])
+def test_manifest_discovery_skips_git_ignored_manifests(tmp_path: Path, manifest_name: str) -> None:
+    """A manifest under a git-ignored path is not a package of the repository.
+
+    The structural lane already enumerates tracked files via `git ls-files`
+    (structural_nodes._tracked_files); the manifest lane must agree with it —
+    a package.json/pyproject.toml that exists on disk under a git-ignored
+    directory (e.g. `tmp/`) must not be discovered as a package.
+    """
+
+    def write_manifest(path: Path, name: str) -> None:
+        if manifest_name == "package.json":
+            path.write_text(json.dumps({"name": name, "version": "1.0.0"}))
+        else:
+            path.write_text(f'[project]\nname = "{name}"\nversion = "1.0.0"\n')
+
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=tmp_path, check=True)
+
+    write_manifest(tmp_path / manifest_name, "tracked-pkg")
+    (tmp_path / ".gitignore").write_text("tmp/\n")
+
+    ignored_dir = tmp_path / "tmp" / "ignored-pkg"
+    ignored_dir.mkdir(parents=True)
+    write_manifest(ignored_dir / manifest_name, "ignored-pkg")
+
+    subprocess.run(["git", "add", manifest_name, ".gitignore"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+    manifests = packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    names = {m.name for m in manifests}
+
+    assert "tracked-pkg" in names, f"tracked manifest missing from discovery: {names}"
+    assert "ignored-pkg" not in names, f"git-ignored manifest was discovered as a package: {names}"
+
+
+@pytest.mark.parametrize("manifest_name", ["package.json", "pyproject.toml"])
+def test_manifest_discovery_falls_back_on_empty_git_index(tmp_path: Path, manifest_name: str) -> None:
+    """A git repo with nothing staged/committed yet must not zero out discovery.
+
+    `git ls-files` succeeds with empty output in a freshly `git init`'d repo
+    (or one with commits but nothing added), which is NOT the same as
+    `NotInGitRepoError`. The structural lane treats an empty tracked list as
+    "fall back to the filesystem walk" (`structural_nodes.py` — `if not
+    tracked:`); the manifest lane must agree with it rather than filtering
+    out every manifest.
+    """
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+
+    if manifest_name == "package.json":
+        (tmp_path / manifest_name).write_text(json.dumps({"name": "unstaged-pkg", "version": "1.0.0"}))
+    else:
+        (tmp_path / manifest_name).write_text('[project]\nname = "unstaged-pkg"\nversion = "1.0.0"\n')
+    # Deliberately no `git add` / `git commit` — the index stays empty.
+
+    manifests = packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    names = {m.name for m in manifests}
+
+    assert "unstaged-pkg" in names, f"manifest lost to an empty git index: {names}"
 
 
 def test_js_versions_in_use_aggregates_across_consumers(tmp_path: Path, conn: sqlite3.Connection) -> None:

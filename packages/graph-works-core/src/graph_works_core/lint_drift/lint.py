@@ -314,12 +314,20 @@ def run_mechanical(
     config: Config,
     *,
     today: date,
-    repo_root: Path | None,
+    repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
     reader: GraphReader | None = None,
     strict: bool = False,
 ) -> LintReport:
-    """The whole mechanical aggregation. Synchronous, and never calls a model."""
-    report, _bundles = _run_mechanical(layout, config, today=today, repo_root=repo_root, reader=reader, strict=strict)
+    """The whole mechanical aggregation. Synchronous, and never calls a model.
+
+    *repo_root* / *repo_roots* are the code repos the work lane resolves repo
+    paths under -- every declared one in a multi-repository workspace; see
+    `compose_lanes`.
+    """
+    report, _bundles = _run_mechanical(
+        layout, config, today=today, repo_root=repo_root, repo_roots=repo_roots, reader=reader, strict=strict
+    )
     return report
 
 
@@ -329,6 +337,7 @@ def _run_mechanical(
     *,
     today: date,
     repo_root: Path | None,
+    repo_roots: tuple[Path, ...] = (),
     reader: GraphReader | None,
     strict: bool,
 ) -> tuple[LintReport, dict[str, Bundle]]:
@@ -337,7 +346,9 @@ def _run_mechanical(
     Private because the bundles are an implementation detail of running both
     halves off one walk; `run_mechanical` is the contract.
     """
-    lane_set = compose_lanes(layout, config, repo_root=repo_root, at=_at_for(today), reader=reader)
+    lane_set = compose_lanes(
+        layout, config, repo_root=repo_root, repo_roots=repo_roots, at=_at_for(today), reader=reader
+    )
     reports, bundles, walk_errors = _lane_reports(lane_set.lanes, today=today, strict=strict)
     return (
         LintReport(
@@ -624,7 +635,8 @@ async def run_lint(
     config: Config,
     *,
     today: date,
-    repo_root: Path | None,
+    repo_root: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
     reader: GraphReader | None = None,
     model_override: str | None = None,
     strict: bool = False,
@@ -637,7 +649,7 @@ async def run_lint(
     the mechanical half unaffected.
     """
     mechanical, bundles = _run_mechanical(
-        layout, config, today=today, repo_root=repo_root, reader=reader, strict=strict
+        layout, config, today=today, repo_root=repo_root, repo_roots=repo_roots, reader=reader, strict=strict
     )
     bundle = bundles.get(WIKI_LANE)
     if bundle is None:

@@ -79,6 +79,7 @@ def rule_set(
     repo_root: Path | None = None,
     vault_root: Path | None = None,
     declarations_dir: Path | None = None,
+    repo_roots: tuple[Path, ...] = (),
 ) -> tuple[Rule, ...]:
     """The one rule set `lint` and `advance` both validate against (C6-M).
 
@@ -118,7 +119,9 @@ def rule_set(
     the standard "Execute implementation plan: ..." row, its own artifact's
     vault-relative path (`vault_root`); in a split topology (workspace and
     code repo are different git repos) the two roots are different
-    directories.
+    directories. `repo_roots` is `repo_root` for a workspace declaring several
+    code repositories: a path resolving under any one of them is good (see
+    `lane_rules`).
 
     **The tag vocabulary composes when present, mirroring the wiki lane's own
     `_wiki_rules`.** Unlike `schema/`/`sections/`, `tags.yaml` is optional:
@@ -163,7 +166,7 @@ def rule_set(
         section_rule(load_sections(declarations / "sections"), severity="error"),
         render_rule(),
         placement_rule(placement_directories(schema_set), severity="error"),
-        *lane_rules(repo_root=repo_root, vault_root=vault_root),
+        *lane_rules(repo_root=repo_root, vault_root=vault_root, repo_roots=repo_roots),
     ]
     tags_path = declarations / VOCABULARY_FILENAME
     if tags_path.is_file():

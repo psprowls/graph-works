@@ -1,0 +1,45 @@
+{
+  "total": 4,
+  "by_work_status": {
+    "open": 4
+  },
+  "by_type": {
+    "Bug": 1,
+    "Epic": 1,
+    "Feature": 1,
+    "Release": 1
+  },
+  "by_phase": {},
+  "children": {
+    "work/epic-epic": {
+      "total": 0,
+      "terminal": 0,
+      "open_paths": []
+    },
+    "work/release-rel": {
+      "total": 0,
+      "terminal": 0,
+      "open_paths": []
+    }
+  },
+  "resume": {
+    "primary": {
+      "path": "work/bug-fix",
+      "title": "Fix"
+    },
+    "alternatives": [
+      {
+        "path": "work/epic-epic",
+        "title": "Epic"
+      },
+      {
+        "path": "work/feature-alpha",
+        "title": "Alpha"
+      },
+      {
+        "path": "work/release-rel",
+        "title": "Rel"
+      }
+    ]
+  }
+}

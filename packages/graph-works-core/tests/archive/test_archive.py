@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import graph_works_core
+import pytest
 from graph_works_core import apply_init, plan_init
 from graph_works_core.archive import commands as archive
 from graph_works_core.workspace import provenance
@@ -62,6 +63,73 @@ def _workspace_with_referring_log(tmp_path: Path):
 
 def _snapshot(root: Path) -> dict[str, bytes]:
     return {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
+
+
+def _wiki_workspace(tmp_path: Path, *, log_links_page: bool):
+    layout = _layout(tmp_path)
+    sources = layout.bundle_dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    (sources / "one.md").write_text(
+        "---\ntype: Source\ntitle: One\ndescription: d\n---\n\nbody\n", encoding="utf-8", newline=""
+    )
+    if log_links_page:
+        log = layout.bundle_dir / "log.md"
+        log.write_text(
+            log.read_text(encoding="utf-8") + "\n## [2026-08-22] ingest\n- ingested [one](sources/one.md)\n",
+            encoding="utf-8",
+            newline="",
+        )
+    return layout
+
+
+@pytest.mark.parametrize("log_links_page", (False, True))
+def test_wiki_only_archive_keeps_its_log_entry(tmp_path: Path, log_links_page: bool) -> None:
+    """The wiki half's referrer rewrite of log.md must not erase the archive entry."""
+    layout = _wiki_workspace(tmp_path, log_links_page=log_links_page)
+
+    run = archive.run_archive(layout, (), ["sources/one"], today=TODAY, dry_run=False)
+
+    assert run.ok and run.wiki is not None and run.wiki.ok
+    assert run.logged == "archived wiki sources/one"
+    log = (layout.bundle_dir / "log.md").read_text(encoding="utf-8")
+    assert log.count("- archived wiki sources/one") == 1
+    if log_links_page:
+        assert "[one](sources/_archive/one.md)" in log
+
+
+def test_wiki_only_dry_run_reports_the_entry_and_writes_nothing(tmp_path: Path) -> None:
+    layout = _wiki_workspace(tmp_path, log_links_page=True)
+    before = _snapshot(layout.bundle_dir)
+
+    run = archive.run_archive(layout, (), ["sources/one"], today=TODAY, dry_run=True)
+
+    assert run.logged == "archived wiki sources/one"
+    assert _snapshot(layout.bundle_dir) == before
+
+
+def test_wiki_only_archive_leaves_an_invalid_pointer_alone(tmp_path: Path) -> None:
+    """An empty work-root set must not trigger clear_active_work's invalid-pointer delete."""
+    layout = _wiki_workspace(tmp_path, log_links_page=False)
+    pointer = layout.cache_dir / provenance.ACTIVE_WORK_FILENAME
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(json.dumps({"path": "not-a-path-native-id"}), encoding="utf-8", newline="")
+
+    run = archive.run_archive(layout, (), ["sources/one"], today=TODAY, dry_run=False)
+
+    assert run.pointer_cleared is False
+    assert pointer.exists()
+
+
+def test_work_archive_still_clears_an_invalid_pointer(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    pointer = layout.cache_dir / provenance.ACTIVE_WORK_FILENAME
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(json.dumps({"path": "not-a-path-native-id"}), encoding="utf-8", newline="")
+
+    run = archive.run_archive(layout, [DONE], today=TODAY, dry_run=False)
+
+    assert run.pointer_cleared is True
+    assert not pointer.exists()
 
 
 def test_dry_run_plans_full_canonical_path_mapping(tmp_path: Path) -> None:

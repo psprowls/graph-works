@@ -1,34 +1,149 @@
-"""Public JSON payload contracts for the future ``gw wiki`` commands."""
+"""Plain-data wiki projections: exact keys and explicit nested rows."""
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 from code_wiki_okf.entities.sync import SyncSummary
 from code_wiki_okf.mirror.model import MirrorResult
 from code_wiki_okf.sync import MirrorSummary
-from graph_works_cli.wiki_cli.rendering import (
-    bootstrap_payload,
-    bootstrap_plan_payload,
-    ingest_payload,
-    lint_payload,
-    proposal_payload,
-    scan_apply_payload,
-    scan_emit_payload,
-    scan_normal_payload,
-    stats_payload,
-)
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
+from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
 from graph_works_core.workspace.init import WorkspaceInit, plan_init
 from graph_works_core.workspace.layout import layout_for
+from graph_works_wire.wiki import (
+    bootstrap_payload,
+    bootstrap_plan_payload,
+    ingest_payload,
+    lint_payload,
+    proposal_decide_payload,
+    proposal_file_payload,
+    proposal_payload,
+    scan_apply_payload,
+    scan_emit_payload,
+    scan_normal_payload,
+    stats_payload,
+    tag_inventory_payload,
+    tags_undeclared_payload,
+)
 from okf_ext.bundle import ApplyResult as BundleApplyResult
-from okf_ext.proposals import Proposal
+from okf_ext.proposals import ApplyResult as ProposalApplyResult
+from okf_ext.proposals import DecisionPlan, Proposal, ProposalPlan, Write, WriteFailure
 from okf_io import Finding, Report
+
+AT = "2026-08-24T12:00:00+00:00"
+DECIDE_WRITE = Write(
+    member="proposals/a.md",
+    mode="update",
+    frontmatter={"page_status": "approved", "verified": [{"by": "human", "at": AT}]},
+)
+DECIDE_KEYS = {
+    "target",
+    "proposal",
+    "decision",
+    "ok",
+    "refusals",
+    "writes",
+    "written",
+    "applied",
+    "rolled_back",
+    "failures",
+}
+
+
+def _decide(**over: object) -> ProposalDecideRun:
+    base: dict[str, object] = {
+        "target": "concepts/a.md",
+        "decision": "approved",
+        "proposal": "proposals/a.md",
+        "plan": DecisionPlan(
+            root=Path("/ws/okf"),
+            proposal="proposals/a.md",
+            decision="approved",
+            writes=(DECIDE_WRITE,),
+            refusals=(),
+        ),
+        "refusals": (),
+        "result": None,
+    }
+    base.update(over)
+    return ProposalDecideRun(**base)  # type: ignore[arg-type]
+
+
+def test_decide_dry_run_projects_planned_frontmatter_only() -> None:
+    payload = proposal_decide_payload(_decide())
+    assert set(payload) == DECIDE_KEYS
+    assert payload["writes"] == [
+        {
+            "member": "proposals/a.md",
+            "mode": "update",
+            "frontmatter": {"page_status": "approved", "verified": [{"by": "human", "at": AT}]},
+        }
+    ]
+    assert payload["applied"] is False and payload["written"] == [] and payload["rolled_back"] is False
+    assert payload["ok"] is True and payload["failures"] == []
+    assert "/ws/okf" not in json.dumps(payload)
+
+
+def test_decide_unknown_target_is_a_refusal_with_no_writes() -> None:
+    refusal = ProposalRefusal(path="concepts/x.md", kind="no-proposal", detail="no proposal targets 'concepts/x.md'")
+    payload = proposal_decide_payload(_decide(proposal=None, plan=None, refusals=(refusal,)))
+    assert payload["proposal"] is None and payload["writes"] == [] and payload["ok"] is False
+    assert payload["refusals"] == [
+        {"path": "concepts/x.md", "kind": "no-proposal", "detail": "no proposal targets 'concepts/x.md'"}
+    ]
+
+
+def test_decide_applied_and_failed_forms() -> None:
+    applied = proposal_decide_payload(
+        _decide(result=ProposalApplyResult(written=("proposals/a.md",), failed=(), skipped=()))
+    )
+    assert applied["applied"] is True and applied["written"] == ["proposals/a.md"]
+    failed = proposal_decide_payload(
+        _decide(
+            result=ProposalApplyResult(
+                written=(),
+                failed=(WriteFailure(path="proposals/a.md", kind="stale", error="changed"),),
+                skipped=(),
+            )
+        )
+    )
+    assert failed["ok"] is False and failed["failures"] == ["proposals/a.md: stale -- changed"]
+
+
+def test_file_payload_never_projects_create_text() -> None:
+    plan = ProposalPlan(
+        root=Path("/ws/okf"),
+        target="explanations/t.md",
+        proposal="proposals/explanations-t.md",
+        writes=(Write(member="proposals/explanations-t.md", mode="create", text="---\nsecret body\n"),),
+        refusals=(),
+    )
+    run = ProposalFileRun(
+        lane="explanation", target=plan.target, proposal=plan.proposal, plan=plan, refusals=(), result=None
+    )
+    payload = proposal_file_payload(run)
+    assert set(payload) == {
+        "lane",
+        "target",
+        "proposal",
+        "ok",
+        "refusals",
+        "writes",
+        "written",
+        "applied",
+        "rolled_back",
+        "failures",
+    }
+    assert payload["writes"] == [{"member": "proposals/explanations-t.md", "mode": "create", "frontmatter": {}}]
+    assert "secret body" not in json.dumps(payload)
 
 
 def test_bootstrap_payload_has_exact_keys_and_reports_additions_and_deletions(tmp_path: Path) -> None:
@@ -342,3 +457,24 @@ def test_both_scan_payloads_report_identical_structural_errors(tmp_path: Path) -
 
     assert emit["entity_errors"] == list(structural.errors)
     assert "demo: mirror sync failed: disk full" in emit["entity_errors"]
+
+
+def test_tag_inventory_payload_counts_distinct_tagged_pages_and_sorts_counts() -> None:
+    result = SimpleNamespace(
+        counts={"zeta": 1, "alpha": 2},
+        concepts={"alpha": ("c1", "c2"), "zeta": ("c1",)},
+        untagged=("c3",),
+        skipped=(SimpleNamespace(path="x.md", reason="parse", detail="bad"),),
+    )
+    assert tag_inventory_payload(result) == {
+        "total_tags": 2,
+        "tagged_pages": 2,
+        "untagged_pages": 1,
+        "counts": {"alpha": 2, "zeta": 1},
+        "skipped": [{"path": "x.md", "reason": "parse", "detail": "bad"}],
+    }
+    assert list(tag_inventory_payload(result)["counts"]) == ["alpha", "zeta"]
+
+
+def test_tags_undeclared_payload_is_a_single_list() -> None:
+    assert tags_undeclared_payload(("b", "a")) == {"undeclared": ["b", "a"]}

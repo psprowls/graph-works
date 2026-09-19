@@ -12,7 +12,7 @@ from graph_works_core.workspace.errors import InitError, WorkspaceError, Workspa
 
 
 def test_version_is_static_and_matches_the_distribution():
-    assert graph_works_core.__version__ == "0.6.0"
+    assert graph_works_core.__version__ == "0.6.2"
 
 
 def test_private_descriptor_loader_has_a_synchronized_okf_io_floor():
@@ -217,5 +217,16 @@ def test_the_query_error_is_exported():
 
 
 def test_the_util_vertical_is_exported():
-    for name in ("LogAppendResult", "SkippedPage", "TokenStamp", "TokensUpdate", "run_log", "run_tokens_update"):
+    for name in (
+        "InvalidLogSection",
+        "LogAppendResult",
+        "LogEntryRead",
+        "LogRead",
+        "SkippedPage",
+        "TokenStamp",
+        "TokensUpdate",
+        "run_log",
+        "run_log_read",
+        "run_tokens_update",
+    ):
         assert name in graph_works_core.__all__

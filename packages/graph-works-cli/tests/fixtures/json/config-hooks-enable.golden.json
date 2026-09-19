@@ -1,0 +1,11 @@
+{
+  "settings_path": "<tmp>/repo/.claude/settings.local.json",
+  "changed": true,
+  "added": [
+    "session-end-transcript-capture.sh"
+  ],
+  "removed": [],
+  "skipped": [
+    "some-other-hook.sh"
+  ]
+}

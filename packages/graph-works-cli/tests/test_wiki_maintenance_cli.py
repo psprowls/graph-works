@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -96,48 +97,87 @@ def test_index_reports_a_noop_without_an_empty_human_response(
     assert result.stdout == "nothing to do\n"
 
 
+def _run(
+    *,
+    ok: bool = True,
+    applied: bool = True,
+    archived: tuple[str, ...] = (),
+    refusals: tuple[object, ...] = (),
+    failed: tuple[object, ...] = (),
+    diff: str = "archive plan",
+) -> SimpleNamespace:
+    plan = SimpleNamespace(ok=True, path_mapping={}, warnings=(), refusals=(), move_plan=None, moves=(), writes=())
+    wiki_plan = SimpleNamespace(
+        ok=ok,
+        tokens=archived,
+        skipped=(),
+        diff=lambda: diff,
+        moves=SimpleNamespace(moves=(), refusals=refusals, stranded=()),
+    )
+    result = SimpleNamespace(ok=True, written=(), warnings=(), rolled_back=False, failures=()) if applied else None
+    wiki = (
+        SimpleNamespace(
+            ok=not failed and not refusals,
+            archived=archived,
+            refusals=(),
+            move=SimpleNamespace(failed=failed),
+            indexes=(),
+        )
+        if applied
+        else None
+    )
+    return SimpleNamespace(
+        plan=plan,
+        wiki_plan=wiki_plan,
+        conflict=(),
+        pointer_cleared=False,
+        logged=None,
+        result=result,
+        wiki=wiki,
+        ok=ok,
+    )
+
+
+@pytest.fixture
+def archive_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[object, object, object, date, bool]]:
+    calls: list[tuple[object, object, object, date, bool]] = []
+
+    def fake_run_archive(
+        layout: object, paths: object, tokens: object, *, today: date, dry_run: bool
+    ) -> SimpleNamespace:
+        calls.append((layout, paths, tokens, today, dry_run))
+        return _run()
+
+    monkeypatch.setattr(maintenance, "run_archive", fake_run_archive)
+    return calls
+
+
 @pytest.mark.parametrize(("target", "expected_tokens"), (("sources/one", ["sources/one"]), (None, None)))
-def test_archive_uses_the_wide_bundle_lens_and_targeted_or_sweep_plan(
-    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, target: str | None, expected_tokens: list[str] | None
+def test_archive_routes_through_run_archive_with_no_work_selection(
+    archive_calls: list[tuple[object, object, object, date, bool]],
+    initialized_workspace: Path,
+    target: str | None,
+    expected_tokens: list[str] | None,
 ) -> None:
-    """The narrow lens strands source reference companions during an archive."""
-    bundle = object()
-    loaded: list[tuple[object, object]] = []
-    planned: list[tuple[object, object]] = []
-
-    def fake_load_bundle(root: object, *, ignore: object) -> object:
-        loaded.append((root, ignore))
-        return bundle
-
-    def fake_plan_archive(actual_bundle: object, tokens: object = None) -> SimpleNamespace:
-        planned.append((actual_bundle, tokens))
-        return SimpleNamespace(ok=True, diff=lambda: "archive plan", moves=SimpleNamespace(stranded=()))
-
-    monkeypatch.setattr(maintenance, "load_bundle", fake_load_bundle)
-    monkeypatch.setattr(maintenance, "plan_archive", fake_plan_archive)
-    monkeypatch.setattr(maintenance, "apply_archive", lambda *_args: SimpleNamespace(ok=True, archived=()))
-
     args = ["wiki", "archive", "--workspace", str(initialized_workspace)]
     if target is not None:
         args.insert(2, target)
+
     result = runner.invoke(app, args)
 
-    layout = maintenance.resolve_workspace(str(initialized_workspace))
     assert result.exit_code == 0
-    assert loaded == [(layout.bundle_dir, maintenance.ARCHIVE_IGNORE)]
-    assert planned == [(bundle, expected_tokens)]
+    layout, paths, tokens, today, dry_run = archive_calls[0]
+    assert layout == maintenance.resolve_workspace(str(initialized_workspace))
+    assert paths == () and tokens == expected_tokens and isinstance(today, date) and dry_run is False
 
 
 def test_archive_dry_run_never_applies(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
-    """A preview that moves files would violate the sole preview-mode guarantee."""
-    applied: list[object] = []
-    monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
+    calls: list[bool] = []
     monkeypatch.setattr(
         maintenance,
-        "plan_archive",
-        lambda *_args, **_kwargs: SimpleNamespace(ok=True, diff=lambda: "preview", moves=SimpleNamespace(stranded=())),
+        "run_archive",
+        lambda *_args, **kwargs: calls.append(kwargs["dry_run"]) or _run(applied=False, diff="preview"),
     )
-    monkeypatch.setattr(maintenance, "apply_archive", applied.append)
 
     result = runner.invoke(
         app, ["wiki", "archive", "sources/one", "--dry-run", "--workspace", str(initialized_workspace)]
@@ -145,23 +185,17 @@ def test_archive_dry_run_never_applies(monkeypatch: pytest.MonkeyPatch, initiali
 
     assert result.exit_code == 0
     assert result.stdout == "preview\n"
-    assert applied == []
+    assert calls == [True]
 
 
 def test_archive_dry_run_prints_a_refused_plan_without_applying(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
-    """A refused preview must expose its plan while still preserving the bundle."""
-    applied: list[object] = []
-    monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         maintenance,
-        "plan_archive",
-        lambda *_args, **_kwargs: SimpleNamespace(
-            ok=False, diff=lambda: "refused preview", moves=SimpleNamespace(stranded=())
-        ),
+        "run_archive",
+        lambda *_args, **_kwargs: _run(ok=False, applied=False, diff="refused preview"),
     )
-    monkeypatch.setattr(maintenance, "apply_archive", applied.append)
 
     result = runner.invoke(
         app, ["wiki", "archive", "sources/one", "--dry-run", "--workspace", str(initialized_workspace)]
@@ -170,29 +204,23 @@ def test_archive_dry_run_prints_a_refused_plan_without_applying(
     assert result.exit_code == exit_codes.GENERIC
     assert result.stdout == "refused preview\n"
     assert "archive plan was refused" in result.stderr
-    assert applied == []
 
 
-@pytest.mark.parametrize(("plan_ok", "result_ok"), ((False, True), (True, False)))
 def test_archive_refusals_and_incomplete_moves_fail(
-    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path, plan_ok: bool, result_ok: bool
+    monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
-    """Refused plans and partial moves must never report a successful archive."""
-    applied: list[object] = []
-    plan = SimpleNamespace(ok=plan_ok, diff=lambda: "refused", moves=SimpleNamespace(stranded=()))
-    monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(maintenance, "plan_archive", lambda *_args, **_kwargs: plan)
+    monkeypatch.setattr(maintenance, "run_archive", lambda *_args, **_kwargs: _run(ok=False, applied=False))
+    refused = runner.invoke(app, ["wiki", "archive", "sources/one", "--workspace", str(initialized_workspace)])
+    monkeypatch.setattr(
+        maintenance,
+        "run_archive",
+        lambda *_args, **_kwargs: _run(failed=(SimpleNamespace(path="a", kind="move", error="disk"),)),
+    )
+    incomplete = runner.invoke(app, ["wiki", "archive", "sources/one", "--workspace", str(initialized_workspace)])
 
-    def fake_apply_archive(*args: object) -> SimpleNamespace:
-        applied.append(args)
-        return SimpleNamespace(ok=result_ok)
-
-    monkeypatch.setattr(maintenance, "apply_archive", fake_apply_archive)
-
-    result = runner.invoke(app, ["wiki", "archive", "sources/one", "--workspace", str(initialized_workspace)])
-
-    assert result.exit_code == exit_codes.GENERIC
-    assert len(applied) == (0 if not plan_ok else 1)
+    assert refused.exit_code == incomplete.exit_code == exit_codes.GENERIC
+    assert "archive plan was refused" in refused.stderr
+    assert "archive was incomplete" in incomplete.stderr
 
 
 def test_stats_renders_a_human_summary_when_json_is_not_requested(
@@ -278,8 +306,7 @@ def test_archive_reports_an_unplannable_bundle_instead_of_a_traceback(
     def fail(*_args: object, **_kwargs: object) -> object:
         raise ValueError("sources/one is not archivable")
 
-    monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(maintenance, "plan_archive", fail)
+    monkeypatch.setattr(maintenance, "run_archive", fail)
 
     result = runner.invoke(app, ["wiki", "archive", "sources/one", "--workspace", str(initialized_workspace)])
 
@@ -296,13 +323,7 @@ def test_archive_reports_a_failed_move_instead_of_a_traceback(
     def fail(*_args: object, **_kwargs: object) -> object:
         raise OSError("destination is not writable")
 
-    monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
-    monkeypatch.setattr(
-        maintenance,
-        "plan_archive",
-        lambda *_args, **_kwargs: SimpleNamespace(ok=True, moves=SimpleNamespace(stranded=())),
-    )
-    monkeypatch.setattr(maintenance, "apply_archive", fail)
+    monkeypatch.setattr(maintenance, "run_archive", fail)
 
     result = runner.invoke(app, ["wiki", "archive", "sources/one", "--workspace", str(initialized_workspace)])
 
@@ -313,16 +334,10 @@ def test_archive_reports_a_failed_move_instead_of_a_traceback(
 
 def test_archive_echoes_every_archived_token(monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path) -> None:
     """A silent archive gives no record of what moved."""
-    monkeypatch.setattr(maintenance, "load_bundle", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
         maintenance,
-        "plan_archive",
-        lambda *_args, **_kwargs: SimpleNamespace(ok=True, moves=SimpleNamespace(stranded=())),
-    )
-    monkeypatch.setattr(
-        maintenance,
-        "apply_archive",
-        lambda *_args: SimpleNamespace(ok=True, archived=("sources/one", "sources/two")),
+        "run_archive",
+        lambda *_args, **_kwargs: _run(archived=("sources/one", "sources/two")),
     )
 
     result = runner.invoke(app, ["wiki", "archive", "--workspace", str(initialized_workspace)])
@@ -360,8 +375,52 @@ def test_wiki_archive_reports_stranded_wikilinks_in_both_modes(tmp_path: Path) -
 
     preview = runner.invoke(app, ["wiki", "archive", "tutorials/foo", "--dry-run", "--workspace", str(workspace)])
     assert preview.exit_code == 0
-    assert "inbound [[wikilink]]" in preview.stderr
+    assert "wiki pages: ! 1 inbound [[wikilink]]" in preview.stderr
 
     applied = runner.invoke(app, ["wiki", "archive", "tutorials/foo", "--workspace", str(workspace)])
     assert applied.exit_code == 0  # ADR-0004: broken links are warn, never error
-    assert "inbound [[wikilink]]" in applied.stderr
+    assert "wiki pages: ! 1 inbound [[wikilink]]" in applied.stderr
+
+
+def _workspace_with_linked_source(tmp_path: Path) -> Path:
+    root = tmp_path / "works"
+    assert runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)]).exit_code == 0
+    layout = maintenance.resolve_workspace(str(root))
+    sources = layout.bundle_dir / "sources"
+    sources.mkdir(parents=True, exist_ok=True)
+    sources.joinpath("one.md").write_text("---\ntitle: One\ndescription: d\n---\n\n## Summary\nd\n", encoding="utf-8")
+    (layout.bundle_dir / "log.md").write_text("# Log\n\nSee [One](sources/one.md).\n", encoding="utf-8")
+    return root
+
+
+def test_wiki_archive_appends_its_log_entry(tmp_path: Path) -> None:
+    workspace = _workspace_with_linked_source(tmp_path)
+
+    result = runner.invoke(app, ["wiki", "archive", "sources/one", "--workspace", str(workspace)])
+
+    assert result.exit_code == 0, result.output
+    assert result.stdout.strip() == "sources/one"
+    log = (maintenance.resolve_workspace(str(workspace)).bundle_dir / "log.md").read_text(encoding="utf-8")
+    assert "archived wiki sources/one" in log and "sources/_archive/one.md" in log
+
+
+@pytest.mark.parametrize("dry_run", (True, False))
+def test_wiki_archive_json_emits_the_combined_projection(tmp_path: Path, dry_run: bool) -> None:
+    workspace = _workspace_with_linked_source(tmp_path)
+    args = [
+        "wiki",
+        "archive",
+        "sources/one",
+        "--json",
+        "--workspace",
+        str(workspace),
+        *(["--dry-run"] if dry_run else []),
+    ]
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    doc = json.loads(result.stdout)
+    assert doc["path_mapping"] == {} and doc["wiki"]["tokens"] == ["sources/one"]
+    assert doc["wiki"]["archived"] == ([] if dry_run else ["sources/one"])
+    assert doc["pointer_cleared"] is False

@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
+from graph_works_cli.util_cli import archive as archive_module
+from graph_works_cli.wiki_cli import maintenance
 from graph_works_cli.work_cli import rendering
 from okf_io import load
 from typer.testing import CliRunner
@@ -32,6 +35,56 @@ def file_item(workspace: Path, title: str, *, kind: str = "Feature") -> str:
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
     return str(json.loads(result.stdout)["path"])
+
+
+@pytest.mark.parametrize(
+    ("command", "literal_command"),
+    (
+        (("archive",), "archive"),
+        (("wiki", "archive"), "wiki archive"),
+        (("wiki", "proposal", "approve", "explanations/a.md"), "wiki proposal approve"),
+        (("wiki", "proposal", "reject", "explanations/a.md"), "wiki proposal reject"),
+        (
+            (
+                "wiki",
+                "proposal",
+                "file",
+                "--lane",
+                "explanation",
+                "--title",
+                "T",
+                "--id",
+                "s1",
+                "--resource",
+                "sources/a.md",
+            ),
+            "wiki proposal file",
+        ),
+    ),
+)
+def test_new_json_commands_envelope_missing_workspace_without_changing_human_error(
+    tmp_path: Path, command: tuple[str, ...], literal_command: str
+) -> None:
+    """Removing a workspace resolver envelope would leave JSON consumers with no document."""
+    missing = tmp_path / "missing"
+    json_result = runner.invoke(app, [*command, "--json", "--workspace", str(missing)])
+    human_result = runner.invoke(app, [*command, "--workspace", str(missing)])
+
+    assert json_result.exit_code == exit_codes.NOT_INITIALIZED
+    assert human_result.exit_code == exit_codes.NOT_INITIALIZED
+    assert json_result.stderr == human_result.stderr
+    assert json_result.stderr.count("Error: ") == 1
+    assert not missing.exists()
+    assert human_result.stdout == ""
+    assert json.loads(json_result.stdout) == {
+        "error": {
+            "command": literal_command,
+            "reason": "workspace",
+            "message": json_result.stderr.removeprefix("Error: ").rstrip("\n"),
+            "exit_code": exit_codes.NOT_INITIALIZED,
+            "payload": None,
+        }
+    }
 
 
 def test_post_payload_refusal_carries_the_computed_refusals_in_the_envelope(workspace: Path) -> None:
@@ -139,3 +192,193 @@ def test_root_callback_resets_json_mode_before_the_next_command_parses(workspace
     second = runner.invoke(app, ["work", "next", "work/no-such-item", "--workspace", str(workspace)])
     assert second.exit_code == exit_codes.AMBIGUOUS
     assert second.stdout == ""
+
+
+def test_archive_json_refusal_carries_the_computed_refusals_in_the_envelope(workspace: Path) -> None:
+    path = file_item(workspace, "Done", kind="Bug")
+    from graph_works_cli.workspace_resolution import resolve_workspace
+
+    layout = resolve_workspace(str(workspace))
+    page = layout.bundle_dir / f"{path}.md"
+    document = load(page)
+    document.set("work_status", "resolved")
+    document.save()
+    sources_dir = layout.bundle_dir / "sources"
+    sources_dir.mkdir(parents=True, exist_ok=True)
+    sources_dir.joinpath("broken.md").write_text(
+        f"---\ntitle: Broken\nbad: value: here\n---\n\nA link to [Done](../{path}.md).\n",
+        encoding="utf-8",
+    )
+
+    result = runner.invoke(app, ["archive", "--workspace", str(workspace), "--json"])
+
+    assert result.exit_code == exit_codes.GENERIC
+    doc = json.loads(result.stdout)
+    assert set(doc) == {"error"}
+    error = doc["error"]
+    assert error["command"] == "archive"
+    assert error["reason"] == "refused"
+    assert error["payload"]["refusals"]
+
+
+def test_archive_json_conflict_carries_the_conflicting_paths(monkeypatch: pytest.MonkeyPatch, workspace: Path) -> None:
+    plan = SimpleNamespace(
+        path_mapping={"work/a": "work/_archive/a"}, warnings=(), refusals=(), move_plan=SimpleNamespace(stranded=())
+    )
+    wiki_plan = SimpleNamespace(
+        tokens=(),
+        skipped=(),
+        moves=SimpleNamespace(moves=(), refusals=(), stranded=()),
+    )
+    run = SimpleNamespace(
+        plan=plan,
+        wiki_plan=wiki_plan,
+        conflict=("log.md",),
+        result=None,
+        wiki=None,
+        pointer_cleared=False,
+        logged=None,
+        ok=False,
+    )
+    monkeypatch.setattr(archive_module, "run_archive", lambda *_args, **_kwargs: run)
+
+    result = runner.invoke(app, ["archive", "--workspace", str(workspace), "--json"])
+
+    assert result.exit_code == exit_codes.GENERIC
+    error = json.loads(result.stdout)["error"]
+    assert error["reason"] == "conflict"
+    assert error["payload"]["conflict"] == ["log.md"]
+
+
+@pytest.mark.parametrize("failed_lane", ("work", "wiki"))
+def test_archive_json_incomplete_apply_carries_an_error_envelope(
+    monkeypatch: pytest.MonkeyPatch, workspace: Path, failed_lane: str
+) -> None:
+    """A successful plan must not turn either failed application into JSON success."""
+    result = SimpleNamespace(ok=failed_lane != "work", written=(), warnings=(), rolled_back=False, failures=("disk",))
+    wiki = SimpleNamespace(
+        ok=failed_lane != "wiki",
+        archived=(),
+        refusals=(),
+        move=SimpleNamespace(failed=()),
+        indexes=(),
+    )
+    run = SimpleNamespace(
+        plan=SimpleNamespace(path_mapping={}, warnings=(), refusals=(), move_plan=SimpleNamespace(stranded=())),
+        wiki_plan=SimpleNamespace(tokens=(), skipped=(), moves=SimpleNamespace(moves=(), refusals=(), stranded=())),
+        conflict=(),
+        result=result,
+        wiki=wiki,
+        pointer_cleared=False,
+        logged=None,
+        ok=True,
+    )
+    monkeypatch.setattr(archive_module, "run_archive", lambda *_args, **_kwargs: run)
+
+    response = runner.invoke(app, ["archive", "--workspace", str(workspace), "--json"])
+
+    assert response.exit_code == exit_codes.GENERIC
+    document = json.loads(response.stdout)
+    assert set(document) == {"error"}
+    assert document["error"]["reason"] == "incomplete-apply"
+    assert document["error"]["exit_code"] == exit_codes.GENERIC
+
+
+def test_wiki_archive_json_refusal_carries_the_computed_refusals_in_the_envelope(
+    monkeypatch: pytest.MonkeyPatch, workspace: Path
+) -> None:
+    refusal = SimpleNamespace(path="sources/one.md", kind="refused", detail="page changed")
+    run = SimpleNamespace(
+        plan=SimpleNamespace(path_mapping={}, warnings=(), refusals=(), move_plan=None),
+        wiki_plan=SimpleNamespace(
+            ok=False,
+            tokens=("sources/one",),
+            skipped=(),
+            moves=SimpleNamespace(moves=(), refusals=(refusal,), stranded=()),
+        ),
+        conflict=(),
+        result=None,
+        wiki=None,
+        pointer_cleared=False,
+        logged=None,
+        ok=False,
+    )
+    monkeypatch.setattr(maintenance, "run_archive", lambda *_args, **_kwargs: run, raising=False)
+
+    result = runner.invoke(app, ["wiki", "archive", "sources/one", "--json", "--workspace", str(workspace)])
+
+    assert result.exit_code == exit_codes.GENERIC
+    error = json.loads(result.stdout)["error"]
+    assert error["command"] == "wiki archive"
+    assert error["reason"] == "refused"
+    assert error["payload"]["wiki"]["refusals"]
+
+
+def test_proposal_approve_json_unknown_target_carries_no_proposal_refusal(workspace: Path) -> None:
+    result = runner.invoke(
+        app, ["wiki", "proposal", "approve", "explanations/nope.md", "--workspace", str(workspace), "--json"]
+    )
+
+    assert result.exit_code == exit_codes.GENERIC
+    error = json.loads(result.stdout)["error"]
+    assert error["command"] == "wiki proposal approve"
+    assert error["reason"] == "refused"
+    assert error["payload"]["refusals"][0]["kind"] == "no-proposal"
+
+
+def test_proposal_approve_json_already_approved_carries_not_proposed_refusal(workspace: Path) -> None:
+    filed = runner.invoke(
+        app,
+        [
+            "wiki",
+            "proposal",
+            "file",
+            "--lane",
+            "explanation",
+            "--title",
+            "Typed CLI",
+            "--id",
+            "source-1",
+            "--resource",
+            "sources/one.md",
+            "--workspace",
+            str(workspace),
+        ],
+    )
+    assert filed.exit_code == 0, filed.output
+    command = ["wiki", "proposal", "approve", "explanations/typed-cli.md", "--workspace", str(workspace), "--json"]
+    assert runner.invoke(app, command).exit_code == 0
+    result = runner.invoke(app, command)
+
+    assert result.exit_code == exit_codes.GENERIC
+    error = json.loads(result.stdout)["error"]
+    assert error["reason"] == "refused"
+    assert error["payload"]["refusals"][0]["kind"] == "not-proposed"
+
+
+def test_proposal_file_json_unknown_lane_has_a_usage_envelope(workspace: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "wiki",
+            "proposal",
+            "file",
+            "--lane",
+            "nope",
+            "--title",
+            "Typed CLI",
+            "--id",
+            "source-1",
+            "--resource",
+            "sources/one.md",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+
+    assert result.exit_code == exit_codes.GENERIC
+    error = json.loads(result.stdout)["error"]
+    assert error["command"] == "wiki proposal file"
+    assert error["reason"] == "usage"
+    assert error["payload"] is None

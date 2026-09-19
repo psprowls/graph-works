@@ -1,0 +1,36 @@
+{
+  "path": "work/epic-epic",
+  "terminal": false,
+  "max_parallel": 2,
+  "slots_free": 2,
+  "supervise_merges": false,
+  "live": [],
+  "repo": null,
+  "dispatches": [],
+  "advances": [],
+  "blocked": [
+    {
+      "path": "work/epic-epic",
+      "kind": "affects-overlap",
+      "reason": "declare affects to allow parallel dispatch"
+    }
+  ],
+  "decisions": {
+    "owner_path": "work/epic-epic",
+    "ledger_path": "<tmp>/works/okf/work/epic-epic/references/00-decisions.md",
+    "open": [],
+    "assumed": [],
+    "counts": {
+      "answered": 0,
+      "assumed": 0,
+      "open": 0,
+      "superseded": 0,
+      "invalid": 0,
+      "total": 0
+    }
+  },
+  "holds": [],
+  "warnings": [
+    "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved"
+  ]
+}

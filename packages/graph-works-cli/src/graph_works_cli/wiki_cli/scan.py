@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import shutil
 from datetime import UTC, datetime
 from pathlib import Path
@@ -24,10 +23,11 @@ from graph_works_core.scan.commands import (
 from graph_works_core.scan.scan_contract import UnsupportedWorklistSchema
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import ScanError
+from graph_works_wire.wiki import scan_apply_payload, scan_emit_payload, scan_normal_payload
 
 from graph_works_cli import exit_codes
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import scan_apply_payload, scan_emit_payload, scan_normal_payload
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -51,7 +51,7 @@ def _reset_results_dir(path: Path) -> None:
 
 def _emit_json(payload: dict[str, object]) -> None:
     """Write a process-boundary payload with no incidental stdout."""
-    typer.echo(json.dumps(payload, indent=2))
+    typer.echo(encode(payload))
 
 
 def scan(

@@ -1,0 +1,21 @@
+[
+  {
+    "member": "proposals/a.md",
+    "target": "concepts/a.md",
+    "title": "A",
+    "description": "d",
+    "page_status": "proposed",
+    "sources": [
+      {
+        "resource": "sources/a.md"
+      }
+    ],
+    "verified": [
+      {
+        "by": "human",
+        "at": "2026-09-01"
+      }
+    ],
+    "malformed": null
+  }
+]

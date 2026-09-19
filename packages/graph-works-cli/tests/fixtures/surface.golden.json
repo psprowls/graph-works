@@ -1,8 +1,85 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "commands": [
+    {
+      "name": "gw agent-config",
+      "help": "Read how Claude Code, Codex and Pi are configured for this workspace's projects.",
+      "short_help": "Read how Claude Code, Codex and Pi are configured for this workspace's projects.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "show"
+      ],
+      "path": [
+        "agent-config"
+      ]
+    },
+    {
+      "name": "gw agent-config show",
+      "help": "Show every layer, git state, trust decision, and effective value.",
+      "short_help": "Show every layer, git state, trust decision, and effective value.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path (default: GRAPH_WORKS_DIR, then cwd discovery).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "project",
+          "opts": [
+            "--project"
+          ],
+          "secondary_opts": [],
+          "help": "Report this one directory; no workspace needed.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "agent",
+          "opts": [
+            "--agent"
+          ],
+          "secondary_opts": [],
+          "help": "Limit to an agent (repeatable).",
+          "required": false,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit machine-readable JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "agent-config",
+        "show"
+      ]
+    },
     {
       "name": "gw archive",
       "help": "Archive every eligible work item and every eligible wiki proposal in one sweep.",
@@ -19,6 +96,17 @@
           ],
           "secondary_opts": [],
           "help": "Render both plans and write nothing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Print the archive projection (graph-works-wire) instead of text.",
           "required": false,
           "default": false,
           "is_flag": true
@@ -1414,6 +1502,17 @@
           "is_flag": true
         },
         {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Print the archive projection instead of text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
           "name": "workspace",
           "opts": [
             "--workspace"
@@ -1617,6 +1716,28 @@
       ],
       "options": [
         {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan without writing proposal files.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Print the proposal projection instead of text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
           "name": "workspace",
           "opts": [
             "--workspace"
@@ -1722,6 +1843,28 @@
           "is_flag": false
         },
         {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan without writing proposal files.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Print the proposal projection instead of text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
           "name": "workspace",
           "opts": [
             "--workspace"
@@ -1756,6 +1899,28 @@
         }
       ],
       "options": [
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan without writing proposal files.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Print the proposal projection instead of text.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
         {
           "name": "workspace",
           "opts": [

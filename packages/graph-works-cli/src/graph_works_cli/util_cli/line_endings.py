@@ -10,14 +10,13 @@ surface (no lint-catalog rule, no `okf-io` extra rule ships alongside it).
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 import typer
 from graph_works_core.util.commands import run_line_endings
+from graph_works_wire.util import line_endings_payload
 
 from graph_works_cli import exit_codes
 from graph_works_cli.errors import exit_error
+from graph_works_cli.json_output import encode
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -34,11 +33,7 @@ def line_endings(
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        payload: dict[str, Any] = {
-            "fixed": report.fixed,
-            "findings": [{"member": finding.member, "crlf_count": finding.crlf_count} for finding in report.findings],
-        }
-        typer.echo(json.dumps(payload, indent=2))
+        typer.echo(encode(line_endings_payload(report)))
     elif not report.findings:
         typer.echo("clean: no CRLF found")
     else:

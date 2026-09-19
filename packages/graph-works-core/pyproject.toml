@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-works-core"
-version = "0.6.0"
+version = "0.6.2"
 description = "What a workspace is: discovery, the layout object, the manifest, and init."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -28,6 +28,8 @@ requires-python = ">=3.12"
 # `subagents-io` for `RoleSpec`/`RoleBinding`/`resolve_role_spec`, and
 # `models-io[bedrock]` because Bedrock is the only backend the packaged
 # catalog names.
+# `plugin-fork-io` arrived with agent-config reads: `agent_config.conventions`
+# reads `adapters.adapter(name).config`, the single where-agents-keep-things table.
 dependencies = [
   "okf-io>=0.2.4,<0.3",
   "okf-ext[schemas]>=0.4.12,<0.5",
@@ -40,6 +42,7 @@ dependencies = [
   "subagents-io>=0.2,<0.3",
   "models-io[bedrock]>=0.2,<0.3",
   "ruamel.yaml>=0.18",
+  "plugin-fork-io>=0.1.1,<0.2",
 ]
 
 # The gateway backend is reachable by declaration rather than by a documented
@@ -67,6 +70,7 @@ work-tracker-okf = { workspace = true }
 config-io = { workspace = true }
 subagents-io = { workspace = true }
 models-io = { workspace = true }
+plugin-fork-io = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,20 @@
+{
+  "owner_path": "work/epic-epic",
+  "path": "work/epic-epic",
+  "spec_path": "<tmp>/works/okf/work/epic-epic/references/01-design.md",
+  "spec_anchor_commit": null,
+  "anchor_source": "none",
+  "commit_range": null,
+  "landed_siblings": [],
+  "touched_paths": [],
+  "commits_since": [],
+  "cited_decisions": [],
+  "contradictions": [],
+  "has_open_decision": false,
+  "diff_command": null,
+  "warnings": [
+    "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved",
+    "no repo resolved; code drift unavailable",
+    "no design spec at <tmp>/works/okf/work/epic-epic/references/01-design.md; nothing to reconcile against"
+  ]
+}

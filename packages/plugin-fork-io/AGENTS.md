@@ -7,6 +7,8 @@ provenance-preserving forks of agent skills. It never imports another workspace
 package, discovers a graph-works workspace, reads `workspace.yaml`, or calls an
 LLM. Resolved paths and machine services enter through typed arguments.
 
+`AgentAdapter.config` (`AgentConfigConventions`) is a pure data table recording where each agent keeps its settings layers and trust record. `graph-works-core`'s `agent_config` vertical is its consumer. plugin-fork-io itself never reads, parses or merges agent configuration; keep it that way. A convention change is a one-row edit here plus the pinned test in `test_adapters.py`.
+
 Helpers beneath a skill are inventory data and must never be imported or executed.
 The full lifecycle uses inactive previews and explicit apply, with original source
 evidence separated from adapted maintained content.

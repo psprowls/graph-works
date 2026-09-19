@@ -13,6 +13,7 @@ rule the whole band inherits.
 from __future__ import annotations
 
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from datetime import date
@@ -22,7 +23,7 @@ from typing import Literal
 from code_graph_io.tokens import count_tokens
 from code_wiki_okf.provenance import tokens_value
 from okf_ext.logs import append_entry
-from okf_io import Document, load_bundle
+from okf_io import Document, load, load_bundle, parse_log
 
 from graph_works_core.workspace.layout import WorkspaceLayout
 
@@ -199,6 +200,79 @@ def run_log(
         entry=entry,
         written=landed is not None,
     )
+
+
+_OP_LABEL = re.compile(r"^\*\*([^*]+)\*\*(?:\s|$)|^([A-Za-z]+)\s*\|")
+
+
+@dataclass(frozen=True, slots=True)
+class LogEntryRead:
+    day: date
+    line: int
+    end: int
+    op: str | None
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
+class InvalidLogSection:
+    line: int
+    heading: str
+
+
+@dataclass(frozen=True, slots=True)
+class LogRead:
+    path: Path
+    exists: bool
+    entries: tuple[LogEntryRead, ...]
+    invalid_sections: tuple[InvalidLogSection, ...]
+
+
+def _op(text: str) -> str | None:
+    match = _OP_LABEL.match(text)
+    return (match.group(1) or match.group(2)).casefold() if match else None
+
+
+def run_log_read(
+    layout: WorkspaceLayout,
+    *,
+    last: int | None = None,
+    op: str | None = None,
+    since: date | None = None,
+) -> LogRead:
+    """Read the bundle-root `log.md` with the `/gw:log` recipe's filters. Never writes.
+
+    Raises `ValueError` for a negative *last*, before touching disk -- the one
+    caller error; every state (no log, undated sections) is data.
+    """
+    if last is not None and last < 0:
+        raise ValueError(f"last must be nonnegative, got {last}")
+    path = layout.bundle_dir / "log.md"
+    if not path.is_file():
+        return LogRead(path=path, exists=False, entries=(), invalid_sections=())
+    document = load(path)
+    lines = document.body.splitlines(keepends=True)
+    wanted = op.casefold() if op is not None else None
+    invalid: list[InvalidLogSection] = []
+    matches: list[LogEntryRead] = []
+    for section in parse_log(document).sections:
+        if section.date is None:
+            invalid.append(InvalidLogSection(section.line, section.heading))
+            continue
+        if since is not None and section.date < since:
+            continue
+        previous_end = 0
+        for entry in section.entries:
+            if entry.line <= previous_end:
+                continue
+            previous_end = entry.end
+            entry_op = _op(entry.text)
+            if wanted is None or wanted == entry_op:
+                text = "".join(lines[entry.line - 1 : entry.end]).rstrip("\r\n")
+                matches.append(LogEntryRead(section.date, entry.line, entry.end, entry_op, text))
+    matches.sort(key=lambda entry: (entry.day, entry.line), reverse=True)
+    selected = matches if last is None else matches[:last]
+    return LogRead(path=path, exists=True, entries=tuple(selected), invalid_sections=tuple(invalid))
 
 
 def _baseline(page: Document) -> str:

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -13,11 +12,12 @@ from graph_works_core.agent_substrate.roles import role_spec
 from graph_works_core.ingest.commands import plan_ingest_brief, run_ingest_source, state_gate_adapter
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_wire.wiki import ingest_brief_payload, ingest_payload
 from models_io import ModelsIoError
 
 from graph_works_cli import exit_codes
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import ingest_brief_payload, ingest_payload
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -76,7 +76,7 @@ def ingest(
             exit_error(str(exc), cause=exc)
         payload = ingest_brief_payload(brief)
         if json_output:
-            typer.echo(json.dumps(payload, indent=2))
+            typer.echo(encode(payload))
         else:
             _emit_brief_human(payload)
         return
@@ -100,7 +100,7 @@ def ingest(
 
     payload = ingest_payload(result)
     if json_output:
-        typer.echo(json.dumps(payload, indent=2))
+        typer.echo(encode(payload))
     else:
         _emit_human(payload)
     _emit_warnings(payload)

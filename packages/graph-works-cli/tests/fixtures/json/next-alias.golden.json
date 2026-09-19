@@ -1,0 +1,95 @@
+{
+  "requested_path": "work/feature-alpha",
+  "selected_path": "work/feature-alpha",
+  "work_status": "open",
+  "kind": "Feature",
+  "phase": null,
+  "effort": null,
+  "action": {
+    "skill": "superpowers:brainstorming",
+    "reason": "Feature entering the pipeline at design"
+  },
+  "artifact": {
+    "path": "<tmp>/works/okf/work/feature-alpha/references/01-design.md"
+  },
+  "on_dispatch": {
+    "phase": "design",
+    "work_status": null,
+    "document_status": null,
+    "requires": [],
+    "sync_plan_table": false,
+    "stamp_source": null
+  },
+  "on_complete": {
+    "phase": "plan",
+    "work_status": null,
+    "document_status": "stable",
+    "requires": [],
+    "sync_plan_table": false,
+    "stamp_source": "design"
+  },
+  "blockers": [],
+  "dispatch": {
+    "profile": {
+      "skill": "superpowers:brainstorming",
+      "mode": "attend",
+      "prompt_tail": "The user may join this session to answer this stage's questions; ask normally.\nIf an `orca orchestration ask` question of yours times out, follow the grace-period protocol in the `gw` plugin's `auto-drive` skill -- its `references/grace-period-protocol.md`, which you read through that installed skill rather than by repository path -- before giving up on it. Never end this Dispatch (no `worker_done`, and never call `worker-stop` or `worker-abandon` yourself -- only the coordinator may) while a question you asked is still unanswered.",
+      "agent": "claude",
+      "model": null,
+      "reasoning_effort": null
+    },
+    "provenance": {
+      "skill": {
+        "rule": {
+          "source": "packaged",
+          "index": 0,
+          "name": "exploration"
+        },
+        "reason": "set"
+      },
+      "mode": {
+        "rule": {
+          "source": "packaged",
+          "index": 0,
+          "name": "exploration"
+        },
+        "reason": "set"
+      },
+      "prompt_tail": {
+        "rule": {
+          "source": "packaged",
+          "index": 0,
+          "name": "exploration"
+        },
+        "reason": "set"
+      },
+      "agent": {
+        "rule": {
+          "source": "packaged",
+          "index": 0,
+          "name": "exploration"
+        },
+        "reason": "set"
+      },
+      "model": {
+        "rule": {
+          "source": "packaged",
+          "index": 0,
+          "name": "exploration"
+        },
+        "reason": "explicit-null"
+      },
+      "reasoning_effort": {
+        "rule": {
+          "source": "packaged",
+          "index": 0,
+          "name": "exploration"
+        },
+        "reason": "explicit-null"
+      }
+    }
+  },
+  "child_rollup": null,
+  "descent": null,
+  "normalized": null
+}

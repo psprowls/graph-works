@@ -1,0 +1,14 @@
+{
+  "path_mapping": {
+    "work/bug-fix": "work/release-rel/children/bug-fix"
+  },
+  "indexes": [
+    "work/index.md",
+    "work/release-rel/children/index.md"
+  ],
+  "warnings": [],
+  "refusals": [],
+  "applied": true,
+  "rolled_back": false,
+  "failures": []
+}

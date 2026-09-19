@@ -1,0 +1,31 @@
+{
+  "path": "work/bug-fix",
+  "phase": "design",
+  "work_status": null,
+  "blockers": [],
+  "on_complete": {
+    "phase": "execute",
+    "work_status": null,
+    "document_status": "stable",
+    "requires": [],
+    "sync_plan_table": false,
+    "stamp_source": "design"
+  },
+  "changes": {
+    "phase": [
+      null,
+      "design"
+    ]
+  },
+  "stamped": {},
+  "plan_row": false,
+  "changed": false,
+  "applied": false,
+  "rolled_back": false,
+  "failures": [],
+  "warnings": [],
+  "refusal": null,
+  "results_path": null,
+  "pointer_path": null,
+  "repo_note": "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved"
+}

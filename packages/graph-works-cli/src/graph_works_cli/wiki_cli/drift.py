@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
 
 import typer
@@ -14,10 +13,11 @@ from graph_works_core.lint_drift.propagate_drift import plan_drift_brief, run_pr
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.repos import resolve_repo
+from graph_works_wire.wiki import drift_brief_payload, drift_payload
 from models_io import ModelsIoError
 
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import drift_brief_payload, drift_payload
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -74,7 +74,7 @@ def drift(
         except (ModelsIoError, OSError, ValueError) as exc:
             exit_error(str(exc), cause=exc)
         if json_output:
-            typer.echo(json.dumps(drift_brief_payload(brief), indent=2))
+            typer.echo(encode(drift_brief_payload(brief)))
         else:
             for t in brief.targets:
                 typer.echo(
@@ -91,7 +91,7 @@ def drift(
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        typer.echo(json.dumps(drift_payload(result), indent=2))
+        typer.echo(encode(drift_payload(result)))
     else:
         typer.echo(f"Considered {result.entities_considered}, judged {result.pages_judged}, stale {result.pages_stale}")
     if result.errors:

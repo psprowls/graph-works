@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "platform": "win32",
+  "python": "3.12.7",
+  "capabilities": [
+    {
+      "name": "dispatch-backend",
+      "value": "workflow-orca",
+      "status": "available",
+      "detail": "resolved",
+      "guarantees": [
+        "g1"
+      ],
+      "provider": "m"
+    }
+  ],
+  "probes": [
+    {
+      "capability": "dispatch-backend",
+      "status": "unavailable",
+      "detail": "orca is not on PATH",
+      "agrees_with_declared": false
+    }
+  ],
+  "unavailable": []
+}

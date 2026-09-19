@@ -6,7 +6,7 @@ from typer.testing import CliRunner
 
 def test_distribution_declares_version_dependencies_and_command():
     package = distribution("plugin-fork-io")
-    assert package.version == "0.1.0"
+    assert package.version == "0.1.1"
     assert {requirement.split(">=")[0] for requirement in package.requires or ()} == {
         "markdown-it-py",
         "ruamel-yaml",

@@ -24,7 +24,8 @@ Three `import-linter` layers (root `pyproject.toml`, `[[tool.importlinter.contra
     workspace/                                             # layer 0
       errors, layout, manifest, discovery, init, provenance, pipeline
     agent_substrate/ : graph/ : prompts/                   # layer 1, shared
-    ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : wiki_stats/ : work/   # layer 2, independent
+    ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/
+      wiki_stats/ : work/ : proposals/                       # layer 2, independent
 
 Each vertical directory owns its command entry point (renamed to
 `commands.py` when it shares the vertical's name — `ingest/commands.py`,
@@ -79,8 +80,9 @@ is the call and its result shape, not an implementation detail. Unlike every
 other vertical, it has no second file: `commands.py` is the entire module,
 so there is nothing left to keep qualified.
 
-The util vertical hoists `LogAppendResult`, `TokenStamp`, `SkippedPage`,
-`TokensUpdate`, `run_log` and `run_tokens_update` — and, from `platform.py`,
+The util vertical hoists `InvalidLogSection`, `LogAppendResult`, `LogEntryRead`,
+`LogRead`, `TokenStamp`, `SkippedPage`, `TokensUpdate`, `run_log`, `run_log_read`
+and `run_tokens_update` — and, from `platform.py`,
 `Capability`, `PlatformReport`, `ProbeResult` and `build_report` — for the
 reason the archive and wiki_stats verticals hoist theirs: they are the call
 and its result shape. `VALID_OPS`, `TOKENS_KEY`, `PROVIDERS` and the four
@@ -118,7 +120,7 @@ and the rest of the shared `prompts`.
 
 from __future__ import annotations
 
-__version__ = "0.6.0"
+__version__ = "0.6.2"
 
 from graph_works_core.agent_substrate.agent_loop import ToolLoopResult, coerce_tool_name, run_tool_loop
 from graph_works_core.agent_substrate.agent_tools import (
@@ -178,11 +180,15 @@ from graph_works_core.scan.scan_contract import (
     ScanWorklist,
 )
 from graph_works_core.util.commands import (
+    InvalidLogSection,
     LogAppendResult,
+    LogEntryRead,
+    LogRead,
     SkippedPage,
     TokenStamp,
     TokensUpdate,
     run_log,
+    run_log_read,
     run_tokens_update,
 )
 from graph_works_core.util.platform import (
@@ -234,11 +240,14 @@ __all__ = [
     "InitError",
     "InstallResult",
     "Installer",
+    "InvalidLogSection",
     "Lane",
     "LaneReport",
     "LaneSet",
     "LintReport",
     "LogAppendResult",
+    "LogEntryRead",
+    "LogRead",
     "Manifest",
     "OrchestratePlan",
     "OrchestrateResult",
@@ -300,6 +309,7 @@ __all__ = [
     "run_ingest_source",
     "run_lint",
     "run_log",
+    "run_log_read",
     "run_mechanical",
     "run_orchestrate",
     "run_propagate_drift",

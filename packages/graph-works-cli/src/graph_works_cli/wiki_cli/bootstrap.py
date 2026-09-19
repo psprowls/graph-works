@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,9 +9,10 @@ from pathlib import Path
 import typer
 from graph_works_core import InitError, apply_init, plan_init
 from graph_works_core.workspace.discovery import resolve_root
+from graph_works_wire.wiki import bootstrap_payload, bootstrap_plan_payload
 
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import bootstrap_payload, bootstrap_plan_payload
 
 
 def bootstrap(
@@ -39,14 +39,14 @@ def bootstrap(
 
     if dry_run:
         if json_output:
-            typer.echo(json.dumps(bootstrap_plan_payload(plan), indent=2))
+            typer.echo(encode(bootstrap_plan_payload(plan)))
         else:
             typer.echo(plan.diff() or "nothing to do")
         return
 
     result = apply_init(plan)
     if json_output:
-        typer.echo(json.dumps(bootstrap_payload(result), indent=2))
+        typer.echo(encode(bootstrap_payload(result)))
     else:
         typer.echo(result.diff() or "nothing to do")
     if not result.ok:

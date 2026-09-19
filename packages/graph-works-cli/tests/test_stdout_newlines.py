@@ -13,7 +13,9 @@ structurally blind to this defect.
 
 from __future__ import annotations
 
+import importlib.metadata
 import io
+import json
 import subprocess
 from pathlib import Path
 
@@ -56,4 +58,11 @@ def test_describe_surface_json_redirected_to_a_file_is_lf_and_matches_the_golden
     # un-break the very thing under test.
     written = captured.read_bytes()
     assert b"\r\n" not in written
-    assert written == GOLDEN.read_bytes()
+    golden = GOLDEN.read_bytes()
+    current_version = importlib.metadata.version("graph-works-cli")
+    golden_version = json.loads(golden)["version"]
+    current_field = f'  "version": "{current_version}",\n'.encode()
+    golden_field = f'  "version": "{golden_version}",\n'.encode()
+    assert written.count(current_field) == 1
+    assert golden.count(golden_field) == 1
+    assert written.replace(current_field, golden_field) == golden

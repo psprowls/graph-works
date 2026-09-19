@@ -74,6 +74,8 @@ def test_the_golden_pins_every_verb_this_item_shipped() -> None:
     paths = {tuple(entry["path"]) for entry in json.loads(GOLDEN.read_text(encoding="utf-8"))["commands"]}
 
     assert {
+        ("agent-config",),
+        ("agent-config", "show"),
         ("archive",),
         ("next",),
         ("util", "describe-surface"),

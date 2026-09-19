@@ -1,0 +1,516 @@
+{
+  "schema_version": 1,
+  "server": "graph-works-serve",
+  "version": "0.3.4",
+  "routes": [
+    {
+      "method": "GET",
+      "path": "/v1/agent-config",
+      "summary": "Each coding agent's configuration layers, trust and effective values.",
+      "params": [
+        {
+          "name": "project",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Report this one directory instead of the workspace's projects."
+        },
+        {
+          "name": "agent",
+          "type": "csv",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Limit to agents: claude,codex,pi."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/config",
+      "summary": "Every resolved config key, or one key's value and origin.",
+      "params": [
+        {
+          "name": "key",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "One catalog key; omit to list all."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/events",
+      "summary": "Stream workspace change events (Server-Sent Events).",
+      "params": [],
+      "response": "event-stream"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/health",
+      "summary": "Liveness and identity of this gw-serve process.",
+      "params": [],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/log",
+      "summary": "Workspace log entries, newest first (the /gw:log filters).",
+      "params": [
+        {
+          "name": "last",
+          "type": "int",
+          "required": false,
+          "default": 10,
+          "location": "query",
+          "summary": "Entries to return after filtering."
+        },
+        {
+          "name": "op",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Operation label, case-insensitive."
+        },
+        {
+          "name": "since",
+          "type": "date",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Inclusive YYYY-MM-DD lower bound."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/page",
+      "summary": "One wiki page with outlinks, backlinks and broken links.",
+      "params": [
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative page id."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/wiki/proposal/decide/apply",
+      "summary": "Approve or reject a wiki proposal: apply the plan whose digest is echoed; 409 if it went stale.",
+      "params": [
+        {
+          "name": "target",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "decision",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "as_of",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "digest",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/wiki/proposal/decide/plan",
+      "summary": "Approve or reject a wiki proposal: plan (writes nothing) and digest it.",
+      "params": [
+        {
+          "name": "target",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "decision",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/work/advance/apply",
+      "summary": "Advance a work item to its next pipeline stage: apply the plan whose digest is echoed; 409 if it went stale.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "effort",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "owner",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "resolved_in",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "released_at",
+          "type": "date",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "worktree",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "branch",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "start_sha",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "return",
+          "type": "bool",
+          "required": false,
+          "default": false,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "as_of",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "digest",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/work/advance/plan",
+      "summary": "Advance a work item to its next pipeline stage: plan (writes nothing) and digest it.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "effort",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "owner",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "resolved_in",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "released_at",
+          "type": "date",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "worktree",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "branch",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "start_sha",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "return",
+          "type": "bool",
+          "required": false,
+          "default": false,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/work/archive/apply",
+      "summary": "Archive terminal work items (named, or a sweep): apply the plan whose digest is echoed; 409 if it went stale.",
+      "params": [
+        {
+          "name": "paths",
+          "type": "list[str]",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "as_of",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        },
+        {
+          "name": "digest",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "POST",
+      "path": "/v1/work/archive/plan",
+      "summary": "Archive terminal work items (named, or a sweep): plan (writes nothing) and digest it.",
+      "params": [
+        {
+          "name": "paths",
+          "type": "list[str]",
+          "required": false,
+          "default": null,
+          "location": "body",
+          "summary": ""
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/work/decisions",
+      "summary": "The owning epic's decisions, filtered; counts cover the whole ledger.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative canonical concept path."
+        },
+        {
+          "name": "status",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "answered|assumed|open|superseded."
+        },
+        {
+          "name": "affects",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Entries whose affects contain this work path."
+        },
+        {
+          "name": "cites",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Entries referencing this id, e.g. D-014."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/work/item",
+      "summary": "One work item: frontmatter, body, sources, owned references.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative canonical concept path."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/work/next",
+      "summary": "The stage to dispatch for an item (read-only; normalized is always null).",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative canonical concept path."
+        },
+        {
+          "name": "descend",
+          "type": "bool",
+          "required": false,
+          "default": false,
+          "location": "query",
+          "summary": "Switch to the next actionable child leaf."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/work/orchestrate",
+      "summary": "The auto-drive dispatch plan for a subtree. Read-only.",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative canonical root concept path."
+        },
+        {
+          "name": "live",
+          "type": "csv",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Running dispatch keys."
+        },
+        {
+          "name": "repo_name",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Select among several declared repositories."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/work/status",
+      "summary": "Active-item rollup and the item worth resuming.",
+      "params": [],
+      "response": "json"
+    }
+  ]
+}

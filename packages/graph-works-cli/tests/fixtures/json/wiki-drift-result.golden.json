@@ -1,0 +1,10 @@
+{
+  "entities_considered": 1,
+  "pages_judged": 1,
+  "pages_stale": 0,
+  "pages_skipped_settled": 0,
+  "findings": [],
+  "plans": [],
+  "errors": [],
+  "dry_run": true
+}

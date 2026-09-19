@@ -24,6 +24,7 @@ from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_co
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repos
+from graph_works_wire import work as wire_work
 
 from graph_works_cli import exit_codes
 from graph_works_cli.provenance import warn_if_stale_routing
@@ -171,7 +172,7 @@ def file(
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.file_payload(outcome)
+    payload = wire_work.file_payload(outcome)
     if outcome.plan.refusal is not None:
         for warning in payload["warnings"]:
             rendering.warn(warning)
@@ -215,7 +216,7 @@ def status(
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.status_payload(report)
+    payload = wire_work.status_payload(report)
     if json_output:
         rendering.emit(payload)
     else:
@@ -239,7 +240,7 @@ def ingest_queue(
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.ingest_queue_payload(report)
+    payload = wire_work.ingest_queue_payload(report)
     if json_output:
         rendering.emit(payload)
     else:
@@ -267,7 +268,7 @@ def lint(
         rendering.fail(str(exc), reason="io", cause=exc)
 
     if json_output:
-        rendering.emit(rendering.lint_payload(report))
+        rendering.emit(wire_work.lint_payload(report))
     else:
         rendering.render_lint(report)
     if not report.ok:
@@ -300,7 +301,7 @@ def next_stage(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.next_payload(result, bundle_root=layout.bundle_dir)
+    payload = wire_work.next_payload(result, bundle_root=layout.bundle_dir)
     if json_output:
         rendering.emit(payload)
         for warning in result.warnings:
@@ -379,7 +380,7 @@ def advance(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.advance_payload(result, path)
+    payload = wire_work.advance_payload(result, path)
     if payload["refusal"] is not None:
         rendering.fail(
             f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
@@ -447,7 +448,7 @@ def record_placement(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.placement_payload(result)
+    payload = wire_work.placement_payload(result)
     if payload["refusal"] is not None:
         rendering.fail(
             f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
@@ -497,7 +498,7 @@ def orchestrate(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.orchestrate_payload(result)
+    payload = wire_work.orchestrate_payload(result)
     if json_output:
         rendering.emit(payload)
         for warning in payload["warnings"]:
@@ -525,7 +526,7 @@ def regen_index(
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.regen_index_payload(update)
+    payload = wire_work.regen_index_payload(update)
     for warning in payload["warnings"]:
         rendering.warn(warning)
     if payload["refusals"]:
@@ -573,7 +574,7 @@ def archive(
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.archive_payload(run, dry_run=dry_run)
+    payload = wire_work.archive_payload(run, dry_run=dry_run)
     for warning in payload["warnings"]:
         rendering.warn(warning)
     # Two counts, never a merged total: `run_archive` keeps `plan` and
@@ -656,7 +657,7 @@ def reparent(
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-    _finish_path_mutation(rendering.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
+    _finish_path_mutation(wire_work.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
 
 
 @work_app.command()
@@ -675,4 +676,4 @@ def adopt(
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except (OSError, ValueError) as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-    _finish_path_mutation(rendering.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)
+    _finish_path_mutation(wire_work.path_mutation_payload(result), dry_run=dry_run, json_output=json_output)

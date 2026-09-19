@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-import json
+from datetime import UTC, datetime
 
 import typer
-from doc_wiki_okf.archive import ARCHIVE_IGNORE, apply_archive, plan_archive
+from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.wiki_stats.commands import compute_stats
-from okf_ext.moves import stranded_warning
+from graph_works_wire.wiki import stats_payload
+from graph_works_wire.work import archive_payload
 from okf_io import load_bundle, update_index
 
-from graph_works_cli import exit_codes
+from graph_works_cli.errors import fail
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import stats_payload
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -49,7 +50,7 @@ def stats(
 
     payload = stats_payload(result)
     if json_output:
-        typer.echo(json.dumps(payload, indent=2))
+        typer.echo(encode(payload))
     else:
         typer.echo(_render_stats(payload))
 
@@ -73,37 +74,43 @@ def index(workspace: str = typer.Option("", "--workspace")) -> None:
 def archive(
     target: str | None = typer.Argument(None),
     dry_run: bool = typer.Option(False, "--dry-run"),
+    json_output: bool = typer.Option(False, "--json", help="Print the archive projection instead of text."),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
     """Archive one curated page or sweep eligible proposal pages."""
-    layout = resolve_workspace(workspace)
+    command = "wiki archive"
+    layout = resolve_workspace(workspace, json_mode=json_output, command=command)
     try:
-        bundle = load_bundle(layout.bundle_dir, ignore=ARCHIVE_IGNORE)
-        plan = plan_archive(bundle, [target] if target is not None else None)
+        run = run_archive(
+            layout, (), [target] if target is not None else None, today=datetime.now(UTC).date(), dry_run=dry_run
+        )
     except (OSError, ValueError) as exc:
-        exit_error(str(exc), cause=exc)
+        fail(str(exc), reason="io", json_mode=json_output, command=command, cause=exc)
 
-    warning = stranded_warning(plan.moves.stranded)
-    if warning is not None:
+    for warning in stranded_warnings(run):
         typer.echo(warning, err=True)
+    payload = archive_payload(run, dry_run=dry_run)
 
-    if dry_run:
-        typer.echo(plan.diff())
-        if not plan.ok:
-            exit_error("archive plan was refused")
+    if dry_run and not json_output:
+        typer.echo(run.wiki_plan.diff())
+    if not run.ok:
+        fail("archive plan was refused", reason="refused", json_mode=json_output, command=command, payload=payload)
+    if not dry_run and ((run.result is not None and not run.result.ok) or (run.wiki is not None and not run.wiki.ok)):
+        fail(
+            "archive was incomplete",
+            reason="incomplete-apply",
+            json_mode=json_output,
+            command=command,
+            payload=payload,
+        )
+    if json_output:
+        typer.echo(encode(payload))
         return
-    if not plan.ok:
-        exit_error("archive plan was refused")
-
-    try:
-        result = apply_archive(bundle, plan)
-    except (OSError, ValueError) as exc:
-        exit_error(str(exc), cause=exc)
-    if not result.ok:
-        exit_error("archive was incomplete", code=exit_codes.GENERIC)
-
-    if result.archived:
-        for token in result.archived:
+    if dry_run:
+        return
+    archived = run.wiki.archived if run.wiki is not None else ()
+    if archived:
+        for token in archived:
             typer.echo(token)
     else:
         typer.echo("nothing to do")

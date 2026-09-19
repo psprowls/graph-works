@@ -1,0 +1,71 @@
+{
+  "projects": [
+    {
+      "path": "/w/repo",
+      "exists": true,
+      "agents": [
+        {
+          "agent": "claude",
+          "home": "/h/.claude",
+          "policy_source": "https://example.invalid/policy",
+          "trust": {
+            "state": "trusted",
+            "record_path": "/h/.claude.json",
+            "matched_key": "/w",
+            "match": "ancestor",
+            "assumed": false
+          },
+          "layers": [
+            {
+              "scope": "project",
+              "path": "/w/repo/.claude/settings.json",
+              "format": "json",
+              "exists": true,
+              "parse": "ok",
+              "parse_error": null,
+              "git": "committed",
+              "applied": true,
+              "excluded_reason": null,
+              "data": {
+                "enabledPlugins": {
+                  "gw@market": true
+                }
+              }
+            }
+          ],
+          "effective": {
+            "enabledPlugins": {
+              "gw@market": true
+            }
+          },
+          "keys": [
+            {
+              "path": [
+                "enabledPlugins",
+                "gw@market"
+              ],
+              "defined_in": [
+                "project"
+              ],
+              "effective_from": [
+                "project"
+              ]
+            }
+          ],
+          "findings": [
+            {
+              "code": "agent-config.git",
+              "message": "git-missing",
+              "path": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "/gone",
+      "exists": false,
+      "agents": []
+    }
+  ]
+}

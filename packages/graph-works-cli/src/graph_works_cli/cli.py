@@ -11,6 +11,7 @@ from typing import Any, cast
 import click
 import typer
 
+from graph_works_cli.agent_config_cli.main import agent_config_app
 from graph_works_cli.config_cli.main import config_app
 from graph_works_cli.graph_cli.main import graph_app
 from graph_works_cli.introspection import TyperCommand, command_to_help_entry, json_safe_default
@@ -116,6 +117,7 @@ def version() -> None:
 
 
 app.add_typer(config_app, name="config")
+app.add_typer(agent_config_app, name="agent-config")
 app.add_typer(graph_app, name="graph")
 register_root_commands(app)
 register_util_root_commands(app)

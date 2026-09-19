@@ -1,0 +1,21 @@
+{
+  "targets": [
+    {
+      "concept_id": "concepts/bar",
+      "title": "bar",
+      "kind": "concept",
+      "candidates": [
+        {
+          "concept_id": "packages/foo",
+          "resource": "package:foo",
+          "title": "foo",
+          "narrative": "It does a thing.",
+          "last_updated_commit": "abc1234",
+          "changed_files": [
+            "a.py"
+          ]
+        }
+      ]
+    }
+  ]
+}

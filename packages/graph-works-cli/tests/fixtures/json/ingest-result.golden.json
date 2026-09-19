@@ -1,0 +1,28 @@
+{
+  "ok": true,
+  "page": "sources/demo.md",
+  "copy": "sources/references/demo.md",
+  "title": "Demo",
+  "source_kind": "reference",
+  "entity_uri": "pkg:demo",
+  "entity_page": "packages/demo.md",
+  "frontmatter_parsed": true,
+  "written": [
+    "sources/demo.md",
+    "sources/references/demo.md"
+  ],
+  "indexes_updated": [
+    "index.md"
+  ],
+  "proposals": [
+    {
+      "lane": "concepts",
+      "title": "Demo concept",
+      "target": "concepts/demo.md",
+      "proposal": "Add the concept",
+      "status": "filed"
+    }
+  ],
+  "warnings": [],
+  "refusals": []
+}

@@ -1,0 +1,60 @@
+{
+  "owner_path": "work/epic-epic",
+  "requested_path": "work/epic-epic",
+  "ledger_path": "<tmp>/works/okf/work/epic-epic/references/00-decisions.md",
+  "entry": {
+    "id": "D-002",
+    "number": 2,
+    "question": "q2?",
+    "status": "answered",
+    "affects": [],
+    "decided": "<today> by user",
+    "supersedes": "D-001",
+    "hold": null,
+    "phase": null,
+    "checkpoint": null,
+    "prose": "**Answer:** no"
+  },
+  "superseded": "D-001",
+  "refusal": null,
+  "applied": true,
+  "rolled_back": false,
+  "failures": [],
+  "entries": [
+    {
+      "id": "D-001",
+      "number": 1,
+      "question": "q?",
+      "status": "superseded",
+      "affects": [],
+      "decided": null,
+      "supersedes": null,
+      "hold": null,
+      "phase": null,
+      "checkpoint": null,
+      "prose": ""
+    },
+    {
+      "id": "D-002",
+      "number": 2,
+      "question": "q2?",
+      "status": "answered",
+      "affects": [],
+      "decided": "<today> by user",
+      "supersedes": "D-001",
+      "hold": null,
+      "phase": null,
+      "checkpoint": null,
+      "prose": "**Answer:** no"
+    }
+  ],
+  "counts": {
+    "answered": 1,
+    "assumed": 0,
+    "open": 0,
+    "superseded": 1,
+    "invalid": 0,
+    "total": 2
+  },
+  "warnings": []
+}

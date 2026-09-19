@@ -21,42 +21,12 @@ imports are absolute.
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 import typer
 from graph_works_core.util.platform import PlatformReport, build_report
+from graph_works_wire.util import platform_payload
 
+from graph_works_cli.json_output import encode
 from graph_works_cli.workspace_resolution import resolve_workspace
-
-
-def _payload(report: PlatformReport) -> dict[str, Any]:
-    return {
-        "schema_version": report.schema_version,
-        "platform": report.platform,
-        "python": report.python,
-        "capabilities": [
-            {
-                "name": capability.name,
-                "value": capability.value,
-                "status": capability.status,
-                "detail": capability.detail,
-                "guarantees": list(capability.guarantees),
-                "provider": capability.provider,
-            }
-            for capability in report.capabilities
-        ],
-        "probes": [
-            {
-                "capability": probe.capability,
-                "status": probe.status,
-                "detail": probe.detail,
-                "agrees_with_declared": probe.agrees_with_declared,
-            }
-            for probe in report.probes
-        ],
-        "unavailable": list(report.unavailable),
-    }
 
 
 def _human(report: PlatformReport) -> str:
@@ -86,4 +56,4 @@ def platform(
     """Report the platform, durability tier, dispatch backend and unavailable components."""
     layout = resolve_workspace(workspace) if probe else None
     report = build_report(layout=layout, probe=probe)
-    typer.echo(json.dumps(_payload(report), indent=2) if json_output else _human(report))
+    typer.echo(encode(platform_payload(report)) if json_output else _human(report))

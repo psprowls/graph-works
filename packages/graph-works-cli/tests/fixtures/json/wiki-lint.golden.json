@@ -1,0 +1,26 @@
+{
+  "ok": true,
+  "mechanical": [
+    {
+      "lane": "wiki",
+      "findings": []
+    },
+    {
+      "lane": "work",
+      "findings": []
+    }
+  ],
+  "semantic": [],
+  "open_proposals": {
+    "count": 0,
+    "oldest": null,
+    "malformed": 0,
+    "ages": {
+      "<7d": 0,
+      "7-30d": 0,
+      ">30d": 0,
+      "undated": 0
+    }
+  },
+  "errors": []
+}

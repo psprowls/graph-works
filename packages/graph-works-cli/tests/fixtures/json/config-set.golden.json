@@ -1,0 +1,18 @@
+{
+  "key": "workflow.auto_drive.max_parallel",
+  "value": 3,
+  "origin": "manifest",
+  "entry": {
+    "key": "workflow.auto_drive.max_parallel",
+    "type": "int",
+    "default": 2,
+    "description": "How many workers auto-drive may have in flight at once.",
+    "kind": "manifest",
+    "env_var": null,
+    "allowed": [],
+    "secret": false,
+    "write_policy": "writable",
+    "write_hint": null
+  },
+  "shadowed": null
+}

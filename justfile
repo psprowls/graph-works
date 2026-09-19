@@ -1,6 +1,6 @@
 # Workspace task runner — okf-io, okf-ext, code-graph-io, code-wiki-okf,
 # work-tracker-okf, config-io, plugin-fork-io, models-io, subagents-io, doc-wiki-okf,
-# graph-works-core, workflow-local, workflow-orca.
+# graph-works-core, workflow-local, workflow-orca, graph-works-wire, graph-works-cli, graph-works-serve.
 # Each recipe is exactly the command a future CI job will call.
 #
 # okf-io and okf-ext share the root `testpaths` and run under a plain
@@ -88,7 +88,9 @@ types: sync
     uv run --package graph-works-core mypy --strict --platform linux packages/graph-works-core/src
     uv run --package workflow-local mypy --strict --platform linux packages/workflow-local/src
     uv run --package workflow-orca mypy --strict --platform linux packages/workflow-orca/src
+    uv run --package graph-works-wire mypy --strict --platform linux packages/graph-works-wire/src
     uv run --package graph-works-cli mypy --strict --platform linux packages/graph-works-cli/src
+    uv run --package graph-works-serve mypy --strict --platform linux packages/graph-works-serve/src
     uv run mypy --strict --platform win32 packages/okf-io/src packages/okf-ext/src
     uv run --package code-graph-io mypy --strict --platform win32 packages/code-graph-io/src
     uv run --package code-wiki-okf mypy --strict --platform win32 packages/code-wiki-okf/src
@@ -101,7 +103,9 @@ types: sync
     uv run --package graph-works-core mypy --strict --platform win32 packages/graph-works-core/src
     uv run --package workflow-local mypy --strict --platform win32 packages/workflow-local/src
     uv run --package workflow-orca mypy --strict --platform win32 packages/workflow-orca/src
+    uv run --package graph-works-wire mypy --strict --platform win32 packages/graph-works-wire/src
     uv run --package graph-works-cli mypy --strict --platform win32 packages/graph-works-cli/src
+    uv run --package graph-works-serve mypy --strict --platform win32 packages/graph-works-serve/src
 
 # Internal package boundaries (okf-ext README, "Boundaries"). Opt-in until CI
 # exists: nothing enforces this but the person who runs it.
@@ -122,7 +126,9 @@ test:
     uv run --package graph-works-core pytest packages/graph-works-core/tests
     uv run --package workflow-local pytest packages/workflow-local/tests
     uv run --package workflow-orca pytest packages/workflow-orca/tests
+    uv run --package graph-works-wire pytest packages/graph-works-wire/tests
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests
+    uv run --package graph-works-serve pytest packages/graph-works-serve/tests
 
 # Branch coverage — GATED, per package.
 #
@@ -145,7 +151,9 @@ cov:
     uv run --package graph-works-core pytest packages/graph-works-core/tests --cov=graph_works_core --cov-branch --cov-report=term-missing --cov-fail-under=95
     just cov-workflow-local
     uv run --package workflow-orca pytest packages/workflow-orca/tests --cov=workflow_orca --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package graph-works-wire pytest packages/graph-works-wire/tests --cov=graph_works_wire --cov-branch --cov-report=term-missing --cov-fail-under=95
     uv run --package graph-works-cli pytest packages/graph-works-cli/tests --cov=graph_works_cli --cov-branch --cov-report=term-missing --cov-fail-under=95
+    uv run --package graph-works-serve pytest packages/graph-works-serve/tests --cov=graph_works_serve --cov-branch --cov-report=term-missing --cov-fail-under=95
 
 # workflow-local's coverage arm. POSIX-only: the package refuses to construct on
 # Windows by design (D-002), so a line-coverage floor there measures a suite that

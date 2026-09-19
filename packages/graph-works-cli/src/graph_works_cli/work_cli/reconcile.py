@@ -17,6 +17,7 @@ from pathlib import Path
 import typer
 from graph_works_core.work.reconcile import run_reconcile_context
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_wire import work as wire_work
 
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering
@@ -58,7 +59,7 @@ def reconcile_context(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.reconcile_payload(context)
+    payload = wire_work.reconcile_payload(context)
     if json_output:
         rendering.emit(payload)
         for warning in payload["warnings"]:

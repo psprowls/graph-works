@@ -1,0 +1,22 @@
+{
+  "path": "work/bug-fix",
+  "root": "work/bug-fix",
+  "expected_phase": "design",
+  "current_phase": "design",
+  "before": {
+    "worktree": null,
+    "branch": null
+  },
+  "after": {
+    "worktree": "<tmp>/wt",
+    "branch": "b/observed"
+  },
+  "changed": true,
+  "applied": true,
+  "written": true,
+  "rolled_back": false,
+  "failures": [],
+  "warnings": [],
+  "refusal": null,
+  "repo_note": "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved"
+}

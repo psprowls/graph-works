@@ -1,0 +1,10 @@
+{
+  "pending": [
+    {
+      "path": "work/bug-a",
+      "work_status": "resolved",
+      "resource": "/work/bug-a/references/01-design.md",
+      "origin": "work/bug-a/references/01-design.md"
+    }
+  ]
+}

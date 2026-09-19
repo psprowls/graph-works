@@ -1,0 +1,18 @@
+{
+  "key": "topic",
+  "value": "Demo",
+  "origin": "manifest",
+  "entry": {
+    "key": "topic",
+    "type": "str",
+    "default": null,
+    "description": "Display name for this workspace.",
+    "kind": "manifest",
+    "env_var": null,
+    "allowed": [],
+    "secret": false,
+    "write_policy": "writable",
+    "write_hint": null
+  },
+  "shadowed": null
+}

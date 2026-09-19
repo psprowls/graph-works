@@ -26,7 +26,7 @@ guard against that.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -129,6 +129,7 @@ def run_archive(
     *,
     today: date,
     dry_run: bool = True,
+    before_apply: Callable[[ArchiveRun], None] | None = None,
 ) -> ArchiveRun:
     """Archive canonical work-item *paths*, or every eligible item when `None`.
     *wiki_slugs* (path-qualified wiki page tokens, e.g. `"adrs/2026-08-12-foo"`),
@@ -157,8 +158,18 @@ def run_archive(
     The pointer is cleared from `result.archived` -- what actually moved on
     the work-item side -- not from *slugs*, and never from the wiki side: a
     wiki page carries no active-work pointer.
+    The pointer is cleared only when at least one work root archived.
+
+    When the wiki plan rewrites a link in `log.md`, the archive entry is
+    appended after the wiki apply rather than folded into the work transaction,
+    because the rewrite is planned against the pre-archive snapshot.
 
     `dry_run=True` by default, matching every writer in this workspace.
+
+    `before_apply`, when supplied on a live call, inspects the actual candidate
+    with application fields empty before any domain write. Raising aborts the
+    call; exceptions propagate. The callback must not mutate the candidate or
+    workspace. Dry runs never invoke it. Omitting it preserves CLI behavior.
 
     No clock. `today=` is required, the way every writer in this workspace
     takes it.
@@ -183,10 +194,18 @@ def run_archive(
     if wiki_plan.tokens:
         messages.append(f"archived wiki {', '.join(wiki_plan.tokens)}")
     logged = "; ".join(messages) or None
-    if logged is not None:
+    # The wiki half's referrer rewrite of log.md is planned against the
+    # pre-archive snapshot; folding the entry into the work transaction first
+    # would have that rewrite silently erase it. Defer the append past the
+    # wiki apply instead, against the freshly written file.
+    defer_log = logged is not None and any(edit.member == "log.md" for edit in wiki_plan.moves.edits)
+    if logged is not None and not defer_log:
         plan = _plan_with_log_entry(plan, bundle.root, today, logged)
+    candidate = ArchiveRun(plan=plan, wiki_plan=wiki_plan, conflict=conflict, logged=logged)
+    if not dry_run and before_apply is not None:
+        before_apply(candidate)
     if dry_run or not plan.ok or not wiki_plan.ok or conflict:
-        return ArchiveRun(plan=plan, wiki_plan=wiki_plan, conflict=conflict, logged=logged)
+        return candidate
 
     # `bundle` (line 166) was loaded with a wider ignore set than IGNORE
     # (ARCHIVE_IGNORE + WIKI_ARCHIVE_IGNORE) -- not eligible as baseline_bundle.
@@ -198,7 +217,12 @@ def run_archive(
     # refusal above therefore blocks both sides; a failed work transaction never
     # reaches this call.
     wiki_result = apply_wiki_archive(bundle, wiki_plan)
-    cleared = provenance.clear_active_work(layout, set(work_roots))
+    if defer_log:
+        assert logged is not None  # narrowed by defer_log
+        append_log_entry(load(bundle.root / "log.md"), logged, on=today, dry_run=False)
+    # An empty set still deletes an *invalid* legacy pointer inside
+    # clear_active_work; a wiki-only archive must not have that side effect.
+    cleared = provenance.clear_active_work(layout, set(work_roots)) if work_roots else False
 
     return ArchiveRun(
         plan=plan,

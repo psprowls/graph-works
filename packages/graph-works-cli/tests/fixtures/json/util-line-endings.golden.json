@@ -1,0 +1,9 @@
+{
+  "fixed": true,
+  "findings": [
+    {
+      "member": "notes/crlf.md",
+      "crlf_count": 3
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "total_pages": 4,
+  "total_edges": 0,
+  "component_count": 4,
+  "top_outbound_hubs": [
+    {
+      "page": "work/bug-fix",
+      "degree": 0
+    },
+    {
+      "page": "work/epic-epic",
+      "degree": 0
+    },
+    {
+      "page": "work/feature-alpha",
+      "degree": 0
+    },
+    {
+      "page": "work/release-rel",
+      "degree": 0
+    }
+  ],
+  "top_inbound_hubs": [
+    {
+      "page": "work/bug-fix",
+      "degree": 0
+    },
+    {
+      "page": "work/epic-epic",
+      "degree": 0
+    },
+    {
+      "page": "work/feature-alpha",
+      "degree": 0
+    },
+    {
+      "page": "work/release-rel",
+      "degree": 0
+    }
+  ],
+  "orphans": [
+    "work/bug-fix",
+    "work/epic-epic",
+    "work/feature-alpha",
+    "work/release-rel"
+  ],
+  "sinks": [
+    "work/bug-fix",
+    "work/epic-epic",
+    "work/feature-alpha",
+    "work/release-rel"
+  ]
+}

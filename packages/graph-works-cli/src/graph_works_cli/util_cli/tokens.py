@@ -9,13 +9,12 @@ than relying on core's `dry_run=True` default.
 
 from __future__ import annotations
 
-import json
-from typing import Any
-
 import typer
 from graph_works_core.util.commands import run_tokens_update
+from graph_works_wire.util import tokens_payload
 
 from graph_works_cli.errors import exit_error
+from graph_works_cli.json_output import encode
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 HUMAN_BUCKET_CAP = 20
@@ -43,13 +42,7 @@ def tokens(
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        payload: dict[str, Any] = {
-            "dry_run": update.dry_run,
-            "updated": [{"page": stamp.page, "tokens": stamp.tokens} for stamp in update.updated],
-            "unchanged": [{"page": stamp.page, "tokens": stamp.tokens} for stamp in update.unchanged],
-            "skipped": [{"page": page.page, "reason": page.reason} for page in update.skipped],
-        }
-        typer.echo(json.dumps(payload, indent=2))
+        typer.echo(encode(tokens_payload(update)))
         return
 
     lines: list[str] = []

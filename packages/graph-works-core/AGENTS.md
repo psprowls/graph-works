@@ -76,8 +76,9 @@ shell-syntax command string here.
 
 ```
 workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner
+agent_config/  layer 1 — conventions resolves injected paths; git_state probes repository identity/state through provenance; local resolves Claude local-file placement/permission gates; trust reads decisions; merge models policy; read exposes project/workspace reports
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
-ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : wiki_stats/ : work/    layer 2, independent verticals
+ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/    layer 2, independent verticals
 ```
 
 Each layer-2 vertical owns one command entry point (`commands.py` when that
@@ -86,6 +87,15 @@ like `lint_drift/lint.py`), its own prompts, and nothing else reaches across
 verticals except through `workspace/` — `orchestrate` is the exception,
 split across `commands.py`, `stage_advance.py` and `placement.py` for planning,
 stage advancement and observed placement; see "The dispatch seam" in the README.
+
+`wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; no cache.
+
+`proposals/` — plan-by-default proposal file/decide (`run_proposal_file`, `run_proposal_decide`); no clock.
+
+`events/` is the one vertical with no command entry point: it is a pure
+`classify` (in `rules.py`) plus its closed vocabulary (`model.py`), consumed
+by `graph-works-serve`'s watcher. It deliberately does not import
+`workspace.dispatch_config`; the caller passes the dispatch document paths.
 
 ### The four things "what a workspace is" means concretely
 
@@ -231,7 +241,8 @@ hand. `today` is always injected; nothing in this package reads the clock.
   holds.
 
 - **`workspace.provenance` is the only module in this package that runs
-  git**, and every one of its functions degrades to `None`/a silent no-op —
+  git**; `agent_config.git_state` reaches it through `probe_git`, and every
+  provenance function degrades to `None`/a silent no-op —
   capturing provenance must never fail a stage advance.
 
 - **Config raises; content never does** (`workspace/errors.py`). This
@@ -276,3 +287,18 @@ including the agent substrate, the graph surface's exit-code table, the
 ingest pipeline, the dispatch/pipeline seam, and the custom-type provenance
 contract — all of which build on the layout/manifest/discovery/init
 primitives documented above.
+
+## Candidate validation before application
+
+`run_archive`, `run_stage_advance`, and `run_proposal_decide` accept optional
+`before_apply: Callable[[TheirResult], None]`. A live call invokes it on the
+actual candidate with application fields empty, before any domain write;
+raising propagates and aborts. Dry runs do not invoke it, and callers omitting
+it retain existing behavior. Callbacks must only inspect, never mutate the
+candidate or workspace. Core imports no interface or wire projection.
+Advance validates the routed candidate under the decision-owner lock before
+its live-only commit gate; that gate may refuse or add diagnostics, but cannot
+change the selected transition. Lock bookkeeping is not a domain mutation.
+Serve uses this seam to compare the shared wire projection with the reviewed
+digest. Existing transaction/snapshot preconditions remain responsible for
+later changes; this is not a claim of general filesystem atomicity.

@@ -150,3 +150,10 @@ all shared/local dispatch inputs. Retired-key `gw config unset [--local]` is
 removal-only and defers sync until cleanup is complete. See the
 [dispatch guide](../graph-works-core/docs/dispatch-rules.md) for YAML examples
 and the explicit cutover procedure; no command translates old routing choices.
+
+## Platform
+
+The CLI supports POSIX and Windows. `gw agent-config show` injects the current
+POSIX user ID to resolve Claude's ownership-sensitive local settings location;
+Windows uses Claude's starting-directory location and does not call `os.getuid`.
+Run `gw util platform` for the live per-capability platform report.

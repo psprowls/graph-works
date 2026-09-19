@@ -7,7 +7,6 @@ first -- belongs to `graph_works_core.tag_policy` and is not restated here.
 
 from __future__ import annotations
 
-import json
 from datetime import date
 from pathlib import Path
 
@@ -20,11 +19,13 @@ from graph_works_core.tag_policy.commands import (
     undeclared,
 )
 from graph_works_core.tag_policy.disposition import load, render
+from graph_works_wire.wiki import tag_inventory_payload, tags_undeclared_payload
 from okf_ext.tags import VOCABULARY_FILENAME
 from okf_ext.tags import inventory as tag_inventory
 from okf_io import load_bundle
 
 from graph_works_cli import exit_codes
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
 
@@ -43,19 +44,12 @@ def inventory_command(
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
-    tagged_pages = len({c for ids in result.concepts.values() for c in ids})
+    payload = tag_inventory_payload(result)
     if json_output:
-        payload = {
-            "total_tags": len(result.counts),
-            "tagged_pages": tagged_pages,
-            "untagged_pages": len(result.untagged),
-            "counts": dict(sorted(result.counts.items())),
-            "skipped": [{"path": s.path, "reason": s.reason, "detail": s.detail} for s in result.skipped],
-        }
-        typer.echo(json.dumps(payload, indent=2))
+        typer.echo(encode(payload))
         return
 
-    typer.echo(f"{len(result.counts)} distinct tags across {tagged_pages} tagged pages")
+    typer.echo(f"{payload['total_tags']} distinct tags across {payload['tagged_pages']} tagged pages")
     # Commonest first; ties lexicographic, so two runs over one bundle agree.
     for tag, count in sorted(result.counts.items(), key=lambda item: (-item[1], item[0])):
         typer.echo(f"{count:>5}  {tag}")
@@ -155,7 +149,7 @@ def gate_command(
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        typer.echo(json.dumps({"undeclared": list(missing)}, indent=2))
+        typer.echo(encode(tags_undeclared_payload(missing)))
     elif missing:
         for tag in missing:
             typer.echo(tag)

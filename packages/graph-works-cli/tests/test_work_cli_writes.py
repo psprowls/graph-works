@@ -264,7 +264,7 @@ def test_reparent_live_apply_updates_lane_indexes(workspace: Path) -> None:
 def test_incomplete_path_apply_emits_the_envelope(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(work_main.work, "run_reparent", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(
-        work_main.rendering,
+        work_main.wire_work,
         "path_mutation_payload",
         lambda _result: {
             "path_mapping": {"work/feature-a": "work/epic-e/children/feature-a"},
@@ -352,7 +352,7 @@ def test_archive_incomplete_apply_emits_the_envelope(workspace: Path, monkeypatc
     )
     monkeypatch.setattr(work_main, "run_archive", lambda *_args, **_kwargs: run)
     monkeypatch.setattr(
-        work_main.rendering,
+        work_main.wire_work,
         "archive_payload",
         lambda *_args, **_kwargs: {
             "warnings": [],

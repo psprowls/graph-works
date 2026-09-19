@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ import pytest
 from graph_works_cli.cli import app
 from graph_works_cli.util_cli import archive as archive_module
 from okf_ext.moves import Stranded
+from okf_io import load
 from typer.testing import CliRunner
 
 runner = CliRunner()
@@ -19,18 +21,37 @@ runner = CliRunner()
 class _Moves:
     def __init__(self, *, stranded: tuple[Stranded, ...] = ()) -> None:
         self.stranded = stranded
+        self.moves: tuple[object, ...] = ()
+        self.refusals: tuple[object, ...] = ()
 
 
 class _Plan:
-    def __init__(self, *, ok: bool = True, diff: str = "", stranded: tuple[Stranded, ...] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        ok: bool = True,
+        diff: str = "",
+        stranded: tuple[Stranded, ...] = (),
+        path_mapping: dict[str, str] | None = None,
+        warnings: tuple[object, ...] = (),
+        refusals: tuple[object, ...] | None = None,
+    ) -> None:
         self.ok = ok
         self._diff = diff
         self.moves = _Moves(stranded=stranded)
         self.move_plan = self.moves
-        self.path_mapping: dict[str, str] = {}
+        self.path_mapping = {} if path_mapping is None else path_mapping
+        self.warnings = warnings
         self.refusals = (
-            () if ok else (SimpleNamespace(path="work/refused", kind="refused", detail="archive plan was refused"),)
+            refusals
+            if refusals is not None
+            else (
+                () if ok else (SimpleNamespace(path="work/refused", kind="refused", detail="archive plan was refused"),)
+            )
         )
+        self.tokens: tuple[str, ...] = ()
+        self.skipped: tuple[object, ...] = ()
+        self.writes: tuple[object, ...] = ()
 
     def diff(self) -> str:
         return self._diff
@@ -54,17 +75,22 @@ class _Run:
         self.wiki_plan = wiki_plan
         self.conflict = conflict
         plan.path_mapping.update({path: path for path in archived})
-        self.result = SimpleNamespace(ok=True, failures=()) if applied else None
+        self.result = (
+            SimpleNamespace(ok=True, written=(), warnings=(), rolled_back=False, failures=()) if applied else None
+        )
         self.wiki = (
             SimpleNamespace(
                 archived=wiki_archived,
                 ok=wiki_ok,
                 refusals=wiki_refusals,
                 move=SimpleNamespace(failed=wiki_failures),
+                indexes=(),
             )
             if applied
             else None
         )
+        self.pointer_cleared = False
+        self.logged = None
 
     @property
     def ok(self) -> bool:
@@ -251,3 +277,44 @@ def test_the_verb_is_registered_at_the_root() -> None:
     result = runner.invoke(app, ["archive", "--help"])
 
     assert result.exit_code == 0
+
+
+def _resolved_bug(workspace: Path) -> str:
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Done",
+            "--kind",
+            "Bug",
+            "--summary",
+            "d",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    path = str(json.loads(result.stdout)["path"])
+    from graph_works_cli.workspace_resolution import resolve_workspace
+
+    page = resolve_workspace(str(workspace)).bundle_dir / f"{path}.md"
+    doc = load(page)
+    doc.set("work_status", "resolved")
+    doc.save()
+    return path
+
+
+@pytest.mark.parametrize("dry_run", (True, False))
+def test_json_emits_the_archive_projection(initialized_workspace: Path, dry_run: bool) -> None:
+    path = _resolved_bug(initialized_workspace)
+    args = ["archive", "--json", "--workspace", str(initialized_workspace), *(["--dry-run"] if dry_run else [])]
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 0, result.output
+    doc = json.loads(result.stdout)
+    assert doc["dry_run"] is dry_run and doc["ok"] is True and path in doc["path_mapping"]
+    assert doc["applied"] is (not dry_run) and set(doc["wiki"]) >= {"tokens", "archived"}

@@ -619,3 +619,25 @@ they should carry one is an open question, not a settled shape.
 Out of scope here: the extractor, the schema for custom types, the lane the
 extracted pages live in, and any enforcement that a page declares provenance at
 all.
+
+### Read-only agent configuration reports
+
+`agent_config.read_project()` and `show()` model the selected on-disk Claude,
+Codex and Pi layers, keeping raw parsed values and per-key origins. They do not
+reproduce running-session flags, headless/SDK acceptance, remote policy sources,
+model alias resolution or nested Codex configuration traversal.
+
+Claude local settings use repository/main-checkout identity, retaining an existing
+legacy starting-directory file below the root file. The caller supplies `user_id`
+for POSIX ownership checks; when placement cannot be established, the report
+includes an `agent-config.local-location` finding and excludes that uncertain
+local layer from effective values. Windows and home-root exceptions keep the
+starting-directory file. Repository lookup failures yield unknown trust with the
+existing explicit assumed-trust finding. State-only custom git probes still work,
+but need a `RepositoryContext` (or a `context()` method) to establish identity.
+
+Object and array nesting is limited to 64 levels before conversion and merging.
+Deeper or unreadable content becomes a layer error, leaving other layers readable
+and report values safe for the normal wire/JSON encoding path. `modelSettings`
+effort resolves against each file's top-level `effortLevel`; derived effort keys
+retain empty `defined_in` when no file authored that exact path.

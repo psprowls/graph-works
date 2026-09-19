@@ -10,6 +10,7 @@ import typer
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import decision, main, reconcile, rendering
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
+from graph_works_wire import work as wire_work
 
 LAYOUT = SimpleNamespace(bundle_dir=Path("/tmp/bundle"), repo_root=Path("/tmp/repo"))
 
@@ -84,7 +85,7 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
     monkeypatch.setattr(main.work, "run_file", lambda *args, **kwargs: outcome)
 
     monkeypatch.setattr(
-        rendering,
+        wire_work,
         "file_payload",
         lambda value: {
             "path": "work/a",
@@ -105,7 +106,7 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
     assert "reconciled" in capsys.readouterr().out
 
     monkeypatch.setattr(
-        rendering,
+        wire_work,
         "file_payload",
         lambda value: {
             "path": "work/a",
@@ -176,7 +177,7 @@ def test_next_json_warns_and_exits_on_blockers(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(main, "warn_if_stale_routing", lambda: None)
     result = SimpleNamespace(route=SimpleNamespace(dispatch=None), warnings=("warn",))
     monkeypatch.setattr(main.work, "run_next", lambda *args, **kwargs: result)
-    monkeypatch.setattr(rendering, "next_payload", lambda *args, **kwargs: {"blockers": ["blocked"]})
+    monkeypatch.setattr(wire_work, "next_payload", lambda *args, **kwargs: {"blockers": ["blocked"]})
     assert _exit_code(lambda: main.next_stage("work/a", False, "", True)) == exit_codes.GENERIC
 
 
@@ -193,7 +194,7 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
         "warnings": ["warn"],
         "repo_note": "note",
     }
-    monkeypatch.setattr(rendering, "advance_payload", lambda *args: payload)
+    monkeypatch.setattr(wire_work, "advance_payload", lambda *args: payload)
     main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", True)
     assert "note" in capsys.readouterr().err
     main.advance("work/a", "", "", "", "", "", "", False, "", False, True, "", False)
@@ -213,7 +214,7 @@ def test_regen_index_all_output_policies(monkeypatch: pytest.MonkeyPatch, capsys
         "failures": [],
         "indexes": ["i"],
     }
-    monkeypatch.setattr(rendering, "regen_index_payload", lambda value: payload)
+    monkeypatch.setattr(wire_work, "regen_index_payload", lambda value: payload)
     main.regen_index(True, "", False)
     assert "would reconcile" in capsys.readouterr().out
     payload["indexes"] = []
@@ -339,7 +340,7 @@ def test_repo_override_and_reconcile_render_branch(monkeypatch: pytest.MonkeyPat
     assert reconcile._repo_override(str(tmp_path)) == tmp_path
     monkeypatch.setattr(reconcile, "resolve_workspace", lambda workspace: LAYOUT)
     monkeypatch.setattr(reconcile, "run_reconcile_context", lambda *args, **kwargs: object())
-    monkeypatch.setattr(rendering, "reconcile_payload", lambda value: {"warnings": []})
+    monkeypatch.setattr(wire_work, "reconcile_payload", lambda value: {"warnings": []})
     monkeypatch.setattr(rendering, "render_reconcile", lambda payload: None)
     reconcile.reconcile_context("work/a", "", "", "", False)
 
@@ -370,7 +371,7 @@ def test_advance_forwards_start_sha_to_core(monkeypatch: pytest.MonkeyPatch) -> 
 
     monkeypatch.setattr(main, "run_stage_advance", _capture)
     monkeypatch.setattr(
-        rendering,
+        wire_work,
         "advance_payload",
         lambda *args: {
             "refusal": None,
@@ -398,7 +399,7 @@ def test_advance_forwards_no_start_sha_as_none(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(main, "run_stage_advance", _capture)
     monkeypatch.setattr(
-        rendering,
+        wire_work,
         "advance_payload",
         lambda *args: {
             "refusal": None,

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graph-works-serve"
+# Ships at gw's version -- graph-works-cli's (ADR-0058); test_package.py pins the two equal.
+version = "0.3.4"
+description = "gw-serve: a loopback HTTP sidecar over graph-works-core, emitting graph-works-wire projections."
+authors = [
+  { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "graph-works-core>=0.6.2,<0.7",
+  "graph-works-wire>=0.1.2,<0.2",
+  "config-io>=0.2,<0.3",
+  "starlette>=0.40",
+  "uvicorn>=0.30",
+  "watchfiles>=1.0,<2",
+]
+
+[project.scripts]
+gw-serve = "graph_works_serve.main:run"
+
+[dependency-groups]
+# Test-only: route/CLI twin assertions invoke `gw … --json` in-process.
+# Never a runtime edge -- test_serve_boundaries.py and import-linter forbid it in src.
+dev = ["graph-works-cli"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graph_works_serve"]
+
+[tool.uv.sources]
+graph-works-core = { workspace = true }
+graph-works-wire = { workspace = true }
+graph-works-cli = { workspace = true }
+config-io = { workspace = true }
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

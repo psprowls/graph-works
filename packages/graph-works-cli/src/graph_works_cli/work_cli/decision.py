@@ -20,6 +20,7 @@ from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_wire import work as wire_work
 
 from graph_works_cli import exit_codes
 from graph_works_cli.work_cli import rendering
@@ -105,7 +106,7 @@ def add(
         _unknown_target(exc)
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-    _emit(rendering.decision_payload(result), verb="appended", json_output=json_output)
+    _emit(wire_work.decision_payload(result), verb="appended", json_output=json_output)
 
 
 @decision_app.command(name="list")
@@ -132,7 +133,7 @@ def list_cmd(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.decision_payload(result)
+    payload = wire_work.decision_payload(result)
     for warning in payload["warnings"]:
         rendering.warn(warning)
     if json_output:
@@ -171,7 +172,7 @@ def answer(
         _unknown_target(exc)
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-    _emit(rendering.decision_payload(result), verb="answered", json_output=json_output)
+    _emit(wire_work.decision_payload(result), verb="answered", json_output=json_output)
 
 
 @decision_app.command()
@@ -209,7 +210,7 @@ def supersede(
         _unknown_target(exc)
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
-    _emit(rendering.decision_payload(result), verb="appended", json_output=json_output)
+    _emit(wire_work.decision_payload(result), verb="appended", json_output=json_output)
 
 
 @decision_app.command()
@@ -262,7 +263,7 @@ def overturn(
     except OSError as exc:
         rendering.fail(str(exc), reason="io", cause=exc)
 
-    payload = rendering.overturn_payload(result)
+    payload = wire_work.overturn_payload(result)
     for warning in payload["warnings"]:
         rendering.warn(warning)
     if payload["refusal"] is not None:

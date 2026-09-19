@@ -1,0 +1,28 @@
+{
+  "dry_run": false,
+  "ok": true,
+  "conflict": [],
+  "path_mapping": {
+    "work/bug-done": "work/_archive/bug-done"
+  },
+  "indexes": [
+    "work/_archive/index.md",
+    "work/index.md"
+  ],
+  "warnings": [],
+  "refusals": [],
+  "applied": true,
+  "rolled_back": false,
+  "failures": [],
+  "pointer_cleared": false,
+  "logged": "archived work/bug-done",
+  "wiki": {
+    "tokens": [],
+    "path_mapping": {},
+    "skipped": [],
+    "refusals": [],
+    "archived": [],
+    "indexes": [],
+    "failures": []
+  }
+}

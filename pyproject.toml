@@ -26,6 +26,7 @@ code-wiki-okf = { workspace = true }
 work-tracker-okf = { workspace = true }
 doc-wiki-okf = { workspace = true }
 graph-works-core = { workspace = true }
+graph-works-wire = { workspace = true }
 workflow-local = { workspace = true }
 workflow-orca = { workspace = true }
 graph-works-cli = { workspace = true }
@@ -80,6 +81,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF", "ANN", "PTH"]
 "packages/subagents-io/tests/**" = ["ANN"]
 "packages/doc-wiki-okf/tests/**" = ["ANN"]
 "packages/graph-works-core/tests/**" = ["ANN"]
+"packages/graph-works-wire/tests/**" = ["ANN"]
 "packages/workflow-local/tests/**" = ["ANN"]
 "packages/workflow-orca/tests/**" = ["ANN"]
 "packages/graph-works-cli/tests/**" = ["ANN"]
@@ -157,8 +159,10 @@ precision = 2
 root_packages = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io", "subagents_io",
     "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf", "graph_works_core",
-    "workflow_local", "workflow_orca", "graph_works_cli", "plugin_fork_io",
+    "workflow_local", "workflow_orca", "graph_works_cli", "graph_works_serve", "graph_works_wire", "plugin_fork_io",
 ]
+# Lets a forbidden contract name an external package (typer, click).
+include_external_packages = true
 
 [[tool.importlinter.contracts]]
 name = "Capabilities sit above the shared context, never below it"
@@ -248,7 +252,7 @@ source_modules = [
     "okf_io", "okf_ext", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf",
     "config_io", "subagents_io", "models_io", "code_graph_io", "plugin_fork_io",
 ]
-forbidden_modules = ["graph_works_core"]
+forbidden_modules = ["graph_works_core", "graph_works_serve"]
 
 [[tool.importlinter.contracts]]
 name = "plugin-fork-io never imports workspace siblings"
@@ -257,7 +261,7 @@ source_modules = ["plugin_fork_io"]
 forbidden_modules = [
     "okf_io", "okf_ext", "code_graph_io", "config_io", "models_io",
     "subagents_io", "code_wiki_okf", "work_tracker_okf", "doc_wiki_okf",
-    "graph_works_core", "graph_works_cli", "workflow_local", "workflow_orca",
+    "graph_works_core", "graph_works_cli", "graph_works_serve", "graph_works_wire", "workflow_local", "workflow_orca",
 ]
 
 # The seam only works in one direction. `independence` forbids every edge AMONG
@@ -286,12 +290,50 @@ name = "Backends never import each other"
 type = "independence"
 modules = ["workflow_local", "workflow_orca"]
 
+# The interface band sits above graph-works-core: `graph-works-cli` and
+# `graph-works-serve`, with `graph-works-wire` as the one home of every
+# typed-result -> JSON projection they share. Two edges would undo that
+# placement, and until now no contract stated either.
+#
+# The wire never imports an interface: a projection that reached for Typer or
+# the CLI could no longer be shared. Direct imports only
+# (`allow_indirect_imports`) -- the rule is about wire's own code, and some
+# lanes beneath core ship their own Typer CLIs.
+[[tool.importlinter.contracts]]
+name = "The wire never imports an interface"
+type = "forbidden"
+source_modules = ["graph_works_wire"]
+forbidden_modules = ["graph_works_cli", "graph_works_serve", "typer", "click"]
+allow_indirect_imports = true
+
+# Interfaces never import each other (ADR-0058): what they share lives in
+# graph-works-wire. The CLI must not pull a web server; serve must not pull Typer.
+[[tool.importlinter.contracts]]
+name = "Interfaces never import each other"
+type = "independence"
+modules = ["graph_works_cli", "graph_works_serve"]
+
+[[tool.importlinter.contracts]]
+name = "Serve never imports a CLI framework"
+type = "forbidden"
+source_modules = ["graph_works_serve"]
+forbidden_modules = ["typer", "click"]
+allow_indirect_imports = true
+
+# Core never imports the interface band. Nothing stopped `graph_works_core`
+# importing the CLI before this.
+[[tool.importlinter.contracts]]
+name = "Core never imports the interface band"
+type = "forbidden"
+source_modules = ["graph_works_core"]
+forbidden_modules = ["graph_works_cli", "graph_works_serve", "graph_works_wire"]
+
 [[tool.importlinter.contracts]]
 name = "graph_works_core verticals sit above shared substrate"
 type = "layers"
 containers = ["graph_works_core"]
 layers = [
-    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : tag_policy : work : util",
+    "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : wiki_page : tag_policy : work : util : agent_config : events : proposals",
     "agent_substrate : graph : prompts",
     "workspace",
 ]
@@ -307,7 +349,11 @@ modules = [
     "graph_works_core.archive",
     "graph_works_core.orchestrate",
     "graph_works_core.wiki_stats",
+    "graph_works_core.wiki_page",
     "graph_works_core.tag_policy",
     "graph_works_core.work",
     "graph_works_core.util",
+    "graph_works_core.agent_config",
+    "graph_works_core.events",
+    "graph_works_core.proposals",
 ]

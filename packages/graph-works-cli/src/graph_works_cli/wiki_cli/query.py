@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
 import typer
 from graph_works_core.agent_substrate.roles import role_spec
 from graph_works_core.query.commands import MAX_TOP_K, MIN_TOP_K, default_embedder, plan_query_brief, run_query
 from graph_works_core.workspace.errors import QueryError, WorkspaceError
+from graph_works_wire.wiki import query_brief_payload, query_payload
 from models_io import ModelsIoError
 
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import query_brief_payload, query_payload
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -41,7 +41,7 @@ def query(
         except (ModelsIoError, OSError, QueryError, ValueError) as exc:
             exit_error(str(exc), cause=exc)
         if json_output:
-            typer.echo(json.dumps(query_brief_payload(brief), indent=2))
+            typer.echo(encode(query_brief_payload(brief)))
         else:
             typer.echo(f"Query: {brief.query}")
             for page in brief.top_pages:
@@ -54,7 +54,7 @@ def query(
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        typer.echo(json.dumps(query_payload(result), indent=2))
+        typer.echo(encode(query_payload(result)))
     else:
         typer.echo(result.answer)
         typer.echo()

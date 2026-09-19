@@ -1,0 +1,21 @@
+{
+  "worklist_path": "<tmp>/works/.gw/cache/scan/worklist.json",
+  "briefs_dir": "<tmp>/works/.gw/cache/scan/briefs",
+  "results_dir": "<tmp>/works/.gw/cache/scan/results",
+  "short_head": "abc123",
+  "entities_written": [
+    "packages/demo"
+  ],
+  "entities_created": [],
+  "entities_updated": [],
+  "entities_deleted": [],
+  "entity_errors": [],
+  "mirror_created": 0,
+  "mirror_updated": 0,
+  "mirror_moved": 0,
+  "mirror_deleted": 0,
+  "mirror_declined": 0,
+  "mirror_stranded": 0,
+  "mirror_skipped_repos": [],
+  "mirror_errors": []
+}

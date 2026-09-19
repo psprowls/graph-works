@@ -127,7 +127,7 @@ def test_work_cli_imports_domain_behavior_only_through_graph_works_core() -> Non
     standard library. Every domain/config/schema dependency must arrive through
     ``graph_works_core`` rather than a lower-level sibling package.
     """
-    allowed = {*sys.stdlib_module_names, "graph_works_cli", "graph_works_core", "typer"}
+    allowed = {*sys.stdlib_module_names, "graph_works_cli", "graph_works_core", "graph_works_wire", "typer"}
     offenders = {
         str(path.relative_to(SRC)): sorted(_imported_roots(path) - allowed)
         for path in WORK_CLI.rglob("*.py")

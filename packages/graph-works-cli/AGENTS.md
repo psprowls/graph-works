@@ -38,11 +38,13 @@ change that moved it, never as an incidental side effect.
 ### Command surface
 
 `cli.py` builds the root Typer app (`gw`), wires the `-v/-vv` verbose callback, `version`, `help
-[--json]`, and mounts five sub-apps via `add_typer()` / root-command registration:
+[--json]`, and mounts six sub-apps via `add_typer()` / root-command registration:
 
 - `graph_cli` — `gw graph build|describe|find|export`, code-graph queries.
-- `wiki_cli` — `gw wiki lint|drift|stats|index|archive|proposals|proposal ...`, plus root-level
-  aliases `gw bootstrap|scan|ingest|query` registered by `wiki_cli.main.register_root_commands()`.
+- `wiki_cli` — `gw wiki lint|drift|stats|index|archive|proposals|proposal ...`; archive and
+  proposal mutation commands route through core's vertical calls, while index and proposal listing
+  retain their lower-layer calls. Root-level aliases `gw bootstrap|scan|ingest|query` are registered
+  by `wiki_cli.main.register_root_commands()`.
 - `work_cli` — `gw work ...` (the work-item pipeline verbs, `decision` sub-app,
   `reconcile-context`), plus root-level aliases `gw next` and `gw archive` registered by
   `util_cli.main.register_util_root_commands()`. `gw next` is a genuine alias — it reuses `gw work
@@ -59,12 +61,19 @@ change that moved it, never as an incidental side effect.
   writer for `workspace.yaml` catalog keys. `set`/`unset --local` write the gitignored, per-machine
   `workspace.local.yaml` overlay instead. `set`/`unset` refresh `.gw/cache/config.json`
   automatically; `sync` is the manual refresh after a hand edit.
+- `agent_config_cli` — `gw agent-config show`, a read-only report over core's agent configuration
+  model. It injects home, environment, and platform; JSON is projected by `graph-works-wire`.
 - `util_cli` — diagnostics: `gw util describe-surface [--json]`, `log`, `tokens`, `trace`.
 
-Every sub-app's commands take `--workspace PATH` and call `workspace_resolution.resolve_workspace()`
-first (D-002): explicit path -> `GRAPH_WORKS_DIR` env -> cwd git walk-up, all via
+Every workspace-backed sub-app command takes `--workspace PATH` and calls
+`workspace_resolution.resolve_workspace()` first (D-002): explicit path -> `GRAPH_WORKS_DIR` env -> cwd git walk-up, all via
 `graph_works_core.workspace.discovery.resolve()`. A refusal there prints `Error: ...` to stderr and
 exits `exit_codes.NOT_INITIALIZED` — precedence and discovery logic live in core, never here.
+`gw agent-config show --project PATH` is the deliberate read-only exception: it bypasses workspace
+resolution and reports that one directory directly. The five new archive/proposal mutation callbacks
+opt into a JSON workspace refusal envelope; their human behavior remains unchanged. Click/Typer
+parse-time failures (for example, missing required arguments and unknown flags) remain native parser
+errors, not JSON envelopes.
 
 ### `exit_codes.py` — the one numbering, CLI-wide (ADR-0013 rule 1)
 
@@ -84,10 +93,12 @@ independently rather than calling `errors.exit_error()` — widening the normali
 sites is deliberately deferred (tracked as D-026), not an oversight to "fix" incidentally while
 touching either file.
 
-### The `--json` refusal envelope — `gw work` only (D-004/D-007)
+### The `--json` refusal envelope — explicit-mode commands (D-004/D-007)
 
-A `--json` `gw work` command that refuses still exits non-zero, but now also prints a structured
-document on stdout before it does, instead of leaving stdout empty:
+A `--json` command that opts into the shared refusal helper still exits non-zero, but prints a
+structured document on stdout before it does, instead of leaving stdout empty. This covers `gw work`
+and the explicit archive/proposal verbs (`gw archive`, `gw wiki archive`, and `gw wiki proposal
+file|approve|reject`):
 
 ```json
 {
@@ -101,23 +112,24 @@ document on stdout before it does, instead of leaving stdout empty:
 }
 ```
 
-`work_cli/rendering.py`'s `fail()` is the single choke point every `gw work` exit site routes
-through (65 call sites as of D-004); it now takes a required `reason=` from a closed vocabulary
+`work_cli/rendering.py`'s `fail()` remains the single choke point every `gw work` exit site routes
+through (65 call sites as of D-004); the explicit-mode helper takes a required `reason=` from a closed vocabulary
 (`refused`, `incomplete-apply`, `conflict`, `incomplete`, `usage`, `workspace`, `unresolved`,
 `not-a-repo`, `io`) and an optional `payload=` — the verb payload already computed for a
 post-payload refusal, `None` for a pre-payload failure (an argument-parse or workspace-resolution
 error, where no payload was ever built). `"error" in doc` is the discriminator: no success
-projection in `rendering.py` carries a top-level `error` key or is a single-key object, so a refusal
-document can never be misread as a result.
+projection in `graph_works_wire` carries a top-level `error` key or is a single-key object, so a
+refusal document can never be misread as a result.
 
-The mechanism is a `ContextVar` (`rendering._JSON_MODE`, plus `_COMMAND_NAME` for the envelope's
-`command` field), set by `rendering.json_option()` — the one `--json` declaration every `gw work`
-command must use instead of hand-writing `typer.Option(False, "--json", ...)` — and reset by
-`cli.py`'s root callback before each subcommand's own option parsing runs. `fail()` asserts rather
-than defaults when the var was never set, so a command that skips `json_option()` fails loudly in
-its own test suite instead of silently never emitting an envelope.
+The `gw work` mechanism is a `ContextVar` (`rendering._JSON_MODE`, plus `_COMMAND_NAME` for the
+envelope's `command` field), set by `rendering.json_option()` — the one `--json` declaration every
+`gw work` command must use instead of hand-writing `typer.Option(False, "--json", ...)` — and reset
+by `cli.py`'s root callback before each subcommand's own option parsing runs. `fail()` asserts rather
+than defaults when the var was never set, so a command that skips `json_option()` fails loudly in its
+own test suite instead of silently never emitting an envelope; archive/proposal commands use the
+explicit-mode helper instead and do not participate in that ContextVar state.
 
-This is scoped to `gw work` only (D-004): `gw help --json`'s own `{"status": "error", ...}` failure
+This is scoped to the opted-in command families: `gw help --json`'s own `{"status": "error", ...}` failure
 shape (`cli.py`) predates this and is deliberately not converged onto it — `status` collides with
 `work_status`/`document_status` elsewhere in the work lane, and reconciling the two shapes is out of
 scope for this item.
@@ -131,12 +143,13 @@ builder, and one `format_<kind>` per graph entity kind, built for exactly the `G
 calls one core function, and routes the returned `output`/`error` strings to stdout/stderr before
 exiting `result.exit_code` — no behavior beyond routing (ADR-0013 rule 5).
 
-Every other sub-app (`wiki`/`work`/`config`/`util`) keeps its own `rendering.py` (see
-`wiki_cli/rendering.py`, `work_cli/rendering.py`, `config_cli/rendering.py`): their result types
-(`LintReport`, `IngestResult`, `ArchiveRun`, decision payloads, etc.) don't fit `describe_block`'s
-graph-entity spine. This is a per-command-family judgment call, not a rule to apply mechanically to
-new sub-apps — if a future graph-shaped result genuinely fits the spine, delegate; if not, write
-bespoke rendering the way `work_cli`/`wiki_cli` already do.
+Every `--json` result is a projection from `graph_works_wire` (`work`, `wiki`, `config`, `util`),
+imported directly — never re-exported — and encoded by `json_output.encode` (`indent=2`). The
+sub-apps' `rendering.py` modules (`work_cli`, `config_cli`) hold only the emit/exit policy and the
+human renderers; `wiki_cli` has none. `tests/test_projection_residue.py` fails if a `*_payload`
+function or an inline `json.dumps` of a result reappears here; `tests/test_json_goldens.py` pins
+every `--json` output byte for byte (regenerate only with `GW_REGEN_JSON_GOLDENS=1`, and only for a
+deliberate shape change).
 
 ### Typer-tree introspection — shared by `help --json` and `describe-surface`
 

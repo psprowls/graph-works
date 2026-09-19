@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## What this repo is
 
 A `uv` workspace (`members = ["packages/*"]`) for OKF tooling. The root is a
-workspace root only — not distributable, `package = false`. It holds fourteen
+workspace root only — not distributable, `package = false`. It holds sixteen
 packages today, plus one plugin tree (not a workspace member, not Python):
 `plugins/gw`, the first-party Claude Code plugin this repo publishes and the
 one Claude Code loads (name `gw`).
@@ -25,6 +25,7 @@ couple to:
 | `-okf`               | 2, OKF-aware   | band 1 plus the OKF document model                                                                                                                                     |
 | `-core`              | 3, application | everything below it; exactly one package (`graph-works-core`) knows what a workspace is                                                                                |
 | `workflow-<backend>` | beside band 1  | vendor/system coupling lives here — one package per dispatch backend                                                                                                   |
+| `graph-works-<interface>` (including `graph-works-serve`) | 4, interface | everything below it; interfaces never import each other — what they share (the JSON projections) lives in graph-works-wire, which imports no interface               |
 
 
 Each package carries its own `AGENTS.md` (via a `CLAUDE.md` that just
@@ -47,14 +48,19 @@ spans packages.
 | `doc-wiki-okf`     | 2        | The documentation-wiki lane: source reading, ingest briefs, proposals.                                                                                         |
 | `work-tracker-okf` | 2        | Work-item tracking as an OKF v0.2 lane.                                                                                                                        |
 | `graph-works-core` | 3        | What a workspace is: discovery, the layout object, the manifest, init.                                                                                         |
-| `graph-works-cli`  | —        | `gw`: a thin Typer interface over `graph-works-core` (ADR-0013 — logic stays in core, this package routes/parses/formats/traces).                              |
+| `graph-works-wire` | 4        | Every typed result projected to plain JSON data — the one copy the CLI and graph-works-serve emit. Pure: no interface framework, no I/O, no encoding. |
+| `graph-works-cli`  | 4        | `gw`: a thin Typer interface over `graph-works-core` (ADR-0013 — logic stays in core, this package routes/parses/formats/traces).                              |
+| `graph-works-serve` | 4      | `gw-serve`: loopback HTTP sidecar over core — read and plan/apply mutation routes, guard, `serve.json`, route catalog. |
 
 
 Dependencies only point down the table (never up, never sideways within a
 band except through the band-1 `DispatchBackend` seam). `graph-works-core` is
 deliberately the only package that resolves a workspace root or reads
 `workspace.yaml` — every package beneath it receives resolved paths as
-arguments.
+arguments. Above core sits the interface band: `graph-works-cli`,
+`graph-works-wire`, and `graph-works-serve`. import-linter states both
+edges — the wire never imports an interface, and core never imports the
+interface band.
 
 ## Commands
 

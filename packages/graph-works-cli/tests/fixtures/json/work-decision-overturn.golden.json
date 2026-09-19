@@ -1,0 +1,29 @@
+{
+  "owner_path": "work/epic-epic",
+  "requested_path": "work/epic-epic",
+  "ledger_path": "<tmp>/works/okf/work/epic-epic/references/00-decisions.md",
+  "entry": {
+    "id": "D-003",
+    "number": 3,
+    "question": "Redo",
+    "status": "answered",
+    "affects": [],
+    "decided": "<today> by user",
+    "supersedes": "D-002",
+    "hold": null,
+    "phase": null,
+    "checkpoint": null,
+    "prose": "**Answer:** later"
+  },
+  "superseded": "D-002",
+  "refusal": null,
+  "applied": true,
+  "rolled_back": false,
+  "failures": [],
+  "follow_up": {
+    "path": "work/tech-debt-redo",
+    "page_path": "<tmp>/works/okf/work/tech-debt-redo.md"
+  },
+  "follow_up_filed": true,
+  "warnings": []
+}

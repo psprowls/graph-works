@@ -7,13 +7,14 @@ for an unknown op, and this turns that into a non-zero exit through the shared h
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 
 import typer
 from graph_works_core.util.commands import run_log
+from graph_works_wire.util import log_payload
 
 from graph_works_cli.errors import exit_error
+from graph_works_cli.json_output import encode
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -32,20 +33,7 @@ def log(
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        typer.echo(
-            json.dumps(
-                {
-                    "path": str(result.path),
-                    "day": result.day.isoformat(),
-                    "op": result.op,
-                    "title": result.title,
-                    "detail": result.detail,
-                    "entry": result.entry,
-                    "written": result.written,
-                },
-                indent=2,
-            )
-        )
+        typer.echo(encode(log_payload(result)))
     elif result.written:
         typer.echo(result.entry)
 

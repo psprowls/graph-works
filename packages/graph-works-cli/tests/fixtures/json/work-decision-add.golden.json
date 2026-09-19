@@ -1,0 +1,47 @@
+{
+  "owner_path": "work/epic-epic",
+  "requested_path": "work/epic-epic",
+  "ledger_path": "<tmp>/works/okf/work/epic-epic/references/00-decisions.md",
+  "entry": {
+    "id": "D-001",
+    "number": 1,
+    "question": "q?",
+    "status": "open",
+    "affects": [],
+    "decided": null,
+    "supersedes": null,
+    "hold": null,
+    "phase": null,
+    "checkpoint": null,
+    "prose": ""
+  },
+  "superseded": null,
+  "refusal": null,
+  "applied": true,
+  "rolled_back": false,
+  "failures": [],
+  "entries": [
+    {
+      "id": "D-001",
+      "number": 1,
+      "question": "q?",
+      "status": "open",
+      "affects": [],
+      "decided": null,
+      "supersedes": null,
+      "hold": null,
+      "phase": null,
+      "checkpoint": null,
+      "prose": ""
+    }
+  ],
+  "counts": {
+    "answered": 0,
+    "assumed": 0,
+    "open": 1,
+    "superseded": 0,
+    "invalid": 0,
+    "total": 1
+  },
+  "warnings": []
+}

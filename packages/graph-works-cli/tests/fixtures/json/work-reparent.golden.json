@@ -1,0 +1,16 @@
+{
+  "path_mapping": {
+    "work/feature-alpha": "work/epic-epic/children/feature-alpha"
+  },
+  "indexes": [
+    "work/epic-epic/children/feature-alpha/children/_archive/index.md",
+    "work/epic-epic/children/feature-alpha/children/index.md",
+    "work/epic-epic/children/index.md",
+    "work/index.md"
+  ],
+  "warnings": [],
+  "refusals": [],
+  "applied": true,
+  "rolled_back": false,
+  "failures": []
+}

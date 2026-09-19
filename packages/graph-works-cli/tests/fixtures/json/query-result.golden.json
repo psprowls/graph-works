@@ -1,0 +1,15 @@
+{
+  "answer": "answer",
+  "citations": [
+    "concepts/a",
+    "concepts/b"
+  ],
+  "pages_drilled": 2,
+  "search_scores": {
+    "concepts/a": {
+      "rrf": 0.5
+    }
+  },
+  "path": "orchestrated",
+  "fallback_error": null
+}

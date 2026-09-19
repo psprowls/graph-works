@@ -51,6 +51,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         "archive",
         "next",
         "config",
+        "agent-config",
         "graph",
         "wiki",
         "work",
@@ -71,7 +72,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         },
         ("ingest",): {"--source", "--json", "--workspace", "--backend"},
         ("query",): {"--query", "--limit", "--backend", "--json", "--workspace"},
-        ("archive",): {"--dry-run", "--workspace"},
+        ("archive",): {"--dry-run", "--json", "--workspace"},
         ("wiki", "lint"): {"--json", "--workspace"},
         ("wiki", "drift"): {
             "--backend",
@@ -84,7 +85,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         },
         ("wiki", "stats"): {"--top", "--json", "--workspace"},
         ("wiki", "index"): {"--workspace"},
-        ("wiki", "archive"): {"--dry-run", "--workspace"},
+        ("wiki", "archive"): {"--dry-run", "--json", "--workspace"},
         ("wiki", "tags", "inventory"): {"--json", "--workspace"},
         ("wiki", "tags", "draft"): {"--as-of", "--floor", "--ceiling", "--workspace"},
         ("wiki", "tags", "apply"): {"--only", "--dry-run", "--workspace"},
@@ -98,10 +99,12 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
             "--resource",
             "--rationale",
             "--evidence",
+            "--dry-run",
+            "--json",
             "--workspace",
         },
-        ("wiki", "proposal", "approve"): {"--workspace"},
-        ("wiki", "proposal", "reject"): {"--workspace"},
+        ("wiki", "proposal", "approve"): {"--dry-run", "--json", "--workspace"},
+        ("wiki", "proposal", "reject"): {"--dry-run", "--json", "--workspace"},
     }
     for command_path, expected in expected_options.items():
         assert _option_names(_help(*command_path)) == expected
@@ -124,7 +127,7 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
     assert not {"--stale-days", "--log-gap-days", "--check"} & _option_names(_help("wiki", "lint"))
     assert not {"--model"} & _option_names(_help("query"))
     for command_path in (("wiki", "proposal", "file"), ("wiki", "proposal", "approve"), ("wiki", "proposal", "reject")):
-        assert not {"--dry-run", "--json"} & _option_names(_help(*command_path))
+        assert {"--dry-run", "--json"} <= _option_names(_help(*command_path))
     assert not {"show", "promote"} & set(_command_names(proposal))
 
 

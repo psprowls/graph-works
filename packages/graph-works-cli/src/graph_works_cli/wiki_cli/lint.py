@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from datetime import UTC, datetime
 
 import typer
 from graph_works_core.lint_drift.lint import run_lint
 from graph_works_core.workspace.config import load_workspace_config
 from graph_works_core.workspace.repos import resolve_repos
+from graph_works_wire.wiki import lint_payload
 
+from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
-from graph_works_cli.wiki_cli.rendering import lint_payload
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -38,7 +38,7 @@ def lint(
         exit_error(str(exc), cause=exc)
 
     if json_output:
-        typer.echo(json.dumps(lint_payload(report), indent=2))
+        typer.echo(encode(lint_payload(report)))
     else:
         typer.echo(report.render())
     if not report.ok:

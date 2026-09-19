@@ -1,19 +1,53 @@
-"""Explicit JSON payloads for the public wiki command surface."""
+"""Plain-data projections for wiki results.
+
+Bootstrap, scan, ingest, query, lint, drift, stats, proposal decide/file, tags.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from doc_wiki_okf.ingest import DocumentBrief
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.lint import LintReport
 from graph_works_core.lint_drift.propagate_drift import DriftBrief, PropagateResult
+from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
 from graph_works_core.query.commands import QueryBrief, QueryResult
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult
+from graph_works_core.wiki_page.commands import PageLink, PageRead
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
 from graph_works_core.workspace.init import WorkspaceInit, WorkspacePlan
-from okf_ext.proposals import Proposal
+from okf_ext.proposals import ApplyResult as ProposalApplyResult
+from okf_ext.proposals import Proposal, Write
+from okf_ext.tags import TagInventory
+
+from graph_works_wire._jsonable import jsonable
+
+
+def _page_link(link: PageLink) -> dict[str, object]:
+    return {
+        "source": link.source,
+        "raw": link.raw,
+        "target": link.target,
+        "external": link.external,
+        "line": link.line,
+    }
+
+
+def page_payload(result: PageRead) -> dict[str, object]:
+    """`/v1/wiki/page`: one page with its computed link neighbourhood."""
+    return {
+        "id": result.id,
+        "frontmatter": jsonable(dict(result.frontmatter)),
+        "body": result.body,
+        "outlinks": [_page_link(link) for link in result.outlinks],
+        "backlinks": list(result.backlinks),
+        "broken": [_page_link(link) for link in result.broken],
+        "parse_error": result.parse_error,
+        "refusal": result.refusal,
+    }
 
 
 def bootstrap_payload(result: WorkspaceInit) -> dict[str, object]:
@@ -318,3 +352,66 @@ def proposal_payload(proposal: Proposal) -> dict[str, object]:
         "verified": [dict(entry) for entry in proposal.verified],
         "malformed": proposal.malformed,
     }
+
+
+def _proposal_refusal(refusal: ProposalRefusal) -> dict[str, object]:
+    return {"path": refusal.path, "kind": refusal.kind, "detail": refusal.detail}
+
+
+def _proposal_write(write: Write) -> dict[str, object]:
+    """Planned key assignments only: body text and a create's whole document are never projected."""
+    return {"member": write.member, "mode": write.mode, "frontmatter": jsonable(dict(write.frontmatter))}
+
+
+def _proposal_application(result: ProposalApplyResult | None) -> dict[str, object]:
+    """The mutation keys shared by proposal decision and filing projections."""
+    return {
+        "written": [] if result is None else list(result.written),
+        "applied": result is not None,
+        "rolled_back": False,
+        "failures": []
+        if result is None
+        else [f"{failure.path}: {failure.kind} -- {failure.error}" for failure in result.failed],
+    }
+
+
+def proposal_decide_payload(run: ProposalDecideRun) -> dict[str, object]:
+    """`gw wiki proposal approve|reject --json`, and serve's decide route."""
+    return {
+        "target": run.target,
+        "proposal": run.proposal,
+        "decision": run.decision,
+        "ok": run.ok,
+        "refusals": [_proposal_refusal(refusal) for refusal in run.refusals],
+        "writes": [] if run.plan is None or run.refusals else [_proposal_write(write) for write in run.plan.writes],
+        **_proposal_application(run.result),
+    }
+
+
+def proposal_file_payload(run: ProposalFileRun) -> dict[str, object]:
+    """`gw wiki proposal file --json`."""
+    return {
+        "lane": run.lane,
+        "target": run.target,
+        "proposal": run.proposal,
+        "ok": run.ok,
+        "refusals": [_proposal_refusal(refusal) for refusal in run.refusals],
+        "writes": [] if run.refusals else [_proposal_write(write) for write in run.plan.writes],
+        **_proposal_application(run.result),
+    }
+
+
+def tag_inventory_payload(result: TagInventory) -> dict[str, object]:
+    """Every tag the vault carries, with page counts sorted by tag."""
+    return {
+        "total_tags": len(result.counts),
+        "tagged_pages": len({concept for ids in result.concepts.values() for concept in ids}),
+        "untagged_pages": len(result.untagged),
+        "counts": dict(sorted(result.counts.items())),
+        "skipped": [{"path": s.path, "reason": s.reason, "detail": s.detail} for s in result.skipped],
+    }
+
+
+def tags_undeclared_payload(missing: Sequence[str]) -> dict[str, object]:
+    """The gate's answer: every tag the vocabulary does not know."""
+    return {"undeclared": list(missing)}

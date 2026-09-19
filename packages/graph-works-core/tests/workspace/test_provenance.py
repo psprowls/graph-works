@@ -33,6 +33,32 @@ def test_a_non_repo_has_no_worktree_state(tmp_path):
     assert provenance.worktree_state(tmp_path, tmp_path) is None
 
 
+def test_probe_git_reports_returncode_and_cause(tmp_path):
+    from graph_works_core.workspace.provenance import probe_git
+
+    outside = probe_git(tmp_path, "rev-parse", "--is-inside-work-tree")
+    assert outside.cause == "ok" and outside.returncode not in (0, None)
+
+    missing = probe_git(tmp_path, "status", executable="git-definitely-not-installed")
+    assert (missing.returncode, missing.cause) == (None, "missing")
+
+
+@pytest.mark.parametrize(
+    ("failure", "cause"),
+    [
+        (subprocess.TimeoutExpired(["git"], 5), "timeout"),
+        (OSError("git transport failed"), "error"),
+    ],
+)
+def test_probe_git_degrades_timeout_and_runner_errors(tmp_path, monkeypatch, failure, cause):
+    def _fail(*args, **kwargs):
+        raise failure
+
+    monkeypatch.setattr(provenance.subprocess, "run", _fail)
+    outcome = provenance.probe_git(tmp_path, "status")
+    assert (outcome.returncode, outcome.stdout, outcome.cause) == (None, "", cause)
+
+
 @pytest.mark.parametrize("raw", ["", "   "])
 def test_a_blank_git_dir_answer_resolves_to_none(raw, tmp_path):
     # `Path("")` normalizes to `Path(".")`, whose str form is not empty --

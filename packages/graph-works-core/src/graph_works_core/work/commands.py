@@ -82,7 +82,7 @@ from work_tracker_okf.hierarchy import ChildRollup, DescendResult, decision_owne
 from work_tracker_okf.hierarchy import descend as descend_to_leaf
 from work_tracker_okf.holds import check_hold, prepare_checkpoint
 from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
-from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, load_items, unreadable_detail
+from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, item_index, load_items, unreadable_detail
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
     PlannedWrite,
@@ -290,6 +290,65 @@ def run_status(layout: WorkspaceLayout) -> StatusReport:
     """Count the active items and name the one worth resuming. Never writes."""
     items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
     return StatusReport(rollup=rollup(items), resume=select_resume(items))
+
+
+@dataclass(frozen=True, slots=True)
+class ItemSource:
+    """One `sources[]` entry, as authored."""
+
+    id: str | None
+    resource: str | None
+    title: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ItemRead:
+    """One work item read whole: frontmatter, body, sources and owned references.
+
+    An unknown or unreadable target is a `refusal`, never a raise (ADR-0013 rule 5).
+    """
+
+    path: str
+    frontmatter: Mapping[str, object]
+    body: str
+    sources: tuple[ItemSource, ...]
+    references: tuple[str, ...]
+    parse_error: str | None
+    coercion_failures: tuple[str, ...]
+    refusal: Literal["unknown-item", "unreadable"] | None
+    detail: str | None
+
+
+def _refused_item(path: str, refusal: Literal["unknown-item", "unreadable"], detail: str | None) -> ItemRead:
+    return ItemRead(path, MappingProxyType({}), "", (), (), None, (), refusal, detail)
+
+
+def _owned_references(bundle_root: Path, path: str) -> tuple[str, ...]:
+    directory = bundle_root / path / "references"
+    if not directory.is_dir():
+        return ()
+    return tuple(sorted(file.relative_to(bundle_root).as_posix() for file in directory.rglob("*") if file.is_file()))
+
+
+def run_item_read(layout: WorkspaceLayout, path: str) -> ItemRead:
+    """Read *path*'s work item and list its owned `references/`. Never writes."""
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    if path not in item_index(load_items(bundle)):
+        detail = unreadable_detail(bundle, path)
+        return _refused_item(path, "unreadable" if detail is not None else "unknown-item", detail)
+    document = bundle.concepts[path]
+    error = document.parse_error
+    return ItemRead(
+        path=path,
+        frontmatter=MappingProxyType(document.fm_data(dates="iso")),
+        body=document.body,
+        sources=tuple(ItemSource(source.id, source.resource, source.title) for source in document.fm.sources),
+        references=_owned_references(layout.bundle_dir, path),
+        parse_error=None if error is None else f"{error.kind}: {error.message}",
+        coercion_failures=tuple(sorted(document.fm.coercion_failures)),
+        refusal=None,
+        detail=None,
+    )
 
 
 @dataclass(frozen=True, slots=True)

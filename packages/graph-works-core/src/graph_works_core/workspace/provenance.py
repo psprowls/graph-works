@@ -19,7 +19,9 @@ from __future__ import annotations
 import json
 import subprocess
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from work_tracker_okf.paths import parse_item_path
 from work_tracker_okf.results import ResultsFacts
@@ -42,26 +44,46 @@ _GIT_TIMEOUT_SECONDS = 5
 _UNIT_SEP = "\x1f"
 
 
-def run_git(cwd: Path, *args: str) -> str | None:
-    """Best-effort `git <args>` in *cwd*; stdout, or `None` on any failure.
+@dataclass(frozen=True, slots=True)
+class GitOutcome:
+    """One git invocation's result; `returncode` is `None` when git did not run."""
 
-    Public because callers outside this module run git through it: this is
-    the only module in the package that does, and a second subprocess helper
-    elsewhere would be a second timeout policy and a second degrade contract
-    to keep in step.
-    """
+    returncode: int | None
+    stdout: str
+    cause: Literal["ok", "missing", "timeout", "error"]
+    stderr: str = ""
+
+
+def probe_git(cwd: Path, *args: str, executable: str = "git") -> GitOutcome:
+    """Run `git <args>` in *cwd*, retaining its exit status for state probes."""
     try:
         completed = subprocess.run(
-            ["git", *args],
+            [executable, *args],
             cwd=cwd,
             capture_output=True,
             text=True,
             check=False,
             timeout=_GIT_TIMEOUT_SECONDS,
         )
+    except FileNotFoundError:
+        return GitOutcome(None, "", "missing")
+    except subprocess.TimeoutExpired:
+        return GitOutcome(None, "", "timeout")
     except (OSError, ValueError, subprocess.SubprocessError):
-        return None
-    return completed.stdout if completed.returncode == 0 else None
+        return GitOutcome(None, "", "error")
+    return GitOutcome(completed.returncode, completed.stdout, "ok", completed.stderr)
+
+
+def run_git(cwd: Path, *args: str) -> str | None:
+    """Best-effort `git <args>` in *cwd*; stdout, or `None` on any failure.
+
+    Public because callers outside this module run git through it (or through
+    `probe_git`): this is the only module in the package that does, and a
+    second subprocess helper elsewhere would be a second timeout policy and a
+    second degrade contract to keep in step.
+    """
+    outcome = probe_git(cwd, *args)
+    return outcome.stdout if outcome.returncode == 0 else None
 
 
 def _absolute(raw: str, cwd: Path) -> Path | None:
@@ -378,6 +400,7 @@ def clear_active_work(layout: WorkspaceLayout, paths: set[str]) -> bool:
 __all__ = [
     "ACTIVE_WORK_FILENAME",
     "FALLBACK_BASE",
+    "GitOutcome",
     "clear_active_work",
     "commit_exists",
     "commits_touching",
@@ -385,6 +408,7 @@ __all__ = [
     "dirty_paths",
     "head_sha",
     "merge_base",
+    "probe_git",
     "repository_of",
     "results_facts",
     "run_git",

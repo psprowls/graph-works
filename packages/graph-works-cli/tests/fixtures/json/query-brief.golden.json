@@ -1,0 +1,13 @@
+{
+  "query": "why",
+  "top_pages": [
+    {
+      "path": "concepts/a",
+      "excerpt": "x",
+      "search_scores": {
+        "bm25": 1.0,
+        "rrf": 0.2
+      }
+    }
+  ]
+}

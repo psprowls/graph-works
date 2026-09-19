@@ -1,0 +1,16 @@
+{
+  "path": "work/feature-alpha",
+  "page_path": "<tmp>/works/okf/work/feature-alpha.md",
+  "refusal": null,
+  "detail": "file work/feature-alpha as Feature",
+  "indexes": [
+    "<tmp>/works/okf/work/index.md",
+    "<tmp>/works/okf/work/feature-alpha/children/index.md",
+    "<tmp>/works/okf/work/feature-alpha/children/_archive/index.md"
+  ],
+  "logged": "- filed work/feature-alpha (Feature)",
+  "warnings": [],
+  "applied": true,
+  "rolled_back": false,
+  "failures": []
+}

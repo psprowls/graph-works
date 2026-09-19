@@ -1,0 +1,258 @@
+[
+  {
+    "key": "version",
+    "value": 1,
+    "origin": "manifest",
+    "entry": {
+      "key": "version",
+      "type": "int",
+      "default": 1,
+      "description": "Manifest format version. There is no migration path; a foreign version is refused.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "read-only",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "initialized_at",
+    "value": "<today>",
+    "origin": "manifest",
+    "entry": {
+      "key": "initialized_at",
+      "type": "str",
+      "default": "",
+      "description": "ISO date this workspace was initialized.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "provenance",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "topic",
+    "value": "Demo",
+    "origin": "manifest",
+    "entry": {
+      "key": "topic",
+      "type": "str",
+      "default": null,
+      "description": "Display name for this workspace.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "layout.bundle_dir",
+    "value": "okf",
+    "origin": "default",
+    "entry": {
+      "key": "layout.bundle_dir",
+      "type": "str",
+      "default": "okf",
+      "description": "The OKF bundle directory, relative to the workspace root.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "layout.config_dir",
+    "value": ".gw",
+    "origin": "default",
+    "entry": {
+      "key": "layout.config_dir",
+      "type": "str",
+      "default": ".gw",
+      "description": "The control plane \u2014 declarations (`schema/`, `sections/`, `tags.yaml`) and the `.gitignore` anchor \u2014 relative to the root.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "layout.cache_dir",
+    "value": null,
+    "origin": "default",
+    "entry": {
+      "key": "layout.cache_dir",
+      "type": "str",
+      "default": null,
+      "description": "Gitignored machine state \u2014 the graph database \u2014 relative to the root. Absent derives from `layout.config_dir`.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "layout.worktrees_dir",
+    "value": null,
+    "origin": "default",
+    "entry": {
+      "key": "layout.worktrees_dir",
+      "type": "str",
+      "default": null,
+      "description": "Gitignored feature worktrees, relative to the root. Absent derives from `layout.config_dir`.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "ignore",
+    "value": [],
+    "origin": "manifest",
+    "entry": {
+      "key": "ignore",
+      "type": "list[str]",
+      "default": [],
+      "description": "Global git glob pathspecs excluded from every repository's scan.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "state_gate.enabled",
+    "value": true,
+    "origin": "default",
+    "entry": {
+      "key": "state_gate.enabled",
+      "type": "bool",
+      "default": true,
+      "description": "Whether the state gate blocks a scan on an unclean branch.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "state_gate.branches",
+    "value": [
+      "main"
+    ],
+    "origin": "default",
+    "entry": {
+      "key": "state_gate.branches",
+      "type": "list[str]",
+      "default": [
+        "main"
+      ],
+      "description": "Branches the state gate treats as clean-required. Empty list is valid and intentional.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "workflow.dispatch_rules",
+    "value": "dispatch.yaml",
+    "origin": "manifest",
+    "entry": {
+      "key": "workflow.dispatch_rules",
+      "type": "str",
+      "default": null,
+      "description": "Shared dispatch-rules document, resolved relative to the workspace root.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "workflow.auto_drive.max_parallel",
+    "value": 2,
+    "origin": "default",
+    "entry": {
+      "key": "workflow.auto_drive.max_parallel",
+      "type": "int",
+      "default": 2,
+      "description": "How many workers auto-drive may have in flight at once.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "workflow.auto_drive.supervise_merges",
+    "value": false,
+    "origin": "default",
+    "entry": {
+      "key": "workflow.auto_drive.supervise_merges",
+      "type": "bool",
+      "default": false,
+      "description": "Mirror every finish-stage merge question to the human. Off by default: auto-drive answers `merge` itself for a non-root child, whose merge target is the epic's own integration branch.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
+    "key": "workspace.dir",
+    "value": null,
+    "origin": "default",
+    "entry": {
+      "key": "workspace.dir",
+      "type": "str",
+      "default": null,
+      "description": "Workspace directory override. Set GRAPH_WORKS_DIR in the environment.",
+      "kind": "env-only",
+      "env_var": "GRAPH_WORKS_DIR",
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  }
+]

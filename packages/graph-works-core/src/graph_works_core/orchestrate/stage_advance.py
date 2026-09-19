@@ -14,7 +14,7 @@ is a normal outcome, not an error.
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -115,6 +115,7 @@ def run_stage_advance(
     start_sha: str | None = None,
     return_: bool = False,
     dry_run: bool = True,
+    before_apply: Callable[[StageAdvance], None] | None = None,
 ) -> StageAdvance:
     """Complete one stage: advance the item and capture what the stage left.
 
@@ -167,6 +168,15 @@ def run_stage_advance(
     pointer. The commit gate below is bound by the same rule: a dry run
     inspects no worktree and refuses nothing.
 
+    `before_apply`, when supplied on a live call, inspects the actual candidate
+    with application fields empty before any domain write. Raising aborts the
+    call; exceptions propagate. The callback must not mutate the candidate or
+    workspace. Dry runs never invoke it. Omitting it preserves CLI behavior.
+
+    The callback sees the routed advance under the decision-owner lock, before
+    the live-only commit gate. That gate may still refuse or add diagnostics;
+    it cannot select a different transition after validation.
+
     Live advances hold the decision owner's lock across the read, hold
     resolution, routing, commit gate and mutation. Dry runs resolve holds
     without locking. On win32, `okf_ext.locking` gives up after ten one-second
@@ -195,6 +205,7 @@ def run_stage_advance(
             repo_name=repo_name,
             start_sha=start_sha,
             return_=return_,
+            before_apply=before_apply,
         )
     # The whole read -> route -> gate -> write sequence shares hold filing's
     # owner lock. A waiting writer sees the hold or phase the first committed.
@@ -220,6 +231,7 @@ def run_stage_advance(
             repo_name=repo_name,
             start_sha=start_sha,
             return_=return_,
+            before_apply=before_apply,
         )
 
 
@@ -244,6 +256,7 @@ def _advance(
     start_sha: str | None,
     return_: bool,
     dry_run: bool,
+    before_apply: Callable[[StageAdvance], None] | None,
 ) -> StageAdvance:
     item = next((candidate for candidate in items if candidate.path == path), None)
     old_phase = item.phase if item is not None else None
@@ -278,8 +291,11 @@ def _advance(
         hold=hold,
         dry_run=True,
     )
+    candidate = StageAdvance(outcome=outcome, repo_note=repo_note)
+    if not dry_run and before_apply is not None:
+        before_apply(candidate)
     if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
-        return StageAdvance(outcome=outcome, repo_note=repo_note)
+        return candidate
 
     new_phase = outcome.plan.transition.phase or old_phase
 

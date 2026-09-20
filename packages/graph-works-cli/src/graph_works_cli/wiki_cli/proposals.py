@@ -7,10 +7,9 @@ from datetime import UTC, datetime
 from typing import Any
 
 import typer
-from graph_works_core.proposals import run_proposal_decide, run_proposal_file
-from graph_works_wire.wiki import proposal_decide_payload, proposal_file_payload, proposal_payload
-from okf_ext.proposals import ApplyResult, Decision, Write, list_proposals
-from okf_io import load_bundle
+from graph_works_core.proposals import run_proposal_decide, run_proposal_file, run_proposals_read
+from graph_works_wire.wiki import proposal_decide_payload, proposal_file_payload, proposals_payload
+from okf_ext.proposals import ApplyResult, Decision, Write
 
 from graph_works_cli.errors import fail
 from graph_works_cli.json_output import encode
@@ -25,11 +24,11 @@ def proposals(
     """List open proposals."""
     layout = resolve_workspace(workspace)
     try:
-        found = list_proposals(load_bundle(layout.bundle_dir), page_status="proposed")
+        found = run_proposals_read(layout)
     except (OSError, ValueError) as exc:
         exit_error(str(exc), cause=exc)
 
-    payload = [proposal_payload(proposal) for proposal in found]
+    payload = proposals_payload(found)
     if json_output:
         typer.echo(encode(payload))
         return

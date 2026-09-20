@@ -17,8 +17,10 @@ def test_version_is_static():
     to the surface, so a consumer naming a raw value's shape does not have to
     reach for `type(...).__name__` and leak ruamel. `0.2.4` publishes the
     private descriptor loader required by graph-works-core's synchronized
-    transaction boundary. All patches (ADR-0007)."""
-    assert okf_io.__version__ == "0.2.4"
+    transaction boundary. `0.2.5` adds `outline`/`outline_index` and its three
+    result types, a read-only reader over the same entry cutting `update`
+    uses. All patches (ADR-0007)."""
+    assert okf_io.__version__ == "0.2.5"
 
 
 def test_version_matches_package_metadata():
@@ -44,6 +46,9 @@ def test_public_surface():
         "Frontmatter",
         "Generated",
         "IndexChange",
+        "IndexEntry",
+        "IndexHeading",
+        "IndexOutline",
         "IndexUpdate",
         "Link",
         "LinkGraph",
@@ -76,6 +81,7 @@ def test_public_surface():
         "load",
         "load_bundle",
         "migrate",
+        "outline_index",
         "parse",
         "parse_log",
         "trust_tier",

@@ -24,15 +24,16 @@ _WORKSPACE_ROOT = Path(__file__).resolve().parents[3]
 #: `test_every_stubbed_workspace_version_is_the_declared_one` pins that.
 _STUB_VERSIONS: dict[str, tuple[str, ...]] = {
     "click": ("8.0.0",),
-    "code-graph-io": ("0.1.0", "0.1.1", "0.2.0", "0.3.0"),
+    "code-graph-io": ("0.1.0", "0.1.1", "0.2.0", "0.3.0", "0.3.1"),
     "code-wiki-okf": ("0.1.0", "0.2.0", "0.3.0", "0.4.0", "0.5.0", "0.5.1"),
     "config-io": ("0.1.0", "0.2.0"),
     "doc-wiki-okf": ("0.1.0", "0.2.0", "0.2.1", "0.2.2", "0.3.0", "0.3.1", "0.3.2", "0.3.3"),
     "graph-works-wire": ("0.1.0", "0.1.1", "0.1.2"),
     "langchain-core": ("1.4.0",),
+    "markdown-it-py": ("3.0.0",),
     "models-io": ("0.2.0",),
     "okf-ext": ("0.1.0", "0.4.5", "0.4.6", "0.4.7", "0.4.8", "0.4.9", "0.4.10", "0.4.11", "0.4.12", "0.4.13", "0.4.14"),
-    "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4"),
+    "okf-io": ("0.1.1", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5"),
     "plugin-fork-io": ("0.1.0", "0.1.1"),
     "ruamel-yaml": ("0.18.0",),
     "subagents-io": ("0.2.0", "0.2.1"),
@@ -151,8 +152,8 @@ def test_built_wheel_resolves_with_core_from_published_metadata_offline(tmp_path
     core_okf_io = next(
         requirement for requirement in core_requirements if canonicalize_name(requirement.name) == "okf-io"
     )
-    assert str(cli_okf_io.specifier) == "<0.3,>=0.2.4"
-    assert str(core_okf_io.specifier) == "<0.3,>=0.2.4"
+    assert str(cli_okf_io.specifier) == "<0.3,>=0.2.5"
+    assert str(core_okf_io.specifier) == "<0.3,>=0.2.5"
 
     extras_by_name: dict[str, set[str]] = {}
     for requirement in (*cli_requirements, *core_requirements):

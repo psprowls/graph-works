@@ -11,6 +11,7 @@ import pytest
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import proposals as proposals_module
+from graph_works_core.proposals import commands as proposals_commands
 from okf_ext.proposals import Proposal
 from typer.testing import CliRunner
 
@@ -91,9 +92,11 @@ def test_proposals_uses_the_open_filter_and_renders_target_status_and_malformed_
         "proposals/a.md", "proposals/a", "concepts/a.md", "A", "", "proposed", "proposed", (), (), "missing metadata"
     )
     called: list[object] = []
-    monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
     monkeypatch.setattr(
-        proposals_module,
+        proposals_commands, "load_bundle", lambda _root: SimpleNamespace(has_member=lambda _member: False)
+    )
+    monkeypatch.setattr(
+        proposals_commands,
         "list_proposals",
         lambda bundle, *, page_status=None: called.append((bundle, page_status)) or (proposal,),
     )
@@ -101,6 +104,7 @@ def test_proposals_uses_the_open_filter_and_renders_target_status_and_malformed_
     human_result = runner.invoke(app, ["wiki", "proposals", "--workspace", str(initialized_workspace)])
     assert json_result.exit_code == human_result.exit_code == 0
     assert json.loads(json_result.stdout)[0]["malformed"] == "missing metadata"
+    assert json.loads(json_result.stdout)[0]["mode"] == "create"
     assert human_result.stdout == "concepts/a.md: proposed (malformed: missing metadata)\n"
     assert [entry[1] for entry in called] == ["proposed", "proposed"]
 
@@ -111,7 +115,7 @@ def test_proposals_reports_an_unreadable_bundle_instead_of_a_traceback(
     def unreadable(_root: object) -> object:
         raise OSError("proposals/ is unreadable")
 
-    monkeypatch.setattr(proposals_module, "load_bundle", unreadable)
+    monkeypatch.setattr(proposals_commands, "load_bundle", unreadable)
     result = runner.invoke(app, ["wiki", "proposals", "--workspace", str(initialized_workspace)])
     assert result.exit_code == exit_codes.GENERIC
     assert result.stdout == "" and result.stderr == "Error: proposals/ is unreadable\n"
@@ -120,8 +124,10 @@ def test_proposals_reports_an_unreadable_bundle_instead_of_a_traceback(
 def test_proposals_says_so_when_no_proposal_is_open(
     monkeypatch: pytest.MonkeyPatch, initialized_workspace: Path
 ) -> None:
-    monkeypatch.setattr(proposals_module, "load_bundle", lambda _root: object())
-    monkeypatch.setattr(proposals_module, "list_proposals", lambda *_args, **_kwargs: ())
+    monkeypatch.setattr(
+        proposals_commands, "load_bundle", lambda _root: SimpleNamespace(has_member=lambda _member: False)
+    )
+    monkeypatch.setattr(proposals_commands, "list_proposals", lambda *_args, **_kwargs: ())
     result = runner.invoke(app, ["wiki", "proposals", "--workspace", str(initialized_workspace)])
     assert result.exit_code == 0 and result.stdout == "no open proposals\n"
 

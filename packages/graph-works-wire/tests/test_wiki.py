@@ -6,6 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
+from types import SimpleNamespace as ns
 
 from code_wiki_okf.entities.sync import SyncSummary
 from code_wiki_okf.mirror.model import MirrorResult
@@ -15,9 +16,11 @@ from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBac
 from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist
+from graph_works_core.wiki_page.commands import TreeNode, TreePage, WikiTree
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
 from graph_works_core.workspace.init import WorkspaceInit, plan_init
 from graph_works_core.workspace.layout import layout_for
+from graph_works_wire import wiki
 from graph_works_wire.wiki import (
     bootstrap_payload,
     bootstrap_plan_payload,
@@ -406,7 +409,7 @@ def test_stats_and_proposal_payloads_have_exact_keys() -> None:
     )
 
     stats_result = stats_payload(stats)
-    proposal_result = proposal_payload(proposal)
+    proposal_result = proposal_payload(proposal, mode="create")
 
     assert set(stats_result) == {
         "total_pages",
@@ -425,6 +428,7 @@ def test_stats_and_proposal_payloads_have_exact_keys() -> None:
         "title",
         "description",
         "page_status",
+        "mode",
         "sources",
         "verified",
         "malformed",
@@ -478,3 +482,82 @@ def test_tag_inventory_payload_counts_distinct_tagged_pages_and_sorts_counts() -
 
 def test_tags_undeclared_payload_is_a_single_list() -> None:
     assert tags_undeclared_payload(("b", "a")) == {"undeclared": ["b", "a"]}
+
+
+def test_proposal_payload_places_mode_after_page_status() -> None:
+    proposal = ns(
+        member="proposals/a.md",
+        target="adrs/a.md",
+        title="A",
+        description="",
+        page_status="approved",
+        sources=(),
+        verified=(),
+        malformed=None,
+    )
+
+    payload = wiki.proposal_payload(proposal, mode="update")
+
+    assert list(payload) == [
+        "member",
+        "target",
+        "title",
+        "description",
+        "page_status",
+        "mode",
+        "sources",
+        "verified",
+        "malformed",
+    ]
+    assert payload["mode"] == "update"
+
+
+def test_proposals_payload_projects_each_listing() -> None:
+    proposal = ns(
+        member="proposals/a.md",
+        target="concepts/a.md",
+        title="A",
+        description="",
+        page_status="proposed",
+        sources=(),
+        verified=(),
+        malformed=None,
+    )
+    listing = ns(proposal=proposal, mode="create")
+
+    assert wiki.proposals_payload([listing]) == [wiki.proposal_payload(proposal, mode="create")]
+    assert wiki.proposals_payload([]) == []
+
+
+def test_wiki_tree_payload_nests_sections() -> None:
+    tree = WikiTree(
+        (
+            TreeNode(
+                "Concepts",
+                2,
+                False,
+                (),
+                (TreeNode("Architecture", 3, False, (TreePage("concepts/a", "A", None),), ()),),
+            ),
+        )
+    )
+
+    assert wiki.wiki_tree_payload(tree) == {
+        "sections": [
+            {
+                "heading": "Concepts",
+                "level": 2,
+                "generated": False,
+                "pages": [],
+                "sections": [
+                    {
+                        "heading": "Architecture",
+                        "level": 3,
+                        "generated": False,
+                        "pages": [{"id": "concepts/a", "title": "A", "type": None}],
+                        "sections": [],
+                    }
+                ],
+            }
+        ]
+    }

@@ -9,6 +9,7 @@ the internal shapes.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -21,20 +22,25 @@ from graph_works_core.work.commands import (
     ChildRollup,
     Decision,
     DecisionCommandResult,
+    DispatchExplanation,
     FilingRun,
     IngestQueueReport,
     ItemRead,
     NextResult,
+    OpenDecision,
     OverturnResult,
     PathMutationResult,
+    QueueEntry,
     RegenIndexesResult,
     StatusReport,
     Transition,
+    WorkItem,
 )
 from graph_works_core.work.reconcile import ReconcileContext
 from graph_works_core.workspace.dispatch import DispatchResolution
 
 from graph_works_wire._jsonable import jsonable
+from graph_works_wire.config import rule_payload
 
 # ---------------------------------------------------------------------------
 # Shared fragments
@@ -264,6 +270,27 @@ def next_blockers(result: NextResult) -> list[str]:
     return blockers
 
 
+def _usable_resolution(result: NextResult) -> DispatchResolution | None:
+    """The resolution `next_payload` and `work_queue_payload` may show.
+
+    `None` when there is no dispatch, or when a preflight refused the profile
+    the fold produced -- the route still has a dispatch, but the skill it
+    names is unusable. One rule, so both projections agree by construction.
+    """
+    resolution = result.dispatch_resolution
+    return None if resolution is None or result.dispatch_preflight is not None else resolution
+
+
+def _usable_on_dispatch(result: NextResult) -> Transition | None:
+    """The `on_dispatch` transition `next_payload` and `work_queue_payload` may show.
+
+    `None` when a preflight refused the dispatch fold's profile -- the same
+    condition `_usable_resolution` gates on, kept as its own helper because
+    `on_dispatch` is `None`-able independently of whether a resolution exists.
+    """
+    return None if result.dispatch_preflight is not None else result.route.on_dispatch
+
+
 def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     """The `gw work next` contract: phase, status, blockers, on_complete,
     action, normalized, child_rollup -- plus the donor-compatible additions
@@ -274,8 +301,7 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     either key must not be handed a name or a transition for a dispatch that
     can never happen.
     """
-    resolution = result.dispatch_resolution
-    preflight = result.dispatch_preflight
+    resolution = _usable_resolution(result)
     return {
         "requested_path": result.requested_path,
         "selected_path": result.selected_path,
@@ -283,13 +309,9 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "kind": result.state.type,
         "phase": result.state.phase,
         "effort": result.state.effort,
-        "action": (
-            None
-            if resolution is None or preflight is not None
-            else {"skill": resolution.profile.skill, "reason": result.route.reason}
-        ),
+        "action": None if resolution is None else {"skill": resolution.profile.skill, "reason": result.route.reason},
         "artifact": None if result.artifact is None else {"path": str(result.artifact.path(bundle_root))},
-        "on_dispatch": None if preflight is not None else _transition(result.route.on_dispatch),
+        "on_dispatch": _transition(_usable_on_dispatch(result)),
         "on_complete": _transition(result.route.on_complete),
         "blockers": next_blockers(result),
         "dispatch": None if resolution is None else dispatch_payload(resolution),
@@ -297,6 +319,53 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "descent": descent_payload(result),
         "normalized": normalized_payload(result),
     }
+
+
+def dispatch_explain_payload(explanation: DispatchExplanation) -> dict[str, Any]:
+    """`/v1/dispatch/explain`: the attributes, every rule with whether it
+    matched, and the profile -- through `dispatch_payload` and
+    `next_blockers`, so profile, provenance and blockers equal `/v1/work/next`'s."""
+    resolution = explanation.resolution
+    dispatch = None if resolution is None else dispatch_payload(resolution)
+    return {
+        "path": explanation.path,
+        "attributes": None if explanation.attributes is None else dict(explanation.attributes),
+        "packaged_rule": None if explanation.packaged_rule is None else rule_payload(explanation.packaged_rule),
+        "rules": [{**rule_payload(rule), "matched": matched} for rule, matched in explanation.rules],
+        "profile": None if dispatch is None else dispatch["profile"],
+        "provenance": None if dispatch is None else dispatch["provenance"],
+        "blockers": next_blockers(explanation.next_result),
+    }
+
+
+def work_queue_payload(entries: Sequence[QueueEntry]) -> dict[str, Any]:
+    """`/v1/work/queue`: one row per active item, by `next_payload`'s rules.
+
+    `skill`/`mode`/`reason` come from `_usable_resolution` and `requires` from
+    `_usable_on_dispatch`, both nulled by a preflight exactly as `next_payload`
+    nulls `action` and `on_dispatch` -- so the queue and `/v1/work/next` agree
+    by construction. `blockers` is `next_blockers`.
+    """
+    rows: list[dict[str, Any]] = []
+    for entry in entries:
+        result = entry.result
+        resolution = _usable_resolution(result)
+        on_dispatch = _usable_on_dispatch(result)
+        rows.append(
+            {
+                "path": result.selected_path,
+                "type": result.state.type,
+                "title": entry.item.title,
+                "phase": result.state.phase,
+                "work_status": result.state.work_status,
+                "skill": None if resolution is None else resolution.profile.skill,
+                "mode": None if resolution is None else resolution.profile.mode,
+                "reason": None if resolution is None else result.route.reason,
+                "blockers": next_blockers(result),
+                "requires": [] if on_dispatch is None else list(on_dispatch.requires),
+            }
+        )
+    return {"items": rows}
 
 
 # ---------------------------------------------------------------------------
@@ -414,6 +483,26 @@ def status_payload(report: StatusReport) -> dict[str, Any]:
     }
 
 
+def work_list_payload(items: Sequence[WorkItem]) -> dict[str, Any]:
+    """`/v1/work/list`: the board's rows. `parent` is the parent item's canonical path or null."""
+    return {
+        "items": [
+            {
+                "path": item.path,
+                "type": item.type,
+                "title": item.title,
+                "work_status": item.work_status,
+                "phase": item.phase,
+                "effort": item.effort,
+                "owner": item.owner,
+                "parent": item.parent_path,
+                "updated": item.updated,
+            }
+            for item in items
+        ]
+    }
+
+
 def ingest_queue_payload(report: IngestQueueReport) -> dict[str, Any]:
     return {
         "pending": [
@@ -514,6 +603,21 @@ def decision_payload(result: DecisionCommandResult) -> dict[str, Any]:
         "entries": [_decision(entry) for entry in result.entries],
         "counts": dict(result.counts),
         "warnings": list(result.warnings),
+    }
+
+
+def open_decisions_payload(records: Sequence[OpenDecision]) -> dict[str, Any]:
+    """`/v1/work/decisions/open`: every open entry across active owners, with the items it holds."""
+    return {
+        "decisions": [
+            {
+                "owner_path": record.owner_path,
+                "ledger_path": str(record.ledger),
+                "held": list(record.held),
+                "entry": _decision(record.decision),
+            }
+            for record in records
+        ]
     }
 
 

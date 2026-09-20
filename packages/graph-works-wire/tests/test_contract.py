@@ -14,24 +14,29 @@ from collections.abc import Callable
 from types import ModuleType
 
 import pytest
-from graph_works_wire import agent_config, config, events, util, wiki, work
+from graph_works_wire import agent_config, code, config, events, util, wiki, work
 from samples_agent_config import AGENT_CONFIG
+from samples_code import CODE
 from samples_config import CONFIG
 from samples_events import EVENTS
 from samples_util import UTIL
 from samples_wiki import WIKI
 from samples_work import WORK
 
-MODULES: tuple[ModuleType, ...] = (work, wiki, config, util, agent_config, events)
+MODULES: tuple[ModuleType, ...] = (work, wiki, config, util, agent_config, events, code)
 
 EXPECTED: set[str] = {
     "events.change_event_payload",
     "events.changes_payload",
     "agent_config.agent_config_payload",
+    "code.excerpt_payload",
+    "config.dispatch_rules_payload",
     "config.hooks_payload",
     "config.projection_payload",
     "config.resolved_list_payload",
     "config.resolved_payload",
+    "config.rule_payload",
+    "config.schema_read_payload",
     "util.line_endings_payload",
     "util.log_read_payload",
     "util.log_payload",
@@ -45,9 +50,11 @@ EXPECTED: set[str] = {
     "wiki.ingest_payload",
     "wiki.lint_payload",
     "wiki.page_payload",
+    "wiki.citations_payload",
     "wiki.proposal_decide_payload",
     "wiki.proposal_file_payload",
     "wiki.proposal_payload",
+    "wiki.proposals_payload",
     "wiki.query_brief_payload",
     "wiki.query_payload",
     "wiki.scan_apply_payload",
@@ -56,10 +63,12 @@ EXPECTED: set[str] = {
     "wiki.stats_payload",
     "wiki.tag_inventory_payload",
     "wiki.tags_undeclared_payload",
+    "wiki.wiki_tree_payload",
     "work.advance_payload",
     "work.archive_payload",
     "work.decision_payload",
     "work.descent_payload",
+    "work.dispatch_explain_payload",
     "work.dispatch_payload",
     "work.file_payload",
     "work.ingest_queue_payload",
@@ -67,6 +76,7 @@ EXPECTED: set[str] = {
     "work.lint_payload",
     "work.next_payload",
     "work.normalized_payload",
+    "work.open_decisions_payload",
     "work.orchestrate_payload",
     "work.overturn_payload",
     "work.path_mutation_payload",
@@ -74,9 +84,19 @@ EXPECTED: set[str] = {
     "work.reconcile_payload",
     "work.regen_index_payload",
     "work.status_payload",
+    "work.work_list_payload",
+    "work.work_queue_payload",
 }
 
-SAMPLES: dict[str, tuple[Callable[[], object], ...]] = {**WORK, **WIKI, **CONFIG, **UTIL, **AGENT_CONFIG, **EVENTS}
+SAMPLES: dict[str, tuple[Callable[[], object], ...]] = {
+    **WORK,
+    **WIKI,
+    **CONFIG,
+    **UTIL,
+    **AGENT_CONFIG,
+    **EVENTS,
+    **CODE,
+}
 
 
 def discovered() -> set[str]:

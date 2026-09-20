@@ -19,6 +19,7 @@ MODULE_NAMES = {
     "events.py",
     "__init__.py",
     "_jsonable.py",
+    "code.py",
     "agent_config.py",
     "config.py",
     "errors.py",

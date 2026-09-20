@@ -4,11 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from types import SimpleNamespace as ns
 
+from graph_works_core.work.commands import DispatchExplanation, OpenDecision
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
-from graph_works_core.workspace.dispatch import resolve_dispatch
+from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
+from graph_works_wire import config as wire_config
 from graph_works_wire import work
 from samples_work import archive_run
+from work_tracker_okf.decisions import Decision
 
 
 def test_archive_payload_wiki_block_empty_planned_applied() -> None:
@@ -288,3 +292,139 @@ def test_orchestrate_payload_carries_holds() -> None:
             },
         }
     ]
+
+
+def test_work_list_payload_maps_parent_path_to_parent() -> None:
+    item = ns(
+        path="work/e/children/a",
+        type="Feature",
+        title="A",
+        work_status="open",
+        phase="plan",
+        effort="medium",
+        owner=None,
+        parent_path="work/e",
+        updated="2026-09-19",
+    )
+
+    assert work.work_list_payload([item]) == {
+        "items": [
+            {
+                "path": "work/e/children/a",
+                "type": "Feature",
+                "title": "A",
+                "work_status": "open",
+                "phase": "plan",
+                "effort": "medium",
+                "owner": None,
+                "parent": "work/e",
+                "updated": "2026-09-19",
+            }
+        ]
+    }
+
+
+def test_dispatch_explain_payload_with_a_dispatch() -> None:
+    resolution = resolve_dispatch({"variant": "single"}, rules=())
+    row = packaged_rule("single")
+    explanation = DispatchExplanation(
+        path="work/a",
+        attributes={"stage": "plan", "variant": "single", "has_spec": True},
+        packaged_rule=row,
+        rules=((row, True),),
+        resolution=resolution,
+        next_result=ns(route=ns(blockers=()), descent=None, dispatch_preflight=None),
+    )
+
+    payload = work.dispatch_explain_payload(explanation)
+
+    assert payload["path"] == "work/a"
+    assert payload["attributes"] == {"stage": "plan", "variant": "single", "has_spec": True}
+    assert payload["packaged_rule"] == wire_config.rule_payload(row)
+    assert payload["rules"] == [{**wire_config.rule_payload(row), "matched": True}]
+    assert {"profile": payload["profile"], "provenance": payload["provenance"]} == work.dispatch_payload(resolution)
+    assert payload["blockers"] == []
+
+
+def _queue_entry(title: str, path: str, *, resolution, preflight, requires=("owner",), blockers=()):
+    return ns(
+        item=ns(title=title),
+        result=ns(
+            selected_path=path,
+            state=ns(type="Feature", phase="plan", work_status="open"),
+            route=ns(reason="plan it", blockers=blockers, on_dispatch=ns(requires=requires)),
+            descent=None,
+            dispatch_resolution=resolution,
+            dispatch_preflight=preflight,
+        ),
+    )
+
+
+def test_work_queue_payload_follows_next_payloads_rules() -> None:
+    resolution = resolve_dispatch({"variant": "single"}, rules=())
+    ready = _queue_entry("A", "work/a", resolution=resolution, preflight=None)
+    refused = _queue_entry("B", "work/b", resolution=None, preflight="dispatch.yaml: rule 0: bad")
+    blocked = ns(
+        item=ns(title="E"),
+        result=ns(
+            selected_path="work/e",
+            state=ns(type="Epic", phase="execute", work_status="in-progress"),
+            route=ns(reason="waiting", blockers=("waiting on children",), on_dispatch=None),
+            descent=None,
+            dispatch_resolution=None,
+            dispatch_preflight=None,
+        ),
+    )
+
+    rows = work.work_queue_payload([ready, refused, blocked])["items"]
+
+    assert rows[0] == {
+        "path": "work/a",
+        "type": "Feature",
+        "title": "A",
+        "phase": "plan",
+        "work_status": "open",
+        "skill": resolution.profile.skill,
+        "mode": resolution.profile.mode,
+        "reason": "plan it",
+        "blockers": [],
+        "requires": ["owner"],
+    }
+    assert (rows[1]["skill"], rows[1]["mode"], rows[1]["reason"], rows[1]["requires"]) == (None, None, None, [])
+    assert rows[1]["blockers"] == ["dispatch.yaml: rule 0: bad"]
+    assert (rows[2]["skill"], rows[2]["requires"], rows[2]["blockers"]) == (None, [], ["waiting on children"])
+
+
+def test_dispatch_explain_payload_without_a_dispatch() -> None:
+    explanation = DispatchExplanation(
+        path="work/e",
+        attributes=None,
+        packaged_rule=None,
+        rules=(),
+        resolution=None,
+        next_result=ns(route=ns(blockers=("waiting on children",)), descent=None, dispatch_preflight="bad"),
+    )
+
+    payload = work.dispatch_explain_payload(explanation)
+
+    assert payload["attributes"] is None and payload["packaged_rule"] is None
+    assert payload["profile"] is None and payload["provenance"] is None
+    assert payload["blockers"] == ["waiting on children", "bad"]
+
+
+def test_open_decisions_payload_reuses_the_decision_projection() -> None:
+    entry = Decision(id="D-001", number=1, question="q", status="open", affects=("work/a", "packages/a"))
+    ledger = Path("/b/work/e/references/00-decisions.md")
+    record = OpenDecision(owner_path="work/e", ledger=ledger, held=("work/a",), decision=entry)
+
+    assert work.open_decisions_payload([record]) == {
+        "decisions": [
+            {
+                "owner_path": "work/e",
+                "ledger_path": str(ledger),
+                "held": ["work/a"],
+                "entry": work._decision(entry),
+            }
+        ]
+    }
+    assert work.open_decisions_payload([]) == {"decisions": []}

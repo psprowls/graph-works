@@ -1,4 +1,4 @@
-"""Filing and deciding one curated-page proposal, plan-by-default (ADR-0022).
+"""Filing, deciding and listing curated-page proposals, plan-by-default (ADR-0022).
 
 This vertical owns target normalization, the bundle/lane-schema load sequence,
 and the plan/apply composition so interfaces only route, parse, format, and
@@ -17,9 +17,11 @@ from typing import Any
 from doc_wiki_okf.proposals import lane_set, plan_file
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.proposals import (
+    PAGE_STATUSES,
     ApplyResult,
     Decision,
     DecisionPlan,
+    Mode,
     Proposal,
     ProposalPlan,
     Refusal,
@@ -27,6 +29,7 @@ from okf_ext.proposals import (
     list_proposals,
     plan_decide,
 )
+from okf_ext.proposals import mode as target_mode
 from okf_ext.schemas import load_schemas
 from okf_io import Bundle, load_bundle
 
@@ -203,12 +206,40 @@ def run_proposal_file(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class ProposalListing:
+    """One proposal and whether promoting it would create or update its target."""
+
+    proposal: Proposal
+    mode: Mode
+
+
+def run_proposals_read(layout: WorkspaceLayout, page_status: str = "proposed") -> tuple[ProposalListing, ...]:
+    """Every proposal with *page_status* (default: the open ones), sorted by member. Never writes.
+
+    The one read `gw wiki proposals` and `/v1/wiki/proposals` share, so the
+    two cannot drift. `mode` is derived from the bundle and never stored.
+    The bundle is loaded without `ignore=`, as the verb always has.
+
+    Raises `ValueError` when *page_status* is not one of `PAGE_STATUSES`.
+    """
+    if page_status not in PAGE_STATUSES:
+        raise ValueError(f"page_status {page_status!r} not in {'|'.join(PAGE_STATUSES)}")
+    bundle = load_bundle(layout.bundle_dir)
+    return tuple(
+        ProposalListing(proposal=proposal, mode=target_mode(bundle, proposal))
+        for proposal in list_proposals(bundle, page_status=page_status)
+    )
+
+
 __all__ = [
     "ProposalDecideRun",
     "ProposalFileRun",
+    "ProposalListing",
     "ProposalRefusal",
     "find_proposal",
     "normalize_target",
     "run_proposal_decide",
     "run_proposal_file",
+    "run_proposals_read",
 ]

@@ -220,7 +220,7 @@ wheels = [
 
 [[package]]
 name = "code-graph-io"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "packages/code-graph-io" }
 dependencies = [
     { name = "pyyaml" },
@@ -465,6 +465,7 @@ dependencies = [
     { name = "config-io" },
     { name = "doc-wiki-okf" },
     { name = "langchain-core" },
+    { name = "markdown-it-py" },
     { name = "models-io", extra = ["bedrock"] },
     { name = "okf-ext", extra = ["schemas"] },
     { name = "okf-io" },
@@ -486,6 +487,7 @@ requires-dist = [
     { name = "config-io", editable = "packages/config-io" },
     { name = "doc-wiki-okf", editable = "packages/doc-wiki-okf" },
     { name = "langchain-core", specifier = ">=1.4" },
+    { name = "markdown-it-py", specifier = ">=3.0" },
     { name = "models-io", extras = ["bedrock"], editable = "packages/models-io" },
     { name = "models-io", extras = ["vercel"], marker = "extra == 'vercel'", editable = "packages/models-io" },
     { name = "okf-ext", extras = ["schemas"], editable = "packages/okf-ext" },
@@ -1192,7 +1194,7 @@ provides-extras = ["schemas"]
 
 [[package]]
 name = "okf-io"
-version = "0.2.4"
+version = "0.2.5"
 source = { editable = "packages/okf-io" }
 dependencies = [
     { name = "markdown-it-py" },

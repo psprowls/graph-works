@@ -23,7 +23,7 @@ from config_io import (
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from graph_works_core.workspace.dispatch import DispatchRule, parse_rules
+from graph_works_core.workspace.dispatch import DispatchRule, packaged_rules, parse_rules
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import dispatch_store, workspace_store
@@ -305,8 +305,29 @@ def apply_dispatch_write(plan: DispatchWritePlan) -> None:
         raise
 
 
+@dataclass(frozen=True, slots=True)
+class DispatchRuleSet:
+    """What the Config screen shows: the declared rule vocabulary, the packaged
+    rows, and the workspace rules in fold order (shared, then local)."""
+
+    attributes: tuple[str, ...]
+    packaged: tuple[DispatchRule, ...]
+    rules: tuple[DispatchRule, ...]
+
+
+def run_dispatch_rules(layout: WorkspaceLayout) -> DispatchRuleSet:
+    """Read the dispatch rules without resolving any item. Never writes.
+
+    Raises `WorkspaceError`, naming the file and rule index, for a malformed
+    dispatch file -- the same refusal `load_dispatch_config` gives every caller.
+    """
+    config = load_dispatch_config(layout)
+    return DispatchRuleSet(tuple(sorted(config.attributes)), packaged_rules(), config.rules)
+
+
 __all__ = [
     "DispatchConfig",
+    "DispatchRuleSet",
     "DispatchWritePlan",
     "apply_dispatch_write",
     "check_dispatch_inputs",
@@ -314,6 +335,7 @@ __all__ = [
     "load_prospective_dispatch_config",
     "plan_dispatch_write",
     "restore_owned_snapshot",
+    "run_dispatch_rules",
     "source_fingerprint",
     "validate_workspace_dispatch_layers",
 ]

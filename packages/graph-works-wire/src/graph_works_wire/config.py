@@ -1,4 +1,4 @@
-"""Plain-data projections for `gw config` results, written key by key in `asdict` order.
+"""Plain-data projections for `gw config` results and the dispatch-rule reads.
 
 `gw config --json` has always been `json.dumps(asdict(result), default=str)`.
 These functions reproduce that output exactly -- same keys, same order, with
@@ -14,6 +14,9 @@ from pathlib import Path
 
 from config_io import ConfigEntry, Resolved
 from graph_works_core.hooks import HooksResult
+from graph_works_core.workspace.dispatch import DispatchRule
+from graph_works_core.workspace.dispatch_config import DispatchRuleSet
+from graph_works_core.workspace.schema_read import SchemaRead
 
 from graph_works_wire._jsonable import jsonable
 
@@ -63,3 +66,31 @@ def hooks_payload(result: HooksResult) -> dict[str, object]:
 def projection_payload(path: Path) -> dict[str, object]:
     """Where `gw config sync` wrote the projection."""
     return {"projection": str(path)}
+
+
+def _constraint(value: object) -> object:
+    """A list constraint is a tuple in core; JSON has only lists."""
+    return list(value) if isinstance(value, tuple) else value
+
+
+def rule_payload(rule: DispatchRule) -> dict[str, object]:
+    """One dispatch rule: its match constraints, the profile fields it sets, and where it came from."""
+    return {
+        "match": {attribute: _constraint(value) for attribute, value in rule.match.items()},
+        "fields": dict(rule.fields),
+        "origin": {"source": rule.origin.source, "index": rule.origin.index, "name": rule.origin.name},
+    }
+
+
+def dispatch_rules_payload(ruleset: DispatchRuleSet) -> dict[str, object]:
+    """`/v1/dispatch/rules`: the vocabulary, packaged rows and workspace rules in fold order."""
+    return {
+        "attributes": list(ruleset.attributes),
+        "packaged": [rule_payload(rule) for rule in ruleset.packaged],
+        "rules": [rule_payload(rule) for rule in ruleset.rules],
+    }
+
+
+def schema_read_payload(read: SchemaRead) -> dict[str, object]:
+    """`/v1/schema`: every schema and section file, parsed as-is and keyed by stem."""
+    return {"schemas": jsonable(dict(read.schemas)), "sections": jsonable(dict(read.sections))}

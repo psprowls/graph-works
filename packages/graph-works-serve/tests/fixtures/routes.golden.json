@@ -29,6 +29,46 @@
     },
     {
       "method": "GET",
+      "path": "/v1/code/excerpt",
+      "summary": "Lines of a declared repository's tracked file around a cited range (5 lines context, 400-line cap).",
+      "params": [
+        {
+          "name": "repo",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Declared repository name."
+        },
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Repo-relative POSIX file path."
+        },
+        {
+          "name": "start",
+          "type": "int",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "First cited line, 1-based."
+        },
+        {
+          "name": "end",
+          "type": "int",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "Last cited line; defaults to start."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
       "path": "/v1/config",
       "summary": "Every resolved config key, or one key's value and origin.",
       "params": [
@@ -41,6 +81,29 @@
           "summary": "One catalog key; omit to list all."
         }
       ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/dispatch/explain",
+      "summary": "Why an item resolves to its dispatch profile, rule by rule (equal to /v1/work/next's dispatch).",
+      "params": [
+        {
+          "name": "path",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative canonical concept path."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/dispatch/rules",
+      "summary": "Dispatch vocabulary, packaged rows and workspace rules in fold order.",
+      "params": [],
       "response": "json"
     },
     {
@@ -85,6 +148,29 @@
           "default": null,
           "location": "query",
           "summary": "Inclusive YYYY-MM-DD lower bound."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/schema",
+      "summary": "Every schema and section declaration file, parsed as-is, keyed by stem.",
+      "params": [],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/citations",
+      "summary": "A page's path:N code citations in body order, body-relative lines, resolved to repositories.",
+      "params": [
+        {
+          "name": "id",
+          "type": "str",
+          "required": true,
+          "default": null,
+          "location": "query",
+          "summary": "Extensionless bundle-relative page id."
         }
       ],
       "response": "json"
@@ -167,6 +253,29 @@
           "summary": ""
         }
       ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/proposals",
+      "summary": "Proposals by page_status (the gw wiki proposals --json array when proposed).",
+      "params": [
+        {
+          "name": "page_status",
+          "type": "str",
+          "required": false,
+          "default": null,
+          "location": "query",
+          "summary": "proposed (default)|approved|rejected|created."
+        }
+      ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/wiki/tree",
+      "summary": "The root index's ## sections with ### nested, and the pages under each.",
+      "params": [],
       "response": "json"
     },
     {
@@ -435,6 +544,13 @@
     },
     {
       "method": "GET",
+      "path": "/v1/work/decisions/open",
+      "summary": "Every open decision across active owners' ledgers, with the items each holds.",
+      "params": [],
+      "response": "json"
+    },
+    {
+      "method": "GET",
       "path": "/v1/work/item",
       "summary": "One work item: frontmatter, body, sources, owned references.",
       "params": [
@@ -447,6 +563,13 @@
           "summary": "Extensionless bundle-relative canonical concept path."
         }
       ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/work/list",
+      "summary": "Every active work item as a board row, sorted by path.",
+      "params": [],
       "response": "json"
     },
     {
@@ -503,6 +626,13 @@
           "summary": "Select among several declared repositories."
         }
       ],
+      "response": "json"
+    },
+    {
+      "method": "GET",
+      "path": "/v1/work/queue",
+      "summary": "Every active item's next stage: skill, mode, reason and blockers.",
+      "params": [],
       "response": "json"
     },
     {

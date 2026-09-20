@@ -9,7 +9,8 @@ from types import MappingProxyType
 from types import SimpleNamespace as ns
 
 from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
-from graph_works_core.wiki_page.commands import PageLink, PageRead
+from graph_works_core.wiki_page.citations import Citation, CitationCandidate, WikiCitations
+from graph_works_core.wiki_page.commands import PageLink, PageRead, TreeNode, TreePage, WikiTree
 from graph_works_wire import wiki
 from okf_ext.proposals import ApplyResult, DecisionPlan, ProposalPlan, Write, WriteFailure
 
@@ -112,6 +113,29 @@ def proposal_file(*, applied: bool) -> ProposalFileRun:
 
 
 WIKI: dict[str, tuple[Callable[[], object], ...]] = {
+    "wiki.citations_payload": (
+        lambda: wiki.citations_payload(
+            WikiCitations(
+                "concepts/a",
+                (
+                    Citation("a.py:3", 2, "gw", "src/a.py", 3, 3, "resolved", ()),
+                    Citation(
+                        "b.py:1",
+                        4,
+                        None,
+                        None,
+                        1,
+                        1,
+                        "ambiguous",
+                        (CitationCandidate("gw", "b.py"), CitationCandidate("other", "b.py")),
+                    ),
+                    Citation("c.py:9", 6, None, None, 9, 9, "missing", ()),
+                ),
+                None,
+            )
+        ),
+        lambda: wiki.citations_payload(WikiCitations("concepts/nope", (), "unknown-page")),
+    ),
     "wiki.page_payload": (
         lambda: wiki.page_payload(
             PageRead(
@@ -268,8 +292,29 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
                 sources=({"resource": "s.md"},),
                 verified=({"by": "human"},),
                 malformed=None,
-            )
+            ),
+            mode="create",
         ),
+    ),
+    "wiki.proposals_payload": (
+        lambda: wiki.proposals_payload(
+            [
+                ns(
+                    proposal=ns(
+                        member="proposals/a.md",
+                        target="concepts/a.md",
+                        title="A",
+                        description="d",
+                        page_status="proposed",
+                        sources=(),
+                        verified=(),
+                        malformed="missing target",
+                    ),
+                    mode="update",
+                )
+            ]
+        ),
+        lambda: wiki.proposals_payload([]),
     ),
     "wiki.proposal_decide_payload": (
         lambda: wiki.proposal_decide_payload(proposal_decide(applied=False)),
@@ -291,4 +336,20 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
         ),
     ),
     "wiki.tags_undeclared_payload": (lambda: wiki.tags_undeclared_payload(("zeta",)),),
+    "wiki.wiki_tree_payload": (
+        lambda: wiki.wiki_tree_payload(
+            WikiTree(
+                (
+                    TreeNode(
+                        "Packages",
+                        2,
+                        True,
+                        (TreePage("repositories/r/packages/a", "a", "Package"),),
+                        (TreeNode("Extra", 3, True, (), ()),),
+                    ),
+                )
+            )
+        ),
+        lambda: wiki.wiki_tree_payload(WikiTree(())),
+    ),
 }

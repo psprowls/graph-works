@@ -81,8 +81,9 @@ def build_app(
     token: str,
     routes: Sequence[RouteSpec] = ROUTES,
     change_source: ChangeSource | None = None,
+    allow_origins: frozenset[str] = frozenset(),
 ) -> Starlette:
-    """Mount *routes* behind the loopback token and Host guard."""
+    """Mount *routes* behind the loopback token and Host guard, answering CORS for *allow_origins*."""
     return Starlette(
         routes=[
             Route(
@@ -97,5 +98,5 @@ def build_app(
             for spec in routes
         ],
         lifespan=_lifespan(context.root, change_source or watch_workspace),
-        middleware=[Middleware(Guard, token=token, port=context.port)],
+        middleware=[Middleware(Guard, token=token, port=context.port, allow_origins=allow_origins)],
     )

@@ -9,20 +9,27 @@ from dataclasses import dataclass
 from datetime import date
 from functools import partial
 from pathlib import Path
+from types import MappingProxyType
 from typing import Literal, cast
 
 from config_io import RegistryError, StoreValidationError
 from graph_works_core.agent_config import AGENTS
 from graph_works_core.agent_config import show as show_agent_config
 from graph_works_core.agent_config.records import AgentName
+from graph_works_core.code_read import run_code_excerpt
 from graph_works_core.orchestrate.commands import run_orchestrate
+from graph_works_core.proposals import PAGE_STATUSES, run_proposals_read
 from graph_works_core.util.commands import run_log_read
-from graph_works_core.wiki_page.commands import run_page_read
+from graph_works_core.wiki_page.citations import run_wiki_citations
+from graph_works_core.wiki_page.commands import run_page_read, run_wiki_tree
 from graph_works_core.work import commands as work
 from graph_works_core.workspace import manifest
+from graph_works_core.workspace.dispatch_config import run_dispatch_rules
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.schema_read import run_schema_read
 from graph_works_wire import agent_config as wire_agent_config
+from graph_works_wire import code as wire_code
 from graph_works_wire import config as wire_config
 from graph_works_wire import util as wire_util
 from graph_works_wire import wiki as wire_wiki
@@ -248,6 +255,112 @@ def _agent_config(context: ServeContext, args: Mapping[str, object]) -> Reply:
     return call("/v1/agent-config", run, _LAYOUT)
 
 
+_READ = (*_LAYOUT, Catch(OSError, "io", 1))
+
+
+def _work_list(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        return Reply(200, wire_work.work_list_payload(work.run_work_list(context.layout())))
+
+    return call("/v1/work/list", run, _READ)
+
+
+def _proposals(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    page_status = _str(args, "page_status") or "proposed"
+    if page_status not in PAGE_STATUSES:
+        return refusal(
+            "/v1/wiki/proposals", "usage", f"page_status: unknown {page_status}; expected {'|'.join(PAGE_STATUSES)}"
+        )
+
+    def run() -> Reply:
+        return Reply(200, wire_wiki.proposals_payload(run_proposals_read(context.layout(), page_status)))
+
+    return call("/v1/wiki/proposals", run, (*_READ, Catch(ValueError, "io", 1)))
+
+
+def _work_queue(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        return Reply(200, wire_work.work_queue_payload(work.run_work_queue(context.layout())))
+
+    return call("/v1/work/queue", run, _READ)
+
+
+def _open_decisions(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        return Reply(200, wire_work.open_decisions_payload(work.run_open_decisions(context.layout())))
+
+    return call("/v1/work/decisions/open", run, _READ)
+
+
+def _schema(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        return Reply(200, wire_config.schema_read_payload(run_schema_read(context.layout())))
+
+    return call("/v1/schema", run, _READ)
+
+
+def _wiki_tree(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        return Reply(200, wire_wiki.wiki_tree_payload(run_wiki_tree(context.layout())))
+
+    return call("/v1/wiki/tree", run, _READ)
+
+
+def _dispatch_rules(context: ServeContext, _args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        return Reply(200, wire_config.dispatch_rules_payload(run_dispatch_rules(context.layout())))
+
+    return call("/v1/dispatch/rules", run, _READ)
+
+
+def _dispatch_explain(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        explanation = work.run_dispatch_explain(context.layout(), cast(str, args["path"]))
+        return Reply(200, wire_work.dispatch_explain_payload(explanation))
+
+    return call("/v1/dispatch/explain", run, _ROUTED)
+
+
+def _citations(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        result = run_wiki_citations(context.layout(), cast(str, args["id"]))
+        payload = wire_wiki.citations_payload(result)
+        if result.refusal is not None:
+            return refusal("/v1/wiki/citations", "unresolved", f"{result.refusal}: {result.id}", payload=payload)
+        return Reply(200, payload)
+
+    return call("/v1/wiki/citations", run, _READ)
+
+
+#: An excerpt refusal's wire reason and, where it differs from the reason's default, its status.
+_EXCERPT_REFUSALS: Mapping[str, tuple[str, int | None]] = MappingProxyType(
+    {
+        "unknown-repository": ("unresolved", None),
+        "unknown-file": ("unresolved", None),
+        "outside-repository": ("refused", 403),
+    }
+)
+
+
+def _excerpt(context: ServeContext, args: Mapping[str, object]) -> Reply:
+    def run() -> Reply:
+        result = run_code_excerpt(
+            context.layout(),
+            cast(str, args["repo"]),
+            cast(str, args["path"]),
+            cast(int, args["start"]),
+            cast(int | None, args["end"]),
+        )
+        payload = wire_code.excerpt_payload(result)
+        if result.refusal is None or result.refusal == "out-of-range":
+            return Reply(200, payload)
+        reason, status = _EXCERPT_REFUSALS[result.refusal]
+        message = f"{result.refusal}: {result.repo}/{result.path}"
+        return refusal("/v1/code/excerpt", reason, message, payload=payload, status=status)
+
+    return call("/v1/code/excerpt", run, (*_READ, Catch(ValueError, "usage", 1)))
+
+
 EVENTS_ROUTE = RouteSpec(
     method="GET",
     path="/v1/events",
@@ -327,6 +440,67 @@ ROUTES: tuple[RouteSpec, ...] = (
             Param("agent", "csv", summary="Limit to agents: claude,codex,pi."),
         ),
         _agent_config,
+    ),
+    RouteSpec("GET", "/v1/work/list", "Every active work item as a board row, sorted by path.", (), _work_list),
+    RouteSpec(
+        "GET",
+        "/v1/wiki/proposals",
+        "Proposals by page_status (the gw wiki proposals --json array when proposed).",
+        (Param("page_status", "str", summary="proposed (default)|approved|rejected|created."),),
+        _proposals,
+    ),
+    RouteSpec(
+        "GET", "/v1/schema", "Every schema and section declaration file, parsed as-is, keyed by stem.", (), _schema
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/wiki/tree",
+        "The root index's ## sections with ### nested, and the pages under each.",
+        (),
+        _wiki_tree,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/wiki/citations",
+        "A page's path:N code citations in body order, body-relative lines, resolved to repositories.",
+        (Param("id", "str", required=True, summary="Extensionless bundle-relative page id."),),
+        _citations,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/code/excerpt",
+        "Lines of a declared repository's tracked file around a cited range (5 lines context, 400-line cap).",
+        (
+            Param("repo", "str", required=True, summary="Declared repository name."),
+            Param("path", "str", required=True, summary="Repo-relative POSIX file path."),
+            Param("start", "int", required=True, minimum=1, summary="First cited line, 1-based."),
+            Param("end", "int", minimum=1, summary="Last cited line; defaults to start."),
+        ),
+        _excerpt,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/dispatch/rules",
+        "Dispatch vocabulary, packaged rows and workspace rules in fold order.",
+        (),
+        _dispatch_rules,
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/dispatch/explain",
+        "Why an item resolves to its dispatch profile, rule by rule (equal to /v1/work/next's dispatch).",
+        (_PATH,),
+        _dispatch_explain,
+    ),
+    RouteSpec(
+        "GET", "/v1/work/queue", "Every active item's next stage: skill, mode, reason and blockers.", (), _work_queue
+    ),
+    RouteSpec(
+        "GET",
+        "/v1/work/decisions/open",
+        "Every open decision across active owners' ledgers, with the items each holds.",
+        (),
+        _open_decisions,
     ),
     *mutation_routes(ADVANCE),
     *mutation_routes(ARCHIVE),

@@ -23,7 +23,7 @@ def test_dependencies_are_exactly_the_three_the_spec_allows() -> None:
 
     names = {entry.split(">")[0].split("<")[0].split("=")[0].strip() for entry in project["dependencies"]}
     assert names == {"okf-io", "okf-ext[schemas]", "typer"}
-    assert "okf-io>=0.2.4,<0.3" in project["dependencies"]
+    assert "okf-io>=0.2.5,<0.3" in project["dependencies"]
 
 
 def test_the_public_surface_is_importable_from_the_package_root() -> None:

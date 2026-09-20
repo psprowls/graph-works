@@ -20,6 +20,7 @@ from its concept's ``description`` is reported instead.
 
 from __future__ import annotations
 
+import bisect
 import difflib
 import re
 from collections.abc import Callable, Sequence
@@ -29,7 +30,7 @@ from typing import Literal
 from urllib.parse import unquote
 
 from okf_io import _edit
-from okf_io._md import Heading, ListItem, parse_body
+from okf_io._md import BodyIndex, Heading, ListItem, parse_body
 from okf_io.bundle import INDEX_NAME, LOG_NAME, Bundle
 from okf_io.document import Document, rendered_with_body
 from okf_io.links import parse_destination, resolve_path
@@ -172,6 +173,84 @@ class _Plan:
     entries: tuple[_Entry, ...]
     dead: tuple[_Entry, ...]
     missing: tuple[EntryTarget, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IndexEntry:
+    """One index list item that begins with a link.
+
+    ``href`` is the destination exactly as the source writes it -- not
+    markdown-it's percent-encoded normalization -- so a reader resolves what
+    the author wrote. ``label`` is the link text; ``text`` is what follows
+    the link with its separator stripped, or ``None``.
+    """
+
+    href: str
+    label: str | None
+    text: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class IndexHeading:
+    """One heading and the entries between it and the next heading of any level."""
+
+    level: int
+    text: str
+    entries: tuple[IndexEntry, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class IndexOutline:
+    """An index body's headings in file order. Read-only: nothing here writes."""
+
+    headings: tuple[IndexHeading, ...]
+
+
+def _linked_items(parsed: BodyIndex) -> tuple[ListItem, ...]:
+    """Every list item carrying a link: the candidates `_plan` and `outline` both cut.
+
+    Takes an already-parsed *parsed* rather than a body string, so a caller
+    holding one parse (`parse_body` is cached, but a caller may also be
+    reusing headings from the same `BodyIndex`) never triggers a second one.
+    """
+    return tuple(item for item in parsed.list_items if item.link_target is not None)
+
+
+def outline(body: str) -> IndexOutline:
+    """The headings of an index *body* (frontmatter already stripped) and
+    the entries under each.
+
+    Pure: no bundle, no file I/O. Parses *body* exactly once. An entry is a
+    list item whose first inline content is a link that `_read_entry` can cut
+    cleanly -- the same test `update` applies, over the same markdown-it
+    parse, so one text yields the same entries to both. A heading inside a
+    blockquote is not a heading; one inside a code fence never parses as one.
+    Items above the first heading belong to no heading and are dropped. An
+    entry belongs to the nearest heading above it, whatever that heading's
+    level.
+    """
+    if not body:
+        return IndexOutline(headings=())
+    parsed = parse_body(body)
+    headings = [heading for heading in parsed.headings if not heading.quoted]
+    lines = [heading.line for heading in headings]
+    grouped: list[list[IndexEntry]] = [[] for _ in headings]
+    for item in _linked_items(parsed):
+        owner = bisect.bisect_left(lines, item.line) - 1
+        if owner < 0:
+            continue
+        entry = _read_entry(item, "")
+        if entry.prefix is None:
+            continue
+        match = _LINK_PREFIX_RE.match(entry.prefix)
+        assert match is not None  # `_read_entry` produced the prefix from this same pattern
+        grouped[owner].append(IndexEntry(href=match.group(1), label=item.link_label, text=entry.text))
+    return IndexOutline(
+        headings=tuple(
+            IndexHeading(level=heading.level, text=heading.text, entries=tuple(entries))
+            for heading, entries in zip(headings, grouped, strict=True)
+        )
+    )
 
 
 def _parent_of(path: str) -> str:
@@ -363,14 +442,13 @@ def _plan(bundle: Bundle, directory: str, directories: frozenset[str]) -> _Plan:
     """Everything reconciling *directory* needs to know, and nothing rendered."""
     document = bundle.indexes.get(directory)
     body = document.body if document is not None else ""
-    items = parse_body(body).list_items if body else ()
+    items = _linked_items(parse_body(body)) if body else ()
 
     entries: list[_Entry] = []
     dead: list[_Entry] = []
     covered: set[str] = set()
     for item in items:
-        if item.link_target is None:
-            continue
+        assert item.link_target is not None  # `_linked_items` admits only linked items
         target = _resolve(item.link_target, source=_index_path(directory))
         if target is None:
             continue

@@ -176,10 +176,12 @@ def parse_rules(raw: object, *, source: str, attributes: frozenset[str]) -> tupl
     return tuple(parsed)
 
 
-def _matches(
+def rule_matches(
     constraints: Mapping[str, str | bool | tuple[str | bool, ...]],
     attributes: Mapping[str, AttributeValue],
 ) -> bool:
+    """Whether every constraint holds. An attribute that is absent or null never
+    matches, and a list constraint matches any one of its values."""
     for attribute, constraint in constraints.items():
         actual = attributes.get(attribute)
         if actual is None:
@@ -190,7 +192,8 @@ def _matches(
     return True
 
 
-def _packaged_rule(variant: str) -> DispatchRule:
+def packaged_rule(variant: str) -> DispatchRule:
+    """The packaged default for *variant* as a rule row: every profile field set, origin `packaged`."""
     entry = PACKAGED_PIPELINE[variant]
     index = tuple(PACKAGED_PIPELINE).index(variant)
     fields: dict[str, ProfileValue] = {
@@ -208,6 +211,11 @@ def _packaged_rule(variant: str) -> DispatchRule:
     )
 
 
+def packaged_rules() -> tuple[DispatchRule, ...]:
+    """Every packaged row, in `PACKAGED_PIPELINE` declaration order."""
+    return tuple(packaged_rule(variant) for variant in PACKAGED_PIPELINE)
+
+
 def resolve_dispatch(
     attributes: Mapping[str, AttributeValue], *, rules: tuple[DispatchRule, ...]
 ) -> DispatchResolution:
@@ -215,14 +223,14 @@ def resolve_dispatch(
     variant = attributes.get("variant")
     if not isinstance(variant, str) or variant not in PACKAGED_PIPELINE:
         raise WorkspaceError(f"dispatch attributes require a known variant; got {variant!r}")
-    packaged = _packaged_rule(variant)
+    packaged = packaged_rule(variant)
     values = dict(packaged.fields)
     origins = {
         field: FieldOrigin(packaged.origin, "explicit-null" if value is None else "set")
         for field, value in values.items()
     }
     for rule in rules:
-        if not _matches(rule.match, attributes):
+        if not rule_matches(rule.match, attributes):
             continue
         fields = rule.fields
         if "agent" in fields and fields["agent"] != values["agent"]:
@@ -261,6 +269,9 @@ __all__ = [
     "ProfileValue",
     "RuleOrigin",
     "dispatch_attributes",
+    "packaged_rule",
+    "packaged_rules",
     "parse_rules",
     "resolve_dispatch",
+    "rule_matches",
 ]

@@ -56,8 +56,12 @@ from okf_io.index import (
     EntryKind,
     EntryTarget,
     IndexChange,
+    IndexEntry,
+    IndexHeading,
+    IndexOutline,
     IndexUpdate,
 )
+from okf_io.index import outline as outline_index
 from okf_io.index import update as update_index
 from okf_io.links import Link, LinkGraph
 from okf_io.links import build as build_link_graph
@@ -88,7 +92,7 @@ from okf_io.models import (
 )
 from okf_io.validate import Finding, Report, Rule, RuleContext, Severity, validate
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 __all__ = [
     "Actor",
@@ -107,6 +111,9 @@ __all__ = [
     "Frontmatter",
     "Generated",
     "IndexChange",
+    "IndexEntry",
+    "IndexHeading",
+    "IndexOutline",
     "IndexUpdate",
     "Link",
     "LinkGraph",
@@ -139,6 +146,7 @@ __all__ = [
     "load",
     "load_bundle",
     "migrate",
+    "outline_index",
     "parse",
     "parse_log",
     "trust_tier",

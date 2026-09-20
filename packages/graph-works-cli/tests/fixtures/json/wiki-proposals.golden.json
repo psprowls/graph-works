@@ -5,6 +5,7 @@
     "title": "A",
     "description": "d",
     "page_status": "proposed",
+    "mode": "create",
     "sources": [
       {
         "resource": "sources/a.md"

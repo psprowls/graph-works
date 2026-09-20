@@ -22,15 +22,16 @@ results stub; `graph_works_core.archive.commands.run_archive` already composes
 left as a gap for a future item. Neither does `work_tracker_okf.cli`'s own
 `init`, which this item does not touch.
 
-Seven names are re-exported rather than defined here -- `DependencyEdge`,
+Eight names are re-exported rather than defined here -- `DependencyEdge`,
 `DependencyIssue`, `DependencyParse`, `parse_dependencies`, `Decision`,
-`ChildRollup` and `Transition`. `graph-works-cli` is forbidden to
+`ChildRollup`, `Transition` and `WorkItem`. `graph-works-cli` is forbidden to
 import `work_tracker_okf` at all (its own boundary test asserts it): `run_file`
 takes typed dependency edges, and the CLI's renderers destructure decisions,
 child rollups and routing transitions out of `NextResult`/`DecisionCommandResult`
 -- without the re-export the CLI could construct or type-annotate none of it.
-They are listed in `__all__` so the re-export is a contract rather than an
-accident of import order.
+`WorkItem` is re-exported because the board's list read returns it. They are
+listed in `__all__` so the re-export is a contract rather than an accident of
+import order.
 
 Front-door note: none of this module's symbols are re-exported through
 `graph_works_core` package root. `run_lint` would collide with the
@@ -102,7 +103,15 @@ from graph_works_core.workspace.decision_owner import (
     hold_for,
     locked_decision_owner,
 )
-from graph_works_core.workspace.dispatch import DispatchResolution, dispatch_attributes, resolve_dispatch
+from graph_works_core.workspace.dispatch import (
+    AttributeValue,
+    DispatchResolution,
+    DispatchRule,
+    dispatch_attributes,
+    packaged_rule,
+    resolve_dispatch,
+    rule_matches,
+)
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
@@ -290,6 +299,16 @@ def run_status(layout: WorkspaceLayout) -> StatusReport:
     """Count the active items and name the one worth resuming. Never writes."""
     items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
     return StatusReport(rollup=rollup(items), resume=select_resume(items))
+
+
+def run_work_list(layout: WorkspaceLayout) -> tuple[WorkItem, ...]:
+    """Every active work item, sorted by canonical path. Never writes.
+
+    Archived items are left out, the same population `rollup` counts, so a
+    board built from this agrees with `gw work status`.
+    """
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    return tuple(sorted((item for item in items if not item.archived), key=lambda item: item.path))
 
 
 @dataclass(frozen=True, slots=True)
@@ -524,40 +543,44 @@ def _stage_artifact(bundle_root: Path, item: WorkItem, result: RouteResult) -> A
     return ref
 
 
+def _load_rules(layout: WorkspaceLayout) -> tuple[DispatchRule, ...] | WorkspaceError:
+    """The workspace's dispatch rules, or the error loading them raised."""
+    try:
+        return load_dispatch_config(layout).rules
+    except WorkspaceError as exc:
+        return exc
+
+
+def _resolve_dispatch_with(
+    rules: tuple[DispatchRule, ...] | WorkspaceError, state: RouteState, computed: RouteResult
+) -> tuple[DispatchResolution | None, str | None]:
+    """Fold *computed*'s dispatch with *rules*; a load error or refused profile is the preflight."""
+    if computed.dispatch is None:
+        return None, None
+    if isinstance(rules, WorkspaceError):
+        return None, str(rules)
+    try:
+        return resolve_dispatch(dispatch_attributes(state, computed.dispatch), rules=rules), None
+    except WorkspaceError as exc:
+        return None, str(exc)
+
+
 def _resolve_next_dispatch(
     layout: WorkspaceLayout, state: RouteState, computed: RouteResult
 ) -> tuple[DispatchResolution | None, str | None]:
     if computed.dispatch is None:
         return None, None
-    try:
-        config = load_dispatch_config(layout)
-        return resolve_dispatch(dispatch_attributes(state, computed.dispatch), rules=config.rules), None
-    except WorkspaceError as exc:
-        return None, str(exc)
+    return _resolve_dispatch_with(_load_rules(layout), state, computed)
 
 
-def run_next(
-    layout: WorkspaceLayout,
-    path: str,
-    *,
-    descend: bool = False,
-    dry_run: bool = True,
-) -> NextResult:
-    """Plan what to dispatch for *path* and optionally descend to its leaf.
+def _plan_route(bundle: Bundle, items: Sequence[WorkItem], path: str, *, descend: bool) -> tuple[NextResult, WorkItem]:
+    """The dry-run routing preview for *path* over an already-loaded bundle.
 
-    Resolves the hold for *this path* specifically, not just "the owner has
-    some open decision" — the behavioral improvement over the standalone
-    `work_tracker_okf.cli`, which does not resolve decision holds from a real
-    ledger.
-
-    Dry-run is the default. An `effort=` override is not exposed here or by the
-    standalone CLI.
-
-    The single write is the canonical design-source repair and nothing else;
-    `test_run_next.py`'s confinement tests pin that.
+    Resolves no dispatch and writes nothing: the planned source
+    normalizations are applied to the in-memory items only, so routing sees
+    the repaired state without the page being touched. `run_next`,
+    `run_dispatch_explain` and `run_work_queue` all route through here.
     """
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    items = load_items(bundle)
     requested = next((item for item in items if item.path == path), None)
     if requested is None:
         detail = unreadable_detail(bundle, path)
@@ -594,20 +617,51 @@ def run_next(
         normalizations=normalizations,
         artifact=_stage_artifact(bundle.root, selected, computed),
     )
+    return preview, selected
+
+
+def _plan_next(layout: WorkspaceLayout, path: str, *, descend: bool) -> tuple[NextResult, Bundle, WorkItem]:
+    """Load the bundle once and plan *path* over it (`_plan_route`)."""
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    preview, selected = _plan_route(bundle, tuple(load_items(bundle)), path, descend=descend)
+    return preview, bundle, selected
+
+
+def run_next(
+    layout: WorkspaceLayout,
+    path: str,
+    *,
+    descend: bool = False,
+    dry_run: bool = True,
+) -> NextResult:
+    """Plan what to dispatch for *path* and optionally descend to its leaf.
+
+    Resolves the hold for *this path* specifically, not just "the owner has
+    some open decision" — the behavioral improvement over the standalone
+    `work_tracker_okf.cli`, which does not resolve decision holds from a real
+    ledger.
+
+    Dry-run is the default. An `effort=` override is not exposed here or by the
+    standalone CLI.
+
+    The single write is the canonical design-source repair and nothing else;
+    `test_run_next.py`'s confinement tests pin that.
+    """
+    preview, bundle, selected = _plan_next(layout, path, descend=descend)
     if dry_run:
-        resolution, preflight = _resolve_next_dispatch(layout, state, computed)
+        resolution, preflight = _resolve_next_dispatch(layout, preview.state, preview.route)
         return replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)
 
-    application, warnings = _apply_normalizations(layout, normalizations, bundle=bundle)
+    application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     persisted_items = load_items(persisted_bundle)
     persisted_state = state_for(
         persisted_items,
-        selected_path,
+        preview.selected_path,
         hold=hold_for(
             persisted_items,
             persisted_bundle.root,
-            selected_path,
+            preview.selected_path,
         ),
     )
     assert persisted_state is not None
@@ -624,6 +678,91 @@ def run_next(
         application=application,
         warnings=warnings,
     )
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchExplanation:
+    """Why *path* resolves to its dispatch profile, rule by rule.
+
+    `next_result` is the dry-run `NextResult` `/v1/work/next` projects, with
+    this read's resolution or preflight folded in, so an interface derives
+    blockers through the one function both use. With no dispatch -- a
+    blocked, terminal or gate item, or a profile the fold refuses --
+    `attributes`, `packaged_rule` and `resolution` are `None` and no rule is
+    marked matched.
+    """
+
+    path: str
+    attributes: Mapping[str, AttributeValue] | None
+    packaged_rule: DispatchRule | None
+    rules: tuple[tuple[DispatchRule, bool], ...]
+    resolution: DispatchResolution | None
+    next_result: NextResult
+
+
+def run_dispatch_explain(layout: WorkspaceLayout, path: str) -> DispatchExplanation:
+    """Explain `gw next`'s dispatch fold for *path*, without descending. Never writes.
+
+    Unlike `run_next`, a malformed dispatch file is not folded into a
+    preflight blocker: it raises `WorkspaceError`, because the rules are this
+    read's subject rather than an input to something else. A profile the fold
+    refuses (`DispatchProfileError`) is still the preflight `next` reports.
+    Raises `ValueError` for an unknown or unreadable *path*.
+    """
+    preview, _bundle, _selected = _plan_next(layout, path, descend=False)
+    rules = load_dispatch_config(layout).rules
+    unmatched = tuple((rule, False) for rule in rules)
+    dispatch = preview.route.dispatch
+    if dispatch is None:
+        return DispatchExplanation(path, None, None, unmatched, None, preview)
+    attributes = dispatch_attributes(preview.state, dispatch)
+    try:
+        resolution = resolve_dispatch(attributes, rules=rules)
+    except WorkspaceError as exc:
+        return DispatchExplanation(path, None, None, unmatched, None, replace(preview, dispatch_preflight=str(exc)))
+    return DispatchExplanation(
+        path=path,
+        attributes=attributes,
+        packaged_rule=packaged_rule(dispatch.variant),
+        rules=tuple((rule, rule_matches(rule.match, attributes)) for rule in rules),
+        resolution=resolution,
+        next_result=replace(preview, dispatch_resolution=resolution),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class QueueEntry:
+    """One active, non-terminal item and the dry-run `NextResult` for it.
+
+    `result` is what `run_next(layout, item.path, dry_run=True)` returns, so an
+    interface derives skill, mode and blockers through the functions
+    `/v1/work/next` uses.
+    """
+
+    item: WorkItem
+    result: NextResult
+
+
+def run_work_queue(layout: WorkspaceLayout) -> tuple[QueueEntry, ...]:
+    """Route every active, non-terminal item as a dry-run `run_next` would. Never writes.
+
+    The bundle and the dispatch config are each loaded once for the whole
+    queue. A malformed dispatch file is each dispatchable item's preflight
+    blocker, exactly as `next` reports it, rather than a failure of the read.
+    Epics waiting on their children are included with that blocker, so no
+    active item is silently dropped.
+    """
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    items = tuple(load_items(bundle))
+    rules = _load_rules(layout)
+    entries: list[QueueEntry] = []
+    for item in sorted(items, key=lambda candidate: candidate.path):
+        if item.archived or item.work_status in TERMINAL_STATUSES:
+            continue
+        preview, _selected = _plan_route(bundle, items, item.path, descend=False)
+        resolution, preflight = _resolve_dispatch_with(rules, preview.state, preview.route)
+        entries.append(QueueEntry(item, replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)))
+    return tuple(entries)
 
 
 def run_lint(
@@ -1074,6 +1213,43 @@ def run_decision_list(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class OpenDecision:
+    """One open ledger entry, the ledger it lives in, and the active items it holds."""
+
+    owner_path: str
+    ledger: Path
+    held: tuple[str, ...]
+    decision: Decision
+
+
+def run_open_decisions(layout: WorkspaceLayout) -> tuple[OpenDecision, ...]:
+    """Every `status: open` entry in the ledger of every active item's decision owner. Never writes.
+
+    Each owner's ledger is read once, and an absent ledger reads as empty, as
+    `gw work decision list` does. Archived items are dropped before any ledger
+    is read. `held` is the entry's `affects` paths that are active items whose
+    own decision owner is this ledger's owner, in `affects` order: exactly the
+    items `hold_for` would report this entry as holding.
+    """
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    items = tuple(load_items(bundle))
+    active = tuple(item for item in items if not item.archived)
+    active_paths = {item.path for item in active}
+    owners = sorted({owner for item in active if (owner := decision_owner(items, item.path)) is not None})
+    found: list[OpenDecision] = []
+    for owner in owners:
+        ledger = _decisions.ledger_ref(owner).path(bundle.root)
+        for entry in sorted(_decisions.load(ledger).entries, key=lambda decision: decision.number):
+            if entry.status != "open":
+                continue
+            held = tuple(
+                path for path in entry.affects if path in active_paths and decision_owner(items, path) == owner
+            )
+            found.append(OpenDecision(owner_path=owner, ledger=ledger, held=held, decision=entry))
+    return tuple(found)
+
+
 def run_decision_supersede(
     layout: WorkspaceLayout,
     path: str,
@@ -1215,32 +1391,40 @@ __all__ = [
     "DependencyEdge",
     "DependencyIssue",
     "DependencyParse",
+    "DispatchExplanation",
     "FilingRun",
     "IngestQueueReport",
     "NextApplication",
     "NextResult",
+    "OpenDecision",
     "OverturnApplication",
     "OverturnApplyError",
     "OverturnPlan",
     "OverturnResult",
     "PathMutationResult",
     "PendingIngest",
+    "QueueEntry",
     "RegenIndexesResult",
     "SourceNormalization",
     "StatusReport",
     "Transition",
+    "WorkItem",
     "parse_dependencies",
     "run_decision_add",
     "run_decision_answer",
     "run_decision_list",
     "run_decision_overturn",
     "run_decision_supersede",
+    "run_dispatch_explain",
     "run_file",
     "run_ingest_queue",
     "run_lint",
     "run_next",
+    "run_open_decisions",
     "run_regen_indexes",
     "run_release_adoption",
     "run_reparent",
     "run_status",
+    "run_work_list",
+    "run_work_queue",
 ]

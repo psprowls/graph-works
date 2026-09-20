@@ -40,12 +40,12 @@ from graph_works_cli.cli import app
 from graph_works_cli.util_cli import platform as platform_module
 from graph_works_cli.wiki_cli import drift as drift_module
 from graph_works_cli.wiki_cli import ingest as ingest_module
-from graph_works_cli.wiki_cli import proposals as proposals_module
 from graph_works_cli.wiki_cli import query as query_module
 from graph_works_cli.wiki_cli import scan as scan_module
 from graph_works_core.hooks import HooksResult
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.propagate_drift import Candidate, DriftBrief, PropagateResult, Target
+from graph_works_core.proposals import commands as proposals_commands
 from graph_works_core.query.commands import QueryBrief, QueryPageBrief, QueryResult
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult, ScanWorklist, worklist_payload
@@ -294,8 +294,8 @@ def proposals(ctx: Ctx) -> None:
         verified=({"by": "human", "at": "2026-09-01"},),
         malformed=None,
     )
-    ctx.mp.setattr(proposals_module, "load_bundle", lambda root: object())
-    ctx.mp.setattr(proposals_module, "list_proposals", lambda bundle, **kwargs: (proposal,))
+    ctx.mp.setattr(proposals_commands, "load_bundle", lambda root: SimpleNamespace(has_member=lambda _member: False))
+    ctx.mp.setattr(proposals_commands, "list_proposals", lambda bundle, **kwargs: (proposal,))
 
 
 def platform_report(ctx: Ctx) -> None:

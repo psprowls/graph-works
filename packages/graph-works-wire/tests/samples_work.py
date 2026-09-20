@@ -9,9 +9,9 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
-from graph_works_core.work.commands import ItemRead, ItemSource
+from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
-from graph_works_core.workspace.dispatch import resolve_dispatch
+from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
 from graph_works_wire import work
 
 BUNDLE = Path("/ws/okf")
@@ -316,6 +316,28 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: work.descent_payload(bare_next()),
     ),
     "work.dispatch_payload": (lambda: work.dispatch_payload(RESOLUTION),),
+    "work.dispatch_explain_payload": (
+        lambda: work.dispatch_explain_payload(
+            DispatchExplanation(
+                path="work/a",
+                attributes=MappingProxyType({"variant": "planned", "has_plan": True}),
+                packaged_rule=packaged_rule("planned"),
+                rules=((packaged_rule("planned"), False),),
+                resolution=RESOLUTION,
+                next_result=ns(route=ns(blockers=()), descent=None, dispatch_preflight=None),
+            )
+        ),
+        lambda: work.dispatch_explain_payload(
+            DispatchExplanation(
+                path="work/e",
+                attributes=None,
+                packaged_rule=None,
+                rules=(),
+                resolution=None,
+                next_result=ns(route=ns(blockers=("b",)), descent=None, dispatch_preflight=None),
+            )
+        ),
+    ),
     "work.advance_payload": (
         lambda: work.advance_payload(advance(applied=True), "work/a"),
         lambda: work.advance_payload(advance(applied=False), "work/a"),
@@ -354,6 +376,31 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: work.decision_payload(decision(planned=True)),
         lambda: work.decision_payload(decision(planned=False)),
     ),
+    "work.open_decisions_payload": (
+        lambda: work.open_decisions_payload(
+            [
+                ns(
+                    owner_path="work/e",
+                    ledger=Path("work/e/references/00-decisions.md"),
+                    held=("work/a",),
+                    decision=ns(
+                        id="D-001",
+                        number=1,
+                        question="q",
+                        status="open",
+                        affects=("work/a",),
+                        decided=None,
+                        supersedes=None,
+                        hold="park",
+                        phase="plan",
+                        checkpoint=None,
+                        prose="",
+                    ),
+                )
+            ]
+        ),
+        lambda: work.open_decisions_payload([]),
+    ),
     "work.overturn_payload": (
         lambda: work.overturn_payload(overturn(applied=True)),
         lambda: work.overturn_payload(overturn(applied=False)),
@@ -363,4 +410,40 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: work.orchestrate_payload(orchestrate(busy=False)),
     ),
     "work.reconcile_payload": (lambda: work.reconcile_payload(RECONCILE),),
+    "work.work_list_payload": (
+        lambda: work.work_list_payload(
+            [
+                ns(
+                    path="work/a",
+                    type="Bug",
+                    title="A",
+                    work_status="accepted",
+                    phase=None,
+                    effort=None,
+                    owner="pat",
+                    parent_path=None,
+                    updated="2026-09-01",
+                )
+            ]
+        ),
+        lambda: work.work_list_payload([]),
+    ),
+    "work.work_queue_payload": (
+        lambda: work.work_queue_payload(
+            [
+                ns(
+                    item=ns(title="A"),
+                    result=ns(
+                        selected_path="work/a",
+                        state=ns(type="Feature", phase="plan", work_status="open"),
+                        route=ns(reason="r", blockers=(), on_dispatch=ns(requires=("owner",))),
+                        descent=None,
+                        dispatch_resolution=RESOLUTION,
+                        dispatch_preflight=None,
+                    ),
+                )
+            ]
+        ),
+        lambda: work.work_queue_payload([]),
+    ),
 }

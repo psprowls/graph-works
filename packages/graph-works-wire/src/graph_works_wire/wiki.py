@@ -12,11 +12,12 @@ from doc_wiki_okf.ingest import DocumentBrief
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.lint import LintReport
 from graph_works_core.lint_drift.propagate_drift import DriftBrief, PropagateResult
-from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
+from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalListing, ProposalRefusal
 from graph_works_core.query.commands import QueryBrief, QueryResult
 from graph_works_core.scan.commands import ScanResult, StructuralSummary
 from graph_works_core.scan.scan_contract import ApplyResult
-from graph_works_core.wiki_page.commands import PageLink, PageRead
+from graph_works_core.wiki_page.citations import Citation, WikiCitations
+from graph_works_core.wiki_page.commands import PageLink, PageRead, TreeNode, WikiTree
 from graph_works_core.wiki_stats.commands import HubEntry, WikiStats
 from graph_works_core.workspace.init import WorkspaceInit, WorkspacePlan
 from okf_ext.proposals import ApplyResult as ProposalApplyResult
@@ -46,6 +47,28 @@ def page_payload(result: PageRead) -> dict[str, object]:
         "backlinks": list(result.backlinks),
         "broken": [_page_link(link) for link in result.broken],
         "parse_error": result.parse_error,
+        "refusal": result.refusal,
+    }
+
+
+def _citation(citation: Citation) -> dict[str, object]:
+    return {
+        "raw": citation.raw,
+        "line": citation.line,
+        "repo": citation.repo,
+        "path": citation.path,
+        "start": citation.start,
+        "end": citation.end,
+        "status": citation.status,
+        "candidates": [{"repo": c.repo, "path": c.path} for c in citation.candidates],
+    }
+
+
+def citations_payload(result: WikiCitations) -> dict[str, object]:
+    """`/v1/wiki/citations`: a page's code citations, body order, body-relative lines."""
+    return {
+        "id": result.id,
+        "citations": [_citation(citation) for citation in result.citations],
         "refusal": result.refusal,
     }
 
@@ -340,14 +363,19 @@ def stats_payload(stats: WikiStats) -> dict[str, object]:
     }
 
 
-def proposal_payload(proposal: Proposal) -> dict[str, object]:
-    """Render one parsed proposal without its internal identity fields."""
+def proposal_payload(proposal: Proposal, *, mode: str) -> dict[str, object]:
+    """Render one parsed proposal without its internal identity fields.
+
+    *mode* (`create` or `update`) is derived by core from the bundle, which
+    wire never reads.
+    """
     return {
         "member": proposal.member,
         "target": proposal.target,
         "title": proposal.title,
         "description": proposal.description,
         "page_status": proposal.page_status,
+        "mode": mode,
         "sources": [dict(source) for source in proposal.sources],
         "verified": [dict(entry) for entry in proposal.verified],
         "malformed": proposal.malformed,
@@ -415,3 +443,23 @@ def tag_inventory_payload(result: TagInventory) -> dict[str, object]:
 def tags_undeclared_payload(missing: Sequence[str]) -> dict[str, object]:
     """The gate's answer: every tag the vocabulary does not know."""
     return {"undeclared": list(missing)}
+
+
+def proposals_payload(listings: Sequence[ProposalListing]) -> list[dict[str, object]]:
+    """`gw wiki proposals --json` and `/v1/wiki/proposals`."""
+    return [proposal_payload(listing.proposal, mode=listing.mode) for listing in listings]
+
+
+def _tree_node(node: TreeNode) -> dict[str, object]:
+    return {
+        "heading": node.heading,
+        "level": node.level,
+        "generated": node.generated,
+        "pages": [{"id": page.id, "title": page.title, "type": page.type} for page in node.pages],
+        "sections": [_tree_node(child) for child in node.children],
+    }
+
+
+def wiki_tree_payload(tree: WikiTree) -> dict[str, object]:
+    """`/v1/wiki/tree`: the root index's sections, `###` nested under `##`."""
+    return {"sections": [_tree_node(node) for node in tree.sections]}

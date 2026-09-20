@@ -75,10 +75,10 @@ shell-syntax command string here.
 ### Module layout (three import-linter layers, per the package `__init__.py`)
 
 ```
-workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner
+workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner, repo_files
 agent_config/  layer 1 — conventions resolves injected paths; git_state probes repository identity/state through provenance; local resolves Claude local-file placement/permission gates; trust reads decisions; merge models policy; read exposes project/workspace reports
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
-ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/    layer 2, independent verticals
+ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/ : code_read/    layer 2, independent verticals
 ```
 
 Each layer-2 vertical owns one command entry point (`commands.py` when that
@@ -88,7 +88,9 @@ verticals except through `workspace/` — `orchestrate` is the exception,
 split across `commands.py`, `stage_advance.py` and `placement.py` for planning,
 stage advancement and observed placement; see "The dispatch seam" in the README.
 
-`wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; no cache.
+`wiki_page/` — `run_page_read`: one page with outlinks, backlinks and broken links; `run_wiki_citations` (`citations.py`): the page's `path:N` inline-code citations with body-relative lines, resolved against `workspace.repo_files`; no cache.
+
+`code_read/` — `run_code_excerpt`: a context window of one declared repository's tracked file; refusals are results. `workspace/repo_files.py` is the file set both share (tracked files minus ignore globs) and the confinement check.
 
 `proposals/` — plan-by-default proposal file/decide (`run_proposal_file`, `run_proposal_decide`); no clock.
 

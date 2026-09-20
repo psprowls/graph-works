@@ -10,12 +10,18 @@ from __future__ import annotations
 import json
 import math
 from dataclasses import asdict, dataclass, fields
+from datetime import date
 from enum import IntEnum
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 
 import pytest
 from config_io import ConfigEntry, Resolved
 from graph_works_core.hooks import HooksResult
+from graph_works_core.workspace.dispatch import DispatchRule, RuleOrigin, packaged_rules
+from graph_works_core.workspace.dispatch_config import DispatchRuleSet
+from graph_works_core.workspace.schema_read import SchemaRead
+from graph_works_wire import config
 from graph_works_wire.config import hooks_payload, projection_payload, resolved_list_payload, resolved_payload
 
 
@@ -179,3 +185,36 @@ def test_upstream_field_lists_are_the_ones_the_projections_spell_out() -> None:
         "write_hint",
     ]
     assert [f.name for f in fields(HooksResult)] == ["settings_path", "changed", "added", "removed", "skipped"]
+
+
+_RULE = DispatchRule(
+    match=MappingProxyType({"stage": ("plan", "execute"), "has_spec": True}),
+    fields=MappingProxyType({"model": "opus", "reasoning_effort": None}),
+    origin=RuleOrigin("/ws/dispatch.local.yaml", 2, "mine"),
+)
+
+
+def test_rule_payload_renders_list_constraints_as_lists_and_scalars_as_scalars() -> None:
+    assert config.rule_payload(_RULE) == {
+        "match": {"stage": ["plan", "execute"], "has_spec": True},
+        "fields": {"model": "opus", "reasoning_effort": None},
+        "origin": {"source": "/ws/dispatch.local.yaml", "index": 2, "name": "mine"},
+    }
+
+
+def test_dispatch_rules_payload() -> None:
+    packaged = packaged_rules()
+    payload = config.dispatch_rules_payload(DispatchRuleSet(("stage", "variant"), packaged, (_RULE,)))
+
+    assert payload["attributes"] == ["stage", "variant"]
+    assert payload["packaged"] == [config.rule_payload(row) for row in packaged]
+    assert payload["rules"] == [config.rule_payload(_RULE)]
+
+
+def test_schema_read_payload_is_json_safe() -> None:
+    read = SchemaRead(schemas={"Feature": {"type": "object"}}, sections={"_x": {"when": date(2026, 9, 19)}})
+
+    assert config.schema_read_payload(read) == {
+        "schemas": {"Feature": {"type": "object"}},
+        "sections": {"_x": {"when": "2026-09-19"}},
+    }

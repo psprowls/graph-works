@@ -18,6 +18,7 @@ from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, NoReturn, cast
+from urllib.parse import urlsplit
 
 import uvicorn
 from graph_works_core.workspace import discovery
@@ -69,10 +70,36 @@ def serve(app: object, sock: socket.socket) -> None:
     _Server(config).run(sockets=[sock])
 
 
+def parse_origin(value: str) -> str:
+    """An exact ``scheme://host[:port]`` origin, or an argparse error naming *value*."""
+    parts = urlsplit(value)
+    try:
+        port_ok = parts.port is None or parts.port > 0
+    except ValueError:
+        port_ok = False
+    if (
+        parts.scheme not in {"http", "https"}
+        or not parts.hostname
+        or parts.username is not None
+        or not port_ok
+        or value != f"{parts.scheme}://{parts.netloc}"
+    ):
+        raise argparse.ArgumentTypeError(f"invalid origin {value!r}: expected http(s)://host[:port]")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="gw-serve", description="Serve one graph-works workspace over loopback HTTP.")
     parser.add_argument("--workspace", default="", help="Workspace path (default: GRAPH_WORKS_DIR, then git walk-up).")
     parser.add_argument("--port", type=int, default=0, help="Port on 127.0.0.1 (default 0: ephemeral).")
+    parser.add_argument(
+        "--allow-origin",
+        action="append",
+        type=parse_origin,
+        default=[],
+        metavar="ORIGIN",
+        help="Answer CORS for this exact origin (repeatable), e.g. http://127.0.0.1:4780.",
+    )
     parser.add_argument("--describe", action="store_true", help="Print the route catalog as JSON and exit.")
     return parser
 
@@ -118,7 +145,7 @@ def main(argv: Sequence[str] | None = None, *, serve_fn: Callable[[object, socke
             # Uvicorn's graceful shutdown but does not subsequently terminate us.
             previous_term = signal.signal(signal.SIGTERM, lambda _signal, _frame: None)
             try:
-                serve_fn(build_app(context, token=token), sock)
+                serve_fn(build_app(context, token=token, allow_origins=frozenset(args.allow_origin)), sock)
             finally:
                 signal.signal(signal.SIGTERM, previous_term)
         finally:

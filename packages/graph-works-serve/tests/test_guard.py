@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from graph_works_serve.guard import check
+from graph_works_serve.guard import check, check_host, check_token
 
 TOKEN = "t0k3n-secret"
 PORT = 4321
@@ -100,3 +100,12 @@ def test_a_refusal_never_echoes_the_token() -> None:
     ):
         assert reply is not None
         assert TOKEN not in json.dumps(reply.body)
+
+
+def test_split_checks_compose_to_check() -> None:
+    assert check_host(OK_HOST, port=PORT) is None
+    assert check_token(_auth(TOKEN), b"", token=TOKEN) is None
+    host_refusal = check_host({"host": "evil"}, port=PORT)
+    assert host_refusal is not None and host_refusal.status == 403
+    token_refusal = check_token(OK_HOST, b"", token=TOKEN)
+    assert token_refusal is not None and token_refusal.status == 401

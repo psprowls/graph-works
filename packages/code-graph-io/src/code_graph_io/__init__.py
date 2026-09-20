@@ -5,8 +5,9 @@ The public access surface is the GraphReader / GraphStore handle pair and the
 open_reader / open_writer openers re-exported below.
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
+from code_graph_io._ignore import IgnoreSpec, compile_ignore
 from code_graph_io.handle import GraphReader, GraphStore, open_reader, open_writer
 from code_graph_io.queries import _VALID_KINDS as VALID_KINDS
 from code_graph_io.queries import (
@@ -50,6 +51,7 @@ __all__ = [
     "GraphNotInitializedError",
     "GraphReader",
     "GraphStore",
+    "IgnoreSpec",
     "ImportRecord",
     "ImporterRecord",
     "MatchRecord",
@@ -60,6 +62,7 @@ __all__ = [
     "SchemaMismatchError",
     "SuiteDescription",
     "SymbolDescription",
+    "compile_ignore",
     "extension_languages",
     "open_reader",
     "open_writer",

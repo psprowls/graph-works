@@ -10,7 +10,7 @@ The loopback HTTP sidecar. Band: interface (above `graph-works-core`, beside
 | `context` | `ServeContext` and framework-neutral `Reply`. |
 | `params` | `Param`, `ParamError`, and query/JSON body parsing. |
 | `errors` | exit/status mappings, error calls, and refusals. |
-| `guard` | pure ASGI token/Host middleware and its pure check. |
+| `guard` | pure ASGI token/Host/CORS middleware and its pure checks. |
 | `routes` | `RouteSpec`, handlers, and `ROUTES`. |
 | `mutations` | shared plan/apply engine, digest, clock seam, and lock. |
 | `mutation_specs` | concrete advance, archive, and proposal-decision adapters. |
@@ -23,10 +23,23 @@ The loopback HTTP sidecar. Band: interface (above `graph-works-core`, beside
 
 - `app.py` is the only Starlette import and `main.py` is the only uvicorn import; the boundary test enforces this.
 - Adding a route means adding a `RouteSpec` to `routes.ROUTES` and regenerating `tests/fixtures/routes.golden.json`.
+- `/v1/wiki/citations` has no event kind of its own: citations derive from a page, so a `page` event already means they may be stale. `/v1/code/excerpt` is not live -- the sidecar does not watch code repositories.
 - `graph-works-cli` is a dev-group dependency for twin tests only.
 - `next` is `dry_run=True`, so `normalized` is always `null`.
 - `discovery_file` uses POSIX `fcntl.flock` to serialize record replacement
   and ownership cleanup; native Windows remains outside its declared platform boundary.
+
+## Guard order and CORS
+
+`check_host` and `check_token` are separate because a CORS preflight has to be
+answered between them. Per request: the `Host` check, then — only when
+`gw-serve --allow-origin` supplied an allow-list — a token-free `204` for an
+allowed origin's preflight (`403` for any other origin's), then the token
+check. Every response to an allowed origin, refusals and the event stream
+included, carries `Access-Control-Allow-Origin` and `Vary: Origin`. With no
+allow-list none of that runs and no CORS header is ever sent. `check()` still
+composes both halves for callers that want one call. Origins match exactly
+(`scheme://host[:port]`).
 
 ## Change stream (`/v1/events`)
 

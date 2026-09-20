@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import subprocess
 import sys
 from pathlib import Path
 
@@ -235,3 +236,43 @@ def stale_graph_dir(tmp_path: Path) -> Path:
     finally:
         conn.close()
     return directory
+
+
+@pytest.fixture
+def git_repo():
+    """Factory: a real git work tree at *root*, *files* staged (tracked), *untracked* written after."""
+
+    def make(root: Path, files: dict[str, str | bytes], *, untracked: dict[str, str] | None = None) -> Path:
+        root.mkdir(parents=True, exist_ok=True)
+        for rel, content in files.items():
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if isinstance(content, bytes):
+                target.write_bytes(content)
+            else:
+                target.write_text(content, encoding="utf-8", newline="\n")
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", "-A"], cwd=root, check=True)
+        for rel, content in (untracked or {}).items():
+            (root / rel).write_text(content, encoding="utf-8", newline="\n")
+        return root
+
+    return make
+
+
+@pytest.fixture
+def declare_repos():
+    """Factory: replace the manifest's `repositories:`/`ignore:` tail with *repos* and a global *ignore*."""
+
+    def declare(layout, repos: dict[str, tuple[Path, list[str]]], ignore: list[str] | None = None) -> None:
+        head = layout.manifest_path.read_text(encoding="utf-8").split("repositories:")[0]
+        lines = [head.rstrip("\n"), "repositories:"]
+        for name, (path, own) in repos.items():
+            lines += [f'  "{name}":', f'    path: "{path.as_posix()}"']
+            if own:
+                lines += ["    ignore:", *(f'      - "{glob}"' for glob in own)]
+        if ignore:
+            lines += ["ignore:", *(f'  - "{glob}"' for glob in ignore)]
+        layout.manifest_path.write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
+
+    return declare

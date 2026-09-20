@@ -149,3 +149,50 @@ def test_another_pids_file_survives_exit(workspace: WorkspaceLayout) -> None:
 
     serve_main.main(["--workspace", str(workspace.root)], serve_fn=hijack)
     assert path.exists()
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "localhost:5173",
+        "ftp://a.b",
+        "http://a.b/",
+        "http://a.b/path",
+        "http://a.b?q=1",
+        "http://a.b#f",
+        "http://",
+        "http://u@a.b",
+        "http://a.b:99999",
+    ],
+)
+def test_a_malformed_origin_exits_2_naming_it(bad: str, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit) as exc:
+        serve_main.main(["--describe", "--allow-origin", bad])
+    assert exc.value.code == 2
+    assert repr(bad) in capsys.readouterr().err
+
+
+def test_allow_origin_is_repeatable_and_reaches_the_guard(workspace: WorkspaceLayout) -> None:
+    seen: list[object] = []
+
+    def fake_serve(app: object, _sock: socket.socket) -> None:
+        seen.append(app)
+
+    argv = [
+        "--workspace",
+        str(workspace.root),
+        "--allow-origin",
+        "http://127.0.0.1:4780",
+        "--allow-origin",
+        "http://localhost:5173",
+    ]
+    assert serve_main.main(argv, serve_fn=fake_serve) == 0
+
+    (middleware,) = seen[0].user_middleware  # type: ignore[attr-defined]
+    assert middleware.kwargs["allow_origins"] == frozenset({"http://127.0.0.1:4780", "http://localhost:5173"})
+
+
+def test_no_flag_means_an_empty_allow_list(workspace: WorkspaceLayout) -> None:
+    seen: list[object] = []
+    assert serve_main.main(["--workspace", str(workspace.root)], serve_fn=lambda app, _sock: seen.append(app)) == 0
+    assert seen[0].user_middleware[0].kwargs["allow_origins"] == frozenset()  # type: ignore[attr-defined]

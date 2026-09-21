@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$ref": "_base-diataxis.schema.json",
+  "unevaluatedProperties": false,
   "properties": {
     "type": { "const": "Tutorial" },
     "prerequisites": { "type": "array", "items": { "type": "string" } },

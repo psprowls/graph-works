@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$ref": "_base.schema.json",
+  "unevaluatedProperties": false,
   "properties": { "type": { "const": "TechDebt" } },
   "x-okf-directory": "work/"
 }

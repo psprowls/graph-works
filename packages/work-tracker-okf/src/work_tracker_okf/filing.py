@@ -41,6 +41,7 @@ FilingRefusal = Literal[
     "invalid-dependency",
     "invalid-effort",
     "invalid-blast-radius",
+    "invalid-release-field",
 ]
 
 _NAME_RE = re.compile(r"[^a-z0-9]+")
@@ -224,6 +225,19 @@ def plan_filing(root: Path, items: Sequence[WorkItem], seed: FilingSeed, section
             root / "work",
             "invalid-blast-radius",
             f"invalid blast radius {seed.blast_radius!r}",
+        )
+
+    release_only = [
+        name for name, value in (("version", seed.version), ("target_date", seed.target_date)) if value is not None
+    ]
+    if release_only and seed.type != "Release":
+        return _refused(
+            seed,
+            "",
+            root,
+            root / "work",
+            "invalid-release-field",
+            f"{' and '.join(release_only)} apply only to a Release, not to a {seed.type}",
         )
 
     by_path = path_index(items)

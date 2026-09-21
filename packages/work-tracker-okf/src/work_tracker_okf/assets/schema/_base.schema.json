@@ -2,7 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "required": ["type", "title", "description", "work_status", "opened", "updated"],
-  "additionalProperties": true,
   "properties": {
     "type": { "type": "string", "minLength": 1 },
     "title": { "type": "string", "minLength": 1 },

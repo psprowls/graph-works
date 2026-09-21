@@ -116,6 +116,13 @@ def test_optional_release_and_common_fields_are_written(vault: Path, section_set
     assert "workflow" + "_status" not in plan.frontmatter
 
 
+@pytest.mark.parametrize("change", [{"version": "1.2.3"}, {"target_date": date(2026, 9, 1)}])
+def test_version_and_target_date_are_refused_for_anything_but_a_release(change, vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), replace(seed(type="Feature"), **change), section_set)
+    assert plan.refusal == "invalid-release-field"
+    assert "apply only to a Release" in plan.detail
+
+
 def test_optional_empty_fields_are_omitted(vault: Path, section_set) -> None:
     plan = plan_filing(vault, (), seed(affects=(), tags=()), section_set)
     for key in ("name", "parent", "parent_path", "depends_on", "sources", "version", "target_date"):

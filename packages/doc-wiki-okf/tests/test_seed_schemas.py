@@ -135,10 +135,10 @@ def test_source_type_is_gone() -> None:
     assert "source_type" not in _schema_set().schemas["Source"]["properties"]
 
 
-def test_source_admits_the_vault_keys_it_does_not_declare() -> None:
-    """`additionalProperties: true` keeps the 18 `last_sync_commit` skill pages
-    and the 8 `source_url` pages valid without declaring vault keys."""
-    assert _schema_set().schemas["Source"]["additionalProperties"] is True
+def test_source_rejects_the_keys_it_does_not_declare() -> None:
+    """The graph-wiki-era vault keys (`last_sync_commit`, `source_url`, `summary`,
+    `source_type`) are retired, so `Source` is strict: an undeclared key is a finding."""
+    assert _schema_set().schemas["Source"]["additionalProperties"] is False
 
 
 def test_source_path_is_the_one_declared_member_property() -> None:

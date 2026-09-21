@@ -60,8 +60,6 @@ def test_run_file_accepts_typed_edges_and_all_metadata(tmp_path) -> None:
         on=TODAY,
         effort="medium",
         blast_radius="package",
-        version="1.2.0",
-        target_date=date(2026, 12, 1),
         owner="pat",
         parent_path=EPIC,
         depends_on=(DependencyEdge(SIBLING, blocks="plan", needs="design"),),
@@ -69,6 +67,21 @@ def test_run_file_accepts_typed_edges_and_all_metadata(tmp_path) -> None:
         tags=("compat",),
     )
     assert result.plan.filing.frontmatter["owner"] == "pat"
+    assert result.application is None
+
+
+def test_run_file_accepts_release_only_metadata_for_a_release(tmp_path) -> None:
+    layout, config = seeded_workspace(tmp_path)
+    result = work.run_file(
+        layout,
+        config,
+        type="Release",
+        title="Q4 release",
+        description="d",
+        on=TODAY,
+        version="1.2.0",
+        target_date=date(2026, 12, 1),
+    )
     assert result.plan.filing.frontmatter["version"] == "1.2.0"
     assert result.plan.filing.frontmatter["target_date"] == date(2026, 12, 1)
     assert result.application is None

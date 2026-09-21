@@ -1,6 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$ref": "_base-diataxis.schema.json",
+  "unevaluatedProperties": false,
   "properties": {
     "type": { "const": "Reference" },
     "applies_to": { "type": "array", "items": { "type": "string" } }

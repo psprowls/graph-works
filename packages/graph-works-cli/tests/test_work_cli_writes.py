@@ -48,10 +48,6 @@ def test_file_writes_a_date_free_canonical_path_and_explicit_json(workspace: Pat
             "d",
             "--name",
             "short name",
-            "--version",
-            "v2",
-            "--target-date",
-            "2026-09-01",
             "--workspace",
             str(workspace),
             "--json",
@@ -843,3 +839,27 @@ def test_record_placement_maps_core_exceptions(
         assert doc["error"]["payload"] is None
     else:
         assert result.stdout == ""
+
+
+def test_a_release_only_field_on_another_kind_is_refused(workspace: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "T",
+            "--kind",
+            "Feature",
+            "--summary",
+            "d",
+            "--version",
+            "v2",
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == exit_codes.GENERIC
+    doc = json.loads(result.stdout)
+    assert doc["error"]["payload"]["refusal"] == "invalid-release-field"

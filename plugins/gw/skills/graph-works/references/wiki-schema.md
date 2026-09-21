@@ -18,12 +18,14 @@ Ingest reads material directly from any filesystem path; there is no staging inb
 <repo>/.works/                      # workspace root
 ├── workspace.yaml                  # workspace manifest (owned by gw)
 ├── .gw/                            # control plane
+│   ├── schema/                     # per-type JSON Schema — authoritative for frontmatter
+│   ├── sections/                   # per-type required headings and placeholders
+│   ├── tags.yaml                   # tag vocabulary
 │   ├── cache/                      # nested under .gw/, not a top-level sibling
 │   └── worktrees/                  # nested under .gw/, not a top-level sibling
 └── okf/                            # bundle root; Obsidian vault root
     ├── index.md                    # content catalog — updated every ingest/scan
     ├── log.md                      # append-only timeline
-    ├── tags.yaml
     ├── work/                       # unified bugs, tech debt, features, initiatives, spikes
     │   └── _archive/                # terminal-status items; consider archiving when status is terminal
     ├── repositories/<repo>/
@@ -35,7 +37,6 @@ Ingest reads material directly from any filesystem path; there is no staging inb
     │   └── files/<source-path>.md
     ├── dependencies/<ecosystem>/<name>.md   # sibling root, NOT nested under repositories/
     ├── tutorials/ how-tos/ references/ explanations/   # Diátaxis lanes
-    ├── concepts/                   # cross-cutting technical concepts; optional kind: concept | pattern | architecture
     ├── sources/                    # one summary page per ingested source
     │   └── references/             # copies of ingested material (the ingest flow copies here; originals are never moved)
     ├── adrs/                       # architecture decision records
@@ -58,90 +59,106 @@ There is no `entities/` folder and no filename-prefix scheme.
 2. **Ingested source material is never edited.** The ingest flow (either `gw ingest`'s `--backend bedrock`/`vercel` pipeline, or the `claude_code`-mode `ingest` skill per `/gw:ingest`) copies material into `<workspace>/okf/sources/references/` — the original file, wherever it lives, is left untouched. There is no staging inbox and no post-ingest move.
 3. **All curated writes go under `<workspace>/okf/`.** Work items use canonical paths below `<workspace>/okf/work/`. No exceptions.
 4. **Every scan or ingest updates ≥3 files:** the touched page(s), `index.md`, `log.md`. A typical ingest touches 5-15.
-5. **Every wiki page carries YAML frontmatter.** Without frontmatter, index maintenance and `lint_wiki.py` can't see it.
+5. **Every wiki page carries YAML frontmatter.** Without frontmatter, index maintenance and `gw wiki lint` can't see it.
 
-## Required page frontmatter
+## Frontmatter
+
+Every page opens with YAML frontmatter, and `type:` selects the contract. The schemas
+installed at `.gw/schema/<Type>.schema.json` are authoritative for keys, enums, and
+required fields; `.gw/sections/<Type>.yaml` for required headings and placeholders.
+Read those rather than copying another page's shape.
+
+| Lane | `type` | Directory | Required keys | Written by |
+|---|---|---|---|---|
+| Entities | `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | `repositories/<repo>/…` | `type`, `title`, `resource` | `gw scan` |
+| Dependencies | `Dependency` | `dependencies/<ecosystem>/` | `type`, `title`, `resource`, `ecosystem` | `gw scan` |
+| Diátaxis | `Explanation`, `Reference`, `HowTo`, `Tutorial` | `explanations/`, `references/`, `how-tos/`, `tutorials/` | `type`, `title`, `description` | authors, via proposals |
+| Sources | `Source` | `sources/` | `type`, `title`, `description`, `source_path` | `gw ingest` |
+| ADRs | `Adr` | `adrs/` | `type`, `title`, `description`, `category`, `adr_id`, `status`, `decision_date` | authors |
+| Proposals | `Proposal` | `proposals/` | `type`, `title`, `target`, `page_status`, `sources` | `gw ingest`, `gw wiki proposal` |
+| Work | `Release`, `Epic`, `Feature`, `Bug`, `TechDebt`, `TestGap`, `Spike` | `work/` | `type`, `title`, `description`, `work_status`, `opened`, `updated`; plus `effort` and `affects` unless `status: draft` | `gw work` |
+
+Minimal example (a curated page):
 
 ```yaml
 ---
-title: common-aws-node-ts
-category: package            # see enum below
-summary: Lambda handlers, middleware, and AWS SDK client wrappers shared across all -aws-node-ts packages
-tags: [aws, lambda, middleware]
-sources: 2                   # optional — number of sources referencing this page
+type: Explanation
+title: Global context
+description: Per-request context object threaded through every Lambda handler.
+tags: [middleware, request-handling]
 updated: 2026-04-20
 ---
 ```
 
-Allowed `category` values: `app`, `package`, `concept`, `dependency`, `work`, `source`, `adr`. For concept pages, an optional `kind` field discriminates: `concept` (default), `pattern`, or `architecture` (for high-level syntheses — build system, module graph, request flow, deployment topology).
+**Retired keys.** The graph-wiki-era keys `category` (except on `Adr`, whose schema
+still requires it), `summary`, `kind`, `uri`, `graph_name`, `last_scan_at`,
+`source_type`, `last_sync_commit`, `last_sync_at`, `packages`, `spec_doc`, `plan_doc`,
+and `phase_started_commit` are not in any schema and nothing writes them. Older pages
+still carry some; do not copy them onto new pages.
+
+`tags:` draws from the vocabulary in `.gw/tags.yaml`. The work lane does not enforce
+it; curated lanes do.
 
 ## Category-specific frontmatter
 
 ### Entity pages
 
-Entity pages live under `<workspace>/okf/repositories/<repo>/` (one folder per kind — `packages/`, `apps/`, `agent-plugins/`, `test-suites/` — plus the repository's own `repository.md`), except `dependency` pages, which live at the sibling root `<workspace>/okf/dependencies/<ecosystem>/<name>.md`. All entity frontmatter is split into two sets:
+Entity pages live under `<workspace>/okf/repositories/<repo>/` (one folder per kind — `packages/`, `apps/`, `agent-plugins/`, `test-suites/`, `files/` — plus the repository's own `repository.md`), except `dependency` pages, which live at the sibling root `<workspace>/okf/dependencies/<ecosystem>/<name>.md`.
 
-**Scanner-owned keys** (replaced every scan — do not hand-edit these):
+Identity keys — `type`, `title`, `resource` — are on every page. `description` and
+`tags` are optional. Each type also has **scanner-owned keys**, listed under
+`frontmatter.owned` in `.gw/sections/<Type>.yaml` and rewritten every scan, and
+**provenance keys**, listed under `frontmatter.provenance`. Do not hand-edit either;
+keys a declaration does not list are left alone.
 
-| Key | Applies to | Notes |
-|---|---|---|
-| `uri` | all | graph node URI |
-| `kind` | all | `repository \| package \| app \| agent_plugin \| dependency \| test_suite` |
-| `graph_name` | all | name of the graph that sourced this entity |
-| `last_scan_at` | all | YYYY-MM-DD of last scan |
-| `depends_on` | package, app | list of dependency names |
-| `test_suites` | package, app | associated test suite names |
-| `entry_points` | package, app | detected entry-point paths |
-| `language` | package, app | primary language string |
-| `version` | package, app | version string from manifest |
-| `app_kind` | app | app sub-type (web, mobile, cli, …) |
-| `app_signals` | app | detected signals (framework, deployment, …) |
-| `tested_packages` | test_suite | packages the suite covers |
-| `suite_kind` | test_suite | `unit \| integration \| other` |
-| `file_count` | test_suite | number of test files detected |
-| `ecosystem` | dependency | `npm \| pypi \| cargo \| go \| …` |
-| `used_by` | dependency | packages that declare this dependency |
-| `versions_in_use` | dependency | version strings found across manifests |
-| `package_count` | repository | total workspace packages detected |
+| Type | Scanner-owned keys |
+|---|---|
+| `Repository` | `package_count` |
+| `Package` | `language`, `version`, `depends_on`, `test_suites`, `entry_points`, `used_by`, `versions_in_use` |
+| `App` | `package` |
+| `AgentPlugin` | `ecosystem`, `version`, `package` |
+| `TestSuite` | `tested_packages`, `suite_kind`, `file_count` |
+| `File` | `language`, `package`, `role_flags` |
+| `Dependency` | `ecosystem`, `implemented_by`, `used_by`, `versions_in_use` |
 
-**Human-preserved keys** (never overwritten by the scanner):
-
-`status`, `last_reviewed`, `owner`, `notes`, and any key outside the scanner-owned set above.
-
-**`summary`** is fill-when-empty: the scanner writes it only if the field is absent or empty. Once you write a summary, the scanner leaves it alone.
+Provenance keys, all scanner-written: `generated` (`by`, `at`), `last_updated_commit`
+(the commit at the last structural pass), `tokens`, and — on pages with prose
+sections — `prose_refreshed_commit` (the SHA the prose was last refreshed at) and
+`prose_refresh_attempts` (the retry counter for a declined refresh; cleared on
+success). `Dependency` pages carry only the counter; `File` pages carry neither.
 
 Minimal example (package):
 
 ```yaml
 ---
-uri: pkg:org/repo/common-aws-node-ts
-kind: package
-graph_name: my-repo
-last_scan_at: 2026-06-01
+type: Package
+title: common-aws-node-ts
+resource: pkg:org/repo/common-aws-node-ts
+language: typescript
+version: "1.0.0"
 depends_on: []
 test_suites: []
 entry_points: []
-language: typescript
-version: "1.0.0"
+generated:
+  by: code-wiki-okf/0.5.0
+  at: '2026-09-09T21:37:46.643280+00:00'
+last_updated_commit: 3ff9f663
 ---
 ```
 
-Entity pages carry no `title` or `updated` key — the H1 carries the display name, and `last_scan_at` is the freshness signal.
+### Diátaxis pages (`Explanation`, `Reference`, `HowTo`, `Tutorial`)
 
-### Concept pages
+All four share `type`, `title`, `description`, and optionally `status`
+(`draft | stable | deprecated`), `updated`, `tags`, and `sources`. `Reference` adds
+`applies_to`; `HowTo` and `Tutorial` add `prerequisites` and `outcome`.
 
-```yaml
----
-title: Global Context
-category: concept
-summary: Per-request context object threaded through every Lambda handler
-tags: [middleware, request-handling]
-sources: 0
-updated: 2026-04-20
----
-```
-
-Concepts are cross-cutting technical patterns — naming conventions, middleware shapes, contracts that span packages. A concept page is a one-paragraph definition, where the pattern appears in the code, and links to packages, dependencies, ADRs, and sources that motivate it. Comparisons live here too: `concepts/<a>-vs-<b>.md` for two-way, `concepts/<topic>-options.md` for n-way.
+An `Explanation` is a cross-cutting technical concept — a naming convention,
+middleware shape, or contract that spans packages — or a high-level synthesis
+(layers, components, flows). It is a one-paragraph definition, where the idea appears
+in the code, and links to the packages, dependencies, ADRs, and sources that motivate
+it. Comparisons live here too: `explanations/<a>-vs-<b>.md` for two-way,
+`explanations/<topic>-options.md` for n-way. The old `kind: concept | pattern |
+architecture` discriminator is gone; use `tags:` (for example `architecture`).
 
 ### Dependency pages
 
@@ -234,53 +251,46 @@ reconciled by `gw work regen-index`; there is no JSON sidecar.
 
 ### Source pages
 
+`gw ingest` writes one summary page per ingested source, plus a verbatim copy of the
+material under `sources/references/`. It stamps `title`, `description`, `source_kind`,
+`source_path`, `origin`, and `ingested`; the optional keys below come from the ingest
+brief. `updated` is declared but not stamped: set it when you touch the page, as
+on every other lane.
+
 ```yaml
 ---
+type: Source
 title: "Auth Migration Spec"
-category: source
-summary: Spec for moving from session tokens to JWTs; addresses compliance flags
-source_path: sources/references/auth-migration.md   # ingest's copy destination: sources/references/<YYYY-MM>-<slug>.<ext>, always — no in-repo-doc exception
-source_type: spec                # spec | article | pr | ticket | transcript | example | doc | note
+description: Spec for moving from session tokens to JWTs; addresses compliance flags.
+source_kind: spec              # spec | article | ticket | skill | doc | transcript | code-review
+source_path: sources/references/2026-04-auth-migration-spec.md   # the copy: sources/references/<YYYY-MM>-<slug>.<ext>, always
+origin: /abs/path/to/auth-migration.md   # where the material was read from; never edited
 source_date: 2026-04-01
-last_sync_commit:                # set only for in-repo docs (source_type: doc) — full SHA at last ingest, used by /gw:lint to detect changes
-last_sync_at:                    # YYYY-MM-DD when sync state was recorded
-authors: [@psprowls]
 ingested: 2026-04-20
 updated: 2026-04-20
+authors: ["@psprowls"]
+entity_uri: repo:acme/web      # optional; omit the key rather than writing null
+tags: [auth]
 ---
 ```
 
-In-repo docs (an in-repo `.md` passed to `/gw:ingest` by repo-relative path) use `source_type: doc`, set `source_path` to the repo-relative path, and record `last_sync_commit` and `last_sync_at`. Only `.md` is supported.
-
-### Architecture pages (concept pages with `kind: architecture`)
-
-High-level syntheses — the layers, components, and flows that span multiple packages — live in `concepts/` as concept pages with `kind: architecture`. The `## Thesis` body section is the load-bearing part; the rest (layers, diagrams, key concepts, decisions) supports the thesis and rotates as the codebase changes. `packages:` lists the workspaces the synthesis reasons about so lint can flag when a referenced package goes away.
-
-```yaml
----
-title: Request flow
-category: concept
-kind: architecture
-summary: How a request flows from edge → API → service layer → datastore
-packages: [web-next-ts, common-aws-node-ts, location-aws-node-ts]
-tags: [architecture, request-flow]
-sources: 0
-updated: 2026-04-20
----
-```
+Drift on an in-repo doc is a diff against its `sources/references/` copy; there is no
+`last_sync_commit` stamp any more.
 
 ### ADR pages
 
 ```yaml
 ---
+type: Adr
 title: "ADR-0012: Move to ESM"
-category: adr
-adr_id: 0012
-status: accepted                 # proposed | accepted | deprecated | superseded
+description: One-sentence statement of the decision.
+category: adr                    # required by the Adr schema; always `adr`
+adr_id: "0012"                   # four digits, quoted
+status: stable                   # draft | stable | deprecated
 decision_date: 2026-02-14
-deciders: [@psprowls]
-supersedes: null                 # ADR ID this replaces, if any
-superseded_by: null              # ADR ID that replaces this, if any
+deciders: ["human:psprowls"]
+supersedes: null                 # ADR this replaces, if any
+superseded_by: null              # ADR that replaces this, if any
 tags: [build-system, modules]
 updated: 2026-04-20
 ---
@@ -301,10 +311,10 @@ updated: 2026-04-20
   | `dependency` | `dependencies/<ecosystem>/<name>.md` (sibling root, not nested) | `dependencies/npm/react.md` |
   | `test_suite` | `repositories/<repo>/test-suites/<name>.md` | `repositories/my-monorepo/test-suites/common-aws-node-ts.md` |
 
-- **Concepts:** `concepts/<concept-slug>.md` — e.g. `concepts/global-context.md`. Comparisons live here too: `concepts/<a>-vs-<b>.md` for two-way, `concepts/<topic>-options.md` for n-way.
+- **Explanations:** `explanations/<slug>.md` — e.g. `explanations/global-context.md`. Comparisons live here too: `explanations/<a>-vs-<b>.md` for two-way, `explanations/<topic>-options.md` for n-way.
 - **Sources:** `sources/<YYYY-MM>-<short-slug>.md` — e.g. `sources/2026-04-auth-migration-spec.md`
 - **ADRs:** `adrs/<NNNN>-<slug>.md` — e.g. `adrs/0012-move-to-esm.md`. Zero-padded ID, monotonically increasing.
-- **Architecture syntheses:** `concepts/<topic>.md` with `kind: architecture` — e.g. `concepts/request-flow.md`
+- **Architecture syntheses:** `explanations/<topic>.md` tagged `architecture` — e.g. `explanations/request-flow.md`
 - **Dependencies:** `dependencies/<ecosystem>/<name>.md` — use the registry name (`dependencies/npm/react.md`, `dependencies/npm/react-native-maps.md`). For scoped npm packages, replace `/` with `__` (`dependencies/npm/@tanstack__react-query.md`). Service pages use a slug derived from the service name, under the `dependencies/` root (`dependencies/mongodb-atlas.md`).
 - **Work:** `<work-path>.md`, where `<work-path>` is an extensionless canonical
   path such as `work/release-cutover/children/epic-migration/children/feature-parser`.
@@ -312,7 +322,7 @@ updated: 2026-04-20
 
 ## Taxonomies
 
-The categorical vocabularies that frontmatter fields draw from. These apply across multiple categories (mainly `work`); per-category enums (e.g. ADR `status`, dependency `kind`) live with the category above.
+The categorical vocabularies that frontmatter fields draw from. These apply across multiple categories (mainly `work`); per-type enums (e.g. ADR `status`, Source `source_kind`) live with the type above.
 
 ### `type` (work)
 
@@ -332,10 +342,6 @@ Security and performance are contributed tags (`security`, `perf`) on the
 appropriate work type, not additional types. Schema/structure problems are
 normally `type: Bug` plus a `data-model` tag; wiki-to-code drift is normally
 `type: TechDebt` plus a `doc-drift` tag.
-
-### `kind` (dependency)
-
-Two values: `package | service`. Frontmatter shape diverges per kind — see [Dependency pages](#dependency-pages) above.
 
 ### Effort (work)
 
@@ -363,6 +369,7 @@ Blast-radius values: `file | package | domain | system`. **Practical impact, not
 | `owner` | every `in-progress` item | all types | — |
 | `effort` | every stable document | all types | — |
 | `blast_radius` | none | all types | — |
+| `released_at` | `Release`, to resolve it | all types (declared in the base work schema; `gw work advance` stamps it) | — |
 
 State-conditional fields (`resolved_in`, `mitigation`, `superseded_by`, `rationale`) are populated only in their corresponding state. Lint enforces.
 
@@ -411,7 +418,7 @@ Use root-absolute markdown links — `okf_io.LinkGraph` parses `[text](/path.md)
 [common-aws-node-ts](/repositories/<repo>/packages/common-aws-node-ts.md)       # full path, display matches the stem
 ```
 
-Always use the full `/repositories/<repo>/<kind-folder>/<name>.md` path for entity pages — there is no stem-only resolution. Use full root-absolute paths for non-entity pages (concepts, sources, ADRs, etc.) too.
+Always use the full `/repositories/<repo>/<kind-folder>/<name>.md` path for entity pages — there is no stem-only resolution. Use full root-absolute paths for non-entity pages (explanations, sources, ADRs, etc.) too.
 
 Code references — when citing actual code — use a plain code reference (not a link):
 
@@ -421,17 +428,17 @@ See `packages/common-aws-node-ts/src/handlers/baseApiHandler.ts:42`
 
 ## Cross-reference rules
 
-- **Every package mentioned on an entity or concept page must be a link** to `/repositories/<repo>/packages/<name>.md`.
-- **Every ADR referenced in entity/concept pages must be a link** to `/adrs/<id>-<slug>.md`.
+- **Every package mentioned on an entity or explanation page must be a link** to `/repositories/<repo>/packages/<name>.md`.
+- **Every ADR referenced in entity or explanation pages must be a link** to `/adrs/<id>-<slug>.md`.
 - **Every claim on an entity page cites** either a source page (`[…](/sources/xxx.md)`) or a code path (backticked, with file:line).
 - **Contradictions get flagged inline** with a `> ⚠️ Contradiction:` callout naming the conflicting sources or code paths.
-- **Concept pages with `kind: architecture` link back to every entity and ADR they draw on.**
+- **Architecture explanations link back to every entity and ADR they draw on.**
 
 ## Index discipline
 
 `<workspace>/okf/index.md` is regenerated by command-layer scan/ingest flows. For manual plugin edits, update the relevant section inline.
 
-The index groups pages by category, alphabetized by title. Each entry is one line with a wikilink, summary, and optional metadata.
+The index groups pages by lane, alphabetized by title. Each entry is one line with a root-absolute markdown link, summary, and optional metadata.
 
 ## Log discipline
 
@@ -454,11 +461,11 @@ not operations.
   repositories/my-monorepo/packages/timeline-native-ts.md. No renames or deletions.
 
 - **ingest** Auth Migration Spec
-  Added sources/2026-04-auth-migration-spec.md. Updated concepts/global-context,
+  Added sources/2026-04-auth-migration-spec.md. Updated explanations/global-context,
   repositories/my-monorepo/packages/shared-aws-node-ts.md,
   repositories/my-monorepo/packages/shared-native-ts.md,
-  concepts/request-flow, adrs/0014-jwt-sessions (new). Flagged contradiction
-  with concepts/global-context on session shape.
+  explanations/request-flow, adrs/0014-jwt-sessions (new). Flagged contradiction
+  with explanations/global-context on session shape.
 ```
 
 Valid ops: `scan`, `ingest`, `query`, `lint`, `create`, `update`, `delete`, `note`.

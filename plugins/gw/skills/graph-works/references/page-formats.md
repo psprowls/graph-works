@@ -4,437 +4,94 @@
 > actually builds (`<repo>/.works/okf/...`) disagree, this page is wrong: trust the
 > tree, and file a TechDebt item for the drift.
 
-Every wiki page has the same skeleton: YAML frontmatter + a section structure that matches its category. Below are the canonical formats. Templates live in `assets/page-templates/`. The full enum and per-category frontmatter spec lives in `wiki-schema.md`.
+Every page is YAML frontmatter plus a body whose headings match its `type`. Two
+declarations are authoritative and installed in every workspace:
 
-## File map convention (entity pages)
+- `.gw/schema/<Type>.schema.json` — frontmatter keys, enums, required fields.
+- `.gw/sections/<Type>.yaml` — required headings, their placeholders, and (for entity
+  types) which frontmatter keys the scanner owns.
 
-Each admitted entity is a single page nested under `repositories/<repo>/`: packages at
-`repositories/<repo>/packages/<name>.md`, apps at `repositories/<repo>/apps/<name>.md`,
-agent plugins at `repositories/<repo>/agent-plugins/<name>.md`, test suites at
-`repositories/<repo>/test-suites/<name>.md`, and the repository's own page at
-`repositories/<repo>/repository.md`. Dependencies are a sibling root, not nested under
-`repositories/`: `dependencies/<ecosystem>/<name>.md`. There is no filename prefix
-scheme and no `entities/` folder. Package, app, and agent-plugin entity pages carry a
-`## File map - <name>` section composed of one H3 subsection per major folder, each
-containing a markdown table. Rules:
+Read those rather than copying another page's shape; the examples below are
+orientation, not a contract. The full key list per type lives in `wiki-schema.md`.
+Keys from the graph-wiki era (`category`, `summary`, `kind`, `uri`, `graph_name`,
+`last_scan_at`, `source_type`, `last_sync_*`, `packages`) are retired — do not write them.
 
-- The H2 heading carries the package or app name: `## File map - <name>`, followed by a one-line overview paragraph.
-- Files at the workspace root live in a synthetic `### <name>/` H3 section directly under the H2 — uniform shape, no special-cased root.
-- Each depth-1 subdirectory gets its own H3 section whose heading is the full path from the workspace root with a trailing slash (e.g. `### <name>/<sub>/`).
-- Under each H3: a one-sentence paragraph describing the directory, then a markdown table with columns `Path | Kind | Description`. `Path` is relative to that section's root (e.g. `middleware/auth.ts` inside `### <name>/src/`). `Kind` is `file` or `dir`. `Description` starts as `— TODO` and is filled in by the agent later.
-- Nested files (depth ≥ 2) flatten into rows inside their depth-1 parent's table. Directories deeper than the cutoff (default `max_depth=4`) are listed as `dir` rows in their depth-1 parent's table instead of getting their own section.
-- The scanner pre-populates the tables via `git ls-files` (so `.gitignore` is respected) with `— TODO` Description placeholders. Per-row descriptions are filled in by the agent on a later pass.
-- `/gw:lint`'s file-map drift check flags rows whose Path is no longer on disk; new files showing up on disk do not fail lint, since `dir`-row summarization is allowed.
-- **Heading+bullet File map blocks** are parsed gracefully: directory entries from H3 headers are still extracted, but file-row entries are dropped. The next scan re-emits the block in table format when the page still shows the unfilled-template signature.
-- **Prod vs testing split:** a package/app entity page's File map shows only **prod source + prod config**. Test files (any component named `tests/`, `__tests__/`, `test/`, or `spec/`), test config (`pytest.ini`, `tox.ini`, `conftest.py`, `jest.config.*`, `vitest.config.*`, `playwright.config.*`, `cypress.config.*`, `mocha.config.*`/`.mocharc.*`, `karma.conf.*`, `ava.config.*`), and test fixtures (typically under `tests/fixtures/`) do not appear here — they belong to that package's own `test_suite` entity page (see below). The prod/test split is implemented by `_is_test_path()` in `packages/code-graph-io/src/code_graph_io/structural_nodes.py` — that helper is the single source of truth.
-- **Fixtures at non-test paths:** workspaces that put fixtures outside a `tests/`-prefixed path (e.g. a root-level `fixtures/` directory used at runtime too) are classified as prod by the scanner. Document them by hand in the `test_suite` entity page's `## Fixtures` section if they are test-only.
+Link with root-absolute markdown links (`[title](/explanations/x.md)`); never
+`[[wikilinks]]`. Cite code as `` `path:line` ``.
 
-## Test-suite entity pages
+## Section ownership
 
-A package or app's test surface is its own admitted entity: a `test_suite` page under `repositories/<repo>/test-suites/<name>.md` (rendered from the `entity-test-suite.md` template, `kind: test_suite`). There is no companion `testing.md` sub-page — the test suite is a sibling entity page, linked back to the package it tests via the `tested_packages` edge. The scanner emits one `test_suite` entity per discovered suite and populates its File-map table from the graph's test-file node paths.
+A declared section is one of two kinds:
 
-### Frontmatter (scanner-owned)
-- `title`, `uri`, `kind: test_suite`, `graph_name`, `last_scan_at`
-- `tested_packages: []` — the package(s) this suite covers
-- `suite_kind`, `file_count` — edge-derived
+- **Generated** (`ownership: generated`) — a deterministic projection of the code
+  graph, rewritten on every scan. Never hand-edit. Examples: `## Files`, `## Commands`,
+  `## Symbols`.
+- **Prose** — written by an agent or a human. A prose section is refreshed only when
+  the code diff since `prose_refreshed_commit` touches the entity's files, and the
+  refresh treats existing text as the baseline to preserve unless the diff contradicts
+  it.
 
-### Sections
-- `## Purpose` — one paragraph: what this suite covers, which frameworks, how to invoke
-- `## How to run` — bullet list of commands (primary, secondary like smoke/e2e)
-- `## File map - <name>` — same table format as the package/app entity page, but the rows are scoped to test files + test config + fixtures (see split rule above)
-- `## Test conventions` — naming, structure, mocks, fixtures
-- `## Fixtures` — bullet list of fixture paths and what each represents
-- `## Coverage` — target threshold, measurement method, report location
-- `## Open questions`
+An unfilled prose section keeps its `> TODO:` placeholder, which lint reports as
+`sections.unfilled`.
 
-### Example worked output (test_suite entity page for common-aws-node-ts)
+## 1. Entity pages
+
+Scanner-owned. Nested under `repositories/<repo>/`, one folder per kind; see
+`wiki-schema.md` for paths and the owned/provenance key tables.
+
+| `type` | Required headings | Optional headings |
+|---|---|---|
+| `Repository` | `Overview`, `Contents` (generated) | `Layout` |
+| `Package` | `Purpose`, `Files` (generated) | `Public API` |
+| `App` | `Purpose`, `Files` (generated) | `Platform & runtime`, `Routes / screens`, `Provider chain` |
+| `AgentPlugin` | `Purpose`, then generated `Commands`, `Agents`, `Skills`, `Scripts`, `Hooks`, `MCP servers` | `How it fits together` |
+| `TestSuite` | `Purpose`, `Files` (generated) | `How to run`, `Test conventions`, `Fixtures` |
+| `File` | `Notes`, then generated `Symbols`, `Imports`, `Exports`, `Imported By` | — |
+
+A package page:
 
 ```markdown
-# common-aws-node-ts — tests
+---
+type: Package
+title: code-wiki-okf
+resource: pkg:org/repo/code-wiki-okf
+language: python
+version: 0.5.1
+depends_on: [code-graph-io, okf-ext, okf-io]
+test_suites: []
+entry_points: []
+generated:
+  by: code-wiki-okf/0.5.1
+  at: '2026-09-16T18:18:55.450584+00:00'
+last_updated_commit: 3ff9f663
+prose_refreshed_commit: 3ff9f663
+---
+
+# code-wiki-okf
 
 ## Purpose
-Integration tests for the handler factories, exercised against a local DynamoDB and SNS stack via testcontainers.
+What the package is for, in prose.
 
-## How to run
-- `pnpm -F common-aws-node-ts test` — primary jest run
-- `pnpm -F common-aws-node-ts test:e2e` — e2e suite (requires Docker)
+## Public API
+The surface other packages import.
 
-## File map - common-aws-node-ts
-
-### common-aws-node-ts/
-Root: test config.
-
-| Path | Kind | Description |
-|---|---|---|
-| `jest.config.ts` | file | jest config (ts-jest preset, coverage thresholds) |
-
-### common-aws-node-ts/tests/
-Integration tests + fixtures.
-
-| Path | Kind | Description |
-|---|---|---|
-| `handlers.test.ts` | file | integration tests for the handler factories |
-| `fixtures/` | dir | golden request/response bodies + signed JWTs |
-
-## Test conventions
-- Each handler has a `<handler>.test.ts` next to the integration suite.
-- Mocks live under `tests/mocks/` and follow the `mock<Service>.ts` naming pattern.
-
-## Fixtures
-- `tests/fixtures/` — golden request/response bodies; refresh via `pnpm refresh-fixtures` when contracts change.
-
-## Coverage
-- Target: 80% statements, 70% branches. Measured by `jest --coverage`. Report at `coverage/index.html`.
-
-## Open questions
-- Whether to roll the e2e suite into the default `test` script once CI Docker support lands.
+## Files
+- [packages/code-wiki-okf/pyproject.toml](/repositories/<repo>/files/packages/code-wiki-okf/pyproject.toml.md)
+- ... one link per tracked file, generated
 ```
 
-## 1. Entity page (package)
+Each `## Files` entry links to that file's own `File` page under
+`repositories/<repo>/files/`. A package's `TestSuite` page is a sibling entity, linked
+back through `tested_packages`.
 
-Package entity pages live at `repositories/<repo>/packages/<name>.md`. The frontmatter is scanner-owned (replaced every scan); human-preserved keys (`status`, `last_reviewed`, `owner`, `notes`) are never overwritten. `summary` is fill-when-empty.
+## 2. Dependency page
 
-```markdown
----
-uri: pkg:org/repo/<name>
-kind: package
-graph_name: <graph-name>
-last_scan_at: <YYYY-MM-DD>
-depends_on: []
-test_suites: []
-entry_points: []
-language: ""
-version: ""
----
-
-# <name>
-
-## Narrative
-_(scanner will populate on next scan)_
-
-## File map - <name>
-| Path | Kind | Description |
-|---|---|---|
-| `<file>` | file | — TODO |
-```
-
-Entity-page content splits into two classes by how it's produced. `## Referenced in wiki` and the `## File map - <name>` row set (the `Path`/`Kind` columns) are **deterministic**: pure graph projections, always regenerated fresh on every scan at zero model cost (`## File map - <name>` is pre-populated with `— TODO` Description placeholders even on structural-only scans; `## Referenced in wiki` is always regenerated from forward-links). `agent_plugin` pages additionally carry template-authoritative deterministic data tables (`## Commands`, `## Agents`, `## Skills`, `## Scripts`, `## Hooks`, `## MCP servers`), always regenerated from the graph, never sourced from the on-disk page.
-
-`## Narrative`, the File map's Description column, and any other hand-added H2 are **prose**: model-maintained, filled in on first scan, then updated only when the diff-driven refresh pass fires (the commit range since `last_updated_commit` touches the entity's files). Prose is never mechanically protected — the refresh prompt treats current page text as ground truth to preserve unless the code diff contradicts it. See the [File map convention](#file-map-convention-entity-pages) section for the full table rules.
-
-## 2. Entity page (app)
-
-App entity pages follow the same shape as package pages with the addition of `app_kind` and `app_signals` in the scanner-owned frontmatter, at `repositories/<repo>/apps/<name>.md`.
-
-```markdown
----
-uri: <app-uri>
-kind: app
-graph_name: <graph-name>
-last_scan_at: <YYYY-MM-DD>
-depends_on: []
-test_suites: []
-entry_points: []
-language: ""
-version: ""
----
-
-# <name>
-
-## Narrative
-_(scanner will populate on next scan)_
-
-## File map - <name>
-| Path | Kind | Description |
-|---|---|---|
-| `<file>` | file | — TODO |
-```
-
-## Other entity kinds
-
-All other admitted entity kinds live nested under `repositories/<repo>/`, one folder per
-kind: `repository` at `repositories/<repo>/repository.md` itself, `agent_plugin` at
-`repositories/<repo>/agent-plugins/<name>.md`, `test_suite` at
-`repositories/<repo>/test-suites/<name>.md`. `dependency` is the one exception — a
-sibling root, not nested under `repositories/`: `dependencies/<ecosystem>/<name>.md`.
-Each carries the universal scanner-owned keys (`uri`, `kind`, `graph_name`,
-`last_scan_at`) plus kind-specific keys (see `wiki-schema.md` Entity pages).
-
-## 3. Concept page
-
-A cross-cutting technical pattern, convention, or idea used across packages.
-
-```markdown
----
-title: GlobalContext
-category: concept
-summary: Request-scoped context via AsyncLocalStorage providing config, database, logger, session
-tags: [context, middleware, patterns]
-sources: 2
-updated: 2026-04-20
----
-
-# GlobalContext
-
-## Definition
-Precise, one-paragraph definition. The canonical form used across the codebase.
-
-## Motivation
-Why this pattern exists. What problem it solves vs. passing context explicitly.
-
-## Shape
-```typescript
-interface IGlobalContext {
-  config: IConfigurationManager;
-  database: IDatabaseManager;
-  logger: ILogger;
-  session: SessionInfo;
-}
-```
-From `packages/common-context-node-ts/src/globalContext.ts`.
-
-## Used in
-- [common-aws-node-ts](/repositories/<repo>/packages/common-aws-node-ts.md) — injects via middleware
-- [common-context-node-ts](/repositories/<repo>/packages/common-context-node-ts.md) — defines the interface
-- All `*-data-node-ts` packages — scope queries by `session.user_id`
-
-## Related patterns
-- [middleware-pipeline](/concepts/middleware-pipeline.md)
-- [repository-pattern](/concepts/repository-pattern.md)
-
-## Sources
-- [2025-12-context-refactor-spec](/sources/2025-12-context-refactor-spec.md)
-
-## Open questions / gotchas
-- Default `session.user_id` is `ObjectId(0)` — tests must call `updateSession()` before DB operations.
-- ⚠️ Contradiction: `[shared-aws-node-ts](/repositories/<repo>/packages/shared-aws-node-ts.md)` assumes `session.session_id` always populated, but `[auth-migration-spec](/sources/auth-migration-spec.md)` says pre-login requests have null.
-```
-
-## 3a. Concept page — pattern variant
-
-A pattern is a prescriptive concept ("when to apply this, what to watch out for") rather than a descriptive one ("what this is in our codebase"). Naming convention only — no new `category` and no new `kind:` discriminator on concepts, the same way comparison pages work (`<a>-vs-<b>.md`).
-
-Filename: `concepts/<topic>-pattern.md`. The `-pattern` suffix is the discriminator.
-
-```markdown
----
-title: "Suspense-driven query loading"
-category: concept
-summary: Pattern for loading data with React Suspense boundaries instead of isLoading flags
-tags: [pattern, react, suspense, data-fetching]
-sources: 1
-updated: 2026-05-04
----
-
-# Suspense-driven query loading
-
-## Definition
-One-paragraph definition of the pattern, in its general form (not tied to this codebase).
-
-## When to apply (Forces)
-- Bulleted list of conditions/forces that make this pattern a good fit.
-- Each bullet is a constraint or pressure the pattern resolves.
-
-## Solution
-The shape of the pattern. Code sketch is fine; keep it minimal and language-agnostic where possible.
-
-## Tradeoffs
-**Positive:** …
-**Negative:** …
-
-## Example sources
-- [2026-05-tanstack-suspense-example](/sources/2026-05-tanstack-suspense-example.md) — minimal Expo demo.
-- [2026-04-react-19-suspense-blog](/sources/2026-04-react-19-suspense-blog.md) — conceptual write-up.
-
-## Where this could apply in the codebase
-- [web-next-ts](/repositories/<repo>/packages/web-next-ts.md) — current isLoading-flag pattern in dashboard queries.
-- [app-expo-ts](/repositories/<repo>/packages/app-expo-ts.md) — same.
-
-## Related patterns
-- [error-boundary-pattern](/concepts/error-boundary-pattern.md)
-- [global-context](/concepts/global-context.md)
-
-## Open questions
-- …
-```
-
-Notes:
-- The `pattern` tag is recommended so the index can group these pages; not enforced.
-- Body sections are recommended, not lint-enforced. Lint nudges (info-level) for naming/tag mismatch only.
-
-## 4. Source summary page
-
-One per ingested source (article, spec, PR, transcript, ticket). Summarized **once**; other pages cite it.
-
-```markdown
----
-title: "Auth Migration Spec"
-category: source
-summary: Move from opaque session tokens to JWTs; driven by compliance, affects 4 packages
-source_path: sources/references/auth-migration.md
-source_type: spec                # spec | article | pr | ticket | transcript | example | doc | note
-source_date: 2026-04-01
-last_sync_commit:                # set only for in-repo docs (source_type: doc) — full SHA at last ingest, used by /gw:lint to detect changes
-last_sync_at:                    # YYYY-MM-DD when sync state was recorded
-authors: [@psprowls]
-ingested: 2026-04-20
-updated: 2026-04-20
----
-
-# Auth Migration Spec
-
-## TL;DR
-Two sentences max. What the source proposes / argues / reports.
-
-## Key claims
-1. Session tokens stored in `sessions` collection must be retired by 2026-Q3 for compliance.
-2. New approach: short-lived JWTs signed by Cognito, validated in `authProvider` middleware.
-3. `session.user_id` contract preserved; `session.session_id` becomes JWT `sub`.
-
-## Proposed changes
-- `packages/shared-aws-node-ts` — new `jwtAuthProvider` middleware
-- `packages/shared-native-ts` — refresh token handling
-- `packages/shared-domain-ts` — header injection from Cognito SDK
-
-## Evidence / rationale
-- Legal flagged current storage pattern (file cited: `docs/compliance-2026Q1.pdf`)
-- Prototype in `packages/shared-aws-node-ts/src/auth/__prototype__.ts`
-
-## Surprises / contradictions
-- Spec claims `session.session_id` unchanged, but see `[global-context](/concepts/global-context.md)` — field shape differs.
-
-## Touches
-- [shared-aws-node-ts](/repositories/<repo>/packages/shared-aws-node-ts.md)
-- [shared-native-ts](/repositories/<repo>/packages/shared-native-ts.md)
-- [shared-domain-ts](/repositories/<repo>/packages/shared-domain-ts.md)
-- [global-context](/concepts/global-context.md)
-
-## Decisions triggered
-- [0014-jwt-sessions](/adrs/0014-jwt-sessions.md) — accepted
-
-## Where it's cited in this wiki
-- [global-context](/concepts/global-context.md)
-- [0014-jwt-sessions](/adrs/0014-jwt-sessions.md)
-```
-
-`last_sync_commit` (40-char SHA) and `last_sync_at` (YYYY-MM-DD) record the repo commit this page was last verified against. `/gw:ingest` writes both when re-ingesting an in-repo doc (`source_type: doc`) with a clean working tree on `main`. `/gw:lint` compares HEAD against `last_sync_commit` to flag source files that have changed since the last ingest.
-
-## 5. Architecture concept page (`kind: architecture`)
-
-High-level synthesis that draws on many packages and sources. Lives in `concepts/` with `kind: architecture`. Use the `concept-architecture.md` template.
-
-```markdown
----
-title: Request Flow
-category: concept
-kind: architecture
-summary: End-to-end path of an authenticated API request from client through Lambda to MongoDB
-packages: [shared-domain-ts, shared-aws-node-ts, common-context-node-ts, *-data-node-ts]
-tags: [architecture, request-flow]
-sources: 4
-updated: 2026-04-20
----
-
-# Request Flow
-
-## Thesis
-Two-three sentences capturing the current understanding of how requests flow through the system. Revised as new sources / ADRs arrive.
-
-## Layers
-
-1. **Client** — React Native (`[app-expo-ts](/repositories/<repo>/packages/app-expo-ts.md)`) or Next.js (`[web-next-ts](/repositories/<repo>/packages/web-next-ts.md)`) uses `[shared-domain-ts](/repositories/<repo>/packages/shared-domain-ts.md)` client
-2. **API Gateway / Lambda** — routes to `*-aws-node-ts` handlers; middleware pipeline establishes `[global-context](/concepts/global-context.md)`
-3. **Data layer** — handlers delegate to `*-data-node-ts` repositories scoped by `session.user_id`
-4. **MongoDB** — per-domain database via `IDatabaseManager.getDatabase(name)`
-
-## Diagrams
-- See the diagram attached to `[2025-12-architecture-overview](/sources/2025-12-architecture-overview.md)` (the ingest flow copies attached material to `sources/references/`)
-
-## Key packages
-- [shared-domain-ts](/repositories/<repo>/packages/shared-domain-ts.md) — client
-- [shared-aws-node-ts](/repositories/<repo>/packages/shared-aws-node-ts.md) — auth
-- [common-aws-node-ts](/repositories/<repo>/packages/common-aws-node-ts.md) — middleware base
-- [common-context-node-ts](/repositories/<repo>/packages/common-context-node-ts.md) — context
-- [activities-data-node-ts](/repositories/<repo>/packages/activities-data-node-ts.md) — repo base classes
-
-## Key concepts
-- [global-context](/concepts/global-context.md)
-- [middleware-pipeline](/concepts/middleware-pipeline.md)
-- [repository-pattern](/concepts/repository-pattern.md)
-
-## Decisions shaping this
-- [0005-lambda-per-endpoint](/adrs/0005-lambda-per-endpoint.md)
-- [0008-middleware-pipeline](/adrs/0008-middleware-pipeline.md)
-- [0014-jwt-sessions](/adrs/0014-jwt-sessions.md)
-
-## How this synthesis has changed
-- **2026-04-20** — added JWT flow from `[2026-04-auth-migration-spec](/sources/2026-04-auth-migration-spec.md)`
-- **2025-12-15** — initial write-up
-```
-
-## 6. ADR page
-
-A dated, citable decision. Classic MADR-lite format.
-
-```markdown
----
-title: "ADR-0014: JWT Sessions"
-category: adr
-adr_id: 0014
-status: accepted
-decision_date: 2026-04-18
-deciders: [@psprowls]
-supersedes: 0007
-superseded_by: null
-tags: [auth, sessions]
-updated: 2026-04-20
----
-
-# ADR-0014: JWT Sessions
-
-**Status:** accepted (2026-04-18)
-**Supersedes:** [0007-opaque-session-tokens](/adrs/0007-opaque-session-tokens.md)
-
-## Context
-Compliance flagged the current session-token storage pattern. See [2026-04-auth-migration-spec](/sources/2026-04-auth-migration-spec.md) for full context.
-
-## Decision
-Adopt short-lived JWTs signed by Cognito. Validation in middleware; refresh on the client.
-
-## Consequences
-
-**Positive:**
-- Meets compliance requirements (no server-side session storage)
-- Simpler horizontal scaling
-
-**Negative:**
-- Token revocation becomes harder (accepted trade-off)
-- Client-side refresh logic must be correct
-
-## Alternatives considered
-- Rotate opaque tokens with short TTL (rejected: still server-side)
-- Auth0 (rejected: see [cognito-vs-auth0](/concepts/cognito-vs-auth0.md))
-
-## Impact
-- [shared-aws-node-ts](/repositories/<repo>/packages/shared-aws-node-ts.md) — middleware change
-- [shared-native-ts](/repositories/<repo>/packages/shared-native-ts.md) — refresh logic
-- [shared-domain-ts](/repositories/<repo>/packages/shared-domain-ts.md) — header injection
-
-## Follow-ups
-- Roll out to staging 2026-05
-- Deprecate opaque tokens 2026-Q3
-```
-
-## 7. Dependency page
-
-`/gw:scan` writes one graph-derived page per dependency into
-`dependencies/<ecosystem>/<name>.md`. The `Dependency` shape is shipped by
-`code-wiki-okf` and installed at `.gw/schema/Dependency.schema.json` and
-`.gw/sections/Dependency.yaml`.
+`/gw:scan` writes one page per dependency into `dependencies/<ecosystem>/<name>.md`.
 
 **Required frontmatter:** `type: Dependency`, `title`, `resource`, `ecosystem`.
 **Optional:** `description`, `tags`, `implemented_by`, `used_by`, `versions_in_use`.
-**Provenance, scanner-owned:** `generated` (`by`, `at`), `last_updated_commit`, `tokens`.
+**Provenance, scanner-owned:** `generated` (`by`, `at`), `last_updated_commit`,
+`tokens`, `prose_refresh_attempts`.
 **Sections:** `## Why we depend on this` (required), then `## Gotchas / workarounds`.
 
 ```markdown
@@ -462,11 +119,194 @@ React provides the component model for the web application.
 Record known issues, version pins, or workarounds this dependency needs.
 ```
 
+## 3. Explanation page
+
+A cross-cutting concept, convention, pattern, or high-level synthesis. Lives in
+`explanations/`. Shared frontmatter with the other Diátaxis types: `type`, `title`,
+`description` required; `status`, `updated`, `tags`, `sources` optional.
+
+Declared headings: `## Context` (required), `## Trade-offs`, `## See also`. Extra
+headings are allowed (`additional_sections: true`).
+
+```markdown
+---
+type: Explanation
+title: Global context
+description: Request-scoped context via AsyncLocalStorage providing config, database, logger, and session.
+tags: [context, middleware]
+updated: 2026-04-20
+---
+
+# Global context
+
+## Context
+Precise, one-paragraph definition — the canonical form used across the codebase — and
+why the pattern exists.
+
+## Shape
+Optional extra section: the interface or code sketch, cited as
+`packages/common-context-node-ts/src/globalContext.ts:12`.
+
+## Trade-offs
+What choosing this costs, and the alternatives.
+
+## See also
+- [common-aws-node-ts](/repositories/<repo>/packages/common-aws-node-ts.md) — injects via middleware
+- [middleware-pipeline](/explanations/middleware-pipeline.md)
+- [2025-12-context-refactor-spec](/sources/2025-12-context-refactor-spec.md)
+```
+
+**Variants** are a naming and tagging convention, not a schema field:
+
+- *Pattern* — prescriptive ("when to apply this"). Tag `pattern`; use extra sections
+  such as `## When to apply`, `## Solution`, `## Tradeoffs`.
+- *Architecture synthesis* — layers, flows, and components spanning many packages. Tag
+  `architecture`; lead with a `## Thesis` section and link back to every entity and
+  ADR it draws on, with a dated `## How this synthesis has changed` log.
+- *Comparison* — `explanations/<a>-vs-<b>.md`, or `<topic>-options.md` for n-way.
+
+Tags must exist in `.gw/tags.yaml`; curated lanes enforce it. Do not add a tag to the
+vocabulary to make a page pass — pick an existing concept tag.
+
+## 4. Reference, HowTo, Tutorial
+
+Same base frontmatter as Explanation, plus:
+
+| `type` | Extra frontmatter | Required headings |
+|---|---|---|
+| `Reference` | `applies_to` | `Summary` (and optional `See also`) |
+| `HowTo` | `prerequisites`, `outcome` | `Goal`, `Assumptions`, `Steps`, `Result` |
+| `Tutorial` | `prerequisites`, `outcome` | `What you will build`, `Before you start`, `Steps` (and optional `What you learned`) |
+
+## 5. Source summary page
+
+One per ingested source (article, spec, ticket, transcript, design doc). Summarized
+**once**; other pages cite it. `gw ingest` writes the page and a verbatim copy of the
+material at `sources/references/<YYYY-MM>-<slug>.<ext>`; the original is never edited.
+
+Required frontmatter: `type`, `title`, `description`, `source_path`. Declared optional
+keys: `source_kind` (`spec | article | ticket | skill | doc | transcript | code-review`),
+`origin`, `ingested`, `updated`, `source_date`, `authors`, `entity_uri`, `tokens`,
+`tags`, `sources`. Omit an optional key rather than writing `null` or an empty value.
+
+Declared headings, all optional: `TL;DR`, `Key claims`, `Touches`,
+`Evidence / rationale`, `Surprises / contradictions`, `Decisions triggered`,
+`Where it's cited in this wiki`.
+
+```markdown
+---
+type: Source
+title: "Auth Migration Spec"
+description: Move from opaque session tokens to JWTs; driven by compliance, affects 4 packages.
+source_kind: spec
+source_path: sources/references/2026-04-auth-migration-spec.md
+origin: /abs/path/to/auth-migration.md
+source_date: 2026-04-01
+ingested: 2026-04-20
+updated: 2026-04-20
+authors: ["@psprowls"]
+tags: [auth]
+---
+
+# Auth Migration Spec
+
+## TL;DR
+Two sentences max. What the source proposes, argues, or reports.
+
+## Key claims
+1. Session tokens stored in `sessions` must be retired by 2026-Q3 for compliance.
+2. New approach: short-lived JWTs signed by Cognito, validated in `authProvider` middleware.
+
+## Evidence / rationale
+- Legal flagged the current storage pattern (`docs/compliance-2026Q1.pdf`).
+
+## Surprises / contradictions
+- Spec claims `session.session_id` is unchanged, but see [global-context](/explanations/global-context.md) — field shape differs.
+
+## Touches
+- [shared-aws-node-ts](/repositories/<repo>/packages/shared-aws-node-ts.md)
+
+## Decisions triggered
+- [0014-jwt-sessions](/adrs/0014-jwt-sessions.md) — stable
+```
+
+Drift on an in-repo doc is a diff against its `sources/references/` copy. There is no
+`last_sync_commit` / `last_sync_at` stamp.
+
+## 6. ADR page
+
+A dated, citable decision in `adrs/`.
+
+Required frontmatter: `type: Adr`, `title`, `description`, `category: adr`, `adr_id`
+(four digits, quoted), `status` (`draft | stable | deprecated`), `decision_date`.
+Optional: `deciders`, `supersedes`, `superseded_by`, `updated`, `tags`.
+
+Declared headings: `Context`, `Decision`, `Consequences` (required), `Alternatives
+considered`. Extra headings are allowed.
+
+```markdown
+---
+type: Adr
+title: "ADR-0014: JWT Sessions"
+description: Adopt short-lived JWTs signed by Cognito in place of server-side session tokens.
+category: adr
+adr_id: "0014"
+status: stable
+decision_date: 2026-04-18
+deciders: ["human:psprowls"]
+supersedes: "0007"
+superseded_by: null
+tags: [auth, sessions]
+updated: 2026-04-20
+---
+
+# ADR-0014: JWT Sessions
+
+## Context
+Compliance flagged the session-token storage pattern. See [2026-04-auth-migration-spec](/sources/2026-04-auth-migration-spec.md).
+
+## Decision
+Adopt short-lived JWTs signed by Cognito. Validate in middleware; refresh on the client.
+
+## Consequences
+**Positive:** meets compliance; simpler horizontal scaling.
+**Negative:** token revocation gets harder (accepted trade-off).
+
+## Alternatives considered
+- Rotate opaque tokens with a short TTL (rejected: still server-side).
+```
+
+## 7. Proposal page
+
+A proposed curated page, filed in `proposals/` by `gw ingest` and disposed of with
+`/gw:proposals`. Required frontmatter: `type: Proposal`, `title`, `target` (the
+bundle-relative path the page would land at), `page_status`
+(`proposed | created | rejected`), and `sources` (each `id`, `resource`, and optional
+`rationale` and `evidence[]`). Optional: `description`, `verified` (`by`, `at`),
+`generated`, `tags`.
+
+Required headings: `Suggested Action`, `Reasoning Summary`, `Evidence From Source`,
+`Existing Pages Considered`, `Potential Conflicts`, `Implementation Notes`, `Origins`.
+While `page_status: proposed` the body is regenerated from `sources[]` — edit the
+frontmatter, not the body. See `proposal-disposition.md` for the review flow.
+
 ## 8. Work page
 
-Work pages use PascalCase `type`, independent document `status`, and
-`work_status` for the work lifecycle. Their extensionless bundle path is their
-identity. Physical nesting under `children/` defines ownership.
+Work pages use PascalCase `type`, independent document `status`, and `work_status` for
+the work lifecycle. Their extensionless bundle path is their identity; physical nesting
+under `children/` defines ownership.
+
+Declared headings per type — every type requires `## Plan`; the rest are optional:
+
+| `type` | Other headings |
+|---|---|
+| `Release` | `Goal`, `Release criteria`, `Notes / log` |
+| `Epic` | `Goal`, `Notes / log` |
+| `Feature` | `Options considered`, `Notes / log` |
+| `Bug` | `Steps to reproduce`, `Expected vs actual`, `Notes / log` |
+| `TechDebt` | `Current state`, `Notes / log` |
+| `TestGap` | `Coverage gap`, `Notes / log` |
+| `Spike` | `Question`, `Findings`, `Notes / log` |
 
 ```markdown
 ---
@@ -496,9 +336,9 @@ sources:
 
 # Path-native filing
 
-## Summary
+## Options considered
 
-File and route every item by permanent canonical path.
+File and route every item by permanent canonical path, or keep page-stem identity.
 
 ## Plan
 
@@ -508,7 +348,9 @@ File and route every item by permanent canonical path.
 ```
 
 The page lives at `<workspace>/okf/<work-path>.md`. Managed artifacts live at
-`<workspace>/okf/<work-path>/references/`. `Release` is root-only; only
-`Release`, `Epic`, and `Feature` may own child lanes. Every lane and local
-archive carries its own Markdown `index.md`. There is no hierarchy frontmatter
-or JSON index sidecar.
+`<workspace>/okf/<work-path>/references/` and are registered in `sources[]` by
+filename-derived id. `Release` is root-only; only `Release`, `Epic`, and `Feature`
+may own child lanes. Every lane and local archive carries its own Markdown
+`index.md`. There is no hierarchy frontmatter or JSON index sidecar. Live-state keys
+(`phase`, `work_status`, `worktree`, `branch`, `released_at`, …) are written by
+`gw work advance`; do not hand-edit them.

@@ -22,7 +22,9 @@
       }
     },
     "last_updated_commit": { "type": "string" },
-    "tokens": { "type": "integer", "minimum": 0 }
+    "tokens": { "type": "integer", "minimum": 0 },
+    "prose_refreshed_commit": { "type": "string" },
+    "prose_refresh_attempts": { "type": "integer", "minimum": 0 }
   },
   "x-okf-directory": "agent-plugins/"
 }

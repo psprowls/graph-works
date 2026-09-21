@@ -60,7 +60,6 @@ page, and managed artifacts live under that directory’s `references/` child.
     │   └── test-suites/<name>.md
     ├── dependencies/<ecosystem>/<name>.md   # sibling root, not nested under repositories/
     ├── tutorials/ how-tos/ references/ explanations/   # Diátaxis lanes
-    ├── concepts/                # Cross-cutting technical concepts; optional kind: concept | pattern | architecture
     ├── sources/                 # One summary page per ingested source
     │   └── references/          # gw ingest’s copies of ingested material
     ├── adrs/                    # Architecture Decision Records
@@ -138,32 +137,36 @@ dispatch.
 
 ## Cross-tool compatibility
 
-Every substrate operation goes through the `gw` CLI — one boundary, no in-process imports. Run `gw <verb> --help` for flags. The full set of verbs these skills depend on is the CLI contract at `okf/concepts/graph-works-plugin-cli-contract.md`.
+Every substrate operation goes through the `gw` CLI — one boundary, no in-process imports. Run `gw <verb> --help` for flags. The full set of verbs these skills depend on is the CLI contract at `okf/explanations/graph-works-plugin-cli-contract.md`.
 
 Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AGENTS.md` (Codex/Cursor/Antigravity/OpenCode). The plugin ships both. The `gw` CLI runs identically everywhere. See `references/cross-tool-setup.md`.
 
 **Note:** your repo's root `CLAUDE.md` is separate from the wiki's `CLAUDE.md`. The root file defines the repo's build/style conventions; the wiki file defines how the vault is structured. Both are active simultaneously when working from the repo root.
 
-## Page categories
+## Page types
 
-| Category | What it documents | Directory |
+`type:` in the frontmatter selects the contract; `.gw/schema/<Type>.schema.json` and `.gw/sections/<Type>.yaml` are authoritative (see `references/wiki-schema.md`).
+
+| `type` | What it documents | Directory |
 |---|---|---|
-| `app` | One application workspace (web, mobile, CLI) — platform, entry points, deployment | `<workspace>/okf/repositories/<repo>/apps/<name>.md` |
-| `package` | One library/service workspace — what it exports, who depends on it, key patterns | `<workspace>/okf/repositories/<repo>/packages/<name>.md` |
-| `concept` | Cross-cutting technical idea, pattern, or architecture synthesis. Optional `kind:` frontmatter — `concept` (default), `pattern`, or `architecture` — selects the page template. Comparisons (`<a>-vs-<b>.md`) live here too. | `<workspace>/okf/concepts/` |
-| `dependency` | An external package or service the monorepo depends on — `kind:` discriminates | `<workspace>/okf/dependencies/<ecosystem>/<name>.md` |
-| `source` | Summary of an ingested spec, PR, article, transcript, etc. | `<workspace>/okf/sources/` |
-| `adr` | Architecture Decision Record — a dated, citable decision with context + consequences | `<workspace>/okf/adrs/` |
+| `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | Graph-derived entity pages, one per admitted entity — written by `gw scan` | `<workspace>/okf/repositories/<repo>/…` |
+| `Dependency` | An external package the repository depends on — written by `gw scan` | `<workspace>/okf/dependencies/<ecosystem>/<name>.md` |
+| `Explanation` | Cross-cutting technical idea, pattern, or architecture synthesis. Comparisons (`<a>-vs-<b>.md`) live here too. | `<workspace>/okf/explanations/` |
+| `Reference`, `HowTo`, `Tutorial` | The other Diátaxis lanes | `references/`, `how-tos/`, `tutorials/` |
+| `Source` | Summary of an ingested spec, PR, article, transcript, etc. | `<workspace>/okf/sources/` |
+| `Adr` | Architecture Decision Record — a dated, citable decision with context + consequences | `<workspace>/okf/adrs/` |
+| `Proposal` | A proposed curated page awaiting disposition | `<workspace>/okf/proposals/` |
+| `Release`, `Epic`, `Feature`, `Bug`, `TechDebt`, `TestGap`, `Spike` | Work items | `<workspace>/okf/work/` |
 
 ## Why this works (vs. just READMEs or generic docs)
 
 | READMEs / generic docs | Code Wiki |
 |---|---|
 | Written once, go stale | Incrementally updated on every ingest/scan |
-| One-directional (README describes package) | Bidirectional — packages link to concepts link to ADRs link to sources |
+| One-directional (README describes package) | Bidirectional — packages link to explanations link to ADRs link to sources |
 | Updates are manual chores | LLM does the cross-reference maintenance |
 | Drift is invisible until you read | Lint surfaces drift mechanically |
-| Searchable only by file | Indexed by category + frontmatter + BM25 |
+| Searchable only by file | Indexed by type + frontmatter + BM25 |
 | Specs/PRs/articles live in separate systems | Ingested and linked alongside code documentation |
 
 ## Related skills
@@ -173,8 +176,8 @@ Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AG
 
 ## Reference docs
 
-- `references/wiki-schema.md` — full vault layout, page frontmatter, taxonomies, body-table conventions
-- `references/page-formats.md` — annotated examples for app, package, concept (all three kinds), dependency, work, source, ADR
+- `references/wiki-schema.md` — full vault layout, page frontmatter per type, taxonomies, body-table conventions
+- `references/page-formats.md` — declared headings per type and annotated examples for entity, dependency, explanation, source, ADR, proposal, work pages
 - `references/scan-workflow.md` — how the scanner builds the code graph and renders entity pages
 - `references/ingest-workflow.md` — detailed ingest flow
 - `references/proposal-disposition.md` — review/accept/reject/supersede curated-page proposals; approve only flips `page_status` and appends `verified[]`, then you fan out one subagent per page to author it at the note's `target`
@@ -185,18 +188,12 @@ Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AG
 - `references/monorepo-principles.md` — why this pattern works for code, how it differs from the generic LLM Wiki
 - `references/lifecycle-rules.md` — the work-layer lint catalog with severities and remediation, run by `/gw:lint` and `gw work lint`
 
-## Templates (`assets/`)
-
-- `CLAUDE.md.template`, `AGENTS.md.template`, `cursorrules.template` — schema loaders per tool
-- `index.md.template`, `log.md.template` — starter index and log
-- `page-templates/` — graph-derived entity templates (`entity-repository.md`, `entity-package.md`, `entity-app.md`, `entity-agent-plugin.md`, `entity-dependency.md`, `entity-test-suite.md`) plus curated-page templates (`concept.md`, `concept-pattern.md`, `concept-architecture.md`, `source.md`, `adr.md`, `dependency.md`, `work.md`, `index.md`)
-
 ## Iron rules
 
 1. **The code is the source of truth.** If the vault contradicts the code, the code wins — update the vault.
 2. **Ingested material is never edited.** `gw ingest --source <path>` copies material into `<workspace>/okf/sources/references/`; the original file is left untouched wherever it lives.
-3. **All curated concept writes go under `<workspace>/okf/`.** Work items use canonical paths under `<workspace>/okf/work/`; managed work artifacts go only in the item’s owned `references/` directory.
-4. **Every vault page has YAML frontmatter.** Curated pages (concept/source/adr/dependency/work) carry `title`, `category`, `summary`, `updated`; concept pages may also carry `kind: concept | pattern | architecture`; graph-derived entity pages carry `uri`, `kind`, `graph_name`, `last_scan_at` plus per-kind edge/attr keys (the scanner owns their frontmatter) — `title`/`updated` are intentionally absent; the H1 carries the entity name and `last_scan_at` is the freshness signal.
+3. **All curated writes go under `<workspace>/okf/`.** Work items use canonical paths under `<workspace>/okf/work/`; managed work artifacts go only in the item’s owned `references/` directory.
+4. **Every vault page has YAML frontmatter** whose `type:` selects a schema in `.gw/schema/`. Curated pages carry `type`, `title`, and `description`; graph-derived entity pages carry `type`, `title`, and `resource` plus scanner-owned keys and provenance (`generated`, `last_updated_commit`, `tokens`, …) that you never hand-edit. Set `updated:` when you touch a page. Do not copy graph-wiki-era keys (`category`, `summary`, `kind`, `uri`, `last_scan_at`) from older pages — they are retired.
 5. **Every ingest or scan touches ≥3 files:** the changed/new page(s), `index.md`, `log.md`.
 6. **Every claim on a package page cites** either a source page (`[…](/sources/xxx.md)`) or a code path (`packages/foo/src/bar.ts`).
 7. **Good query answers get filed back** — explorations compound.

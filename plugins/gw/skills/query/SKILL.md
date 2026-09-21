@@ -67,14 +67,14 @@ gw query --query "<question>" --json
 This is the `claude_code`-backend default — it returns a `top_pages` list, each with a `path`, an `excerpt`, and `search_scores`. Treat those paths as part of the starting candidate set alongside `index.md`, from the outset rather than only once the index comes up empty. `--backend bedrock` / `--backend vercel` still run the full internal pipeline (an internal LLM call composes the answer) for workspaces that opt into it.
 
 Pick 3-10 pages across categories most likely to contain the answer:
-- `concepts/` — cross-cutting patterns and high-level syntheses (filter by `kind: architecture` for big-picture questions, `kind: pattern` for reusable patterns)
+- `explanations/` — cross-cutting patterns and high-level syntheses (filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns)
 - `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — package/app surface area
 - `dependencies/<ecosystem>/` — external-library questions
 - `work/` — bug / tech-debt / planned / in-progress questions
 - `adrs/` — "why did we do it this way"
 - `sources/` — evidence and original context
 
-**In-repo doc sources:** Search results may include `category: source` pages with `source_type: doc` — these summarize in-repo `.md` design docs. When citing a claim that originates in such a doc, prefer the vault source page (`[<slug>](/sources/<YYYY-MM>-<slug>.md)`); the source page itself cites the canonical repo-relative `source_path`.
+**In-repo doc sources:** Search results may include `type: Source` pages with `source_kind: doc` — these summarize in-repo `.md` design docs. When citing a claim that originates in such a doc, prefer the vault source page (`[<slug>](/sources/<YYYY-MM>-<slug>.md)`); the source page itself cites the canonical repo-relative `source_path`.
 
 ### 2. Read the picked pages in full
 
@@ -94,18 +94,18 @@ Format:
 ### 6. Offer to file back
 ```
 _Should I file this as a new page? Suggested location:
- `<workspace>/okf/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses,
- `pattern` for reusable patterns, or omit `kind` for general concepts. Or I can append to [existing-page](/existing-page.md)._
+ `<workspace>/okf/explanations/<slug>.md` — tag it `architecture` for system-level syntheses
+ or `pattern` for reusable patterns. Or I can append to [existing-page](/existing-page.md)._
 ```
 
-If yes, pick the right kind (see above), use the matching template (`concept-architecture.md`, `concept-pattern.md`, or `concept.md`), add frontmatter, update `index.md`, append to `log.md` with `op: create`.
+If yes, pick the right tag (see above), follow `../graph-works/references/page-formats.md` for the `Explanation` frontmatter (`type`, `title`, `description`, `tags`, `updated`) and headings, update `index.md`, append to `log.md` with `op: create`.
 
 ## Rules
 
 - **Read the index first.** No grep-everything.
 - **Every claim cites** a vault page or code path.
 - **Offer to file back** — for substantive answers worth keeping.
-- **If the vault doesn't know**, say so and suggest a source to ingest or a concept page to create.
+- **If the vault doesn't know**, say so and suggest a source to ingest or an explanation page to create.
 - **Output format follows the question** — "A vs B" → table; "who depends on X" → list; "how does X work" → prose with citations.
 
 ## Red flags

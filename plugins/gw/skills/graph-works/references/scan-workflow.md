@@ -42,13 +42,21 @@ Bulleted wikilinks; suggest `/gw:lint` and `/gw:ingest` to flesh out narratives.
 
 ## Frontmatter contract
 
-Data keys (`DATA_KEYS`, replaced every scan): `uri`, `kind`, `graph_name`, `last_scan_at`, plus per-kind edge/attr keys (`depends_on`, `test_suites`, `entry_points`, `language`, `version`, `app_kind`, `app_signals`, `tested_packages`, `suite_kind`, `file_count`, `ecosystem`, `used_by`, `versions_in_use`, `package_count`). Human keys preserved verbatim: `status`, `last_reviewed`, `owner`, `notes`. `summary` is fill-when-empty.
+Each entity type's `.gw/sections/<Type>.yaml` declares two key sets under `frontmatter:`. Identity keys (`type`, `title`, `resource`) come from the scanner on every page.
 
-Provenance keys (scanner-stamped but deliberately NOT in `DATA_KEYS` — preserved verbatim across re-scan):
-- `last_updated_commit` — HEAD at which prose sections (`## Narrative`, `## Purpose`, etc.) were last refreshed; gates the diff-driven prose-refresh pass.
-- `drift_propagated_commit` — the entity's `last_updated_commit` value at which the drift producer last proposed against curated pages backlinking it; gates the cross-page drift pass (proposal ledger) and keeps repeat runs idempotent.
+- **Owned keys** (`frontmatter.owned`, rewritten every scan): the per-kind graph edges and attributes — for example `depends_on`, `test_suites`, `entry_points`, `language`, `version` on a package, `tested_packages`, `suite_kind`, `file_count` on a test suite, `ecosystem`, `used_by`, `versions_in_use` on a dependency, `package_count` on a repository. `wiki-schema.md` has the table.
+- **Provenance keys** (`frontmatter.provenance`, scanner-stamped): `generated` (`by`, `at`), `last_updated_commit`, `tokens`, `prose_refreshed_commit`, `prose_refresh_attempts`.
 
-The state gate (`last_updated_commit` stamping on scan/ingest) is configurable per-workspace via the `state_gate:` block in `<root>/workspace.yaml` (`enabled` + allowed `branches`); absent config gates on a clean `main`. See the workspace-io README for the schema.
+Keys a declaration does not list — including any you add by hand — are left alone by a re-scan. The graph-wiki-era keys (`uri`, `kind`, `graph_name`, `last_scan_at`, `summary`) are gone.
+
+The two commit keys mean different things:
+
+- `last_updated_commit` — HEAD at the last **structural** pass. `entities.sync` advances it unconditionally, so it cannot gate prose.
+- `prose_refreshed_commit` — the SHA at which the prose sections (`## Purpose`, `## Public API`, etc.) were last refreshed; stamped by the prose phase only. It gates the diff-driven refresh: the commit range since this anchor touching the entity's files earns a fresh attempt. `prose_refresh_attempts` bounds how many times a page that came back still holding a placeholder is retried, and is cleared when the anchor is stamped. `Dependency` pages carry only the counter.
+
+The drift propagator's per-entity anchor is not frontmatter: it lives in `<cache_dir>/drift/propagated.json`.
+
+The state gate (stamping on scan/ingest) is configurable per-workspace via the `state_gate:` block in `<root>/workspace.yaml` (`enabled` + allowed `branches`); absent config gates on a clean `main`.
 
 ## Contract
 

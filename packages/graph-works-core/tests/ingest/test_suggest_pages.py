@@ -664,7 +664,7 @@ async def test_a_proposal_whose_write_fails_is_recorded_not_counted(tmp_path, mo
 
     The point is not the filesystem: it is that `apply`'s `ApplyResult` was
     discarded, so *any* write failure came back as `status: "proposed"` and was
-    counted into the `proposal_status` frontmatter and the `log.md` line.
+    counted into `IngestResult.proposal_status` and the `log.md` line.
     """
     root = make_bundle(tmp_path)
     (root / "proposals").write_text("not a directory\n", encoding="utf-8")

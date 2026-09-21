@@ -549,7 +549,7 @@ async def test_a_suggest_failure_leaves_the_page_written(workspace, monkeypatch)
     assert result.ok
     assert result.proposals == ()
     assert result.proposal_status["extractor"] == "failed"
-    assert "extractor: failed" in (layout.bundle_dir / result.page).read_text(encoding="utf-8")
+    assert "extractor: failed" not in (layout.bundle_dir / result.page).read_text(encoding="utf-8")
 
 
 async def test_a_reasoner_failure_leaves_the_page_written(workspace, monkeypatch):
@@ -991,12 +991,13 @@ async def test_a_refusal_with_no_suggestions_still_leaves_written_empty(workspac
     assert result.proposals == ()
 
 
-async def test_a_clean_runs_page_carries_no_blank_proposal_status_keys(workspace, monkeypatch):
-    """F2: the status mapping is filtered by `plan_ingest`'s own blank rule.
+async def test_the_page_carries_no_proposal_status_but_the_result_still_does(workspace, monkeypatch):
+    """The suggest-phase status is reported on the result and in `log.md`, not
+    written to the page: no schema declares it and nothing reads it back.
 
-    Asserted on the parsed frontmatter, not on a substring: `error` is a
-    common enough word in a source page's body that a `"error" not in text`
-    check would pass or fail for the wrong reason.
+    Asserted on the parsed frontmatter, not on a substring: `proposal_status`
+    is a common enough phrase in a source page's body that a text check would
+    pass or fail for the wrong reason.
     """
     from okf_io import parse
 
@@ -1005,7 +1006,8 @@ async def test_a_clean_runs_page_carries_no_blank_proposal_status_keys(workspace
     result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
     assert result.ok
     page = parse((layout.bundle_dir / result.page).read_text(encoding="utf-8"))
-    assert set(page.fm_data()["proposal_status"]) == {"reasoner", "extractor", "proposals"}
+    assert "proposal_status" not in page.fm_data()
+    assert {"reasoner", "extractor", "proposals"} <= set(result.proposal_status)
 
 
 async def test_the_reasoner_is_told_the_validated_source_kind_not_the_hint(workspace, monkeypatch):

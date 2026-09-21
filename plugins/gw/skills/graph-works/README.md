@@ -25,7 +25,7 @@ READMEs go stale. Architecture diagrams drift. Comments rot. This skill turns an
 | **13 entry-point skills** | `onboard`, `scan`, `ingest`, `query`, `lint`, `log`, `file`, `archive`, `regen-index`, `status`, `workflow`, `proposals`, `auto-drive` — invoked `/gw:<name>` in Claude Code, `$<name>` in Codex |
 | **Substrate operations** | Via `gw`: `bootstrap`, `scan`, `ingest`, `query`, `wiki lint` (+ code-drift) |
 | **12 reference docs** | Schema, page formats, 4 workflows (scan/ingest/query/lint), Obsidian setup, cross-tool setup, monorepo principles, lifecycle rules, sidecar schema |
-| **Wiki templates** | `CLAUDE.md`, `AGENTS.md`, `cursorrules`, `index.md`, `log.md`, plus entity templates (`entity-repository`, `entity-package`, `entity-app`, `entity-agent-plugin`, `entity-dependency`, `entity-test-suite`) and curated-page templates (`concept`, `concept-pattern`, `concept-architecture`, `source`, `adr`, `dependency`, `work`, `index`) |
+| **Wiki templates** | `CLAUDE.md`, `AGENTS.md`, `cursorrules`, `index.md`, `log.md`, plus per-type schemas and section declarations installed at `.gw/schema/` and `.gw/sections/` |
 
 ## Quick start
 
@@ -51,16 +51,16 @@ cd ~/my-repo
 > /gw:lint
 ```
 
-## Page categories
+## Page types
 
-| Category | Example |
+| `type` | Example |
 |---|---|
-| `app` | `<workspace>/okf/repositories/<repo>/apps/web-next-ts.md` — Next.js app: platform, routes, deployment |
-| `package` | `<workspace>/okf/repositories/<repo>/packages/common-aws-node-ts.md` — Lambda handlers, middleware, exports |
-| `concept` | `<workspace>/okf/concepts/global-context.md` — cross-cutting pattern; or `kind: architecture` for high-level syntheses, `kind: pattern` for reusable patterns |
-| `dependency` | `<workspace>/okf/dependencies/npm/react.md` — external lib: versions in use, upgrade notes, gotchas |
-| `source` | `<workspace>/okf/sources/2026-04-auth-migration-spec.md` — ingested spec with claims + citations |
-| `adr` | `<workspace>/okf/adrs/0012-move-to-esm.md` — dated decision with context + consequences |
+| `App` | `<workspace>/okf/repositories/<repo>/apps/web-next-ts.md` — Next.js app: platform, routes, deployment |
+| `Package` | `<workspace>/okf/repositories/<repo>/packages/common-aws-node-ts.md` — Lambda handlers, middleware, exports |
+| `Explanation` | `<workspace>/okf/explanations/global-context.md` — cross-cutting concept; tag `architecture` for high-level syntheses, `pattern` for reusable patterns |
+| `Dependency` | `<workspace>/okf/dependencies/npm/react.md` — external lib: versions in use, upgrade notes, gotchas |
+| `Source` | `<workspace>/okf/sources/2026-04-auth-migration-spec.md` — ingested spec with claims + citations |
+| `Adr` | `<workspace>/okf/adrs/0012-move-to-esm.md` — dated decision with context + consequences |
 
 ## Cross-tool compatibility
 
@@ -99,7 +99,6 @@ Only the schema loader file changes per tool. The scripts run identically everyw
     │   └── test-suites/<name>.md
     ├── dependencies/<ecosystem>/<name>.md   # sibling root, not nested under repositories/
     ├── tutorials/ how-tos/ references/ explanations/   # Diátaxis lanes
-    ├── concepts/                # Cross-cutting technical concepts; optional kind: concept | pattern | architecture
     ├── sources/                 # One summary page per ingested source
     │   └── references/          # the ingest flow's copies of ingested material
     ├── adrs/                    # Architecture Decision Records
@@ -124,7 +123,7 @@ Only the schema loader file changes per tool. The scripts run identically everyw
 |---|---|
 | One per package, manually written | One per package, LLM-maintained and cross-linked |
 | Go stale silently | `lint` detects drift mechanically |
-| No cross-references | Every package links to concepts, sources, ADRs |
+| No cross-references | Every package links to explanations, sources, ADRs |
 | No history of why decisions were made | ADRs capture decisions; log tracks every ingest/scan |
 | Specs and articles live elsewhere | Ingested directly from any path and summarized in `sources/` |
 

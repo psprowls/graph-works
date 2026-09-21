@@ -115,16 +115,13 @@ def test_the_adapter_returns_the_three_gate_fields(tmp_path):
     assert gate["allowed"] is True
 
 
-def test_compose_frontmatter_writes_the_two_keys_it_owns():
+def test_compose_frontmatter_writes_only_the_entity_uri_it_owns():
     """K-F: the drift stamp was this function's only reader of the state gate
-    and of the kind, and both parameters went with it."""
-    frontmatter = compose_frontmatter(
-        {"description": "One line."},
-        entity_uri="pkg:okf-io",
-        proposal_status={"reasoner": "ok"},
-    )
+    and of the kind, and both parameters went with it. The suggest-phase
+    status went too: it is not page frontmatter."""
+    frontmatter = compose_frontmatter({"description": "One line."}, entity_uri="pkg:okf-io")
     assert frontmatter["entity_uri"] == "pkg:okf-io"
-    assert frontmatter["proposal_status"] == {"reasoner": "ok"}
+    assert "proposal_status" not in frontmatter
     assert "last_sync_commit" not in frontmatter
 
 
@@ -132,7 +129,6 @@ def test_the_optional_frontmatter_rides_through_and_blanks_do_not():
     frontmatter = compose_frontmatter(
         {"authors": ["A"], "source_date": "2026-08-01", "tags": [], "tokens": 12, "title": "ignored"},
         entity_uri=None,
-        proposal_status={},
     )
     assert frontmatter["authors"] == ["A"]
     assert frontmatter["source_date"] == "2026-08-01"
@@ -206,29 +202,6 @@ def test_an_unclosed_fence_does_not_swallow_the_rest_of_the_body():
     composed = compose_body("## TL;DR\n\n```md\n## Touches\n", entity_page="packages/okf-io")
     assert composed.rstrip().endswith("[/packages/okf-io.md](/packages/okf-io.md)")
     assert composed.count("## Touches") == 2
-
-
-def test_blank_proposal_status_values_are_dropped_but_a_zero_count_survives():
-    """`plan_ingest` drops blanks at the top level only, so the nested `error:
-    None` used to land on every page this tool ever wrote. `proposals: 0` is
-    the one empty-ish value worth keeping: a run that filed nothing said so.
-    """
-    frontmatter = compose_frontmatter(
-        {},
-        entity_uri=None,
-        proposal_status={
-            "reasoner": "ok",
-            "extractor": "ok",
-            "proposals": 0,
-            "unclassified": [],
-            "refused": [],
-            "duplicates": [],
-            "failed": [],
-            "errored": [],
-            "error": None,
-        },
-    )
-    assert frontmatter["proposal_status"] == {"reasoner": "ok", "extractor": "ok", "proposals": 0}
 
 
 def test_the_log_line_names_every_outcome_kind_separately():

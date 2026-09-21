@@ -11,6 +11,7 @@
     "source_path": { "type": "string", "minLength": 1, "x-okf-member": true },
     "origin": { "type": "string" },
     "ingested": { "type": "string", "format": "date" },
+    "updated": { "type": "string", "format": "date" },
     "source_date": { "type": "string", "format": "date" },
     "authors": { "type": "array", "items": { "type": "string" } },
     "entity_uri": { "type": "string" },

@@ -13,7 +13,7 @@ Recommended Obsidian configuration for a Code Wiki. None of this is strictly req
 
 ## Settings → Files and Links
 
-- **Default location for new notes:** none — new pages are typed (`concepts/`, `adrs/`, `work/`, `sources/`, etc. under `<workspace>/okf/`); file each note in the lane matching its kind rather than relying on a single default folder
+- **Default location for new notes:** none — new pages are typed (`explanations/`, `adrs/`, `work/`, `sources/`, etc. under `<workspace>/okf/`); file each note in the lane matching its kind rather than relying on a single default folder
 - **New link format:** `Absolute path in vault`
 - **Use `[[Wikilinks]]`:** OFF
 - **Attachment folder path:** `sources/references/` (attached images are copied here by the ingest flow, alongside the material that references them)
@@ -104,8 +104,8 @@ git commit -m "init wiki"
 
 ## Tips
 
-- **Graph view daily** — spot structural drift. Clusters per package/feature area; concept pages with `kind: architecture` as hubs.
-- **Pin `index.md`, `log.md`, and the active architecture concept page or current `work/<epic>` item**
+- **Graph view daily** — spot structural drift. Clusters per package/feature area; explanation pages tagged `architecture` as hubs.
+- **Pin `index.md`, `log.md`, and the active architecture explanation or current `work/<epic>` item**
 - **Split view** — code on the left, vault on the right. Browse the vault while the LLM edits.
 - **Strict line breaks** — so your LLM's markdown renders as expected
 - **Templater plugin (optional)** — auto-fill `package_path`, `updated:`, etc. when creating new pages manually

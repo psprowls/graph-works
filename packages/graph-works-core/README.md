@@ -443,8 +443,8 @@ material lands a second page instead. Keying the refusal on `origin` instead is
 an open question on graph-works-cli.
 
 **The suggest phase is best-effort.** A reasoner or extractor failure yields
-zero proposals, records the reason in the page's own `proposal_status`
-frontmatter, and never fails the ingest.
+zero proposals, records the reason in `IngestResult.proposal_status` (not on the page),
+and never fails the ingest.
 
 **Skill ingest is not here.** The two-pass planner→synthesizer flow that writes
 guidance pages is the guidance layer, one above this one, and is deferred with

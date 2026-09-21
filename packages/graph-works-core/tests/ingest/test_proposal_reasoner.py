@@ -187,7 +187,7 @@ async def test_an_empty_response_is_a_failure(tmp_path, monkeypatch):
 def test_the_prompt_names_the_validated_source_kind_and_the_resolved_origin(tmp_path):
     """D3: the reasoner is told the two identity fields that exist at its own
     call time. The page's composed frontmatter is not among them and cannot
-    be -- `proposal_status`, one of its fields, is what this phase computes.
+    be -- it is composed after this phase returns.
     """
     prompt = build_reasoner_prompt(
         bundle=_bundle(tmp_path),

@@ -68,7 +68,7 @@ how many hubs each list carries (default 10); `--json` emits `total_pages`, `tot
 
 ### A. Concepts mentioned without their own page
 
-Grep for concept-shaped phrases repeated across 3+ package/concept pages but without a dedicated concept page. Suggest creating one. Comparisons (`<a>-vs-<b>.md`) live under `concepts/`.
+Grep for concept-shaped phrases repeated across 3+ package/explanation pages but without a dedicated explanation page. Suggest creating one. Comparisons (`<a>-vs-<b>.md`) live under `explanations/`.
 
 ### B. Cross-reference gaps
 

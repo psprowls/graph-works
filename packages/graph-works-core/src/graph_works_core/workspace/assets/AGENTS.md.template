@@ -84,7 +84,7 @@ to the filesystem root.
 ├── {{CONFIG_DIR}}/           schema/, sections/, tags.yaml, cache/, worktrees/
 └── {{BUNDLE_DIR}}/           the bundle; the three lanes own everything inside
     ├── index.md, log.md      root index and the append-only timeline
-    ├── repositories/ packages/ apps/ agent-plugins/ test-suites/ dependencies/
+    ├── repositories/ dependencies/
     ├── explanations/ references/ tutorials/ how-tos/
     ├── sources/ adrs/ proposals/
     └── work/
@@ -102,16 +102,18 @@ Graph-derived. One page per admitted code entity, regenerated from the code grap
 
 | Directory | Type | Filename |
 | --- | --- | --- |
-| `repositories/` | `Repository` | `<repo>/repository.md` |
-| `packages/` | `Package` | `<name>.md` |
-| `apps/` | `App` | `<name>.md` |
-| `agent-plugins/` | `AgentPlugin` | `<name>.md` |
-| `test-suites/` | `TestSuite` | `<name>.md` |
+| `repositories/<repo>/` | `Repository` | `repository.md` |
+| `repositories/<repo>/packages/` | `Package` | `<name>.md` |
+| `repositories/<repo>/apps/` | `App` | `<name>.md` |
+| `repositories/<repo>/agent-plugins/` | `AgentPlugin` | `<name>.md` |
+| `repositories/<repo>/test-suites/` | `TestSuite` | `<name>.md` |
+| `repositories/<repo>/files/` | `File` | `<repo-relative-path>.md` |
 | `dependencies/` | `Dependency` | `<ecosystem>/<name>.md` |
 
-Entities also appear nested under their owning repository —
-`repositories/<repo>/packages/<name>.md`, `repositories/<repo>/files/…` — so a
-repository page reaches its members by relative path.
+Entity pages are nested under their owning repository, one folder per kind, so a
+repository page reaches its members by relative path. `dependencies/` is the one
+sibling root, because a dependency belongs to no single repository. There are no
+top-level `packages/`, `apps/`, `agent-plugins/` or `test-suites/` directories.
 
 Generated pages carry a `generated:` block (`by:`, `at:`) and a `resource:` URI such as
 `dependency:pypi/pytest`. Prose sections under the frontmatter (`## Why we depend on
@@ -176,8 +178,8 @@ write, and the `on_dispatch` / `on_complete` frontmatter deltas. Dispatch one st
 session with `/gw:workflow <path>` and clear context between stages. `--descend`
 switches to the next actionable child when a parent is waiting on its subtree.
 
-Frontmatter carries the live state: `phase`, `work_status`, `phase_started_commit`,
-`worktree`, `branch`, `affects`, `depends_on`.
+Frontmatter carries the live state: `phase`, `work_status`, `worktree`, `branch`,
+`affects`, `depends_on`, `sources`.
 
 Unattended runs go through `/gw:auto-drive`, which dispatches each ready stage as an
 Orca-supervised worker using the per-phase models in `workspace.yaml`. Re-running the

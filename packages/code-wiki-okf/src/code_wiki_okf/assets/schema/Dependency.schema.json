@@ -23,7 +23,8 @@
       }
     },
     "last_updated_commit": { "type": "string" },
-    "tokens": { "type": "integer", "minimum": 0 }
+    "tokens": { "type": "integer", "minimum": 0 },
+    "prose_refresh_attempts": { "type": "integer", "minimum": 0 }
   },
   "x-okf-directory": "dependencies/"
 }

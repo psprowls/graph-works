@@ -194,8 +194,7 @@ def state_gate_adapter(config: Config) -> StateGate:
 
 
 #: `plan_ingest`'s own blank rule (`sources/plan.py`), restated so
-#: `compose_frontmatter` can apply it one level down. `0` is deliberately not
-#: blank: a run that filed nothing said so.
+#: `compose_frontmatter` can filter the carried keys with it.
 _BLANK: tuple[object, ...] = (None, "", (), [])
 
 
@@ -203,21 +202,17 @@ def compose_frontmatter(
     frontmatter: Mapping[str, Any],
     *,
     entity_uri: str | None,
-    proposal_status: Mapping[str, Any],
 ) -> dict[str, Any]:
     """The `extra` frontmatter `plan_ingest` writes beside its own six keys.
 
     `plan_ingest` drops values in `(None, "", (), [])`, so an absent entity or
     an empty tag list contributes nothing rather than a null.
 
-    **That rule is top-level only**, so a nested blank survives it: every page
-    this tool wrote before this filter carried `error: null` inside its
-    `proposal_status` block, on a clean run. The same rule is applied one level
-    down here. `proposals: 0` is not blank under it and stays -- a run that
-    filed nothing said so, and that is worth a key. The mapping can never
-    filter down to `{}`: `reasoner` and `extractor` always carry a status
-    string, so no empty `proposal_status` block can reach the page. Consumers
-    read an absent key as empty.
+    **The suggest-phase status is not written to the page.** It used to land
+    as a `proposal_status` block, which no schema declared and nothing read
+    back. The status lives on `IngestResult.proposal_status` (the CLI warns
+    from it) and, as outcome counts, in the `log.md` line (`_log_line`); the
+    page carries only what the ingest brief supplied.
 
     It takes no `state_gate=` and no kind: the drift stamp was this function's
     only reader of either, and K-F deleted it. The gate seam itself is
@@ -227,7 +222,6 @@ def compose_frontmatter(
     """
     extra: dict[str, Any] = {key: frontmatter[key] for key in CARRIED_KEYS if frontmatter.get(key) not in _BLANK}
     extra["entity_uri"] = entity_uri
-    extra["proposal_status"] = {key: value for key, value in proposal_status.items() if value not in _BLANK}
     return extra
 
 
@@ -477,10 +471,9 @@ async def run_ingest_source(
     the clock.
 
     **Proposals commit after the page, not before.** `plan_suggestions` runs
-    and `compose_frontmatter` composes against its plan-time status before
-    `plan_ingest` is even built -- `proposal_status` has to exist for that call
-    -- but `apply_suggestions` is deferred until after the page's own
-    `apply_plan` succeeds. A refused or failed main write means
+    and the page is composed before `plan_ingest` is even built, but
+    `apply_suggestions` is deferred until after the page's own `apply_plan`
+    succeeds. A refused or failed main write means
     `apply_suggestions` is never called, so no proposal cites a `resource` for
     a page that never landed.
 
@@ -615,11 +608,7 @@ async def run_ingest_source(
         model_override=model_override,
     )
 
-    extra: dict[str, Any] = compose_frontmatter(
-        frontmatter,
-        entity_uri=entity_uri,
-        proposal_status=status,
-    )
+    extra: dict[str, Any] = compose_frontmatter(frontmatter, entity_uri=entity_uri)
     plan = plan_ingest(
         bundle,
         schema_set,

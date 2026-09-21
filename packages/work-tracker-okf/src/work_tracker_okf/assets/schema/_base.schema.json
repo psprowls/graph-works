@@ -37,6 +37,7 @@
     "target": { "type": "string", "pattern": "^([0-9]{4}-Q[1-4]|[0-9]{4}-(0[1-9]|1[0-2]))$" },
     "owner": { "type": "string", "minLength": 1 },
     "resolved_in": { "type": "string", "minLength": 1 },
+    "released_at": { "type": "string", "format": "date" },
     "worktree": { "type": "string", "minLength": 1 },
     "branch": { "type": "string", "minLength": 1 },
     "superseded_by": { "type": "string", "minLength": 1 },

@@ -125,7 +125,7 @@ PY
   Code drift: 2 new packages un-documented. 3 orphans, 1 stale roadmap page.
 
 - **ingest** Auth Migration Spec
-  Added sources/2026-04-auth-migration-spec.md. Updated concepts/global-context,
+  Added sources/2026-04-auth-migration-spec.md. Updated explanations/global-context,
   repositories/my-monorepo/packages/shared-aws-node-ts.md, adrs/0014-jwt-sessions (new).
 
 ## 2026-04-19

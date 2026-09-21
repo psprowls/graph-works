@@ -129,8 +129,7 @@ def build_reasoner_prompt(
 
     *page_text* is the page's composed **body** -- it has not been written yet
     (spec §4.6), and it is not the whole page: a reader of the landed page also
-    sees its frontmatter, and the reasoner cannot, because `proposal_status` --
-    one of that frontmatter's fields -- is what this very phase computes.
+    sees its frontmatter, and the reasoner cannot.
     `compose_frontmatter` runs after `plan_suggestions` returns, so at reasoner
     time there is no composed frontmatter to pass.
 

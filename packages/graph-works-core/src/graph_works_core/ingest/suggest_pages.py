@@ -27,11 +27,12 @@ the target is `lane_set.target_for`'s. Placement is the lane's; validation is
 
 **Best-effort, always.** A reasoner failure, an extractor call failure, or a
 parse miss yields zero proposals, records the failure in the status, and never
-fails the ingest. The status is what the page's `proposal_status` frontmatter
-carries, so a degraded run is legible on the page itself rather than only in a
-log nobody reads. Best-effort is not the same as unaccounted for: a proposal
+fails the ingest. The status is what `IngestResult.proposal_status` carries, and
+the CLI surfaces its `error`, `failed` and `errored` entries as warnings, so a
+degraded run is not silently indistinguishable from a run with nothing to
+suggest. Best-effort is not the same as unaccounted for: a proposal
 whose write does not land is recorded in `failed` and is **not** counted, so
-the page never claims a proposal no file supports.
+the status never claims a proposal no file supports.
 
 **Known consequence, inherited not introduced:** `okf_ext.proposals` keys
 `sources[]` dedup on `resource` and skips an already-stored one, so a re-fired
@@ -487,9 +488,9 @@ def apply_suggestions(
                 applied = apply_plan(bundle, item.plan)
                 if not applied.ok:
                     # A planned write that did not land is not a filed
-                    # proposal. Reporting it as one puts a count in the source
-                    # page's own `proposal_status` frontmatter, and in
-                    # `log.md`, that no file on disk supports.
+                    # proposal. Reporting it as one puts a count in
+                    # `IngestResult.proposal_status` and in `log.md` that no
+                    # file on disk supports.
                     failed.append(f"{item.title}: {applied.failed[0].kind}")
                     logger.warning("proposal for %r did not land: %s", item.title, applied.failed[0].error)
                     continue

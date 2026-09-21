@@ -23,15 +23,15 @@ This is the `claude_code`-backend default (the one `gw query` runs unless a work
 {
   "query": "<question>",
   "top_pages": [
-    {"path": "concepts/foo", "excerpt": "...", "search_scores": {"...": 0.0}}
+    {"path": "explanations/foo", "excerpt": "...", "search_scores": {"...": 0.0}}
   ]
 }
 ```
-`path` is a bundle concept id relative to `<workspace>/okf/` — **no `.md` suffix**. To read the page, append `.md` (`<workspace>/okf/concepts/foo.md`), or resolve it via `gw graph`. Read each `top_pages` entry's `path` in full — the `excerpt` and `search_scores` are there to help you triage which pages to open first, not to quote as the answer.
+`path` is a bundle concept id relative to `<workspace>/okf/` — **no `.md` suffix**. To read the page, append `.md` (`<workspace>/okf/explanations/foo.md`), or resolve it via `gw graph`. Read each `top_pages` entry's `path` in full — the `excerpt` and `search_scores` are there to help you triage which pages to open first, not to quote as the answer.
 
 Scan the index and pick the 3-10 pages most likely to contain the answer, from `top_pages` and the index together. A good monorepo query usually pulls across categories:
 
-- `concepts/` — for cross-cutting patterns and high-level syntheses; filter by `kind: architecture` for big-picture questions, `kind: pattern` for reusable patterns
+- `explanations/` — for cross-cutting patterns and high-level syntheses; filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns
 - `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — for specific package/app surface area
 - `dependencies/<ecosystem>/` for "how do we use X library" questions
 - `work/` for "why does X fail / what's planned / what's in progress"
@@ -65,18 +65,18 @@ Format:
 **Every good answer is a candidate wiki page.** At the end of the answer, ask:
 
 > _Should I file this as a new page? Suggested location:
-> `<workspace>/okf/concepts/<slug>.md` — pick the kind: `architecture` for system-level syntheses, `pattern` for reusable patterns, or omit for general concepts. Or I can append to [existing-page](/existing-page.md)._
+> `<workspace>/okf/explanations/<slug>.md` — tag it `architecture` for system-level syntheses or `pattern` for reusable patterns. Or I can append to [existing-page](/existing-page.md)._
 
 If yes:
-- Pick the right category and kind:
-  - "how does X work" (big picture) → `concepts/<slug>.md` with `kind: architecture`
-  - "how does X work" (pattern) → `concepts/<slug>.md` with `kind: pattern`
-  - "how does X work" (general) → `concepts/<slug>.md` (no `kind`)
-  - "A vs B" → `concepts/<a>-vs-<b>.md`
+- Pick the right type and location:
+  - "how does X work" (big picture) → `explanations/<slug>.md`, tagged `architecture`
+  - "how does X work" (pattern) → `explanations/<slug>.md`, tagged `pattern`
+  - "how does X work" (general) → `explanations/<slug>.md`
+  - "A vs B" → `explanations/<a>-vs-<b>.md`
   - "why did we decide X" → `adrs/` (only if it's capturing a real past decision)
-  - "what's planned for X / why does X fail / workaround for Y" → `work/` (`kind:` discriminates)
-- Use the appropriate template (`concept-architecture.md`, `concept-pattern.md`, or `concept.md`)
-- Add frontmatter with `category`, `summary`, `updated` (and `kind` if applicable)
+  - "what's planned for X / why does X fail / workaround for Y" → `work/` (`type:` discriminates: `Bug`, `TechDebt`, `Feature`, …)
+- Follow `references/page-formats.md` for the type's frontmatter and declared headings
+- Add frontmatter with `type`, `title`, `description`, `tags` (from `.gw/tags.yaml`), and `updated`
 - Update `<workspace>/okf/index.md`
 - Run `gw util log --op create --title "<question>" --detail "<filed response path>"`
   in the intended workspace. It appends a `- **create** <question> — <filed response path>`
@@ -97,5 +97,5 @@ Not every query wants a markdown answer. Offer the user:
 - Do not grep the entire repo on every query — use the index, then drill into the wiki, then to code only if needed
 - Do not answer without citations — every claim must link to a wiki page or code path
 - Do not create a new page for a trivial one-off question — only file back substantive answers worth keeping
-- Do not invent content not in the wiki or code — if you don't know, say so and suggest a source to ingest or a concept page to create
+- Do not invent content not in the wiki or code — if you don't know, say so and suggest a source to ingest or an explanation page to create
 - Do not skip the `log.md` entry when filing an answer back

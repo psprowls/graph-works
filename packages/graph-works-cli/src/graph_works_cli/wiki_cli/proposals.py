@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import typer
+from doc_wiki_okf.actors import producer_actor
 from graph_works_core.proposals import run_proposal_decide, run_proposal_file, run_proposals_read
 from graph_works_wire.wiki import proposal_decide_payload, proposal_file_payload, proposals_payload
 from okf_ext.proposals import ApplyResult, Decision, Write
@@ -63,7 +64,7 @@ def _decide(target: str, decision: Decision, workspace: str, *, dry_run: bool, j
     """Record one human decision against a proposal target."""
     layout = resolve_workspace(workspace, json_mode=json_output, command=command)
     try:
-        run = run_proposal_decide(layout, target, decision, by="human", at=datetime.now(UTC), dry_run=dry_run)
+        run = run_proposal_decide(layout, target, decision, at=datetime.now(UTC), dry_run=dry_run)
     except (OSError, ValueError) as exc:
         fail(str(exc), reason="io", json_mode=json_output, command=command, cause=exc)
     payload = proposal_decide_payload(run)
@@ -124,7 +125,7 @@ def file_proposal(
             title=title,
             description=description,
             source=source,
-            by="agent:graph-works-cli",
+            by=producer_actor("graph-works-cli"),
             at=datetime.now(UTC),
             dry_run=dry_run,
         )

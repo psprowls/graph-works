@@ -125,8 +125,8 @@ Each subagent:
 
 Destination frontmatter is the destination type's business, not the note's. A
 page's own `status` and the note's `page_status` are different keys about
-different documents — do not conflate them. Omit `tokens:` (stamped later by
-`gw util tokens`).
+different documents — do not conflate them. Do not write a `tokens:` key;
+no page here carries one.
 
 Write real prose grounded in the note's evidence and its sources — never a
 bullet dump, never invented facts. Cite each source by its recorded
@@ -161,8 +161,7 @@ New pages do not appear in the indexes until they are reconciled:
 gw wiki index
 ```
 
-It prints each index it rewrote, or `nothing to do`. Optionally run
-`gw util tokens` afterward to stamp the `tokens:` keys you omitted.
+It prints each index it rewrote, or `nothing to do`.
 
 ### 5. Verify and archive
 

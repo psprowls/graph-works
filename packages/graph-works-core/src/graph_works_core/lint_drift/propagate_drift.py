@@ -35,6 +35,7 @@ from typing import Any, Protocol
 
 from code_wiki_okf.config import Config
 from code_wiki_okf.git_state import changed_files_since
+from doc_wiki_okf.actors import producer_actor
 from doc_wiki_okf.proposals import is_adr
 from langchain_core.messages import HumanMessage, SystemMessage
 from models_io.pricing import cost_for_usage
@@ -246,7 +247,7 @@ def drift_targets(
 PROPAGATOR_ROLE = "drift_propagator"
 
 #: Who the proposal ledger records as the author of a drift-filed source.
-PROPAGATOR_ACTOR = "agent:drift-propagator"
+PROPAGATOR_ACTOR = producer_actor("graph-works-core")
 
 #: Page statuses a human has already acted on. The one suppression the ledger
 #: cannot infer, so it is kept: `plan_propose` would refuse a decided proposal

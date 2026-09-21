@@ -45,7 +45,7 @@ Bulleted wikilinks; suggest `/gw:lint` and `/gw:ingest` to flesh out narratives.
 Each entity type's `.gw/sections/<Type>.yaml` declares two key sets under `frontmatter:`. Identity keys (`type`, `title`, `resource`) come from the scanner on every page.
 
 - **Owned keys** (`frontmatter.owned`, rewritten every scan): the per-kind graph edges and attributes — for example `depends_on`, `test_suites`, `entry_points`, `language`, `version` on a package, `tested_packages`, `suite_kind`, `file_count` on a test suite, `ecosystem`, `used_by`, `versions_in_use` on a dependency, `package_count` on a repository. `wiki-schema.md` has the table.
-- **Provenance keys** (`frontmatter.provenance`, scanner-stamped): `generated` (`by`, `at`), `last_updated_commit`, `tokens`, `prose_refreshed_commit`, `prose_refresh_attempts`.
+- **Provenance keys** (`frontmatter.provenance`, scanner-stamped): `generated` (`by`, `at`), `last_updated_commit`, `prose_refreshed_commit`, `prose_refresh_attempts`. (`tokens` is declared too but a scan never stamps it; only the optional `gw util tokens` does.)
 
 Keys a declaration does not list — including any you add by hand — are left alone by a re-scan. The graph-wiki-era keys (`uri`, `kind`, `graph_name`, `last_scan_at`, `summary`) are gone.
 

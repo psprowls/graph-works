@@ -72,6 +72,7 @@ from typing import Any
 from code_graph_io import GraphNotInitializedError, SchemaMismatchError, open_reader
 from code_wiki_okf.config import Config
 from code_wiki_okf.git_state import compute_state_gate
+from doc_wiki_okf.actors import producer_actor
 from doc_wiki_okf.ingest import DocumentBrief, plan_document_brief
 from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatcher, StateGate
@@ -285,8 +286,9 @@ def compose_body(body: str, *, entity_page: str | None) -> str:
     return f"{body[:cut]}{separator}- {link}\n{body[cut:]}"
 
 
-#: What `generated.by` says when the caller does not.
-_DEFAULT_BY = "agent:graph-works-core"
+#: What `generated.by` says when the caller does not: `<producer>/<version>`, the
+#: form okf-io's actor convention accepts.
+_DEFAULT_BY = producer_actor("graph-works-core")
 
 #: `doc_wiki_okf.cli.IGNORE`, restated. Declarations are not concepts, and a
 #: reference copy is material rather than a page. It is duplicated rather than

@@ -122,10 +122,11 @@ keys a declaration does not list are left alone.
 | `Dependency` | `ecosystem`, `implemented_by`, `used_by`, `versions_in_use` |
 
 Provenance keys, all scanner-written: `generated` (`by`, `at`), `last_updated_commit`
-(the commit at the last structural pass), `tokens`, and — on pages with prose
+(the commit at the last structural pass), and — on pages with prose
 sections — `prose_refreshed_commit` (the SHA the prose was last refreshed at) and
 `prose_refresh_attempts` (the retry counter for a declined refresh; cleared on
 success). `Dependency` pages carry only the counter; `File` pages carry neither.
+`tokens` is declared but not scan-stamped: only the optional `gw util tokens` writes it, nothing runs that automatically, and pages here do not carry it.
 
 Minimal example (package):
 
@@ -169,7 +170,7 @@ architecture` discriminator is gone; use `tags:` (for example `architecture`).
 
 **Required frontmatter:** `type: Dependency`, `title`, `resource`, `ecosystem`.
 **Optional:** `description`, `tags`, `implemented_by`, `used_by`, `versions_in_use`.
-**Provenance, scanner-owned:** `generated` (`by`, `at`), `last_updated_commit`, `tokens`.
+**Provenance, scanner-owned:** `generated` (`by`, `at`), `last_updated_commit`, `prose_refresh_attempts`.
 **Sections:** `## Why we depend on this` (required), then `## Gotchas / workarounds`.
 
 ```yaml

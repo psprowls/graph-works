@@ -7,6 +7,7 @@ from datetime import UTC
 from pathlib import Path
 
 import pytest
+from doc_wiki_okf.actors import producer_actor
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import ingest as ingest_module
@@ -100,7 +101,7 @@ def test_ingest_runs_one_source_against_the_first_configured_repo(
     assert result.exit_code == 0
     assert calls[0]["source"] == source
     assert calls[0]["repo"] == first_repo
-    assert calls[0]["by"] == "agent:graph-works-cli"
+    assert calls[0]["by"] == producer_actor("graph-works-cli")
     assert calls[0]["state_gate"] is gate
     assert calls[0]["at"].tzinfo is UTC  # type: ignore[union-attr]
     assert calls[0]["today"] == calls[0]["at"].date()  # type: ignore[union-attr]

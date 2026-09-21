@@ -11,7 +11,7 @@ allowed to create it.
         [{"id": "src-ingest", "resource": "/sources/ingest.md", "title": "Ingest guidance"}],
         title="Claude vs Bedrock ingest idiom",
         description="Two sources argue for one page.",
-        by="agent:ingest",
+        by="ingest/0.1",
         at=now,
     )
     proposals.apply(bundle, plan)

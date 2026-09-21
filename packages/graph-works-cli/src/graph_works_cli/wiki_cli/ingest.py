@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import cast
 
 import typer
+from doc_wiki_okf.actors import producer_actor
 from graph_works_core.agent_substrate.roles import role_spec
 from graph_works_core.ingest.commands import plan_ingest_brief, run_ingest_source, state_gate_adapter
 from graph_works_core.workspace.config import load_workspace_config
@@ -90,7 +91,7 @@ def ingest(
                 repo=config.repos[0].path,
                 today=now.date(),
                 at=now,
-                by="agent:graph-works-cli",
+                by=producer_actor("graph-works-cli"),
                 state_gate=state_gate_adapter(config),
                 backend_override=backend_override,
             )

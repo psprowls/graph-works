@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import PurePosixPath
 from typing import Any
 
+from doc_wiki_okf.actors import human_actor
 from doc_wiki_okf.proposals import lane_set, plan_file
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.proposals import (
@@ -125,12 +126,16 @@ def run_proposal_decide(
     target: str,
     decision: Decision,
     *,
-    by: str,
+    by: str | None = None,
     at: datetime,
     dry_run: bool = True,
     before_apply: Callable[[ProposalDecideRun], None] | None = None,
 ) -> ProposalDecideRun:
     """Plan -- and unless ``dry_run``, apply -- one proposal decision.
+
+    *by* is recorded in ``verified[]``. Omitted, it is ``human:<handle>`` read
+    from git in the workspace root, so a decision made by hand is never stamped
+    with a string okf-io's actor convention rejects.
 
     `before_apply`, when supplied on a live call, inspects the actual candidate
     with application fields empty before any domain write. Raising aborts the
@@ -148,7 +153,7 @@ def run_proposal_decide(
         if not dry_run and before_apply is not None:
             before_apply(run)
         return run
-    plan = plan_decide(bundle, proposal, decision, by=by, at=at)
+    plan = plan_decide(bundle, proposal, decision, by=by or human_actor(layout.root), at=at)
     run = ProposalDecideRun(
         target=normalized,
         decision=decision,

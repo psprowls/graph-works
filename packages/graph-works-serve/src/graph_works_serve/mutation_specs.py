@@ -138,12 +138,12 @@ def _validate_decide(params: Params) -> None:
 def _run_decide(
     layout: WorkspaceLayout, params: Params, as_of: datetime, dry_run: bool, before_apply: BeforeApply | None = None
 ) -> ProposalDecideRun:
-    # Match the CLI's actor and stamp the reviewed instant, including during apply.
+    # `by` is left to core: the same `human:<handle>` from git the CLI records. Stamp the reviewed
+    # instant, including during apply.
     return run_proposal_decide(
         layout,
         str(params["target"]),
         "approved" if params["decision"] == "approve" else "rejected",
-        by="human",
         at=as_of,
         dry_run=dry_run,
         before_apply=before_apply,

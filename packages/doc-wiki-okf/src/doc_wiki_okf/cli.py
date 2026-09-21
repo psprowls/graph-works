@@ -40,6 +40,7 @@ from okf_ext.schemas import SchemaSet, load_schemas
 from okf_ext.shape import SectionSet, load_sections
 from okf_io import Bundle, load_bundle
 
+from doc_wiki_okf.actors import human_actor, producer_actor
 from doc_wiki_okf.ingest import (
     BatchBrief,
     DocumentBrief,
@@ -425,7 +426,9 @@ def file_proposal(
     resource: str = typer.Option(..., "--resource", help="The source's `resource` -- what dedup keys on."),
     rationale: str = typer.Option("", "--rationale", help="Why this source argues for the page."),
     evidence: list[str] = typer.Option(None, "--evidence", help="Repeatable evidence bullet."),  # noqa: B008
-    by: str = typer.Option("agent:doc-wiki-okf", "--by", help="Who is filing; stamped into `generated.by`."),
+    by: str | None = typer.Option(
+        None, "--by", help="Who is filing; stamped into `generated.by`. Default `doc-wiki-okf/<version>`."
+    ),
     declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where `schema/` lives."),  # noqa: B008
     today_option: str | None = typer.Option(None, "--today", help="Stamp `generated.at` from YYYY-MM-DD."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
@@ -453,19 +456,26 @@ def file_proposal(
         source["evidence"] = list(evidence)
 
     plan = plan_file(
-        bundle, lanes, lane=lane, title=title, description=description, source=source, by=by, at=_at(today)
+        bundle,
+        lanes,
+        lane=lane,
+        title=title,
+        description=description,
+        source=source,
+        by=by or producer_actor("doc-wiki-okf"),
+        at=_at(today),
     )
     _report(plan, dry_run=dry_run, bundle=bundle, json_output=json_output)
 
 
 def _decide(
-    root: Path, target: Path, decision: str, by: str, today_option: str | None, dry_run: bool, json_output: bool
+    root: Path, target: Path, decision: str, by: str | None, today_option: str | None, dry_run: bool, json_output: bool
 ) -> None:
     """The body `approve` and `reject` share, so the two cannot drift."""
     today = _today(today_option)
     bundle = _bundle(root)
     found = _find(bundle, str(target))
-    plan = plan_decide(bundle, found, cast(Decision, decision), by=by, at=_at(today))
+    plan = plan_decide(bundle, found, cast(Decision, decision), by=by or human_actor(root), at=_at(today))
     _report(plan, dry_run=dry_run, bundle=bundle, json_output=json_output)
 
 
@@ -473,7 +483,9 @@ def _decide(
 def approve(
     root: Path = typer.Argument(..., help="Bundle root."),  # noqa: B008
     target: Path = typer.Argument(..., help="The page the proposal argues for."),  # noqa: B008
-    by: str = typer.Option("human", "--by", help="Who decided; appended to `verified[]`."),
+    by: str | None = typer.Option(
+        None, "--by", help="Who decided; appended to `verified[]`. Default `human:<handle>` from git."
+    ),
     today_option: str | None = typer.Option(None, "--today", help="Stamp the decision from YYYY-MM-DD."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     json_output: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
@@ -487,7 +499,9 @@ def approve(
 def reject(
     root: Path = typer.Argument(..., help="Bundle root."),  # noqa: B008
     target: Path = typer.Argument(..., help="The page the proposal argues for."),  # noqa: B008
-    by: str = typer.Option("human", "--by", help="Who decided; appended to `verified[]`."),
+    by: str | None = typer.Option(
+        None, "--by", help="Who decided; appended to `verified[]`. Default `human:<handle>` from git."
+    ),
     today_option: str | None = typer.Option(None, "--today", help="Stamp the decision from YYYY-MM-DD."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     json_output: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
@@ -500,7 +514,9 @@ def reject(
 def promote(
     root: Path = typer.Argument(..., help="Bundle root."),  # noqa: B008
     target: Path = typer.Argument(..., help="The page the proposal argues for."),  # noqa: B008
-    by: str = typer.Option("agent:doc-wiki-okf", "--by", help="Stamped into the new page's `generated.by`."),
+    by: str | None = typer.Option(
+        None, "--by", help="Stamped into the new page's `generated.by`. Default `doc-wiki-okf/<version>`."
+    ),
     declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where the declarations live."),  # noqa: B008
     today_option: str | None = typer.Option(None, "--today", help="The date an ADR's filename carries."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
@@ -518,7 +534,13 @@ def promote(
     found = _find(bundle, str(target))
     try:
         plan = plan_promotion(
-            bundle, lanes, found, section_set=_sections(root, declarations_dir), by=by, at=_at(today), on=today
+            bundle,
+            lanes,
+            found,
+            section_set=_sections(root, declarations_dir),
+            by=by or producer_actor("doc-wiki-okf"),
+            at=_at(today),
+            on=today,
         )
     except KeyError as exc:
         typer.echo(f"{found.target}: {exc}", err=True)
@@ -543,7 +565,9 @@ def _migration_payload(plan: MigrationPlan) -> dict[str, Any]:
 def migrate(
     root: Path = typer.Argument(..., help="Bundle root to rewrite."),  # noqa: B008
     apply_changes: bool = typer.Option(False, "--apply", help="Write the rewrite and perform the moves."),
-    by: str = typer.Option("agent:doc-wiki-okf", "--by", help="Stamped into each migrated `generated.by`."),
+    by: str | None = typer.Option(
+        None, "--by", help="Stamped into each migrated `generated.by`. Default `doc-wiki-okf/<version>`."
+    ),
     today_option: str | None = typer.Option(None, "--today", help="Stamp `generated.at` from YYYY-MM-DD."),
     json_output: bool = typer.Option(False, "--json", help="Emit the plan as JSON."),
 ) -> None:
@@ -571,6 +595,7 @@ def migrate(
     """
     today = _today(today_option)
     at = _at(today)
+    by = by or producer_actor("doc-wiki-okf")
 
     if not apply_changes:
         bundle = _bundle(root)
@@ -752,7 +777,7 @@ def source_add(
     authors: list[str] = typer.Option(None, "--author", help="Repeatable author name."),  # noqa: B008
     source_date: str = typer.Option("", "--source-date", help="When the material itself was written, YYYY-MM-DD."),
     tokens: int | None = typer.Option(None, "--tokens", help="Approximate token count of the material."),
-    by: str = typer.Option("agent:doc-wiki-okf", "--by", help="Stamped into `generated.by`."),
+    by: str | None = typer.Option(None, "--by", help="Stamped into `generated.by`. Default `doc-wiki-okf/<version>`."),
     declarations_dir: Path | None = typer.Option(None, "--declarations-dir", help="Where the declarations live."),  # noqa: B008
     today_option: str | None = typer.Option(None, "--today", help="Compute the page path as of YYYY-MM-DD."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
@@ -793,7 +818,7 @@ def source_add(
             description=description,
             source_kind=checked,
             origin=origin,
-            by=by,
+            by=by or producer_actor("doc-wiki-okf"),
             at=_at(today),
             today=today,
             entity_uri=entity_uri,

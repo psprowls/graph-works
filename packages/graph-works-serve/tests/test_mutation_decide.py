@@ -42,6 +42,7 @@ def _apply(client: TestClient, headers: dict[str, str], params: dict[str, Any], 
 def test_round_trip_matches_cli_and_stamps_the_echoed_plan_instant(
     env: Env, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, decision: str, status: str
 ) -> None:
+    monkeypatch.setattr("graph_works_core.proposals.commands.human_actor", lambda cwd=None: "human:tester")
     layout, member, client, headers = env
     params = {"target": TARGET, "decision": decision}
     before = snapshot(layout)
@@ -79,7 +80,7 @@ def test_round_trip_matches_cli_and_stamps_the_echoed_plan_instant(
     assert applied.json()["result"]["applied"] is True
     fm = load(layout.bundle_dir / member).fm_data()
     assert fm["page_status"] == status
-    assert fm["verified"][-1] == {"by": "human", "at": "2026-09-18T14:03:07+00:00"}
+    assert fm["verified"][-1] == {"by": "human:tester", "at": "2026-09-18T14:03:07+00:00"}
     assert datetime.fromisoformat(fm["verified"][-1]["at"]) == datetime.fromisoformat(plan["as_of"])
     assert snapshot(layout) == snapshot(twin)
 

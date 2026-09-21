@@ -91,7 +91,7 @@ back through `tested_packages`.
 **Required frontmatter:** `type: Dependency`, `title`, `resource`, `ecosystem`.
 **Optional:** `description`, `tags`, `implemented_by`, `used_by`, `versions_in_use`.
 **Provenance, scanner-owned:** `generated` (`by`, `at`), `last_updated_commit`,
-`tokens`, `prose_refresh_attempts`.
+`prose_refresh_attempts`.
 **Sections:** `## Why we depend on this` (required), then `## Gotchas / workarounds`.
 
 ```markdown

@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from doc_wiki_okf.actors import producer_actor
 from graph_works_cli import exit_codes
 from graph_works_cli.cli import app
 from graph_works_cli.wiki_cli import proposals as proposals_module
@@ -152,7 +153,8 @@ def test_proposal_decisions_pass_the_raw_target_to_core(
     layout, raw, actual_decision = captured[0][:3]
     kwargs = captured[0][3]
     assert raw == target_spelling and actual_decision == decision
-    assert kwargs["by"] == "human" and kwargs["dry_run"] is False
+    # A decision is a human act: core resolves `human:<handle>` from git, so the CLI passes no actor.
+    assert "by" not in kwargs and kwargs["dry_run"] is False
     assert isinstance(kwargs["at"], datetime) and kwargs["at"].tzinfo is UTC
     assert layout.bundle_dir == proposals_module.resolve_workspace(str(initialized_workspace)).bundle_dir
 
@@ -238,7 +240,7 @@ def test_proposal_file_builds_the_ordered_source_mapping_and_timestamps_it(
         "rationale": "This removes ambiguity.",
         "evidence": ["first", "second"],
     }
-    assert captured[0]["by"] == "agent:graph-works-cli" and captured[0]["dry_run"] is False
+    assert captured[0]["by"] == producer_actor("graph-works-cli") and captured[0]["dry_run"] is False
     assert isinstance(captured[0]["at"], datetime) and captured[0]["at"].tzinfo is UTC
 
 

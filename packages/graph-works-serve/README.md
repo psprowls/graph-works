@@ -14,7 +14,7 @@ gw-serve [--workspace PATH] [--port 0] [--allow-origin ORIGIN ...] [--describe]
 
 ## Platform
 
-POSIX (Linux, macOS) and Windows through WSL (ADR-0021). Native Windows is
+POSIX (Linux, macOS) and Windows through WSL (ADR 2026-08-19-windows-is-supported). Native Windows is
 deferred: `serve.json`'s `0600` mode and the pid-liveness probe
 (`os.kill(pid, 0)`, in `discovery_file.pid_alive`) are POSIX behaviour, and the
 agent-config route injects `os.getuid()` on POSIX only. Discovery-file writes

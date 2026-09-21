@@ -2,7 +2,7 @@
 
 A direct analogue of `code_wiki_okf/entities/pages.py`, the module this problem
 was already solved in. `x-okf-directory` is read off the loaded `SchemaSet`, not
-hardcoded: ADR-0012's annotation tells a writer where to *create*, and nothing
+hardcoded: ADR 2026-08-07-pascalcase-types's annotation tells a writer where to *create*, and nothing
 ever tells a reader or a validator where to *expect*.
 
 Configuration errors raise, as they do in every loader in this workspace. A type

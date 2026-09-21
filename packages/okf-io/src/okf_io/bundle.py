@@ -59,7 +59,7 @@ class Bundle:
 
     ``_canonical`` maps :func:`canonical_id` of a member's path to that
     member's *raw* disk id -- one entry per member whose raw id is non-ASCII,
-    none otherwise. Ids themselves stay raw disk bytes (§ADR-0027): a writer
+    none otherwise. Ids themselves stay raw disk bytes (§ADR 2026-08-21-member-identity): a writer
     that reconstructs a path from an id must open the file that id names, on
     a filesystem that may not be normalization-insensitive the way APFS is.
     Matching is NFC-insensitive; identity is not.
@@ -71,7 +71,7 @@ class Bundle:
     or more members are NFC-equal but byte-different: impossible on a
     normalization-folding filesystem (APFS), reachable on one that is not
     (ext4). See ``_rules/identity.py``, which turns a non-empty entry into a
-    reported ``Finding`` rather than raising -- CI is deferred (ADR-0010), so
+    reported ``Finding`` rather than raising -- CI is deferred (ADR 2026-08-02-quality-gates-enforced), so
     this field exists for a hazard nothing here can currently reproduce.
     """
 
@@ -129,7 +129,7 @@ class Bundle:
         so a bundle that ignores ``schema/`` and links into it has a working
         link, not a broken one.
 
-        Matching is NFC-insensitive (§ADR-0027): the exact-match body above is
+        Matching is NFC-insensitive (§ADR 2026-08-21-member-identity): the exact-match body above is
         the fast path, unchanged for every ASCII bundle-relative path that
         exists today; a non-ASCII query that misses it falls back to
         :attr:`_canonical`, which is empty unless the bundle carries a
@@ -339,7 +339,7 @@ def _track_canonical(canonical: dict[str, str], collisions: dict[str, list[str]]
     path), so only a non-ASCII *relative* can collide with an existing entry;
     an ASCII *relative* is a no-op here.
 
-    Last-write-wins for *canonical* is unchanged (§ADR-0027) -- the last raw
+    Last-write-wins for *canonical* is unchanged (§ADR 2026-08-21-member-identity) -- the last raw
     id seen in walk order always wins.
     *collisions* additionally remembers every raw id a later member
     displaced, in walk order, so the final element of each recorded list is

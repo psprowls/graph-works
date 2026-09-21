@@ -11,7 +11,7 @@ body and whose input is a markdown-it parse. They share no code and no data.
 **Staleness is not here.** okf-io already ships `lifecycle.stale`, which fires
 when a document's own `stale_after` has passed. A blanket "nothing older than N
 days" policy layered on top would contradict an author who deliberately wrote
-`stale_after: 2027-01-01` -- the inverse of ADR-0009's principle. A document
+`stale_after: 2027-01-01` -- the inverse of ADR 2026-08-03-index-reconciliation's principle. A document
 that declares no expiry is not stale; it is undated, which is a different fact
 and not one this capability reports.
 

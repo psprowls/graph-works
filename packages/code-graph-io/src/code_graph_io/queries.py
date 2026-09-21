@@ -195,7 +195,7 @@ class PackageDescription:
     # both directions of the depends_on_package edge.
     internal_dependencies: list[str] = field(default_factory=list)  # outgoing
     internal_dependents: list[str] = field(default_factory=list)  # incoming
-    # facts migrated from the implemented Dependency node (ADR-0048); empty
+    # facts migrated from the implemented Dependency node (ADR 2026-09-07-dependencies); empty
     # when this package does not implement a distributable manifest's
     # Dependency node.
     used_by: list[str] = field(default_factory=list)
@@ -809,7 +809,7 @@ def describe_package(
     internal_dependents = [r[0] for r in internal_dependent_rows]
 
     # Facts migrated from the implemented Dependency node, if this package
-    # implements one (ADR-0048). Same consumer-kind filter and ordering as
+    # implements one (ADR 2026-09-07-dependencies). Same consumer-kind filter and ordering as
     # describe_dependency, so the two agree by construction.
     used_by: list[str] = []
     versions_in_use: list[str] = []
@@ -1327,7 +1327,7 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
     docstring names — and so a virtual workspace root's dev tooling,
     re-sourced to the Repository node, renders too.
 
-    `used_by` carries consumer **URIs**, not bare names (ADR-0048): the three
+    `used_by` carries consumer **URIs**, not bare names (ADR 2026-09-07-dependencies): the three
     admitted kinds flattened into one name list cannot say which is which, so
     a virtual workspace root reads as a package. A URI is self-describing
     about kind and resolvable to a page by placement. `describe_package`'s

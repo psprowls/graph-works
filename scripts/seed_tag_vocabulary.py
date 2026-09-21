@@ -26,7 +26,7 @@ Design notes
   at `.gw/tags.yaml`, outside `bundle_dir`, so splicing it would silently ignore
   a real bundle member if one were ever named `tags.yaml`.
 
-* **The quarantine is derived from the package, not listed here.** ADR-0029
+* **The quarantine is derived from the package, not listed here.** ADR 2026-08-21-a-package-contributes
   splits the two routes: a package contributes `TagDefinition` entries, the
   vocabulary *file* is the vault's. `work_tracker_okf` contributes `perf` and
   `security`; retyping them here would let the two lists drift, which is the
@@ -38,7 +38,7 @@ Design notes
 
 * **Nothing writes without an explicit flag.** `evidence` writes only where
   `--out` says; `rename` reports unless `--write`; `gate` and `verify` are pure
-  reads. ADR-0022: a mutation surface plans by default, the caller applies.
+  reads. ADR 2026-08-18-mutation-surfaces-plan: a mutation surface plans by default, the caller applies.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ MANIFEST_FILENAME = "workspace.yaml"
 BUNDLE_DIRNAME = "wiki"
 CONFIG_DIRNAME = ".gw"
 
-#: The tags that arrive by ADR-0029's *package* route. Derived, never retyped.
+#: The tags that arrive by ADR 2026-08-21-a-package-contributes's *package* route. Derived, never retyped.
 #: They are admitted by contribution, not by frequency: their carrier count is
 #: irrelevant to the floor, and a count of 0 is correct rather than dead weight.
 QUARANTINE: frozenset[str] = frozenset(definition.name for definition in CONTRIBUTED_TAGS)
@@ -280,7 +280,7 @@ def render_evidence(
         "",
         "## Quarantine",
         "",
-        "Contributed by the package route (ADR-0029). **Not eligible for any",
+        "Contributed by the package route (ADR 2026-08-21-a-package-contributes). **Not eligible for any",
         "disposition here** — never authored, never dropped, and never edited in",
         "`deprecated` or `replaced_by`. A count of 0 is correct, not dead weight.",
         "",
@@ -364,7 +364,7 @@ def run_rename(workspace: Path, ignore: Sequence[str], *, write: bool) -> int:
     a deprecation; `plan_merge` stays for a collapse the vault does not want in
     its history, and this item has none.
 
-    A plan is a value you inspect and filter, not a `dry_run` flag (ADR-0022) --
+    A plan is a value you inspect and filter, not a `dry_run` flag (ADR 2026-08-18-mutation-surfaces-plan) --
     which is why the dry run prints the same plan the write applies, rather than
     a different code path.
     """

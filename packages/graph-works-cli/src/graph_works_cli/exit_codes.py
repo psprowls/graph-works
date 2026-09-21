@@ -1,4 +1,4 @@
-"""Stable exit-code contract (ADR-0013 rule 1) — re-exported from `code_graph_io.exit_codes`.
+"""Stable exit-code contract (ADR 2026-08-13-command-modules rule 1) — re-exported from `code_graph_io.exit_codes`.
 
 Every sub-app maps its own typed result onto the closest-fitting code here rather than inventing a
 second parallel numbering: missing workspace -> `NOT_INITIALIZED`; unresolved slug/entity match ->

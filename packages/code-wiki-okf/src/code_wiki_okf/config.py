@@ -6,7 +6,7 @@ concept content, and the workspace manifest is configuration — following the
 `VocabularyError` / `SchemaError` / `SectionError` precedent in okf-ext.
 
 This reads the same file `graph_works_core.workspace.manifest` reads, but
-independently: this package cannot depend on `graph_works_core` (ADR-0005 —
+independently: this package cannot depend on `graph_works_core` (ADR 2026-08-02-workspace-layering —
 `code-wiki-okf` is tier 3, `graph_works_core` sits above it), so it has its
 own permissive top-level parse rather than importing `Manifest`/`CATALOG`.
 Every key this module does not name (`version`, `roles`, `layout`, ...) is
@@ -192,7 +192,7 @@ def config_from_mapping(
     two functions have no illegal argument combination.
 
     *anchor* is the directory a relative `repositories.*.path` resolves
-    against — the directory the document itself was read from (ADR-0041). It
+    against — the directory the document itself was read from (ADR 2026-08-26-a-relative-path). It
     is **not** *bundle_root*, which is what a relative *graph_dir* /
     *declarations_dir* resolves against and what *declarations_dir* defaults
     to. The two coincide only when the document sits at

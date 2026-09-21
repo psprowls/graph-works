@@ -58,7 +58,7 @@ def test_the_flip_carries_both_the_status_and_the_dated_target(tmp_path) -> None
     }
 
 
-def test_the_promoted_page_is_an_explanation_carrying_the_skeleton(tmp_path) -> None:
+def test_the_promoted_page_is_an_adr_carrying_the_skeleton_and_its_decision_date(tmp_path) -> None:
     root = tmp_path / "b"
     bundle, proposal = _approved(root)
     plan = plan_promotion(bundle, lanes(), proposal, section_set=section_set(), by=BY, at=AT, on=TODAY)
@@ -66,13 +66,15 @@ def test_the_promoted_page_is_an_explanation_carrying_the_skeleton(tmp_path) -> 
 
     page = parse((root / "adrs/2026-08-12-bulk-write-staging-protocol.md").read_text(encoding="utf-8"))
     assert page.parse_error is None
-    assert page.fm.type == "Explanation"
+    assert page.fm.type == "Adr"
     assert page.fm.title == "Bulk Write Staging Protocol"
     assert page.fm.description == "Why this page."
-    assert page.body == render_skeleton(section_set().types["Explanation"])
+    assert page.fm_data()["decision_date"] == TODAY.isoformat()
+    assert page.fm_data()["status"] == "stable"
+    assert page.body == render_skeleton(section_set().types["Adr"])
 
 
-def test_the_promoted_page_passes_the_explanation_schema(tmp_path) -> None:
+def test_the_promoted_page_passes_the_adr_schema(tmp_path) -> None:
     root = tmp_path / "b"
     bundle, proposal = _approved(root)
     apply(bundle, plan_promotion(bundle, lanes(), proposal, section_set=section_set(), by=BY, at=AT, on=TODAY))
@@ -92,9 +94,9 @@ def test_this_layer_supplies_none_of_the_owned_provenance_keys(tmp_path) -> None
     from doc_wiki_okf.proposals.promote import page_render
 
     _bundle, proposal = _approved(tmp_path / "b")
-    render = page_render(lanes()["adr"], proposal, section_set=section_set())
+    render = page_render(lanes()["adr"], proposal, section_set=section_set(), on=TODAY)
     assert not set(render.frontmatter) & set(OWNED_PROVENANCE_KEYS)
-    assert set(render.frontmatter) == {"title", "description"}
+    assert set(render.frontmatter) == {"title", "description", "decision_date", "status"}
 
 
 def test_a_target_in_no_declared_lane_refuses(tmp_path) -> None:

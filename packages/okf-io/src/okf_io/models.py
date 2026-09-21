@@ -548,7 +548,7 @@ def _scan_citations(body: str) -> tuple[Source, ...]:
     Two consequences of that shared locator, both deliberate. The
     bracketed-number dialect (``[1] [Title](url)`` paragraph lines, which
     `crypto_bitcoin` writes) is now read where the list-item-only scan missed
-    it entirely -- an ADR-0003 read-side change, safe because the values arrive
+    it entirely -- an ADR 2026-08-02-v01-compat-read read-side change, safe because the values arrive
     flagged in ``fallbacks``. And entries stop at the next heading, so a second
     ``# Citations`` section is no longer folded into the first.
 

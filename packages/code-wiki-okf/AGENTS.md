@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 `code-wiki-okf` reads the shared code graph (via `code-graph-io`'s
 `GraphReader`) and generates/updates a standalone OKF v0.2 bundle describing
 it — one page per `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`,
-`File`, and `Dependency`. It is a tier-3 consumer of `okf-io` (ADR-0005):
+`File`, and `Dependency`. It is a tier-3 consumer of `okf-io` (ADR 2026-08-02-workspace-layering):
 depends on `okf-io`, `okf-ext[schemas]`, and `code-graph-io`; nothing depends
 on it. Python ≥3.12.
 
@@ -52,7 +52,7 @@ takes `today=`/`at=` as an argument. `sync` and `validate` both resolve
 separate workspace layout to derive a cache directory from.
 
 A known, deliberate gap: `init` no longer seeds a `workspace.yaml` of its own
-(2026-08-22 tech-debt item, ADR-0033). A bundle that was `init`'d but never
+(2026-08-22 tech-debt item, ADR 2026-08-22-single-workspace-config). A bundle that was `init`'d but never
 given a `workspace.yaml` (by hand, or via `--config-path`) makes `sync`/
 `validate` fail with a raw uncaught `OSError`, not a clean `ConfigError` exit.
 
@@ -67,7 +67,7 @@ getting them wrong should hear about it immediately, not get a silently
 degraded `Bundle`. `config.py` reads the same `workspace.yaml` that
 `graph_works_core.workspace.manifest` reads, but independently and only for
 those three blocks — this package cannot depend on `graph_works_core`
-(ADR-0005 puts it above tier 3), so every other top-level key is ignored
+(ADR 2026-08-02-workspace-layering puts it above tier 3), so every other top-level key is ignored
 rather than validated.
 
 **Two entry points, one validator.** `load_config(bundle_root, config_path=…)`
@@ -79,7 +79,7 @@ band rule is untouched: this package is handed a mapping and two directories,
 and still imports nothing from `graph_works_core`.
 
 `anchor` is the directory a relative `repositories.*.path` resolves against
-(ADR-0041) and `bundle_root` is what a relative `graph_dir` /
+(ADR 2026-08-26-a-relative-path) and `bundle_root` is what a relative `graph_dir` /
 `declarations_dir` resolves against — different directories in a graph-works
 layout, so do not pass one for the other. `source` is the name every
 `ConfigError` quotes.

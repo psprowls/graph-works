@@ -1,4 +1,4 @@
-"""Rewriting a v0.1 bundle into v0.2 form (OKF v0.2 §13.1, ADR-0003).
+"""Rewriting a v0.1 bundle into v0.2 form (OKF v0.2 §13.1, ADR 2026-08-02-v01-compat-read).
 
 The read half already ships: ``models.build_frontmatter`` falls back to a v0.1
 top-level ``timestamp`` and to a body ``# Citations`` list, recording both in
@@ -27,7 +27,7 @@ the decline is reported too, as an ``Unmigrated`` with reason
 nothing (§3).
 
 Byte fidelity needs nothing new here. Frontmatter edits go through
-``Document.set`` / ``Document.delete`` and are rendered by the ADR-0001 splice;
+``Document.set`` / ``Document.delete`` and are rendered by the ADR 2026-08-02-two-layer-document splice;
 body edits go through ``_edit.apply``, which copies every unedited line
 verbatim. The existing guarantee carries over unchanged: always valid, never
 lossy, minimal in the common case.

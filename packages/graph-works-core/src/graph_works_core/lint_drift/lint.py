@@ -127,7 +127,7 @@ def _finding_line(finding: Finding) -> str:
     all fit their fields. An over-long code or path pushes the rest of that
     line right rather than truncating — nothing is ever lost.
 
-    Severity is data rather than structure (okf-io ADR-0008), so it renders as
+    Severity is data rather than structure (okf-io ADR 2026-08-03-finding-model-dotted), so it renders as
     a word in its own column rather than sorting the finding into an errors or
     warnings bucket — the same shape `Report` itself keeps.
     """

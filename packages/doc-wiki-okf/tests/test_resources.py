@@ -7,8 +7,8 @@ from doc_wiki_okf.resources import SEED_RELATIVE_PATHS, assets_root, seed_files
 _SCAFFOLD_MEMBERS = ("index.md", "log.md", "tags.yaml")
 
 
-def test_twelve_paths_schemas_before_sections() -> None:
-    assert len(SEED_RELATIVE_PATHS) == 12
+def test_fourteen_paths_schemas_before_sections() -> None:
+    assert len(SEED_RELATIVE_PATHS) == 14
     schema_last = max(i for i, p in enumerate(SEED_RELATIVE_PATHS) if p.startswith("schema/"))
     sections_first = min(i for i, p in enumerate(SEED_RELATIVE_PATHS) if p.startswith("sections/"))
     assert schema_last < sections_first
@@ -25,7 +25,7 @@ def test_no_scaffold_member_is_claimed() -> None:
         assert member not in SEED_RELATIVE_PATHS
 
 
-def test_seed_files_reads_twelve_non_empty_files() -> None:
+def test_seed_files_reads_fourteen_non_empty_files() -> None:
     files = seed_files()
     assert set(files) == set(SEED_RELATIVE_PATHS)
     assert all(text.strip() for text in files.values())

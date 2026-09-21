@@ -386,7 +386,7 @@ def citations_section(body: str) -> CitationsSection | None:
     """Locate a v0.1 ``# Citations`` section: what it holds, and where it sits.
 
     One locator, two callers. ``models._scan_citations`` reads the entries for
-    the ADR-0003 read fallback and ``migrate`` deletes the range they sit in,
+    the ADR 2026-08-02-v01-compat-read read fallback and ``migrate`` deletes the range they sit in,
     so a shared function is what stops reader and writer from ever disagreeing
     about what a citations section is.
 

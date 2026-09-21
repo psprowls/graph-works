@@ -17,9 +17,9 @@ _INSTALL_FILES = set(SEED_RELATIVE_PATHS)
 _ALL_FILES = _SCAFFOLD_FILES | _INSTALL_FILES
 
 
-def test_the_package_owns_exactly_twelve_files() -> None:
-    assert len(SEED_RELATIVE_PATHS) == 12
-    assert len(set(SEED_RELATIVE_PATHS)) == 12
+def test_the_package_owns_exactly_fourteen_files() -> None:
+    assert len(SEED_RELATIVE_PATHS) == 14
+    assert len(set(SEED_RELATIVE_PATHS)) == 14
 
 
 def test_this_package_ships_none_of_the_scaffold_members() -> None:

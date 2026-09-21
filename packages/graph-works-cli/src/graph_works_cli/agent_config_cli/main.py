@@ -1,6 +1,6 @@
 """`gw agent-config` — report each coding agent's configuration. Read-only.
 
-ADR-0013: this module resolves, injects (`Path.home()`, environment, platform)
+ADR 2026-08-13-command-modules: this module resolves, injects (`Path.home()`, environment, platform)
 and formats; core owns all configuration logic and wire owns the JSON projection.
 """
 

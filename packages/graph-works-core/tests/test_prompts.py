@@ -416,7 +416,8 @@ def test_the_rendered_categories_match_the_schemas_declarations_exactly(tmp_path
 
     expected = {"adr", "work"}
     for _type_name, directory in declared_directories(schema_set).items():
-        expected.add(directory.rstrip("/"))
+        if directory != "adrs/":  # the hardcoded `adr` row already stands for it
+            expected.add(directory.rstrip("/"))
     # Directory names and category names differ only by pluralization for the
     # eleven schema-sourced rows (e.g. "how-tos" -> "how-to"); assert on
     # cardinality and on each schema type's specific category name instead of

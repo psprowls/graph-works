@@ -13,7 +13,7 @@ has to know what a bundle is.
 
 A `PendingWrite` carries `str | bytes`. The `str` case is encoded UTF-8 at
 staging time and is what every rendering capability produces; the `bytes` case
-is staged verbatim and is how binary material reaches a bundle. See ADR-0031.
+is staged verbatim and is how binary material reaches a bundle. See ADR 2026-08-21-a-pending-write.
 
 `SkipReason` and `FailureKind` are unions across every capability,
 deliberately. `tags-not-a-sequence` and `duplicate-edit` stay in `FailureKind`

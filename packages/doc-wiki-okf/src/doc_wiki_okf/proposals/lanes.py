@@ -1,7 +1,7 @@
 """The lane map for proposal rendering.
 
 Five lanes: four Diátaxis types, each with a directory derived from the loaded
-SchemaSet, plus one ADR lane (the only dated lane, using Explanation type in
+SchemaSet, plus one ADR lane (the only dated lane, using the Adr type in
 adrs/).
 
 The lane map determines where a new proposal lands (directory, schema type, dating)
@@ -29,17 +29,19 @@ DIATAXIS_LANES = {
     "explanation": "Explanation",
 }
 
-#: The ADR lane's directory and type (Explanation in adrs/).
+#: The ADR lane's directory and type (Adr in adrs/). An ADR is written in the
+#: Diátaxis explanation style, so its schema builds on the same base as the
+#: Explanation lane's; it has its own type so ADR-specific checks can find it.
 ADR_DIRECTORY = "adrs/"
-ADR_TYPE = "Explanation"
+ADR_TYPE = "Adr"
 
 
 def is_adr(concept_id: str, type_name: str) -> bool:
     """An ADR is the ADR lane's type **in** the ADR lane's directory.
 
-    Both halves are required: `ADR_TYPE` is `Explanation`, which the Diátaxis
-    explanation lane also uses, so the type alone would sweep every explanation
-    page into the ADR checks.
+    Both halves are required: an `Adr` outside `adrs/` is misplaced, not an ADR
+    the ADR checks should sweep in, and any other type in `adrs/` is not one
+    either.
 
     Takes the type name rather than a document, so the package that owns the
     vocabulary needs no okf-io type in its interface; every caller already has

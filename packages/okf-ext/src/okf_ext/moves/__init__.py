@@ -78,7 +78,7 @@ from okf_ext.writing import FailureKind, WriteFailure
 #: `MovePlan` or `MoveResult` ever hands one back to a caller, unlike
 #: `tables`' `read`/`read_all`, which ship because three named external
 #: consumers use them directly. Shipping an unused surface pre-1.0 would only
-#: bind a future removal to a breaking minor bump (ADR-0007) for a surface
+#: bind a future removal to a breaking minor bump (ADR 2026-08-02-versioning-independent-static) for a surface
 #: nothing ever consumed. `locate` stays reachable as
 #: `okf_ext.moves.locate.destinations` etc. for anything that genuinely needs
 #: it, `test_moves_locate.py` included.

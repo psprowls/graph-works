@@ -153,7 +153,7 @@ def _layout(vault: Path):  # -> WorkspaceLayout
 def migration_dir(vault: Path) -> Path:
     """`.gw/migration/` -- where the decisions file, the entity snapshot and the
     quarantine live. Outside the bundle, so never a member and never an
-    `ignore=` entry (ADR-0024)."""
+    `ignore=` entry (ADR 2026-08-20-gw-directory-nests)."""
     return _layout(vault).config_dir / "migration"
 
 
@@ -1115,7 +1115,7 @@ def _absence_reason(row: dict, renames: dict[str, str]) -> str:
         return "dependency facets landed after this page was written (a9bdbff8); verify by ecosystem/name"
     if prefix in {"app", "agent_plugin", "test_suite"}:
         return "C# parsing support landed after this page was written (a9bdbff8); verify the successor by hand"
-    return "repository-first placement changed member paths (ADR-0026, cc697716); or `gw scan` has not run yet"
+    return "repository-first placement changed member paths (ADR 2026-08-20-repo-scoped-entity, cc697716); or `gw scan` has not run yet"
 
 
 def _render_unmatched(unmatched: Sequence[dict], bundle: Bundle, rows: Sequence[dict], renames: dict[str, str]) -> str:
@@ -1127,7 +1127,7 @@ def _render_unmatched(unmatched: Sequence[dict], bundle: Bundle, rows: Sequence[
     before the sweep started.
 
     Each row names *why* the absence is expected -- repository-first placement
-    (ADR-0026, landed at `cc697716`), dependency facets, C# parsing (`a9bdbff8`),
+    (ADR 2026-08-20-repo-scoped-entity, landed at `cc697716`), dependency facets, C# parsing (`a9bdbff8`),
     or the repo rename -- so the review is a judgment about a stated reason
     rather than a re-derivation.
     """

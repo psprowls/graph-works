@@ -70,7 +70,7 @@ def bundle_root(tmp_path):
     _write(
         root,
         "adrs/0001-two-layer.md",
-        "---\ntype: Explanation\ntitle: Two layers\n---\n\nPer [okf-io](/packages/okf-io.md).\n",
+        "---\ntype: Adr\ntitle: Two layers\n---\n\nPer [okf-io](/packages/okf-io.md).\n",
     )
     return root
 

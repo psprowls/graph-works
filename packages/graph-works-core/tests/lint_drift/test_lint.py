@@ -293,7 +293,7 @@ def curated(workspace):
     bundle = workspace.layout.bundle_dir
     (bundle / "adrs").mkdir(exist_ok=True)
     (bundle / "adrs" / "0001-pick-okf.md").write_text(
-        "---\ntype: Explanation\ntitle: Pick OKF\n---\n\nAccepted.\n", encoding="utf-8"
+        "---\ntype: Adr\ntitle: Pick OKF\n---\n\nAccepted.\n", encoding="utf-8"
     )
     (bundle / "concepts").mkdir(exist_ok=True)
     (bundle / "concepts" / "cited.md").write_text(
@@ -482,7 +482,8 @@ from graph_works_core.lint_drift.lint import PAGE_QUALITY_WINDOW, _group_pages  
 def _write(workspace, relative: str, *, body: str = "Body.\n") -> None:
     path = workspace.layout.bundle_dir / relative
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(f"---\ntype: Explanation\ntitle: {relative}\n---\n\n{body}", encoding="utf-8")
+    type_name = "Adr" if relative.startswith("adrs/") else "Explanation"
+    path.write_text(f"---\ntype: {type_name}\ntitle: {relative}\n---\n\n{body}", encoding="utf-8")
 
 
 def _seed_corpus(workspace, *, count: int = 25) -> None:

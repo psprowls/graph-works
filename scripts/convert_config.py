@@ -169,7 +169,7 @@ def read_v2(root: Path) -> dict[str, object]:
 
 
 #: What `layout.bundle_dir` is seeded with. Deliberately not
-#: `layout.DEFAULT_BUNDLE_DIR` (`okf`): the bundle does not move (ADR-0024) and
+#: `layout.DEFAULT_BUNDLE_DIR` (`okf`): the bundle does not move (ADR 2026-08-20-gw-directory-nests) and
 #: the live vault is `wiki/`.
 BUNDLE_DIR_SEED = "wiki"
 

@@ -3,7 +3,7 @@
 
 Wired into `just check` as `platform-declared`, beside `normalization` and
 `line-endings`. This is rule 3a of
-[ADR-0021](/adrs/0021-windows-is-supported-via-wsl-native-windows-is-deferred.md)
+[ADR 2026-08-19-windows-is-supported](/adrs/0021-windows-is-supported-via-wsl-native-windows-is-deferred.md)
 turned from an unenforced convention into a check -- see the design spec for
 work/epic-native-windows-support/children/tech-debt-publish-platform-matrix.
 `workflow-local`'s README accurately said "It is POSIX only" and nothing

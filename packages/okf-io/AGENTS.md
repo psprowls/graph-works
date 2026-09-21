@@ -98,7 +98,7 @@ the view instead of re-reading `fm_raw`:
   `not:`, `from:` and `class:` readable when attribute mapping would break.
 - `coercion_failures` — dotted paths whose raw value was the wrong shape. The
   raw value stays reachable through `fm_raw`.
-- `fallbacks` — which ADR-0003 read-time fallbacks fired, so a consumer can tell
+- `fallbacks` — which ADR 2026-08-02-v01-compat-read read-time fallbacks fired, so a consumer can tell
   a fallback-derived value from an authored one. `_rules/legacy.py` keys off
   this rather than re-scanning the body, which would disagree with the view on a
   migrated document that kept its old `# Citations` prose. `migrate.py` keys off
@@ -120,7 +120,7 @@ relative filename but reads as `scheme:opaque` under RFC 3986 §4.2, so it is
 
 `Link.target` is `None` both for an external destination and for a relative path
 that escapes the bundle root; `Link.external` tells them apart, and only the
-second is broken. Broken links are `warn`, never `error` (ADR-0004) — which is
+second is broken. Broken links are `warn`, never `error` (ADR 2026-08-02-broken-links) — which is
 why `Report.ok` stays `True` for a bundle whose only problem is a dead link.
 
 Backlinks are **computed** from the one walk, never written into a neighbour's

@@ -67,7 +67,7 @@ from doc_wiki_okf.sources import SOURCE_TYPE, plan_ingest, seed_source_kinds, so
 #: writer's occupancy check depends on.
 #:
 #: `*/.DS_Store` is the nested half of what okf-io already drops at the bundle
-#: root. ADR-0028 scoped the walk's dot exclusion to the root on the argument
+#: root. ADR 2026-08-21-bundle-dot-exclusion scoped the walk's dot exclusion to the root on the argument
 #: that a nested dot-entry "only exists because something deliberately created
 #: a path there" -- true of `.agents/`, false of `.DS_Store`, which Finder
 #: writes into every directory it is asked to display. The root pattern is

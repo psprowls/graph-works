@@ -74,7 +74,7 @@ Read those rather than copying another page's shape.
 | Dependencies | `Dependency` | `dependencies/<ecosystem>/` | `type`, `title`, `resource`, `ecosystem` | `gw scan` |
 | Diátaxis | `Explanation`, `Reference`, `HowTo`, `Tutorial` | `explanations/`, `references/`, `how-tos/`, `tutorials/` | `type`, `title`, `description` | authors, via proposals |
 | Sources | `Source` | `sources/` | `type`, `title`, `description`, `source_path` | `gw ingest` |
-| ADRs | `Adr` | `adrs/` | `type`, `title`, `description`, `category`, `adr_id`, `status`, `decision_date` | authors |
+| ADRs | `Adr` | `adrs/` | `type`, `title`, `description`, `decision_date` | authors, or `gw wiki proposal promote` |
 | Proposals | `Proposal` | `proposals/` | `type`, `title`, `target`, `page_status`, `sources` | `gw ingest`, `gw wiki proposal` |
 | Work | `Release`, `Epic`, `Feature`, `Bug`, `TechDebt`, `TestGap`, `Spike` | `work/` | `type`, `title`, `description`, `work_status`, `opened`, `updated`; plus `effort` and `affects` unless `status: draft` | `gw work` |
 
@@ -90,8 +90,7 @@ updated: 2026-04-20
 ---
 ```
 
-**Retired keys.** The graph-wiki-era keys `category` (except on `Adr`, whose schema
-still requires it), `summary`, `kind`, `uri`, `graph_name`, `last_scan_at`,
+**Retired keys.** The graph-wiki-era keys `category`, `adr_id`, `summary`, `kind`, `uri`, `graph_name`, `last_scan_at`,
 `source_type`, `last_sync_commit`, `last_sync_at`, `packages`, `spec_doc`, `plan_doc`,
 and `phase_started_commit` are not in any schema and nothing writes them. Older pages
 still carry some; do not copy them onto new pages.
@@ -283,15 +282,13 @@ Drift on an in-repo doc is a diff against its `sources/references/` copy; there 
 ```yaml
 ---
 type: Adr
-title: "ADR-0012: Move to ESM"
+title: Move to ESM
 description: One-sentence statement of the decision.
-category: adr                    # required by the Adr schema; always `adr`
-adr_id: "0012"                   # four digits, quoted
 status: stable                   # draft | stable | deprecated
-decision_date: 2026-02-14
+decision_date: 2026-02-14        # required; also the filename's date prefix
 deciders: ["human:psprowls"]
-supersedes: null                 # ADR this replaces, if any
-superseded_by: null              # ADR that replaces this, if any
+supersedes: null                 # path(s) of the ADR(s) this replaces, e.g. ["/adrs/2025-11-03-use-commonjs.md"]
+superseded_by: null              # path(s) of the ADR(s) that replace this
 tags: [build-system, modules]
 updated: 2026-04-20
 ---
@@ -314,7 +311,7 @@ updated: 2026-04-20
 
 - **Explanations:** `explanations/<slug>.md` — e.g. `explanations/global-context.md`. Comparisons live here too: `explanations/<a>-vs-<b>.md` for two-way, `explanations/<topic>-options.md` for n-way.
 - **Sources:** `sources/<YYYY-MM>-<short-slug>.md` — e.g. `sources/2026-04-auth-migration-spec.md`
-- **ADRs:** `adrs/<NNNN>-<slug>.md` — e.g. `adrs/0012-move-to-esm.md`. Zero-padded ID, monotonically increasing.
+- **ADRs:** `adrs/<YYYY-MM-DD>-<slug>.md` — e.g. `adrs/2026-02-14-move-to-esm.md`. Dated by the decision, never numbered: there is no id to allocate and nothing to collide on.
 - **Architecture syntheses:** `explanations/<topic>.md` tagged `architecture` — e.g. `explanations/request-flow.md`
 - **Dependencies:** `dependencies/<ecosystem>/<name>.md` — use the registry name (`dependencies/npm/react.md`, `dependencies/npm/react-native-maps.md`). For scoped npm packages, replace `/` with `__` (`dependencies/npm/@tanstack__react-query.md`). Service pages use a slug derived from the service name, under the `dependencies/` root (`dependencies/mongodb-atlas.md`).
 - **Work:** `<work-path>.md`, where `<work-path>` is an extensionless canonical
@@ -430,7 +427,7 @@ See `packages/common-aws-node-ts/src/handlers/baseApiHandler.ts:42`
 ## Cross-reference rules
 
 - **Every package mentioned on an entity or explanation page must be a link** to `/repositories/<repo>/packages/<name>.md`.
-- **Every ADR referenced in entity or explanation pages must be a link** to `/adrs/<id>-<slug>.md`.
+- **Every ADR referenced in entity or explanation pages must be a link** to `/adrs/<YYYY-MM-DD>-<slug>.md`.
 - **Every claim on an entity page cites** either a source page (`[…](/sources/xxx.md)`) or a code path (backticked, with file:line).
 - **Contradictions get flagged inline** with a `> ⚠️ Contradiction:` callout naming the conflicting sources or code paths.
 - **Architecture explanations link back to every entity and ADR they draw on.**

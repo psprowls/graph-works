@@ -12,7 +12,7 @@ from doc_wiki_okf.resources import SEED_RELATIVE_PATHS
 #: judgment to make about whether ingested material is a Source; it is one by
 #: construction, and filling those four fields would mean inventing content for
 #: a decision nobody makes.
-NON_RUBRIC_TYPES = frozenset({"Source"})
+NON_RUBRIC_TYPES = frozenset({"Source", "Adr"})
 
 
 def test_the_four_names_in_diataxis_order() -> None:

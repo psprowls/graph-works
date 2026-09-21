@@ -21,7 +21,7 @@ neighbours. `--config-dir` relocates the declaration files
 (`schema/`, `sections/`, `tags.yaml`) to a directory shared across several
 bundles, for this run only — it is not persisted anywhere, since `init` no
 longer seeds a `workspace.yaml` of its own (2026-08-22 tech-debt item;
-ADR-0033). Point `sync`/`validate` at that same directory with their own
+ADR 2026-08-22-single-workspace-config). Point `sync`/`validate` at that same directory with their own
 `--config-dir` on every later invocation, or point them at a real
 `workspace.yaml` with `--config-path` instead — see below.
 

@@ -3,7 +3,7 @@
 Read, derive from, and write back OKF v0.2 concept documents.
 
 The OKF v0.2 specification is not checked into this repository; it is referenced
-by name and version, the way ADR-0007 is referenced below.
+by name and version, the way ADR 2026-08-02-versioning-independent-static is referenced below.
 
 ## The two-layer model
 
@@ -76,7 +76,7 @@ content-bearing subdirectory with no entry is added — assets are never
 proposed, only pruned when their entry goes dead — and every other byte is
 copied through, prose and comments and line endings included. There is no marker syntax and no generated region:
 markers are not in SPEC.md, and okf-io implements only what the spec defines
-(ADR-0005).
+(ADR 2026-08-02-workspace-layering).
 
 Entry text is never rewritten under the default `descriptions="preserve"`;
 text that has drifted from its concept's `description` is reported in
@@ -108,5 +108,5 @@ schemas exist.
 
 ## Versioning
 
-Static `version` field, never `hatch-vcs` (ADR-0007). Pre-1.0: minor = breaking,
+Static `version` field, never `hatch-vcs` (ADR 2026-08-02-versioning-independent-static). Pre-1.0: minor = breaking,
 patch = compatible.

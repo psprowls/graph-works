@@ -136,7 +136,7 @@ def test_show_prints_the_review_body(tmp_path) -> None:
     result = runner.invoke(app, ["proposal", "show", str(root), "adrs/bulk-write-staging-protocol.md"])
     assert result.exit_code == 0
     assert "## Suggested Action" in result.stdout
-    assert "Create new Explanation page `adrs/bulk-write-staging-protocol.md`." in result.stdout
+    assert "Create new Adr page `adrs/bulk-write-staging-protocol.md`." in result.stdout
     assert "Staging precedes any live write." in result.stdout
 
 

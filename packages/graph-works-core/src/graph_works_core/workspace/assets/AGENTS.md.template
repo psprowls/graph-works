@@ -131,7 +131,7 @@ The four Diátaxis lanes plus the material they are drawn from:
 | `how-tos/` | `HowTo` | Goal-oriented: solve one problem |
 | `tutorials/` | `Tutorial` | Learning-oriented: build one thing end to end |
 | `sources/` | `Source` | One summary per ingested source, at `sources/<YYYY-MM>-<slug>.md` |
-| `adrs/` | `Adr` | Architecture decision records, `<NNNN>-<slug>.md` |
+| `adrs/` | `Adr` | Architecture decision records, `<YYYY-MM-DD>-<slug>.md` — dated, never numbered |
 | `proposals/` | `Proposal` | Staged curated pages awaiting disposition |
 
 A proposal names its `target:` (e.g. `adrs/bulk-write-staging-protocol.md`) and cites

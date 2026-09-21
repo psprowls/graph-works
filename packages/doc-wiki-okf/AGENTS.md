@@ -200,6 +200,6 @@ already lives in `reading/skills`.
 
 - Value types are frozen dataclasses with tuple fields, matching
   `okf_ext.proposals`, `moves`, and `generators`.
-- Version is static (ADR-0007). Tag `doc-wiki-okf-vX.Y.Z`.
-- Module root is flat and singular (ADR-0006): one `src/doc_wiki_okf`, no
+- Version is static (ADR 2026-08-02-versioning-independent-static). Tag `doc-wiki-okf-vX.Y.Z`.
+- Module root is flat and singular (ADR 2026-08-02-naming-okf-io): one `src/doc_wiki_okf`, no
   namespace nesting.

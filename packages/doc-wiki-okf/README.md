@@ -48,7 +48,7 @@ schema, a section declaration, and a lane directory:
 | `Reference` | `references/` |
 | `Explanation` | `explanations/` |
 
-Per ADR-0012, each type's schema carries the directory as an `x-okf-directory`
+Per ADR 2026-08-07-pascalcase-types, each type's schema carries the directory as an `x-okf-directory`
 annotation, and `pages.directory_for()` reads it to place a **new** page. The
 annotation is a **writer-only hint** — it tells a writer where to *create*.
 Nothing reads it to *locate* an existing page: `type` stays the sole source of
@@ -197,7 +197,7 @@ re-record one deletes the page and re-runs.
 A PDF or an image lands too, byte-for-byte. `plan_ingest` takes `content: str
 | bytes` and never inspects it; `okf_ext.writing.PendingWrite.rendered` widened
 the same way, so a binary copy stages and commits through the same engine a
-text copy does (ADR-0031). What is not there yet is text extraction: a binary
+text copy does (ADR 2026-08-21-a-pending-write). What is not there yet is text extraction: a binary
 source's page body is the section skeleton plus the caller's `--title` and
 `--description`, and its ingest brief goes content-blind rather than being fed
 replacement-character mojibake — real PDF/image text extraction is a separate,

@@ -1,6 +1,6 @@
-"""Bundle-structural identity concerns arising from ADR-0027's NFC-insensitive
+"""Bundle-structural identity concerns arising from ADR 2026-08-21-member-identity's NFC-insensitive
 matching. Not a spec-defined topic -- okf-io implements only what OKF v0.2
-defines (ADR-0005) -- so this catalog entry cites the ADR that created the
+defines (ADR 2026-08-02-workspace-layering) -- so this catalog entry cites the ADR that created the
 hazard rather than a spec section, unlike every other topic in this
 package."""
 
@@ -21,7 +21,7 @@ def _display(raw_id: str) -> str:
     (that's the whole hazard), so the winner and every loser render as
     *identical glyphs* if interpolated raw -- the message would be the entire
     actionable artifact of this rule (this hazard can't be reproduced on the
-    normalization-folding filesystem this repo runs its tests on, ADR-0010)
+    normalization-folding filesystem this repo runs its tests on, ADR 2026-08-02-quality-gates-enforced)
     and yet tell an operator nothing about which file is which.
     """
     return raw_id.encode("unicode_escape").decode("ascii")
@@ -44,7 +44,7 @@ def canonical_collisions(ctx: RuleContext) -> Iterable[Finding]:
             "identity.canonical-collision",
             "error",
             f"{len(ids)} members normalize to the same id ({cid!r}); `{_display(winner)}` wins, {losers} lost silently",
-            "ADR-0027",
+            "ADR 2026-08-21-member-identity",
             winner,
         )
 

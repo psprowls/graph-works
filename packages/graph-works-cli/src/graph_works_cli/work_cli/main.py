@@ -1,6 +1,6 @@
 """`gw work` — the work-item pipeline verbs.
 
-Interface band only (ADR-0013): parse arguments, resolve the workspace, call
+Interface band only (ADR 2026-08-13-command-modules): parse arguments, resolve the workspace, call
 **one** `graph-works-core` command, project the typed result, choose an exit
 code. No business composition lives here, and nothing under
 `graph_works_cli` imports `work_tracker_okf` -- `test_work_surface.py`

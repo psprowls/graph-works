@@ -197,7 +197,7 @@ def proposal_path(bundle: Bundle, target: str, *, directory: str = "proposals") 
     return candidate
 
 
-#: Deprecated alias, kept for one minor version (ADR-0030). Removed at 0.5.0
+#: Deprecated alias, kept for one minor version (ADR 2026-08-21-a-colliding-name). Removed at 0.5.0
 #: alongside the `okf_ext.sections` shim. No runtime warning -- see README.
 placement = proposal_path
 

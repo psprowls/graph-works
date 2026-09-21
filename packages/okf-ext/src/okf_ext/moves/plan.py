@@ -540,7 +540,7 @@ def _stranded_candidate(target: str, keys: Mapping[str, str]) -> str | None:
     `None` for every one of them, silently reporting zero stranded references
     on exactly the path that needs the count most.
 
-    *keys* is `{canonical_id(key): key}`, not the raw key set (§ADR-0027).
+    *keys* is `{canonical_id(key): key}`, not the raw key set (§ADR 2026-08-21-member-identity).
     *target* is content-derived -- it comes off a `[[wikilink]]` in a body --
     so it can name the same file in a different Unicode normalization form
     than the caller's mapping key, exactly as `_body_edits` documents for its
@@ -608,7 +608,7 @@ def stranded_summary(stranded_entries: Sequence[Stranded]) -> str:
 def stranded_warning(stranded_entries: Sequence[Stranded]) -> str | None:
     """The two-line stderr note a CLI prints, or `None` when there is nothing
     to warn about. Never touches an exit code -- broken links are warn, never
-    error (ADR-0004)."""
+    error (ADR 2026-08-02-broken-links)."""
     if not stranded_entries:
         return None
     return (
@@ -788,7 +788,7 @@ def plan_move_dir(bundle: Bundle, source: str, dest: str) -> MovePlan:
     prefix = source.rstrip("/")
     # A caller's `source` is written text, like any other reference, and a
     # raw disk id may name the same directory in a different Unicode
-    # normalization form (§ADR-0027). Comparing canonically, segment by
+    # normalization form (§ADR 2026-08-21-member-identity). Comparing canonically, segment by
     # segment, is what keeps a directory rename from silently matching
     # nothing when the two disagree -- and computing the remainder in
     # *segments* rather than by string length is what keeps the destination

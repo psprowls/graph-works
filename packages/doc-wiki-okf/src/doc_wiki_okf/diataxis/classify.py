@@ -10,6 +10,7 @@ content path.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Literal
 
@@ -59,8 +60,14 @@ def classify(
     title: str,
     rationale: str,
     decided_by: str,
+    allowed_types: Sequence[str] = TYPE_NAMES,
 ) -> Classification | Unclassified:
     """Validate a typing decision and derive where the page goes.
+
+    *allowed_types* is the closed vocabulary the type must come from: the four
+    Diátaxis types by default. A caller that files into a lane with its own type
+    (the ADR lane's `Adr`) passes that type too, rather than teaching the rubric
+    a type it does not classify.
 
     An empty or whitespace-only *type_name* is the caller **declining to
     choose**, and comes back as `undecided`. An agent that cannot tell a
@@ -77,10 +84,10 @@ def classify(
             reason="undecided",
             detail=f"no type chosen; expected one of {list(TYPE_NAMES)} or an explicit decline",
         )
-    if wanted not in TYPE_NAMES:
+    if wanted not in allowed_types:
         return Unclassified(
             reason="unknown-type",
-            detail=f"unknown type {wanted!r}; expected one of {list(TYPE_NAMES)}",
+            detail=f"unknown type {wanted!r}; expected one of {list(allowed_types)}",
         )
     if wanted not in schema_set.schemas:
         return Unclassified(

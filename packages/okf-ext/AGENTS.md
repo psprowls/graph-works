@@ -45,7 +45,7 @@ failure's percentage is global across both packages, not okf-ext alone.
 `just contracts` runs `uv run lint-imports` — the internal package-boundary
 check described in `README.md`'s "Boundaries" section. Read that section
 before adding a module. It is **opt-in**, not run in CI (there is no CI yet,
-ADR-0010) and not part of `just check`'s default path independent of a human
+ADR 2026-08-02-quality-gates-enforced) and not part of `just check`'s default path independent of a human
 invoking it — actually it *is* listed in `just check`'s dependency chain, so
 running `just` / `just check` does exercise it. What it enforces:
 
@@ -193,7 +193,7 @@ capability" (forbidden by the independence contract) and not "duplicate it"
 ### Dependency posture
 
 Three unconditional dependencies: `okf-io` (pinned `>=0.1,<0.2`-style per
-ADR-0007's minor-is-breaking pre-1.0 policy — check `pyproject.toml` for the
+ADR 2026-08-02-versioning-independent-static's minor-is-breaking pre-1.0 policy — check `pyproject.toml` for the
 current ceiling), `ruamel.yaml` (declared independently rather than relying
 on okf-io's transitive copy, because `okf_io._yaml` is private), and
 `markdown-it-py` (same reasoning; it's also the one documented exception to

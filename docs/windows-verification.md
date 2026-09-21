@@ -1,7 +1,7 @@
 # Native Windows verification protocol
 
 This is the whole of graph-works' native-Windows signal. There is no CI on this
-platform — ADR-0010 stands and the epic's D-003 bought a documented manual run
+platform — ADR 2026-08-02-quality-gates-enforced stands and the epic's D-003 bought a documented manual run
 instead — so what is written here is what anyone later gets to cite.
 
 **Run it whole.** A partial run over a partially-landed tree measures nothing
@@ -1264,7 +1264,7 @@ wrong; the capability's own owning child if the machinery is.
 
 **Gate:** none.
 
-Following ADR-0019 Q3's precedent, where a byte-for-byte match was what made
+Following ADR 2026-08-17-track-obra-superpowers Q3's precedent, where a byte-for-byte match was what made
 "the pipeline ran" a measurement rather than an impression. The repo already
 carries the reference — `packages/graph-works-cli/tests/fixtures/surface.golden.json` —
 so there is nothing to hand-carry from a macOS box.
@@ -1462,9 +1462,9 @@ duplicate.
 ## What this run does not settle
 
 - **The reds.** This protocol measures; the owners above fix.
-- **CI.** ADR-0010 stands. No `.github/`.
+- **CI.** ADR 2026-08-02-quality-gates-enforced stands. No `.github/`.
 - **WSL.** Unaffected throughout — it is the supported channel and nothing in
   this epic changes it.
-- **ADR-0027 case-insensitivity and ADR-0036 on-disk shape on NTFS.** Scoped out
+- **ADR 2026-08-21-member-identity case-insensitivity and ADR 2026-08-23-an-archived-subtree on-disk shape on NTFS.** Scoped out
   deliberately: settling them could force a member-identity change affecting
   every platform. Do not add them as checkpoints.

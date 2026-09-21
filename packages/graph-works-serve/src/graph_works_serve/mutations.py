@@ -1,4 +1,4 @@
-"""Plan/apply over HTTP: ADR-0022's plan-by-default contract carried across a
+"""Plan/apply over HTTP: ADR 2026-08-18-mutation-surfaces-plan's plan-by-default contract carried across a
 stateless boundary.
 
 `plan` returns a dry-run projection, the instant it was planned at (`as_of`)

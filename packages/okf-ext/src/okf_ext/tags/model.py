@@ -64,7 +64,7 @@ class TagDrift:
     """A contributed tag whose description the human has since changed.
 
     Reported, never overwritten. `description` is prose the human owns, the
-    same claim ADR-0009 makes about an index entry's text; only `deprecated`
+    same claim ADR 2026-08-03-index-reconciliation makes about an index entry's text; only `deprecated`
     and `replaced_by` are machine instructions, and only those refuse.
     """
 
@@ -78,7 +78,7 @@ class VocabularyPlan:
     """A preview of merging one package's definitions into a vault's file.
 
     A value rather than a `dry_run=True` flag, following every other planner
-    in this package (ADR-0022). `before` and `after` are the whole file, so a
+    in this package (ADR 2026-08-18-mutation-surfaces-plan). `before` and `after` are the whole file, so a
     caller can diff them without re-reading anything.
 
     On a whole-merge refusal -- a malformed file, or one whose `tags:` block

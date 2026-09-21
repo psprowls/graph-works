@@ -60,7 +60,7 @@ class UnsupportedAnchorPlatform(RuntimeError):
 
 
 #: Win32 refuses these as filenames regardless of extension, at every path
-#: component.  Read by the tier record and by ADR-0042.
+#: component.  Read by the tier record and by ADR 2026-08-27-two-declared-durability.
 RESERVED_DEVICE_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL"} | {f"COM{digit}" for digit in "123456789"} | {f"LPT{digit}" for digit in "123456789"}
 )
@@ -72,7 +72,7 @@ class RefusedShape:
 
     A refusal is a declared contract statement of the tier, not an incident:
     `gw util platform` reports the refusable shapes as normal output, and
-    ADR-0042 records them as the tier boundary.
+    ADR 2026-08-27-two-declared-durability records them as the tier boundary.
     """
 
     member: str
@@ -83,7 +83,7 @@ class RefusedShape:
 #: Whether the kernel will refuse to follow a symlink on open.  Stated rather
 #: than inferred at each call site: on Windows this is False and the flag
 #: silently becomes 0, so the protection VANISHES with no diagnostic.  Naming
-#: it is what lets ADR-0042 record the loss and `gw util platform` report it.
+#: it is what lets ADR 2026-08-27-two-declared-durability record the loss and `gw util platform` report it.
 NOFOLLOW_AVAILABLE = hasattr(os, "O_NOFOLLOW")
 
 #: Whether `Anchor.fsync()` actually flushes.  False on Windows (L2): rename
@@ -137,7 +137,7 @@ def set_mode(descriptor: int, path: Path | Callable[[], Path], mode: int) -> Non
 
     The fallback loses the descriptor's guarantee that the mode lands on the
     object the caller opened rather than on whatever holds that name now.
-    That is recorded in ADR-0042 as L7.  On NTFS `chmod` honours only the
+    That is recorded in ADR 2026-08-27-two-declared-durability as L7.  On NTFS `chmod` honours only the
     read-only bit in any case, so the mode assertions this engine makes are
     meaningful on the POSIX pass only.
 
@@ -164,7 +164,7 @@ def nofollow_flag() -> int:
     replacement is `_WindowsAnchor.open_child`, which `lstat`s each component
     and refuses a link explicitly.  That is weaker: a check, not a kernel
     guarantee, so a swap between the check and the syscall is not caught.
-    ADR-0042 records this as the tier's largest security difference.
+    ADR 2026-08-27-two-declared-durability records this as the tier's largest security difference.
 
     This one degrades rather than refusing, unlike `directory_flags` below,
     because a real replacement exists.  The `sys.platform` guard is what lets
@@ -531,17 +531,17 @@ class _PosixAnchor:
 
 
 #: The tier name a path-revalidating anchor declares.  Paired with
-#: `POSIX_STRONG_TIER`; ADR-0042 records what each one guarantees.
+#: `POSIX_STRONG_TIER`; ADR 2026-08-27-two-declared-durability records what each one guarantees.
 WINDOWS_REVALIDATED_TIER = "windows-revalidated"
 
 #: The Win32 path length ceiling that the registry opt-in lifts.  Named so the
-#: refusal message and ADR-0042 cite the same number.
+#: refusal message and ADR 2026-08-27-two-declared-durability cite the same number.
 MAX_PATH = 260
 
 #: The weak tier's on-disk serialization point, inside the bundle root.
 #:
 #: A Windows bundle carries a file a POSIX bundle does not.  It is
-#: dot-prefixed and lives at the root, where ADR-0028's root-scoped dot
+#: dot-prefixed and lives at the root, where ADR 2026-08-21-bundle-dot-exclusion's root-scoped dot
 #: exclusion already keeps it out of `load_bundle()` -- but the two digest
 #: tests assert that rather than assume it, because a divergence here would
 #: make the two tiers compute different manifest digests for identical
@@ -549,7 +549,7 @@ MAX_PATH = 260
 BUNDLE_LOCK_NAME = ".gw-bundle.lock"
 
 #: The `GetVolumeInformationW` file-system flag bit reporting hard-link
-#: support.  Named so the refusal message, the test suite, and ADR-0042 all
+#: support.  Named so the refusal message, the test suite, and ADR 2026-08-27-two-declared-durability all
 #: cite the same flag.
 FILE_SUPPORTS_HARD_LINKS = 0x00400000
 
@@ -669,7 +669,7 @@ class _WindowsAnchor:
 
     That narrows the swap window.  It does not close it: between the
     re-validation and the syscall that follows, the path can still be
-    replaced.  ADR-0042 records this as the tier's defining weakness, and
+    replaced.  ADR 2026-08-27-two-declared-durability records this as the tier's defining weakness, and
     records that the bundle-root lock is held for the whole mutation, so the
     exposure is to actors outside the transaction protocol -- a user, an
     editor, a sync client -- not to a second `gw`.
@@ -765,7 +765,7 @@ class _WindowsAnchor:
         *same resolved path* and re-reads its identity -- which means a
         duplicate taken after a swap refuses, where the POSIX arm would carry
         the pre-swap directory forward.  That difference is a tier property,
-        not a bug, and ADR-0042 names it.
+        not a bug, and ADR 2026-08-27-two-declared-durability names it.
         """
         return _WindowsAnchor(self.root, long_paths=self._long_paths, hard_links=self._hard_links)
 
@@ -978,7 +978,7 @@ class _WindowsAnchor:
         through -- `os.O_DIRECTORY` is what it lacks, not `os.fchmod`, which
         Windows gained in CPython 3.13 -- so this is a path chmod with no
         flush, a sixth loss the design's table did not enumerate, recorded in
-        ADR-0042 as L6.  On NTFS `chmod` honours only the read-only bit; the
+        ADR 2026-08-27-two-declared-durability as L6.  On NTFS `chmod` honours only the read-only bit; the
         mode bits the engine sets are preserved on the POSIX coverage pass,
         which is where the mode assertions actually run.
         """
@@ -991,7 +991,7 @@ class _WindowsAnchor:
 
         Returning `None` is the tier's declared contract, not an oversight.
         Rename and link durability on this tier is whatever the filesystem
-        gives unprompted; ADR-0042 says so, and the manual verification run
+        gives unprompted; ADR 2026-08-27-two-declared-durability says so, and the manual verification run
         is what measures it.
         """
         return None
@@ -1006,7 +1006,7 @@ class _WindowsAnchor:
         directory being swapped underneath it.  This tier cannot: Windows has
         no directory lock, so serialization moves to a file inside the
         directory, and the immunity is replaced by `_revalidate()`'s check at
-        acquisition time.  ADR-0042 records the difference.
+        acquisition time.  ADR 2026-08-27-two-declared-durability records the difference.
         """
         directory = self._revalidate()
         with locked(directory / BUNDLE_LOCK_NAME):
@@ -1157,7 +1157,7 @@ def _anchor_platform(platform_name: str | None) -> str:
 def anchor_tier(platform_name: str | None = None) -> str:
     """The durability tier this platform's anchor declares.
 
-    Two tiers, both implemented, both declared in ADR-0042: `posix-strong`
+    Two tiers, both implemented, both declared in ADR 2026-08-27-two-declared-durability: `posix-strong`
     pins directory descriptors, `windows-revalidated` re-`lstat`s a held path.
     A platform name that does not match a Windows shape defaults to the
     POSIX-strong tier, since every non-Windows platform this engine runs on
@@ -1173,7 +1173,7 @@ def anchor_tier(platform_name: str | None = None) -> str:
 class DurabilityTier:
     """What a platform's transaction engine guarantees, and what it does not.
 
-    The two tiers are declared in ADR-0042.  `gw util platform` renders this
+    The two tiers are declared in ADR 2026-08-27-two-declared-durability.  `gw util platform` renders this
     verbatim; the refusals are contract statements, not error conditions.
 
     Every field is derived from a constant in this module rather than restated,
@@ -1227,7 +1227,7 @@ def durability_tier(platform_name: str | None = None) -> DurabilityTier:
     """The full tier declaration for *platform_name*.
 
     `anchor_tier()` answers the name alone and stays the cheap query; this
-    answers everything `gw util platform` and ADR-0042 need.
+    answers everything `gw util platform` and ADR 2026-08-27-two-declared-durability need.
     """
     return _WINDOWS_TIER if _is_windows(_anchor_platform(platform_name)) else _POSIX_TIER
 

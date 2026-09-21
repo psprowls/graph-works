@@ -255,7 +255,7 @@ def vocabulary_rule(
     tier-2 or tier-3 composition that wants its own house rule enforced may
     therefore pass `severity="error"`; `okf_io`'s own rules are untouched by
     this parameter and stay the only answer to spec conformance. See
-    ADR-0050.
+    ADR 2026-09-09-a-house-rule.
 
     `tags.non-canonical` suppresses only `tags.unknown`, never `tags.deprecated`.
     When the canonical form is **allowed**, unknown is suppressed: `Data Quality`

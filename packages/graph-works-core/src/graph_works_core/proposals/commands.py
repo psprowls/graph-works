@@ -1,4 +1,4 @@
-"""Filing, deciding and listing curated-page proposals, plan-by-default (ADR-0022).
+"""Filing, deciding and listing curated-page proposals, plan-by-default (ADR 2026-08-18-mutation-surfaces-plan).
 
 This vertical owns target normalization, the bundle/lane-schema load sequence,
 and the plan/apply composition so interfaces only route, parse, format, and

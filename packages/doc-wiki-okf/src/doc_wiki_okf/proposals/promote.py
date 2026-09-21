@@ -30,9 +30,10 @@ from okf_io import Bundle
 from doc_wiki_okf.proposals.lanes import Lane, LaneSet
 
 
-def page_render(lane: Lane, proposal: Proposal, *, section_set: SectionSet) -> PageRender:
+def page_render(lane: Lane, proposal: Proposal, *, section_set: SectionSet, on: date | None = None) -> PageRender:
     """The page this promotion writes: the lane's type, the declared skeleton,
-    and the proposal's own title and description.
+    and the proposal's own title and description. For the ADR lane, given *on*, it
+    also carries `decision_date` and `status: stable`, which the `Adr` schema needs.
 
     Nothing in `OWNED_PROVENANCE_KEYS` -- `generated`, `sources` and `verified`
     are the capability's, and `plan_create` raises on a caller that supplies
@@ -42,10 +43,16 @@ def page_render(lane: Lane, proposal: Proposal, *, section_set: SectionSet) -> P
     Raises `KeyError` when *section_set* does not declare the lane's type --
     caller configuration, as in `diataxis.pages.new_page_text`.
     """
+    frontmatter: dict[str, object] = {"title": proposal.title, "description": proposal.description}
+    if lane.name == "adr" and on is not None:
+        # The `Adr` schema requires `decision_date`. A promotion is a human
+        # decision taken on *on*, so the ADR is `stable` from the day it lands.
+        frontmatter["decision_date"] = on.isoformat()
+        frontmatter["status"] = "stable"
     return PageRender(
         type=lane.type_name,
         body=render_skeleton(section_set.types[lane.type_name]),
-        frontmatter={"title": proposal.title, "description": proposal.description},
+        frontmatter=frontmatter,
     )
 
 
@@ -90,7 +97,7 @@ def plan_promotion(
     plan = plan_promote(
         bundle,
         replace(proposal, target=dated),
-        page_render(lane, proposal, section_set=section_set),
+        page_render(lane, proposal, section_set=section_set, on=on),
         by=by,
         at=at,
     )

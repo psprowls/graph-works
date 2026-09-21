@@ -3,7 +3,7 @@
 **A text splice, not a dump.** `tags.yaml` is human-owned in the strongest
 sense this codebase has: the scaffold seeds it with an explanatory comment
 block, and from that moment it is the vault's file -- hand-edited, re-grouped,
-commented. ADR-0009 already answers this shape of problem for `index.md`:
+commented. ADR 2026-08-03-index-reconciliation already answers this shape of problem for `index.md`:
 `update_index()` reconciles, it does not regenerate. The machine owns *which*
 entries appear; the human owns *what they say*; every other byte is copied
 through. This module is that rule applied to the vocabulary.

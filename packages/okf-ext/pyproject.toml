@@ -9,8 +9,8 @@ description = "Beyond-spec capabilities over any OKF v0.2 bundle. Tier 2: extend
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    # Tier 2 depends on the core, never the other way round (ADR-0005).
-    # Pre-1.0 policy is minor = breaking (ADR-0007), so the ceiling is 0.3.
+    # Tier 2 depends on the core, never the other way round (ADR 2026-08-02-workspace-layering).
+    # Pre-1.0 policy is minor = breaking (ADR 2026-08-02-versioning-independent-static), so the ceiling is 0.3.
     "okf-io>=0.2.3,<0.3",
     # Read `tags.yaml`. Declared rather than inherited through okf-io: an
     # undeclared transitive import breaks the day the core swaps YAML libraries,

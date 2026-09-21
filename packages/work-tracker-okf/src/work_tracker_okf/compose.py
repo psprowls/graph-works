@@ -95,7 +95,7 @@ def rule_set(
     this set ever walked a work item for `[[wikilink]]` syntax at all --
     `render_rule` was wired into the wiki lane only. `render.wikilink-target`
     is a WARN by design (broken links are warn, never error; see
-    ADR-0004) and must not be raised to error here: this vault currently
+    ADR 2026-08-02-broken-links) and must not be raised to error here: this vault currently
     trips it hundreds of times over, and `gw work advance`'s exit code must
     stay unaffected.
 
@@ -140,9 +140,10 @@ def rule_set(
     purely from okf-io carries no tag rule at all and reports `ok` regardless
     of a vault's tags. `Report.ok` over a *composed* rule set was never a
     conformance claim, so a tier-2 house rule may be ERROR without touching
-    the one that is. See ADR-0050, which sharpens ADR-0044 the way ADR-0044
-    sharpens ADR-0005. The consequence is deliberate: an undeclared tag blocks
-    `gw work advance`.
+    the one that is. See ADR 2026-09-09-a-house-rule, which sharpens
+    ADR 2026-08-28-extension-layer-tier the way ADR 2026-08-28-extension-layer-tier
+    sharpens ADR 2026-08-02-workspace-layering. The consequence is deliberate:
+    an undeclared tag blocks `gw work advance`.
 
     **The promotion covers all three `vocabulary_rule` codes, `tags.deprecated`
     included** -- `severity=` is one argument for the whole rule, not scoped

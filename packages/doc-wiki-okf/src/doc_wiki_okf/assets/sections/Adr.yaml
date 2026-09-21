@@ -1,0 +1,17 @@
+sections:
+  - heading: Context
+    required: true
+    placeholder: |
+      > TODO: the forces in play, and what made a decision necessary.
+  - heading: Decision
+    required: true
+    placeholder: |
+      > TODO: what was decided, stated in the active voice.
+  - heading: Consequences
+    required: true
+    placeholder: |
+      > TODO: what this makes easy, what it makes hard, and what it rules out.
+  - heading: Alternatives considered
+    placeholder: |
+      > TODO: the options rejected, and why each lost.
+additional_sections: true

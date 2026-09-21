@@ -2,7 +2,7 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-`gw` — a thin Typer CLI over `graph-works-core` (ADR-0013: all logic stays in core, this package
+`gw` — a thin Typer CLI over `graph-works-core` (ADR 2026-08-13-command-modules: all logic stays in core, this package
 routes, parses, formats, and traces). Python >=3.12. Tests are pytest.
 
 ## Commands
@@ -75,7 +75,7 @@ opt into a JSON workspace refusal envelope; their human behavior remains unchang
 parse-time failures (for example, missing required arguments and unknown flags) remain native parser
 errors, not JSON envelopes.
 
-### `exit_codes.py` — the one numbering, CLI-wide (ADR-0013 rule 1)
+### `exit_codes.py` — the one numbering, CLI-wide (ADR 2026-08-13-command-modules rule 1)
 
 Re-exports `code_graph_io.exit_codes` by explicit name (not `from x import *`), so every sub-app
 imports from inside this package and `test_exit_codes.py` can pin the identity. Every sub-app maps
@@ -141,7 +141,7 @@ builder, and one `format_<kind>` per graph entity kind, built for exactly the `G
 `GraphResult` shape `graph_works_core.graph.commands` returns. `gw graph`'s four verbs
 (`build`/`describe`/`find`/`export`) delegate directly to that: each command resolves a `GraphTarget`,
 calls one core function, and routes the returned `output`/`error` strings to stdout/stderr before
-exiting `result.exit_code` — no behavior beyond routing (ADR-0013 rule 5).
+exiting `result.exit_code` — no behavior beyond routing (ADR 2026-08-13-command-modules rule 5).
 
 Every `--json` result is a projection from `graph_works_wire` (`work`, `wiki`, `config`, `util`),
 imported directly — never re-exported — and encoded by `json_output.encode` (`indent=2`). The

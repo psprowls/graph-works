@@ -193,7 +193,7 @@ class WorkspacePlan:
     def diff(self) -> str:
         """The plan's acts, in `WorkspaceInit.diff()`'s line vocabulary.
 
-        On the plan rather than in the CLI: ADR-0022 requires a plan to be a
+        On the plan rather than in the CLI: ADR 2026-08-18-mutation-surfaces-plan requires a plan to be a
         complete artifact the caller can inspect before any write, and a renderer
         living in one caller is not that.
 

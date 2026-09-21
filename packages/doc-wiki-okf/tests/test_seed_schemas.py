@@ -12,7 +12,7 @@ from okf_io import validate as okf_validate
 _DIATAXIS_TYPES = ("Explanation", "HowTo", "Reference", "Tutorial")
 
 #: Every type this package ships a schema for, sorted.
-_ALL_TYPES = ("Explanation", "HowTo", "Reference", "Source", "Tutorial")
+_ALL_TYPES = ("Adr", "Explanation", "HowTo", "Reference", "Source", "Tutorial")
 
 _LANES = {
     "Tutorial": "tutorials/",
@@ -20,6 +20,7 @@ _LANES = {
     "Reference": "references/",
     "Explanation": "explanations/",
     "Source": "sources/",
+    "Adr": "adrs/",
 }
 
 
@@ -28,7 +29,7 @@ def _schema_set():
     return load_schemas(str(assets))
 
 
-def test_seed_schemas_load_as_exactly_the_five_types() -> None:
+def test_seed_schemas_load_as_exactly_the_six_types() -> None:
     assert tuple(sorted(_schema_set().schemas)) == _ALL_TYPES
 
 

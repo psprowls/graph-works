@@ -47,14 +47,14 @@ def test_diataxis_lanes_directory_from_schema_set() -> None:
     assert lanes_obj.lanes[3].type_name == "Explanation"
 
 
-def test_adr_lane_is_explanation_in_adrs_and_is_dated() -> None:
-    """adr is Explanation in adrs/, and is the only dated lane."""
+def test_adr_lane_is_adr_in_adrs_and_is_dated() -> None:
+    """adr is the Adr type in adrs/, and is the only dated lane."""
     lanes_obj = lane_set(schema_set())
     adr_lane = lanes_obj.lanes[4]
 
     assert adr_lane.name == "adr"
     assert adr_lane.directory == "adrs/"
-    assert adr_lane.type_name == "Explanation"
+    assert adr_lane.type_name == "Adr"
     assert adr_lane.dated is True
 
     # Verify Diátaxis lanes are not dated
@@ -165,18 +165,17 @@ def test_lane_set_is_frozen() -> None:
 
 
 def test_is_adr_requires_both_the_directory_and_the_type() -> None:
-    """`ADR_TYPE` is `Explanation`, which the Diátaxis explanation lane also
-    uses — so the type alone would sweep every explanation page into the ADR
-    checks, and the directory alone would sweep every ADR-lane page."""
+    """An `Adr` outside `adrs/` is misplaced, and any other type inside `adrs/`
+    is not an ADR, so neither half alone is enough."""
     from doc_wiki_okf.proposals import is_adr
 
-    assert is_adr("adrs/0001-two-layer", "Explanation")
-    assert not is_adr("concepts/byte-fidelity", "Explanation")
-    assert not is_adr("adrs/0001-two-layer", "Reference")
-    assert not is_adr("adrs/0001-two-layer", "")
+    assert is_adr("adrs/2026-08-12-two-layer", "Adr")
+    assert not is_adr("explanations/byte-fidelity", "Adr")
+    assert not is_adr("adrs/2026-08-12-two-layer", "Explanation")
+    assert not is_adr("adrs/2026-08-12-two-layer", "")
 
 
 def test_is_adr_tolerates_the_whitespace_a_frontmatter_reader_leaves() -> None:
     from doc_wiki_okf.proposals import is_adr
 
-    assert is_adr("adrs/0001-two-layer", "  Explanation  ")
+    assert is_adr("adrs/2026-08-12-two-layer", "  Adr  ")

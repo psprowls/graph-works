@@ -324,7 +324,7 @@ class ItemSource:
 class ItemRead:
     """One work item read whole: frontmatter, body, sources and owned references.
 
-    An unknown or unreadable target is a `refusal`, never a raise (ADR-0013 rule 5).
+    An unknown or unreadable target is a `refusal`, never a raise (ADR 2026-08-13-command-modules rule 5).
     """
 
     path: str

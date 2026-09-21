@@ -30,7 +30,7 @@ MANIFEST_FILENAME = "workspace.yaml"
 #: The per-machine overlay, gitignored and never committed. A sibling of the
 #: manifest rather than a member of `config_dir`, so both files are read from
 #: the same directory and a relative path in either anchors identically
-#: (ADR-0041).
+#: (ADR 2026-08-26-a-relative-path).
 LOCAL_MANIFEST_FILENAME = "workspace.local.yaml"
 
 #: What a `.git` walk-up defaults to: `<repo>/.works`.

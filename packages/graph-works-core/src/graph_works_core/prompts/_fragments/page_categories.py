@@ -14,9 +14,11 @@ hand-written table did -- add, rename or remove a schema's
 `architecture_overview.py` already made for the layout half of these
 prompts.
 
-`adr` and `work` stay hardcoded rows: `adrs/` has no schema at all
-(deliberately -- the cutover epic's decision,
-`doc_wiki_okf.proposals.lanes.ADR_DIRECTORY`). `work_tracker_okf`'s own
+`adr` and `work` stay hardcoded rows. `adr` because the row must render for a
+workspace whose declarations predate the `Adr` schema
+(`doc_wiki_okf.proposals.lanes.ADR_DIRECTORY` names the directory either way);
+`Adr` is deliberately absent from `_TYPE_GLOSSES`, so a schema-declared `adrs/`
+does not add a second row. `work_tracker_okf`'s own
 schemas (`Epic`, `Bug`, `Feature`, `Spike`, `TechDebt`, `TestGap`) do declare
 `x-okf-directory: "work/"` and are installed alongside the rest -- `work` is
 hardcoded rather than schema-derived because `_TYPE_GLOSSES` is keyed on only

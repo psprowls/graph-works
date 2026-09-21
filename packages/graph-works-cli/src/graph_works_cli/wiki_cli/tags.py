@@ -1,6 +1,6 @@
 """`gw wiki tags` — inventory, draft, apply, gate.
 
-ADR-0013: this module routes, parses, formats, and traces. Every decision --
+ADR 2026-08-13-command-modules: this module routes, parses, formats, and traces. Every decision --
 what the retention rule is, what a disposition file may say, which phase runs
 first -- belongs to `graph_works_core.tag_policy` and is not restated here.
 """

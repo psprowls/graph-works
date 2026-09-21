@@ -69,12 +69,14 @@
     "schema/Reference.schema.json",
     "schema/Explanation.schema.json",
     "schema/Source.schema.json",
+    "schema/Adr.schema.json",
     "sections/_fragments.doc_wiki.yaml",
     "sections/Tutorial.yaml",
     "sections/HowTo.yaml",
     "sections/Reference.yaml",
     "sections/Explanation.yaml",
     "sections/Source.yaml",
+    "sections/Adr.yaml",
     "log.md: installed by doc-wiki-okf/0.3.3"
   ],
   "deleted": []

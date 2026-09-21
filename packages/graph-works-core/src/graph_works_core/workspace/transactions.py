@@ -1453,7 +1453,7 @@ def _verify_directory_modes(root: Anchor, modes: Sequence[_DirectoryMode]) -> No
     raises before the first live effect on any mismatch. On the strong
     (POSIX) tier this resolves every mode bit; on the weak (Windows) tier it
     resolves only `S_IWRITE`, since that is the only bit NTFS's `chmod`
-    honours -- see ADR-0042 L8. `_apply_directory_modes` restores the
+    honours -- see ADR 2026-08-27-two-declared-durability L8. `_apply_directory_modes` restores the
     captured mode onto the destination after the effects land, at the same
     per-tier resolution.
     """
@@ -2962,7 +2962,7 @@ def apply_mutation(
     it restores the second load and is always correct.
 
     *allowed_new_findings* is an explicit operation-specific exception to
-    ADR-0040's default no-surplus guarantee. Each (post-mutation member, code)
+    ADR 2026-08-25-the-work-mutation's default no-surplus guarantee. Each (post-mutation member, code)
     occurrence permits one surplus error after consuming the real baseline;
     it never excuses structural conditions, reload failures or stale indexes.
     The caller must establish the operation's semantic preconditions under its

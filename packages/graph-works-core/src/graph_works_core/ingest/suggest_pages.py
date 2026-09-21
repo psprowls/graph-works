@@ -20,10 +20,9 @@ and a same-run duplicate are different shapes and get their own keys, so
 "closed vocabulary" is true of each key rather than of none.
 
 `classify` validates a **type name**, and the lane's type comes from
-`LaneSet[lane].type_name`. Its derived `concept_id` is deliberately unused: the
-adr lane's type is `Explanation`, so that id would say `explanations/…`, while
-the target is `lane_set.target_for`'s. Placement is the lane's; validation is
-`classify`'s.
+`LaneSet[lane].type_name`. Its derived `concept_id` is deliberately unused: it
+would be derived from the type's own directory, while the target is
+`lane_set.target_for`'s. Placement is the lane's; validation is `classify`'s.
 
 **Best-effort, always.** A reasoner failure, an extractor call failure, or a
 parse miss yields zero proposals, records the failure in the status, and never
@@ -53,8 +52,9 @@ from typing import Any
 from code_wiki_okf.entities.catalog import CONTENT_GROUPS
 from code_wiki_okf.placement import GLOBAL_LANES, REPOSITORIES_LANE
 from doc_wiki_okf.diataxis.classify import Unclassified, classify
+from doc_wiki_okf.diataxis.rubric import TYPE_NAMES
 from doc_wiki_okf.proposals.filing import plan_file
-from doc_wiki_okf.proposals.lanes import LaneSet
+from doc_wiki_okf.proposals.lanes import ADR_TYPE, LaneSet
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from okf_ext.proposals import ProposalPlan
@@ -397,6 +397,7 @@ async def plan_suggestions(
                 title=suggestion["title"],
                 rationale=suggestion["rationale"],
                 decided_by="agent:extractor",
+                allowed_types=(*TYPE_NAMES, ADR_TYPE),
             )
             if isinstance(decision, Unclassified):
                 # Dropped, never defaulted. `Unclassified.reason` is closed

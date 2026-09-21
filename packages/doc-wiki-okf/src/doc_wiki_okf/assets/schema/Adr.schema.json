@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$ref": "_base-diataxis.schema.json",
+  "unevaluatedProperties": false,
+  "required": ["decision_date"],
+  "properties": {
+    "type": { "const": "Adr" },
+    "decision_date": { "type": "string", "format": "date" },
+    "deciders": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "supersedes": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    },
+    "superseded_by": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" } }
+      ]
+    }
+  },
+  "x-okf-directory": "adrs/"
+}

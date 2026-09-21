@@ -29,7 +29,7 @@ def test_a_first_filing_plans_one_create_at_the_undated_target(tmp_path) -> None
         ("proposals/adrs-bulk-write-staging-protocol.md", "create")
     ]
     assert "## Suggested Action" in plan.writes[0].text
-    assert "Create new Explanation page `adrs/bulk-write-staging-protocol.md`." in plan.writes[0].text
+    assert "Create new Adr page `adrs/bulk-write-staging-protocol.md`." in plan.writes[0].text
 
 
 def test_planning_writes_nothing(tmp_path) -> None:

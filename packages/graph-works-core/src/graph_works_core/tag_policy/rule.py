@@ -2,7 +2,7 @@
 
 **Why this is tier 3 and not `okf_ext`.** Test 3 reads `code_wiki_okf`'s
 entity-lane convention and test 4 reads `work_tracker_okf`'s field
-vocabulary. `okf_ext` importing either would invert ADR-0044's tier model,
+vocabulary. `okf_ext` importing either would invert ADR 2026-08-28-extension-layer-tier's tier model,
 and `just contracts` would say so. Tests 1 and 2 are pure counts over a
 `TagInventory` and could live anywhere; splitting them from their three
 siblings would put half a rule in each package, which is worse than putting

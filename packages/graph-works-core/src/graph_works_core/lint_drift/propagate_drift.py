@@ -204,7 +204,7 @@ def _is_drift_target(concept_id: str, document: Document) -> bool:
 
 
 def _target_kind(concept_id: str, document: Document) -> str:
-    """`"adr"` for the ADR lane's type in the ADR lane's directory, else
+    """`"adr"` for an `Adr` in the ADR lane's directory, else
     `"concept"` — the judge rubric's key.
 
     The two-part test itself lives in `doc_wiki_okf.proposals.is_adr`: the

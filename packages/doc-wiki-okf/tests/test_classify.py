@@ -5,6 +5,7 @@ import importlib.resources
 
 import pytest
 from doc_wiki_okf.diataxis.classify import Classification, Unclassified, classify
+from doc_wiki_okf.diataxis.rubric import TYPE_NAMES
 from okf_ext.schemas import load_schemas
 
 _GOOD = {
@@ -105,3 +106,15 @@ def test_nothing_raises_for_any_input(schema_set) -> None:
         {**_GOOD, "decided_by": ""},
     ):
         assert classify(schema_set, **kwargs) is not None
+
+
+def test_a_lane_type_outside_the_rubric_is_accepted_when_the_caller_allows_it(schema_set) -> None:
+    """The ADR lane files a type of its own (`Adr`); the rubric's four stay the default."""
+    args = dict(type_name="Adr", title="Adopt JWTs", rationale="A decision.", decided_by="agent:x")
+
+    refused = classify(schema_set, **args)
+    assert isinstance(refused, Unclassified) and refused.reason == "unknown-type"
+
+    accepted = classify(schema_set, allowed_types=(*TYPE_NAMES, "Adr"), **args)
+    assert not isinstance(accepted, Unclassified)
+    assert accepted.type_name == "Adr" and accepted.concept_id.startswith("adrs/")

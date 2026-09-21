@@ -103,12 +103,13 @@ Disposition is the user's curation call. Present a per-proposal recommendation
 with the ground-truth evidence; never approve in bulk silently.
 
 **Retargeting is an explicit, separate decision.** The target a note carries is
-the ledger's own data. If the right destination is a different path — most
-often an ADR, where the shipped writer files to `adrs/<slug>.md` while this
-workspace's corpus is numbered `adrs/NNNN-<slug>.md` and its `Adr` declaration
-requires a four-digit `adr_id` — say so, get the user's agreement, edit the
-note's `target` **before** approving, and reconcile any link that named the old
-path. Never rename a target silently to make it fit a convention.
+the ledger's own data. If the right destination is a different path — say, an
+existing page it should update rather than a new one — say so, get the user's
+agreement, edit the note's `target` **before** approving, and reconcile any link
+that named the old path. Never rename a target silently to make it fit a
+convention. An ADR-lane note needs no retargeting for its name: promotion dates it
+(`adrs/<YYYY-MM-DD>-<slug>.md`) and writes it as `type: Adr`, `status: stable`, with
+`decision_date` set to the promotion date.
 
 ### 2. Author the pages — FAN OUT ONE SUBAGENT PER PAGE (in parallel)
 

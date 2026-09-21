@@ -4,7 +4,7 @@ Typed and sync, and carrying no `graph_wiki`/`graph-wiki` naming. Top-level,
 not under `workspace/`: this
 merges entries into a repo-level Claude Code settings file, unrelated to the
 workspace manifest/layout `workspace/` owns, and never touches a
-`WorkspaceLayout`. Per ADR-0013, `repo_root` is a plain argument -- this
+`WorkspaceLayout`. Per ADR 2026-08-13-command-modules, `repo_root` is a plain argument -- this
 module never resolves a workspace itself.
 """
 
@@ -28,7 +28,7 @@ Action = Literal["enable", "disable"]
 class HooksError(WorkspaceError):
     """A hooks merge/remove refused: an unknown feature/action, or a missing
     hook script under `scripts_dir` at enable time. Configuration/environment,
-    not content -- per ADR-0013 rule 5."""
+    not content -- per ADR 2026-08-13-command-modules rule 5."""
 
 
 class HooksSettingsError(HooksError):

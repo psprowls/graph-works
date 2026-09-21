@@ -111,7 +111,7 @@ Prefer *dropped* over deprecated-without-replacement — same practical outcome,
 one fewer file entry. Prefer deprecated-with-`replaced_by` over *dropped*
 whenever a survivor exists: a `replaced_by` is a repair, a drop is a complaint.
 
-## The ADR-0029 seam — three rules
+## The ADR 2026-08-21-a-package-contributes seam — three rules
 
 A package contributes `TagDefinition` entries; the vocabulary *file* is the
 vault's. The two routes must never touch the same entry.

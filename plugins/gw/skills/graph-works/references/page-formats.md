@@ -235,11 +235,18 @@ Drift on an in-repo doc is a diff against its `sources/references/` copy. There 
 
 ## 6. ADR page
 
-A dated, citable decision in `adrs/`.
+A dated, citable decision in `adrs/`, written in the Diátaxis explanation style: it
+shares the base frontmatter of the other Diátaxis types and argues *why*, not what.
 
-Required frontmatter: `type: Adr`, `title`, `description`, `category: adr`, `adr_id`
-(four digits, quoted), `status` (`draft | stable | deprecated`), `decision_date`.
-Optional: `deciders`, `supersedes`, `superseded_by`, `updated`, `tags`.
+The filename is `adrs/<decision_date>-<slug>.md`. **ADRs are dated, never numbered**:
+two branches can each add one without colliding on an allocated number, and nothing
+has to hand out the next id. Cite an ADR by a link to its path, never by a number.
+
+Required frontmatter: `type: Adr`, `title` (plain — no `ADR-NNNN:` prefix),
+`description`, `decision_date`. Optional: `status` (`draft | stable | deprecated`; a
+promoted proposal starts `stable`), `deciders`, `supersedes` and `superseded_by` (a
+root-absolute path to another ADR, a list of them, or `null`), `updated`, `tags`,
+`sources`. There is no `adr_id` and no `category`.
 
 Declared headings: `Context`, `Decision`, `Consequences` (required), `Alternatives
 considered`. Extra headings are allowed.
@@ -247,20 +254,18 @@ considered`. Extra headings are allowed.
 ```markdown
 ---
 type: Adr
-title: "ADR-0014: JWT Sessions"
+title: JWT sessions
 description: Adopt short-lived JWTs signed by Cognito in place of server-side session tokens.
-category: adr
-adr_id: "0014"
 status: stable
 decision_date: 2026-04-18
 deciders: ["human:psprowls"]
-supersedes: "0007"
+supersedes: ["/adrs/2026-01-10-opaque-session-tokens.md"]
 superseded_by: null
 tags: [auth, sessions]
 updated: 2026-04-20
 ---
 
-# ADR-0014: JWT Sessions
+# JWT sessions
 
 ## Context
 Compliance flagged the session-token storage pattern. See [2026-04-auth-migration-spec](/sources/2026-04-auth-migration-spec.md).

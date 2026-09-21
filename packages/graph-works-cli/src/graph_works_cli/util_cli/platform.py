@@ -1,7 +1,7 @@
 """`gw util platform` — what am I actually getting on this machine?
 
 Formatting only. Every fact comes from `build_report()`, which derives each
-answer from the machinery that owns it (ADR-0013: all logic stays in core).
+answer from the machinery that owns it (ADR 2026-08-13-command-modules: all logic stays in core).
 
 Two contracts are stated here so nobody later "fixes" them:
 

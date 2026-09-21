@@ -4,7 +4,7 @@ Four commands over `graph_works_core.graph.commands`, which already returns a
 `GraphResult` carrying a stable exit code and two rendered strings. This module
 resolves `--workspace` into a `GraphTarget`, calls the matching core function,
 routes `output`/`error` to stdout/stderr, and exits `result.exit_code`. There is
-no behavior here beyond routing (ADR-0013 rule 5).
+no behavior here beyond routing (ADR 2026-08-13-command-modules rule 5).
 
 The one thing it does not pass through verbatim is the error *prefix*. Core
 spells its failures `error: <exc>`; every other `gw` sub-app writes

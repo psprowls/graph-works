@@ -8,12 +8,9 @@ layer up: rename or add a lane and the model keeps proposing the old names
 while `_validate_suggestion` drops every suggestion in the new one -- a run
 that reports zero proposals with no error anywhere.
 
-Glosses cannot come off the set. `Lane` carries no description text, and a
-type-keyed map would be wrong rather than merely absent: the `adr` and
-`explanation` lanes share `type_name="Explanation"`, so the ADR lane would get
-the explanation blurb. They are optional editorial instead, keyed on the lane
-name -- a lane with no gloss renders as its bare name rather than blocking the
-render on someone writing one.
+Glosses cannot come off the set. `Lane` carries no description text, so they
+are optional editorial, keyed on the lane name -- a lane with no gloss renders
+as its bare name rather than blocking the render on someone writing one.
 """
 
 from __future__ import annotations

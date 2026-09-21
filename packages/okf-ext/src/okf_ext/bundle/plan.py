@@ -240,7 +240,7 @@ def plan_install(
     exception here.
 
     `files` stays `Mapping[str, str]` and does not follow `PendingWrite.rendered`'s
-    widening to `str | bytes` (ADR-0031). What this plans is a package's *own
+    widening to `str | bytes` (ADR 2026-08-21-a-pending-write). What this plans is a package's *own
     declaration assets* -- seed schemas, section declarations, scaffold templates
     -- which are text by construction, authored in the package's own `resources/`.
     The compare path encodes each value to UTF-8 precisely so it can byte-compare

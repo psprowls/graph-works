@@ -39,7 +39,7 @@ What does transfer is that everyone pays for an unconditional dependency:
 v0.2.0 declares three unconditional dependencies:
 
 - **`okf-io>=0.1,<0.2`** — the bundle model this is built on. Pre-1.0, minor is
-  breaking (ADR-0007), hence the ceiling.
+  breaking (ADR 2026-08-02-versioning-independent-static), hence the ceiling.
 - **`ruamel.yaml>=0.18`** — `load_vocabulary` and `load_schemas` both parse YAML
   files. Declared rather than inherited: relying on it arriving through `okf-io`
   breaks the day the core swaps YAML libraries, and importing `okf_io._yaml`
@@ -145,7 +145,7 @@ from `okf_ext.shape` directly in new code.
 
 The recipe applies just as well to a rename inside one module, not only to a
 move between modules. **Current instance:** `okf_ext.proposals.placement`
-renamed to `proposal_path` in `0.4.6` (ADR-0030 — a colliding name moves on
+renamed to `proposal_path` in `0.4.6` (ADR 2026-08-21-a-colliding-name — a colliding name moves on
 the side without an invariant). `placement` stays as an additive alias —
 `placement is proposal_path` — and comes out at `0.5.0` alongside the
 `okf_ext.sections` shim above. Import `proposal_path` directly in new code.
@@ -197,7 +197,7 @@ takes a `{type: directory}` map and holds no lane name, no type name and no
 taxonomy; a bundle that declares nothing gets no findings. Even the one case
 declarations cannot resolve — two types sharing a directory, one directly under
 it and one below — is an injected `depth` map rather than a constant here. It
-ships at `warn` like every other factory, because ADR-0012 is explicit that a
+ships at `warn` like every other factory, because ADR 2026-08-07-pascalcase-types is explicit that a
 directory annotation is a writer-side hint and a page sitting somewhere
 unexpected is a legal page; the caller whose own reconciler cannot recover is
 the one that passes `error`.
@@ -319,7 +319,7 @@ needs one of two larger changes — `inventory()` exposing raw-type information
 it currently has no reason to carry, or a fifth `SkipReason` for "counted but
 not a string at that position" threaded through every planner — and because
 the root cause is `okf_io`'s coercion behaviour, which this package commits to
-never modifying (see Boundaries, above; also ADR-0005). A caller who hits this
+never modifying (see Boundaries, above; also ADR 2026-08-02-workspace-layering). A caller who hits this
 today has one workaround: inspect the bundle's own `fm_raw` for the concepts
 `inventory()` attributes the suspicious tag to, and check whether the value at
 that position is actually a `str`.
@@ -551,7 +551,7 @@ leaves a dangling reference" invariant on that order. Two sequences means two
 orders, with no way to interleave them. `okf_ext.proposals.Write.text` mirrors
 the widening, create-only; `okf_ext.bundle.plan_install` deliberately does not
 (its inputs are a package's own text declarations, and its byte-compare has
-nothing to compare a binary value against). See ADR-0031. — okf-ext 0.4.7
+nothing to compare a binary value against). See ADR 2026-08-21-a-pending-write. — okf-ext 0.4.7
 
 **`tables` ships a primitive, not a rule.** It exports no `TOPIC` and no
 `CODES`, and emits no `Finding`. `diataxis.no-entries` and "Reference entries

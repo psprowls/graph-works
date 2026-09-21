@@ -1,6 +1,6 @@
 """doc-wiki-okf: the documentation-wiki lane over OKF v0.2.
 
-Tier 3 per ADR-0005: depends on `okf-io` and `okf-ext[schemas]`, and nothing
+Tier 3 per ADR 2026-08-02-workspace-layering: depends on `okf-io` and `okf-ext[schemas]`, and nothing
 depends on this package.
 
 Five subpackages. `doc_wiki_okf.reading` is substrate-neutral file and format

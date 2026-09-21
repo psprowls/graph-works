@@ -22,7 +22,7 @@ per-capability answer on the running host.
 .works/
   workspace.yaml    the manifest — version, topic, four layout overrides,
                     plus the bundle declarations (`repositories`, `ignore`,
-                    `state_gate`) merged in per ADR-0033
+                    `state_gate`) merged in per ADR 2026-08-22-single-workspace-config
   .gw/              every graph-works-owned machinery member, flattened together
     schema/         committed declarations
     sections/       committed declarations
@@ -312,7 +312,7 @@ The affected item stays held until all its open entries are answered or
 superseded. The owner can differ from the affected child; standalone fallback
 owners use the same policy.
 
-This is an explicit operation-specific exception to ADR-0040's default
+This is an explicit operation-specific exception to ADR 2026-08-25-the-work-mutation's default
 no-surplus postcondition guarantee. Only decision append grants a budget of
 one `(owner page member, decisions.open-at-finish)` surplus finding, and only
 when the new entry names an existing, non-archived, nonterminal item whose

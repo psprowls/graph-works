@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "graph-works-cli"
 version = "0.3.4"
-description = "gw: the graph-works CLI — a thin Typer interface over graph-works-core (ADR-0013)."
+description = "gw: the graph-works CLI — a thin Typer interface over graph-works-core (ADR 2026-08-13-command-modules)."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
 ]

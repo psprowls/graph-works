@@ -49,7 +49,7 @@ and `generators`.
 `okf_ext` package.
 
 **`placement` is a deprecated alias of `proposal_path`**, kept for one minor
-version (ADR-0030) and removed at `0.5.0`. Use `proposal_path` in new code.
+version (ADR 2026-08-21-a-colliding-name) and removed at `0.5.0`. Use `proposal_path` in new code.
 """
 
 from __future__ import annotations

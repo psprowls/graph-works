@@ -409,7 +409,7 @@ def plan_entities(
         implementations = sorted(dependency_description.implemented_by)
         if implementations:
             # A Dependency whose node resolves to a workspace member gets no
-            # page (ADR-0034 as narrowed by ADR-0048): `used_by` and
+            # page (ADR 2026-08-22-code-wiki-placement as narrowed by ADR 2026-09-07-dependencies): `used_by` and
             # `versions_in_use` move onto the implementing Package page
             # instead. The graph node and its `implemented_by` edge are
             # unaffected — only the write is skipped. Ambiguity is still

@@ -1,6 +1,6 @@
 """work-tracker-okf: work-item tracking as an OKF v0.2 lane.
 
-Tier 3 per ADR-0005: depends on `okf-io` and `okf-ext[schemas]`, and nothing
+Tier 3 per ADR 2026-08-02-workspace-layering: depends on `okf-io` and `okf-ext[schemas]`, and nothing
 depends on this package. Ships the fourteen declaration files a work lane
 installs into a shared bundle, the closed vocabulary those declarations encode,
 and the `WorkItem` projection every other module in the lane reads.

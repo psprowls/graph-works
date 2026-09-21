@@ -293,7 +293,7 @@ def _concepts_in(bundle: Bundle, directory: str) -> tuple[str, ...]:
 def _subdirectories_of(directories: frozenset[str], directory: str) -> tuple[str, ...]:
     """Direct child directories of *directory* eligible to be proposed as new index entries.
 
-    A dot-directory is excluded here even though root-scoped exclusion (§ADR-0028) makes it
+    A dot-directory is excluded here even though root-scoped exclusion (§ADR 2026-08-21-bundle-dot-exclusion) makes it
     a real bundle member: it is machine-managed content nested in the tree, not something a
     human curates a subdirectory entry for. An existing hand-written entry that names a page
     inside one is still honored -- this only stops the directory itself from being

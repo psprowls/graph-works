@@ -146,3 +146,99 @@ def load_rules(path: Path) -> tuple[list[Rule], list[Refused]]:
         except _BadRule as exc:
             refusals.append(Refused("bad-rule", f"moves[{index}]: {exc}"))
     return rules, refusals
+
+
+@dataclass(frozen=True)
+class Expansion:
+    """What the rules mean against one bundle.
+
+    `ordinary` is the mapping handed to `plan_move_many`. `reserved` holds the
+    `index.md` / `log.md` members under a rule, which this script carries
+    itself -- see the module docstring.
+    """
+
+    ordinary: Mapping[str, str]
+    reserved: Mapping[str, str]
+    refusals: tuple[Refused, ...]
+
+
+def _member_paths(bundle: Bundle) -> tuple[str, ...]:
+    """Every member as a bundle-relative posix path, sorted.
+
+    A deliberate four-line duplicate of the private
+    `okf_ext.moves.plan._all_member_paths` (`plan.py:860-866`) rather than an
+    import of it: a script does not reach into another package's private
+    surface, and the shape is small enough that mirroring it costs less than
+    the coupling would. If it drifts, `plan_move_many` refuses the mapping as
+    `not-a-member` rather than moving the wrong thing.
+    """
+    found = {f"{cid}.md" for cid in bundle.concepts}
+    found.update(bundle.assets)
+    found.update(f"{directory}/{INDEX_NAME}" if directory else INDEX_NAME for directory in bundle.indexes)
+    found.update(f"{directory}/{LOG_NAME}" if directory else LOG_NAME for directory in bundle.logs)
+    return tuple(sorted(found))
+
+
+def _segments(directory: str) -> list[str]:
+    return [canonical_id(segment) for segment in directory.split("/") if segment]
+
+
+def _rest_under(head: list[str], member: str) -> str | None:
+    """The remainder of *member* beneath the canonical segments *head*, or None.
+
+    Mirrors `plan_move_dir._under_prefix` (`plan.py:801-807`) segment by
+    segment through `canonical_id`. That comparison is what anchors a rule at
+    the bundle root -- a `references` rule cannot reach
+    `work/<item>/references/` or `sources/references/` -- and what keeps a raw
+    disk id in a different Unicode normalization form than the rule matching
+    anyway (ADR 2026-08-21-member-identity).
+    """
+    parts = member.split("/")
+    if len(parts) <= len(head):
+        return None
+    if [canonical_id(part) for part in parts[: len(head)]] != head:
+        return None
+    return "/".join(parts[len(head) :])
+
+
+def expand(bundle: Bundle, rules: Sequence[Rule]) -> Expansion:
+    """Turn directory rules into the `{old: new}` mapping the engine takes."""
+    members = _member_paths(bundle)
+    claims: dict[str, list[tuple[int, str]]] = {}
+    refusals: list[Refused] = []
+
+    for index, rule in enumerate(rules):
+        head = _segments(rule.directory)
+        matched = 0
+        for member in members:
+            rest = _rest_under(head, member)
+            if rest is None:
+                continue
+            matched += 1
+            claims.setdefault(member, []).append((index, f"{rule.to}/{rest}"))
+        if matched:
+            continue
+        # The destination check is what keeps a second run over an
+        # already-moved bundle a clean no-op rather than a spurious refusal.
+        target = _segments(rule.to)
+        if not any(_rest_under(target, member) is not None for member in members):
+            refusals.append(
+                Refused(
+                    "empty-rule",
+                    f"`{rule.directory}` matched no member and `{rule.to}` holds none either",
+                )
+            )
+
+    mapping: dict[str, str] = {}
+    for member, claimed in sorted(claims.items()):
+        if len({dest for _index, dest in claimed}) > 1:
+            named = ", ".join(f"`{rules[index].directory}` -> `{dest}`" for index, dest in claimed)
+            refusals.append(Refused("rule-overlap", f"`{member}` is claimed by {len(claimed)} rules: {named}"))
+            continue
+        mapping[member] = claimed[0][1]
+
+    reserved = {
+        source: dest for source, dest in mapping.items() if PurePosixPath(source).name in RESERVED
+    }
+    ordinary = {source: dest for source, dest in mapping.items() if source not in reserved}
+    return Expansion(ordinary=ordinary, reserved=reserved, refusals=tuple(refusals))

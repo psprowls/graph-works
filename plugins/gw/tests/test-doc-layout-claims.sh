@@ -2,6 +2,9 @@
 # Guards against plugins/gw/ docs re-describing the pre-OKF
 # workspace layout (wiki/, raw/, entities/, knowledge/) that gw bootstrap no
 # longer builds. See work/tech-debt-plugin-docs-layout-claims.
+# Also guards the retired page-templates/ entity-template inventory; see
+# work/epic-plugin-cli-contract-docs-hygiene/children/
+# tech-debt-doc-layout-denylist-retired-entity-vocabulary.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -86,6 +89,7 @@ assert_skill_dir() {
 DENYLIST_PATTERN='workspace>/wiki|repo>/graph-works|wiki/entities|knowledge/|raw/|(^|[^a-zA-Z_.>/-])wiki/[a-z]'
 RETIRED_DEPENDENCY_SHAPE='load_bearing|category: dependency|package_name|service_name|upstream_url|quirks|provider:|kind: ?package ?\| ?service'
 RETIRED_LINT_KEYS='missing_in_vault|orphaned_in_vault|exports_drift|scanner_heading_drift|source_path_drift|guidance_lint_findings'
+RETIRED_TEMPLATE_INVENTORY='page-templates|entity-(repository|package|app|agent-plugin|dependency|test-suite)'
 RETIRED_LOG_HEADING='##[[:space:]]+\[(YYYY-MM-DD|[0-9]{4}-[0-9]{2}-[0-9]{2})\]'
 RETIRED_LOG_GREP='\^## \\\['
 
@@ -95,6 +99,7 @@ echo "doc-layout-claims guard test"
 DEPENDENCY_ALLOWLIST=("tests/test-doc-layout-claims.sh")
 LINT_ALLOWLIST=("tests/test-doc-layout-claims.sh")
 LOG_ALLOWLIST=("tests/test-doc-layout-claims.sh")
+TEMPLATE_ALLOWLIST=("tests/test-doc-layout-claims.sh")
 
 sweep_denylist "layout" "$DENYLIST_PATTERN" \
     "carries a stale layout claim" "${LAYOUT_ALLOWLIST[@]}"
@@ -104,6 +109,8 @@ sweep_denylist "lint" "$RETIRED_LINT_KEYS" \
     "carries a retired lint payload key" "${LINT_ALLOWLIST[@]}"
 sweep_denylist "log" "$RETIRED_LOG_HEADING|$RETIRED_LOG_GREP" \
     "carries a retired log heading or retrieval recipe" "${LOG_ALLOWLIST[@]}"
+sweep_denylist "templates" "$RETIRED_TEMPLATE_INVENTORY" \
+    "names a retired page-templates/ entity template" "${TEMPLATE_ALLOWLIST[@]}"
 
 # --- Rider-presence assertion (work/epic-unforked-plugin-skill-dispatch/
 # children/feature-move-to-brief-behaviors, D-004) ---

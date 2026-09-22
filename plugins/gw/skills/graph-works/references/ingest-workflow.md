@@ -142,7 +142,7 @@ Summary the user sees in chat:
 - Expect heavy updates to package pages and explanation pages (especially system-level syntheses).
 
 ### Code reviews (PR summaries)
-- `source_kind: code-review`. Include the PR URL in `source_path` or a `pr_url` frontmatter field.
+- `source_kind: code-review`. Keep `source_path` set to the reference copy's destination, `sources/references/<YYYY-MM>-<slug>.<ext>`, as in step 4 and the [Source pages example](wiki-schema.md#source-pages). Include the PR URL as a Markdown link under `## Evidence / rationale` in the source page body.
 - Add root-absolute markdown links under `## Touches` for every package the PR modified.
 - If the PR implements an ADR, link both ways.
 

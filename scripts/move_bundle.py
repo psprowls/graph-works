@@ -37,6 +37,14 @@ Design notes
   of scope for v1; `expand` is the seam they would be added behind.
 * **Indexes, `log.md` and `gw config sync` are not this script's concern.**
   It moves files and repairs links, then prints the follow-up commands.
+* **The reserved half needs its own copy of every invariant the engine
+  enforces on the ordinary half.** The reserved set is by construction
+  exactly what `_validate`'s `claimed` tracking cannot see, so "destination
+  collision detection comes free from the engine" is true only of the
+  mapping the engine sees -- a reserved destination that already exists, or
+  two reserved sources claiming one destination, both need their own guard
+  here (see `expand` and `rename_reserved`). The next change touching the
+  reserved half must re-ask this question, not assume the engine covers it.
 """
 
 from __future__ import annotations
@@ -101,6 +109,20 @@ class _BadRule(Exception):
     pass
 
 
+class _RenameFailed(Exception):
+    """`rename_reserved` cannot proceed. Carries the `(source, dest)` pairs
+    that already landed before the failing entry, so `write` rolls back
+    exactly those rather than guessing from what exists on disk -- an entry
+    this call never touched (e.g. a pre-existing conflicting file at `dest`)
+    must never be treated as something to move back.
+    """
+
+    def __init__(self, done: tuple[tuple[str, str], ...], refusal: Refused) -> None:
+        super().__init__(refusal.detail)
+        self.done = done
+        self.refusal = refusal
+
+
 def _directory(value: object, field: str) -> str:
     """Validate one end of a rule and return it canonically, or raise."""
     if not isinstance(value, str) or not value.strip():
@@ -121,9 +143,17 @@ def load_rules(path: Path) -> tuple[list[Rule], list[Refused]]:
     `okf_ext.tags.vocabulary` gives about its own format: a silently-ignored
     key is the same silent-no-op failure class as a typo that still loads,
     just not the way the author meant.
+
+    A missing rules file, or a path that names a directory, is an `OSError`
+    out of `read_text` -- refused the same way as bad YAML, rather than a
+    raw traceback, since both are "the operator handed this a bad path" and
+    a caller printing `REFUSED bad-rules: ...` should not have to also
+    catch what this function raises.
     """
     try:
         data = YAML(typ="safe").load(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return [], [Refused("bad-rules", f"{path}: cannot read rules file: {exc}")]
     except YAMLError as exc:
         return [], [Refused("bad-rules", f"{path}: not valid YAML: {exc}")]
 
@@ -240,6 +270,27 @@ def expand(bundle: Bundle, rules: Sequence[Rule]) -> Expansion:
     reserved = {
         source: dest for source, dest in mapping.items() if PurePosixPath(source).name in RESERVED
     }
+
+    # The reserved half of C2: two reserved sources (e.g. two lane indexes)
+    # claiming one destination -- merging `explanations` and `references`
+    # under `docs` both name `docs/index.md`. The engine's `claimed`
+    # tracking in `_validate` never sees this, because the reserved mapping
+    # never reaches the engine at all; this mirrors that tracking by hand,
+    # in the same shape `rule-overlap` above uses for the ordinary case.
+    # Forwarded as `dest-exists` so it renders through the one channel a
+    # reader already knows, whether the engine or this script produced it.
+    claimed_by: dict[str, str] = {}
+    for source, dest in sorted(reserved.items()):
+        if dest in claimed_by:
+            refusals.append(
+                Refused(
+                    "dest-exists",
+                    f"`{dest}` is claimed by two reserved members: `{claimed_by[dest]}` and `{source}`",
+                )
+            )
+            continue
+        claimed_by[dest] = source
+
     ordinary = {source: dest for source, dest in mapping.items() if source not in reserved}
     return Expansion(ordinary=ordinary, reserved=reserved, refusals=tuple(refusals))
 
@@ -285,12 +336,38 @@ def prepare(root: Path, rules: Sequence[Rule]) -> Prepared:
     `okf_ext.moves` never reading `bundle.ignored` is used *deliberately*
     rather than guarded against: the planner then never sees a lane index as
     a referrer and never rewrites its relative entries.
+
+    The other half of C1's guard lives here rather than in `expand`: a
+    reserved destination that already exists on disk is a fact about the
+    filesystem, not about the loaded `Bundle`, and `expand` only ever sees
+    the latter. Checking it here -- after expansion, before planning -- keeps
+    `expand` a pure function of one `Bundle` (every existing caller, direct
+    and in tests, hands it a `Bundle` with no root) while still refusing
+    before anything is written. A destination that is merely the same file
+    already moved there is not a conflict: `expand` only populates `reserved`
+    when the *source* is still a live member, so the clean second-run no-op
+    (source gone, nothing to check) never reaches this loop.
     """
-    lens = load_bundle(root, ignore=IGNORE)
+    try:
+        lens = load_bundle(root, ignore=IGNORE)
+    except OSError as exc:
+        refusal = Refused("bad-bundle", f"{root}: cannot read bundle: {exc}")
+        return Prepared(Expansion({}, {}, (refusal,)), None, None, None)
     expansion = expand(lens, rules)
+    collisions = tuple(
+        Refused("dest-exists", f"`{dest}` already exists on disk; reserved member `{source}` would overwrite it")
+        for source, dest in sorted(expansion.reserved.items())
+        if (root / dest).exists()
+    )
+    if collisions:
+        expansion = Expansion(expansion.ordinary, expansion.reserved, (*expansion.refusals, *collisions))
     if expansion.refusals:
         return Prepared(expansion, None, None, None)
-    planning = load_bundle(root, ignore=(*IGNORE, *sorted(expansion.reserved)))
+    try:
+        planning = load_bundle(root, ignore=(*IGNORE, *sorted(expansion.reserved)))
+    except OSError as exc:
+        refusal = Refused("bad-bundle", f"{root}: cannot read bundle: {exc}")
+        return Prepared(Expansion(expansion.ordinary, expansion.reserved, (refusal,)), None, None, None)
     plan = moves.plan_move_many(planning, expansion.ordinary)
     repair = moves.plan_repair(lens, expansion.reserved) if expansion.reserved else None
     return Prepared(expansion, planning, plan, repair)
@@ -303,16 +380,37 @@ def rename_reserved(root: Path, reserved: Mapping[str, str]) -> list[str]:
     it needs no content edit at all -- only `okf_ext.moves` declines to be the
     thing that renames it. `Path.replace` is the whole operation.
 
+    Belt and braces on top of `prepare`'s C1/C2 guards: `Path.replace` is
+    *defined* to destroy an existing destination silently, so this checks
+    `destination.exists()` itself rather than trusting that every caller
+    ran the dry-run check first. It also catches every other `OSError` a
+    rename can raise (a parent segment that is itself a file, a destination
+    that is a directory) rather than letting one propagate out of a
+    half-completed batch. Either way it raises `_RenameFailed` carrying the
+    `(source, dest)` pairs that already landed, so `write` can roll back
+    exactly those and nothing it never touched.
+
     The prune is this script's job rather than `apply`'s: the lane index is
     still sitting in the source directory while the ordinary batch commits, so
     `apply`'s regime-4 prune finds the directory non-empty and leaves it.
     Best-effort and bottom-up, with no failure path -- a directory that will
     not go is a directory something else still wants.
     """
+    done: list[tuple[str, str]] = []
     for source, dest in sorted(reserved.items()):
         destination = root / dest
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        (root / source).replace(destination)
+        if destination.exists():
+            refusal = Refused(
+                "dest-exists", f"`{dest}` already exists on disk; reserved member `{source}` would overwrite it"
+            )
+            raise _RenameFailed(tuple(done), refusal)
+        try:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            (root / source).replace(destination)
+        except OSError as exc:
+            refusal = Refused("bad-rename", f"`{source}` -> `{dest}`: {exc}")
+            raise _RenameFailed(tuple(done), refusal) from exc
+        done.append((source, dest))
 
     pruned: list[str] = []
     for source in sorted(reserved, reverse=True):
@@ -341,14 +439,20 @@ def unrename_reserved(root: Path, reserved: Mapping[str, str]) -> None:
     Best-effort, like the prune half of `rename_reserved`: a member that
     cannot be moved back is left where it is rather than raising, because the
     refusals already being returned are the real diagnosis and must not be
-    masked by a rollback failure.
+    masked by a rollback failure. That includes an origin that already
+    exists: `Path.replace` would silently destroy it, and an origin
+    reappearing mid-rollback (something else recreated it) is exactly the
+    kind of surprise this best-effort pass must not compound -- it skips
+    that entry rather than clobbering whatever is now sitting there.
     """
     for source, dest in sorted(reserved.items()):
         destination = root / dest
         if not destination.is_file():
             continue
+        origin = root / source
+        if origin.exists():
+            continue
         try:
-            origin = root / source
             origin.parent.mkdir(parents=True, exist_ok=True)
             destination.replace(origin)
         except OSError:
@@ -382,10 +486,25 @@ def write(root: Path, prepared: Prepared) -> Applied:
     If the recomputed repair plan carries refusals, the reserved renames are
     rolled back to their source paths (`unrename_reserved`) before the
     refusals are returned -- the ordinary move stays applied, since it
-    succeeded and is internally consistent on its own; only the reserved
-    half, whose repair failed, is undone. With the index back at its source,
-    the bundle is then in a state the same `plan_repair` mapping fixes on a
-    re-run -- see `scripts/move-bundle.md`.
+    succeeded on its own terms; only the reserved half, whose repair failed,
+    is undone. The bundle is **not** left fully consistent by this: the
+    ordinary move already rewrote every OKF reference *into* the reserved
+    member's now-stale source path (the root index, for instance, now links
+    `/explanations/index.md` through whatever new base the ordinary rewrite
+    computed), and the lane index sitting back at its source still carries
+    its original **relative** entries, now pointing at siblings that live
+    under the new base. Both dangle until a re-run completes the move --
+    which the non-zero exit code makes visible, and which `expand`
+    reclassifying the rolled-back index as reserved again makes automatic.
+    See `scripts/move-bundle.md`.
+
+    `rename_reserved` can itself fail partway -- a reserved destination that
+    exists despite `prepare`'s check (a race, or a caller that skipped it),
+    or an `OSError` from a filesystem shape `mkdir`/`replace` cannot handle
+    (a parent segment that is a file, a destination that is a directory).
+    Either raises `_RenameFailed` carrying exactly the `(source, dest)`
+    pairs that already landed, so the rollback here undoes only those --
+    never a pre-existing conflicting file this call never touched.
     """
     if prepared.planning is None or prepared.plan is None:
         raise ValueError("write() needs a prepared plan; check `Prepared.ok` first")
@@ -395,7 +514,13 @@ def write(root: Path, prepared: Prepared) -> Applied:
     if not reserved or not result.ok:
         return Applied(result, (), None, ())
 
-    pruned = tuple(rename_reserved(root, reserved))
+    try:
+        pruned = tuple(rename_reserved(root, reserved))
+    except _RenameFailed as exc:
+        if exc.done:
+            unrename_reserved(root, dict(exc.done))
+        return Applied(result, (), None, (exc.refusal,))
+
     after = load_bundle(root, ignore=IGNORE)
     repair_plan = moves.plan_repair(after, reserved)
     if not repair_plan.ok:
@@ -463,13 +588,17 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     applied = write(args.bundle, prepared)
-    print(f"{counts} -- written")
     for failure in applied.move.failed:
         print(f"FAILED {failure.path}: {failure.kind} -- {failure.error}")
+    if applied.repair is not None:
+        for failure in applied.repair.failed:
+            print(f"FAILED {failure.path}: {failure.kind} -- {failure.error}")
     for refusal in applied.refusals:
         print(f"REFUSED {refusal.kind}: {refusal.detail}")
     if not applied.ok:
+        print(f"{counts} -- attempted, see failures")
         return 1
+    print(f"{counts} -- written")
     if applied.repair is not None:
         print(f"{len(applied.repair.written)} reserved-member referrer(s) repaired, {len(applied.pruned)} pruned")
     print("\nNext:")

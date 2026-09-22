@@ -531,6 +531,97 @@ def test_a_bad_rules_file_exits_one_before_the_bundle_is_read(tmp_path: Path) ->
     assert main([str(tmp_path / "no-such-bundle"), "--rules", str(rules)]) == 1
 
 
+def test_a_preexisting_reserved_destination_is_refused_and_nothing_is_destroyed(
+    bundle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """C1: a hand-authored `docs/explanations/index.md` already sits at the
+    reserved destination. `Path.replace` would silently clobber it; both the
+    dry run and `--write` must refuse instead, and `--write` must exit 1
+    having destroyed nothing.
+    """
+    conflict = bundle / "docs" / "explanations" / "index.md"
+    conflict.parent.mkdir(parents=True)
+    conflict.write_bytes(b"---\ntype: Reference\ntitle: Pre-existing\n---\n\n# Pre-existing\n")
+    before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    rules = write_rules(tmp_path, "moves:\n  - dir: explanations\n    to: docs/explanations\n")
+
+    assert main([str(bundle), "--rules", str(rules)]) == 1
+    dry_out = capsys.readouterr().out
+    assert "REFUSED dest-exists" in dry_out
+    assert "docs/explanations/index.md" in dry_out
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 1
+    write_out = capsys.readouterr().out
+    assert "REFUSED dest-exists" in write_out
+    assert "refused, nothing written" in write_out
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+    assert conflict.read_bytes() == b"---\ntype: Reference\ntitle: Pre-existing\n---\n\n# Pre-existing\n"
+
+
+def test_two_reserved_sources_onto_one_destination_are_refused(bundle: Path, tmp_path: Path) -> None:
+    """C2: merging two lanes under one base (`explanations` and `references`
+    both to `docs`) makes both lane indexes claim `docs/index.md`. Nothing
+    the engine sees catches this -- it must be refused before any plan is
+    built, and nothing may be written.
+    """
+    before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    rules = write_rules(
+        tmp_path,
+        "moves:\n  - dir: explanations\n    to: docs\n  - dir: references\n    to: docs\n",
+    )
+
+    prepared = prepare(bundle, load_rules(rules)[0])
+    assert not prepared.ok
+    assert prepared.plan is None  # refused before any plan was built
+    kinds = [r.kind for r in prepared.refusals]
+    assert "dest-exists" in kinds
+    detail = next(r.detail for r in prepared.refusals if r.kind == "dest-exists")
+    assert "docs/index.md" in detail
+    assert "explanations/index.md" in detail
+    assert "references/index.md" in detail
+
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 1
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+
+
+def test_a_failed_repair_apply_prints_failures_and_exits_one(
+    bundle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """I3: `applied.repair.failed` must be surfaced, not swallowed -- and M7:
+    the counts line must not claim `-- written` on a failure branch, and must
+    print after the failures rather than before them.
+    """
+    import move_bundle as module
+    from okf_ext.moves import MoveResult
+    from okf_ext.writing import WriteFailure
+
+    rules = write_rules(tmp_path, DIATAXIS)
+    real_write = module.write
+
+    def fake_write(root: Path, prepared) -> module.Applied:  # type: ignore[no-untyped-def]
+        applied = real_write(root, prepared)
+        assert applied.repair is not None
+        broken_repair = MoveResult(
+            moved=applied.repair.moved,
+            written=(),
+            failed=(WriteFailure(path="index.md", kind="digest-mismatch", error="simulated for I3/M7"),),
+            pruned=applied.repair.pruned,
+        )
+        return module.Applied(applied.move, applied.pruned, broken_repair, applied.refusals)
+
+    monkeypatch.setattr(module, "write", fake_write)
+
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 1
+    out = capsys.readouterr().out
+    assert "FAILED index.md: digest-mismatch -- simulated for I3/M7" in out
+    assert "written" not in out
+    assert "attempted, see failures" in out
+    failed_at = out.index("FAILED index.md")
+    attempted_at = out.index("attempted, see failures")
+    assert failed_at < attempted_at
+
+
 def test_a_second_cli_run_exits_zero_with_nothing_to_do(
     bundle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from okf_io import load_bundle
 
-from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules, prepare, rename_reserved, write
+from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules, main, prepare, rename_reserved, write
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "move_bundle"
 
@@ -401,3 +401,72 @@ def test_a_move_with_no_reserved_member_needs_no_repair_pass(bundle: Path) -> No
     assert applied.ok
     assert applied.repair is None
     assert (bundle / "docs/sources/2026-08-spec.md").is_file()
+
+
+# --- the CLI ------------------------------------------------------------------
+
+
+def test_a_dry_run_leaves_the_bundle_byte_identical_and_prints_the_plan(
+    bundle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rules = write_rules(tmp_path, DIATAXIS)
+    before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    assert main([str(bundle), "--rules", str(rules)]) == 0
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+    out = capsys.readouterr().out
+    assert "explanations/why-graphs.md -> docs/explanations/why-graphs.md" in out
+    assert "[reserved] explanations/index.md -> docs/explanations/index.md" in out
+    assert "dry run" in out
+    assert "inbound [[wikilink]] reference(s)" in out
+
+
+def test_write_applies_and_prints_the_follow_up_commands(
+    bundle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rules = write_rules(tmp_path, DIATAXIS)
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 0
+    assert (bundle / "docs/reference/moves-api.md").is_file()
+    out = capsys.readouterr().out
+    assert "written" in out
+    assert "gw wiki index" in out
+    assert "gw wiki lint" in out
+    assert "okf/log.md" in out
+
+
+def test_a_rules_level_refusal_exits_one_and_writes_nothing(
+    bundle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rules = write_rules(tmp_path, "moves:\n  - dir: reference\n    to: docs/reference\n")
+    before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 1
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+    assert "REFUSED empty-rule" in capsys.readouterr().out
+
+
+def test_an_overlap_refusal_exits_one_and_writes_nothing(bundle: Path, tmp_path: Path) -> None:
+    body = (
+        "moves:\n"
+        "  - dir: explanations\n"
+        "    to: docs/explanations\n"
+        "  - dir: explanations\n"
+        "    to: guides/explanations\n"
+    )
+    rules = write_rules(tmp_path, body)
+    before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 1
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+
+
+def test_a_bad_rules_file_exits_one_before_the_bundle_is_read(tmp_path: Path) -> None:
+    rules = write_rules(tmp_path, "rules: []\n")
+    assert main([str(tmp_path / "no-such-bundle"), "--rules", str(rules)]) == 1
+
+
+def test_a_second_cli_run_exits_zero_with_nothing_to_do(
+    bundle: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rules = write_rules(tmp_path, DIATAXIS)
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 0
+    capsys.readouterr()
+    assert main([str(bundle), "--rules", str(rules), "--write"]) == 0
+    assert "0 moves, 0 reference edits" in capsys.readouterr().out

@@ -370,3 +370,82 @@ def write(root: Path, prepared: Prepared) -> Applied:
         refusals = tuple(Refused(r.kind, f"`{r.path}`: {r.detail}") for r in repair_plan.refusals)
         return Applied(result, pruned, None, refusals)
     return Applied(result, pruned, moves.apply(after, repair_plan), ())
+
+
+def render(prepared: Prepared) -> list[str]:
+    """The plan, as lines. Writes nothing.
+
+    Shape borrowed from `doc_wiki_okf.archive.ArchivePlan.diff`: refusals
+    first with a leading `!`-equivalent, then moves, then reference edits,
+    then the one `stranded_summary` line.
+    """
+    lines = [f"REFUSED {refusal.kind}: {refusal.detail}" for refusal in prepared.refusals]
+    plan = prepared.plan
+    if plan is not None:
+        lines.extend(f"  {move.source} -> {move.dest}" for move in plan.moves)
+        lines.extend(f"  ~ {edit.member}: {edit.old} -> {edit.new}" for edit in plan.edits)
+        if plan.stranded:
+            lines.append(moves.stranded_summary(plan.stranded))
+    lines.extend(
+        f"  [reserved] {source} -> {dest}" for source, dest in sorted(prepared.expansion.reserved.items())
+    )
+    if prepared.repair is not None:
+        lines.append(
+            f"  [reserved] {len(prepared.repair.edits)} provisional repair edit(s), recomputed on --write"
+        )
+    return lines
+
+
+def _counts(prepared: Prepared) -> str:
+    plan = prepared.plan
+    moved = len(plan.moves) if plan is not None else 0
+    edits = len(plan.edits) if plan is not None else 0
+    marooned = len(plan.stranded) if plan is not None else 0
+    reserved = len(prepared.expansion.reserved)
+    return f"{moved} moves, {edits} reference edits, {reserved} reserved, {marooned} stranded"
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
+    parser.add_argument("bundle", type=Path, help="the OKF bundle directory (e.g. <workspace>/okf)")
+    parser.add_argument("--rules", type=Path, required=True, help="the YAML rules file")
+    parser.add_argument("--write", action="store_true", help="apply; the default is a dry run")
+    args = parser.parse_args(argv)
+
+    rules, refusals = load_rules(args.rules)
+    if refusals:
+        for refusal in refusals:
+            print(f"REFUSED {refusal.kind}: {refusal.detail}")
+        return 1
+
+    prepared = prepare(args.bundle, rules)
+    for line in render(prepared):
+        print(line)
+    counts = _counts(prepared)
+    if not prepared.ok:
+        print(f"{counts} -- refused, nothing written")
+        return 1
+    if not args.write:
+        print(f"{counts} -- dry run")
+        return 0
+
+    applied = write(args.bundle, prepared)
+    print(f"{counts} -- written")
+    for failure in applied.move.failed:
+        print(f"FAILED {failure.path}: {failure.kind} -- {failure.error}")
+    for refusal in applied.refusals:
+        print(f"REFUSED {refusal.kind}: {refusal.detail}")
+    if not applied.ok:
+        return 1
+    if applied.repair is not None:
+        print(f"{len(applied.repair.written)} reserved-member referrer(s) repaired, {len(applied.pruned)} pruned")
+    print("\nNext:")
+    print("  gw wiki index")
+    print("  gw wiki lint")
+    print("  append to okf/log.md:")
+    print(f"    - **update** moved {len(prepared.plan.moves)} page(s) per the rules file")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

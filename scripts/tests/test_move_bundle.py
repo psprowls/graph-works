@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from okf_io import load_bundle
 
-from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules
+from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules, prepare
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "move_bundle"
 
@@ -204,3 +204,89 @@ def test_a_rule_matching_nothing_whose_destination_holds_members_is_a_clean_no_o
     assert result.refusals == ()
     assert dict(result.ordinary) == {}
     assert dict(result.reserved) == {}
+
+
+DIATAXIS_RULES = [Rule("explanations", "docs/explanations"), Rule("references", "docs/reference")]
+
+
+# --- one plan, not a plan_move_dir loop ---------------------------------------
+
+
+def test_the_plan_never_sees_a_lane_index_as_a_source_or_a_referrer(bundle: Path) -> None:
+    prepared = prepare(bundle, DIATAXIS_RULES)
+    assert prepared.ok
+    assert prepared.refusals == ()
+    assert [m.source for m in prepared.plan.moves] == [
+        "explanations/diagram.png",
+        "explanations/why-graphs.md",
+        "references/moves-api.md",
+    ]
+    assert not any(m.source.endswith("/index.md") for m in prepared.plan.moves)
+    assert not any(e.member.endswith("/index.md") for e in prepared.plan.edits)
+
+
+def test_a_cross_lane_link_is_computed_against_both_new_bases(bundle: Path) -> None:
+    """The property a `plan_move_dir` loop loses: one mapping, one call."""
+    prepared = prepare(bundle, DIATAXIS_RULES)
+    relative = [e for e in prepared.plan.edits if e.member == "explanations/why-graphs.md"]
+    assert ("../references/moves-api.md", "../reference/moves-api.md") in [(e.old, e.new) for e in relative]
+    absolute = [e for e in prepared.plan.edits if e.member == "references/moves-api.md"]
+    assert ("/explanations/why-graphs.md", "/docs/explanations/why-graphs.md") in [
+        (e.old, e.new) for e in absolute
+    ]
+
+
+def test_the_asset_moves_and_its_relative_reference_is_left_alone(bundle: Path) -> None:
+    prepared = prepare(bundle, DIATAXIS_RULES)
+    asset = [m for m in prepared.plan.moves if m.source == "explanations/diagram.png"]
+    assert asset[0].is_asset is True
+    assert asset[0].dest == "docs/explanations/diagram.png"
+
+
+def test_a_wikilink_into_the_moved_set_is_counted_never_repaired(bundle: Path) -> None:
+    """`okf_ext.moves.stranded` matches a `[[wikilink]]` target against the
+    mapping's key set only (`plan.py:533-556`), and deliberately implements no
+    Obsidian-style bare-name (shortest-path) resolution
+    (`okf_ext.body.resolve_wikilink`'s docstring). The fixture's `[[why-graphs]]`
+    is a bare name, not the mapping key `explanations/why-graphs.md`, so it is
+    never counted -- confirmed against the engine directly, not guessed.
+    """
+    prepared = prepare(bundle, DIATAXIS_RULES)
+    assert prepared.plan.stranded == ()
+
+
+def test_a_frontmatter_resource_pointing_into_the_moved_set_is_repaired(bundle: Path) -> None:
+    prepared = prepare(bundle, [Rule("sources", "docs/sources")])
+    keys = {(e.member, e.key, e.new) for e in prepared.plan.edits if e.where == "frontmatter"}
+    assert ("references/moves-api.md", "sources.0.resource", "/docs/sources/2026-08-spec.md") in keys
+
+
+def test_the_repair_plan_is_provisional_and_covers_the_lane_indexes(bundle: Path) -> None:
+    prepared = prepare(bundle, DIATAXIS_RULES)
+    assert prepared.repair is not None
+    edited = {(e.member, e.old, e.new) for e in prepared.repair.edits}
+    assert ("index.md", "/explanations/index.md", "/docs/explanations/index.md") in edited
+    assert ("index.md", "/references/index.md", "/docs/reference/index.md") in edited
+
+
+def test_rules_level_refusals_short_circuit_before_any_plan(bundle: Path) -> None:
+    prepared = prepare(bundle, [Rule("reference", "docs/reference")])
+    assert prepared.plan is None
+    assert prepared.planning is None
+    assert not prepared.ok
+    assert [r.kind for r in prepared.refusals] == ["empty-rule"]
+
+
+def test_engine_refusals_are_forwarded_as_refused(bundle: Path) -> None:
+    """A destination that already holds a member is `dest-exists`, from `_validate`."""
+    (bundle / "docs" / "sources").mkdir(parents=True)
+    (bundle / "docs" / "sources" / "2026-08-spec.md").write_bytes(b"---\ntitle: T\n---\n\n# T\n")
+    prepared = prepare(bundle, [Rule("sources", "docs/sources")])
+    assert not prepared.ok
+    assert [r.kind for r in prepared.refusals] == ["dest-exists"]
+
+
+def test_prepare_writes_nothing(bundle: Path) -> None:
+    before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    prepare(bundle, DIATAXIS_RULES)
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before

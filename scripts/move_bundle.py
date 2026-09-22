@@ -242,3 +242,55 @@ def expand(bundle: Bundle, rules: Sequence[Rule]) -> Expansion:
     }
     ordinary = {source: dest for source, dest in mapping.items() if source not in reserved}
     return Expansion(ordinary=ordinary, reserved=reserved, refusals=tuple(refusals))
+
+
+@dataclass(frozen=True)
+class Prepared:
+    """A dry-run preview.
+
+    `repair` is **provisional** -- computed against the pre-move bundle, so
+    its edit count is indicative. `write` recomputes it after the move,
+    because a repair plan computed up front would fail `apply`'s body-digest
+    check (`MovePlan.digests`, `model.py:146-152`): the root index links both
+    `/explanations/index.md` and `/explanations/foo.md`, so the repair plan
+    and the move plan edit the same file.
+    """
+
+    expansion: Expansion
+    planning: Bundle | None
+    plan: MovePlan | None
+    repair: MovePlan | None
+
+    @property
+    def refusals(self) -> tuple[Refused, ...]:
+        """Every refusal, rules-level and engine-level, in one shape."""
+        engine = tuple(
+            Refused(refusal.kind, f"`{refusal.path}`: {refusal.detail}")
+            for refusal in (self.plan.refusals if self.plan is not None else ())
+        )
+        return (*self.expansion.refusals, *engine)
+
+    @property
+    def ok(self) -> bool:
+        return not self.refusals
+
+
+def prepare(root: Path, rules: Sequence[Rule]) -> Prepared:
+    """Expand the rules, build the one move plan, and preview the repair.
+
+    Writes nothing. Two loads, under two lenses: the wide one for expansion
+    and for the provisional repair, and a narrower one -- the wide recipe plus
+    one glob per reserved member -- for planning. An exact bundle-relative
+    path is a valid `fnmatch` glob for itself, and this is the one place
+    `okf_ext.moves` never reading `bundle.ignored` is used *deliberately*
+    rather than guarded against: the planner then never sees a lane index as
+    a referrer and never rewrites its relative entries.
+    """
+    lens = load_bundle(root, ignore=IGNORE)
+    expansion = expand(lens, rules)
+    if expansion.refusals:
+        return Prepared(expansion, None, None, None)
+    planning = load_bundle(root, ignore=(*IGNORE, *sorted(expansion.reserved)))
+    plan = moves.plan_move_many(planning, expansion.ordinary)
+    repair = moves.plan_repair(lens, expansion.reserved) if expansion.reserved else None
+    return Prepared(expansion, planning, plan, repair)

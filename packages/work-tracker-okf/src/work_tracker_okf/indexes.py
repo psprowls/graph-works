@@ -11,8 +11,9 @@ from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import child_lane, parse_item_path
 from work_tracker_okf.vocabulary import PARENT_TYPES
 
-GENERATED_START = "<!-- graph-works:work-items:start -->"
-GENERATED_END = "<!-- graph-works:work-items:end -->"
+_LEGACY_MARKER_START = "<!-- graph-works:work-items:start -->"
+_LEGACY_MARKER_END = "<!-- graph-works:work-items:end -->"
+_LEGACY_MARKER_LINES = (_LEGACY_MARKER_START, _LEGACY_MARKER_END)
 
 
 @dataclass(frozen=True, slots=True)
@@ -136,6 +137,17 @@ def _required_lanes(items: Sequence[WorkItem]) -> tuple[str, ...]:
     return tuple(sorted(lanes))
 
 
+def is_direct_entry_target(target: str) -> bool:
+    """Whether *target* is the shape of a direct item page in this lane.
+
+    A direct work-tracker entry always links to a bare ``<basename>.md`` in
+    the same directory as the index. Anything with a path separator (a
+    subdirectory, ``children/...``, ``../sibling-lane/...``) or ``index.md``
+    itself belongs to okf-io, not the work tracker, and is left alone.
+    """
+    return bool(target) and "/" not in target and target != "index.md" and target.endswith(".md")
+
+
 def _direct_items(items: Sequence[WorkItem], lane: str) -> tuple[WorkItem, ...]:
     direct: list[WorkItem] = []
     for item in items:
@@ -145,26 +157,118 @@ def _direct_items(items: Sequence[WorkItem], lane: str) -> tuple[WorkItem, ...]:
     return tuple(sorted(direct, key=lambda item: item.basename))
 
 
-def _render_region(entries: Sequence[str]) -> str:
-    body = "\n".join(entries)
-    if body:
-        body = f"{body}\n"
-    return f"{GENERATED_START}\n{body}{GENERATED_END}"
+def _new_items_section(rendered: Sequence[str]) -> str:
+    if not rendered:
+        return ""
+    body = "\n".join(rendered)
+    return f"# Items\n\n{body}\n"
 
 
-def reconcile_marked_index(before: str | None, entries: Sequence[str]) -> str:
-    """Merge generated *entries* into already-repaired optional index text."""
-    region = _render_region(entries)
+def _entry_order(target: str) -> str:
+    """Sort key for an entry target: its basename, matching `_direct_items`.
+
+    Comparing raw targets would let the ``.md`` suffix decide between
+    prefix-colliding slugs (``feature-x-y.md`` < ``feature-x.md``, since
+    ``-`` < ``.``), so the final order would depend on insertion history.
+    """
+    return target.removesuffix(".md")
+
+
+def _insert_missing(kept: list[str], rendered: dict[str, str], missing: Sequence[str]) -> list[str]:
+    """Insert each missing target's rendered line next to the kept entries, in filename order."""
+    for target in missing:
+        positions = [
+            (existing, idx)
+            for idx, line in enumerate(kept)
+            if (existing := parse_entry(line)) is not None and is_direct_entry_target(existing)
+        ]
+        insert_at = next(
+            (idx for existing, idx in positions if _entry_order(existing) > _entry_order(target)),
+            None,
+        )
+        if insert_at is None:
+            insert_at = (positions[-1][1] + 1) if positions else len(kept)
+        kept.insert(insert_at, rendered[target])
+    return kept
+
+
+def _append_missing_without_existing_entries(
+    kept: list[str], rendered: dict[str, str], missing: Sequence[str]
+) -> list[str]:
+    """Add entries when no surviving entry anchors an insertion point.
+
+    Reuses a dangling, entry-less "# Items" heading left behind by a lane
+    that pruned to zero entries, instead of appending a duplicate heading.
+    """
+    new_lines = [rendered[target] for target in missing]
+    heading_at = None
+    for idx, line in enumerate(kept):
+        if line.strip() == "# Items":
+            heading_at = idx
+    if heading_at is not None:
+        j = heading_at + 1
+        while j < len(kept) and kept[j] == "":
+            j += 1
+        if j >= len(kept) or kept[j].lstrip().startswith("#"):
+            tail_sep = [""] if j < len(kept) else []
+            return [*kept[: heading_at + 1], "", *new_lines, *tail_sep, *kept[j:]]
+    trimmed = list(kept)
+    while trimmed and trimmed[-1] == "":
+        trimmed.pop()
+    if trimmed:
+        return [*trimmed, "", "# Items", "", *new_lines]
+    return ["# Items", "", *new_lines]
+
+
+def strip_legacy_markers(text: str) -> str:
+    """Remove the legacy ``graph-works:work-items`` marker lines, and nothing else.
+
+    Every other byte -- entries, prose, blank lines, the trailing newline --
+    is left exactly as it was. `reconcile_entries` strips through this same
+    function, so a lane index migrates identically whether it is reconciled
+    or only stripped.
+    """
+    return "\n".join(line for line in text.split("\n") if line.strip() not in _LEGACY_MARKER_LINES)
+
+
+def reconcile_entries(before: str | None, entries: Sequence[str]) -> str:
+    """Merge *entries* into *before*, owning only lines whose target is a direct item page.
+
+    Mirrors okf-io's reconciliation model one tier up: an entry is added,
+    refreshed, or pruned by what it links to, not by a byte-range marker.
+    Legacy ``graph-works:work-items`` marker lines are stripped on sight, so
+    the first reconciliation after this change migrates any lane index that
+    still carries them.
+    """
+    rendered: dict[str, str] = {}
+    for entry in entries:
+        target = parse_entry(entry)
+        if target is None:
+            raise ValueError(f"rendered entry does not round-trip through parse_entry: {entry!r}")
+        rendered[target] = entry
     if before is None or not before:
-        return f"{region}\n"
-    start = before.find(GENERATED_START)
-    end = before.find(GENERATED_END, start + len(GENERATED_START)) if start >= 0 else -1
-    if start >= 0 and end >= 0:
-        end += len(GENERATED_END)
-        return f"{before[:start]}{region}{before[end:]}"
-    prose = before.rstrip("\n")
-    separator = "\n\n" if prose else ""
-    return f"{prose}{separator}{region}\n"
+        return _new_items_section(list(rendered.values()))
+    lines = strip_legacy_markers(before).split("\n")
+    if lines and lines[-1] == "" and before.endswith("\n"):
+        lines.pop()
+    kept: list[str] = []
+    seen: set[str] = set()
+    for line in lines:
+        target = parse_entry(line)
+        if target is not None and is_direct_entry_target(target):
+            if target in rendered:
+                kept.append(rendered[target])
+                seen.add(target)
+            continue  # stale entry: drop
+        kept.append(line)
+    missing = sorted((target for target in rendered if target not in seen), key=_entry_order)
+    if missing:
+        if seen:
+            kept = _insert_missing(kept, rendered, missing)
+        else:
+            kept = _append_missing_without_existing_entries(kept, rendered, missing)
+    text = "\n".join(kept)
+    return f"{text}\n" if text else ""
 
 
 def plan_indexes(
@@ -173,7 +277,7 @@ def plan_indexes(
     *,
     lanes: Iterable[str] | None = None,
 ) -> tuple[LaneIndexPlan, ...]:
-    """Plan marked regions for requested lanes or every required work lane."""
+    """Plan reconciled entries for requested lanes or every required work lane."""
     selected = tuple(sorted(set(lanes))) if lanes is not None else _required_lanes(items)
     plans: list[LaneIndexPlan] = []
     for lane in selected:
@@ -184,16 +288,16 @@ def plan_indexes(
             before = None
         direct = _direct_items(items, lane)
         entries = tuple(render_entry(item) for item in direct)
-        plans.append(LaneIndexPlan(lane, path, before, reconcile_marked_index(before, entries), entries))
+        plans.append(LaneIndexPlan(lane, path, before, reconcile_entries(before, entries), entries))
     return tuple(plans)
 
 
 __all__ = [
-    "GENERATED_END",
-    "GENERATED_START",
     "LaneIndexPlan",
+    "is_direct_entry_target",
     "parse_entry",
     "plan_indexes",
-    "reconcile_marked_index",
+    "reconcile_entries",
     "render_entry",
+    "strip_legacy_markers",
 ]

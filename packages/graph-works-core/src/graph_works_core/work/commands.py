@@ -82,7 +82,7 @@ from work_tracker_okf.filing import FilingSeed
 from work_tracker_okf.hierarchy import ChildRollup, DescendResult, decision_owner
 from work_tracker_okf.hierarchy import descend as descend_to_leaf
 from work_tracker_okf.holds import check_hold, prepare_checkpoint
-from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes
+from work_tracker_okf.indexes import LaneIndexPlan, plan_indexes, strip_legacy_markers
 from work_tracker_okf.items import IGNORE, WORK_DIR, WorkItem, item_index, load_items, unreadable_detail
 from work_tracker_okf.mutation import (
     DirectoryPrecondition,
@@ -827,11 +827,18 @@ def _work_only_ignore(layout: WorkspaceLayout) -> tuple[str, ...]:
 
 @dataclass(frozen=True, slots=True)
 class RegenIndexesResult:
-    """Every required lane index plan plus an optional journaled application."""
+    """Every required lane index plan plus an optional journaled application.
+
+    `marker_strips` are the non-required `work/` indexes this run migrates off
+    the legacy ``graph-works:work-items`` markers without reconciling them:
+    each plan's `after` is its `before` with only the two marker lines
+    removed. They are written by the same `mutation` as `plans`.
+    """
 
     plans: tuple[LaneIndexPlan, ...]
     mutation: WorkMutationPlan
     application: MutationApplication | None = None
+    marker_strips: tuple[LaneIndexPlan, ...] = ()
 
 
 def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> Mapping[str, DirectoryPrecondition]:
@@ -856,13 +863,70 @@ def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> M
     return MappingProxyType(conditions)
 
 
+def _legacy_marker_strips(
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+    reconciled: frozenset[str],
+) -> tuple[tuple[LaneIndexPlan, ...], tuple[str, ...]]:
+    """Strip-only migration plans for `work/` indexes the reconcile pass skips.
+
+    `plan_indexes` covers only the required lanes, so a lane index nothing
+    requires any more -- an archived parent's `children/`, an active parent's
+    inert `children/_archive/` -- would keep its legacy marker lines forever.
+    Every other `index.md` under `work/` (the bundle's own walk,
+    `bundle.indexes`) that still carries them is planned here with just those
+    two lines removed; its entries are never reconciled.
+
+    One guard, because the transaction's postcondition gate checks every
+    written lane index against a full reconcile and rolls the whole run back
+    on a stale one: a file is stripped only when stripping alone already
+    equals that full reconcile. A lane whose own entries are out of date
+    keeps its markers, untouched, and is named in a warning instead.
+    """
+    marked: list[str] = []
+    for directory in sorted(bundle.indexes):
+        if directory in reconciled or not (directory == WORK_DIR or directory.startswith(f"{WORK_DIR}/")):
+            continue
+        try:
+            text = (bundle.root / directory / "index.md").read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        if strip_legacy_markers(text) != text:
+            marked.append(directory)
+    if not marked:
+        return (), ()
+    strips: list[LaneIndexPlan] = []
+    warnings: list[str] = []
+    for plan in plan_indexes(bundle.root, items, lanes=marked):
+        if plan.before is None:
+            continue
+        stripped = strip_legacy_markers(plan.before)
+        if stripped == plan.before:
+            continue
+        member = plan.path.relative_to(bundle.root).as_posix()
+        if plan.after != stripped:
+            warnings.append(
+                f"{member}: legacy work-items markers left in place; its entries are stale, "
+                "so stripping the markers alone would leave an index the reconcile check rejects"
+            )
+            continue
+        strips.append(plan)
+    return tuple(strips), tuple(warnings)
+
+
 def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> RegenIndexesResult:
-    """Reconcile every required root and parent-owned work lane."""
+    """Reconcile every required root and parent-owned work lane.
+
+    The same run also migrates every other `work/` index still carrying the
+    legacy marker lines, stripping only those lines (see
+    `_legacy_marker_strips`).
+    """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
     lane_preconditions = _absent_index_lane_preconditions(bundle.root, items)
     plans = plan_indexes(bundle.root, items)
     changed_lanes = {plan.lane for plan in plans if plan.changed}
+    marker_strips, strip_warnings = _legacy_marker_strips(bundle, items, frozenset(plan.lane for plan in plans))
     mutation = _write_plan(
         bundle.root,
         "indexes",
@@ -872,9 +936,10 @@ def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> Regen
                 plan.before.encode("utf-8") if plan.before is not None else None,
                 plan.after.encode("utf-8"),
             )
-            for plan in plans
+            for plan in (*plans, *marker_strips)
             if plan.changed
         ),
+        warnings=strip_warnings,
         directory_preconditions=tuple(
             condition for lane, condition in lane_preconditions.items() if lane in changed_lanes
         ),
@@ -882,7 +947,7 @@ def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> Regen
     application = (
         None if dry_run else apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
     )
-    return RegenIndexesResult(plans=plans, mutation=mutation, application=application)
+    return RegenIndexesResult(plans=plans, mutation=mutation, application=application, marker_strips=marker_strips)
 
 
 @dataclass(frozen=True, slots=True)

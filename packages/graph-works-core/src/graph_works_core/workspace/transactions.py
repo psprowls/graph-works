@@ -48,7 +48,7 @@ from okf_io import Bundle, Rule, parse, validate
 from okf_io import load_bundle as _load_bundle
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
-from work_tracker_okf.indexes import reconcile_marked_index, render_entry
+from work_tracker_okf.indexes import reconcile_entries, render_entry
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import WorkMutationPlan, directory_manifest_digest
 from work_tracker_okf.paths import parse_item_path
@@ -2433,7 +2433,7 @@ def _validate_postconditions(
                 key=lambda item: item.basename,
             )
         )
-        expected = reconcile_marked_index(current, tuple(render_entry(item) for item in direct))
+        expected = reconcile_entries(current, tuple(render_entry(item) for item in direct))
         if current != expected:
             failures.append(f"{member}: generated direct-descendant inventory is stale")
     try:

@@ -525,7 +525,7 @@ def lint_payload(report: object) -> dict[str, Any]:
 def regen_index_payload(result: RegenIndexesResult) -> dict[str, Any]:
     application = result.application
     return {
-        "indexes": [str(plan.path) for plan in result.plans if plan.changed],
+        "indexes": [str(plan.path) for plan in (*result.plans, *result.marker_strips) if plan.changed],
         "warnings": [*result.mutation.warnings, *(() if application is None else application.warnings)],
         "refusals": [_refusal(item) for item in result.mutation.refusals],
         "applied": application is not None,

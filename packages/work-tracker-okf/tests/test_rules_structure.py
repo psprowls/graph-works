@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from work_helpers import lane_report, write_item
+from work_tracker_okf._rules.structure import _direct_entries
 
 
 def _codes(root: Path) -> set[str]:
@@ -125,15 +126,16 @@ def test_index_reports_missing_stale_duplicate_and_non_direct_entries(tmp_path: 
     write_item(tmp_path, descendant, "type: Feature\nwork_status: open\n")
     index = tmp_path / lane / "index.md"
     index.write_text(
-        "<!-- graph-works:work-items:start -->\n"
+        "# Items\n\n"
         "- [Stale](gone.md)\n"
         "- [Nested](epic-migration/children/feature-import.md)\n"
         "- [Nested again](epic-migration/children/feature-import.md)\n"
-        "<!-- graph-works:work-items:end -->\n",
+        "- [children/](children/index.md)\n",
         encoding="utf-8",
     )
 
-    codes = {finding.code for finding in lane_report(tmp_path).findings}
+    findings = lane_report(tmp_path).findings
+    codes = {finding.code for finding in findings}
 
     assert {
         "structure.index-entry-missing",
@@ -141,12 +143,11 @@ def test_index_reports_missing_stale_duplicate_and_non_direct_entries(tmp_path: 
         "structure.index-entry-duplicate",
         "structure.index-entry-non-direct",
     } <= codes
+    assert not any("children/index.md" in (finding.message or "") for finding in findings)
 
 
 def test_a_bracketed_title_is_not_reported_missing(path_native_root: Path) -> None:
     """D1: a balanced bracket in a title is valid link text the rule must read."""
-    from work_tracker_okf.indexes import GENERATED_END, GENERATED_START
-
     write_item(
         path_native_root,
         "work/bug-bracket-title",
@@ -154,18 +155,16 @@ def test_a_bracketed_title_is_not_reported_missing(path_native_root: Path) -> No
     )
     lane_index = path_native_root / "work" / "index.md"
     entry = "- [Bug: Replace [[entities/x]] syntax](bug-bracket-title.md) — open · not started"
-    lane_index.write_text(f"{GENERATED_START}\n{entry}\n{GENERATED_END}\n", encoding="utf-8")
+    lane_index.write_text(f"# Items\n\n{entry}\n", encoding="utf-8")
 
     codes = [f.code for f in lane_report(path_native_root).findings if "bug-bracket-title" in (f.message or "")]
     assert "structure.index-entry-missing" not in codes
 
 
 def test_an_unreadable_region_line_is_reported_not_dropped(path_native_root: Path) -> None:
-    from work_tracker_okf.indexes import GENERATED_END, GENERATED_START
-
     lane_index = path_native_root / "work" / "index.md"
     lane_index.write_text(
-        f"{GENERATED_START}\n- [Bug: a] broken](nowhere.md) — open · design\n{GENERATED_END}\n",
+        "# Items\n\n- [Bug: a] broken](nowhere.md) — open · design\n",
         encoding="utf-8",
     )
 
@@ -174,12 +173,96 @@ def test_an_unreadable_region_line_is_reported_not_dropped(path_native_root: Pat
 
 
 def test_a_blank_line_in_the_region_is_not_reported(path_native_root: Path) -> None:
-    """The region body starts with a newline, so `splitlines` always yields a
-    leading empty string. Reporting it would fire on every well-formed index."""
-    from work_tracker_okf.indexes import GENERATED_END, GENERATED_START
-
+    """A blank line between entries is not an attempted entry and must not be
+    reported as unreadable."""
     lane_index = path_native_root / "work" / "index.md"
-    lane_index.write_text(f"{GENERATED_START}\n\n{GENERATED_END}\n", encoding="utf-8")
+    lane_index.write_text("# Items\n\n\n", encoding="utf-8")
 
     codes = [f.code for f in lane_report(path_native_root).findings]
     assert "structure.index-entry-unreadable" not in codes
+
+
+def _index_findings(root: Path) -> list[tuple[str, str]]:
+    return [
+        (finding.code, finding.message or "")
+        for finding in lane_report(root).findings
+        if finding.code.startswith("structure.index-entry-")
+    ]
+
+
+def test_a_prose_link_to_a_non_item_page_is_not_an_index_entry(tmp_path: Path) -> None:
+    """A lane index may link a design doc or any other non-item page from a
+    bullet; only a bare direct-item target or a real work-item page is an
+    entry the rule classifies, so this is neither stale nor anything else."""
+    epic = "work/epic-x"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: open\n")
+    references = tmp_path / epic / "references"
+    references.mkdir(parents=True)
+    (references / "01-design.md").write_text("# Design\n", encoding="utf-8")
+    (tmp_path / "work" / "index.md").write_text(
+        "# Items\n\n"
+        "- [Epic: T](epic-x.md) — open · not started\n\n"
+        "# Reading\n\n"
+        "- [Design](epic-x/references/01-design.md)\n",
+        encoding="utf-8",
+    )
+
+    assert _index_findings(tmp_path) == []
+
+
+def test_a_task_list_bullet_is_not_reported_unreadable(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/bug-x", "type: Bug\nwork_status: open\n")
+    (tmp_path / "work" / "index.md").write_text(
+        "# Items\n\n"
+        "- [Bug: T](bug-x.md) — open · not started\n\n"
+        "# Todo\n\n"
+        "- [ ] triage the backlog\n"
+        "- [x] archive the resolved epics\n"
+        "- [X] done, capitalised\n"
+        "- [ ]\n",
+        encoding="utf-8",
+    )
+
+    assert _index_findings(tmp_path) == []
+
+
+def test_direct_entries_ignores_a_non_link_bullet() -> None:
+    text = "- just a note, no link here\n"
+    targets, unreadable = _direct_entries(text, "work", frozenset())
+    assert targets == ()
+    assert unreadable == ()
+
+
+def test_direct_entries_ignores_a_subdirectory_link() -> None:
+    text = "- [children/](children/index.md)\n"
+    targets, unreadable = _direct_entries(text, "work", frozenset())
+    assert targets == ()
+    assert unreadable == ()
+
+
+def test_direct_entries_reports_a_malformed_item_link_as_unreadable() -> None:
+    text = "- [Broken(epic-x.md) — open · design\n"
+    targets, unreadable = _direct_entries(text, "work", frozenset())
+    assert targets == ()
+    assert len(unreadable) == 1
+
+
+def test_direct_entries_finds_item_links_anywhere_in_the_file() -> None:
+    text = (
+        "Some notes.\n\n"
+        "- [Epic: X](epic-x.md) — open · design\n\n"
+        "# Subdirectories\n\n"
+        "- [children/](children/index.md)\n"
+    )
+    targets, unreadable = _direct_entries(text, "work", frozenset())
+    assert targets == ("epic-x.md",)
+    assert unreadable == ()
+
+
+def test_direct_entries_does_not_mistake_a_slug_ending_in_index_for_an_index_page() -> None:
+    """The index-page exclusion is a basename check, not a suffix match: a real
+    item slug that happens to end in "index" is not an index page."""
+    text = "- [Feature: Regen index](feature-regen-index.md) — open · design\n"
+    targets, unreadable = _direct_entries(text, "work", frozenset())
+    assert targets == ("feature-regen-index.md",)
+    assert unreadable == ()

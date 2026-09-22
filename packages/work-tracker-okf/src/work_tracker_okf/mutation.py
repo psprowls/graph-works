@@ -16,7 +16,7 @@ from okf_io import Bundle, Document
 from okf_io.bundle import INDEX_NAME, LOG_NAME, canonical_id
 from okf_io.links import resolve_reference
 
-from work_tracker_okf.indexes import plan_indexes, reconcile_marked_index
+from work_tracker_okf.indexes import is_direct_entry_target, parse_entry, plan_indexes, reconcile_entries
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, child_lane, parse_item_path
 from work_tracker_okf.vocabulary import PARENT_TYPES
@@ -445,6 +445,48 @@ def _lane_mapping(items: Sequence[WorkItem], path_mapping: Mapping[str, str]) ->
     return mapping
 
 
+def _is_direct_entry_line(line: str) -> bool:
+    target = parse_entry(line)
+    return target is not None and is_direct_entry_target(target)
+
+
+def _reconciliation_preimage(before_bytes: bytes | None, rewritten: bytes | None) -> bytes | None:
+    """The text `reconcile_entries` reconciles one lane index from, merged line by line.
+
+    Two sources, each right for a different kind of line:
+
+    - A direct-entry line (a bare ``<basename>.md`` target) comes from the raw
+      on-disk bytes. The generic okf-ext rewrite retargets a moved item's own
+      entry (``bug-done.md`` -> ``_archive/bug-done.md``); once its target
+      carries a path separator `reconcile_entries` no longer recognizes it as
+      an entry it owns and would keep it forever instead of pruning it. The
+      raw line is safe here because `reconcile_entries` regenerates every
+      entry it keeps from `render_entry` anyway.
+    - Every other line -- headings, human prose, okf-io's own subdirectory
+      links -- comes from the rewrite, so links into a moved subtree follow it
+      instead of being left pointing at the vacated location.
+
+    The okf-ext rewrite preserves line count, so lines pair up by position.
+    When there is no rewrite for this index, or the line counts ever disagree
+    (or either side is not UTF-8), the raw bytes are used whole rather than
+    risk pairing the wrong lines.
+    """
+    if before_bytes is None or rewritten is None or rewritten == before_bytes:
+        return before_bytes
+    try:
+        raw_lines = before_bytes.decode("utf-8").split("\n")
+        rewritten_lines = rewritten.decode("utf-8").split("\n")
+    except UnicodeDecodeError:
+        return before_bytes
+    if len(raw_lines) != len(rewritten_lines):
+        return before_bytes
+    merged = [
+        raw if _is_direct_entry_line(raw) else rewritten_line
+        for raw, rewritten_line in zip(raw_lines, rewritten_lines, strict=True)
+    ]
+    return "\n".join(merged).encode("utf-8")
+
+
 def _index_effects(
     root: Path,
     items: Sequence[WorkItem],
@@ -495,7 +537,7 @@ def _index_effects(
         except OSError as exc:
             refusals.append(MutationRefusal(source_member, "index-read", str(exc)))
             continue
-        content_bytes = rendered.get(source_member, before_bytes)
+        content_bytes = _reconciliation_preimage(before_bytes, rendered.get(source_member))
         try:
             before = content_bytes.decode("utf-8") if content_bytes is not None else None
         except UnicodeDecodeError as exc:
@@ -509,7 +551,7 @@ def _index_effects(
         except OSError as exc:
             refusals.append(MutationRefusal(destination_member, "index-read", str(exc)))
             continue
-        after = reconcile_marked_index(before, lane_plan.entries).encode("utf-8")
+        after = reconcile_entries(before, lane_plan.entries).encode("utf-8")
         if moved or before_bytes != after:
             before_digest = _digest(before_bytes) if before_bytes is not None else None
             preimage_source = (

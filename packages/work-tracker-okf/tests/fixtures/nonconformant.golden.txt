@@ -21,11 +21,11 @@ warn	plan.table-malformed	work/epic-stalled-decomposition.md	work_tracker_okf._r
 warn	state.stuck-open	work/epic-stalled-decomposition.md	work_tracker_okf._rules.state	`work_status: open` with no update in 94 days (over 30)
 error	targets.affects-missing	work/epic-stalled-decomposition.md	work_tracker_okf._rules.targets	`affects` entry 'packages/does-not-exist' does not exist under the repo root
 error	structure.release-nested	work/feature-parent-cycle-a/children/release-nested.md	work_tracker_okf._rules.structure	`type: Release` is root-only but this item has parent 'work/feature-parent-cycle-a'
-warn	structure.index-entry-duplicate	work/index.md	work_tracker_okf._rules.structure	generated index region lists `work/bug-cycle-a.md` 2 times
-warn	structure.index-entry-missing	work/index.md	work_tracker_okf._rules.structure	generated index region does not list direct item `work/tech-debt-in-progress.md`
-warn	structure.index-entry-non-direct	work/index.md	work_tracker_okf._rules.structure	generated index entry `work/spike-wrong-parent-type/children/feature-accepted-no-plan.md` is not a direct descendant of this lane
-warn	structure.index-entry-stale	work/index.md	work_tracker_okf._rules.structure	generated index entry `work/gone.md` names no work item
-warn	structure.index-entry-unreadable	work/index.md	work_tracker_okf._rules.structure	generated index region line is not a readable entry: '- [Bug: an unbalanced ] in link text](bug-unreadable-entry.md) — open · not started'
+warn	structure.index-entry-duplicate	work/index.md	work_tracker_okf._rules.structure	lane index links item page `work/bug-cycle-a.md` 2 times
+warn	structure.index-entry-missing	work/index.md	work_tracker_okf._rules.structure	lane index has no entry for direct item page `work/tech-debt-in-progress.md`
+warn	structure.index-entry-non-direct	work/index.md	work_tracker_okf._rules.structure	lane index entry `work/spike-wrong-parent-type/children/feature-accepted-no-plan.md` is not a direct descendant of this lane
+warn	structure.index-entry-stale	work/index.md	work_tracker_okf._rules.structure	lane index entry `work/gone.md` names no work item
+warn	structure.index-entry-unreadable	work/index.md	work_tracker_okf._rules.structure	lane index link-bullet is not a readable entry: '- [Bug: an unbalanced ] in link text](bug-unreadable-entry.md) — open · not started'
 warn	state.archive-eligible	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` is terminal; the item is still under `work/`
 warn	state.resolved-without-ref	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` with no `resolved_in`
 error	structure.children-on-leaf	work/spike-wrong-parent-type.md	work_tracker_okf._rules.structure	`type: Spike` may not own the child lane `work/spike-wrong-parent-type/children`

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import posixpath
+import re
 from collections import Counter
 from collections.abc import Iterable
 from pathlib import PurePosixPath
@@ -10,7 +11,7 @@ from pathlib import PurePosixPath
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, items
-from work_tracker_okf.indexes import GENERATED_END, GENERATED_START, parse_entry, plan_indexes
+from work_tracker_okf.indexes import is_direct_entry_target, parse_entry, plan_indexes
 from work_tracker_okf.items import WorkItem, item_index
 from work_tracker_okf.paths import child_lane, parse_item_path
 from work_tracker_okf.vocabulary import PARENT_TYPES, ROOT_ONLY_TYPES, SLUG_PREFIXES
@@ -144,29 +145,10 @@ def sources(ctx: RuleContext) -> Iterable[Finding]:
                 )
 
 
-def _region_entries(text: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Targets parsed from the generated region, and the lines that would not parse.
-
-    An unparseable line used to be dropped in silence, which is what let a
-    writer/reader disagreement present as `index-entry-missing` for months.
-    Blank lines are not lines: the region body opens with a newline, so
-    `splitlines` always yields a leading empty string.
-    """
-    start = text.find(GENERATED_START)
-    end = text.find(GENERATED_END, start + len(GENERATED_START)) if start >= 0 else -1
-    if start < 0 or end < 0:
-        return (), ()
-    targets: list[str] = []
-    unreadable: list[str] = []
-    for line in text[start + len(GENERATED_START) : end].splitlines():
-        if not line.strip():
-            continue
-        target = parse_entry(line)
-        if target is None:
-            unreadable.append(line.strip())
-        else:
-            targets.append(target)
-    return tuple(targets), tuple(unreadable)
+_LINK_BULLET = re.compile(r"^-\s*\[")
+#: A GFM task-list item (``- [ ] todo``, ``- [x] done``). Its ``[ ]`` is a
+#: checkbox, not link text, so the line is prose rather than an attempted entry.
+_TASK_BULLET = re.compile(r"^-\s*\[[ xX]\](?:\s|$)")
 
 
 def _target_page(lane: str, target: str) -> str:
@@ -176,10 +158,53 @@ def _target_page(lane: str, target: str) -> str:
     return posixpath.normpath(f"{lane}/{path}")
 
 
+def _is_lint_candidate(lane: str, target: str, all_pages: frozenset[str]) -> bool:
+    """Whether *target* is a link-bullet this lane's lint rule should classify at all.
+
+    Two ways in. A bare ``<basename>.md`` target is the shape of a direct
+    item page (`indexes.is_direct_entry_target`, the reconciler's own
+    ownership predicate), so it is an entry whether or not the page still
+    exists -- which is how a stale entry is caught. Any other target counts
+    only when it resolves to a real work-item page, so the classification
+    below can still report a genuine non-direct link (an item nested deeper
+    in this lane, or elsewhere in the bundle). Everything else -- okf-io's
+    own ``index.md`` links, prose links to a design doc or any other
+    non-item page -- is not an entry and is left alone.
+    """
+    return is_direct_entry_target(target) or _target_page(lane, target) in all_pages
+
+
+def _direct_entries(text: str, lane: str, all_pages: frozenset[str]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Targets of every item-page entry in *text*, and any link-bullet that failed to parse.
+
+    Scans the whole file, not a marker-delimited region. Only targets
+    `_is_lint_candidate` accepts are returned, for the caller to classify as
+    direct, non-direct, or stale. A bullet with no link at all, and a GFM
+    task-list item, are prose rather than attempted entries, so neither is
+    ever reported as unreadable.
+    """
+    targets: list[str] = []
+    unreadable: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if _TASK_BULLET.match(stripped) or not _LINK_BULLET.match(stripped):
+            continue
+        target = parse_entry(line)
+        if target is None:
+            unreadable.append(stripped)
+        elif _is_lint_candidate(lane, target, all_pages):
+            targets.append(target)
+    return tuple(targets), tuple(unreadable)
+
+
 def indexes(ctx: RuleContext) -> Iterable[Finding]:
-    """Require each generated region to list exactly the lane's direct items."""
+    """Require each lane index to link every direct item page, once, and no stale one.
+
+    Entries are identified by link target anywhere in the file (a bare
+    ``<basename>.md`` in the lane's own directory), not by a delimited region.
+    """
     work_items = items(ctx)
-    all_pages = {item.page_path for item in work_items}
+    all_pages = frozenset(item.page_path for item in work_items)
     for plan in plan_indexes(ctx.bundle.root, work_items):
         expected = {
             item.page_path
@@ -187,14 +212,14 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
             if (location := parse_item_path(item.path)) is not None and location.lane == plan.lane
         }
         document = ctx.bundle.indexes.get(plan.lane)
-        targets, unreadable = ((), ()) if document is None else _region_entries(document.raw_text)
+        targets, unreadable = ((), ()) if document is None else _direct_entries(document.raw_text, plan.lane, all_pages)
         pages = tuple(_target_page(plan.lane, target) for target in targets)
         counts = Counter(pages)
         for page in sorted(expected - set(pages)):
             yield Finding(
                 code="structure.index-entry-missing",
                 severity="warn",
-                message=f"generated index region does not list direct item `{page}`",
+                message=f"lane index has no entry for direct item page `{page}`",
                 spec=_SPEC,
                 path=f"{plan.lane}/index.md",
                 line=None,
@@ -203,7 +228,7 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
             yield Finding(
                 code="structure.index-entry-unreadable",
                 severity="warn",
-                message=f"generated index region line is not a readable entry: {line!r}",
+                message=f"lane index link-bullet is not a readable entry: {line!r}",
                 spec=_SPEC,
                 path=f"{plan.lane}/index.md",
                 line=None,
@@ -213,7 +238,7 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
                 yield Finding(
                     code="structure.index-entry-duplicate",
                     severity="warn",
-                    message=f"generated index region lists `{page}` {count} times",
+                    message=f"lane index links item page `{page}` {count} times",
                     spec=_SPEC,
                     path=f"{plan.lane}/index.md",
                     line=None,
@@ -225,7 +250,7 @@ def indexes(ctx: RuleContext) -> Iterable[Finding]:
             yield Finding(
                 code=code,
                 severity="warn",
-                message=f"generated index entry `{page}` {detail}",
+                message=f"lane index entry `{page}` {detail}",
                 spec=_SPEC,
                 path=f"{plan.lane}/index.md",
                 line=None,

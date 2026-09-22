@@ -193,6 +193,13 @@ def test_apply_creates_scaffolding_but_does_not_register_gitkeep(vault: Path, se
     assert "sources" not in document.fm_data()
 
 
+def test_a_newly_filed_parent_seeds_an_empty_lane_index_with_no_markers(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(type="Epic", title="Migration"), section_set)
+    apply(plan)
+    assert (plan.owned_directory / "children" / "index.md").read_text(encoding="utf-8") == ""
+    assert (plan.owned_directory / "children" / "_archive" / "index.md").read_text(encoding="utf-8") == ""
+
+
 def test_apply_a_leaf_creates_no_child_lane(vault: Path, section_set) -> None:
     plan = plan_filing(vault, (), seed(type="Bug"), section_set)
     apply(plan)

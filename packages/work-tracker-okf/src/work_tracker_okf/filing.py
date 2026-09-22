@@ -17,7 +17,6 @@ from okf_io import Document, parse
 from work_tracker_okf._selection import path_index
 from work_tracker_okf.dependencies import DependencyEdge, serialize_dependencies, validate_dependencies
 from work_tracker_okf.hierarchy import unknown_depends_on
-from work_tracker_okf.indexes import GENERATED_END, GENERATED_START
 from work_tracker_okf.items import WorkItem
 from work_tracker_okf.paths import child_lane, item_page, owned_dir, references_dir
 from work_tracker_okf.vocabulary import (
@@ -327,7 +326,7 @@ def plan_filing(root: Path, items: Sequence[WorkItem], seed: FilingSeed, section
 
 
 def _empty_index() -> str:
-    return f"{GENERATED_START}\n{GENERATED_END}\n"
+    return ""
 
 
 def _document(plan: FilingPlan) -> Document:

@@ -3,15 +3,172 @@ from pathlib import Path
 from okf_io import load_bundle
 from work_helpers import make_item
 from work_tracker_okf.indexes import (
-    GENERATED_END,
-    GENERATED_START,
     _required_lanes,
+    is_direct_entry_target,
     parse_entry,
     plan_indexes,
-    reconcile_marked_index,
+    reconcile_entries,
     render_entry,
+    strip_legacy_markers,
 )
 from work_tracker_okf.items import IGNORE, load_items
+
+
+def test_is_direct_entry_target_accepts_a_bare_item_page() -> None:
+    assert is_direct_entry_target("feature-import-legacy.md") is True
+
+
+def test_is_direct_entry_target_rejects_index_md() -> None:
+    assert is_direct_entry_target("index.md") is False
+
+
+def test_is_direct_entry_target_rejects_a_path_with_a_separator() -> None:
+    assert is_direct_entry_target("children/feature-import-legacy.md") is False
+    assert is_direct_entry_target("../sibling-lane/feature-import-legacy.md") is False
+
+
+def test_is_direct_entry_target_rejects_a_non_markdown_target() -> None:
+    assert is_direct_entry_target("diagram.png") is False
+
+
+def test_reconcile_entries_from_nothing_creates_an_items_section() -> None:
+    entries = ("- [Epic: X](epic-x.md) — open · design",)
+    result = reconcile_entries(None, entries)
+    assert result == "# Items\n\n- [Epic: X](epic-x.md) — open · design\n"
+
+
+def test_reconcile_entries_from_nothing_with_no_entries_is_empty() -> None:
+    assert reconcile_entries(None, ()) == ""
+
+
+def test_reconcile_entries_appends_a_new_section_after_existing_prose() -> None:
+    before = "Some hand-written notes about this lane.\n"
+    entries = ("- [Epic: X](epic-x.md) — open · design",)
+    result = reconcile_entries(before, entries)
+    assert result == ("Some hand-written notes about this lane.\n\n# Items\n\n- [Epic: X](epic-x.md) — open · design\n")
+
+
+def test_reconcile_entries_refreshes_a_changed_entry_in_place() -> None:
+    before = "# Items\n\n- [Epic: X](epic-x.md) — open · design\n"
+    entries = ("- [Epic: X](epic-x.md) — in-progress · execute",)
+    result = reconcile_entries(before, entries)
+    assert result == "# Items\n\n- [Epic: X](epic-x.md) — in-progress · execute\n"
+
+
+def test_reconcile_entries_prunes_a_stale_entry() -> None:
+    before = "# Items\n\n- [Epic: X](epic-x.md) — open · design\n- [Epic: Y](epic-y.md) — open · design\n"
+    entries = ("- [Epic: X](epic-x.md) — open · design",)  # Y left the lane
+    result = reconcile_entries(before, entries)
+    assert "epic-y.md" not in result
+    assert result == "# Items\n\n- [Epic: X](epic-x.md) — open · design\n"
+
+
+def test_reconcile_entries_inserts_a_missing_entry_in_filename_order() -> None:
+    before = "# Items\n\n- [Epic: X](epic-x.md) — open · design\n"
+    entries = (
+        "- [Epic: A](epic-a.md) — open · design",
+        "- [Epic: X](epic-x.md) — open · design",
+    )
+    result = reconcile_entries(before, entries)
+    assert result == ("# Items\n\n- [Epic: A](epic-a.md) — open · design\n- [Epic: X](epic-x.md) — open · design\n")
+
+
+def test_reconcile_entries_orders_prefix_colliding_slugs_the_same_regardless_of_history() -> None:
+    """`feature-x` sorts before `feature-x-y` by basename, as `_direct_items`
+    orders them -- but `feature-x-y.md` sorts before `feature-x.md` as a raw
+    string (`-` < `.`). Every path to the final index must agree on the
+    basename order, whichever entry was already present."""
+    short = "- [Feature: X](feature-x.md) — open · design"
+    long = "- [Feature: X Y](feature-x-y.md) — open · design"
+    entries = (short, long)
+    expected = f"# Items\n\n{short}\n{long}\n"
+
+    from_nothing = reconcile_entries(None, entries)
+    from_prose = reconcile_entries("# Items\n", entries)
+    long_first = reconcile_entries(reconcile_entries(None, (long,)), entries)
+    short_first = reconcile_entries(reconcile_entries(None, (short,)), entries)
+
+    assert from_nothing == expected
+    assert from_prose == expected
+    assert long_first == expected
+    assert short_first == expected
+
+
+def test_reconcile_entries_never_touches_an_unrelated_link_bullet() -> None:
+    before = (
+        "# Items\n\n- [Epic: X](epic-x.md) — open · design\n\n# Subdirectories\n\n- [children/](children/index.md)\n"
+    )
+    entries = ("- [Epic: X](epic-x.md) — open · design",)
+    result = reconcile_entries(before, entries)
+    assert "- [children/](children/index.md)" in result
+
+
+def test_reconcile_entries_never_touches_a_non_direct_item_link() -> None:
+    before = (
+        "# Items\n\n"
+        "- [Epic: X](epic-x.md) — open · design\n"
+        "- [Feature: Sibling](../sibling-lane/feature-sibling.md) — open · design\n"
+    )
+    entries = ("- [Epic: X](epic-x.md) — open · design",)
+    result = reconcile_entries(before, entries)
+    assert "../sibling-lane/feature-sibling.md" in result
+
+
+def test_reconcile_entries_strips_legacy_marker_lines_and_keeps_entries() -> None:
+    before = (
+        "<!-- graph-works:work-items:start -->\n"
+        "- [Epic: X](epic-x.md) — open · design\n"
+        "<!-- graph-works:work-items:end -->\n"
+    )
+    entries = ("- [Epic: X](epic-x.md) — open · design",)
+    result = reconcile_entries(before, entries)
+    assert "graph-works:work-items" not in result
+    assert result == "- [Epic: X](epic-x.md) — open · design\n"
+
+
+def test_strip_legacy_markers_removes_only_the_two_marker_lines() -> None:
+    before = (
+        "# Lane\n\n"
+        "<!-- graph-works:work-items:start -->\n"
+        "- [Epic: Gone](epic-gone.md) — resolved · done\n"
+        "<!-- graph-works:work-items:end -->\n\n"
+        "Trailing prose.\n"
+    )
+    assert strip_legacy_markers(before) == (
+        "# Lane\n\n- [Epic: Gone](epic-gone.md) — resolved · done\n\nTrailing prose.\n"
+    )
+    assert strip_legacy_markers("no markers\n") == "no markers\n"
+
+
+def test_reconcile_entries_migrates_legacy_prose_and_entries_together() -> None:
+    before = (
+        "Some notes.\n\n"
+        "<!-- graph-works:work-items:start -->\n"
+        "- [Epic: X](epic-x.md) — open · design\n"
+        "<!-- graph-works:work-items:end -->\n"
+    )
+    entries = ("- [Epic: X](epic-x.md) — open · design",)
+    result = reconcile_entries(before, entries)
+    assert result == "Some notes.\n\n- [Epic: X](epic-x.md) — open · design\n"
+
+
+def test_reconcile_entries_reuses_a_dangling_items_heading_after_pruning_to_empty() -> None:
+    before = "# Items\n\n- [Epic: X](epic-x.md) — open · design\n"
+    emptied = reconcile_entries(before, ())
+    result = reconcile_entries(emptied, ("- [Epic: Y](epic-y.md) — open · design",))
+    assert result.count("# Items") == 1
+    assert result == "# Items\n\n- [Epic: Y](epic-y.md) — open · design\n"
+
+
+def test_reconcile_entries_reuses_dangling_heading_even_with_a_trailing_subdirectories_section() -> None:
+    before = (
+        "# Items\n\n- [Epic: X](epic-x.md) — open · design\n\n# Subdirectories\n\n- [children/](children/index.md)\n"
+    )
+    emptied = reconcile_entries(before, ())
+    result = reconcile_entries(emptied, ("- [Epic: Y](epic-y.md) — open · design",))
+    assert result.count("# Items") == 1
+    assert "- [children/](children/index.md)" in result
+    assert result.index("# Items") < result.index("# Subdirectories")
 
 
 def test_lane_index_lists_direct_items_only_and_preserves_human_prose(path_native_root: Path) -> None:
@@ -20,17 +177,19 @@ def test_lane_index_lists_direct_items_only_and_preserves_human_prose(path_nativ
     index.write_text("# Children\n\nHuman note.\n", encoding="utf-8")
     bundle = load_bundle(path_native_root, ignore=IGNORE)
     plan = plan_indexes(path_native_root, load_items(bundle), lanes=(lane,))[0]
-    assert "Human note." in plan.after
-    assert GENERATED_START in plan.after
+    assert "# Children\n\nHuman note." in plan.after
+    assert "# Items" in plan.after
     assert "epic-migration.md" in plan.after
     assert "feature-import.md" not in plan.after
 
 
-def test_existing_generated_region_is_replaced_without_touching_surrounding_prose(path_native_root: Path) -> None:
+def test_existing_items_section_is_refreshed_in_place_without_touching_surrounding_prose(
+    path_native_root: Path,
+) -> None:
     lane = "work/release-cutover/children"
     index = path_native_root / lane / "index.md"
     index.write_text(
-        f"# Children\n\nBefore.\n\n{GENERATED_START}\n- stale\n{GENERATED_END}\n\nAfter.\n",
+        "# Children\n\nBefore.\n\n# Items\n\n- [stale](stale.md) — open · design\n",
         encoding="utf-8",
     )
 
@@ -38,20 +197,21 @@ def test_existing_generated_region_is_replaced_without_touching_surrounding_pros
 
     assert plan.before is not None
     assert plan.after.startswith("# Children\n\nBefore.\n\n")
-    assert plan.after.endswith("\n\nAfter.\n")
-    assert "- stale" not in plan.after
-    assert plan.after.count(GENERATED_START) == 1
-    assert plan.after.count(GENERATED_END) == 1
+    assert "stale.md" not in plan.after
+    assert "epic-migration.md" in plan.after
 
 
-def test_shared_reconciler_accepts_pre_repaired_prose_and_generated_entries() -> None:
-    before = f"# Children\n\nSee /new/path.md.\n\n{GENERATED_START}\n- stale\n{GENERATED_END}\n"
+def test_shared_reconciler_is_idempotent_across_repeated_calls() -> None:
+    before = "# Children\n\nSee /new/path.md.\n\n# Items\n\n- [stale](stale.md) — open · design\n"
+    entries = ("- [current](current.md) — open · design",)
 
-    after = reconcile_marked_index(before, ("- current",))
+    once = reconcile_entries(before, entries)
+    twice = reconcile_entries(once, entries)
 
-    assert "See /new/path.md." in after
-    assert "- current" in after
-    assert "- stale" not in after
+    assert "See /new/path.md." in once
+    assert "- [current](current.md) — open · design" in once
+    assert "stale.md" not in once
+    assert twice == once
 
 
 def test_index_entries_are_sorted_by_filename() -> None:

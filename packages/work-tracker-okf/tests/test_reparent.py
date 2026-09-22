@@ -577,6 +577,11 @@ def test_release_adoption_refuses_non_release_and_non_root_sources(tmp_path: Pat
 
 
 def test_reparent_merges_source_destination_and_owned_lane_indexes(tmp_path: Path) -> None:
+    """The moved lane's own index gains a freshly-rendered entry for the item
+    that now lives directly in it (bare and relative to the index's new
+    directory), while its incidental prose link follows the moved item: the
+    reconciliation pre-image takes non-entry lines from the okf-ext rewrite
+    and only direct-entry lines from the raw on-disk bytes."""
     release, epic, feature = _tree(tmp_path)
     old_index = tmp_path / epic / "children" / "index.md"
     old_index.write_text(f"# Children\n\nSee [feature](/{feature}.md).\n", encoding="utf-8")
@@ -590,9 +595,35 @@ def test_reparent_merges_source_destination_and_owned_lane_indexes(tmp_path: Pat
     assert f"{release}/children/index.md" in by_member
     assert f"{destination}/children/index.md" in by_member
     moved_index = by_member[f"{destination}/children/index.md"].after
-    assert b"See [feature]" in moved_index
-    assert f"/{destination}/children/feature-import.md".encode() in moved_index
+    assert f"See [feature](/{destination}/children/feature-import.md).".encode() in moved_index
+    assert f"/{feature}.md".encode() not in moved_index
+    assert b"- [Feature: T](feature-import.md)" in moved_index
+    assert moved_index.count(b"# Items") == 1
     assert f"{epic}/children/index.md" in plan.deletes
+
+
+def test_reparenting_a_relocating_child_lane_index_does_not_duplicate_its_entry(tmp_path: Path) -> None:
+    """Reviewer repro (Task 5 fix round 2): a parent's own child-lane `index.md`
+    that already carries a properly-reconciled entry for one of its direct
+    items must not be corrupted when that lane itself relocates (nested
+    under the parent as the parent moves) -- no doubled `# Items` heading,
+    no duplicate or broken-relinked entry, exactly one correct entry pointing
+    at the item's new bare location."""
+    release, epic, _feature = _tree(tmp_path)
+    old_index = tmp_path / epic / "children" / "index.md"
+    old_index.write_text("# Items\n\n- [Feature: T](feature-import.md) — open · not started\n", encoding="utf-8")
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_reparent(bundle, load_items(bundle), epic, release)
+
+    assert plan.ok, plan.refusals
+    destination = f"{release}/children/epic-migration"
+    by_member = {write.member: write for write in plan.writes}
+    moved_index = by_member[f"{destination}/children/index.md"].after.decode("utf-8")
+
+    assert moved_index.count("# Items") == 1
+    assert moved_index.count("feature-import.md") == 1
+    assert "- [Feature: T](feature-import.md) — open · not started" in moved_index
 
 
 def test_symlink_escape_refuses_the_whole_subtree(tmp_path: Path) -> None:

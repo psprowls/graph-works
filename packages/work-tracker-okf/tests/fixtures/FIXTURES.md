@@ -51,8 +51,14 @@ artifacts including a `.jsonl`, and both lane index files.
 `okf_io.update_index` renders a **new** bullet with a ` - ` separator where
 this fixture authors ` — `. It is okf-io's rendering, not this lane's, and
 chasing it would mean this package taking an opinion on another package's
-output. Assertions on generated entries expect ` - `; the six authored bullets
-keep their em dash because `descriptions="preserve"` never rewrites them.
+output. Assertions on generated entries expect ` - `. The authored bullets that
+remain are the four in `work/index.md` -- its three direct-item entries (hand-
+written descriptions rather than the `status · phase` suffix `render_entry`
+writes; the lane rule identifies an entry by its link target, not its text)
+and the `_archive` subdirectory bullet -- and they keep their em dash because
+`descriptions="preserve"` never rewrites them. `work/_archive/index.md` holds
+no bullets: nothing is archived directly under that lane, and its prose points
+at the nested archive lane that lists the vault's one archived item.
 
 ## `nonconformant/` and `nonconformant_repo/`
 

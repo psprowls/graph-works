@@ -1,6 +1,6 @@
 # Archived work
 
-- [An archived child](../release-path-native-cutover/children/epic-conformant-vault/children/_archive/feature-epic-feature-archived-child.md) — an archived child. A conformant fixture item.
-
-<!-- graph-works:work-items:start -->
-<!-- graph-works:work-items:end -->
+No item is archived directly under this lane; the one archived item in this vault, an
+archived child, lives nested under
+`release-path-native-cutover/children/epic-conformant-vault/children/_archive/` instead, and
+is named in that lane's own index. A conformant fixture item.

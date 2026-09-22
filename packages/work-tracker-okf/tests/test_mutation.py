@@ -19,6 +19,7 @@ from work_tracker_okf.mutation import (
     _plan_path_mutation,
     _prefix_rebase,
     _rebase_item_sources,
+    _reconciliation_preimage,
     _resolved_inside,
     _restore_reserved_text,
     _subtree_items,
@@ -345,3 +346,78 @@ def test_planned_bytes_match_whether_or_not_the_artifact_exists(tmp_path: Path) 
     page_without = next(w for w in plan_without_artifact.writes if w.member == "work/_archive/bug-dangling.md")
     page_with = next(w for w in plan_with_artifact.writes if w.member == "work/_archive/bug-dangling.md")
     assert page_without.after == page_with.after
+
+
+def test_reparenting_across_lanes_reconciles_by_link_target_not_markers(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/bug-dangling", "type: Bug\nwork_status: resolved\nphase: execute\n")
+    (tmp_path / "work/index.md").write_text(
+        "# Work\n\nHuman prose about this lane, with no markers at all.\n", encoding="utf-8"
+    )
+    bundle = load_bundle(tmp_path)
+    items = load_written_items(tmp_path)
+
+    plan = _plan_path_mutation(
+        bundle,
+        items,
+        "archive",
+        {"work/bug-dangling": "work/_archive/bug-dangling"},
+        roots=("work/bug-dangling",),
+    )
+
+    assert plan.ok, plan.refusals
+    by_member = {write.member: write for write in plan.writes}
+    destination_index = by_member["work/_archive/index.md"].after.decode("utf-8")
+    assert "graph-works:work-items" not in destination_index
+    assert "bug-dangling.md" in destination_index
+
+
+def test_archiving_prunes_the_vacated_entry_from_the_source_lane_index(tmp_path: Path) -> None:
+    """A moved item's own entry in the source lane's index must be pruned, not
+    relinked in place. The generic okf-ext rewrite retargets a moved item's own
+    stale link (``bug-done.md`` -> ``_archive/bug-done.md``) before
+    `_index_effects` reads the source index's pre-image; sourcing that pre-image
+    from the rewrite's output instead of the true on-disk bytes let the
+    relinked, now-cross-lane-shaped entry survive `reconcile_entries` forever,
+    since it no longer looks like a bare, prunable direct-entry target."""
+    write_item(tmp_path, "work/bug-done", "type: Bug\nwork_status: resolved\nphase: execute\n")
+    (tmp_path / "work/index.md").write_text(
+        "# Work\n\n- [Bug: Done](bug-done.md) — resolved · execute\n", encoding="utf-8"
+    )
+    bundle = load_bundle(tmp_path)
+    items = load_written_items(tmp_path)
+
+    plan = _plan_path_mutation(
+        bundle,
+        items,
+        "archive",
+        {"work/bug-done": "work/_archive/bug-done"},
+        roots=("work/bug-done",),
+    )
+
+    assert plan.ok, plan.refusals
+    by_member = {write.member: write for write in plan.writes}
+    source_index = by_member["work/index.md"].after.decode("utf-8")
+    assert "bug-done" not in source_index
+
+
+def test_reconciliation_preimage_takes_entries_raw_and_everything_else_rewritten() -> None:
+    raw = b"# Work\n\nSee [x](epic-x/index.md).\n\n- [Epic: X](epic-x.md) \xe2\x80\x94 resolved \xc2\xb7 done\n"
+    rewritten = (
+        b"# Work\n\nSee [x](_archive/epic-x/index.md).\n\n"
+        b"- [Epic: X](_archive/epic-x.md) \xe2\x80\x94 resolved \xc2\xb7 done\n"
+    )
+
+    merged = _reconciliation_preimage(raw, rewritten)
+
+    assert merged == (
+        b"# Work\n\nSee [x](_archive/epic-x/index.md).\n\n- [Epic: X](epic-x.md) \xe2\x80\x94 resolved \xc2\xb7 done\n"
+    )
+
+
+def test_reconciliation_preimage_falls_back_to_raw_bytes_when_it_cannot_pair_lines() -> None:
+    raw = b"# Work\n\n- [Epic: X](epic-x.md)\n"
+
+    assert _reconciliation_preimage(raw, None) == raw
+    assert _reconciliation_preimage(None, b"anything\n") is None
+    assert _reconciliation_preimage(raw, b"# Work\n- [Epic: X](_archive/epic-x.md)\n") == raw
+    assert _reconciliation_preimage(raw, b"# Work\n\n\xff\n") == raw

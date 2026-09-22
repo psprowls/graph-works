@@ -118,12 +118,15 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
     application = SimpleNamespace(rolled_back=True, failures=("failed",), warnings=("warning",), ok=False)
     update = SimpleNamespace(path=tmp_path / "index.md", changed=True)
     refusal = SimpleNamespace(path="work/a", kind="conflict", detail="changed")
+    stripped = SimpleNamespace(path=tmp_path / "children" / "_archive" / "index.md", changed=True)
     regen = SimpleNamespace(
         application=application,
         plans=(update,),
         mutation=SimpleNamespace(warnings=("planned",), refusals=(refusal,)),
+        marker_strips=(stripped,),
     )
     assert work.regen_index_payload(regen)["rolled_back"] is True
+    assert work.regen_index_payload(regen)["indexes"] == [str(update.path), str(stripped.path)]
 
     archive_run = SimpleNamespace(
         ok=False,

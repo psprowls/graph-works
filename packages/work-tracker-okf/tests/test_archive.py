@@ -63,6 +63,46 @@ def test_parent_archive_normalizes_terminal_descendants_before_moving_parent(tmp
     assert plan.path_mapping[archived_bug] == "work/_archive/epic-migration/children/bug-old"
 
 
+def test_parent_archive_prunes_its_entry_and_rebases_the_lanes_other_links(tmp_path: Path) -> None:
+    """One lane index, both jobs, one pass: the archived parent's own entry is
+    pruned (judged against its raw, un-rewritten target), while the same
+    index's okf-io subdirectory link and a human prose link into the moved
+    subtree follow it to the archive (taken from the okf-ext rewrite) instead
+    of being left pointing at the vacated location."""
+    _release, epic, _feature = _terminal_tree(tmp_path)
+    (tmp_path / epic / "index.md").write_text("# Epic migration\n", encoding="utf-8")
+    (tmp_path / "work/index.md").write_text(
+        "# Work\n"
+        "\n"
+        "Start with [the import feature](epic-migration/children/feature-done.md).\n"
+        "\n"
+        "# Items\n"
+        "\n"
+        "- [Epic: T](epic-migration.md) — resolved · not started\n"
+        "- [Release: T](release-cutover.md) — open · not started\n"
+        "\n"
+        "# Subdirectories\n"
+        "\n"
+        "- [epic-migration](epic-migration/index.md)\n",
+        encoding="utf-8",
+    )
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), (epic,))
+
+    assert plan.ok, plan.refusals
+    assert plan.path_mapping[epic] == "work/_archive/epic-migration"
+    by_member = {write.member: write for write in plan.writes}
+    source_index = by_member["work/index.md"].after.decode("utf-8")
+    assert "(epic-migration.md)" not in source_index
+    assert "_archive/epic-migration.md" not in source_index
+    assert "- [Release: T](release-cutover.md) — open · not started" in source_index
+    assert "Start with [the import feature](_archive/epic-migration/children/feature-done.md)." in source_index
+    assert "- [epic-migration](_archive/epic-migration/index.md)" in source_index
+    assert "(epic-migration/" not in source_index
+    assert source_index.count("# Items") == 1
+
+
 def test_parent_archive_flattens_every_depth_under_one_archive_lane(tmp_path: Path) -> None:
     _release, epic, feature = _terminal_tree(tmp_path)
     nested = f"{feature}/children/bug-nested"

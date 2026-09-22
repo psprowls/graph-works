@@ -151,6 +151,7 @@ def regen(*, applied: bool) -> object:
         application=APPLICATION if applied else None,
         plans=(ns(path=Path("/ws/okf/work/index.md"), changed=True), ns(path=Path("/ws/y.md"), changed=False)),
         mutation=ns(warnings=("planned",), refusals=(REFUSAL,)),
+        marker_strips=(),
     )
 
 

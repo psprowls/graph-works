@@ -81,6 +81,12 @@ def test_the_body_teaches_atomic_workspace_commits_before_the_log_format_section
     assert text.index("## Committing workspace changes") < text.index("## Log format")
 
 
+def test_the_body_teaches_single_line_workspace_commit_subjects():
+    text = _render()
+    section = text[text.index("## Committing workspace changes") : text.index("## Log format")]
+    assert "single line" in section
+
+
 # --- the human tail -----------------------------------------------------------
 
 

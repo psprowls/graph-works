@@ -270,7 +270,8 @@ transition, one ingest, one scan, one lint fix each get their own commit, made a
 as the change lands rather than batched at session end.
 
 Subject lines use the `workspace:` prefix the existing history uses, e.g.
-`workspace: advance <item> to plan`.
+`workspace: advance <item> to plan`. Keep the message to that single line — these
+commits are small and self-explanatory; skip the body.
 
 Never commit `workspace.local.yaml`, `dispatch.local.yaml`, or `{{CONFIG_DIR}}/cache/`
 (all gitignored by `gw bootstrap`).

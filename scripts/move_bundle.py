@@ -325,3 +325,48 @@ def rename_reserved(root: Path, reserved: Mapping[str, str]) -> list[str]:
             pruned.append(directory.relative_to(root).as_posix())
             directory = directory.parent
     return sorted(pruned)
+
+
+@dataclass(frozen=True)
+class Applied:
+    """What landed. `repair` is `None` when no reserved member was carried."""
+
+    move: MoveResult
+    pruned: tuple[str, ...]
+    repair: MoveResult | None
+    refusals: tuple[Refused, ...]
+
+    @property
+    def ok(self) -> bool:
+        return not self.refusals and self.move.ok and (self.repair is None or self.repair.ok)
+
+
+def write(root: Path, prepared: Prepared) -> Applied:
+    """Apply the four steps in order: move, rename, **reload**, repair.
+
+    The reload is load-bearing, not tidiness. The root index links both
+    `/explanations/index.md` and `/explanations/foo.md`, so the repair plan
+    and the move plan edit the same file; a repair plan computed before the
+    move fails `apply`'s body-digest check (`MovePlan.digests`,
+    `model.py:146-152`). `Prepared.repair` is therefore provisional and is
+    recomputed here.
+
+    If the recomputed repair plan carries refusals, they are returned and
+    nothing further is written. The bundle is then in a state the same
+    `plan_repair` mapping fixes on a re-run -- see `scripts/move-bundle.md`.
+    """
+    if prepared.planning is None or prepared.plan is None:
+        raise ValueError("write() needs a prepared plan; check `Prepared.ok` first")
+
+    result = moves.apply(prepared.planning, prepared.plan)
+    reserved = prepared.expansion.reserved
+    if not reserved or not result.ok:
+        return Applied(result, (), None, ())
+
+    pruned = tuple(rename_reserved(root, reserved))
+    after = load_bundle(root, ignore=IGNORE)
+    repair_plan = moves.plan_repair(after, reserved)
+    if not repair_plan.ok:
+        refusals = tuple(Refused(r.kind, f"`{r.path}`: {r.detail}") for r in repair_plan.refusals)
+        return Applied(result, pruned, None, refusals)
+    return Applied(result, pruned, moves.apply(after, repair_plan), ())

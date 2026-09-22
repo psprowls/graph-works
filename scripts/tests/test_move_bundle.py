@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from okf_io import load_bundle
 
-from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules, prepare, rename_reserved
+from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules, prepare, rename_reserved, write
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "move_bundle"
 
@@ -323,3 +323,81 @@ def test_an_empty_mapping_does_nothing(bundle: Path) -> None:
     before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
     assert rename_reserved(bundle, {}) == []
     assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+
+
+# --- the apply ----------------------------------------------------------------
+
+
+def apply_diataxis(bundle: Path) -> None:
+    prepared = prepare(bundle, DIATAXIS_RULES)
+    assert prepared.ok, prepared.refusals
+    applied = write(bundle, prepared)
+    assert applied.ok, applied.refusals
+
+
+def test_every_page_lands_and_the_source_lanes_are_gone(bundle: Path) -> None:
+    apply_diataxis(bundle)
+    present = sorted(p.relative_to(bundle).as_posix() for p in bundle.rglob("*") if p.is_file())
+    assert present == [
+        "docs/explanations/diagram.png",
+        "docs/explanations/index.md",
+        "docs/explanations/why-graphs.md",
+        "docs/reference/index.md",
+        "docs/reference/moves-api.md",
+        "index.md",
+        "log.md",
+        "sources/2026-08-spec.md",
+        "sources/references/2026-08-spec.md",
+        "work/feature-x.md",
+        "work/feature-x/references/01-design.md",
+    ]
+
+
+def test_a_lane_index_keeps_its_relative_entries_exactly(bundle: Path) -> None:
+    before = (bundle / "explanations/index.md").read_bytes()
+    apply_diataxis(bundle)
+    assert (bundle / "docs/explanations/index.md").read_bytes() == before
+
+
+def test_the_root_index_inbound_link_to_a_lane_index_is_repaired(bundle: Path) -> None:
+    apply_diataxis(bundle)
+    text = (bundle / "index.md").read_bytes().decode("utf-8")
+    assert "/docs/explanations/index.md" in text
+    assert "/docs/reference/index.md" in text
+    assert "(/explanations/" not in text
+    assert "(/references/" not in text
+
+
+def test_the_cross_lane_links_both_resolve_after_the_move(bundle: Path) -> None:
+    apply_diataxis(bundle)
+    relative = (bundle / "docs/explanations/why-graphs.md").read_bytes().decode("utf-8")
+    assert "../reference/moves-api.md" in relative
+    assert (bundle / "docs/explanations" / "../reference/moves-api.md").resolve().is_file()
+    absolute = (bundle / "docs/reference/moves-api.md").read_bytes().decode("utf-8")
+    assert "/docs/explanations/why-graphs.md" in absolute
+
+
+def test_the_wikilink_is_left_exactly_as_written(bundle: Path) -> None:
+    apply_diataxis(bundle)
+    assert "[[explanations/why-graphs]]" in (bundle / "docs/reference/moves-api.md").read_bytes().decode("utf-8")
+
+
+def test_a_second_run_over_an_already_moved_bundle_is_a_clean_no_op(bundle: Path) -> None:
+    apply_diataxis(bundle)
+    after = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    prepared = prepare(bundle, DIATAXIS_RULES)
+    assert prepared.ok
+    assert dict(prepared.expansion.ordinary) == {}
+    assert dict(prepared.expansion.reserved) == {}
+    assert prepared.plan.is_empty
+    write(bundle, prepared)
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == after
+
+
+def test_a_move_with_no_reserved_member_needs_no_repair_pass(bundle: Path) -> None:
+    prepared = prepare(bundle, [Rule("sources", "docs/sources")])
+    assert dict(prepared.expansion.reserved) == {}
+    applied = write(bundle, prepared)
+    assert applied.ok
+    assert applied.repair is None
+    assert (bundle / "docs/sources/2026-08-spec.md").is_file()

@@ -10,5 +10,5 @@ sources:
 
 # The moves API
 
-See [why graphs](/explanations/why-graphs.md), and [[why-graphs]] which nothing
+See [why graphs](/explanations/why-graphs.md), and [[explanations/why-graphs]] which nothing
 can repair.

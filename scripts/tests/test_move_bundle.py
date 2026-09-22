@@ -244,15 +244,16 @@ def test_the_asset_moves_and_its_relative_reference_is_left_alone(bundle: Path) 
 
 
 def test_a_wikilink_into_the_moved_set_is_counted_never_repaired(bundle: Path) -> None:
-    """`okf_ext.moves.stranded` matches a `[[wikilink]]` target against the
-    mapping's key set only (`plan.py:533-556`), and deliberately implements no
-    Obsidian-style bare-name (shortest-path) resolution
-    (`okf_ext.body.resolve_wikilink`'s docstring). The fixture's `[[why-graphs]]`
-    is a bare name, not the mapping key `explanations/why-graphs.md`, so it is
-    never counted -- confirmed against the engine directly, not guessed.
+    """The fixture's wikilink is path-qualified (`[[explanations/why-graphs]]`)
+    because `_stranded_candidate` (`plan.py:532-556`) matches `<target>.md`
+    then `<target>` against the mapping's key set -- full bundle-relative
+    paths -- and does no bare-name (Obsidian shortest-path) resolution. A bare
+    `[[why-graphs]]` would never match the mapping key `explanations/why-graphs.md`.
     """
     prepared = prepare(bundle, DIATAXIS_RULES)
-    assert prepared.plan.stranded == ()
+    assert [(s.member, s.target) for s in prepared.plan.stranded] == [
+        ("references/moves-api.md", "explanations/why-graphs.md")
+    ]
 
 
 def test_a_frontmatter_resource_pointing_into_the_moved_set_is_repaired(bundle: Path) -> None:

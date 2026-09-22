@@ -599,6 +599,18 @@ def test_every_prompt_forbids_writes():
         assert "report only" in build()
 
 
+def test_every_prompt_requires_the_page_id_copied_verbatim():
+    """A model free to paraphrase a page's id (a readable slug of its title,
+    say) produces one `_split_page` cannot resolve -- `unknown page` in
+    `report.errors`, silently dropping the finding's page. The prompt has to
+    say the id is copied, not composed, or the parser is fighting a habit
+    nothing told the model to break."""
+    for build in _BUILDERS:
+        prompt = build()
+        assert "--- Page:" in prompt
+        assert "verbatim" in prompt
+
+
 def test_the_ingestor_prompt_states_the_index_and_log_rule_once(tmp_path):
     # Three sections of one assembled prompt used to disagree: iron rule 5
     # mandated touching index.md and log.md, LOG_FORMAT taught the syntax for

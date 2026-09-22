@@ -89,8 +89,11 @@ _OUTPUT_FORMAT = """\
 ## Output format
 
 Report one finding per line in plain text. Do not output JSON, bullet lists, or markdown headers.
-Prefix a finding with `<page id>: ` when it is about one page. Do not include write operations —
-report only. The user decides what to fix."""
+Prefix a finding with `<page id>: ` when it is about one page — copy that id verbatim from the
+page's own `--- Page: <id> ---` header above, character for character. Never invent, paraphrase,
+reslugify, or shorten it: a page's title and its id often differ, and a reader can only find the
+page again by the id exactly as given. Do not include write operations — report only. The user
+decides what to fix."""
 
 
 def _assemble(intro: str, checks: str, project_context: str) -> str:

@@ -264,6 +264,23 @@ rules. Present findings as a report with suggested actions; append a `lint` entr
    regen-index`.
 10. **Never hand-edit `{{CONFIG_DIR}}/cache/`** — regenerate it.
 
+## Committing workspace changes
+
+If this workspace is its own git repository (it sits outside the code repository),
+commit workspace changes **atomically**: one logical change per commit. A work-item
+transition, one ingest, one scan, one lint fix each get their own commit, made as soon
+as the change lands rather than batched at session end.
+
+Subject lines use the `workspace:` prefix the existing history uses, e.g.
+`workspace: advance <item> to plan`. Keep the message to that single line — these
+commits are small and self-explanatory; skip the body.
+
+Never commit `workspace.local.yaml`, `dispatch.local.yaml`, or `{{CONFIG_DIR}}/cache/`
+(all gitignored by `gw bootstrap`).
+
+If the workspace lives inside the code repository, workspace edits ride along with that
+repository's ordinary commits; still keep them separate from code changes.
+
 ## Log format
 
 Appended to `{{BUNDLE_DIR}}/log.md`. One `## <ISO date>` section per day, newest first;

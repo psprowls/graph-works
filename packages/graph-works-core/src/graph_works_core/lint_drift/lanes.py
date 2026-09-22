@@ -214,8 +214,12 @@ def _compose_work(
 
     Rules come from `work_tracker_okf.compose.rule_set`, not bare
     `lane_rules(repo_root=...)` — the same function
-    `graph_works_core.work.commands.run_lint` uses, so the standalone and
-    combined checks can never validate the work lane differently. That widens
+    `graph_works_core.work.commands.run_lint` uses, and now called with the same
+    `vault_root=layout.bundle_dir` that both `run_lint` and the mutation gate
+    pass, so `plan.action-target-missing` reads identically from every entry
+    point. Dropping `vault_root` here used to leave `gw wiki lint` silently
+    unable to resolve a plan action's own vault-relative artifact path, a
+    finding `gw work lint` and the gate did not share. That widens
     what this lane needs to compose: `rule_set` requires `schema/` and
     `sections/` to exist under `config.declarations_dir` and raises
     `OSError` when either is missing, where bare `lane_rules` read neither
@@ -232,7 +236,11 @@ def _compose_work(
         root=layout.bundle_dir,
         ignore=_work_ignore(layout),
         rules=rule_set(
-            layout.bundle_dir, repo_root=repo_root, repo_roots=repo_roots, declarations_dir=config.declarations_dir
+            layout.bundle_dir,
+            repo_root=repo_root,
+            repo_roots=repo_roots,
+            vault_root=layout.bundle_dir,
+            declarations_dir=config.declarations_dir,
         ),
     )
 

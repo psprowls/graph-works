@@ -2180,7 +2180,7 @@ def _extra_rules(
     return rule_set(
         validation_root,
         repo_roots=roots,
-        vault_root=layout.root,
+        vault_root=layout.bundle_dir,
         declarations_dir=declarations_dir,
     )
 

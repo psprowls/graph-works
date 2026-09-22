@@ -196,6 +196,72 @@ def test_a_malformed_table_is_never_scanned_for_actions(tmp_path: Path) -> None:
     assert lane_report(vault, today=TODAY, repo_root=_repo(tmp_path)).by_code("plan.action-target-missing") == ()
 
 
+def test_a_root_absolute_action_resolving_under_the_vault_root_is_silent(tmp_path: Path) -> None:
+    """The boilerplate "Execute implementation plan: ..." row every plan-stage
+    item carries, in the root-absolute spelling the OKF convention actually
+    uses -- `vault_root` is the bundle root, not the workspace root."""
+    vault = tmp_path / "vault"
+    plan_dir = vault / "work" / "feature-x" / "references"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "02-plan.md").write_text("# Plan\n", encoding="utf-8")
+    body = (
+        "\n## Plan\n\n"
+        "| Action | Done when | Rationale |\n"
+        "| --- | --- | --- |\n"
+        "| Execute implementation plan: /work/feature-x/references/02-plan.md | Landed | Workflow |\n"
+    )
+    write_item(vault, "2026-08-01-feature-x", "type: Feature\nwork_status: open\n", body=body)
+    assert lane_report(vault, today=TODAY, vault_root=vault).by_code("plan.action-target-missing") == ()
+
+
+def test_a_root_absolute_action_naming_a_missing_vault_path_is_an_error(tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    body = (
+        "\n## Plan\n\n"
+        "| Action | Done when | Rationale |\n"
+        "| --- | --- | --- |\n"
+        "| Execute implementation plan: /work/feature-x/references/02-plan.md | Landed | Workflow |\n"
+    )
+    write_item(vault, "2026-08-01-feature-x", "type: Feature\nwork_status: open\n", body=body)
+    finding = lane_report(vault, today=TODAY, vault_root=vault).by_code("plan.action-target-missing")[0]
+    assert finding.severity == "error"
+    assert "/work/feature-x/references/02-plan.md" in finding.message
+    assert "the vault root" in finding.message
+
+
+def test_a_root_absolute_action_is_never_checked_against_a_repo_root(tmp_path: Path) -> None:
+    """A `/`-prefixed token is unambiguously bundle-relative (OKF's root-absolute
+    link convention); a repo root existing at the same relative path must not
+    silence a real miss against the vault."""
+    repo = tmp_path / "repo"
+    (repo / "work" / "feature-x" / "references").mkdir(parents=True)
+    (repo / "work" / "feature-x" / "references" / "02-plan.md").write_text("x\n", encoding="utf-8")
+    vault = tmp_path / "vault"
+    body = (
+        "\n## Plan\n\n"
+        "| Action | Done when | Rationale |\n"
+        "| --- | --- | --- |\n"
+        "| Execute implementation plan: /work/feature-x/references/02-plan.md | Landed | Workflow |\n"
+    )
+    write_item(vault, "2026-08-01-feature-x", "type: Feature\nwork_status: open\n", body=body)
+    report = lane_report(vault, today=TODAY, repo_root=repo, vault_root=vault)
+    assert len(report.by_code("plan.action-target-missing")) == 1
+
+
+def test_no_vault_root_skips_root_absolute_checking(tmp_path: Path) -> None:
+    """Not knowing where the vault root is says nothing about whether a
+    root-absolute path is good -- even with a repo root configured."""
+    vault = tmp_path / "vault"
+    body = (
+        "\n## Plan\n\n"
+        "| Action | Done when | Rationale |\n"
+        "| --- | --- | --- |\n"
+        "| Execute implementation plan: /work/feature-x/references/02-plan.md | Landed | Workflow |\n"
+    )
+    write_item(vault, "2026-08-01-feature-x", "type: Feature\nwork_status: open\n", body=body)
+    assert lane_report(vault, today=TODAY, repo_root=_repo(tmp_path)).by_code("plan.action-target-missing") == ()
+
+
 # --- the module's shape -----------------------------------------------------
 
 

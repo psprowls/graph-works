@@ -241,6 +241,35 @@ def test_the_work_lane_now_validates_schema_and_section_conformance(workspace):
     assert any(finding.code.startswith("schemas.") for finding in report.findings)
 
 
+def test_the_work_lane_resolves_a_root_absolute_plan_action_at_the_bundle_root(workspace):
+    """`_compose_work` passes `vault_root=layout.bundle_dir`: a plan-stage
+    item's boilerplate "Execute implementation plan: ..." row, written in the
+    root-absolute spelling every other citation in this bundle uses, must
+    resolve without help from a repo root -- and a miss must still be caught,
+    the same finding `gw work lint` and the mutation gate already report."""
+    bundle_dir = workspace.layout.bundle_dir
+    plan_dir = bundle_dir / "work" / "feature-x" / "references"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "02-plan.md").write_text("# Plan\n", encoding="utf-8")
+    (bundle_dir / "work" / "feature-x.md").write_text(
+        "---\ntype: Feature\ntitle: X\ndescription: d\nwork_status: open\n"
+        "opened: 2026-08-13\nupdated: 2026-08-13\n---\n\n"
+        "## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n"
+        "| Execute implementation plan: /work/feature-x/references/02-plan.md | Landed | Workflow |\n",
+        encoding="utf-8",
+    )
+    _wiki, work = _compose(workspace).lanes
+    bundle = load_bundle(work.root, ignore=work.ignore)
+    report = validate(bundle, today=TODAY, extra_rules=work.rules)
+    assert report.by_code("plan.action-target-missing") == ()
+
+    (plan_dir / "02-plan.md").unlink()
+    bundle = load_bundle(work.root, ignore=work.ignore)
+    report = validate(bundle, today=TODAY, extra_rules=work.rules)
+    finding = report.by_code("plan.action-target-missing")[0]
+    assert "/work/feature-x/references/02-plan.md" in finding.message
+
+
 def test_the_wiki_lane_promotes_tags_unknown_to_error(workspace):
     """The work lane's `vocabulary_rule` composes at `severity="error"`
     (`work_tracker_okf.compose.rule_set`), and the wiki lane's own

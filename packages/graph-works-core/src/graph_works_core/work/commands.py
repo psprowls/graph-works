@@ -865,7 +865,7 @@ def run_lint(
         layout.bundle_dir,
         repo_root=repo_root,
         repo_roots=repo_roots,
-        vault_root=layout.root,
+        vault_root=layout.bundle_dir,
         declarations_dir=config.declarations_dir,
     )
     return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)

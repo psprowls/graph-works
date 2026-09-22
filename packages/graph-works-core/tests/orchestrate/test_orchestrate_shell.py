@@ -55,6 +55,17 @@ def _write(
 
 
 def _artifact(layout, path: str, phase: str) -> None:
+    """The design/plan artifact a completed stage leaves behind at
+    `<item>/references/0{1,2}-{phase}.md`, before an advance out of that phase
+    stamps the `## Plan` table's action row pointing at it.
+
+    Real usage always has this file land first -- the design/plan-writing
+    skill creates it, then `gw work advance` is the next call. A fixture that
+    skips straight to advancing a `phase: plan` item without it is asking the
+    postcondition gate to validate a row naming an artifact that was never
+    written, which `plan.action-target-missing` catches (vault_root is the
+    bundle root everywhere the rule is composed, so a root-absolute plan-action
+    token is no longer silently unchecked)."""
     filename = {"design": "01-design.md", "plan": "02-plan.md"}[phase]
     target = layout.bundle_dir / path / "references" / filename
     target.parent.mkdir(parents=True, exist_ok=True)

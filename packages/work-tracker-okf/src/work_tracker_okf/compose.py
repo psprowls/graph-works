@@ -118,7 +118,9 @@ def rule_set(
     nothing about whether the paths under it are good. The two are distinct
     because a plan action can name either a code path (`repo_root`) or, via
     the standard "Execute implementation plan: ..." row, its own artifact's
-    vault-relative path (`vault_root`); in a split topology (workspace and
+    bundle-relative path (`vault_root` -- the bundle root,
+    `WorkspaceLayout.bundle_dir`, not the workspace root a sibling `.gw/` and
+    `scratch/` also live under); in a split topology (workspace and
     code repo are different git repos) the two roots are different
     directories. `repo_roots` is `repo_root` for a workspace declaring several
     code repositories: a path resolving under any one of them is good (see

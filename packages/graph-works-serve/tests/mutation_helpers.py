@@ -50,6 +50,20 @@ def write_item(
     )
 
 
+def seed_plan_doc(layout: WorkspaceLayout, path: str) -> None:
+    """The plan artifact a completed plan stage leaves behind at
+    `<item>/references/02-plan.md`. An advance out of `phase: plan` stamps the
+    `## Plan` table's "Execute implementation plan: ..." row pointing at it, in
+    the root-absolute spelling every citation in this bundle uses;
+    `plan.action-target-missing` now checks that against the bundle root
+    (`vault_root` is wired everywhere the rule is composed), so a fixture that
+    puts an item at `phase: plan` and then completes it needs this file to
+    already exist, matching what a real plan-writing stage leaves behind."""
+    references = layout.bundle_dir / path / "references"
+    references.mkdir(parents=True, exist_ok=True)
+    (references / "02-plan.md").write_text("# Plan\n", encoding="utf-8")
+
+
 def write_proposal(layout: WorkspaceLayout, slug: str, *, target: str, page_status: str = "proposed") -> str:
     member = f"proposals/{slug}.md"
     page = layout.bundle_dir / member

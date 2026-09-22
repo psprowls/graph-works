@@ -91,11 +91,17 @@ def make_terminal(root: Path, path: str, *, status: str = "resolved") -> None:
     document.save()
 
 
-def lane_report(root: Path, *, today: date = NONCONFORMANT_TODAY, repo_root: Path | None = None) -> Report:
+def lane_report(
+    root: Path, *, today: date = NONCONFORMANT_TODAY, repo_root: Path | None = None, vault_root: Path | None = None
+) -> Report:
     """Validate *root* with the complete work-tracker lane rule bundle."""
     from work_tracker_okf.rules import lane_rules
 
-    return validate(load_bundle(root, ignore=IGNORE), today=today, extra_rules=lane_rules(repo_root=repo_root))
+    return validate(
+        load_bundle(root, ignore=IGNORE),
+        today=today,
+        extra_rules=lane_rules(repo_root=repo_root, vault_root=vault_root),
+    )
 
 
 def render_finding(finding: Finding) -> str:

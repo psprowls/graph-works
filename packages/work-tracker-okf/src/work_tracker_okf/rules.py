@@ -38,9 +38,10 @@ def lane_rules(
 
     *repo_root* is where `affects` entries resolve; *repo_roots* is the same
     for a workspace declaring several code repositories -- an entry resolving
-    under any of them (or under *repo_root*) is good. *vault_root* is where
-    plan-action tokens resolve -- two different directories in a split
-    topology (workspace and code repo are different git repos). Either being
+    under any of them (or under *repo_root*) is good. *vault_root* is the
+    bundle root a plan-action token resolves under -- two different
+    directories from *repo_root* in a split topology (workspace and code
+    repo are different git repos). Either being
     `None` **skips** its rule (`targets.affects-missing` /
     `plan.action-target-missing` respectively; no repo root means *repo_root*
     `None` and *repo_roots* empty) rather than reporting it as a

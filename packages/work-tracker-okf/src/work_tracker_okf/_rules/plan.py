@@ -35,12 +35,14 @@ _HEADING = "Plan"
 #: The columns `assets/sections/_fragments.work_tracker.yaml` declares.
 PLAN_TABLE_SPEC = TableSpec(columns=(Column("action"), Column("done when"), Column("rationale")))
 
-#: work-io's token scanner: an `a/b`-shaped whitespace-delimited word. Matched
-#: against one `str.split()` token at a time (see `_actions`), never against
-#: the whole cell -- a `\b`-anchored search over the raw cell text lets a
-#: `https://` scheme's `://` slide past the boundary check and misdetects a URL
-#: as a bare path.
-_PATH_RE = re.compile(r"[\w][\w.\-]*/[\w.\-/]+")
+#: work-io's token scanner, widened by one thing: an optional leading `/`, since
+#: OKF root-absolute links (`/work/<item>/references/02-plan.md`, the boilerplate
+#: "Execute implementation plan: ..." row's own spelling) are exactly as common a
+#: plan-action shape as the bare `a/b` one work-io scans for. Matched against one
+#: `str.split()` token at a time (see `_actions`), never against the whole cell --
+#: a `\b`-anchored search over the raw cell text lets a `https://` scheme's `://`
+#: slide past the boundary check and misdetects a URL as a bare path.
+_PATH_RE = re.compile(r"/?[\w][\w.\-]*/[\w.\-/]+")
 
 
 def _finding(code: str, severity: Severity, item: WorkItem, message: str) -> Finding:
@@ -99,22 +101,44 @@ def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
     lane reads a path it was not handed, and one injected root is the whole
     contract.
 
-    A token is checked against **either** configured root, not just one: a
-    hand-written action naming a code file ("Edit packages/foo/bar.py")
+    **`*vault_root*` is the bundle root** (`WorkspaceLayout.bundle_dir`, the
+    `okf/` directory this vault's own root-absolute links resolve against --
+    AGENTS.md's "cite with root-absolute markdown links" convention), not the
+    workspace root a sibling `.gw/` and `scratch/` also live under. Every
+    caller composing this rule passes the same value, so `gw wiki lint`,
+    `gw work lint`, and the mutation gate agree on one finding.
+
+    A bare token ("Edit packages/foo/bar.py") is checked against **either**
+    configured root, not just one: a hand-written action naming a code file
     resolves under a repo root, while the one boilerplate "Execute
-    implementation plan: ..." row every plan-stage item carries names its own
-    plan artifact's vault path, which resolves under *vault_root*. In a
+    implementation plan: ..." row every plan-stage item carries can also name
+    its own plan artifact bare, which resolves under *vault_root*. In a
     co-located topology the two roots are the same directory and this
     collapses to a single check; in a split topology (workspace and code repo
     are different git repos) they are not, and a token existing under either
     is enough. *repo_roots* holds every declared code repository -- one in
     the common case, several in a multi-repository workspace -- and a token
     under any one of them is enough too.
+
+    **A root-absolute token (`/work/...`) is checked only against
+    *vault_root***, never against a repo root: OKF's own convention gives it
+    one unambiguous meaning, a bundle-relative path, so checking it against a
+    code repository would be answering a question this token was never
+    asking. It is skipped, not flagged, when *vault_root* is `None` -- not
+    knowing where the vault root is says nothing about whether the path is
+    good, the same reasoning that skips the whole rule when no root at all
+    is configured.
     """
 
     repo_name = "the repo root" if len(repo_roots) <= 1 else "any repo root"
-    _roots = ((repo_name, bool(repo_roots)), ("the vault root", vault_root is not None))
-    root_names = " or ".join(name for name, present in _roots if present) or "the repo root"
+    bare_root_names = (
+        " or ".join(
+            name
+            for name, present in ((repo_name, bool(repo_roots)), ("the vault root", vault_root is not None))
+            if present
+        )
+        or "the repo root"
+    )
 
     def rule(ctx: RuleContext) -> Iterable[Finding]:
         for item, document in with_documents(ctx):
@@ -129,6 +153,16 @@ def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
                     if match is None:
                         continue
                     token = match.group()
+                    if token.startswith("/"):
+                        if vault_root is None or (vault_root / token[1:]).exists():
+                            continue
+                        yield _finding(
+                            "plan.action-target-missing",
+                            "error",
+                            item,
+                            f"plan action names `{token}`, which does not exist under the vault root",
+                        )
+                        continue
                     if any((root / token).exists() for root in repo_roots):
                         continue
                     if vault_root is not None and (vault_root / token).exists():
@@ -137,7 +171,7 @@ def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
                         "plan.action-target-missing",
                         "error",
                         item,
-                        f"plan action names `{token}`, which does not exist under {root_names}",
+                        f"plan action names `{token}`, which does not exist under {bare_root_names}",
                     )
 
     return rule

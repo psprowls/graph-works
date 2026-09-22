@@ -14,7 +14,7 @@ from graph_works_core.orchestrate.stage_advance import run_stage_advance
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_serve import mutations
 from httpx import Response
-from mutation_helpers import make_client, serve_workspace, snapshot, write_item
+from mutation_helpers import make_client, seed_plan_doc, serve_workspace, snapshot, write_item
 from starlette.testclient import TestClient
 from typer.testing import CliRunner
 
@@ -91,6 +91,7 @@ def test_an_outside_edit_makes_apply_409_and_the_fresh_plan_applies(env: Env) ->
     layout, client, headers = env
     planned = client.post(PLAN, json={"path": ITEM}, headers=headers).json()
     write_item(layout, ITEM, work_status="open", phase="plan", effort="small")
+    seed_plan_doc(layout, ITEM)
     before = snapshot(layout)
     stale = _apply(client, headers, {"path": ITEM}, planned)
     assert stale.status_code == 409

@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 from graph_works_serve import mutation_specs, mutations
-from mutation_helpers import make_client, serve_workspace, snapshot, write_item, write_proposal
+from mutation_helpers import make_client, seed_plan_doc, serve_workspace, snapshot, write_item, write_proposal
 
 
 @pytest.mark.parametrize("operation", ["archive", "advance", "decide"])
@@ -48,6 +48,7 @@ def test_changed_core_candidate_is_stale_before_any_serve_write(
                 write_item(layout, "work/feature-unreviewed", work_status="resolved", phase="done")
             elif operation == "advance":
                 write_item(layout, path, work_status="open", phase="plan", effort="medium")
+                seed_plan_doc(layout, path)
             else:
                 (layout.bundle_dir / "proposals/reviewed.md").unlink()
                 write_proposal(layout, "replacement", target="concepts/widget")

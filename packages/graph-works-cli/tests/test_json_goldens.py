@@ -364,6 +364,7 @@ CASES: tuple[Case, ...] = (
         ],
         items_advanced,
     ),
+    Case("work-touch-active-work", _w("work", "touch-active-work", "work/bug-fix", "--json"), items_advanced),
     Case("work-status", _w("work", "status", "--json"), items),
     Case("work-ingest-queue", _w("work", "ingest-queue", "--json"), ingest_queue_item),
     Case("work-lint", _w("work", "lint", "--json"), items),

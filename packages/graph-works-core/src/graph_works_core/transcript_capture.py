@@ -31,10 +31,6 @@ from typing import TextIO
 GUARD_ENV = "GRAPH_WORKS_TRANSCRIPT_CAPTURE_GUARD"
 TRACE_LOG_ENV = "GRAPH_WORKS_TRANSCRIPT_CAPTURE_TRACE_LOG"
 
-#: `pointer["phase"]` -> the reference filename's ordinal prefix. Matches the
-#: `.sh`'s embedded mapping exactly.
-_ORDINALS = {"design": "01", "plan": "02", "execute": "03", "finish": "04"}
-
 
 def _default_trace_log() -> Path:
     """`/tmp/...` on POSIX (a no-op change there), `%TEMP%\\...` on Windows --
@@ -56,7 +52,9 @@ def _trace(env: Mapping[str, str], session: str, event: str, reason: str = "") -
 
 
 def _copy_transcript(env: Mapping[str, str], session: str, transcript_path: Path) -> None:
-    from work_tracker_okf.paths import parse_item_path
+    from okf_io import load
+    from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page, parse_item_path
+    from work_tracker_okf.sources import upsert
 
     from graph_works_core.workspace.discovery import resolve
     from graph_works_core.workspace.provenance import ACTIVE_WORK_FILENAME
@@ -75,11 +73,9 @@ def _copy_transcript(env: Mapping[str, str], session: str, transcript_path: Path
         _trace(env, session, "skip", "invalid-path")
         return
 
-    ordinal = _ORDINALS[phase]
-    references = layout.bundle_dir / location.path / "references"
-    references.mkdir(parents=True, exist_ok=True)
-
-    main_dest = references / f"{ordinal}-{phase}-transcript.jsonl"
+    ref = artifact_ref(location.path, MANAGED_ARTIFACTS[f"{phase}-transcript"])
+    main_dest = ref.path(layout.bundle_dir)
+    main_dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(transcript_path, main_dest)
     copied = [str(main_dest)]
 
@@ -87,9 +83,13 @@ def _copy_transcript(env: Mapping[str, str], session: str, transcript_path: Path
     if sidechain_dir.is_dir():
         for agent_file in sorted(sidechain_dir.glob("agent-*.jsonl")):
             agent_id = agent_file.stem.removeprefix("agent-")
-            dest = references / f"{ordinal}-{phase}-transcript-subagent-{agent_id}.jsonl"
+            dest = main_dest.parent / f"{main_dest.stem}-subagent-{agent_id}.jsonl"
             shutil.copy2(agent_file, dest)
             copied.append(str(dest))
+
+    document = load(item_page(location.path).path(layout.bundle_dir))
+    if upsert(document, ref, title=f"{phase.capitalize()} session transcript"):
+        document.save()
 
     _trace(env, session, "copied", ",".join(copied))
 

@@ -139,3 +139,20 @@ def test_checkpoint_ref_uses_the_phase_ordinal_and_decision_id() -> None:
 def test_checkpoint_ref_rejects_unparkable_phases_and_ids(phase: str, decision_id: str) -> None:
     with pytest.raises(ValueError):
         checkpoint_ref("work/a", phase, decision_id)
+
+
+@pytest.mark.parametrize(
+    ("phase", "filename"),
+    [
+        ("design", "01-design-transcript.jsonl"),
+        ("plan", "02-plan-transcript.jsonl"),
+        ("execute", "03-execute-transcript.jsonl"),
+        ("finish", "04-finish-transcript.jsonl"),
+    ],
+)
+def test_every_phase_has_a_transcript_managed_artifact(phase: str, filename: str, tmp_path: Path) -> None:
+    key = f"{phase}-transcript"
+    assert paths.MANAGED_ARTIFACTS[key] == filename
+    ref = paths.artifact_ref("work/release-cutover", paths.MANAGED_ARTIFACTS[key])
+    assert ref == ArtifactRef(rel=f"work/release-cutover/references/{filename}", source_id=key)
+    assert ref.resource == f"/work/release-cutover/references/{filename}"

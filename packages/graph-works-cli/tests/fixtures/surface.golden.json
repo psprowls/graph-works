@@ -2275,7 +2275,8 @@
         "record-placement",
         "regen-index",
         "reparent",
-        "status"
+        "status",
+        "touch-active-work"
       ],
       "path": [
         "work"
@@ -3902,6 +3903,51 @@
       "path": [
         "work",
         "status"
+      ]
+    },
+    {
+      "name": "gw work touch-active-work",
+      "help": "Point transcript capture at PATH's current phase. Never advances PATH.\n\n`/gw:workflow` runs this before every stage skill, so the session's\n`SessionEnd` capture is labelled with the phase it ran. Refuses, writing\nnothing, for an unknown, unreadable, terminal, or unphased item. A failed\npointer write only warns: capture is provenance, never a gate.",
+      "short_help": "Point transcript capture at PATH's current phase.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the stamped pointer as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "touch-active-work"
       ]
     }
   ]

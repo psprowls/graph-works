@@ -61,7 +61,12 @@ read are unchanged from `gw work next`.
   then run `gw work advance <work-path> --effort <value>` and re-run `gw work next`.
 - If `action.skill` is **null**, `blockers` is empty, and `on_complete` is
   **non-null** — this is a **satisfied gate** (an epic whose children are all
-  terminal, or an epic whose finish stage is satisfied). Do not dispatch a
+  terminal, or an epic whose finish stage is satisfied). No stage skill runs,
+  but the session still needs its own label: run
+  `gw work touch-active-work <work-path>` first, stamping the pointer with the
+  gate item's own phase before a child's `finish` pointer gets overwritten by
+  this session's exit advance. A refusal or "not written" warning here is a
+  note to relay, never a reason to stop, same as step 3. Then do not dispatch a
   skill: run `gw work advance <work-path>` directly (step 5) — its own terminal
   check governs what happens next (Terminal handling if the advance lands on
   `phase: done` / `work_status: resolved`, otherwise the step 6 hand-off).
@@ -97,6 +102,15 @@ never `--worktree`/`--branch` — here, and at step 5. An attended session
 (no `Dispatch key:` line) keeps today's behavior.
 
 ### 3. Dispatch the stage skill
+
+**Stamp the active-work pointer first.** Run
+`gw work touch-active-work <work-path>` (under a descent, the selected leaf's
+path), after step 2's dispatch transition and before the stage skill. It points
+`SessionEnd` transcript capture at the phase this session is about to run. The
+exit advance at step 5 deliberately leaves the pointer alone, so this session's
+transcript is not filed under the next phase. A refusal or a "not written"
+warning is a note to relay, never a reason to stop: capture is provenance, not
+a gate.
 
 Invoke the stage skill named by `action.skill` via the Skill tool, using the
 value **verbatim**, prepending a work-item brief.
@@ -261,9 +275,13 @@ context window).
    (already ingested). Ingest accepts design sources only — never hand it a
    plan artifact.
 
-2. **Offer to archive (any terminal status).** Ask the user "Archive `<work-path>`
-   now?" If yes, run `/gw:archive <work-path>`. If no, report that the item
-   stays in `work/` and can be archived later with `/gw:archive`.
+2. **Offer to archive (any terminal status).** When session transcript capture
+   is enabled, say so before asking: archiving in this same session clears the
+   active-work pointer and moves the item, so this finish session's own
+   transcript is not captured — archiving later, from a fresh session, keeps
+   it. Ask the user "Archive `<work-path>` now?" If yes, run
+   `/gw:archive <work-path>`. If no, report that the item stays in `work/` and
+   can be archived later with `/gw:archive`.
 
 ### Detaching a child
 

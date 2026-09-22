@@ -106,7 +106,8 @@ Ground rules' "NEVER commit anything" still holds — an init is not a commit.
 ## Q4: Session transcript capture
 
 One-line intro: a SessionEnd hook copies the session transcript into the active work
-item's directory whenever `gw work advance` has stamped an active-work pointer.
+item's directory, under the phase last stamped for it — by `gw work touch-active-work`
+at the start of a stage session, or by a dispatch (entry) `gw work advance`.
 
 AskUserQuestion: "Enable session transcript capture for the active work item?"
 - "Yes" → run `gw config hooks enable transcript`

@@ -336,6 +336,24 @@ assert_contains "skills/graph-works/references/proposal-disposition.md" \
     "## Origins" \
     "the disposition reference still recognises the Origins body heading"
 
+# bug-transcript-capture-labels-the-wrong-phase: the pointer is stamped at the
+# start of every stage session, not by the exit advance.
+assert_contains "skills/workflow/SKILL.md" \
+    "gw work touch-active-work" \
+    "workflow stamps the active-work pointer before every stage skill"
+assert_contains "hooks/examples/README.md" \
+    "gw work touch-active-work" \
+    "the transcript hook README names the pointer's start-of-session writer"
+assert_contains "skills/onboard/SKILL.md" \
+    "gw work touch-active-work" \
+    "onboard's transcript intro names the pointer's start-of-session writer"
+assert_contains "skills/workflow/SKILL.md" \
+    "gate item's own phase" \
+    "workflow's satisfied-gate bullet stamps the pointer before advancing"
+assert_contains "skills/workflow/SKILL.md" \
+    "this finish session's own" \
+    "workflow's archive offer names the finish transcript archiving-in-session drops"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

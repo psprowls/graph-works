@@ -96,6 +96,7 @@ from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
+from graph_works_core.workspace import provenance
 from graph_works_core.workspace.decision_owner import (
     DecisionContext,
     DecisionOwner,
@@ -368,6 +369,59 @@ def run_item_read(layout: WorkspaceLayout, path: str) -> ItemRead:
         refusal=None,
         detail=None,
     )
+
+
+TouchRefusal = Literal["unknown-item", "unreadable", "terminal", "inactive-phase"]
+
+
+@dataclass(frozen=True, slots=True)
+class ActiveWorkTouch:
+    """The active-work pointer stamped for the session about to run.
+
+    A refusal writes nothing and leaves any existing pointer as it was: an
+    item that cannot be captured is not a reason to un-point capture at
+    whatever the session had.
+    """
+
+    path: str
+    phase: str | None
+    pointer_path: Path | None
+    refusal: TouchRefusal | None
+    detail: str | None
+
+
+def run_touch_active_work(layout: WorkspaceLayout, path: str, *, today: date) -> ActiveWorkTouch:
+    """Stamp the active-work pointer to *path*'s **current** phase. Nothing else.
+
+    The start-of-session half of the pointer's contract. `gw work advance`
+    stamps only on an entry transition, and most stages have none, so
+    `/gw:workflow` calls this before every stage skill. Then the
+    `SessionEnd` transcript capture labels the session with the phase it
+    ran, not the phase its closing advance moved the item into. Idempotent.
+    A failed write degrades to `pointer_path=None` (provenance never fails).
+    """
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    item = item_index(load_items(bundle)).get(path)
+    if item is None:
+        detail = unreadable_detail(bundle, path)
+        if detail is not None:
+            return ActiveWorkTouch(path, None, None, "unreadable", detail)
+        return ActiveWorkTouch(path, None, None, "unknown-item", f"unknown path {path!r}")
+    if item.work_status in TERMINAL_STATUSES:
+        return ActiveWorkTouch(
+            path, item.phase, None, "terminal", f"work_status {item.work_status!r} is terminal; nothing to capture"
+        )
+    if item.phase not in provenance.ACTIVE_WORK_PHASES:
+        return ActiveWorkTouch(
+            path,
+            item.phase,
+            None,
+            "inactive-phase",
+            f"phase {item.phase!r} is not an active-work phase; expected one of "
+            f"{sorted(provenance.ACTIVE_WORK_PHASES)}",
+        )
+    written = provenance.write_active_work(layout, path, item.phase, updated=today.isoformat())
+    return ActiveWorkTouch(path, item.phase, written, None, None)
 
 
 @dataclass(frozen=True, slots=True)

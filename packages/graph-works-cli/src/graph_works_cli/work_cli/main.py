@@ -469,6 +469,45 @@ def record_placement(
     rendering.render_placement(payload)
 
 
+@work_app.command(name="touch-active-work")
+def touch_active_work(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the stamped pointer as JSON."),
+) -> None:
+    """Point transcript capture at PATH's current phase. Never advances PATH.
+
+    `/gw:workflow` runs this before every stage skill, so the session's
+    `SessionEnd` capture is labelled with the phase it ran. Refuses, writing
+    nothing, for an unknown, unreadable, terminal, or unphased item. A failed
+    pointer write only warns: capture is provenance, never a gate.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = work.run_touch_active_work(layout, path, today=_today())
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+
+    payload = wire_work.touch_active_work_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if payload["pointer_path"] is None:
+        rendering.warn(f"{path}: active-work pointer was not written (cache directory unwritable)")
+        if json_output:
+            rendering.emit(payload)
+        return
+    if json_output:
+        rendering.emit(payload)
+        return
+    typer.echo(f"{path}: active-work pointer -> {payload['phase']}")
+
+
 @work_app.command()
 def orchestrate(
     path: str = typer.Argument(..., help="Extensionless bundle-relative canonical root concept path."),

@@ -127,6 +127,53 @@ def test_happy_path_copies_main_transcript_and_subagent_sidechains(tmp_path: Pat
     assert (references / "03-execute-transcript-subagent-42.jsonl").read_text(encoding="utf-8") == '{"e":2}\n'
     assert "copied" in _trace_text(tmp_path)
 
+    from okf_io import load
+
+    document = load(page)
+    sources = document.fm_data().get("sources")
+    assert sources == [
+        {
+            "id": "execute-transcript",
+            "resource": "/work/feature-x/references/03-execute-transcript.jsonl",
+            "title": "Execute session transcript",
+        }
+    ]
+
+
+def test_rerun_with_unchanged_transcript_does_not_duplicate_the_sources_entry(tmp_path: Path) -> None:
+    from okf_io import load
+
+    layout = apply_init(plan_init(tmp_path / "ws", today=date(2026, 9, 2), topic="t")).layout
+    work_path = "work/feature-x"
+    page = layout.bundle_dir / f"{work_path}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("---\ntype: Feature\n---\n", encoding="utf-8")
+    layout.cache_dir.mkdir(parents=True, exist_ok=True)
+    (layout.cache_dir / "active-work.json").write_text(
+        json.dumps({"path": work_path, "phase": "execute"}) + "\n", encoding="utf-8"
+    )
+
+    transcript = tmp_path / "session.jsonl"
+    transcript.write_text('{"e":1}\n', encoding="utf-8")
+
+    env = _env(tmp_path, GRAPH_WORKS_DIR=str(layout.root))
+    payload = {"session_id": "abcdef123456", "transcript_path": str(transcript)}
+
+    rc_first = main(_stdin(payload), env)
+    rc_second = main(_stdin(payload), env)
+
+    assert rc_first == 0
+    assert rc_second == 0
+    document = load(page)
+    sources = document.fm_data().get("sources")
+    assert sources == [
+        {
+            "id": "execute-transcript",
+            "resource": "/work/feature-x/references/03-execute-transcript.jsonl",
+            "title": "Execute session transcript",
+        }
+    ]
+
 
 def test_exception_mid_copy_is_fail_open(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     layout = apply_init(plan_init(tmp_path / "ws", today=date(2026, 9, 2), topic="t")).layout

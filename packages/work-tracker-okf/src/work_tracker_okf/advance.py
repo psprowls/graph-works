@@ -41,6 +41,14 @@ RefusalReason = Literal[
     "no-affects-touched",
 ]
 
+#: Which routing-table transition a plan picked. `dispatch` is an entry
+#: (`on_dispatch`, applied at the *start* of a stage's session); `complete`
+#: is an exit (`on_complete`, applied at its *end*); `return` is `on_return`.
+#: One band up, the active-work pointer is stamped only for `dispatch`: an
+#: exit runs inside the session it ends, so stamping the next phase then
+#: mislabels that session's own transcript.
+Trigger = Literal["dispatch", "complete", "return"]
+
 #: The three reasons above that this module never produces itself. They are
 #: raised one band up, by the `execute -> finish` commit gate in
 #: `graph_works_core.orchestrate.stage_advance`, which cannot own the
@@ -66,7 +74,8 @@ class AdvancePlan:
     `stamp_source` and `sync_plan_table` are **unresolved requests** (C3-K):
     turning the first into a `Source` needs child 2's path and upsert
     functions, and the second needs `okf_ext.tables` plus a row naming the
-    plan artifact. Child 3 imports neither; child 6 composes them.
+    plan artifact. Child 3 imports neither; child 6 composes them. `trigger`
+    is which transition was picked, `None` on a refusal.
     """
 
     path: str
@@ -77,6 +86,7 @@ class AdvancePlan:
     sync_plan_table: bool
     refusal: RefusalReason | None
     detail: str
+    trigger: Trigger | None
 
     @property
     def changed(self) -> bool:
@@ -116,10 +126,11 @@ def advance(
     stage completion, and silently ignoring a `resolved_in` handed to one
     would record nothing while looking like it had.
 
-    Takes `(items, path)` rather than a pre-routed transition because routing,
-    picking `on_dispatch or on_complete`, and refusing an unmet requirement are
-    one decision -- splitting them across a CLI is how `work-io` ended up with
-    the gate messages living away from the table that produces them.
+    Takes `(items, path)` rather than a pre-routed transition because
+    routing, picking `on_dispatch or on_complete` (with trigger recorded),
+    and refusing an unmet requirement are one decision -- splitting them
+    across a CLI is how `work-io` ended up with the gate messages living
+    away from the table that produces them.
 
     `unreadable` is `Bundle.unreadable`, keyed by bundle-relative `.md` path:
     when *path* is missing from `items` because its page could not be read
@@ -155,9 +166,13 @@ def advance(
                 "return-not-available",
                 f"no return path from phase {item.phase!r}: --return applies to an item at phase 'finish'",
             )
+        trigger: Trigger = "return"
     else:
-        transition = result.on_dispatch or result.on_complete
-        if transition is None:
+        if result.on_dispatch is not None:
+            transition, trigger = result.on_dispatch, "dispatch"
+        elif result.on_complete is not None:
+            transition, trigger = result.on_complete, "complete"
+        else:
             return _refused(path, result, None, "nothing-to-advance", f"nothing to advance: {result.reason}")
     # Two independent guards on the sentinel, because a leak writes an invalid
     # enum value into a real page.
@@ -216,6 +231,7 @@ def advance(
         sync_plan_table=transition.sync_plan_table,
         refusal=None,
         detail=result.reason,
+        trigger=trigger,
     )
 
 
@@ -237,6 +253,7 @@ def _refused(
         sync_plan_table=False,
         refusal=reason,
         detail=detail,
+        trigger=None,
     )
 
 
@@ -287,4 +304,4 @@ def apply(document: Document, plan: AdvancePlan) -> None:
         document.set(change.key, change.after)
 
 
-__all__ = ["GATE_REFUSALS", "AdvancePlan", "FieldChange", "RefusalReason", "advance", "apply"]
+__all__ = ["GATE_REFUSALS", "AdvancePlan", "FieldChange", "RefusalReason", "Trigger", "advance", "apply"]

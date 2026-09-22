@@ -863,3 +863,65 @@ def test_a_release_only_field_on_another_kind_is_refused(workspace: Path) -> Non
     assert result.exit_code == exit_codes.GENERIC
     doc = json.loads(result.stdout)
     assert doc["error"]["payload"]["refusal"] == "invalid-release-field"
+
+
+def test_touch_active_work_stamps_the_current_phase(workspace: Path) -> None:
+    path = file_item(workspace, "Done", kind="Bug")
+    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
+    pointer = resolve_workspace(str(workspace)).cache_dir / "active-work.json"
+    pointer.unlink()
+
+    result = runner.invoke(app, ["work", "touch-active-work", path, "--json", "--workspace", str(workspace)])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["phase"] == "design" and payload["refusal"] is None
+    assert json.loads(Path(payload["pointer_path"]).read_text(encoding="utf-8"))["phase"] == "design"
+
+
+def test_touch_active_work_refuses_an_unphased_item(workspace: Path) -> None:
+    path = file_item(workspace, "Done", kind="Bug")
+
+    result = runner.invoke(app, ["work", "touch-active-work", path, "--json", "--workspace", str(workspace)])
+    assert result.exit_code != 0
+    assert json.loads(result.stdout)["error"]["payload"]["refusal"]["reason"] == "inactive-phase"
+
+
+def test_touch_active_work_degraded_write_warns_and_exits_zero(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graph_works_core.workspace import provenance
+
+    path = file_item(workspace, "Done", kind="Bug")
+    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
+    monkeypatch.setattr(provenance, "write_active_work", lambda *a, **k: None)
+
+    result = runner.invoke(app, ["work", "touch-active-work", path, "--json", "--workspace", str(workspace)])
+    assert result.exit_code == 0
+    assert json.loads(result.stdout)["pointer_path"] is None
+    assert "active-work pointer was not written" in result.stderr
+
+
+def test_touch_active_work_human_mode_reports_the_phase_on_success(workspace: Path) -> None:
+    path = file_item(workspace, "Done", kind="Bug")
+    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
+    pointer = resolve_workspace(str(workspace)).cache_dir / "active-work.json"
+    pointer.unlink()
+
+    result = runner.invoke(app, ["work", "touch-active-work", path, "--workspace", str(workspace)])
+    assert result.exit_code == 0, result.output
+    assert f"{path}: active-work pointer -> design" in result.stdout
+
+
+def test_touch_active_work_human_mode_degraded_write_omits_the_phase_line(
+    workspace: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from graph_works_core.workspace import provenance
+
+    path = file_item(workspace, "Done", kind="Bug")
+    assert runner.invoke(app, ["work", "advance", path, "--workspace", str(workspace)]).exit_code == 0
+    monkeypatch.setattr(provenance, "write_active_work", lambda *a, **k: None)
+
+    result = runner.invoke(app, ["work", "touch-active-work", path, "--workspace", str(workspace)])
+    assert result.exit_code == 0
+    assert "active-work pointer was not written" in result.stderr
+    assert "->" not in result.stdout

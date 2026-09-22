@@ -590,3 +590,35 @@ def test_the_refusal_vocabulary_carries_the_affects_coverage_reason() -> None:
 
     assert "no-affects-touched" in typing.get_args(RefusalReason)
     assert "unreadable-member" in typing.get_args(RefusalReason)
+
+
+# --- which transition the plan picked (bug-transcript-capture-labels-the-wrong-phase) ---
+
+
+def test_first_dispatch_is_a_dispatch_trigger():
+    item = make_item("work/bug-a", type="Bug", phase=None, work_status="open", effort="medium")
+    plan = advance((item,), item.path, today=TODAY)
+    assert plan.refusal is None
+    assert plan.transition is not None and plan.transition.phase == "design"
+    assert plan.trigger == "dispatch"
+
+
+def test_stage_exit_is_a_complete_trigger():
+    item = make_item("work/bug-a", type="Bug", phase="plan", work_status="open", effort="medium")
+    plan = advance((item,), item.path, today=TODAY)
+    assert plan.refusal is None
+    assert plan.transition is not None and plan.transition.phase == "execute"
+    assert plan.trigger == "complete"
+
+
+def test_return_is_a_return_trigger():
+    item = make_item("work/bug-a", type="Bug", phase="finish", work_status="in-progress", effort="medium")
+    plan = advance((item,), item.path, today=TODAY, return_=True)
+    assert plan.refusal is None
+    assert plan.trigger == "return"
+
+
+def test_a_refusal_carries_no_trigger():
+    plan = advance((), "work/nope", today=TODAY)
+    assert plan.refusal == "unknown-path"
+    assert plan.trigger is None

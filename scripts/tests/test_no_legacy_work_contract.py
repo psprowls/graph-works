@@ -143,7 +143,8 @@ def test_transcript_capture_resolves_the_active_canonical_path() -> None:
 
     assert 'work_path = pointer["path"]' in text
     assert "location = parse_item_path(work_path)" in text
-    assert 'layout.bundle_dir / location.path / "references"' in text
+    assert "artifact_ref(location.path, MANAGED_ARTIFACTS[" in text
+    assert "item_page(location.path)" in text
 
 
 def test_public_managed_artifact_payloads_do_not_use_legacy_doc_keys() -> None:

@@ -8,7 +8,10 @@ re-export would be a surface both the planner lane and the stage-gate lane
 still have a reason to edit, which is exactly the collision the split removes.
 
 Provenance never fails an advance. A `None` `results_path` or `pointer_path`
-is a normal outcome, not an error.
+is a normal outcome, not an error. `pointer_path` is also `None` by design,
+not degradation, on an exit or return transition -- only a `dispatch`
+transition stamps the active-work pointer, since only that transition runs
+at the start of the session it prepares.
 """
 
 from __future__ import annotations
@@ -53,9 +56,10 @@ class StageAdvance:
 
     `results_path` and `pointer_path` are `None` for a dry run, for a refusal,
     when the stage produced nothing to capture (a non-code phase for
-    `results_path`, a `done` landing for `pointer_path`), and whenever the
-    corresponding capture degraded -- provenance never fails an advance, so
-    "nothing was written" is a normal outcome, not an error.
+    `results_path`, a `done` landing or an exit or return transition for
+    `pointer_path`), and whenever the corresponding capture degraded --
+    provenance never fails an advance, so "nothing was written" is a normal
+    outcome, not an error.
 
     `repo_note` carries the reason no code repo was resolved: `resolve_repo`'s
     note, or that several are declared and the cwd is in none of them. Named
@@ -306,7 +310,7 @@ def _advance(
             item, _facts_root(item, stamped_worktree, resolved_repo), start_sha=start_sha, repo_note=repo_note
         )
         if refusal is not None:
-            refused = replace(outcome.plan, refusal=refusal, changes=(), stamp_source=None, detail=detail)
+            refused = replace(outcome.plan, refusal=refusal, changes=(), stamp_source=None, detail=detail, trigger=None)
             return StageAdvance(
                 outcome=replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False),
                 repo_note=repo_note,
@@ -392,8 +396,12 @@ def _advance(
         if result_member is not None:
             results_path = bundle.root / result_member
 
+    # Only an entry transition stamps the pointer: it runs at the start of the
+    # session it prepares. An exit (`complete`) or `return` runs inside the
+    # session it ends, and that session's `SessionEnd` capture must still see
+    # the phase it ran -- `gw work touch-active-work` stamps the next session.
     pointer_path: Path | None = None
-    if application.ok and new_phase is not None and new_phase != "done":
+    if application.ok and outcome.plan.trigger == "dispatch" and new_phase is not None and new_phase != "done":
         pointer_path = provenance.write_active_work(layout, path, new_phase, updated=today.isoformat())
     return StageAdvance(
         outcome=outcome,

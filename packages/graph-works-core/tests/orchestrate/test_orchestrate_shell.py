@@ -147,7 +147,14 @@ def test_dry_run_stage_advance_writes_nothing(tmp_path: Path) -> None:
     assert (layout.bundle_dir / f"{path}.md").read_bytes() == before
 
 
-def test_live_stage_advance_is_journaled_and_path_pointer_is_written(tmp_path: Path) -> None:
+def _pointer(layout) -> dict[str, str] | None:
+    target = layout.cache_dir / "active-work.json"
+    return json.loads(target.read_text(encoding="utf-8")) if target.exists() else None
+
+
+def test_live_stage_exit_is_journaled_and_does_not_stamp_the_pointer(tmp_path: Path) -> None:
+    """An exit transition runs inside the session it ends: stamping the next
+    phase here is what mislabelled that session's transcript."""
     layout = _initialized_workspace(tmp_path)
     path = "work/feature-a"
     _write(layout, path)
@@ -157,8 +164,65 @@ def test_live_stage_advance_is_journaled_and_path_pointer_is_written(tmp_path: P
     result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
     assert result.application is not None and result.application.ok
     assert result.application.journal.is_file()
+    assert result.outcome.plan.trigger == "complete"
     assert load(layout.bundle_dir / f"{path}.md").fm_data()["phase"] == "execute"
-    assert json.loads((layout.cache_dir / "active-work.json").read_text(encoding="utf-8"))["path"] == path
+    assert result.pointer_path is None
+    assert _pointer(layout) is None
+
+
+def test_live_stage_exit_leaves_an_existing_pointer_on_the_session_phase(tmp_path: Path) -> None:
+    from graph_works_core.work import commands as work
+    from graph_works_core.workspace import provenance
+
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path)
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    provenance.write_active_work(layout, path, "plan", updated=TODAY.isoformat())
+    stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+    assert _pointer(layout) == {"path": path, "phase": "plan", "updated": TODAY.isoformat()}
+
+
+def test_live_dispatch_transition_stamps_the_entered_phase(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/bug-a"
+    _write(layout, path, type="Bug", phase=None)
+    from graph_works_core.work import commands as work
+
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+    assert result.outcome.plan.trigger == "dispatch"
+    assert result.pointer_path == layout.cache_dir / "active-work.json"
+    assert _pointer(layout) == {"path": path, "phase": "design", "updated": TODAY.isoformat()}
+
+
+def test_execute_dispatch_transition_without_a_phase_change_still_stamps(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path, phase="execute", work_status="accepted")
+    from graph_works_core.work import commands as work
+
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    result = stage.run_stage_advance(layout, path, today=TODAY, owner="pat", dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert result.outcome.plan.trigger == "dispatch"
+    assert _pointer(layout) == {"path": path, "phase": "execute", "updated": TODAY.isoformat()}
+
+
+def test_return_transition_does_not_restamp_the_pointer(tmp_path: Path) -> None:
+    from graph_works_core.work import commands as work
+    from graph_works_core.workspace import provenance
+
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path, phase="finish", work_status="in-progress")
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    provenance.write_active_work(layout, path, "finish", updated=TODAY.isoformat())
+    result = stage.run_stage_advance(layout, path, today=TODAY, return_=True, dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert result.outcome.plan.trigger == "return"
+    assert result.pointer_path is None
+    assert _pointer(layout) == {"path": path, "phase": "finish", "updated": TODAY.isoformat()}
 
 
 def test_live_stage_advance_forwards_explicit_worktree_stamping(tmp_path: Path) -> None:
@@ -491,6 +555,7 @@ def test_a_dirty_execute_stage_is_refused_and_writes_nothing(tmp_path: Path) -> 
     result = stage.run_stage_advance(layout, path, today=TODAY, repo=repo, dry_run=False)
     assert result.outcome.plan.refusal == "uncommitted-work"
     assert "packages/a/left-behind.py" in result.outcome.plan.detail
+    assert result.outcome.plan.trigger is None
     assert page.read_bytes() == before
     assert result.results_path is None and result.pointer_path is None
     assert result.application is None

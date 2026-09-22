@@ -355,6 +355,14 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
         lambda: work.status_payload(status(resume=True)),
         lambda: work.status_payload(status(resume=False)),
     ),
+    "work.touch_active_work_payload": (
+        lambda: work.touch_active_work_payload(
+            ns(path="work/a", phase="plan", pointer_path=Path("/r/active-work.json"), refusal=None, detail=None)
+        ),
+        lambda: work.touch_active_work_payload(
+            ns(path="work/a", phase=None, pointer_path=None, refusal="inactive-phase", detail="why")
+        ),
+    ),
     "work.ingest_queue_payload": (
         lambda: work.ingest_queue_payload(
             ns(pending=(ns(path="work/a", work_status="resolved", resource="/work/a/r.md", origin="design"),))

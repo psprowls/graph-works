@@ -19,6 +19,7 @@ from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.placement import PlacementRecord
 from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.work.commands import (
+    ActiveWorkTouch,
     ChildRollup,
     Decision,
     DecisionCommandResult,
@@ -436,6 +437,20 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "warnings": [] if application is None else list(application.warnings),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "repo_note": result.repo_note,
+    }
+
+
+# ---------------------------------------------------------------------------
+# touch-active-work
+# ---------------------------------------------------------------------------
+
+
+def touch_active_work_payload(result: ActiveWorkTouch) -> dict[str, Any]:
+    return {
+        "path": result.path,
+        "phase": result.phase,
+        "pointer_path": None if result.pointer_path is None else str(result.pointer_path),
+        "refusal": None if result.refusal is None else {"reason": result.refusal, "detail": result.detail},
     }
 
 

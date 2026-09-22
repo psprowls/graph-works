@@ -93,3 +93,28 @@ def test_one_bad_rule_does_not_hide_the_others(tmp_path: Path) -> None:
 
 def test_the_ignore_recipe_hides_schema_and_sections_but_not_ds_store() -> None:
     assert IGNORE == ("schema/*", "*/schema/*", "sections/*", "*/sections/*")
+
+
+@pytest.fixture
+def bundle(tmp_path: Path) -> Path:
+    """A mutable copy of the fixture bundle. A move writes, so never the original."""
+    root = tmp_path / "okf"
+    shutil.copytree(FIXTURE, root)
+    return root
+
+
+def test_the_fixture_bundle_has_the_shape_the_tests_assume(bundle: Path) -> None:
+    present = sorted(p.relative_to(bundle).as_posix() for p in bundle.rglob("*") if p.is_file())
+    assert present == [
+        "explanations/diagram.png",
+        "explanations/index.md",
+        "explanations/why-graphs.md",
+        "index.md",
+        "log.md",
+        "references/index.md",
+        "references/moves-api.md",
+        "sources/2026-08-spec.md",
+        "sources/references/2026-08-spec.md",
+        "work/feature-x.md",
+        "work/feature-x/references/01-design.md",
+    ]

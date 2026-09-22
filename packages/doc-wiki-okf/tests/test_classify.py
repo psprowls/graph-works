@@ -26,7 +26,7 @@ def test_a_good_decision_becomes_a_classification(schema_set) -> None:
     result = classify(schema_set, **_GOOD)
     assert isinstance(result, Classification)
     assert result.type_name == "Reference"
-    assert result.concept_id == "references/cli-flags"
+    assert result.concept_id == "docs/reference/cli-flags"
     assert result.title == "CLI flags"
     assert result.rationale.startswith("It is a lookup table")
     assert result.decided_by == "agent:ingestor"
@@ -61,7 +61,7 @@ def test_a_rubric_type_with_no_installed_schema_is_undeclared_type(tmp_path) -> 
     (partial / "Tutorial.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema",'
         ' "properties": {"type": {"const": "Tutorial"}},'
-        ' "x-okf-directory": "tutorials/"}',
+        ' "x-okf-directory": "docs/tutorials/"}',
         encoding="utf-8",
     )
     result = classify(load_schemas(partial), **_GOOD)

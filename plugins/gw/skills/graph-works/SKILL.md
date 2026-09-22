@@ -59,7 +59,7 @@ page, and managed artifacts live under that directory’s `references/` child.
     │   ├── agent-plugins/<name>.md
     │   └── test-suites/<name>.md
     ├── dependencies/<ecosystem>/<name>.md   # sibling root, not nested under repositories/
-    ├── tutorials/ how-tos/ references/ explanations/   # Diátaxis lanes
+    ├── docs/tutorials/ docs/how-tos/ docs/reference/ docs/explanations/   # Diátaxis lanes
     ├── sources/                 # One summary page per ingested source
     │   └── references/          # gw ingest’s copies of ingested material
     ├── adrs/                    # Architecture Decision Records
@@ -152,7 +152,7 @@ Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AG
 | `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | Graph-derived entity pages, one per admitted entity — written by `gw scan` | `<workspace>/okf/repositories/<repo>/…` |
 | `Dependency` | An external package the repository depends on — written by `gw scan` | `<workspace>/okf/dependencies/<ecosystem>/<name>.md` |
 | `Explanation` | Cross-cutting technical idea, pattern, or architecture synthesis. Comparisons (`<a>-vs-<b>.md`) live here too. | `<workspace>/okf/explanations/` |
-| `Reference`, `HowTo`, `Tutorial` | The other Diátaxis lanes | `references/`, `how-tos/`, `tutorials/` |
+| `Reference`, `HowTo`, `Tutorial` | The other Diátaxis lanes | `docs/reference/`, `docs/how-tos/`, `docs/tutorials/` |
 | `Source` | Summary of an ingested spec, PR, article, transcript, etc. | `<workspace>/okf/sources/` |
 | `Adr` | Architecture Decision Record — a dated, citable decision with context + consequences | `<workspace>/okf/adrs/` |
 | `Proposal` | A proposed curated page awaiting disposition | `<workspace>/okf/proposals/` |

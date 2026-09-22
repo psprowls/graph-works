@@ -5,7 +5,7 @@ from doc_wiki_okf.proposals.render import ReviewRenderer
 from okf_ext.proposals import HEADER, BodyRenderer
 
 ADR = Lane(name="adr", directory="adrs/", type_name="Explanation", dated=True)
-REFERENCE = Lane(name="reference", directory="references/", type_name="Reference", dated=False)
+REFERENCE = Lane(name="reference", directory="docs/reference/", type_name="Reference", dated=False)
 
 SOURCES = (
     {
@@ -101,8 +101,8 @@ def test_every_empty_section_says_so_rather_than_rendering_a_bare_heading():
 
 
 def test_the_verb_derives_from_the_mode_and_the_sentence_from_the_lane():
-    body = _renderer(lane=REFERENCE, target="references/flags.md", mode="update")(description="", sources=())
-    assert "Update existing Reference page `references/flags.md`." in body
+    body = _renderer(lane=REFERENCE, target="docs/reference/flags.md", mode="update")(description="", sources=())
+    assert "Update existing Reference page `docs/reference/flags.md`." in body
 
 
 def test_a_scalar_rides_through_as_a_one_item_list():

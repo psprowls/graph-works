@@ -336,8 +336,8 @@ def test_the_two_step_flow_yields_a_backlink(tmp_path: Path) -> None:
     # target concept id (the resolved path with `.md` stripped). `plan_propose`
     # stages the proposal under `proposals/`, not at the eventual lane target,
     # so that is the id that appears -- `filing.proposal` is exactly it.
-    assert filing.proposal == "proposals/explanations-why-auth-works-this-way.md"
-    assert "proposals/explanations-why-auth-works-this-way" in graph.backlinks["sources/2026-08-auth-spec"]
+    assert filing.proposal == "proposals/docs-explanations-why-auth-works-this-way.md"
+    assert "proposals/docs-explanations-why-auth-works-this-way" in graph.backlinks["sources/2026-08-auth-spec"]
 
 
 def test_a_binary_payload_reaches_the_copy_write_verbatim(tmp_path: Path) -> None:

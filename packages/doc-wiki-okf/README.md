@@ -43,10 +43,10 @@ schema, a section declaration, and a lane directory:
 
 | Type | Lane directory |
 |---|---|
-| `Tutorial` | `tutorials/` |
-| `HowTo` | `how-tos/` |
-| `Reference` | `references/` |
-| `Explanation` | `explanations/` |
+| `Tutorial` | `docs/tutorials/` |
+| `HowTo` | `docs/how-tos/` |
+| `Reference` | `docs/reference/` |
+| `Explanation` | `docs/explanations/` |
 
 Per ADR 2026-08-07-pascalcase-types, each type's schema carries the directory as an `x-okf-directory`
 annotation, and `pages.directory_for()` reads it to place a **new** page. The

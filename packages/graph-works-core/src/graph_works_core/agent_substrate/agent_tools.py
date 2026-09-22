@@ -84,10 +84,19 @@ def strip_code_fence(text: str) -> str:
     return stripped[:closing].strip() if closing != -1 else stripped.strip()
 
 
-def _lane(concept_id: str) -> str:
-    """The lane a concept id belongs to: its first path segment, `""` at root."""
-    head, separator, _ = concept_id.partition("/")
-    return head if separator else ""
+def _lane(concept_id: str, lanes: Sequence[str]) -> str | None:
+    """The member of *lanes* *concept_id* belongs to, or `None` for none.
+
+    Longest prefix wins, so a multi-segment lane (`docs/explanations`) is
+    resolved rather than collapsed to its first segment. For the
+    single-segment lanes this function used to assume, the answer is
+    unchanged: the first path segment, when it is a requested lane.
+    """
+    for lane in sorted(lanes, key=len, reverse=True):
+        if lane and concept_id.startswith(f"{lane}/"):
+            return lane
+    # `""` is the root lane: a concept with no path segment at all.
+    return "" if "" in lanes and "/" not in concept_id else None
 
 
 def _slug(concept_id: str) -> str:
@@ -100,8 +109,11 @@ def _humanized(slug: str) -> str:
 
 def _entry(concept_id: str, doc: Document, lane: str, *, excerpt_chars: int) -> dict[str, Any]:
     slug = _slug(concept_id)
+    # The kind is the lane's own last segment singularized -- `docs/how-tos`
+    # is a how-to, not a `docs/how-to`.
+    tail = lane.rpartition("/")[2]
     return {
-        "kind": _IRREGULAR_KINDS.get(lane, lane.removesuffix("s")),
+        "kind": _IRREGULAR_KINDS.get(tail, tail.removesuffix("s")),
         "slug": slug,
         "path": f"/{concept_id}.md",
         "title": str(doc.fm.title or _humanized(slug)),
@@ -127,8 +139,8 @@ def build_catalog(
     """
     catalog: dict[str, list[dict[str, Any]]] = {lane: [] for lane in lanes}
     for concept_id in sorted(bundle.concepts):
-        lane = _lane(concept_id)
-        if lane in catalog:
+        lane = _lane(concept_id, lanes)
+        if lane is not None:
             catalog[lane].append(_entry(concept_id, bundle.concepts[concept_id], lane, excerpt_chars=excerpt_chars))
     return catalog
 

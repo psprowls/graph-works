@@ -49,7 +49,7 @@ You integrate a new source (spec, PR, article, ticket, transcript) into the `<wo
 
 | Source kind | Typical touches |
 |---|---|
-| `spec` | Entity links + `explanations/`/`references/` pages, or an ADR |
+| `spec` | Entity links + `docs/explanations/`/`docs/reference/` pages, or an ADR |
 | `article` | Explanation or reference pages |
 | `ticket` | Source summary; light entity touches |
 | `transcript` | ADRs + entity links for relevant packages |
@@ -80,7 +80,7 @@ Before writing:
 - Whether this source captures a decision worth an ADR
 - **New pages** — REQUIRED enumeration: every NEW page this ingest would create
   (explanation/reference stubs, ADRs), one bullet each, e.g.
-  `- NEW explanations/<slug>.md — <one-line justification>`. If none, state
+  `- NEW docs/explanations/<slug>.md — <one-line justification>`. If none, state
   "New pages: none." Your single confirmation covers exactly this list — never
   create a page that was not enumerated.
 
@@ -109,7 +109,7 @@ Merge mode (page exists, per the brief's `merge_mode: true`): append a dated `##
 For each code entity (package, app, dependency) the source touches, add a root-absolute markdown link — `[<name>](/repositories/<repo>/<kind-folder>/<name>.md)` — under the source summary's `## Touches` section. Entity pages are scanner-owned — **do not edit them**. The scanner regenerates each entity's reciprocal reference from these forward-links on the next `/gw:scan`. Set the source page's `entity_uri:` frontmatter to the primary/canonical entity's URI from `entity_match.uri` in the brief (or `null` if none).
 
 ### 6. Update explanation / reference / dependency pages
-For each cross-cutting idea the source mentions: update the relevant `explanations/` page's claims (why-shaped syntheses and reusable patterns both live there) or the relevant `references/` page's facts (what-is-true-of-a-thing), add a citation, or create a stub page in the appropriate Diátaxis lane — see `okf/AGENTS.md`'s lane table for the full set (`explanations/`, `references/`, `how-tos/`, `tutorials/`). Dependency pages are graph-derived at `dependencies/<ecosystem>/*` and are scanner-owned — never hand-edited.
+For each cross-cutting idea the source mentions: update the relevant `docs/explanations/` page's claims (why-shaped syntheses and reusable patterns both live there) or the relevant `docs/reference/` page's facts (what-is-true-of-a-thing), add a citation, or create a stub page in the appropriate Diátaxis lane — see `okf/AGENTS.md`'s lane table for the full set (`docs/explanations/`, `docs/reference/`, `docs/how-tos/`, `docs/tutorials/`). Dependency pages are graph-derived at `dependencies/<ecosystem>/*` and are scanner-owned — never hand-edited.
 
 ### 7. Capture ADRs for decisions
 If the source proposes or documents a decision, the ADR must have appeared in
@@ -124,7 +124,7 @@ Two kinds:
 - **Vault↔code** — note the code path and the conflicting vault claim
 
 ### 9. Update explanation/reference pages (optional)
-If the source shifts a high-level synthesis, revise the relevant `explanations/` or `references/` page and append a dated note under an additional section (e.g. `## Changelog`) — `additional_sections: true` on both schemas permits this. Don't rewrite history; append.
+If the source shifts a high-level synthesis, revise the relevant `docs/explanations/` or `docs/reference/` page and append a dated note under an additional section (e.g. `## Changelog`) — `additional_sections: true` on both schemas permits this. Don't rewrite history; append.
 
 ### 10. Update index
 Command-layer ingest/scan flows update indexes automatically. If you edited wiki pages by hand, reconcile with `gw wiki index` rather than editing `index.md` yourself.

@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import importlib.resources
 import unicodedata
+from dataclasses import replace
 
-from doc_wiki_okf.archive import ARCHIVE_IGNORE, IGNORE, WIKI_LANES, apply_archive, plan_archive
+import pytest
+from doc_wiki_okf.archive import (
+    ARCHIVE_IGNORE,
+    IGNORE,
+    PROPOSALS_DIRECTORY,
+    WIKI_LANE_TYPES,
+    _lane_of,
+    apply_archive,
+    plan_archive,
+    wiki_lanes,
+)
 from doc_wiki_okf.diataxis.pages import directory_for
-from doc_wiki_okf.proposals.lanes import ADR_DIRECTORY
+from doc_wiki_okf.resources import seeded_schema_set
 from okf_ext.schemas import load_schemas
 from okf_io import load_bundle, update_index
 
@@ -22,7 +33,7 @@ d
 
 _PROPOSAL = """---
 type: Proposal
-target: tutorials/new-idea.md
+target: docs/tutorials/new-idea.md
 title: New idea
 description: d
 page_status: {status}
@@ -46,23 +57,36 @@ def _build(root, pages):
 
 
 def _page_path(root, token, *, archived=False):
-    lane, slug = token.split("/", 1)
+    """The on-disk path of *token*, whose lane may be multi-segment
+    (`docs/tutorials/foo`): a page sits directly in its lane, so the slug is
+    the last segment and everything before it is the lane."""
+    lane, slug = token.rsplit("/", 1)
     dirname = f"{lane}/_archive" if archived else lane
     return root / dirname / f"{slug}.md"
 
 
-def test_a_targeted_archive_moves_the_page_regardless_of_status(tmp_path):
-    bundle = _build(tmp_path, {"tutorials/foo": _PAGE.format(title="Foo")})
+def _schema_set():
+    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "schema"
+    return load_schemas(str(assets))
 
-    plan = plan_archive(bundle, ["tutorials/foo"])
+
+#: The lanes every call site in this file plans against: the real derivation,
+#: so these tests exercise the schema set rather than a parallel constant.
+_LANES = wiki_lanes(_schema_set())
+
+
+def test_a_targeted_archive_moves_the_page_regardless_of_status(tmp_path):
+    bundle = _build(tmp_path, {"docs/tutorials/foo": _PAGE.format(title="Foo")})
+
+    plan = plan_archive(bundle, ["docs/tutorials/foo"], lanes=_LANES)
     result = apply_archive(bundle, plan)
 
-    assert result.archived == ("tutorials/foo",)
+    assert result.archived == ("docs/tutorials/foo",)
     assert result.ok is True
-    assert not _page_path(tmp_path, "tutorials/foo").exists()
-    assert _page_path(tmp_path, "tutorials/foo", archived=True).is_file()
-    assert any(index.path == "tutorials/index.md" for index in result.indexes)
-    assert any(index.path == "tutorials/_archive/index.md" for index in result.indexes)
+    assert not _page_path(tmp_path, "docs/tutorials/foo").exists()
+    assert _page_path(tmp_path, "docs/tutorials/foo", archived=True).is_file()
+    assert any(index.path == "docs/tutorials/index.md" for index in result.indexes)
+    assert any(index.path == "docs/tutorials/_archive/index.md" for index in result.indexes)
 
 
 def test_a_targeted_token_with_a_differently_normalized_query_resolves_to_the_raw_disk_id(tmp_path):
@@ -70,29 +94,29 @@ def test_a_targeted_token_with_a_differently_normalized_query_resolves_to_the_ra
     see work/tech-debt-has-member-callers-raw-id."""
     nfd = unicodedata.normalize("NFD", "café")
     nfc = unicodedata.normalize("NFC", "café")
-    bundle = _build(tmp_path, {f"tutorials/{nfd}": _PAGE.format(title="Café")})
+    bundle = _build(tmp_path, {f"docs/tutorials/{nfd}": _PAGE.format(title="Café")})
 
-    plan = plan_archive(bundle, [f"tutorials/{nfc}"])
+    plan = plan_archive(bundle, [f"docs/tutorials/{nfc}"], lanes=_LANES)
 
     assert plan.ok is True
-    assert plan.tokens == (f"tutorials/{nfd}",)
-    assert [move.source for move in plan.moves.moves] == [f"tutorials/{nfd}.md"]
-    assert [move.dest for move in plan.moves.moves] == [f"tutorials/_archive/{nfd}.md"]
+    assert plan.tokens == (f"docs/tutorials/{nfd}",)
+    assert [move.source for move in plan.moves.moves] == [f"docs/tutorials/{nfd}.md"]
+    assert [move.dest for move in plan.moves.moves] == [f"docs/tutorials/_archive/{nfd}.md"]
 
 
 def test_a_targeted_token_naming_no_page_is_unknown_member(tmp_path):
-    bundle = _build(tmp_path, {"tutorials/foo": _PAGE.format(title="Foo")})
+    bundle = _build(tmp_path, {"docs/tutorials/foo": _PAGE.format(title="Foo")})
 
-    plan = plan_archive(bundle, ["tutorials/missing"])
+    plan = plan_archive(bundle, ["docs/tutorials/missing"], lanes=_LANES)
 
     assert plan.tokens == ()
-    assert [(s.token, s.reason) for s in plan.skipped] == [("tutorials/missing", "unknown-member")]
+    assert [(s.token, s.reason) for s in plan.skipped] == [("docs/tutorials/missing", "unknown-member")]
 
 
 def test_a_targeted_token_naming_an_excluded_lane_is_unknown_member(tmp_path):
-    bundle = _build(tmp_path, {"tutorials/foo": _PAGE.format(title="Foo")})
+    bundle = _build(tmp_path, {"docs/tutorials/foo": _PAGE.format(title="Foo")})
 
-    plan = plan_archive(bundle, ["entities/foo", "work/foo", "not-a-lane"])
+    plan = plan_archive(bundle, ["entities/foo", "work/foo", "not-a-lane"], lanes=_LANES)
 
     assert plan.tokens == ()
     assert {s.token for s in plan.skipped} == {"entities/foo", "work/foo", "not-a-lane"}
@@ -100,14 +124,14 @@ def test_a_targeted_token_naming_an_excluded_lane_is_unknown_member(tmp_path):
 
 
 def test_an_already_archived_token_is_skipped(tmp_path):
-    bundle = _build(tmp_path, {"tutorials/foo": _PAGE.format(title="Foo")})
-    apply_archive(bundle, plan_archive(bundle, ["tutorials/foo"]))
+    bundle = _build(tmp_path, {"docs/tutorials/foo": _PAGE.format(title="Foo")})
+    apply_archive(bundle, plan_archive(bundle, ["docs/tutorials/foo"], lanes=_LANES))
     reloaded = _build(tmp_path, {})  # reload: the page now sits under _archive/
 
-    plan = plan_archive(reloaded, ["tutorials/foo"])
+    plan = plan_archive(reloaded, ["docs/tutorials/foo"], lanes=_LANES)
 
     assert plan.tokens == ()
-    assert [(s.token, s.reason) for s in plan.skipped] == [("tutorials/foo", "already-archived")]
+    assert [(s.token, s.reason) for s in plan.skipped] == [("docs/tutorials/foo", "already-archived")]
 
 
 def test_sweep_archives_only_proposals_past_proposed(tmp_path):
@@ -117,16 +141,16 @@ def test_sweep_archives_only_proposals_past_proposed(tmp_path):
             "proposals/still-open": _PROPOSAL.format(status="proposed"),
             "proposals/approved-one": _PROPOSAL.format(status="approved"),
             "proposals/rejected-one": _PROPOSAL.format(status="rejected"),
-            "tutorials/untouched": _PAGE.format(title="Untouched"),
+            "docs/tutorials/untouched": _PAGE.format(title="Untouched"),
         },
     )
 
-    plan = plan_archive(bundle)
+    plan = plan_archive(bundle, lanes=_LANES)
     result = apply_archive(bundle, plan)
 
     assert result.archived == ("proposals/approved-one", "proposals/rejected-one")
     assert _page_path(tmp_path, "proposals/still-open").is_file()
-    assert _page_path(tmp_path, "tutorials/untouched").is_file()
+    assert _page_path(tmp_path, "docs/tutorials/untouched").is_file()
     assert _page_path(tmp_path, "proposals/approved-one", archived=True).is_file()
     assert _page_path(tmp_path, "proposals/rejected-one", archived=True).is_file()
 
@@ -138,7 +162,7 @@ def test_a_sources_page_takes_its_reference_companion_with_it(tmp_path):
     (references / "2026-08-foo.txt").write_text("material\n", encoding="utf-8")
     reloaded = _build(tmp_path, {})
 
-    plan = plan_archive(reloaded, ["sources/2026-08-foo"])
+    plan = plan_archive(reloaded, ["sources/2026-08-foo"], lanes=_LANES)
     result = apply_archive(reloaded, plan)
 
     assert result.archived == ("sources/2026-08-foo",)
@@ -150,33 +174,33 @@ def test_a_refused_plan_applies_nothing(tmp_path):
     bundle = _build(
         tmp_path,
         {
-            "tutorials/foo": _PAGE.format(title="Foo"),
-            "tutorials/_archive/foo": _PAGE.format(title="Stray"),
+            "docs/tutorials/foo": _PAGE.format(title="Foo"),
+            "docs/tutorials/_archive/foo": _PAGE.format(title="Stray"),
         },
     )
 
-    plan = plan_archive(bundle, ["tutorials/foo"])
+    plan = plan_archive(bundle, ["docs/tutorials/foo"], lanes=_LANES)
     result = apply_archive(bundle, plan)
 
     assert plan.ok is False
     assert result.archived == ()
     assert result.refusals != ()
     assert result.ok is False
-    assert _page_path(tmp_path, "tutorials/foo").is_file()
-    assert plan.diff().startswith("! tutorials/foo.md: dest-exists")
+    assert _page_path(tmp_path, "docs/tutorials/foo").is_file()
+    assert plan.diff().startswith("! docs/tutorials/foo.md: dest-exists")
 
 
 def test_plan_diff_and_changed_render_the_preview(tmp_path):
-    bundle = _build(tmp_path, {"tutorials/foo": _PAGE.format(title="Foo")})
+    bundle = _build(tmp_path, {"docs/tutorials/foo": _PAGE.format(title="Foo")})
 
-    plan = plan_archive(bundle, ["tutorials/foo", "unknown/x"])
+    plan = plan_archive(bundle, ["docs/tutorials/foo", "unknown/x"], lanes=_LANES)
 
     assert plan.changed is True
     diff = plan.diff()
     assert "unknown/x: skipped (unknown-member)" in diff
-    assert "tutorials/foo.md -> tutorials/_archive/foo.md" in diff
+    assert "docs/tutorials/foo.md -> docs/tutorials/_archive/foo.md" in diff
 
-    empty_plan = plan_archive(bundle, ["unknown/x"])
+    empty_plan = plan_archive(bundle, ["unknown/x"], lanes=_LANES)
     assert empty_plan.changed is False
     assert empty_plan.tokens == ()
 
@@ -185,21 +209,21 @@ def test_plan_diff_renders_a_reference_rebase(tmp_path):
     bundle = _build(
         tmp_path,
         {
-            "tutorials/foo": _PAGE.format(title="Foo"),
-            "tutorials/other": _PAGE.format(title="Other") + "\nSee [Foo](foo.md) for background.\n",
+            "docs/tutorials/foo": _PAGE.format(title="Foo"),
+            "docs/tutorials/other": _PAGE.format(title="Other") + "\nSee [Foo](foo.md) for background.\n",
         },
     )
 
-    plan = plan_archive(bundle, ["tutorials/foo"])
+    plan = plan_archive(bundle, ["docs/tutorials/foo"], lanes=_LANES)
 
-    assert any(edit.member == "tutorials/other.md" for edit in plan.moves.edits)
-    assert "~ tutorials/other.md:" in plan.diff()
+    assert any(edit.member == "docs/tutorials/other.md" for edit in plan.moves.edits)
+    assert "~ docs/tutorials/other.md:" in plan.diff()
 
 
 def test_sweep_with_no_eligible_proposals_touches_nothing(tmp_path):
     bundle = _build(tmp_path, {"proposals/still-open": _PROPOSAL.format(status="proposed")})
 
-    plan = plan_archive(bundle)
+    plan = plan_archive(bundle, lanes=_LANES)
     result = apply_archive(bundle, plan)
 
     assert plan.tokens == ()
@@ -218,7 +242,7 @@ def test_reference_companions_are_matched_by_stem_and_top_level_only(tmp_path):
     (nested / "2026-08-foo.txt").write_text("nested copy\n", encoding="utf-8")
     reloaded = _build(tmp_path, {})
 
-    plan = plan_archive(reloaded, ["sources/2026-08-foo"])
+    plan = plan_archive(reloaded, ["sources/2026-08-foo"], lanes=_LANES)
     result = apply_archive(reloaded, plan)
 
     assert result.archived == ("sources/2026-08-foo",)
@@ -229,20 +253,20 @@ def test_reference_companions_are_matched_by_stem_and_top_level_only(tmp_path):
 
 
 def test_the_authors_words_survive_the_lane_crossing(tmp_path):
-    bundle = _build(tmp_path, {"tutorials/foo": _PAGE.format(title="Foo")})
-    update_index(bundle, directories=["tutorials"], create_missing=True, dry_run=False)
+    bundle = _build(tmp_path, {"docs/tutorials/foo": _PAGE.format(title="Foo")})
+    update_index(bundle, directories=["docs/tutorials"], create_missing=True, dry_run=False)
 
-    index_path = tmp_path / "tutorials" / "index.md"
+    index_path = tmp_path / "docs" / "tutorials" / "index.md"
     original = index_path.read_text(encoding="utf-8")
     assert " - d" in original
     index_path.write_text(original.replace(" - d", " - Hand-authored blurb."), encoding="utf-8")
 
     reloaded = _build(tmp_path, {})
-    plan = plan_archive(reloaded, ["tutorials/foo"])
+    plan = plan_archive(reloaded, ["docs/tutorials/foo"], lanes=_LANES)
     result = apply_archive(reloaded, plan)
 
-    assert result.archived == ("tutorials/foo",)
-    archived_index = (tmp_path / "tutorials" / "_archive" / "index.md").read_text(encoding="utf-8")
+    assert result.archived == ("docs/tutorials/foo",)
+    archived_index = (tmp_path / "docs" / "tutorials" / "_archive" / "index.md").read_text(encoding="utf-8")
     assert "Hand-authored blurb." in archived_index
 
 
@@ -293,32 +317,6 @@ def test_the_two_recipes_differ_by_exactly_the_move_blind_patterns() -> None:
     assert tuple(pattern for pattern in ARCHIVE_IGNORE if pattern not in IGNORE) == ()
 
 
-def _schema_set():
-    assets = importlib.resources.files("doc_wiki_okf") / "assets" / "schema"
-    return load_schemas(str(assets))
-
-
-_LANE_TYPES = {
-    "tutorials": "Tutorial",
-    "how-tos": "HowTo",
-    "references": "Reference",
-    "explanations": "Explanation",
-    "sources": "Source",
-}
-
-
-def test_wiki_lanes_matches_the_schema_and_module_source_of_truth() -> None:
-    schema_set = _schema_set()
-    for lane, type_name in _LANE_TYPES.items():
-        assert lane in WIKI_LANES
-        assert lane == directory_for(schema_set, type_name).rstrip("/")
-    assert "adrs" in WIKI_LANES
-    assert ADR_DIRECTORY.rstrip("/") == "adrs"
-    # "proposals" is the one genuinely fixed convention with no other module
-    # constant to check against, matching the module's own docstring rationale.
-    assert "proposals" in WIKI_LANES
-
-
 # --- the stranded-wikilink count (2026-08-21 spec §4.4) ---------------------
 
 _CITING = """---
@@ -327,7 +325,7 @@ description: d
 ---
 
 ## Summary
-See [[tutorials/foo]] for the rest.
+See [[docs/tutorials/foo]] for the rest.
 """
 
 _QUIET = """---
@@ -342,15 +340,159 @@ Nothing points anywhere.
 
 def test_a_wikilink_only_vault_and_a_quiet_vault_produce_different_plans(tmp_path):
     """The item's done-when, as a test: the count is what tells the two apart."""
-    loud = _build(tmp_path / "loud", {"tutorials/foo": _PAGE.format(title="Foo"), "reference/citing": _CITING})
-    quiet = _build(tmp_path / "quiet", {"tutorials/foo": _PAGE.format(title="Foo"), "reference/citing": _QUIET})
+    loud = _build(tmp_path / "loud", {"docs/tutorials/foo": _PAGE.format(title="Foo"), "reference/citing": _CITING})
+    quiet = _build(tmp_path / "quiet", {"docs/tutorials/foo": _PAGE.format(title="Foo"), "reference/citing": _QUIET})
 
-    loud_plan = plan_archive(loud, ["tutorials/foo"])
-    quiet_plan = plan_archive(quiet, ["tutorials/foo"])
+    loud_plan = plan_archive(loud, ["docs/tutorials/foo"], lanes=_LANES)
+    quiet_plan = plan_archive(quiet, ["docs/tutorials/foo"], lanes=_LANES)
 
     assert loud_plan.ok and quiet_plan.ok  # never a reason a plan is not ok
-    assert [entry.target for entry in loud_plan.moves.stranded] == ["tutorials/foo.md"]
+    assert [entry.target for entry in loud_plan.moves.stranded] == ["docs/tutorials/foo.md"]
     assert quiet_plan.moves.stranded == ()
     assert loud_plan.diff() != quiet_plan.diff()
     assert "1 inbound [[wikilink]]" in loud_plan.diff()
     assert "inbound [[wikilink]]" not in quiet_plan.diff()
+
+
+# --- the schema-derived lane vocabulary ------------------------------------
+
+
+def test_wiki_lanes_derives_every_declared_lane_from_the_schema_set() -> None:
+    """The drift guard: the archive vocabulary and the schemas cannot disagree,
+    because there is only one of them."""
+    schema_set = _schema_set()
+    lanes = wiki_lanes(schema_set)
+    for type_name in WIKI_LANE_TYPES:
+        assert directory_for(schema_set, type_name).rstrip("/") in lanes
+
+
+def test_wiki_lanes_carries_proposals_which_no_shipped_schema_declares() -> None:
+    """`doc-wiki-okf` ships six schemas, not seven (`resources.SEED_RELATIVE_PATHS`):
+    `proposals/` is a fixed convention, named once, like `ADR_DIRECTORY`."""
+    assert "Proposal" not in _schema_set().schemas
+    assert PROPOSALS_DIRECTORY.rstrip("/") in wiki_lanes(_schema_set())
+
+
+def test_wiki_lanes_is_ordered_longest_first() -> None:
+    """A prefix lookup over an unsorted tuple can match `docs` before
+    `docs/explanations`. The producer sorts so no consumer has to."""
+    lanes = wiki_lanes(_schema_set())
+    assert list(lanes) == sorted(lanes, key=len, reverse=True)
+
+
+def test_wiki_lanes_raises_for_a_schema_set_missing_a_wiki_type() -> None:
+    """Configuration, not bundle content -- the same contract `directory_for`
+    and `lane_set` already state."""
+    partial = replace(_schema_set(), schemas={"Tutorial": {"x-okf-directory": "docs/tutorials/"}})
+    with pytest.raises(KeyError):
+        wiki_lanes(partial)
+
+
+def test_the_seeded_schema_set_is_this_packages_own_assets() -> None:
+    """The fallback `run_archive` uses when a workspace has no `.gw/schema/`."""
+    assert tuple(sorted(seeded_schema_set().schemas)) == tuple(sorted(_schema_set().schemas))
+
+
+# --- multi-segment lanes ---------------------------------------------------
+
+_DOCS_LANES = ("docs/explanations", "docs/how-tos", "docs/tutorials", "docs/reference", "proposals", "sources", "adrs")
+
+
+def test_lane_of_resolves_a_multi_segment_lane() -> None:
+    assert _lane_of("docs/explanations/foo", _DOCS_LANES) == "docs/explanations"
+
+
+def test_lane_of_rejects_a_token_deeper_than_its_lane() -> None:
+    """A page sits directly in its lane. That contract is preserved, not
+    relaxed, by the move to a prefix match."""
+    assert _lane_of("docs/explanations/a/b", _DOCS_LANES) is None
+
+
+def test_lane_of_rejects_an_unknown_first_segment() -> None:
+    assert _lane_of("repositories/foo", _DOCS_LANES) is None
+    assert _lane_of("work/foo", _DOCS_LANES) is None
+    assert _lane_of("docs/foo", _DOCS_LANES) is None
+
+
+def test_lane_of_rejects_a_bare_word_and_a_trailing_slash() -> None:
+    assert _lane_of("explanations", _DOCS_LANES) is None
+    assert _lane_of("docs/explanations/", _DOCS_LANES) is None
+
+
+def test_lane_of_prefers_the_longer_lane_whatever_order_it_is_given() -> None:
+    """`_lane_of` sorts defensively: a caller-supplied tuple need not already
+    be longest-first for the lookup to be right."""
+    unsorted = ("docs", "docs/explanations")
+    assert _lane_of("docs/explanations/foo", unsorted) == "docs/explanations"
+
+
+def test_a_targeted_archive_round_trips_in_a_multi_segment_lane(tmp_path) -> None:
+    """The whole point: under the `docs/` layout the page lands in the lane's
+    own `_archive/`, and both the lane index and its `_archive/` form
+    reconcile -- not `docs/_archive/` and not `docs/index.md`.
+
+    The lane index also carries a link to the moved page, so `moves` itself
+    would want to rewrite that link (a `RefEdit` on `docs/explanations/index.md`)
+    were `plan_archive`'s lane-index filter not dropping it first --
+    `update_index` owns index content end to end, and a leftover moves-edit on
+    top of it is exactly the double-write `_lane_of`'s filter exists to
+    prevent (the same reason `work_tracker_okf.archive` filters
+    `_LANE_INDEXES`)."""
+    bundle = _build(
+        tmp_path,
+        {
+            "docs/explanations/foo": _PAGE.format(title="Foo"),
+            "docs/explanations/index": _PAGE.format(title="Explanations") + "\n[Foo](/docs/explanations/foo.md)\n",
+        },
+    )
+
+    plan = plan_archive(bundle, ["docs/explanations/foo"], lanes=_DOCS_LANES)
+    result = apply_archive(bundle, plan)
+
+    assert result.archived == ("docs/explanations/foo",)
+    assert result.ok
+    assert (tmp_path / "docs/explanations/_archive/foo.md").is_file()
+    assert not (tmp_path / "docs/explanations/foo.md").exists()
+    assert not (tmp_path / "docs/_archive").exists()
+    written = {update.path for update in result.indexes}
+    assert "docs/explanations/index.md" in written
+    assert "docs/explanations/_archive/index.md" in written
+    assert "docs/index.md" not in written
+    assert all(edit.member != "docs/explanations/index.md" for edit in plan.moves.edits)
+
+
+def test_the_plan_carries_the_lanes_it_was_given(tmp_path) -> None:
+    bundle = _build(tmp_path, {"docs/explanations/foo": _PAGE.format(title="Foo")})
+    plan = plan_archive(bundle, ["docs/explanations/foo"], lanes=_DOCS_LANES)
+    assert plan.lanes == tuple(_DOCS_LANES)
+
+
+def test_a_sweep_skips_a_proposal_that_sits_in_no_lane(tmp_path) -> None:
+    """`list_proposals` enumerates by `type:`, not by path, so a `Proposal`
+    outside every lane can come back. It has no lane to build an `_archive/`
+    path under, so it is not a sweep candidate -- previously it computed a
+    nonsense destination from its first path segment."""
+    bundle = _build(
+        tmp_path,
+        {
+            "proposals/good": _PROPOSAL.format(status="approved"),
+            "unknown/stray": _PROPOSAL.format(status="approved"),
+        },
+    )
+    plan = plan_archive(bundle, lanes=_DOCS_LANES)
+    assert plan.tokens == ("proposals/good",)
+    assert plan.skipped == ()
+
+
+def test_the_diataxis_lanes_live_under_docs() -> None:
+    """The relocation, asserted once at the source of truth. `reference` is
+    singular; `how-tos` keeps its hyphen."""
+    assert wiki_lanes(_schema_set()) == (
+        "docs/explanations",
+        "docs/tutorials",
+        "docs/reference",
+        "docs/how-tos",
+        "proposals",
+        "sources",
+        "adrs",
+    )

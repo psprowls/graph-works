@@ -7,5 +7,5 @@
     "prerequisites": { "type": "array", "items": { "type": "string" } },
     "outcome": { "type": "string", "minLength": 1 }
   },
-  "x-okf-directory": "tutorials/"
+  "x-okf-directory": "docs/tutorials/"
 }

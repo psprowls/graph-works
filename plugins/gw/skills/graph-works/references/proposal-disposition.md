@@ -76,7 +76,7 @@ Set `export GRAPH_WORKS_DIR=<workspace>` first.
 
 **The argument is the `target`, not the filename.** `approve` and `reject`
 resolve their argument by normalized target path — `adrs/0013-some-page.md`,
-`explanations/byte-fidelity.md` — never by the note's own slug. If the user
+`docs/explanations/byte-fidelity.md` — never by the note's own slug. If the user
 hands you a filename, resolve it first: read `gw wiki proposals --json`, find
 the record whose `member` matches, and call the command with that record's
 exact `target`.

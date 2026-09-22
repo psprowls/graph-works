@@ -43,7 +43,7 @@ BUNDLE_ROWS: list[tuple[str, tuple[EventKind, str] | None]] = [
     ("work/Not_An_Item.md", (P, "work/Not_An_Item.md")),
     ("proposals/p-1.md", (P, "proposals/p-1.md")),
     ("adrs/0001-x.md", (P, "adrs/0001-x.md")),
-    ("explanations/deep/topic.md", (P, "explanations/deep/topic.md")),
+    ("docs/explanations/deep/topic.md", (P, "docs/explanations/deep/topic.md")),
     (".DS_Store", None),
     ("work/.foo.md.swp", None),
     ("work/a/references/.hidden/00-decisions.md", None),

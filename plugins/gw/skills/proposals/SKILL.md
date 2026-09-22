@@ -13,7 +13,7 @@ Dispose of the proposals the ingest pipeline and the drift producer drop into
 ```
 /gw:proposals          # Claude Code
 $proposals                      # Codex
-/gw:proposals adrs/0013-command-modules-are-libraries.md explanations/byte-fidelity.md
+/gw:proposals adrs/0013-command-modules-are-libraries.md docs/explanations/byte-fidelity.md
 ```
 
 Without arguments: review every open (`page_status: proposed`) note. With

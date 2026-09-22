@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -12,6 +13,7 @@ import pytest
 from graph_works_core import apply_init, plan_init
 from graph_works_core.archive import commands as archive
 from graph_works_core.workspace import provenance
+from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.moves import Stranded
 
 TODAY = date(2026, 8, 23)
@@ -258,7 +260,7 @@ def test_archive_remains_hoisted_at_package_root() -> None:
 
 def test_archive_stranded_warnings_are_projected_by_core() -> None:
     work = Stranded(member="work/citing.md", target="work/a.md", line=3)
-    wiki = Stranded(member="tutorials/citing.md", target="tutorials/b.md", line=5)
+    wiki = Stranded(member="docs/tutorials/citing.md", target="docs/tutorials/b.md", line=5)
     run = SimpleNamespace(
         plan=SimpleNamespace(move_plan=SimpleNamespace(stranded=(work,))),
         wiki_plan=SimpleNamespace(moves=SimpleNamespace(stranded=(wiki,))),
@@ -347,3 +349,68 @@ def test_two_declared_repos_archive_validates_against_every_declared_repo(tmp_pa
     result = archive.run_archive(layout, paths=(DONE,), today=TODAY, dry_run=False)
     assert result.result is not None
     assert result.result.ok, result.result.failures
+
+
+def _wiki_page(layout, member: str) -> None:
+    page = layout.bundle_dir / f"{member}.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Explanation\ntitle: E\ndescription: d\n---\n\n## Summary\nd\n",
+        encoding="utf-8",
+    )
+
+
+def test_a_wiki_page_archives_against_the_workspaces_own_declared_lanes(tmp_path: Path) -> None:
+    """The lanes come from `.gw/schema/`, so a workspace archives against its
+    own real layout rather than the installed package's assumption.
+
+    The seeded fallback (`doc_wiki_okf.resources.seeded_schema_set`) declares
+    `Explanation` at `docs/explanations/`, byte-identical to what
+    `_layout`/`apply_init` writes into `.gw/schema/` -- reading either gives
+    the same answer, so a test built on that stock layout alone cannot tell
+    `_wiki_lanes_for` apart from a version that always used the fallback. This
+    test rewrites the workspace's own copy of `Explanation.schema.json` to
+    declare `docs/rationale/` instead, a directory no seeded schema names, so
+    only genuinely reading `.gw/schema/` -- not the package's fallback --
+    archives the page to the right place.
+    """
+    layout = _layout(tmp_path)
+    schema_path = layout.config_dir / SCHEMA_DIRNAME / "Explanation.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    schema["x-okf-directory"] = "docs/rationale/"
+    schema_path.write_text(json.dumps(schema), encoding="utf-8")
+    _wiki_page(layout, "docs/rationale/foo")
+
+    run = archive.run_archive(layout, (), ["docs/rationale/foo"], today=TODAY, dry_run=False)
+
+    assert run.wiki_plan.tokens == ("docs/rationale/foo",)
+    assert run.wiki is not None and run.wiki.ok
+    assert (layout.bundle_dir / "docs/rationale/_archive/foo.md").is_file()
+
+
+def test_the_lanes_fall_back_to_the_seeded_schemas_when_the_workspace_has_none(tmp_path: Path) -> None:
+    """`_wiki_rules` gates on the schema directory existing; so does this. The
+    fallback is the package's own assets, which is exactly the behavior the
+    deleted `WIKI_LANES` constant had.
+
+    `_wiki_lanes_for` only ever reads `layout.config_dir / SCHEMA_DIRNAME`, so
+    removing that directory alone is enough to exercise its fallback branch.
+    But `run_archive`'s live apply also runs the *work* lane's postcondition
+    gate (`transactions._extra_rules`), which falls back to treating
+    `layout.bundle_dir` as the declarations root under the same missing-schema
+    condition -- a fallback that predates this change and serves an unrelated
+    workspace shape. Mirroring the real schema/sections declarations there
+    keeps that unrelated gate satisfied without touching production code
+    outside this task's scope, while still leaving `.gw/schema` itself absent
+    for `_wiki_lanes_for` to fall back on.
+    """
+    layout = _layout(tmp_path)
+    _wiki_page(layout, "docs/explanations/foo")
+    shutil.copytree(layout.config_dir / SCHEMA_DIRNAME, layout.bundle_dir / SCHEMA_DIRNAME)
+    shutil.copytree(layout.config_dir / "sections", layout.bundle_dir / "sections")
+    shutil.rmtree(layout.config_dir / SCHEMA_DIRNAME)
+
+    run = archive.run_archive(layout, (), ["docs/explanations/foo"], today=TODAY, dry_run=False)
+
+    assert run.wiki_plan.tokens == ("docs/explanations/foo",)
+    assert (layout.bundle_dir / "docs/explanations/_archive/foo.md").is_file()

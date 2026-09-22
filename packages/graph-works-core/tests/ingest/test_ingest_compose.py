@@ -219,7 +219,7 @@ def test_the_log_line_names_every_outcome_kind_separately():
             "proposals": 2,
             "unclassified": ["a: undeclared-type"],
             "refused": ["b: already-decided"],
-            "duplicates": ["c: explanations/c.md"],
+            "duplicates": ["c: docs/explanations/c.md"],
             "failed": ["d: mkdir-error"],
             "errored": ["e: RuntimeError"],
             "error": "extractor failed",

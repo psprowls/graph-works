@@ -75,7 +75,7 @@ def test_an_unknown_lane_raises(tmp_path) -> None:
 def test_an_existing_target_files_in_update_mode(tmp_path) -> None:
     root = tmp_path / "b"
     page = "---\ntype: Reference\ntitle: Flags\n---\n\n# Flags\n"
-    bundle = build_bundle(root, {"references/flags": page})
+    bundle = build_bundle(root, {"docs/reference/flags": page})
     plan = plan_file(
         bundle,
         lanes(),
@@ -86,7 +86,7 @@ def test_an_existing_target_files_in_update_mode(tmp_path) -> None:
         by=BY,
         at=AT,
     )
-    assert "Update existing Reference page `references/flags.md`." in plan.writes[0].text
+    assert "Update existing Reference page `docs/reference/flags.md`." in plan.writes[0].text
 
 
 def test_a_non_ascii_target_files_in_update_mode_against_the_raw_disk_id(tmp_path, monkeypatch) -> None:
@@ -98,7 +98,7 @@ def test_a_non_ascii_target_files_in_update_mode_against_the_raw_disk_id(tmp_pat
     monkeypatch.setattr("doc_wiki_okf.proposals.lanes.slugify", lambda title: nfc)
     root = tmp_path / "b"
     page = "---\ntype: Reference\ntitle: Café\n---\n\n# Café\n"
-    bundle = build_bundle(root, {f"references/{nfd}": page})
+    bundle = build_bundle(root, {f"docs/reference/{nfd}": page})
 
     plan = plan_file(
         bundle,
@@ -111,5 +111,5 @@ def test_a_non_ascii_target_files_in_update_mode_against_the_raw_disk_id(tmp_pat
         at=AT,
     )
 
-    assert plan.target == f"references/{nfd}.md"
-    assert f"Update existing Reference page `references/{nfd}.md`." in plan.writes[0].text
+    assert plan.target == f"docs/reference/{nfd}.md"
+    assert f"Update existing Reference page `docs/reference/{nfd}.md`." in plan.writes[0].text

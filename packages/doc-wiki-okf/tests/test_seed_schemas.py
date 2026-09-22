@@ -15,10 +15,10 @@ _DIATAXIS_TYPES = ("Explanation", "HowTo", "Reference", "Tutorial")
 _ALL_TYPES = ("Adr", "Explanation", "HowTo", "Reference", "Source", "Tutorial")
 
 _LANES = {
-    "Tutorial": "tutorials/",
-    "HowTo": "how-tos/",
-    "Reference": "references/",
-    "Explanation": "explanations/",
+    "Tutorial": "docs/tutorials/",
+    "HowTo": "docs/how-tos/",
+    "Reference": "docs/reference/",
+    "Explanation": "docs/explanations/",
     "Source": "sources/",
     "Adr": "adrs/",
 }
@@ -59,7 +59,11 @@ def test_the_base_declares_no_directory() -> None:
 
 
 def _findings(
-    tmp_path: Path, frontmatter: str, code: str = "schemas.invalid", lane: str = "tutorials", heading: str = "Steps"
+    tmp_path: Path,
+    frontmatter: str,
+    code: str = "schemas.invalid",
+    lane: str = "docs/tutorials",
+    heading: str = "Steps",
 ) -> list[str]:
     root = tmp_path / "bundle"
     (root / lane).mkdir(parents=True, exist_ok=True)

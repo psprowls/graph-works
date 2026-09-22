@@ -36,7 +36,11 @@ from doc_wiki_okf.archive import ArchivePlan as WikiArchivePlan
 from doc_wiki_okf.archive import ArchiveResult as WikiArchiveResult
 from doc_wiki_okf.archive import apply_archive as apply_wiki_archive
 from doc_wiki_okf.archive import plan_archive as plan_wiki_archive
+from doc_wiki_okf.archive import wiki_lanes
+from doc_wiki_okf.resources import seeded_schema_set
+from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.moves import MovePlan, stranded_warning
+from okf_ext.schemas import load_schemas
 from okf_io import append_log_entry, load, load_bundle
 from okf_io import parse as parse_document
 from work_tracker_okf.archive import plan_archive
@@ -62,6 +66,22 @@ def _touched_members(plan: MovePlan) -> frozenset[str]:
     either is allowed to apply.
     """
     return frozenset({move.source for move in plan.moves} | {edit.member for edit in plan.edits})
+
+
+def _wiki_lanes_for(layout: WorkspaceLayout) -> tuple[str, ...]:
+    """The wiki lane vocabulary this workspace declares.
+
+    The workspace's own `.gw/schema/` when it has one, so archiving follows the
+    layout actually on disk rather than the installed package's assumption --
+    a workspace that has not yet run `gw config sync` still archives correctly.
+    Gated on the directory existing, the same way `lint_drift.lanes._wiki_rules`
+    gates its `schema_rule`; without one, the package's own seeded schemas are
+    the fallback, which is precisely the behavior the deleted `WIKI_LANES`
+    constant had.
+    """
+    schema_dir = layout.config_dir / SCHEMA_DIRNAME
+    schema_set = load_schemas(schema_dir) if schema_dir.is_dir() else seeded_schema_set()
+    return wiki_lanes(schema_set)
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +196,7 @@ def run_archive(
     """
     bundle = load_bundle(layout.bundle_dir, ignore=(*ARCHIVE_IGNORE, *WIKI_ARCHIVE_IGNORE))
     plan = plan_archive(bundle, load_items(bundle), paths)
-    wiki_plan = plan_wiki_archive(bundle, wiki_slugs)
+    wiki_plan = plan_wiki_archive(bundle, wiki_slugs, lanes=_wiki_lanes_for(layout))
     work_touched = {
         *(move.source for move in plan.moves),
         *(move.dest for move in plan.moves),

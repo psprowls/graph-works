@@ -14,7 +14,7 @@ Sources are read from any filesystem path:
 ## Inputs
 
 - Path to a source file. Any filesystem path, or repo-relative for in-repo docs.
-- The current state of `<workspace>/okf/` (especially `index.md`, relevant `repositories/`, `explanations/`, `references/`)
+- The current state of `<workspace>/okf/` (especially `index.md`, relevant `repositories/`, `docs/explanations/`, `docs/reference/`)
 
 ## Step-by-step
 
@@ -50,7 +50,7 @@ Before writing anything, tell the user:
 - Whether this source proposes a decision worth capturing as an ADR
 - **New pages** — REQUIRED enumeration: every NEW page this ingest would create
   (explanation/reference stubs, ADRs), one bullet each, e.g.
-  `- NEW explanations/<slug>.md — <one-line justification>`. If none, state
+  `- NEW docs/explanations/<slug>.md — <one-line justification>`. If none, state
   "New pages: none." Your single confirmation covers exactly this list — never
   create a page that was not enumerated.
 
@@ -84,7 +84,7 @@ For each code entity (package, app, dependency) the source touches, add a root-a
 
 For each cross-cutting idea mentioned:
 - If a page exists: update its claims section, or add to its citations
-- If not: create a stub page in the appropriate Diátaxis lane (`explanations/` for why-shaped syntheses and patterns, `references/` for what-is-true-of-a-thing facts — see `okf/AGENTS.md`'s lane table) with the minimum (definition, one cited claim, link back to this source)
+- If not: create a stub page in the appropriate Diátaxis lane (`docs/explanations/` for why-shaped syntheses and patterns, `docs/reference/` for what-is-true-of-a-thing facts — see `okf/AGENTS.md`'s lane table) with the minimum (definition, one cited claim, link back to this source)
 
 ### 7. ADR capture (if applicable)
 
@@ -110,7 +110,7 @@ Log contradictions in `log.md` with `op: note`.
 
 ### 9. Update explanation/reference pages (optional)
 
-If the source meaningfully shifts a high-level synthesis, revise the relevant `explanations/` or `references/` page. Append a dated note under an additional section (e.g. `## Changelog`) — both schemas allow additional sections beyond their required ones. Don't rewrite history; append.
+If the source meaningfully shifts a high-level synthesis, revise the relevant `docs/explanations/` or `docs/reference/` page. Append a dated note under an additional section (e.g. `## Changelog`) — both schemas allow additional sections beyond their required ones. Don't rewrite history; append.
 
 ### 10. Update `index.md`
 
@@ -149,7 +149,7 @@ Summary the user sees in chat:
 ### Articles
 - Often produce explanation pages, not ADRs.
 - May touch no packages if purely informational.
-- Good source of comparison material — file as `explanations/<a>-vs-<b>.md`.
+- Good source of comparison material — file as `docs/explanations/<a>-vs-<b>.md`.
 
 ### Tickets
 - Usually light ingest — a short source summary plus root-absolute markdown links for the relevant package entities.

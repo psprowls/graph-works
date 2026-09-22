@@ -4,7 +4,8 @@ Mirrors `work_tracker_okf.archive`'s shape (`ArchivePlan`, `ArchiveResult`,
 `Skipped`, `plan_archive`, `apply_archive`) over `okf_ext.moves`, but a wiki
 bundle has no single lane the way `work/` is for work items -- a page is
 addressed by **path-qualified token** (`"<lane>/<slug>"`, e.g.
-`"adrs/2026-08-12-foo"`) rather than a bare slug.
+`"adrs/2026-08-12-foo"`), against a lane vocabulary the caller resolves from
+the loaded schema set via `wiki_lanes`.
 
 **Targeted mode is unconditional** (D-019): a named token that resolves to a
 page moves regardless of any status field. `entities/` (code-wiki-okf/scan
@@ -36,9 +37,11 @@ from okf_ext import moves
 from okf_ext.moves import MovePlan, MoveResult, Refusal, stranded_summary
 from okf_ext.proposals import list_proposals
 from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
+from okf_ext.schemas import SchemaSet
 from okf_ext.shape import DEFAULT_IGNORE as _SECTIONS_IGNORE
 from okf_io import Bundle, Describe, EntryTarget, IndexUpdate, load_bundle, update_index
 
+from doc_wiki_okf.diataxis.pages import directory_for
 from doc_wiki_okf.sources import REFERENCES_DIRECTORY
 
 #: Why a named token did not move. A closed vocabulary. Narrower than
@@ -46,23 +49,45 @@ from doc_wiki_okf.sources import REFERENCES_DIRECTORY
 #: gate, so there is no `not-terminal` here.
 SkipReason = Literal["unknown-member", "already-archived"]
 
-#: The seven wiki lanes a token may name, bundle-relative posix, no trailing
-#: slash. The four Diátaxis directories are the schemas' own
-#: `x-okf-directory` values (`how-tos/`, `references/`, `explanations/` are
-#: plural/derived forms, not the Diátaxis *names* `doc_wiki_okf.proposals.lanes`
-#: uses); `adrs`, `sources` and `proposals` are the fixed conventions used
-#: throughout this package. Hardcoded, matching how `ADR_DIRECTORY` and
-#: `REFERENCES_DIRECTORY` are also fixed conventions rather than schema reads:
-#: a pure string function should not do file I/O.
-WIKI_LANES: tuple[str, ...] = (
-    "tutorials",
-    "how-tos",
-    "references",
-    "explanations",
-    "adrs",
-    "sources",
-    "proposals",
+#: The six wiki types whose lane this package ships a schema for. Type names
+#: are legitimately this package's vocabulary; directories are not -- those
+#: come off the schema set, so `wiki_lanes` and `x-okf-directory` cannot drift
+#: apart. `Proposal` is absent deliberately: no shipped schema declares it
+#: (`resources.SEED_RELATIVE_PATHS`), so its lane is the one fixed convention
+#: below.
+WIKI_LANE_TYPES: tuple[str, ...] = (
+    "Tutorial",
+    "HowTo",
+    "Reference",
+    "Explanation",
+    "Adr",
+    "Source",
 )
+
+#: The proposal lane, trailing slash, matching `proposals.lanes.ADR_DIRECTORY`'s
+#: convention. Named once here because no schema declares it.
+PROPOSALS_DIRECTORY = "proposals/"
+
+
+def wiki_lanes(schema_set: SchemaSet) -> tuple[str, ...]:
+    """Every wiki lane a token may name, bundle-relative posix, no trailing
+    slash, longest first.
+
+    Longest first so a prefix lookup is unambiguous when one lane's directory
+    prefixes another's (`docs` versus `docs/explanations`) -- the same ordering
+    `LaneSet.lane_for` computes for itself.
+
+    Reads a `SchemaSet` it is handed and touches no file, so this module stays
+    as pure as it was when the vocabulary was a constant; the I/O stays with
+    the caller that was already doing it.
+
+    Raises `KeyError` for a wiki type the set does not carry -- caller
+    configuration, the same contract `directory_for` and `lane_set` state.
+    """
+    declared = [directory_for(schema_set, type_name).rstrip("/") for type_name in WIKI_LANE_TYPES]
+    declared.append(PROPOSALS_DIRECTORY.rstrip("/"))
+    return tuple(sorted(dict.fromkeys(declared), key=len, reverse=True))
+
 
 #: The `ignore=` recipe `apply_archive` reconciles through. `*/references/*`
 #: crosses `/` (okf-io's `*` does), so this hides `sources/references/`
@@ -101,12 +126,19 @@ class Skipped:
 @dataclass(frozen=True, slots=True)
 class ArchivePlan:
     """What archiving would move. Speaks the same `ok`/`changed`/`diff()`
-    vocabulary `work_tracker_okf.archive.ArchivePlan` does."""
+    vocabulary `work_tracker_okf.archive.ArchivePlan` does.
+
+    `lanes` is the resolved vocabulary the plan was computed against, carried
+    so `apply_archive` reconciles the same lanes the plan filtered -- rather
+    than re-deriving them, which would need a schema set it has no reason to
+    hold.
+    """
 
     root: Path
     tokens: tuple[str, ...]
     skipped: tuple[Skipped, ...]
     moves: MovePlan
+    lanes: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -150,17 +182,28 @@ class ArchiveResult:
 _EMPTY_MOVE = MoveResult(moved=(), written=(), failed=(), pruned=())
 
 
-def _lane_of(token: str) -> str | None:
+def _lane_of(token: str, lanes: Sequence[str]) -> str | None:
     """The wiki lane *token* names, or `None` if it names none.
 
-    A token is `<lane>/<slug>` -- exactly one slash, first segment a member
-    of `WIKI_LANES`. A bare word, a deeper path, or an unknown first segment
-    (`"entities/foo"`, `"work/foo"`) all name no lane.
+    A token is `<lane>/<slug>`: the longest member of *lanes* that prefixes
+    *token*, with exactly one path segment left over. A bare word, a token
+    deeper than its lane (`"docs/explanations/a/b"`), and an unknown lane
+    (`"repositories/foo"`, `"work/foo"`) all name no lane.
+
+    The "one segment left over" half is the old "exactly one slash" rule,
+    preserved rather than relaxed: a page sits directly in its lane.
+
+    *lanes* is sorted here rather than assumed sorted. `wiki_lanes` already
+    returns longest-first, but a lookup whose correctness depends on the
+    caller's ordering is a defect waiting for the one caller that builds the
+    tuple by hand.
     """
-    lane, sep, rest = token.partition("/")
-    if not sep or not rest or "/" in rest:
-        return None
-    return lane if lane in WIKI_LANES else None
+    for lane in sorted(lanes, key=len, reverse=True):
+        if not token.startswith(f"{lane}/"):
+            continue
+        rest = token[len(lane) + 1 :]
+        return lane if rest and "/" not in rest else None
+    return None
 
 
 def _page(token: str) -> str:
@@ -172,13 +215,13 @@ def _archived_page(token: str, lane: str) -> str:
     return f"{lane}/_archive/{slug}.md"
 
 
-def _select(bundle: Bundle, tokens: Sequence[str]) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
+def _select(bundle: Bundle, tokens: Sequence[str], lanes: Sequence[str]) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
     """Targeted mode: unconditional per D-019. The only checks are lane
     membership and not being archived already."""
     chosen: list[str] = []
     skipped: list[Skipped] = []
     for token in dict.fromkeys(tokens):  # one record per named token, order preserved
-        lane = _lane_of(token)
+        lane = _lane_of(token, lanes)
         if lane is None:
             skipped.append(Skipped(token, "unknown-member", f"{token!r} names no known wiki lane"))
             continue
@@ -195,7 +238,7 @@ def _select(bundle: Bundle, tokens: Sequence[str]) -> tuple[tuple[str, ...], tup
     return tuple(sorted(chosen)), tuple(skipped)
 
 
-def _sweep(bundle: Bundle) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
+def _sweep(bundle: Bundle, lanes: Sequence[str]) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
     """Every eligible proposal, or none. A sweep's non-candidates were never
     candidates (matching `work_tracker_okf.archive._select`'s own C4-G), so
     this carries no `Skipped`.
@@ -203,12 +246,18 @@ def _sweep(bundle: Bundle) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
     Eligible means a *coerced* `page_status` other than `"proposed"` -- a
     malformed proposal (`page_status is None`) has no status signal to sweep
     against and is left alone, matching `_select`'s own treatment of an
-    uncoercible proposal page status.
+    uncoercible proposal page status -- **and** a member that resolves to a
+    lane. `list_proposals` enumerates by `type:`, not by path, so a `Proposal`
+    sitting outside every lane can come back; it has no lane to build an
+    `_archive/` path under, and silently dropping it is what "never a
+    candidate" means.
     """
     chosen = sorted(
         proposal.member[:-3]  # strip ".md": member is already bundle-relative posix
         for proposal in list_proposals(bundle)
-        if proposal.page_status is not None and proposal.page_status != "proposed"
+        if proposal.page_status is not None
+        and proposal.page_status != "proposed"
+        and _lane_of(proposal.member[:-3], lanes) is not None
     )
     return tuple(chosen), ()
 
@@ -239,34 +288,41 @@ def _reference_companions(bundle: Bundle, source_slug: str) -> dict[str, str]:
     return mapping
 
 
-def _mapping(tokens: Sequence[str], bundle: Bundle) -> dict[str, str]:
+def _mapping(tokens: Sequence[str], bundle: Bundle, lanes: Sequence[str]) -> dict[str, str]:
     mapping: dict[str, str] = {}
     for token in tokens:
-        lane, slug = token.split("/", 1)
+        lane = _lane_of(token, lanes)
+        if lane is None:  # pragma: no cover -- `_select`/`_sweep` only yield resolvable tokens
+            continue
         mapping[_page(token)] = _archived_page(token, lane)
         if lane == "sources":
-            mapping.update(_reference_companions(bundle, slug))
+            mapping.update(_reference_companions(bundle, token[len(lane) + 1 :]))
     return mapping
 
 
-def plan_archive(bundle: Bundle, tokens: Sequence[str] | None = None) -> ArchivePlan:
+def plan_archive(bundle: Bundle, tokens: Sequence[str] | None = None, *, lanes: Sequence[str]) -> ArchivePlan:
     """Plan the archive of *tokens*, or of every eligible proposal when `None`.
 
     *bundle* must be loaded through `ARCHIVE_IGNORE`; through `IGNORE` a
     `sources/` page's `references/` companions are invisible to `moves` and
     the archive is silently half done.
 
+    *lanes* is the wiki lane vocabulary, from `wiki_lanes(schema_set)`. It is
+    required and keyword-only: a default would be a second, drifting copy of
+    exactly the constant this argument replaced.
+
     Writes nothing.
     """
-    chosen, skipped = _sweep(bundle) if tokens is None else _select(bundle, tokens)
-    plan = moves.plan_move_many(bundle, _mapping(chosen, bundle))
+    resolved = tuple(lanes)
+    chosen, skipped = _sweep(bundle, resolved) if tokens is None else _select(bundle, tokens, resolved)
+    plan = moves.plan_move_many(bundle, _mapping(chosen, bundle, resolved))
     # Drop every touched lane's own index edits, active and `_archive/` form,
     # so `update_index` owns index content end to end -- the same reason
     # work_tracker_okf.archive.plan_archive filters `_LANE_INDEXES`.
-    lanes = {token.split("/", 1)[0] for token in chosen}
-    lane_indexes = {f"{lane}/index.md" for lane in lanes} | {f"{lane}/_archive/index.md" for lane in lanes}
+    touched = {lane for token in chosen if (lane := _lane_of(token, resolved)) is not None}
+    lane_indexes = {f"{lane}/index.md" for lane in touched} | {f"{lane}/_archive/index.md" for lane in touched}
     filtered = replace(plan, edits=tuple(edit for edit in plan.edits if edit.member not in lane_indexes))
-    return ArchivePlan(root=bundle.root, tokens=chosen, skipped=skipped, moves=filtered)
+    return ArchivePlan(root=bundle.root, tokens=chosen, skipped=skipped, moves=filtered, lanes=resolved)
 
 
 def _harvest(bundle: Bundle, lanes: Sequence[str]) -> Mapping[str, str]:
@@ -282,9 +338,9 @@ def _harvest(bundle: Bundle, lanes: Sequence[str]) -> Mapping[str, str]:
     return {drift.target: drift.text for update in update_index(bundle, directories=present) for drift in update.drift}
 
 
-def _describe_for(harvested: Mapping[str, str]) -> Describe:
+def _describe_for(harvested: Mapping[str, str], lanes: Sequence[str]) -> Describe:
     def describe(target: EntryTarget) -> str | None:
-        for lane in WIKI_LANES:
+        for lane in sorted(lanes, key=len, reverse=True):
             prefix = f"{lane}/_archive/"
             if target.path.startswith(prefix):
                 active = f"{lane}/{target.path[len(prefix) :]}"
@@ -336,7 +392,7 @@ def apply_archive(bundle: Bundle, plan: ArchivePlan) -> ArchiveResult:
     if not plan.tokens:
         return ArchiveResult(archived=(), skipped=plan.skipped, refusals=(), move=_EMPTY_MOVE, indexes=())
 
-    lanes = sorted({token.split("/", 1)[0] for token in plan.tokens})
+    lanes = sorted({lane for token in plan.tokens if (lane := _lane_of(token, plan.lanes)) is not None})
     harvested = _harvest(bundle, lanes)
     result = moves.apply(bundle, plan.moves)
 
@@ -346,12 +402,12 @@ def apply_archive(bundle: Bundle, plan: ArchivePlan) -> ArchiveResult:
     indexes: tuple[IndexUpdate, ...] = ()
     if archived:
         reloaded = load_bundle(plan.root, ignore=IGNORE)
-        touched = sorted({token.split("/", 1)[0] for token in archived})
+        touched = sorted({lane for token in archived if (lane := _lane_of(token, plan.lanes)) is not None})
         candidates = [d for lane in touched for d in (lane, f"{lane}/_archive")]
         indexes = update_index(
             reloaded,
             directories=_present_directories(reloaded, candidates),
-            describe=_describe_for(harvested),
+            describe=_describe_for(harvested, plan.lanes),
             create_missing=True,
             dry_run=False,
         )
@@ -362,11 +418,13 @@ def apply_archive(bundle: Bundle, plan: ArchivePlan) -> ArchiveResult:
 __all__ = [
     "ARCHIVE_IGNORE",
     "IGNORE",
-    "WIKI_LANES",
+    "PROPOSALS_DIRECTORY",
+    "WIKI_LANE_TYPES",
     "ArchivePlan",
     "ArchiveResult",
     "SkipReason",
     "Skipped",
     "apply_archive",
     "plan_archive",
+    "wiki_lanes",
 ]

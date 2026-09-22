@@ -190,7 +190,7 @@ def apply_retype(bundle: Bundle, plan: RetypePlan) -> RetypeResult:
     the **body**, and a frontmatter edit does not change the body, so rewriting
     `type:` cannot invalidate the move plan it was computed alongside. It is also
     the right ordering on failure: a correctly-typed page in its old lane is a
-    legal page under ADR 2026-08-07-pascalcase-types, while a page in `explanations/` still claiming to
+    legal page under ADR 2026-08-07-pascalcase-types, while a page in `docs/explanations/` still claiming to
     be something else is a lie in the field every reader trusts. The durable half
     lands first; the cosmetic half second.
 

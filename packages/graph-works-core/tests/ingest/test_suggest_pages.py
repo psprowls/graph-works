@@ -150,7 +150,7 @@ def test_catalog_lanes_covers_global_discovery_indexes_but_not_a_top_level_files
         "agent-plugins",
         "test-suites",
         "dependencies",
-        "explanations",
+        "docs/explanations",
         "adrs",
         "sources",
     } <= lanes
@@ -161,7 +161,7 @@ def test_the_curated_index_lists_existing_pages_with_their_lane(tmp_path):
     root = make_bundle(tmp_path)
     bundle = load_bundle(root)
     index = build_curated_index(bundle, lane_set(declarations(root)[0]))
-    assert {"lane": "explanation", "id": "explanations/why", "title": "Why", "summary": "The reason"} in index
+    assert {"lane": "explanation", "id": "docs/explanations/why", "title": "Why", "summary": "The reason"} in index
 
 
 def test_the_extract_prompt_names_the_existing_pages_and_says_so_when_there_are_none():
@@ -236,7 +236,7 @@ async def test_plan_suggestions_writes_nothing(tmp_path, monkeypatch):
     payload = json.dumps({"suggestions": [_suggestion(title="Deferred")]})
     planned, status, _bundle = await _plan_phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
     assert len(planned) == 1
-    assert planned[0].target == "explanations/deferred.md"
+    assert planned[0].target == "docs/explanations/deferred.md"
     assert status["proposals"] == 1  # optimistic: len(planned), nothing applied yet
     assert not (root / "proposals").exists()
 
@@ -249,7 +249,7 @@ async def test_apply_suggestions_applies_a_previously_planned_proposal(tmp_path,
 
     reports, apply_status = apply_suggestions(bundle, planned)
     assert apply_status == {"proposals": 1, "failed": [], "errored": []}
-    assert [report["target"] for report in reports] == ["explanations/deferred.md"]
+    assert [report["target"] for report in reports] == ["docs/explanations/deferred.md"]
     assert (root / planned[0].plan.proposal).exists()
 
 
@@ -318,7 +318,7 @@ async def test_run_suggest_phase_merges_plan_time_and_apply_time_errored_entries
     from okf_ext.proposals import apply as real_apply_plan
 
     def fake_apply(bundle_arg, plan):
-        if plan.target == "explanations/applyboom.md":
+        if plan.target == "docs/explanations/applyboom.md":
             raise RuntimeError("boom-apply")
         return real_apply_plan(bundle_arg, plan)
 
@@ -395,10 +395,10 @@ async def test_each_lane_files_to_its_declared_target(tmp_path, monkeypatch):
     reports, status = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
     targets = {report["target"] for report in reports}
     assert targets == {
-        "tutorials/page-tutorial.md",
-        "how-tos/page-how-to.md",
-        "references/page-reference.md",
-        "explanations/page-explanation.md",
+        "docs/tutorials/page-tutorial.md",
+        "docs/how-tos/page-how-to.md",
+        "docs/reference/page-reference.md",
+        "docs/explanations/page-explanation.md",
         "adrs/page-adr.md",
     }
     assert status["extractor"] == "ok"
@@ -455,13 +455,13 @@ async def test_a_classify_refusal_drops_the_suggestion_and_records_the_reason(tm
     assert reports == []
     assert status["proposals"] == 0
     assert status["unclassified"] == ["Options: undeclared-type"]
-    assert not (root / "references").exists()
+    assert not (root / "docs" / "reference").exists()
 
 
 async def test_mode_is_derived_from_the_bundle_not_proposed(tmp_path, monkeypatch):
     """An existing target selects update mode regardless of model suggestions."""
     root = make_bundle(tmp_path)
-    (root / "explanations" / "repeatable.md").write_text(
+    (root / "docs" / "explanations" / "repeatable.md").write_text(
         "---\ntype: Explanation\ntitle: Repeatable\ndescription: d\n---\n\nbody\n",
         encoding="utf-8",
         newline="",
@@ -470,7 +470,7 @@ async def test_mode_is_derived_from_the_bundle_not_proposed(tmp_path, monkeypatc
     reports, _ = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
     proposal = (root / reports[0]["proposal"]).read_text(encoding="utf-8")
     assert "Update existing Explanation page" in proposal
-    assert reports[0]["target"] == "explanations/repeatable.md"
+    assert reports[0]["target"] == "docs/explanations/repeatable.md"
 
 
 async def test_a_changed_renderer_context_refuses_without_replacing_the_proposal(tmp_path, monkeypatch):
@@ -480,7 +480,7 @@ async def test_a_changed_renderer_context_refuses_without_replacing_the_proposal
     first, _ = await _phase(root, extractor_payload=payload, monkeypatch=monkeypatch)
     note = root / first[0]["proposal"]
     before = note.read_bytes()
-    (root / "explanations" / "repeatable.md").write_text(
+    (root / "docs" / "explanations" / "repeatable.md").write_text(
         "---\ntype: Explanation\ntitle: Repeatable\ndescription: d\n---\n\nbody\n",
         encoding="utf-8",
         newline="",
@@ -553,7 +553,7 @@ async def test_a_plan_file_refusal_drops_the_suggestion_and_records_the_reason(t
     """`classify` accepting a suggestion doesn't guarantee `plan_file` will.
 
     Seed a live, already-decided `Proposal` at the exact target the
-    suggestion resolves to (`explanations/blocked.md`): `plan_propose` refuses
+    suggestion resolves to (`docs/explanations/blocked.md`): `plan_propose` refuses
     a re-proposal against a decided proposal with `already-decided`, never
     silently reopening it. That refusal has to surface under its own key --
     `status["refused"]` -- with the bare refusal kind, no proposal filed,
@@ -567,7 +567,7 @@ async def test_a_plan_file_refusal_drops_the_suggestion_and_records_the_reason(t
         "type: Proposal\n"
         "title: Blocked\n"
         "description: d\n"
-        "target: explanations/blocked.md\n"
+        "target: docs/explanations/blocked.md\n"
         "page_status: approved\n"
         "generated:\n"
         "  by: agent:test\n"
@@ -635,7 +635,7 @@ async def test_a_non_text_extractor_response_is_a_failure(tmp_path, monkeypatch)
 async def test_two_suggestions_for_one_target_file_once_and_count_once(tmp_path, monkeypatch):
     """The bundle is a snapshot; the loop's own writes do not appear in it.
 
-    Both suggestions resolve to `explanations/same-page.md`, so `plan_file`
+    Both suggestions resolve to `docs/explanations/same-page.md`, so `plan_file`
     derived `mode="create"` twice and the second write was refused as `stale`.
     Nothing read that refusal, so the run reported two proposals and one file.
 
@@ -656,7 +656,7 @@ async def test_two_suggestions_for_one_target_file_once_and_count_once(tmp_path,
     assert status["proposals"] == 1
     assert len(reports) == 1
     assert len(list((root / "proposals").glob("*.md"))) == 1
-    assert status["duplicates"] == ["Same Page: explanations/same-page.md"]
+    assert status["duplicates"] == ["Same Page: docs/explanations/same-page.md"]
 
 
 async def test_a_proposal_whose_write_fails_is_recorded_not_counted(tmp_path, monkeypatch):
@@ -728,7 +728,7 @@ async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypa
     `classify` sees a SchemaSet with `Reference` removed, which is how
     `undeclared-type` is reached without breaking lane construction (the
     `LaneSet` is still built from the full set). A live already-decided
-    `Proposal` at `explanations/blocked.md` reaches `plan_file`'s
+    `Proposal` at `docs/explanations/blocked.md` reaches `plan_file`'s
     `already-decided`. Two suggestions with the same title reach the same-run
     duplicate drop. One run, all three.
     """
@@ -747,7 +747,7 @@ async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypa
         "type: Proposal\n"
         "title: Blocked\n"
         "description: d\n"
-        "target: explanations/blocked.md\n"
+        "target: docs/explanations/blocked.md\n"
         "page_status: approved\n"
         "generated:\n"
         "  by: agent:test\n"
@@ -796,6 +796,6 @@ async def test_one_run_files_each_drop_kind_under_its_own_key(tmp_path, monkeypa
     )
     assert status["unclassified"] == ["Options: undeclared-type"]
     assert status["refused"] == ["Blocked: already-decided"]
-    assert status["duplicates"] == ["Same Page: explanations/same-page.md"]
+    assert status["duplicates"] == ["Same Page: docs/explanations/same-page.md"]
     assert status["proposals"] == 1
     assert [report["title"] for report in reports] == ["Same Page"]

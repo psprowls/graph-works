@@ -124,7 +124,7 @@ def test_decide_applied_and_failed_forms() -> None:
 def test_file_payload_never_projects_create_text() -> None:
     plan = ProposalPlan(
         root=Path("/ws/okf"),
-        target="explanations/t.md",
+        target="docs/explanations/t.md",
         proposal="proposals/explanations-t.md",
         writes=(Write(member="proposals/explanations-t.md", mode="create", text="---\nsecret body\n"),),
         refusals=(),

@@ -67,7 +67,7 @@ gw query --query "<question>" --json
 This is the `claude_code`-backend default — it returns a `top_pages` list, each with a `path`, an `excerpt`, and `search_scores`. Treat those paths as part of the starting candidate set alongside `index.md`, from the outset rather than only once the index comes up empty. `--backend bedrock` / `--backend vercel` still run the full internal pipeline (an internal LLM call composes the answer) for workspaces that opt into it.
 
 Pick 3-10 pages across categories most likely to contain the answer:
-- `explanations/` — cross-cutting patterns and high-level syntheses (filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns)
+- `docs/explanations/` — cross-cutting patterns and high-level syntheses (filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns)
 - `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — package/app surface area
 - `dependencies/<ecosystem>/` — external-library questions
 - `work/` — bug / tech-debt / planned / in-progress questions

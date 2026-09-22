@@ -93,7 +93,7 @@ def proposal_decide(*, applied: bool, found: bool = True) -> ProposalDecideRun:
 
 def proposal_file(*, applied: bool) -> ProposalFileRun:
     write = Write(member="proposals/explanations-a.md", mode="create", text="---\nbody\n")
-    plan = ProposalPlan(Path("/ws/okf"), "explanations/a.md", write.member, (write,), ())
+    plan = ProposalPlan(Path("/ws/okf"), "docs/explanations/a.md", write.member, (write,), ())
     return ProposalFileRun(
         lane="explanation",
         target=plan.target,

@@ -237,7 +237,7 @@ def test_reports_both_lanes_stranded_counts_separately_and_labelled(
     (2026-08-21 spec §4.5) -- the two counts are never merged into one."""
     calls.box["run"] = _Run(
         plan=_Plan(stranded=(Stranded(member="work/citing.md", target="work/a.md", line=3),)),
-        wiki_plan=_Plan(stranded=(Stranded(member="tutorials/citing.md", target="tutorials/b.md", line=5),)),
+        wiki_plan=_Plan(stranded=(Stranded(member="docs/tutorials/citing.md", target="docs/tutorials/b.md", line=5),)),
         archived=("2026-01-01-a",),
         wiki_archived=("concepts/b",),
         applied=True,

@@ -31,19 +31,19 @@ def test_diataxis_lanes_directory_from_schema_set() -> None:
     lanes_obj = lane_set(ss)
 
     # Tutorial
-    assert lanes_obj.lanes[0].directory == "tutorials/"
+    assert lanes_obj.lanes[0].directory == "docs/tutorials/"
     assert lanes_obj.lanes[0].type_name == "Tutorial"
 
     # HowTo
-    assert lanes_obj.lanes[1].directory == "how-tos/"
+    assert lanes_obj.lanes[1].directory == "docs/how-tos/"
     assert lanes_obj.lanes[1].type_name == "HowTo"
 
     # Reference
-    assert lanes_obj.lanes[2].directory == "references/"
+    assert lanes_obj.lanes[2].directory == "docs/reference/"
     assert lanes_obj.lanes[2].type_name == "Reference"
 
     # Explanation
-    assert lanes_obj.lanes[3].directory == "explanations/"
+    assert lanes_obj.lanes[3].directory == "docs/explanations/"
     assert lanes_obj.lanes[3].type_name == "Explanation"
 
 
@@ -67,10 +67,10 @@ def test_target_for_undated_by_default() -> None:
     lanes_obj = lane_set(schema_set())
 
     # Diátaxis lanes are undated
-    assert lanes_obj.target_for("tutorial", "Getting Started") == "tutorials/getting-started.md"
-    assert lanes_obj.target_for("how-to", "Build a Widget") == "how-tos/build-a-widget.md"
-    assert lanes_obj.target_for("reference", "Config") == "references/config.md"
-    assert lanes_obj.target_for("explanation", "Why Events Work") == "explanations/why-events-work.md"
+    assert lanes_obj.target_for("tutorial", "Getting Started") == "docs/tutorials/getting-started.md"
+    assert lanes_obj.target_for("how-to", "Build a Widget") == "docs/how-tos/build-a-widget.md"
+    assert lanes_obj.target_for("reference", "Config") == "docs/reference/config.md"
+    assert lanes_obj.target_for("explanation", "Why Events Work") == "docs/explanations/why-events-work.md"
 
     # adr is also undated by default
     assert lanes_obj.target_for("adr", "Use YAML for Config") == "adrs/use-yaml-for-config.md"
@@ -82,10 +82,12 @@ def test_on_date_prefixes_only_dated_lane() -> None:
     test_date = date(2026, 8, 12)
 
     # Diátaxis lanes ignore on= (no date prefix)
-    assert lanes_obj.target_for("tutorial", "Getting Started", on=test_date) == "tutorials/getting-started.md"
-    assert lanes_obj.target_for("how-to", "Build a Widget", on=test_date) == "how-tos/build-a-widget.md"
-    assert lanes_obj.target_for("reference", "Config", on=test_date) == "references/config.md"
-    assert lanes_obj.target_for("explanation", "Why Events Work", on=test_date) == "explanations/why-events-work.md"
+    assert lanes_obj.target_for("tutorial", "Getting Started", on=test_date) == "docs/tutorials/getting-started.md"
+    assert lanes_obj.target_for("how-to", "Build a Widget", on=test_date) == "docs/how-tos/build-a-widget.md"
+    assert lanes_obj.target_for("reference", "Config", on=test_date) == "docs/reference/config.md"
+    assert (
+        lanes_obj.target_for("explanation", "Why Events Work", on=test_date) == "docs/explanations/why-events-work.md"
+    )
 
     # adr lane dates the filename when on= is given
     assert lanes_obj.target_for("adr", "Use YAML for Config", on=test_date) == "adrs/2026-08-12-use-yaml-for-config.md"
@@ -95,10 +97,10 @@ def test_lane_for_resolves_directory_to_lane() -> None:
     """lane_for reads a directory and returns the lane; None outside all declared lanes."""
     lanes_obj = lane_set(schema_set())
 
-    assert lanes_obj.lane_for("tutorials/") == lanes_obj.lanes[0]
-    assert lanes_obj.lane_for("how-tos/") == lanes_obj.lanes[1]
-    assert lanes_obj.lane_for("references/") == lanes_obj.lanes[2]
-    assert lanes_obj.lane_for("explanations/") == lanes_obj.lanes[3]
+    assert lanes_obj.lane_for("docs/tutorials/") == lanes_obj.lanes[0]
+    assert lanes_obj.lane_for("docs/how-tos/") == lanes_obj.lanes[1]
+    assert lanes_obj.lane_for("docs/reference/") == lanes_obj.lanes[2]
+    assert lanes_obj.lane_for("docs/explanations/") == lanes_obj.lanes[3]
     assert lanes_obj.lane_for("adrs/") == lanes_obj.lanes[4]
 
     # Unknown directory returns None
@@ -112,14 +114,14 @@ def test_lane_for_resolves_directory_to_lane() -> None:
         # Full file paths within each lane
         ("adrs/2026-08-12-x.md", "adr"),
         ("adrs/bulk-write.md", "adr"),
-        ("references/deep/x.md", "reference"),
-        ("references/config.md", "reference"),
-        ("tutorials/getting-started.md", "tutorial"),
-        ("how-tos/build-a-widget.md", "how-to"),
-        ("explanations/why-events-work.md", "explanation"),
+        ("docs/reference/deep/x.md", "reference"),
+        ("docs/reference/config.md", "reference"),
+        ("docs/tutorials/getting-started.md", "tutorial"),
+        ("docs/how-tos/build-a-widget.md", "how-to"),
+        ("docs/explanations/why-events-work.md", "explanation"),
         # Nested paths within lane directories
-        ("references/deep/nested/page.md", "reference"),
-        ("tutorials/advanced/section/page.md", "tutorial"),
+        ("docs/reference/deep/nested/page.md", "reference"),
+        ("docs/tutorials/advanced/section/page.md", "tutorial"),
         # Paths outside all lane directories return None
         ("docs/something.md", None),
         ("guides/unknown.md", None),
@@ -170,7 +172,7 @@ def test_is_adr_requires_both_the_directory_and_the_type() -> None:
     from doc_wiki_okf.proposals import is_adr
 
     assert is_adr("adrs/2026-08-12-two-layer", "Adr")
-    assert not is_adr("explanations/byte-fidelity", "Adr")
+    assert not is_adr("docs/explanations/byte-fidelity", "Adr")
     assert not is_adr("adrs/2026-08-12-two-layer", "Explanation")
     assert not is_adr("adrs/2026-08-12-two-layer", "")
 

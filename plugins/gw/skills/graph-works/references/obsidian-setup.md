@@ -13,7 +13,7 @@ Recommended Obsidian configuration for a Code Wiki. None of this is strictly req
 
 ## Settings → Files and Links
 
-- **Default location for new notes:** none — new pages are typed (`explanations/`, `adrs/`, `work/`, `sources/`, etc. under `<workspace>/okf/`); file each note in the lane matching its kind rather than relying on a single default folder
+- **Default location for new notes:** none — new pages are typed (`docs/explanations/`, `adrs/`, `work/`, `sources/`, etc. under `<workspace>/okf/`); file each note in the lane matching its kind rather than relying on a single default folder
 - **New link format:** `Absolute path in vault`
 - **Use `[[Wikilinks]]`:** OFF
 - **Attachment folder path:** `sources/references/` (attached images are copied here by the ingest flow, alongside the material that references them)

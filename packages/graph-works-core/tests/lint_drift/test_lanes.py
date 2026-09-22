@@ -109,13 +109,13 @@ def test_a_curated_directory_added_later_needs_no_lanes_edit(workspace):
     curated directory silently rejoin the work lane and restore the
     duplication with nothing to catch it."""
     bundle_dir = workspace.layout.bundle_dir
-    (bundle_dir / "tutorials").mkdir()
-    (bundle_dir / "tutorials" / "getting-started.md").write_text(
+    (bundle_dir / "docs" / "tutorials").mkdir(parents=True)
+    (bundle_dir / "docs" / "tutorials" / "getting-started.md").write_text(
         "---\ntype: Tutorial\ntitle: Start\n---\n\nBody.\n", encoding="utf-8"
     )
     _wiki, work = _compose(workspace).lanes
-    assert "tutorials/*" in work.ignore
-    assert "tutorials/getting-started" not in load_bundle(work.root, ignore=work.ignore).concepts
+    assert "docs/*" in work.ignore
+    assert "docs/tutorials/getting-started" not in load_bundle(work.root, ignore=work.ignore).concepts
 
 
 def test_the_wiki_lane_carries_every_declared_capability(workspace):

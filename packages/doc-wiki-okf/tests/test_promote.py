@@ -136,5 +136,5 @@ def test_an_unapproved_proposal_still_refuses(tmp_path) -> None:
 def test_an_undated_lane_promotes_in_place(tmp_path) -> None:
     bundle, proposal = _approved(tmp_path / "b", lane="reference", title="CLI Flags")
     plan = plan_promotion(bundle, lanes(), proposal, section_set=section_set(), by=BY, at=AT, on=TODAY)
-    assert plan.writes[0].member == "references/cli-flags.md"
-    assert dict(plan.writes[1].frontmatter)["target"] == "references/cli-flags.md"
+    assert plan.writes[0].member == "docs/reference/cli-flags.md"
+    assert dict(plan.writes[1].frontmatter)["target"] == "docs/reference/cli-flags.md"

@@ -122,7 +122,7 @@ Record known issues, version pins, or workarounds this dependency needs.
 ## 3. Explanation page
 
 A cross-cutting concept, convention, pattern, or high-level synthesis. Lives in
-`explanations/`. Shared frontmatter with the other Diátaxis types: `type`, `title`,
+`docs/explanations/`. Shared frontmatter with the other Diátaxis types: `type`, `title`,
 `description` required; `status`, `updated`, `tags`, `sources` optional.
 
 Declared headings: `## Context` (required), `## Trade-offs`, `## See also`. Extra
@@ -163,7 +163,7 @@ What choosing this costs, and the alternatives.
 - *Architecture synthesis* — layers, flows, and components spanning many packages. Tag
   `architecture`; lead with a `## Thesis` section and link back to every entity and
   ADR it draws on, with a dated `## How this synthesis has changed` log.
-- *Comparison* — `explanations/<a>-vs-<b>.md`, or `<topic>-options.md` for n-way.
+- *Comparison* — `docs/explanations/<a>-vs-<b>.md`, or `<topic>-options.md` for n-way.
 
 Tags must exist in `.gw/tags.yaml`; curated lanes enforce it. Do not add a tag to the
 vocabulary to make a page pass — pick an existing concept tag.

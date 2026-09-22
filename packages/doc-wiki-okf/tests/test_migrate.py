@@ -204,7 +204,7 @@ def test_an_unreadable_old_dialect_document_is_refused(tmp_path) -> None:
 def test_a_parse_error_that_is_not_a_proposal_is_ignored(tmp_path) -> None:
     """A broken tutorial page is not this rewriter's business."""
     broken = "---\ntitle: A broken page\n\n## no close delimiter\n"
-    plan = _plan(tmp_path, {"tutorials/x": broken})
+    plan = _plan(tmp_path, {"docs/tutorials/x": broken})
     assert plan.ok
     assert plan.is_empty
 

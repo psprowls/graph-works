@@ -6,5 +6,5 @@
     "type": { "const": "Reference" },
     "applies_to": { "type": "array", "items": { "type": "string" } }
   },
-  "x-okf-directory": "references/"
+  "x-okf-directory": "docs/reference/"
 }

@@ -10,6 +10,11 @@ from __future__ import annotations
 import importlib.resources
 from importlib.resources.abc import Traversable
 
+from okf_ext.schemas import SchemaSet, load_schemas
+
+#: The subdirectory of `assets/` holding this package's schema documents.
+SCHEMA_ASSET_DIRNAME = "schema"
+
 #: Every file this package owns, bundle-relative posix, in write order.
 #:
 #: Fourteen: `sections/_fragments.doc_wiki.yaml` is a member like any other, and
@@ -51,4 +56,17 @@ def seed_files() -> dict[str, str]:
     return {relative: (assets / relative).read_text(encoding="utf-8") for relative in SEED_RELATIVE_PATHS}
 
 
-__all__ = ["SEED_RELATIVE_PATHS", "assets_root", "seed_files"]
+def seeded_schema_set() -> SchemaSet:
+    """This package's own schemas, loaded from package data.
+
+    The fallback for a caller that wants the declared wiki lanes but has no
+    workspace `.gw/schema/` to read -- see
+    `graph_works_core.archive.commands.run_archive`. `as_file` rather than a
+    path join: `assets_root()` is a `Traversable`, and under a zipped install
+    the directory has to be materialized before `load_schemas` can walk it.
+    """
+    with importlib.resources.as_file(assets_root() / SCHEMA_ASSET_DIRNAME) as path:
+        return load_schemas(path)
+
+
+__all__ = ["SCHEMA_ASSET_DIRNAME", "SEED_RELATIVE_PATHS", "assets_root", "seed_files", "seeded_schema_set"]

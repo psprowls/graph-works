@@ -36,7 +36,7 @@ Ingest reads material directly from any filesystem path; there is no staging inb
     │   ├── test-suites/<name>.md
     │   └── files/<source-path>.md
     ├── dependencies/<ecosystem>/<name>.md   # sibling root, NOT nested under repositories/
-    ├── tutorials/ how-tos/ references/ explanations/   # Diátaxis lanes
+    ├── docs/tutorials/ docs/how-tos/ docs/reference/ docs/explanations/   # Diátaxis lanes
     ├── sources/                    # one summary page per ingested source
     │   └── references/             # copies of ingested material (the ingest flow copies here; originals are never moved)
     ├── adrs/                       # architecture decision records
@@ -72,7 +72,7 @@ Read those rather than copying another page's shape.
 |---|---|---|---|---|
 | Entities | `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | `repositories/<repo>/…` | `type`, `title`, `resource` | `gw scan` |
 | Dependencies | `Dependency` | `dependencies/<ecosystem>/` | `type`, `title`, `resource`, `ecosystem` | `gw scan` |
-| Diátaxis | `Explanation`, `Reference`, `HowTo`, `Tutorial` | `explanations/`, `references/`, `how-tos/`, `tutorials/` | `type`, `title`, `description` | authors, via proposals |
+| Diátaxis | `Explanation`, `Reference`, `HowTo`, `Tutorial` | `docs/explanations/`, `docs/reference/`, `docs/how-tos/`, `docs/tutorials/` | `type`, `title`, `description` | authors, via proposals |
 | Sources | `Source` | `sources/` | `type`, `title`, `description`, `source_path` | `gw ingest` |
 | ADRs | `Adr` | `adrs/` | `type`, `title`, `description`, `decision_date` | authors, or `gw wiki proposal promote` |
 | Proposals | `Proposal` | `proposals/` | `type`, `title`, `target`, `page_status`, `sources` | `gw ingest`, `gw wiki proposal` |
@@ -156,8 +156,8 @@ An `Explanation` is a cross-cutting technical concept — a naming convention,
 middleware shape, or contract that spans packages — or a high-level synthesis
 (layers, components, flows). It is a one-paragraph definition, where the idea appears
 in the code, and links to the packages, dependencies, ADRs, and sources that motivate
-it. Comparisons live here too: `explanations/<a>-vs-<b>.md` for two-way,
-`explanations/<topic>-options.md` for n-way. The old `kind: concept | pattern |
+it. Comparisons live here too: `docs/explanations/<a>-vs-<b>.md` for two-way,
+`docs/explanations/<topic>-options.md` for n-way. The old `kind: concept | pattern |
 architecture` discriminator is gone; use `tags:` (for example `architecture`).
 
 ### Dependency pages
@@ -309,10 +309,10 @@ updated: 2026-04-20
   | `dependency` | `dependencies/<ecosystem>/<name>.md` (sibling root, not nested) | `dependencies/npm/react.md` |
   | `test_suite` | `repositories/<repo>/test-suites/<name>.md` | `repositories/my-monorepo/test-suites/common-aws-node-ts.md` |
 
-- **Explanations:** `explanations/<slug>.md` — e.g. `explanations/global-context.md`. Comparisons live here too: `explanations/<a>-vs-<b>.md` for two-way, `explanations/<topic>-options.md` for n-way.
+- **Explanations:** `docs/explanations/<slug>.md` — e.g. `docs/explanations/global-context.md`. Comparisons live here too: `docs/explanations/<a>-vs-<b>.md` for two-way, `docs/explanations/<topic>-options.md` for n-way.
 - **Sources:** `sources/<YYYY-MM>-<short-slug>.md` — e.g. `sources/2026-04-auth-migration-spec.md`
 - **ADRs:** `adrs/<YYYY-MM-DD>-<slug>.md` — e.g. `adrs/2026-02-14-move-to-esm.md`. Dated by the decision, never numbered: there is no id to allocate and nothing to collide on.
-- **Architecture syntheses:** `explanations/<topic>.md` tagged `architecture` — e.g. `explanations/request-flow.md`
+- **Architecture syntheses:** `docs/explanations/<topic>.md` tagged `architecture` — e.g. `docs/explanations/request-flow.md`
 - **Dependencies:** `dependencies/<ecosystem>/<name>.md` — use the registry name (`dependencies/npm/react.md`, `dependencies/npm/react-native-maps.md`). For scoped npm packages, replace `/` with `__` (`dependencies/npm/@tanstack__react-query.md`). Service pages use a slug derived from the service name, under the `dependencies/` root (`dependencies/mongodb-atlas.md`).
 - **Work:** `<work-path>.md`, where `<work-path>` is an extensionless canonical
   path such as `work/release-cutover/children/epic-migration/children/feature-parser`.
@@ -459,11 +459,11 @@ not operations.
   repositories/my-monorepo/packages/timeline-native-ts.md. No renames or deletions.
 
 - **ingest** Auth Migration Spec
-  Added sources/2026-04-auth-migration-spec.md. Updated explanations/global-context,
+  Added sources/2026-04-auth-migration-spec.md. Updated docs/explanations/global-context,
   repositories/my-monorepo/packages/shared-aws-node-ts.md,
   repositories/my-monorepo/packages/shared-native-ts.md,
-  explanations/request-flow, adrs/0014-jwt-sessions (new). Flagged contradiction
-  with explanations/global-context on session shape.
+  docs/explanations/request-flow, adrs/0014-jwt-sessions (new). Flagged contradiction
+  with docs/explanations/global-context on session shape.
 ```
 
 Valid ops: `scan`, `ingest`, `query`, `lint`, `create`, `update`, `delete`, `note`.

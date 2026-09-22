@@ -167,9 +167,9 @@ def test_show_targets_the_raw_disk_id_for_a_non_ascii_page(tmp_path, monkeypatch
     monkeypatch.setattr("doc_wiki_okf.proposals.lanes.slugify", lambda title: nfc)
     root = tmp_path / "b"
     _init(root)
-    (root / "references").mkdir(parents=True, exist_ok=True)
+    (root / "docs" / "reference").mkdir(parents=True, exist_ok=True)
     page_text = "---\ntype: Reference\ntitle: Café\n---\n\n# Café\n"
-    (root / "references" / f"{nfd}.md").write_text(page_text, encoding="utf-8")
+    (root / "docs" / "reference" / f"{nfd}.md").write_text(page_text, encoding="utf-8")
     filed = runner.invoke(
         app,
         [
@@ -193,13 +193,13 @@ def test_show_targets_the_raw_disk_id_for_a_non_ascii_page(tmp_path, monkeypatch
     # The page is rewritten under a different Unicode normalization after
     # filing: delete the NFD file, write NFC in its place with identical
     # content. The proposal's stored `target` (NFD) is now stale.
-    (root / "references" / f"{nfd}.md").unlink()
-    (root / "references" / f"{nfc}.md").write_text(page_text, encoding="utf-8")
+    (root / "docs" / "reference" / f"{nfd}.md").unlink()
+    (root / "docs" / "reference" / f"{nfc}.md").write_text(page_text, encoding="utf-8")
 
-    result = runner.invoke(app, ["proposal", "show", str(root), f"references/{nfd}.md"])
+    result = runner.invoke(app, ["proposal", "show", str(root), f"docs/reference/{nfd}.md"])
 
     assert result.exit_code == 0, result.stderr
-    assert f"Update existing Reference page `references/{nfc}.md`." in result.stdout
+    assert f"Update existing Reference page `docs/reference/{nfc}.md`." in result.stdout
 
 
 def test_a_root_that_is_not_a_directory_exits_one(tmp_path) -> None:

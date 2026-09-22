@@ -98,7 +98,7 @@ Only the schema loader file changes per tool. The scripts run identically everyw
     │   ├── agent-plugins/<name>.md
     │   └── test-suites/<name>.md
     ├── dependencies/<ecosystem>/<name>.md   # sibling root, not nested under repositories/
-    ├── tutorials/ how-tos/ references/ explanations/   # Diátaxis lanes
+    ├── docs/tutorials/ docs/how-tos/ docs/reference/ docs/explanations/   # Diátaxis lanes
     ├── sources/                 # One summary page per ingested source
     │   └── references/          # the ingest flow's copies of ingested material
     ├── adrs/                    # Architecture Decision Records

@@ -97,8 +97,8 @@ def test_a_non_rubric_type_is_still_refused_by_classify_and_retype(tmp_path: Pat
     root: Path = tmp_path / "bundle"
     bundle = build_bundle(
         root,
-        {"explanations/test": "---\ntype: Explanation\ntitle: Test\ndescription: A test.\n---\n\n## Context\n"},
+        {"docs/explanations/test": "---\ntype: Explanation\ntitle: Test\ndescription: A test.\n---\n\n## Context\n"},
     )
-    plan = plan_retype(bundle, schema_set(), "explanations/test", "Source")
+    plan = plan_retype(bundle, schema_set(), "docs/explanations/test", "Source")
     assert plan.ok is False
     assert [refusal.kind for refusal in plan.refusals] == ["unknown-type"]

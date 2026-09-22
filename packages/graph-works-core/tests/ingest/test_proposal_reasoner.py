@@ -23,8 +23,8 @@ def _bundle(tmp_path: Path):
     from okf_io import load_bundle
 
     root = tmp_path / "okf"
-    (root / "explanations").mkdir(parents=True)
-    (root / "explanations" / "why.md").write_text(
+    (root / "docs" / "explanations").mkdir(parents=True)
+    (root / "docs" / "explanations" / "why.md").write_text(
         "---\ntype: Explanation\ntitle: Why\ndescription: The reason\n---\n\nBecause.\n",
         encoding="utf-8",
     )
@@ -66,7 +66,7 @@ def test_only_the_two_allowed_graph_tools_reach_the_loop(tmp_path):
         return query
 
     tools = build_reasoner_tools(
-        bundle=_bundle(tmp_path), lanes=("explanations",), chunks=[], graph_tools=[cg_find, cg_write]
+        bundle=_bundle(tmp_path), lanes=("docs/explanations",), chunks=[], graph_tools=[cg_find, cg_write]
     )
     names = {each.name for each in tools}
     assert "cg_find" in names
@@ -77,9 +77,11 @@ def test_only_the_two_allowed_graph_tools_reach_the_loop(tmp_path):
 def test_read_wiki_page_is_a_key_lookup(tmp_path):
     tools = {
         each.name: each
-        for each in build_reasoner_tools(bundle=_bundle(tmp_path), lanes=("explanations",), chunks=[], graph_tools=[])
+        for each in build_reasoner_tools(
+            bundle=_bundle(tmp_path), lanes=("docs/explanations",), chunks=[], graph_tools=[]
+        )
     }
-    assert "Because." in tools["read_wiki_page"].invoke({"concept_id": "explanations/why"})
+    assert "Because." in tools["read_wiki_page"].invoke({"concept_id": "docs/explanations/why"})
     assert tools["read_wiki_page"].invoke({"concept_id": "../../etc/passwd"}).startswith("ERROR:")
 
 
@@ -87,7 +89,7 @@ def test_read_source_chunk_bounds_its_index(tmp_path):
     tools = {
         each.name: each
         for each in build_reasoner_tools(
-            bundle=_bundle(tmp_path), lanes=("explanations",), chunks=["a", "b"], graph_tools=[]
+            bundle=_bundle(tmp_path), lanes=("docs/explanations",), chunks=["a", "b"], graph_tools=[]
         )
     }
     assert tools["read_source_chunk"].invoke({"index": 1}) == "b"
@@ -98,7 +100,9 @@ def test_read_source_chunk_bounds_its_index(tmp_path):
 def test_search_wiki_catalog_returns_json_rows(tmp_path):
     tools = {
         each.name: each
-        for each in build_reasoner_tools(bundle=_bundle(tmp_path), lanes=("explanations",), chunks=[], graph_tools=[])
+        for each in build_reasoner_tools(
+            bundle=_bundle(tmp_path), lanes=("docs/explanations",), chunks=[], graph_tools=[]
+        )
     }
     rows = json.loads(tools["search_wiki_catalog"].invoke({"query": "why"}))
     assert rows and rows[0]["slug"] == "why"
@@ -107,7 +111,7 @@ def test_search_wiki_catalog_returns_json_rows(tmp_path):
 def test_a_source_under_budget_is_inlined(tmp_path):
     prompt = build_reasoner_prompt(
         bundle=_bundle(tmp_path),
-        lanes=("explanations",),
+        lanes=("docs/explanations",),
         material=Path("/tmp/thing.md"),
         source_text="short source",
         source_page="sources/2026-08-thing.md",
@@ -124,7 +128,7 @@ def test_a_source_under_budget_is_inlined(tmp_path):
 def test_a_source_over_budget_becomes_a_chunk_manifest(tmp_path):
     prompt = build_reasoner_prompt(
         bundle=_bundle(tmp_path),
-        lanes=("explanations",),
+        lanes=("docs/explanations",),
         material=Path("/tmp/thing.md"),
         source_text="x" * (FULL_SOURCE_MAX_CHARS + 1),
         source_page="sources/2026-08-thing.md",
@@ -146,7 +150,7 @@ async def test_a_clean_run_returns_ok(tmp_path, monkeypatch):
     )
     result = await run_proposal_reasoner(
         bundle=_bundle(tmp_path),
-        lanes=("explanations",),
+        lanes=("docs/explanations",),
         lane_set=_lanes(tmp_path),
         material=Path("/tmp/thing.md"),
         source_text="short",
@@ -168,7 +172,7 @@ async def test_an_empty_response_is_a_failure(tmp_path, monkeypatch):
     )
     result = await run_proposal_reasoner(
         bundle=_bundle(tmp_path),
-        lanes=("explanations",),
+        lanes=("docs/explanations",),
         lane_set=_lanes(tmp_path),
         material=Path("/tmp/thing.md"),
         source_text="short",
@@ -191,7 +195,7 @@ def test_the_prompt_names_the_validated_source_kind_and_the_resolved_origin(tmp_
     """
     prompt = build_reasoner_prompt(
         bundle=_bundle(tmp_path),
-        lanes=("explanations",),
+        lanes=("docs/explanations",),
         material=Path("/tmp/thing.md"),
         source_text="short source",
         source_page="sources/2026-08-thing.md",

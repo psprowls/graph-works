@@ -11,10 +11,10 @@ from okf_ext.shape import load_sections
 from okf_io import parse
 
 _LANES = {
-    "Tutorial": "tutorials/",
-    "HowTo": "how-tos/",
-    "Reference": "references/",
-    "Explanation": "explanations/",
+    "Tutorial": "docs/tutorials/",
+    "HowTo": "docs/how-tos/",
+    "Reference": "docs/reference/",
+    "Explanation": "docs/explanations/",
 }
 
 
@@ -40,13 +40,13 @@ def test_directory_for_raises_for_an_undeclared_type(schema_set) -> None:
 
 def test_default_concept_id_slugs_the_title_and_carries_no_suffix(schema_set) -> None:
     got = default_concept_id(schema_set, type_name="Explanation", title="Why OKF Uses `type`")
-    assert got == "explanations/why-okf-uses-type"
+    assert got == "docs/explanations/why-okf-uses-type"
     assert not got.endswith(".md")
 
 
 def test_default_concept_id_degrades_a_titleless_title(schema_set) -> None:
     """`reading.slugify` returns `untitled` for all-punctuation input."""
-    assert default_concept_id(schema_set, type_name="Tutorial", title="!!!") == "tutorials/untitled"
+    assert default_concept_id(schema_set, type_name="Tutorial", title="!!!") == "docs/tutorials/untitled"
 
 
 def _classification(type_name: str, title: str) -> Classification:
@@ -90,7 +90,7 @@ def test_new_page_text_raises_for_a_type_no_schema_declares(section_set, tmp_pat
     (partial / "Tutorial.schema.json").write_text(
         '{"$schema": "https://json-schema.org/draft/2020-12/schema",'
         ' "properties": {"type": {"const": "Tutorial"}},'
-        ' "x-okf-directory": "tutorials/"}',
+        ' "x-okf-directory": "docs/tutorials/"}',
         encoding="utf-8",
     )
     with pytest.raises(KeyError):

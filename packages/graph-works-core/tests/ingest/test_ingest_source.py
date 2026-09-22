@@ -564,7 +564,7 @@ async def test_a_successful_suggest_files_a_proposal(workspace, monkeypatch):
     layout, repo, material = workspace
     _models(monkeypatch)
     result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
-    assert [report["target"] for report in result.proposals] == ["explanations/why-the-thing.md"]
+    assert [report["target"] for report in result.proposals] == ["docs/explanations/why-the-thing.md"]
     assert result.proposal_status["proposals"] == 1
     assert "proposals" in result.indexes_updated
 
@@ -586,7 +586,7 @@ async def test_a_refused_suggestion_is_reported_in_the_log_by_kind(workspace, mo
     "N suggestion(s) dropped" count.
 
     Seeding an already-decided `Proposal` at the exact target the extractor's
-    lone suggestion resolves to (`explanations/blocked.md`) is the same setup
+    lone suggestion resolves to (`docs/explanations/blocked.md`) is the same setup
     `test_suggest_pages.test_a_plan_file_refusal_drops_the_suggestion_and_records_the_reason`
     uses -- `plan_propose` refuses a re-proposal against a decided proposal
     with `already-decided`.
@@ -598,7 +598,7 @@ async def test_a_refused_suggestion_is_reported_in_the_log_by_kind(workspace, mo
         "type: Proposal\n"
         "title: Blocked\n"
         "description: d\n"
-        "target: explanations/blocked.md\n"
+        "target: docs/explanations/blocked.md\n"
         "page_status: approved\n"
         "generated:\n"
         "  by: agent:test\n"
@@ -944,7 +944,7 @@ async def test_an_apply_time_proposal_error_reaches_proposal_status_via_the_shar
     from okf_ext.proposals import apply as real_apply_plan
 
     def fake_apply(bundle_arg, plan):
-        if plan.target == "explanations/why-the-thing.md":
+        if plan.target == "docs/explanations/why-the-thing.md":
             raise RuntimeError("boom-apply")
         return real_apply_plan(bundle_arg, plan)
 

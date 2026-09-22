@@ -25,7 +25,7 @@ if TYPE_CHECKING:  # `classify` imports `default_concept_id` from here at runtim
 
 
 def directory_for(schema_set: SchemaSet, type_name: str) -> str:
-    """The `x-okf-directory` a type's schema declares, e.g. `"tutorials/"`.
+    """The `x-okf-directory` a type's schema declares, e.g. `"docs/tutorials/"`.
 
     Raises `KeyError` for a type the set does not carry.
     """

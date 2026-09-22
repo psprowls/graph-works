@@ -84,6 +84,24 @@ def test_the_catalog_serves_the_link_form_the_citation_rules_ask_for(tmp_path):
     assert _LINK_RE.findall(f"[Auth]({path})") == ["concepts/auth"]
 
 
+def test_a_multi_segment_lane_catalogs_its_own_pages(tmp_path):
+    """The Diataxis lanes live under `docs/`, so a lane is a prefix rather
+    than a first path segment -- and its kind is the lane's last segment."""
+    bundle = _bundle(
+        tmp_path,
+        {"docs/explanations/why": _page(title="Why"), "docs/how-tos/do-it": _page(title="Do it")},
+    )
+    catalog = build_catalog(bundle, lanes=("docs/explanations", "docs/how-tos"))
+    assert [entry["slug"] for entry in catalog["docs/explanations"]] == ["why"]
+    assert catalog["docs/how-tos"][0]["kind"] == "how-to"
+    assert catalog["docs/explanations"][0]["path"] == "/docs/explanations/why.md"
+
+
+def test_a_page_under_docs_but_in_no_requested_lane_is_absent(tmp_path):
+    bundle = _bundle(tmp_path, {"docs/stray/x": _page(title="Stray")})
+    assert build_catalog(bundle, lanes=("docs/explanations",))["docs/explanations"] == []
+
+
 def test_the_entities_lane_keeps_its_singular_kind(tmp_path):
     bundle = _bundle(tmp_path, {"entities/pkg_okf": _page(title="okf")})
     assert build_catalog(bundle, lanes=("entities",))["entities"][0]["kind"] == "entity"

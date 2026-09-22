@@ -53,8 +53,8 @@ def _file_run(*, plan_ok: bool = True, result_ok: bool = True, written: tuple[st
     refusals = () if plan_ok else (SimpleNamespace(path="proposals/a.md", kind="refused", detail="no"),)
     return SimpleNamespace(
         lane="explanation",
-        target="explanations/typed-cli.md",
-        proposal="proposals/explanations-typed-cli.md",
+        target="docs/explanations/typed-cli.md",
+        proposal="proposals/docs-explanations-typed-cli.md",
         ok=plan_ok and result_ok,
         plan=_plan(ok=plan_ok),
         refusals=refusals,
@@ -161,11 +161,11 @@ def test_proposal_decisions_pass_the_raw_target_to_core(
 
 def test_proposal_decision_unknown_target_is_a_real_workspace_refusal(initialized_workspace: Path) -> None:
     result = runner.invoke(
-        app, ["wiki", "proposal", "approve", "explanations/nope.md", "--workspace", str(initialized_workspace)]
+        app, ["wiki", "proposal", "approve", "docs/explanations/nope.md", "--workspace", str(initialized_workspace)]
     )
     bundle = proposals_module.resolve_workspace(str(initialized_workspace)).bundle_dir
     assert result.exit_code == exit_codes.GENERIC
-    assert result.stderr == f"Error: no proposal targets 'explanations/nope.md' in {bundle}\n"
+    assert result.stderr == f"Error: no proposal targets 'docs/explanations/nope.md' in {bundle}\n"
 
 
 @pytest.mark.parametrize(
@@ -328,7 +328,7 @@ def test_file_json_dry_run_writes_nothing_and_projects(initialized_workspace: Pa
     result = runner.invoke(app, [*_file_args(initialized_workspace), "--dry-run", "--json"])
     assert result.exit_code == 0, result.output
     doc = json.loads(result.stdout)
-    assert doc["lane"] == "explanation" and doc["target"] == "explanations/typed-cli.md"
+    assert doc["lane"] == "explanation" and doc["target"] == "docs/explanations/typed-cli.md"
     assert doc["applied"] is False and doc["writes"][0]["mode"] == "create"
     assert sorted(path.as_posix() for path in bundle.rglob("*")) == before
 
@@ -340,7 +340,7 @@ def test_decide_json_dry_run_then_apply(initialized_workspace: Path, command: st
         "wiki",
         "proposal",
         command,
-        "explanations/typed-cli.md",
+        "docs/explanations/typed-cli.md",
         "--workspace",
         str(initialized_workspace),
         "--json",
@@ -351,7 +351,7 @@ def test_decide_json_dry_run_then_apply(initialized_workspace: Path, command: st
     assert planned_doc["applied"] is False and planned_doc["writes"][0]["frontmatter"]["page_status"] == status
     applied = runner.invoke(app, base)
     assert applied.exit_code == 0, applied.output
-    assert json.loads(applied.stdout)["written"] == ["proposals/explanations-typed-cli.md"]
+    assert json.loads(applied.stdout)["written"] == ["proposals/docs-explanations-typed-cli.md"]
 
 
 def test_decide_dry_run_without_json_prints_planned_members(initialized_workspace: Path) -> None:
@@ -362,10 +362,10 @@ def test_decide_dry_run_without_json_prints_planned_members(initialized_workspac
             "wiki",
             "proposal",
             "approve",
-            "explanations/typed-cli.md",
+            "docs/explanations/typed-cli.md",
             "--dry-run",
             "--workspace",
             str(initialized_workspace),
         ],
     )
-    assert result.exit_code == 0 and result.stdout.strip() == "proposals/explanations-typed-cli.md"
+    assert result.exit_code == 0 and result.stdout.strip() == "proposals/docs-explanations-typed-cli.md"

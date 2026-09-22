@@ -640,7 +640,7 @@ def _finding(
     severity: str = "error",
     message: str = "target does not resolve",
     spec: str = "§6.1",
-    path: str | None = "how-tos/deploy.md",
+    path: str | None = "docs/how-tos/deploy.md",
     line: int | None = 12,
 ) -> Finding:
     return Finding(code=code, severity=severity, message=message, spec=spec, path=path, line=line)  # type: ignore[arg-type]
@@ -726,7 +726,7 @@ def test_render_keeps_the_message_of_a_finding_that_names_no_path_or_no_line():
                 _finding(
                     code="provenance.stale",
                     message="sources[] older than the anchor",
-                    path="references/api.md",
+                    path="docs/reference/api.md",
                     line=None,
                 ),
             ),
@@ -735,8 +735,8 @@ def test_render_keeps_the_message_of_a_finding_that_names_no_path_or_no_line():
     rendered = report.render()
     assert "no index.md" in rendered
     assert "sources[] older than the anchor" in rendered
-    assert "references/api.md" in rendered
-    assert "references/api.md:" not in rendered
+    assert "docs/reference/api.md" in rendered
+    assert "docs/reference/api.md:" not in rendered
 
 
 def test_render_flattens_a_multi_line_finding_message_onto_one_line():

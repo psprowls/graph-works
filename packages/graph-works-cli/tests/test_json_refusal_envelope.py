@@ -42,8 +42,8 @@ def file_item(workspace: Path, title: str, *, kind: str = "Feature") -> str:
     (
         (("archive",), "archive"),
         (("wiki", "archive"), "wiki archive"),
-        (("wiki", "proposal", "approve", "explanations/a.md"), "wiki proposal approve"),
-        (("wiki", "proposal", "reject", "explanations/a.md"), "wiki proposal reject"),
+        (("wiki", "proposal", "approve", "docs/explanations/a.md"), "wiki proposal approve"),
+        (("wiki", "proposal", "reject", "docs/explanations/a.md"), "wiki proposal reject"),
         (
             (
                 "wiki",
@@ -316,7 +316,7 @@ def test_wiki_archive_json_refusal_carries_the_computed_refusals_in_the_envelope
 
 def test_proposal_approve_json_unknown_target_carries_no_proposal_refusal(workspace: Path) -> None:
     result = runner.invoke(
-        app, ["wiki", "proposal", "approve", "explanations/nope.md", "--workspace", str(workspace), "--json"]
+        app, ["wiki", "proposal", "approve", "docs/explanations/nope.md", "--workspace", str(workspace), "--json"]
     )
 
     assert result.exit_code == exit_codes.GENERIC
@@ -346,7 +346,7 @@ def test_proposal_approve_json_already_approved_carries_not_proposed_refusal(wor
         ],
     )
     assert filed.exit_code == 0, filed.output
-    command = ["wiki", "proposal", "approve", "explanations/typed-cli.md", "--workspace", str(workspace), "--json"]
+    command = ["wiki", "proposal", "approve", "docs/explanations/typed-cli.md", "--workspace", str(workspace), "--json"]
     assert runner.invoke(app, command).exit_code == 0
     result = runner.invoke(app, command)
 

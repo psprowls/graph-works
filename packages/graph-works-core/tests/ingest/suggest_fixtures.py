@@ -38,8 +38,8 @@ def make_bundle(tmp_path: Path, *, without: str | None = None) -> Path:
 
     (root / "index.md").write_text("---\nokf_version: 0.2\n---\n\n# bundle\n", encoding="utf-8")
     (root / "log.md").write_text("---\nokf_version: 0.2\n---\n\n# log\n", encoding="utf-8")
-    explanations = root / "explanations"
-    explanations.mkdir(exist_ok=True)
+    explanations = root / "docs" / "explanations"
+    explanations.mkdir(parents=True, exist_ok=True)
     (explanations / "why.md").write_text(
         "---\ntype: Explanation\ntitle: Why\ndescription: The reason\n---\n\nBecause.\n", encoding="utf-8"
     )

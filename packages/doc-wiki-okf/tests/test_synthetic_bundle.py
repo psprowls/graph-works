@@ -66,7 +66,7 @@ def test_a_missing_required_section_is_exactly_sections_missing(tmp_path: Path) 
         "## Assumptions\n\nYou have the thing.\n\n"
         "## Steps\n\nDo it.\n"
     )  # `Result` is missing
-    bundle = build_bundle(tmp_path / "bundle", {"how-tos/how-to-do-it": page})
+    bundle = build_bundle(tmp_path / "bundle", {"docs/how-tos/how-to-do-it": page})
     report = validate_with(bundle, declaration_rules())
     assert ext_codes(report) == ["sections.missing"]
     assert "Result" in report.by_code("sections.missing")[0].message
@@ -114,7 +114,7 @@ def test_the_skeletons_are_the_reason_placeholders_avoid_bare_slots() -> None:
 
 
 def test_the_references_lane_does_not_collide_with_a_nested_work_artifact(tmp_path: Path) -> None:
-    """Spec §9: `references/` is a bundle-root lane; `work-tracker-okf`'s
+    """Spec §9: `docs/reference/` is a wiki lane under `docs/`; `work-tracker-okf`'s
     `work/<slug>/references/` is nested. Confirmed against a bundle holding
     both rather than reasoned about."""
     lane_page = _filled_page("Reference", "CLI flags")
@@ -122,11 +122,11 @@ def test_the_references_lane_does_not_collide_with_a_nested_work_artifact(tmp_pa
     bundle = build_bundle(
         tmp_path / "bundle",
         {
-            "references/cli-flags": lane_page,
+            "docs/reference/cli-flags": lane_page,
             "work/feature-x/references/01-design": artifact,
         },
     )
-    assert "references/cli-flags" in bundle.concepts
+    assert "docs/reference/cli-flags" in bundle.concepts
     assert "work/feature-x/references/01-design" in bundle.concepts
 
     report = validate_with(bundle, declaration_rules())

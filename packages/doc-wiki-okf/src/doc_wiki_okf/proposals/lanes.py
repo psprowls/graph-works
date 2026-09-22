@@ -56,7 +56,7 @@ class Lane:
 
     Attributes:
         name: The lane name (e.g. "tutorial", "adr").
-        directory: The bundle-relative directory (e.g. "tutorials/").
+        directory: The bundle-relative directory (e.g. "docs/tutorials/").
         type_name: The OKF schema type name (e.g. "Tutorial", "Explanation").
         dated: Whether filenames in this lane use YYYY-MM-DD dating.
     """

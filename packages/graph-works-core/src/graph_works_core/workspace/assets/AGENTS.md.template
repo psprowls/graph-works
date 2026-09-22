@@ -85,7 +85,7 @@ to the filesystem root.
 └── {{BUNDLE_DIR}}/           the bundle; the three lanes own everything inside
     ├── index.md, log.md      root index and the append-only timeline
     ├── repositories/ dependencies/
-    ├── explanations/ references/ tutorials/ how-tos/
+    ├── docs/                  explanations/ reference/ tutorials/ how-tos/
     ├── sources/ adrs/ proposals/
     └── work/
 ```
@@ -122,14 +122,16 @@ that is where hard-won knowledge belongs.
 
 ### Doc wiki — `doc_wiki_okf`
 
-The four Diátaxis lanes plus the material they are drawn from:
+The four Diátaxis lanes, under `docs/`, plus the material they are drawn from.
+`docs/` means the Diátaxis quadrants and nothing else; `adrs/`, `sources/` and
+`proposals/` stay at the bundle root.
 
 | Directory | Type | Purpose |
 | --- | --- | --- |
-| `explanations/` | `Explanation` | Understanding-oriented: why a thing is shaped this way |
-| `references/` | `Reference` | Information-oriented: what is true of a thing |
-| `how-tos/` | `HowTo` | Goal-oriented: solve one problem |
-| `tutorials/` | `Tutorial` | Learning-oriented: build one thing end to end |
+| `docs/explanations/` | `Explanation` | Understanding-oriented: why a thing is shaped this way |
+| `docs/reference/` | `Reference` | Information-oriented: what is true of a thing |
+| `docs/how-tos/` | `HowTo` | Goal-oriented: solve one problem |
+| `docs/tutorials/` | `Tutorial` | Learning-oriented: build one thing end to end |
 | `sources/` | `Source` | One summary per ingested source, at `sources/<YYYY-MM>-<slug>.md` |
 | `adrs/` | `Adr` | Architecture decision records, `<YYYY-MM-DD>-<slug>.md` — dated, never numbered |
 | `proposals/` | `Proposal` | Staged curated pages awaiting disposition |

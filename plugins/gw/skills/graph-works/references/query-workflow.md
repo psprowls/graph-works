@@ -23,7 +23,7 @@ This is the `claude_code`-backend default (the one `gw query` runs unless a work
 {
   "query": "<question>",
   "top_pages": [
-    {"path": "explanations/foo", "excerpt": "...", "search_scores": {"...": 0.0}}
+    {"path": "docs/explanations/foo", "excerpt": "...", "search_scores": {"...": 0.0}}
   ]
 }
 ```
@@ -31,7 +31,7 @@ This is the `claude_code`-backend default (the one `gw query` runs unless a work
 
 Scan the index and pick the 3-10 pages most likely to contain the answer, from `top_pages` and the index together. A good monorepo query usually pulls across categories:
 
-- `explanations/` — for cross-cutting patterns and high-level syntheses; filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns
+- `docs/explanations/` — for cross-cutting patterns and high-level syntheses; filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns
 - `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — for specific package/app surface area
 - `dependencies/<ecosystem>/` for "how do we use X library" questions
 - `work/` for "why does X fail / what's planned / what's in progress"
@@ -69,10 +69,10 @@ Format:
 
 If yes:
 - Pick the right type and location:
-  - "how does X work" (big picture) → `explanations/<slug>.md`, tagged `architecture`
-  - "how does X work" (pattern) → `explanations/<slug>.md`, tagged `pattern`
-  - "how does X work" (general) → `explanations/<slug>.md`
-  - "A vs B" → `explanations/<a>-vs-<b>.md`
+  - "how does X work" (big picture) → `docs/explanations/<slug>.md`, tagged `architecture`
+  - "how does X work" (pattern) → `docs/explanations/<slug>.md`, tagged `pattern`
+  - "how does X work" (general) → `docs/explanations/<slug>.md`
+  - "A vs B" → `docs/explanations/<a>-vs-<b>.md`
   - "why did we decide X" → `adrs/` (only if it's capturing a real past decision)
   - "what's planned for X / why does X fail / workaround for Y" → `work/` (`type:` discriminates: `Bug`, `TechDebt`, `Feature`, …)
 - Follow `references/page-formats.md` for the type's frontmatter and declared headings

@@ -20,8 +20,8 @@ from okf_io import load, load_bundle
 
 TODAY = date(2026, 8, 23)
 AT = datetime(2026, 8, 24, 12, 0, tzinfo=UTC)
-TARGET = "explanations/typed-cli.md"
-MEMBER = "proposals/explanations-typed-cli.md"
+TARGET = "docs/explanations/typed-cli.md"
+MEMBER = "proposals/docs-explanations-typed-cli.md"
 SOURCE = {"id": "s1", "resource": "/sources/one.md"}
 
 
@@ -76,7 +76,7 @@ def test_find_proposal_matches_only_by_normalized_target(layout: WorkspaceLayout
     bundle = load_bundle(layout.bundle_dir)
     found = find_proposal(bundle, "./" + TARGET)
     assert found is not None and found.member == MEMBER
-    assert find_proposal(bundle, "explanations/other.md") is None
+    assert find_proposal(bundle, "docs/explanations/other.md") is None
     assert find_proposal(bundle, "") is None
 
 
@@ -111,7 +111,7 @@ def test_two_dry_runs_over_two_copies_are_identical(tmp_path: Path, layout: Work
     assert first.plan.writes == second.plan.writes
 
 
-@pytest.mark.parametrize("target", ("explanations/nope.md", "../escape.md", ""))
+@pytest.mark.parametrize("target", ("docs/explanations/nope.md", "../escape.md", ""))
 def test_unknown_or_escaping_target_is_a_no_proposal_refusal(layout: WorkspaceLayout, target: str) -> None:
     run = run_proposal_decide(layout, target, "approved", by="human", at=AT)
 
@@ -146,7 +146,7 @@ def test_malformed_proposal_is_refused(layout: WorkspaceLayout) -> None:
     assert [refusal.kind for refusal in run.refusals] == ["malformed-proposal"]
 
 
-@pytest.mark.parametrize("target", (TARGET, "explanations/nope.md"))
+@pytest.mark.parametrize("target", (TARGET, "docs/explanations/nope.md"))
 def test_decide_naive_at_raises_before_target_lookup(layout: WorkspaceLayout, target: str) -> None:
     with pytest.raises(ValueError):
         run_proposal_decide(layout, target, "approved", by="human", at=datetime(2026, 8, 24))

@@ -348,18 +348,18 @@ def test_archive_echoes_every_archived_token(monkeypatch: pytest.MonkeyPatch, in
 
 def _workspace_with_wikilink_into(tmp_path: Path, token: str) -> Path:
     """A real, bootstrapped workspace with *token*'s page and a curated page
-    under `references/` whose body cites `token` as a `[[wikilink]]`."""
+    under `docs/reference/` whose body cites `token` as a `[[wikilink]]`."""
     root = tmp_path / "works"
     result = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(root)])
     assert result.exit_code == 0
 
     layout = maintenance.resolve_workspace(str(root))
-    lane, slug = token.split("/", 1)
+    lane, slug = token.rsplit("/", 1)
     target_dir = layout.bundle_dir / lane
     target_dir.mkdir(parents=True, exist_ok=True)
     (target_dir / f"{slug}.md").write_text("---\ntitle: Foo\ndescription: d\n---\n\n## Summary\nd\n", encoding="utf-8")
 
-    references_dir = layout.bundle_dir / "references"
+    references_dir = layout.bundle_dir / "docs" / "reference"
     references_dir.mkdir(parents=True, exist_ok=True)
     (references_dir / "citing.md").write_text(
         f"---\ntitle: Citing\ndescription: d\n---\n\n## Summary\nSee [[{token}]] for the rest.\n",
@@ -371,13 +371,13 @@ def _workspace_with_wikilink_into(tmp_path: Path, token: str) -> Path:
 def test_wiki_archive_reports_stranded_wikilinks_in_both_modes(tmp_path: Path) -> None:
     """The lane the spec singles out: without `--dry-run` this command never
     prints the plan, so a plan-render-only fix would leave it silent."""
-    workspace = _workspace_with_wikilink_into(tmp_path, "tutorials/foo")
+    workspace = _workspace_with_wikilink_into(tmp_path, "docs/tutorials/foo")
 
-    preview = runner.invoke(app, ["wiki", "archive", "tutorials/foo", "--dry-run", "--workspace", str(workspace)])
+    preview = runner.invoke(app, ["wiki", "archive", "docs/tutorials/foo", "--dry-run", "--workspace", str(workspace)])
     assert preview.exit_code == 0
     assert "wiki pages: ! 1 inbound [[wikilink]]" in preview.stderr
 
-    applied = runner.invoke(app, ["wiki", "archive", "tutorials/foo", "--workspace", str(workspace)])
+    applied = runner.invoke(app, ["wiki", "archive", "docs/tutorials/foo", "--workspace", str(workspace)])
     assert applied.exit_code == 0  # ADR-0004: broken links are warn, never error
     assert "wiki pages: ! 1 inbound [[wikilink]]" in applied.stderr
 

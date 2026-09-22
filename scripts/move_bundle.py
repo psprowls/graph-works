@@ -327,6 +327,34 @@ def rename_reserved(root: Path, reserved: Mapping[str, str]) -> list[str]:
     return sorted(pruned)
 
 
+def unrename_reserved(root: Path, reserved: Mapping[str, str]) -> None:
+    """Move each reserved member back from `dest` to `source`. The inverse of
+    `rename_reserved`, used only when the repair plan recomputed after the
+    rename is refused.
+
+    Exists so the doc's recovery promise is true: with the index back under
+    its *source* directory, `expand` reclassifies it as reserved on the next
+    `prepare`, the same mapping is recomputed, and the move completes once
+    the operator has fixed the offending reference -- rather than leaving the
+    index permanently stranded at `dest`, unreachable by any rule again.
+
+    Best-effort, like the prune half of `rename_reserved`: a member that
+    cannot be moved back is left where it is rather than raising, because the
+    refusals already being returned are the real diagnosis and must not be
+    masked by a rollback failure.
+    """
+    for source, dest in sorted(reserved.items()):
+        destination = root / dest
+        if not destination.is_file():
+            continue
+        try:
+            origin = root / source
+            origin.parent.mkdir(parents=True, exist_ok=True)
+            destination.replace(origin)
+        except OSError:
+            continue
+
+
 @dataclass(frozen=True)
 class Applied:
     """What landed. `repair` is `None` when no reserved member was carried."""
@@ -351,9 +379,13 @@ def write(root: Path, prepared: Prepared) -> Applied:
     `model.py:146-152`). `Prepared.repair` is therefore provisional and is
     recomputed here.
 
-    If the recomputed repair plan carries refusals, they are returned and
-    nothing further is written. The bundle is then in a state the same
-    `plan_repair` mapping fixes on a re-run -- see `scripts/move-bundle.md`.
+    If the recomputed repair plan carries refusals, the reserved renames are
+    rolled back to their source paths (`unrename_reserved`) before the
+    refusals are returned -- the ordinary move stays applied, since it
+    succeeded and is internally consistent on its own; only the reserved
+    half, whose repair failed, is undone. With the index back at its source,
+    the bundle is then in a state the same `plan_repair` mapping fixes on a
+    re-run -- see `scripts/move-bundle.md`.
     """
     if prepared.planning is None or prepared.plan is None:
         raise ValueError("write() needs a prepared plan; check `Prepared.ok` first")
@@ -367,8 +399,9 @@ def write(root: Path, prepared: Prepared) -> Applied:
     after = load_bundle(root, ignore=IGNORE)
     repair_plan = moves.plan_repair(after, reserved)
     if not repair_plan.ok:
+        unrename_reserved(root, reserved)
         refusals = tuple(Refused(r.kind, f"`{r.path}`: {r.detail}") for r in repair_plan.refusals)
-        return Applied(result, pruned, None, refusals)
+        return Applied(result, (), None, refusals)
     return Applied(result, pruned, moves.apply(after, repair_plan), ())
 
 
@@ -443,6 +476,7 @@ def main(argv: list[str] | None = None) -> int:
     print("  gw wiki index")
     print("  gw wiki lint")
     print("  append to okf/log.md:")
+    assert prepared.plan is not None
     print(f"    - **update** moved {len(prepared.plan.moves)} page(s) per the rules file")
     return 0
 

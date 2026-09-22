@@ -403,6 +403,75 @@ def test_a_move_with_no_reserved_member_needs_no_repair_pass(bundle: Path) -> No
     assert (bundle / "docs/sources/2026-08-spec.md").is_file()
 
 
+# --- a refused repair rolls the reserved rename back ---------------------------
+
+
+def _poison_with_a_reference_style_link(bundle: Path) -> None:
+    """Append a reference-style link into the moved set to a file outside it,
+    so the repair plan recomputed after the rename is refused with
+    `reference-definition` / `unlocatable-reference` -- a reference-style
+    link's destination lives in a definition line the locator cannot place,
+    per `okf_ext.moves.plan.plan_move_many` (`plan.py:709-742`).
+    """
+    target = bundle / "sources" / "2026-08-spec.md"
+    target.write_bytes(
+        target.read_bytes() + b"\nSee [the explanations index][idx].\n\n[idx]: /explanations/index.md\n"
+    )
+
+
+def test_a_refused_repair_rolls_the_reserved_member_back_to_its_source(bundle: Path) -> None:
+    _poison_with_a_reference_style_link(bundle)
+    before = (bundle / "explanations/index.md").read_bytes()
+    prepared = prepare(bundle, [Rule("explanations", "docs/explanations")])
+    assert prepared.ok, prepared.refusals
+
+    applied = write(bundle, prepared)
+
+    assert applied.ok is False
+    assert {r.kind for r in applied.refusals} == {"reference-definition", "unlocatable-reference"}
+    assert applied.repair is None
+    assert applied.pruned == ()
+    # The ordinary move landed -- it is internally consistent on its own.
+    assert (bundle / "docs/explanations/diagram.png").is_file()
+    assert (bundle / "docs/explanations/why-graphs.md").is_file()
+    # The reserved member is back at its SOURCE path, byte for byte.
+    assert not (bundle / "docs/explanations/index.md").exists()
+    assert (bundle / "explanations/index.md").is_file()
+    assert (bundle / "explanations/index.md").read_bytes() == before
+
+
+def test_a_second_run_after_a_refused_repair_reclassifies_and_retries(bundle: Path) -> None:
+    """The recovery the doc promises: once the offending reference is fixed,
+    re-running the same command completes the move -- because the rolled-back
+    index is reclassified as reserved on the next `prepare`."""
+    _poison_with_a_reference_style_link(bundle)
+    rule = [Rule("explanations", "docs/explanations")]
+
+    first = prepare(bundle, rule)
+    applied_first = write(bundle, first)
+    assert not applied_first.ok
+
+    # `explanations` still exists and is still reserved -- the same mapping
+    # is recomputed, not silently forgotten.
+    second = prepare(bundle, rule)
+    assert dict(second.expansion.reserved) == {"explanations/index.md": "docs/explanations/index.md"}
+    applied_second = write(bundle, second)
+    assert not applied_second.ok  # the reference is still broken
+
+    # Fix the offending reference and confirm the move now completes.
+    poisoned = bundle / "sources" / "2026-08-spec.md"
+    text = poisoned.read_bytes().decode("utf-8").replace(
+        "[idx]: /explanations/index.md", "[idx]: /docs/explanations/index.md"
+    )
+    poisoned.write_bytes(text.encode("utf-8"))
+
+    third = prepare(bundle, rule)
+    applied_third = write(bundle, third)
+    assert applied_third.ok
+    assert (bundle / "docs/explanations/index.md").is_file()
+    assert not (bundle / "explanations").exists()
+
+
 # --- the CLI ------------------------------------------------------------------
 
 

@@ -73,7 +73,10 @@ planning load via `ignore=`, renamed directly, and its inbound references are
 repaired by a `plan_repair` computed against a **reloaded** bundle — the reload
 is required, because the move plan and the repair plan both edit the root index.
 
-If that recomputed repair plan is refused, the script reports it and exits 1
-with the files already moved. Re-running the same command fixes it: the ordinary
-mapping is then empty, and `plan_repair` recomputes the same reserved mapping
-against the current bundle.
+If that recomputed repair plan is refused, the script rolls the reserved
+renames back to their source paths, reports the refusals, and exits 1. The
+ordinary move is left in place -- it succeeded and is internally consistent
+on its own; only the reserved half, whose repair failed, is undone. With the
+index back at its source, the same rule reclassifies it as reserved on a
+re-run, `plan_repair` recomputes the same mapping against the current
+bundle, and the move completes once the offending reference has been fixed.

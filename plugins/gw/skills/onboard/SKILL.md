@@ -28,7 +28,8 @@ workspace itself, or the repo's `.claude/settings.local.json`; `gw` is the sole 
 
 The workspace resolves in this order: an explicit `--workspace` path, then the
 `GRAPH_WORKS_DIR` environment variable, then a `.git` walk-up from the current
-directory, defaulting to `<repo>/.works`.
+directory, defaulting to `<repo>/.works`. An out-of-repo workspace has no repository of
+its own until Q3b creates one.
 
 Run:
 
@@ -87,6 +88,20 @@ faithfully, not a fault — say so rather than letting it read as one.
 
 Show that output, confirm with the user, then run the same command **without**
 `--dry-run` to apply it. Report the resulting workspace path.
+
+## Q3b: Workspace repository
+
+Runs only on the creation path (the same gate as Q1–Q3; a found workspace skips it).
+
+1. Run `git -C "<workspace path>" rev-parse --is-inside-work-tree`.
+2. Success — the workspace is already inside a git repository. Say so and move on.
+3. Failure — AskUserQuestion: "Initialize a local git repository in the workspace?"
+   - "Yes" → run `git init "<workspace path>"`. Local only: no remote, no commit.
+   - "No" → run nothing; note that workspace edits will be untracked.
+
+The closing report lists the `git init` line verbatim when it was run, and lists the
+step as skipped otherwise. This is the only git-affecting step in this skill; the
+Ground rules' "NEVER commit anything" still holds — an init is not a commit.
 
 ## Q4: Session transcript capture
 

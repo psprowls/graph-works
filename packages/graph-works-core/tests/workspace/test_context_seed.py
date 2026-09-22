@@ -73,6 +73,14 @@ def test_an_unset_topic_renders_without_raising():
     assert "(unset)" in _render(topic=None)
 
 
+def test_the_body_teaches_atomic_workspace_commits_before_the_log_format_section():
+    text = _render()
+    assert "## Committing workspace changes" in text
+    assert "atomic" in text
+    assert ".gw/cache/" in text
+    assert text.index("## Committing workspace changes") < text.index("## Log format")
+
+
 # --- the human tail -----------------------------------------------------------
 
 

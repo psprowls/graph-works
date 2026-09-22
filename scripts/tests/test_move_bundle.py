@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from okf_io import load_bundle
 
-from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules, prepare
+from move_bundle import IGNORE, Expansion, Refused, Rule, expand, load_rules, prepare, rename_reserved
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "move_bundle"
 
@@ -290,4 +290,36 @@ def test_engine_refusals_are_forwarded_as_refused(bundle: Path) -> None:
 def test_prepare_writes_nothing(bundle: Path) -> None:
     before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
     prepare(bundle, DIATAXIS_RULES)
+    assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before
+
+
+# --- reserved members ---------------------------------------------------------
+
+
+def test_a_reserved_member_is_renamed_byte_for_byte_with_parents_created(bundle: Path) -> None:
+    before = (bundle / "explanations/index.md").read_bytes()
+    rename_reserved(bundle, {"explanations/index.md": "docs/explanations/index.md"})
+    assert not (bundle / "explanations/index.md").exists()
+    assert (bundle / "docs/explanations/index.md").read_bytes() == before
+
+
+def test_a_source_directory_that_emptied_is_pruned(bundle: Path) -> None:
+    """`apply` cannot do this: the lane index is still sitting in the source
+    directory while the ordinary batch commits, so it finds it non-empty."""
+    (bundle / "explanations/diagram.png").unlink()
+    (bundle / "explanations/why-graphs.md").unlink()
+    pruned = rename_reserved(bundle, {"explanations/index.md": "docs/explanations/index.md"})
+    assert pruned == ["explanations"]
+    assert not (bundle / "explanations").exists()
+
+
+def test_a_source_directory_still_holding_members_is_left_alone(bundle: Path) -> None:
+    pruned = rename_reserved(bundle, {"explanations/index.md": "docs/explanations/index.md"})
+    assert pruned == []
+    assert (bundle / "explanations/why-graphs.md").is_file()
+
+
+def test_an_empty_mapping_does_nothing(bundle: Path) -> None:
+    before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}
+    assert rename_reserved(bundle, {}) == []
     assert {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()} == before

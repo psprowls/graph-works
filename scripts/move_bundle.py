@@ -294,3 +294,34 @@ def prepare(root: Path, rules: Sequence[Rule]) -> Prepared:
     plan = moves.plan_move_many(planning, expansion.ordinary)
     repair = moves.plan_repair(lens, expansion.reserved) if expansion.reserved else None
     return Prepared(expansion, planning, plan, repair)
+
+
+def rename_reserved(root: Path, reserved: Mapping[str, str]) -> list[str]:
+    """Rename each reserved member, creating parents, then prune what emptied.
+
+    A lane index's entries are **relative**, and its siblings move with it, so
+    it needs no content edit at all -- only `okf_ext.moves` declines to be the
+    thing that renames it. `Path.replace` is the whole operation.
+
+    The prune is this script's job rather than `apply`'s: the lane index is
+    still sitting in the source directory while the ordinary batch commits, so
+    `apply`'s regime-4 prune finds the directory non-empty and leaves it.
+    Best-effort and bottom-up, with no failure path -- a directory that will
+    not go is a directory something else still wants.
+    """
+    for source, dest in sorted(reserved.items()):
+        destination = root / dest
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        (root / source).replace(destination)
+
+    pruned: list[str] = []
+    for source in sorted(reserved, reverse=True):
+        directory = (root / source).parent
+        while directory != root:
+            try:
+                directory.rmdir()
+            except OSError:
+                break
+            pruned.append(directory.relative_to(root).as_posix())
+            directory = directory.parent
+    return sorted(pruned)

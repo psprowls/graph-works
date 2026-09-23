@@ -197,9 +197,11 @@ empty live list. On success, the result contains:
 
 - `terminal` (bool), `max_parallel` / `slots_free` (ints), and `live` (the
   echoed input list).
-- `repo` — `{"path": "<code repository>"}`, the repository `workspace.yaml`
-  declares, or `null` when none resolves. A `null` repo never plans a
-  creation: those items arrive in `blocked[]` as `worktree-unprovable`.
+- `repo` — `{"name": "<declared name>", "path": "<code repository>", "source": "frontmatter|flag|sole|fallback"}`,
+  the repository `workspace.yaml` declares, or `null` when none resolves. A
+  `null` repo never plans a creation: those items arrive in `blocked[]` as
+  `worktree-unprovable`. `source` says why that repository was chosen;
+  `frontmatter` means the item (or an ancestor) sets `repo:`.
 - `dispatches[]` — each entry: `key` (the exact planner session name,
   `gw-<phase>-<stem>`, at most 64 characters with the path hash retained), `path`, `phase`,
   `kind`, `effort`, `skill`, `mode` (`autonomous` | `attend` | `relay`),

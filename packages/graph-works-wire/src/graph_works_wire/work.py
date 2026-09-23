@@ -679,7 +679,9 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         "slots_free": result.slots_free,
         "supervise_merges": result.supervise_merges,
         "live": list(result.live),
-        "repo": None if result.code_repo is None else {"path": result.code_repo},
+        "repo": None
+        if result.code_repo is None
+        else {"name": result.code_repo_name, "path": result.code_repo, "source": result.code_repo_source},
         "dispatches": [
             {
                 "key": dispatch.key,

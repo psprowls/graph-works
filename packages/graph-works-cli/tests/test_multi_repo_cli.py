@@ -167,7 +167,17 @@ def test_work_orchestrate_repo_name_selects_the_declared_repo(two_repos: tuple[P
     path = _file(root, "Orchestrated", "apps/ui")
     result = runner.invoke(app, ["work", "orchestrate", path, "--repo-name", "ui", "--workspace", str(root), "--json"])
     assert result.exit_code == 0, result.output
-    assert json.loads(result.stdout)["repo"] == {"path": str(ui.resolve())}
+    assert json.loads(result.stdout)["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "flag"}
+
+
+def test_work_orchestrate_plans_a_tagged_item_without_repo_name(two_repos: tuple[Path, Path, Path]) -> None:
+    root, _code, ui = two_repos
+    args = ["work", "file", "--title", "Tagged", "--kind", "Feature", "--summary", "d", "--affects", "apps/ui"]
+    filed = runner.invoke(app, [*args, "--repo", "ui", "--workspace", str(root), "--json"])
+    path = json.loads(filed.stdout)["path"]
+    result = runner.invoke(app, ["work", "orchestrate", path, "--workspace", str(root), "--json"])
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
 
 
 def _placement_args(root: Path, path: str, phase: str, worktree: str) -> list[str]:

@@ -267,6 +267,8 @@ def orchestrate(*, busy: bool) -> object:
         holds=(hold,) if busy else (),
         warnings=("w",),
         code_repo="/code" if busy else None,
+        code_repo_name="code" if busy else None,
+        code_repo_source="sole" if busy else None,
     )
 
 

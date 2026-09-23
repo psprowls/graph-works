@@ -31,6 +31,10 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Env:
     monkeypatch.setattr(mutations, "now", lambda: AT)
     layout = serve_workspace(tmp_path)
     write_item(layout, ITEM, work_status="open", phase="design")
+    refs = layout.bundle_dir / ITEM / "references"
+    refs.mkdir(parents=True, exist_ok=True)
+    (refs / "01-design.md").write_text("# Design\n", encoding="utf-8", newline="")
+    (refs / "02-plan.md").write_text("# Plan\n", encoding="utf-8", newline="")
     client, headers = make_client(layout)
     return layout, client, headers
 
@@ -52,6 +56,9 @@ def test_plan_writes_nothing_and_apply_matches_the_cli_projection(
 
     twin = serve_workspace(tmp_path / "twin")
     write_item(twin, ITEM, work_status="open", phase="design")
+    twin_refs = twin.bundle_dir / ITEM / "references"
+    twin_refs.mkdir(parents=True, exist_ok=True)
+    (twin_refs / "01-design.md").write_text("# Design\n", encoding="utf-8", newline="")
     monkeypatch.setattr(work_cli, "_today", lambda: date(2026, 9, 18))
     cli = CliRunner().invoke(
         app,

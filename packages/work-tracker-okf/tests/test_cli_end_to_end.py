@@ -67,7 +67,7 @@ def test_the_path_native_surface_ends_at_zero_errors(tmp_path: Path) -> None:
     assert [finding for finding in report["findings"] if finding["severity"] == "error"] == []
 
 
-def test_missing_canonical_artifact_is_a_warning_not_a_write_refusal(tmp_path: Path) -> None:
+def test_missing_canonical_artifact_refuses_completion(tmp_path: Path) -> None:
     root = str(tmp_path)
     _run("init", root, "--today", TODAY)
     _run(
@@ -85,8 +85,10 @@ def test_missing_canonical_artifact_is_a_warning_not_a_write_refusal(tmp_path: P
         TODAY,
     )
     _run("advance", root, PATH, "--today", TODAY)
-    _run("advance", root, PATH, "--today", TODAY, "--effort", "small")
-    result = runner.invoke(app, ["lint", root, "--today", TODAY, "--json"])
-    assert result.exit_code == 0
-    codes = {finding["code"] for finding in json.loads(result.stdout)["findings"]}
-    assert "structure.source-missing" in codes
+    page = tmp_path / f"{PATH}.md"
+    before = page.read_bytes()
+    result = runner.invoke(app, ["advance", root, PATH, "--today", TODAY, "--effort", "small"])
+    assert result.exit_code == 1
+    assert "artifact-missing" in result.stderr
+    assert "01-design.md" in result.stderr
+    assert page.read_bytes() == before

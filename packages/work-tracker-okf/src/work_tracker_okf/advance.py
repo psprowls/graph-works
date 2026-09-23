@@ -31,6 +31,7 @@ RefusalReason = Literal[
     "unknown-path",
     "unreadable-member",
     "phase-mismatch",
+    "artifact-missing",
     "blocked",
     "nothing-to-advance",
     "effort-required",

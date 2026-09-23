@@ -54,6 +54,13 @@ def _write(
     )
 
 
+def _artifact(layout, path: str, phase: str) -> None:
+    filename = {"design": "01-design.md", "plan": "02-plan.md"}[phase]
+    target = layout.bundle_dir / path / "references" / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"# {phase.title()}\n", encoding="utf-8")
+
+
 def _initialized_workspace(tmp_path: Path):
     repo = tmp_path / "repo"
     (repo / ".git").mkdir(parents=True)
@@ -159,6 +166,7 @@ def test_live_stage_exit_is_journaled_and_does_not_stamp_the_pointer(tmp_path: P
     layout = _initialized_workspace(tmp_path)
     path = "work/feature-a"
     _write(layout, path)
+    _artifact(layout, path, "plan")
     from graph_works_core.work import commands as work
 
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
@@ -230,6 +238,7 @@ def test_live_stage_advance_forwards_explicit_worktree_stamping(tmp_path: Path) 
     layout = _initialized_workspace(tmp_path)
     path = "work/feature-a"
     _write(layout, path)
+    _artifact(layout, path, "plan")
     from graph_works_core.work import commands as work
 
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
@@ -445,6 +454,8 @@ def _ready(layout, path: str, *, phase: str = "execute", **kwargs) -> None:
     from graph_works_core.work import commands as work
 
     _write(layout, path, phase=phase, work_status="in-progress", **kwargs)
+    if phase == "plan":
+        _artifact(layout, path, "plan")
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
 
 
@@ -884,6 +895,8 @@ def _stamping_workspace(tmp_path: Path, epic_phase: str = "execute"):
     _write(layout, "work/epic-a", type="Epic", phase=epic_phase)
     _write(layout, "work/epic-a/children/feature-a", phase="plan")
     _write(layout, "work/feature-solo", phase="plan")
+    _artifact(layout, "work/epic-a/children/feature-a", "plan")
+    _artifact(layout, "work/feature-solo", "plan")
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
     return layout
 

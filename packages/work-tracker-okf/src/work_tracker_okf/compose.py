@@ -23,6 +23,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
+from stat import S_ISREG
 from types import MappingProxyType
 from typing import Literal
 
@@ -347,11 +348,9 @@ def advance_and_stamp(
     `sources.upsert` was built for exactly this: it mutates the in-memory
     `Document` and lets the caller save.
 
-    **The stamp is unconditional** (C6-G): no existence check before writing
-    the pointer, matching the reference `gw work advance`. A pointer at a
-    missing artifact is `targets.artifact-missing`, a `warn`, and the caller's
-    post-write lint is what surfaces it immediately rather than at the next
-    `lint` run.
+    Completing design or plan requires its canonical artifact to be a regular
+    file before stamping or changing the page. Other transitions keep their
+    usual stamp behavior.
 
     `sync_plan_table` is nested under the stamp because `workflow.py` sets it on
     exactly one transition -- plan-complete -> execute -- where `stamp_source`
@@ -394,6 +393,24 @@ def advance_and_stamp(
     title: str | None = None
     row = False
     if plan.stamp_source is not None:
+        ref = artifact_ref(item.path, MANAGED_ARTIFACTS[plan.stamp_source])
+        target = ref.path(bundle.root)
+        if plan.trigger == "complete" and plan.stamp_source in {SPEC_SOURCE_ID, PLAN_SOURCE_ID}:
+            try:
+                regular = S_ISREG(target.stat().st_mode)
+            except (FileNotFoundError, NotADirectoryError):
+                regular = False
+            if not regular:
+                refused = replace(
+                    plan,
+                    changes=(),
+                    stamp_source=None,
+                    sync_plan_table=False,
+                    refusal="artifact-missing",
+                    detail=f"completion requires a regular artifact file: {target}",
+                    trigger=None,
+                )
+                return AdvanceOutcome(plan=refused, stamped=None, stamp_title=None, plan_row=False, written=False)
         stamped, title = stamp_for(bundle.root, item, plan.stamp_source)
         if plan.sync_plan_table:
             row = plan_row_splice(document, stamped).changed

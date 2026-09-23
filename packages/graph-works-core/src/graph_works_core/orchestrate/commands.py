@@ -49,10 +49,11 @@ from graph_works_core.workspace.dispatch import (
 )
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import checked_bool, checked_int
 from graph_works_core.workspace.provenance import default_base, run_git
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import ItemRepo, resolve_item_repo
 
 WALK_DEPTH_CAP = 10_000
 
@@ -87,6 +88,7 @@ BLOCKED_KINDS: frozenset[str] = frozenset(
         "worktree-unprovable",
         "worktree-ambiguous",
         "decisions",
+        "cross-repo-child",
         "invalid",
     }
 )
@@ -374,21 +376,40 @@ def _descendants(items: Sequence[WorkItem], root: str) -> list[WorkItem]:
     return out
 
 
-def _epic_stamp(items: Sequence[WorkItem], root_item: WorkItem) -> tuple[str, str] | None:
-    """`(path, branch)` of "the epic worktree" rules 2-3 reuse or fork against:
-    the root's own stamp, falling back to the first stamped descendant in pick
-    order. The fallback is reproducible from vault state but depends on which
-    child happened to run first -- recorded as a risk in the spec, not fixed
-    here."""
-    if root_item.worktree and root_item.branch:
-        return root_item.worktree, root_item.branch
-    stamped = [item for item in _descendants(items, root_item.path) if item.worktree and item.branch]
+def _epic_stamp(
+    items: Sequence[WorkItem],
+    root_item: WorkItem,
+    *,
+    repo: str | None = None,
+    exclude: frozenset[str] = frozenset(),
+) -> tuple[str, str] | None:
+    """`(path, branch)` of "the epic worktree" rules 2-3 reuse or fork against.
+
+    `repo=None` is the epic's own repository: the root's scalar stamp, falling
+    back to the first stamped descendant in pick order -- skipping *exclude*,
+    the descendants that resolve to another repository, whose scalar pair
+    names a checkout of *that* repository. A named *repo* reads
+    `repo_stamps[repo]` the same way. The fallback is reproducible from vault
+    state but depends on which child happened to run first -- recorded as a
+    risk in the spec, not fixed here.
+    """
+
+    def pair(item: WorkItem) -> tuple[str, str] | None:
+        if repo is None:
+            return (item.worktree, item.branch) if item.worktree and item.branch else None
+        stamp = item.repo_stamps.get(repo)
+        return (stamp.worktree, stamp.branch) if stamp is not None else None
+
+    own = pair(root_item)
+    if own is not None:
+        return own
+    stamped = [
+        item for item in _descendants(items, root_item.path) if item.path not in exclude and pair(item) is not None
+    ]
     if not stamped:
         return None
     stamped.sort(key=lambda item: (PICK_ORDER.get(item.work_status, 99), item.opened, item.path))
-    chosen = stamped[0]
-    assert chosen.worktree is not None and chosen.branch is not None
-    return chosen.worktree, chosen.branch
+    return pair(stamped[0])
 
 
 def _adopt(item: WorkItem, *, inventory: Mapping[str, str]) -> tuple[str, str] | _Refusal | None:
@@ -816,6 +837,7 @@ def plan(
     worktree_inventory: Mapping[str, str] | None = None,
     repo_known: bool = True,
     code_repo: str | None = None,
+    repo_refusals: Mapping[str, BlockedItem] = MappingProxyType({}),
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
@@ -864,6 +886,14 @@ def plan(
     silently linking trunk work beneath it. Defaults `None`, which falls back
     to comparing against `repo_path` -- unchanged behaviour for a direct
     caller that only ever passed `repo_path`.
+
+    `repo_refusals` is `path -> BlockedItem`, one entry for every descendant
+    that resolves to another repository (`cross-repo-child`) or cannot
+    resolve its own `repo:` at all (`invalid`). `run_orchestrate` computes it,
+    because resolution reads `workspace.yaml`; a refused path is blocked with
+    that exact `BlockedItem` before any reservation and is excluded from
+    `_epic_stamp`'s descendant fallback, so a cross-repo child's scalar pair
+    can never become the epic worktree.
     """
     exists = worktree_exists or {}
     inventory = worktree_inventory or {}
@@ -917,7 +947,7 @@ def plan(
         if item.worktree:
             live_worktree_owners.setdefault(item.worktree, set()).add(item.path)
 
-    stamp = _epic_stamp(items, root_item) if root_item is not None else None
+    stamp = _epic_stamp(items, root_item, exclude=frozenset(repo_refusals)) if root_item is not None else None
     epic_worktree_path = stamp[0] if stamp else None
     epic_branch = stamp[1] if stamp else branch_name(root, root_item.type if root_item else "")
 
@@ -943,6 +973,10 @@ def plan(
     dispatches: list[PlannedDispatch] = []
     resolutions: dict[str, DispatchResolution] = {}
     for item, result in candidates:
+        repo_refusal = repo_refusals.get(item.path)
+        if repo_refusal is not None:
+            blocked.append(repo_refusal)
+            continue
         affects = set(item.affects)
         if not affects:
             blocked.append(
@@ -1119,7 +1153,10 @@ class OrchestrateResult:
     frontier walk, and is deliberately not done.
 
     `code_repo` is the resolved code repository, reported even when the
-    dirty-checkout rule withholds it from `plan()`.
+    dirty-checkout rule withholds it from `plan()`. `code_repo_name` and
+    `code_repo_source` say *why* it was chosen -- `ItemRepo.name`/`.source`
+    from `resolve_item_repo` -- and are both `None` for an explicit `repo=`,
+    which bypasses that resolution entirely.
     """
 
     plan: OrchestratePlan
@@ -1131,6 +1168,8 @@ class OrchestrateResult:
     warnings: tuple[str, ...] = ()
     holds: tuple[HoldReport, ...] = ()
     code_repo: str | None = None
+    code_repo_name: str | None = None
+    code_repo_source: str | None = None
 
     @property
     def path(self) -> str:
@@ -1286,6 +1325,39 @@ def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, path: str) 
     )
 
 
+def _repo_refusals(
+    layout: WorkspaceLayout, items: Sequence[WorkItem], root: str, root_repo: ItemRepo
+) -> dict[str, BlockedItem]:
+    """Every descendant of *root* that does not plan in *root_repo*.
+
+    Each descendant resolves with the root's repository as its fallback, so
+    an untagged one inherits it even when the root's came from `--repo-name`.
+    A different answer is `cross-repo-child` -- placing work in a second
+    repository is not built yet, and guessing would place it in the wrong
+    one. A descendant whose own resolution refuses (an undeclared `repo:`)
+    is `invalid` for itself only; the rest of the subtree still plans.
+    """
+    by_path = {item.path: item for item in items}
+    inherited = replace(root_repo, source="fallback", note=None)
+    refusals: dict[str, BlockedItem] = {}
+    for node in _descendants(items, root):
+        try:
+            resolved = resolve_item_repo(layout, node, by_path, fallback=lambda: inherited)
+        except WorkspaceError as exc:
+            refusals[node.path] = BlockedItem(path=node.path, kind="invalid", reason=str(exc))
+            continue
+        if resolved.name != root_repo.name:
+            refusals[node.path] = BlockedItem(
+                path=node.path,
+                kind="cross-repo-child",
+                reason=(
+                    f"{node.path} resolves to repository {resolved.name!r} ({resolved.source}), "
+                    f"not {root_repo.name!r} where {root} plans; cross-repository children are not placed yet"
+                ),
+            )
+    return refusals
+
+
 def run_orchestrate(
     layout: WorkspaceLayout,
     path: str,
@@ -1299,11 +1371,14 @@ def run_orchestrate(
 
     Never mutates a work item, a worktree or the manifest.
 
-    `repo` defaults to `resolve_repo(layout, repo_name=repo_name)` -- the code
-    repo `workspace.yaml` declares, not the layout's `repo_root`. An
-    explicit `repo` still wins and **skips the config read entirely**: an
-    argument is not a default. `repo_name` selects among several declared
-    repositories and is ignored when `repo` is given.
+    `repo` defaults to the root item's resolved repository
+    (`resolve_item_repo(layout, root_item, by_path, repo_name=repo_name)`),
+    not the layout's `repo_root`. An explicit `repo` still wins and **skips
+    that resolution entirely**: an argument is not a default. `repo_name`
+    selects among several declared repositories and is ignored when `repo`
+    is given. Descendants that resolve to a different repository than the
+    root are blocked `cross-repo-child`; a descendant whose own `repo:`
+    cannot be resolved is blocked `invalid` for itself only.
 
     `provisions_worktrees` passes straight through to `plan()` -- see its
     docstring; this shell resolves no backend itself; that is a caller's job.
@@ -1320,10 +1395,14 @@ def run_orchestrate(
     max_parallel = checked_int(layout, "workflow.auto_drive.max_parallel")
     supervise_merges = checked_bool(layout, "workflow.auto_drive.supervise_merges")
 
-    repo_note: str | None = None
-    resolved_repo = repo
-    if resolved_repo is None:
-        resolved_repo, repo_note = resolve_repo(layout, repo_name=repo_name)
+    by_path = {item.path: item for item in items}
+    repo_refusals: dict[str, BlockedItem] = {}
+    if repo is not None:
+        root_repo = ItemRepo(None, repo, "flag")
+    else:
+        root_repo = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
+        repo_refusals = _repo_refusals(layout, items, path, root_repo)
+    resolved_repo, repo_note = root_repo.path, root_repo.note
 
     code_repo = str(resolved_repo) if resolved_repo is not None else None
     repo_path = code_repo
@@ -1350,6 +1429,7 @@ def run_orchestrate(
         worktree_inventory=_worktree_inventory(resolved_repo),
         repo_known=code_repo is not None,
         code_repo=code_repo,
+        repo_refusals=repo_refusals,
     )
 
     decisions = _resolve_decisions(items, bundle.root, path)
@@ -1364,6 +1444,8 @@ def run_orchestrate(
         warnings=computed.warnings + decisions.warnings + ((repo_note,) if repo_note else ()),
         holds=open_holds(items, bundle.root, subtree),
         code_repo=code_repo,
+        code_repo_name=root_repo.name if repo is None else None,
+        code_repo_source=root_repo.source if repo is None else None,
     )
 
 

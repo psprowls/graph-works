@@ -12,6 +12,7 @@ from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.orchestrate import stage_advance as stage
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import layout_for
+from graph_works_core.workspace.repos import ItemRepo
 from okf_io import load
 
 TODAY = date(2026, 8, 23)
@@ -69,7 +70,7 @@ def _declare_repo(monkeypatch, tmp_path: Path) -> Path:
     withheld) and `default_base` falls back -- a cold start still mints."""
     code = tmp_path / "code"
     code.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setattr(orchestrate, "resolve_repo", lambda *args, **kwargs: (code, None))
+    monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo("code", code, "sole"))
     return code
 
 
@@ -292,13 +293,13 @@ def test_explicit_repo_skips_declared_repo_resolution(tmp_path: Path, monkeypatc
     repo.mkdir()
     path = "work/feature-a"
     _write(layout, path, phase="design")
-    monkeypatch.setattr(orchestrate, "resolve_repo", lambda *args, **kwargs: pytest.fail("must not resolve"))
+    monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: pytest.fail("must not resolve"))
     monkeypatch.setattr(orchestrate, "_checkout_is_dirty", lambda candidate: False)
     monkeypatch.setattr(orchestrate, "default_base", lambda candidate: "trunk")
     result = orchestrate.run_orchestrate(layout, path, repo=repo)
     assert result.warnings == ()
     # Cold start mints the epic worktree even with an explicit repo path known
-    # (rule 4a is deleted) -- `resolve_repo` still must not be called, since
+    # (rule 4a is deleted) -- `resolve_item_repo` still must not be called, since
     # `repo=` bypasses declared-repo resolution regardless of placement.
     assert result.dispatches[0].worktree.action == "create-top-level"
     assert result.dispatches[0].worktree.path is None
@@ -310,7 +311,9 @@ def test_declared_repo_resolution_note_is_preserved(tmp_path: Path, monkeypatch)
     layout = _workspace(tmp_path)
     path = "work/feature-a"
     _write(layout, path)
-    monkeypatch.setattr(orchestrate, "resolve_repo", lambda *args, **kwargs: (None, "repo unavailable"))
+    monkeypatch.setattr(
+        orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo(None, None, "sole", "repo unavailable")
+    )
     result = orchestrate.run_orchestrate(layout, path)
     assert "repo unavailable" in result.warnings
 
@@ -329,7 +332,9 @@ def test_no_declared_code_repo_reports_null_and_blocks_a_worktree_creation(tmp_p
     layout = _workspace(tmp_path)
     path = "work/feature-a"
     _write(layout, path, phase="design")
-    monkeypatch.setattr(orchestrate, "resolve_repo", lambda *args, **kwargs: (None, "repo unavailable"))
+    monkeypatch.setattr(
+        orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo(None, None, "sole", "repo unavailable")
+    )
     result = orchestrate.run_orchestrate(layout, path)
     assert result.code_repo is None
     assert "repo unavailable" in result.warnings
@@ -934,6 +939,71 @@ def _two_repo_stamping_workspace(tmp_path: Path):
     declared = f"repositories:\n  code:\n    path: {json.dumps(str(code))}\n  ui:\n    path: {json.dumps(str(ui))}\n"
     layout.manifest_path.write_text(text.replace(seeded, declared), encoding="utf-8")
     return layout, code, ui
+
+
+def _tag(layout, path: str, repo: str) -> None:
+    document = load(layout.bundle_dir / f"{path}.md")
+    document.set("repo", repo)
+    document.save()
+
+
+def _kinds(result) -> dict[str, str]:
+    return {blocked.path: blocked.kind for blocked in result.blocked}
+
+
+def test_a_tagged_epic_plans_without_a_repo_name(tmp_path: Path) -> None:
+    layout, _code, ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/epic-a", "ui")
+
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+
+    assert result.code_repo is not None and Path(result.code_repo).resolve() == ui.resolve()
+    assert (result.code_repo_name, result.code_repo_source) == ("ui", "frontmatter")
+    assert _kinds(result).get("work/epic-a/children/feature-a") != "cross-repo-child"
+
+
+def test_an_untagged_child_inherits_the_root_s_flag_repository(tmp_path: Path) -> None:
+    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
+
+    result = orchestrate.run_orchestrate(layout, "work/epic-a", repo_name="ui")
+
+    assert (result.code_repo_name, result.code_repo_source) == ("ui", "flag")
+    assert "cross-repo-child" not in _kinds(result).values()
+
+
+def test_a_cross_repo_child_is_refused_by_name(tmp_path: Path) -> None:
+    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/epic-a", "ui")
+    _tag(layout, "work/epic-a/children/feature-a", "code")
+
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+
+    (blocked,) = [b for b in result.blocked if b.path == "work/epic-a/children/feature-a"]
+    assert blocked.kind == "cross-repo-child"
+    assert "'code'" in blocked.reason and "'ui'" in blocked.reason
+    assert all(d.slug != blocked.path for d in result.dispatches)
+
+
+def test_a_descendant_naming_an_undeclared_repo_blocks_only_itself(tmp_path: Path) -> None:
+    from graph_works_core.work import commands as work
+
+    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/epic-a", "ui")
+    _write(layout, "work/epic-a/children/feature-b", phase="plan", affects=("packages/b",))
+    _tag(layout, "work/epic-a/children/feature-b", "nope")
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+
+    kinds = _kinds(result)
+    assert kinds["work/epic-a/children/feature-b"] == "invalid"
+    assert kinds.get("work/epic-a/children/feature-a") != "invalid"
+
+
+def test_an_untagged_root_still_refuses_in_a_two_repo_workspace(tmp_path: Path) -> None:
+    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
+    with pytest.raises(WorkspaceError, match="repo_name"):
+        orchestrate.run_orchestrate(layout, "work/epic-a")
 
 
 def test_a_two_repo_advance_infers_from_the_declared_repo_holding_the_cwd(tmp_path: Path) -> None:

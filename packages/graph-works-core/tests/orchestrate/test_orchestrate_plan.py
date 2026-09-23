@@ -9,8 +9,9 @@ from unittest import mock
 
 import pytest
 from graph_works_core.orchestrate import commands as orchestrate
+from graph_works_core.orchestrate.commands import BlockedItem
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.items import WorkItem
+from work_tracker_okf.items import Stamp, WorkItem
 
 
 def _item(path: str, **overrides: object) -> WorkItem:
@@ -356,6 +357,29 @@ def test_capacity_blocks_only_candidates_past_the_free_slots() -> None:
     assert [(blocked.path, blocked.kind) for blocked in result.blocked] == [(second, "capacity")]
 
 
+def test_a_repo_refusal_blocks_the_candidate_and_reserves_nothing() -> None:
+    root = "work/epic-a"
+    first = f"{root}/children/feature-a"
+    second = f"{root}/children/feature-b"
+    items = (
+        _item(
+            root,
+            type="Epic",
+            phase="execute",
+            affects=("packages/root",),
+            active_child_paths=(first, second),
+            worktree="/wt/epic-a",
+            branch="epic/a",
+        ),
+        _item(first, affects=("packages/a",)),
+        _item(second, affects=("packages/b",), opened="2026-08-02"),
+    )
+    refusal = BlockedItem(path=first, kind="cross-repo-child", reason=f"{first} resolves to 'code', not 'ui'")
+    result = _plan(items, root, repo_refusals={first: refusal})
+    assert refusal in result.blocked
+    assert [dispatch.slug for dispatch in result.dispatches] == [second]
+
+
 def test_dependency_blocker_keeps_its_path_native_classification() -> None:
     path = "work/feature-a"
     dependency = "work/feature-b"
@@ -451,6 +475,31 @@ def test_epic_stamp_prefers_root_then_sorted_stamped_descendant() -> None:
     )
     assert orchestrate._epic_stamp((unstamped, later, first), unstamped) == ("/first", "feature/first")
     assert orchestrate._epic_stamp((unstamped,), unstamped) is None
+
+
+def test_the_epic_stamp_fallback_skips_an_excluded_descendant() -> None:
+    root = _item("work/epic", type="Epic", worktree=None, branch=None)
+    foreign = _item(
+        "work/epic/children/feature-a",
+        worktree="/wt/foreign",
+        branch="f",
+    )
+    items = (root, foreign)
+    assert orchestrate._epic_stamp(items, root) == ("/wt/foreign", "f")
+    assert orchestrate._epic_stamp(items, root, exclude=frozenset({foreign.path})) is None
+
+
+def test_the_epic_stamp_reads_repo_stamps_for_a_named_repo() -> None:
+    root = _item(
+        "work/epic",
+        type="Epic",
+        worktree="/wt/own",
+        branch="own",
+        repo_stamps={"ui": Stamp("/wt/ui", "u")},
+    )
+    assert orchestrate._epic_stamp((root,), root) == ("/wt/own", "own")
+    assert orchestrate._epic_stamp((root,), root, repo="ui") == ("/wt/ui", "u")
+    assert orchestrate._epic_stamp((root,), root, repo="docs") is None
 
 
 def test_worktree_rule_1c_adopts_when_the_stamped_directory_has_vanished() -> None:

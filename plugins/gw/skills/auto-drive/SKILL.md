@@ -215,7 +215,7 @@ empty live list. On success, the result contains:
 - `blocked[]` — each: `path`, `kind` (one of exactly `deps`, `capacity`,
   `affects-overlap`, `effort-required`, `decisions`, `human`,
   `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
-  `worktree-unprovable`, `worktree-ambiguous`, `invalid`),
+  `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`),
   `reason`. The closed vocabulary is `BLOCKED_KINDS` in
   `graph_works_core.orchestrate.commands` — if a `kind` arrives that isn't in
   this list, treat it as this skill being out of date, print it, and act on
@@ -284,16 +284,20 @@ you know is out of date).
   Never add `--worktree`/`--branch` to it: sizing is not a placement.
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
   `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
-  `worktree-unprovable`, `worktree-ambiguous`, `invalid`): print one line each
+  `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`):
+  print one line each
   (`blocked <work-path> (<kind>): <reason>`) and take no action. `capacity` and
   `worktree-pending` resolve themselves next cycle as slots/worktrees free
-  up; `deps`, `affects-overlap`, `human`, and `invalid` need a human decision
-  outside this loop; `decisions` is a third case — it neither self-resolves
-  nor needs a decision outside this loop, it's resolved *inside* this loop
-  by the coordinator's own CLI call, but only once the user tells you to —
-  see §2.5.1. `relay-untailed` and `worktree-unsupported` are a fourth: both
-  are configuration faults that will recur every cycle until someone edits
-  something outside this loop, so report them once and don't wait on them.
+  up; `deps`, `affects-overlap`, `human`, `cross-repo-child`, and `invalid`
+  need a human decision outside this loop; `decisions` is a third case — it
+  neither self-resolves nor needs a decision outside this loop, it's resolved
+  *inside* this loop by the coordinator's own CLI call, but only once the
+  user tells you to — see §2.5.1. `relay-untailed` and `worktree-unsupported`
+  are a fourth: both are configuration faults that will recur every cycle
+  until someone edits something outside this loop, so report them once and
+  don't wait on them. `cross-repo-child` means a child resolves (via `repo:`)
+  to a different repository than its epic; placing it is not supported yet —
+  report it and move on.
   `relay-untailed` means a relay-mode variant has no `prompt_tail`, so a
   dispatched worker would drop into an interactive menu unattended — the fix
   is a matching rule with `prompt_tail` in the shared dispatch document named

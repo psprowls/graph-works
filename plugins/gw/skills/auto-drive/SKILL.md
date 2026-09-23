@@ -287,8 +287,7 @@ you know is out of date).
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
   `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`):
-  print one line each
-  (`blocked <work-path> (<kind>): <reason>`) and take no action. `capacity` and
+  print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action. `capacity` and
   `worktree-pending` resolve themselves next cycle as slots/worktrees free
   up; `deps`, `affects-overlap`, `human`, `cross-repo-child`, and `invalid`
   need a human decision outside this loop; `decisions` is a third case — it

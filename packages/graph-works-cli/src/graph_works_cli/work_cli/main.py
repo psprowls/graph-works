@@ -420,7 +420,10 @@ def record_placement(
     repo: str = typer.Option(
         "",
         "--repo",
-        help="Declared repository the observed pair lives in; another than the item's own writes repo_stamps.",
+        help=(
+            "Declared repository the observed pair lives in; one other than the item's own is "
+            "recorded under repo_stamps."
+        ),
     ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
@@ -428,14 +431,18 @@ def record_placement(
 ) -> None:
     """Record where a dispatched stage runs. Never advances PATH.
 
-    Writes only `worktree`, `branch` and `updated`. Refuses -- writing nothing --
-    when PATH is not ROOT or its descendant, when a descendant is recorded at
-    `design` or `plan`, when PATH's phase is no longer `--phase`, and for an
-    invalid or terminal item or an invalid observation. An identical pair is a
-    no-op. The values must be observed, never the planner's requested names.
+    Writes `worktree`, `branch` and `updated` -- or, with `--repo` naming a
+    repository other than PATH's own, `repo_stamps[NAME]` and `updated`
+    instead. Refuses -- writing nothing -- when PATH is not ROOT or its
+    descendant, when a descendant is recorded at `design` or `plan`, when
+    PATH's phase is no longer `--phase`, and for an invalid or terminal item
+    or an invalid observation. An identical pair is a no-op. The values must
+    be observed, never the planner's requested names.
 
     `--repo-name` selects the code repository when `workspace.yaml` declares
-    several; without it such a workspace refuses rather than guess.
+    several and PATH's chain sets no `repo:`; an item whose own or an
+    ancestor's `repo:` already resolves one needs neither flag, and a
+    conflicting `--repo-name` refuses.
 
     `--repo` names the repository the pair was observed in. A repository
     other than PATH's own records under `repo_stamps`; its own records the

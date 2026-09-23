@@ -1,11 +1,28 @@
 """The two dispatch consumers resolve the same leaf snapshot."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.work.commands import run_next
 from test_run_next import _layout, _spec, _write
+
+
+def _git_worktree(layout, target: Path, branch: str) -> Path:
+    """Replace the workspace fixture's marker with a real tracked repository."""
+    repo = layout.root.parent
+    (repo / ".git").rmdir()
+    for args in (
+        ("init", "-b", "main"),
+        ("config", "user.email", "t@example.com"),
+        ("config", "user.name", "T"),
+        ("add", "."),
+        ("commit", "-m", "fixture"),
+        ("worktree", "add", "-b", branch, str(target)),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    return target
 
 
 @pytest.mark.parametrize(
@@ -24,12 +41,13 @@ from test_run_next import _layout, _spec, _write
 )
 def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec, variant):
     layout = _layout(tmp_path)
+    worktree = _git_worktree(layout, tmp_path / "feature-worktree", "feature/a")
     path = "work/feature-a"
     _write(layout, path, type=kind, phase=phase)
     page = layout.bundle_dir / f"{path}.md"
     page.write_text(
         page.read_text().replace(
-            "effort: medium", "effort: medium\nblast_radius: package\nworktree: /wt/a\nbranch: feature/a"
+            "effort: medium", f"effort: medium\nblast_radius: package\nworktree: {worktree}\nbranch: feature/a"
         ),
         encoding="utf-8",
     )
@@ -55,10 +73,7 @@ def test_next_and_orchestrate_share_resolution(tmp_path: Path, kind, phase, spec
         encoding="utf-8",
     )
     next_result = run_next(layout, path, dry_run=False)
-    from unittest.mock import patch
-
-    with patch("graph_works_core.orchestrate.commands._stat_worktrees", return_value={"/wt/a": True}):
-        planned_result = run_orchestrate(layout, path)
+    planned_result = run_orchestrate(layout, path)
     planned = planned_result.dispatches[0]
     assert next_result.route.dispatch.variant == variant
     resolution = next_result.dispatch_resolution
@@ -110,13 +125,14 @@ def test_descended_next_resolves_leaf_attributes_and_keeps_transitions(tmp_path)
     from work_tracker_okf.workflow import route
 
     layout = _layout(tmp_path)
+    worktree = _git_worktree(layout, tmp_path / "epic-worktree", "epic/a")
     parent = "work/epic-a"
     child = f"{parent}/children/feature-a"
     _write(layout, parent, type="Epic", phase="execute")
     _write(layout, child)
     page = layout.bundle_dir / f"{parent}.md"
     document = load(page)
-    document.set("worktree", str(tmp_path))
+    document.set("worktree", str(worktree))
     document.set("branch", "epic/a")
     page.write_text(document.serialize(), encoding="utf-8")
     (layout.root / "dispatch.local.yaml").write_text(

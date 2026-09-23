@@ -984,6 +984,30 @@ def test_a_cross_repo_child_is_refused_by_name(tmp_path: Path) -> None:
     assert all(d.slug != blocked.path for d in result.dispatches)
 
 
+def test_shell_observes_each_repository_even_when_foreign_child_is_refused(tmp_path: Path, monkeypatch) -> None:
+    layout, code, ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/epic-a", "code")
+    _tag(layout, "work/epic-a/children/feature-a", "ui")
+    (ui / "dirty.txt").write_text("local edit\n", encoding="utf-8")
+    observed = {}
+    real_plan = orchestrate.plan
+
+    def capture(*args, **kwargs):
+        observed.update(kwargs["repo_contexts"])
+        return real_plan(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrate, "plan", capture)
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+    assert _kinds(result)["work/epic-a/children/feature-a"] == "cross-repo-child"
+    assert len(observed) == 2
+    by_path = {context.path: context for context in observed.values()}
+    assert by_path[str(code.resolve())].checkout_usable
+    assert not by_path[str(ui.resolve())].checkout_usable
+    assert all(
+        context.inventory_known and context.inventory["main"] == (context.path,) for context in observed.values()
+    )
+
+
 def test_a_descendant_with_a_malformed_repo_surfaces_a_warning_and_is_not_blocked(tmp_path: Path) -> None:
     layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
     _tag(layout, "work/epic-a", "ui")

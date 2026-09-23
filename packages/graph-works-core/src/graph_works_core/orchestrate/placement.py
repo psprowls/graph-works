@@ -33,7 +33,7 @@ from work_tracker_okf.placement import PlacementPlan, apply_placement, plan_plac
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import declared_repositories, resolve_item_repo, resolve_repos
+from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
@@ -51,19 +51,45 @@ class PlacementRecord:
         return self.application is not None and self.application.ok
 
 
-def _stamp_target(
-    layout: WorkspaceLayout, items: Sequence[WorkItem], path: str, *, repo: str, repo_name: str | None
-) -> str | None:
-    """`repo` when it names a repository other than *path*'s own, else `None` (the scalar pair)."""
-    declared = declared_repositories(layout)
-    if repo not in declared:
-        raise WorkspaceError(
-            f"{path}: --repo {repo!r} names no declared repository in {layout.manifest_path}; "
-            f"declared: {sorted(declared)}"
-        )
+def _prepare_placement(
+    layout: WorkspaceLayout,
+    items: Sequence[WorkItem],
+    path: str,
+    *,
+    root: str,
+    phase: str,
+    worktree: str,
+    branch: str,
+    today: date,
+    repo_name: str | None,
+    repo: str | None,
+) -> tuple[PlacementPlan, ItemRepo | None]:
+    """Plan first, then resolve the item's repository for eligible placements."""
     by_path = {item.path: item for item in items}
-    own = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
-    return None if own.name == repo else repo
+    own: ItemRepo | None = None
+    target: str | None = None
+    if repo and path in by_path:
+        declared = declared_repositories(layout)
+        if repo not in declared:
+            raise WorkspaceError(
+                f"{path}: --repo {repo!r} names no declared repository in {layout.manifest_path}; "
+                f"declared: {sorted(declared)}"
+            )
+        own = resolve_item_repo(layout, by_path[path], by_path, repo_name=repo_name)
+        target = None if own.name == repo else repo
+    plan = plan_placement(
+        items,
+        path,
+        root=root,
+        phase=phase,
+        worktree=worktree,
+        branch=branch,
+        today=today,
+        repo=target,
+    )
+    if plan.refusal is None and own is None:
+        own = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
+    return plan, own
 
 
 def run_record_placement(
@@ -81,7 +107,9 @@ def run_record_placement(
 ) -> PlacementRecord:
     """Record (*worktree*, *branch*) on *path* for its *phase* dispatch under *root*.
 
-    The code repo for postcondition validation is now *path*'s own --
+    Every eligible placement, including a preview or unchanged replay,
+    validates *path*'s repository and returns its selection note. The code
+    repo for postcondition validation is *path*'s own --
     `resolve_item_repo`'s strict chain: the nearest `repo:` over *path* and
     its ancestors, then *repo_name*, then the sole declared repository;
     several declared with no `repo:` and no *repo_name* still raise
@@ -102,38 +130,52 @@ def run_record_placement(
     and live runs, so a dry run can plan the foreign-vs-own distinction too.
 
     Dry runs and unknown paths plan without locking, like `run_stage_advance`.
-    A live record takes the decision owner's lock, re-plans against the
-    projection read inside it, and applies one journaled page write before
-    releasing it. A stale preimage returns a failed `MutationApplication`
-    and writes nothing.
+    A live record takes the decision owner's lock, re-plans and re-resolves
+    against the projection read inside it, and applies one journaled page
+    write before releasing it. A stale preimage returns a failed
+    `MutationApplication` and writes nothing.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
     known = any(item.path == path for item in items)
     if dry_run or not known:
-        target = _stamp_target(layout, items, path, repo=repo, repo_name=repo_name) if repo and known else None
-        return PlacementRecord(
-            plan=plan_placement(
-                items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today, repo=target
-            )
+        plan, own = _prepare_placement(
+            layout,
+            items,
+            path,
+            root=root,
+            phase=phase,
+            worktree=worktree,
+            branch=branch,
+            today=today,
+            repo_name=repo_name,
+            repo=repo,
         )
+        return PlacementRecord(plan=plan, repo_note=own.note if own else None)
     with locked_decision_owner(layout, path) as context:
-        target = _stamp_target(layout, context.items, path, repo=repo, repo_name=repo_name) if repo else None
-        plan = plan_placement(
-            context.items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today, repo=target
+        plan, own = _prepare_placement(
+            layout,
+            context.items,
+            path,
+            root=root,
+            phase=phase,
+            worktree=worktree,
+            branch=branch,
+            today=today,
+            repo_name=repo_name,
+            repo=repo,
         )
         if plan.refusal is not None or not plan.changed:
-            return PlacementRecord(plan=plan)
-        by_path = {item.path: item for item in context.items}
-        item_repo = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
+            return PlacementRecord(plan=plan, repo_note=own.note if own else None)
+        assert own is not None
         application = apply_mutation(
             layout,
             _mutation(context.bundle, plan),
-            repo_root=item_repo.path,
+            repo_root=own.path,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
         )
-        return PlacementRecord(plan=plan, application=application, repo_note=item_repo.note)
+        return PlacementRecord(plan=plan, application=application, repo_note=own.note)
 
 
 def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:

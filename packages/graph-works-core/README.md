@@ -535,6 +535,16 @@ default. `layout.repo_root` stays on the layout — gitignore placement and
 `scanner_excludes` are its documented job — but `orchestrate.commands` is no
 longer one of its readers.
 
+`run_record_placement` validates the work item's own repository for every
+eligible pair, including dry-run previews and unchanged replays, and returns
+the resolver's note in `PlacementRecord.repo_note`. An explicit `repo=` names
+the stamp destination; the item's own repository is still resolved to decide
+whether the pair belongs in scalar fields or `repo_stamps`. Undeclared targets
+and conflicting selections raise `WorkspaceError`. A preview reads without
+locking or writing; a live call re-reads and resolves under the decision-owner
+lock before its journaled write. The lock does not make later external file
+edits atomic: stale preimages still report a failed application.
+
 Four limits worth knowing before you rely on the result:
 
 - The owning epic's decisions ledger is read **twice** per plan — once for the

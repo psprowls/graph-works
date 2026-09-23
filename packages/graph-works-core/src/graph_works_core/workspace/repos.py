@@ -187,7 +187,10 @@ def resolve_item_repo(
             )
         return ItemRepo(declared_name, repositories[declared_name], "frontmatter", note)
     if repo_name is not None:
-        path, _ = resolve_repo(layout, repo_name=repo_name)
+        try:
+            path, _ = resolve_repo(layout, repo_name=repo_name)
+        except WorkspaceError as exc:
+            raise WorkspaceError(f"{label}: {exc}") from exc
         return ItemRepo(repo_name, path, "flag", note)
     if fallback is not None:
         chosen = fallback()

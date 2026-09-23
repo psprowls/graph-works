@@ -275,3 +275,20 @@ def test_declared_repositories_is_empty_when_the_manifest_is_absent(tmp_path):
     layout = _workspace(tmp_path)
     layout.manifest_path.unlink()
     assert repos.declared_repositories(layout) == {}
+
+
+def test_item_repo_flag_naming_an_undeclared_repo_names_the_item(tmp_path):
+    layout, _one, _two_path = _two(tmp_path)
+    index = _items(layout)
+    with pytest.raises(WorkspaceError) as excinfo:
+        repos.resolve_item_repo(layout, index[CHILD], index, repo_name="nope")
+    message = str(excinfo.value)
+    assert CHILD in message and "'nope'" in message
+
+
+def test_item_repo_with_no_item_and_one_declared_repo_is_the_sole_repo(tmp_path):
+    layout = _workspace(tmp_path)
+    code = tmp_path / "code"
+    code.mkdir()
+    _repositories(layout, f'repositories:\n  code:\n    path: "{code}"\n')
+    assert repos.resolve_item_repo(layout, None, {}) == repos.ItemRepo("code", code.resolve(), "sole")

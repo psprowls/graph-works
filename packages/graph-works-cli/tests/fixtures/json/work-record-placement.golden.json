@@ -11,6 +11,7 @@
     "worktree": "<tmp>/wt",
     "branch": "b/observed"
   },
+  "repo": null,
   "changed": true,
   "applied": true,
   "written": true,

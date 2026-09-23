@@ -167,3 +167,27 @@ def test_release_fields_are_optional(tmp_path: Path) -> None:
         )
         == []
     )
+
+
+_REPO_FIELDS = "repo: graph-works\nrepo_stamps:\n  gw-ui:\n    worktree: /wt/gw-ui-epic-x\n    branch: epic/x\n"
+
+
+def test_base_schema_accepts_repo_and_repo_stamps(tmp_path: Path) -> None:
+    assert _findings(tmp_path, _COMPLETE + "status: draft\n" + _REPO_FIELDS) == []
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        "repo: ''\n",
+        "repo: 3\n",
+        "repo_stamps: [gw-ui]\n",
+        "repo_stamps:\n  gw-ui:\n    worktree: /wt/ui\n",
+        "repo_stamps:\n  gw-ui:\n    branch: epic/x\n",
+        "repo_stamps:\n  gw-ui:\n    worktree: /wt/ui\n    branch: epic/x\n    extra: 1\n",
+        "repo_stamps:\n  gw-ui:\n    worktree: ''\n    branch: epic/x\n",
+        "repo_stamps:\n  gw-ui: /wt/ui\n",
+    ],
+)
+def test_base_schema_rejects_malformed_repo_fields(tmp_path: Path, fields: str) -> None:
+    assert _findings(tmp_path, _COMPLETE + "status: draft\n" + fields) != []

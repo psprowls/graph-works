@@ -213,3 +213,16 @@ def test_apply_rechecks_collisions(vault: Path, section_set) -> None:
     with pytest.raises(FileExistsError):
         apply(plan)
     assert not plan.target.exists()
+
+
+def test_filing_writes_repo_after_owner(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(owner="pat", repo="ui"), section_set)
+    assert plan.refusal is None
+    assert plan.frontmatter["repo"] == "ui"
+    page = apply(plan)
+    text = page.read_text(encoding="utf-8")
+    assert "owner: pat\nrepo: ui\n" in text
+
+
+def test_filing_omits_repo_when_unset(vault: Path, section_set) -> None:
+    assert "repo" not in plan_filing(vault, (), seed(), section_set).frontmatter

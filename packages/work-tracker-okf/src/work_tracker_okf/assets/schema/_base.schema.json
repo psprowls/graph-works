@@ -39,6 +39,20 @@
     "released_at": { "type": "string", "format": "date" },
     "worktree": { "type": "string", "minLength": 1 },
     "branch": { "type": "string", "minLength": 1 },
+    "repo": { "type": "string", "minLength": 1 },
+    "repo_stamps": {
+      "type": "object",
+      "propertyNames": { "minLength": 1 },
+      "additionalProperties": {
+        "type": "object",
+        "required": ["worktree", "branch"],
+        "additionalProperties": false,
+        "properties": {
+          "worktree": { "type": "string", "minLength": 1 },
+          "branch": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
     "superseded_by": { "type": "string", "minLength": 1 },
     "mitigation": { "type": "string", "minLength": 1 },
     "rationale": { "type": "string", "minLength": 1 },

@@ -228,6 +228,8 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         holds=(),
         warnings=("w",),
         code_repo="/code",
+        code_repo_name="code",
+        code_repo_source="sole",
     )
     orchestrate_result = work.orchestrate_payload(orchestration)
     assert orchestrate_result["dispatches"][0]["path"] == "work/a"
@@ -235,7 +237,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     assert orchestrate_result["advances"][0]["mode"] == "return"
     assert orchestrate_result["supervise_merges"] is False
     assert orchestrate_result["holds"] == []
-    assert orchestrate_result["repo"] == {"path": "/code"}
+    assert orchestrate_result["repo"] == {"name": "code", "path": "/code", "source": "sole"}
 
 
 def test_orchestrate_payload_carries_holds() -> None:

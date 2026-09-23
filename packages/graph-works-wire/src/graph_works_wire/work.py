@@ -429,6 +429,7 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "current_phase": plan.current_phase,
         "before": {"worktree": plan.before[0], "branch": plan.before[1]},
         "after": {"worktree": plan.after[0], "branch": plan.after[1]},
+        "repo": plan.repo,
         "changed": plan.changed,
         "applied": application is not None,
         "written": result.written,
@@ -679,7 +680,9 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         "slots_free": result.slots_free,
         "supervise_merges": result.supervise_merges,
         "live": list(result.live),
-        "repo": None if result.code_repo is None else {"path": result.code_repo},
+        "repo": None
+        if result.code_repo is None
+        else {"name": result.code_repo_name, "path": result.code_repo, "source": result.code_repo_source},
         "dispatches": [
             {
                 "key": dispatch.key,

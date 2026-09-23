@@ -134,6 +134,9 @@ def file(
     version: str = typer.Option("", "--version", help="Version or release train identifier."),
     target_date: str = typer.Option("", "--target-date", help="Target date (YYYY-MM-DD)."),
     owner: str = typer.Option("", "--owner", help="Owner handle."),
+    repo: str = typer.Option(
+        "", "--repo", help="Declared repository this item's code lives in; descendants inherit it."
+    ),
     tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
@@ -161,6 +164,7 @@ def file(
             version=version or None,
             target_date=_optional_date(target_date, "--target-date"),
             owner=owner or None,
+            repo=repo or None,
             parent_path=parent_path or None,
             depends_on=edges,
             affects=rendering.split_csv(affects),
@@ -413,20 +417,36 @@ def record_placement(
     worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
     branch: str = typer.Option(..., "--branch", help="The observed branch name, without `refs/heads/`."),
     repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
+    repo: str = typer.Option(
+        "",
+        "--repo",
+        help=(
+            "Declared repository the observed pair lives in; one other than the item's own is "
+            "recorded under repo_stamps."
+        ),
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the placement record as JSON."),
 ) -> None:
     """Record where a dispatched stage runs. Never advances PATH.
 
-    Writes only `worktree`, `branch` and `updated`. Refuses -- writing nothing --
-    when PATH is not ROOT or its descendant, when a descendant is recorded at
-    `design` or `plan`, when PATH's phase is no longer `--phase`, and for an
-    invalid or terminal item or an invalid observation. An identical pair is a
-    no-op. The values must be observed, never the planner's requested names.
+    Writes `worktree`, `branch` and `updated` -- or, with `--repo` naming a
+    repository other than PATH's own, `repo_stamps[NAME]` and `updated`
+    instead. Refuses -- writing nothing -- when PATH is not ROOT or its
+    descendant, when a descendant is recorded at `design` or `plan`, when
+    PATH's phase is no longer `--phase`, and for an invalid or terminal item
+    or an invalid observation. An identical pair is a no-op. The values must
+    be observed, never the planner's requested names.
 
     `--repo-name` selects the code repository when `workspace.yaml` declares
-    several; without it such a workspace refuses rather than guess.
+    several and PATH's chain sets no `repo:`; an item whose own or an
+    ancestor's `repo:` already resolves one needs neither flag, and a
+    conflicting `--repo-name` refuses.
+
+    `--repo` names the repository the pair was observed in. A repository
+    other than PATH's own records under `repo_stamps`; its own records the
+    scalar pair.
     """
     layout = resolve_workspace(workspace)
     try:
@@ -439,6 +459,7 @@ def record_placement(
             branch=branch,
             today=_today(),
             repo_name=repo_name or None,
+            repo=repo or None,
             dry_run=dry_run,
         )
     except WorkspaceError as exc:

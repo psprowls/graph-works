@@ -71,7 +71,7 @@ def test_file_maps_core_failures(monkeypatch: pytest.MonkeyPatch, error: Excepti
     monkeypatch.setattr(main, "_dependency_edges", lambda dep: ())
     monkeypatch.setattr(main.work, "run_file", lambda *args, **kwargs: (_ for _ in ()).throw(error))
     assert (
-        _exit_code(lambda: main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", False, "", False))
+        _exit_code(lambda: main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", "", False, "", False))
         == code
     )
 
@@ -100,9 +100,9 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
             "failures": [],
         },
     )
-    main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", True, "", False)
+    main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", "", True, "", False)
     assert "preview" in capsys.readouterr().out
-    main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", False, "", False)
+    main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", "", False, "", False)
     assert "reconciled" in capsys.readouterr().out
 
     monkeypatch.setattr(
@@ -122,7 +122,7 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
         },
     )
     assert (
-        _exit_code(lambda: main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", False, "", False))
+        _exit_code(lambda: main.file("T", "Feature", "S", "", "", "", "", [], "", "", "", "", "", "", False, "", False))
         == 1
     )
 

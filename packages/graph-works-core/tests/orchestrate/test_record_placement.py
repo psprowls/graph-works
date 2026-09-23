@@ -17,8 +17,9 @@ from graph_works_core.work import commands as work
 from graph_works_core.workspace import decision_owner as owners
 from graph_works_core.workspace import transactions
 from graph_works_core.workspace.layout import WorkspaceLayout
-from okf_io import Bundle, load
+from okf_io import Bundle, load, load_bundle
 from work_tracker_okf.decisions import ledger_ref
+from work_tracker_okf.items import IGNORE, Stamp, WorkItem, load_items
 from work_tracker_okf.mutation import WorkMutationPlan
 from work_tracker_okf.placement import PlacementPlan
 from work_tracker_okf.sources import upsert
@@ -520,3 +521,70 @@ def test_a_selected_repo_lacking_affects_needs_every_declared_repo_when_the_base
     assert record.application is not None, record.plan.refusal
     assert record.application.ok, record.application.failures
     assert record.written
+
+
+def _tag(layout: WorkspaceLayout, path: str, repo: str) -> None:
+    document = load(layout.bundle_dir / f"{path}.md")
+    document.set("repo", repo)
+    document.save()
+
+
+def _child(layout: WorkspaceLayout) -> WorkItem:
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    return next(item for item in items if item.path == CHILD)
+
+
+def test_a_tagged_item_records_without_a_repo_name(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = _record(layout)
+    assert record.written and record.plan.repo is None
+
+
+def test_repo_naming_another_repository_writes_repo_stamps(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui", dry_run=False
+    )
+    assert record.written and record.plan.repo == "ui"
+    child = _child(layout)
+    assert child.worktree is None
+    assert dict(child.repo_stamps) == {"ui": Stamp(WT, BR)}
+
+
+def test_repo_naming_the_item_s_own_repository_writes_the_scalar_pair(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="code", dry_run=False
+    )
+    assert record.written and record.plan.repo is None
+    child = _child(layout)
+    assert (child.worktree, child.branch) == (WT, BR)
+    assert dict(child.repo_stamps) == {}
+
+
+def test_repo_naming_an_undeclared_repository_refuses(tmp_path: Path) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    with pytest.raises(WorkspaceError, match="nope"):
+        placement.run_record_placement(
+            layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="nope", dry_run=False
+        )
+
+
+def test_a_dry_run_with_repo_plans_the_foreign_target(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui", dry_run=True
+    )
+    assert record.plan.repo == "ui" and record.application is None

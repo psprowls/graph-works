@@ -44,7 +44,7 @@ from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.anchor import resolve_anchor, spec_ref
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo
+from graph_works_core.workspace.repos import resolve_item_repo
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,11 +158,15 @@ def run_reconcile_context(
 ) -> ReconcileContext:
     """Assemble the reconcile context for one work item. Read-only.
 
-    *repo* is an explicit override for the code repository; when it is `None`,
-    `resolve_repo(layout, repo_name=repo_name)` decides and its resolution note
-    is folded into `warnings`. `resolve_repo`'s own refusals — an ambiguous or
-    malformed `workspace.yaml` — propagate as `WorkspaceError`; they are
-    that function's closed contract, not a degrade this module invents around.
+    *repo* is an explicit override for the code repository and, when given,
+    wins outright. When it is `None`, `resolve_item_repo` decides, per item:
+    the item's own `repo:` (inherited from its nearest physical ancestor)
+    first, then *repo_name*, then strict resolution (one declared repo, or
+    none). Its resolution note is folded into `warnings`. `resolve_item_repo`'s
+    own refusals — a `repo:` naming nothing declared, a conflicting
+    *repo_name*, or ambiguity with no `repo:` set anywhere in the chain —
+    propagate as `WorkspaceError`; they are that function's closed contract,
+    not a degrade this module invents around.
 
     Raises:
         ValueError: for a path naming no work item. §3.2 of the consuming spec
@@ -178,9 +182,11 @@ def run_reconcile_context(
 
     warnings: list[str] = []
     if repo is None:
-        repo, note = resolve_repo(layout, repo_name=repo_name)
-        if note:
-            warnings.append(note)
+        by_path = {candidate.path: candidate for candidate in items}
+        resolved = resolve_item_repo(layout, item, by_path, repo_name=repo_name)
+        repo = resolved.path
+        if resolved.note:
+            warnings.append(resolved.note)
     if repo is None:
         warnings.append("no repo resolved; code drift unavailable")
 

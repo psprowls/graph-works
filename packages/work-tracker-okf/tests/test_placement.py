@@ -13,7 +13,7 @@ from okf_io import load, load_bundle
 from work_helpers import load_written_items, make_item, write_item
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.items import WorkItem, load_items
+from work_tracker_okf.items import Stamp, WorkItem, load_items
 from work_tracker_okf.placement import PLACEMENT_REFUSALS, PlacementPlan, apply_placement, plan_placement
 from work_tracker_okf.workflow import route, state_for
 
@@ -440,3 +440,108 @@ def test_raw_absent_or_null_effort_keeps_recorded_phase_on_item_and_root(tmp_pat
     plan = _plan(load_written_items(tmp_path))
     assert plan.refusal is None and plan.current_phase == "execute"
     assert plan.changed
+
+
+def test_a_malformed_repo_does_not_block_a_scalar_placement() -> None:
+    items = _vault(invalid_optional_fields=("repo",))
+    assert _plan(items).refusal is None
+
+
+def test_a_foreign_repo_placement_plans_against_repo_stamps() -> None:
+    items = _vault(worktree="/wt/own", branch="feature/own", repo_stamps={"ui": Stamp("/wt/ui-old", "old")})
+    plan = plan_placement(items, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui")
+    assert plan.refusal is None
+    assert plan.repo == "ui"
+    assert plan.before == ("/wt/ui-old", "old")
+    assert dict(plan.changes)["worktree"] == WT and dict(plan.changes)["branch"] == BR
+
+
+def test_an_identical_foreign_pair_is_unchanged() -> None:
+    items = _vault(repo_stamps={"ui": Stamp(WT, BR)})
+    plan = plan_placement(items, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui")
+    assert plan.refusal is None and not plan.changed
+
+
+def test_a_malformed_repo_stamps_refuses_a_foreign_write_only() -> None:
+    items = _vault(invalid_optional_fields=("repo_stamps",))
+    foreign = plan_placement(items, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui")
+    assert foreign.refusal == "invalid-item"
+    assert _plan(items).refusal is None
+
+
+@pytest.mark.parametrize("repo", ["", " ui"])
+def test_a_blank_or_padded_repo_name_refuses(repo: str) -> None:
+    plan = plan_placement(_vault(), CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo=repo)
+    assert plan.refusal == "invalid-pair"
+
+
+def test_apply_writes_a_foreign_pair_into_repo_stamps_only(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        SOLO,
+        "type: Bug\nwork_status: in-progress\nphase: execute\neffort: medium\n"
+        "opened: 2026-09-01\nupdated: 2026-09-01\nworktree: /wt/own\nbranch: bug/own\n"
+        "repo_stamps:\n  other:\n    worktree: /wt/other\n    branch: b/other\n",
+    )
+    items = load_written_items(tmp_path)
+    plan = plan_placement(items, SOLO, root=SOLO, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui")
+    document = load(tmp_path / f"{SOLO}.md")
+    apply_placement(document, plan)
+    document.save()
+
+    (item,) = load_written_items(tmp_path)
+    assert (item.worktree, item.branch) == ("/wt/own", "bug/own")
+    assert dict(item.repo_stamps) == {"other": Stamp("/wt/other", "b/other"), "ui": Stamp(WT, BR)}
+    assert item.updated == TODAY.isoformat()
+    assert item.invalid_optional_fields == ()
+
+
+def test_apply_creates_repo_stamps_when_absent(tmp_path: Path) -> None:
+    write_item(
+        tmp_path,
+        SOLO,
+        "type: Bug\nwork_status: in-progress\nphase: execute\neffort: medium\n"
+        "opened: 2026-09-01\nupdated: 2026-09-01\n",
+    )
+    items = load_written_items(tmp_path)
+    plan = plan_placement(items, SOLO, root=SOLO, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui")
+    document = load(tmp_path / f"{SOLO}.md")
+    apply_placement(document, plan)
+    document.save()
+
+    (item,) = load_written_items(tmp_path)
+    assert item.worktree is None
+    assert dict(item.repo_stamps) == {"ui": Stamp(WT, BR)}
+
+
+def test_apply_updates_an_existing_repo_stamp_entry_leaving_the_sibling_and_the_rest_of_the_page_untouched(
+    tmp_path: Path,
+) -> None:
+    write_item(
+        tmp_path,
+        SOLO,
+        "type: Bug\nwork_status: in-progress\nphase: execute\neffort: medium\n"
+        "opened: 2026-09-01\nupdated: 2026-09-01\n"
+        "repo_stamps:\n"
+        "  ui:\n    worktree: /old\n    branch: b\n"
+        "  other:\n    worktree: /wt/other\n    branch: b/other\n",
+    )
+    page = tmp_path / f"{SOLO}.md"
+    before_lines = page.read_text(encoding="utf-8").splitlines()
+    items = load_written_items(tmp_path)
+    plan = plan_placement(items, SOLO, root=SOLO, phase="execute", worktree=WT, branch="b", today=TODAY, repo="ui")
+    document = load(page)
+    apply_placement(document, plan)
+    document.save()
+
+    (item,) = load_written_items(tmp_path)
+    assert dict(item.repo_stamps) == {"ui": Stamp(WT, "b"), "other": Stamp("/wt/other", "b/other")}
+
+    after_lines = page.read_text(encoding="utf-8").splitlines()
+    assert len(before_lines) == len(after_lines)
+    changed = [i for i, (old, new) in enumerate(zip(before_lines, after_lines, strict=True)) if old != new]
+    for i in changed:
+        assert "worktree:" in after_lines[i] or "updated:" in after_lines[i]
+    unchanged = [i for i in range(len(before_lines)) if i not in changed]
+    for i in unchanged:
+        assert before_lines[i] == after_lines[i]

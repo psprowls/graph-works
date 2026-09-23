@@ -56,7 +56,7 @@ def test_the_worker_placement_flag_is_what_the_workflow_skill_tells_workers(step
             "**Verify the branch.**",
             (
                 "binds to this `task_id`/`dispatch_id`",
-                "latest same-Run worker row",
+                "latest attempt (§2.1's definition) is this Dispatch",
                 "frozen dispatch key",
                 "newer attempt supersedes",
                 "enter inspection",

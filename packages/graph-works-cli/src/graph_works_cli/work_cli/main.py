@@ -134,6 +134,9 @@ def file(
     version: str = typer.Option("", "--version", help="Version or release train identifier."),
     target_date: str = typer.Option("", "--target-date", help="Target date (YYYY-MM-DD)."),
     owner: str = typer.Option("", "--owner", help="Owner handle."),
+    repo: str = typer.Option(
+        "", "--repo", help="Declared repository this item's code lives in; descendants inherit it."
+    ),
     tags: str = typer.Option("", "--tags", help="Comma-separated tags."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
@@ -161,6 +164,7 @@ def file(
             version=version or None,
             target_date=_optional_date(target_date, "--target-date"),
             owner=owner or None,
+            repo=repo or None,
             parent_path=parent_path or None,
             depends_on=edges,
             affects=rendering.split_csv(affects),

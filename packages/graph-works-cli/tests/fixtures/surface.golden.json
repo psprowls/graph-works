@@ -3313,6 +3313,17 @@
           "is_flag": false
         },
         {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Declared repository this item's code lives in; descendants inherit it.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
           "name": "tags",
           "opts": [
             "--tags"

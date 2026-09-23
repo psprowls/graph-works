@@ -217,3 +217,12 @@ def test_work_advance_no_longer_refuses_in_a_two_repo_workspace(two_repos: tuple
     payload = json.loads(result.stdout)
     assert payload["refusal"] is None
     assert "2 repositories declared" in payload["repo_note"]
+
+
+def test_work_file_repo_writes_the_repo_field(two_repos: tuple[Path, Path, Path]) -> None:
+    root, _code, _ui = two_repos
+    args = ["work", "file", "--title", "Tagged", "--kind", "Feature", "--summary", "d", "--affects", "apps/ui"]
+    result = runner.invoke(app, [*args, "--repo", "ui", "--workspace", str(root), "--json"])
+    assert result.exit_code == 0, result.output
+    path = json.loads(result.stdout)["path"]
+    assert load(root / "okf" / f"{path}.md").fm_data()["repo"] == "ui"

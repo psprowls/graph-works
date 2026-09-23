@@ -380,6 +380,42 @@ def test_a_repo_refusal_blocks_the_candidate_and_reserves_nothing() -> None:
     assert [dispatch.slug for dispatch in result.dispatches] == [second]
 
 
+def test_plan_never_reuses_a_repo_refused_descendant_s_stamp_as_the_epic_anchor() -> None:
+    """Review focus 2, pinned at `plan()`'s own wiring rather than only at
+    `_epic_stamp` directly: `_epic_stamp` is called with
+    `exclude=frozenset(repo_refusals)` (commands.py), so a refused
+    descendant's own scalar `worktree`/`branch` pair can never become the
+    epic anchor a sibling reuses or forks against.
+
+    The root Epic carries no stamp of its own, so the only candidate epic
+    anchor is the refused child's `/wt/foreign` / `f` pair. Without the
+    exclusion, the plain-phase sibling (a `READ_ONLY_PHASES` entitlement)
+    would reuse that pair outright; with it, there is no anchor left to
+    inherit and the sibling cold-starts, blocking `worktree-unprovable`
+    instead -- never touching the foreign path or branch anywhere in the
+    plan.
+    """
+    root = "work/epic-a"
+    refused = f"{root}/children/feature-a"
+    sibling = f"{root}/children/feature-b"
+    items = (
+        _item(root, type="Epic", phase="execute", affects=("packages/root",), active_child_paths=(refused, sibling)),
+        _item(refused, worktree="/wt/foreign", branch="f", affects=("packages/a",)),
+        _item(sibling, affects=("packages/b",), opened="2026-08-02"),
+    )
+    refusal = BlockedItem(path=refused, kind="cross-repo-child", reason=f"{refused} resolves to 'code', not 'ui'")
+
+    result = _plan(items, root, repo_refusals={refused: refusal})
+
+    assert refusal in result.blocked
+    assert not any(
+        dispatch.worktree.path == "/wt/foreign" or dispatch.worktree.branch == "f" for dispatch in result.dispatches
+    )
+    assert not any(advance.worktree == "/wt/foreign" or advance.branch == "f" for advance in result.advances)
+    sibling_blocked = [blocked for blocked in result.blocked if blocked.path == sibling]
+    assert sibling_blocked and sibling_blocked[0].kind == "worktree-unprovable"
+
+
 def test_dependency_blocker_keeps_its_path_native_classification() -> None:
     path = "work/feature-a"
     dependency = "work/feature-b"

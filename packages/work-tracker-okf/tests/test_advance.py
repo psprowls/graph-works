@@ -13,6 +13,65 @@ from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition
 TODAY = date(2026, 8, 10)
 
 
+@pytest.mark.parametrize(
+    "actual, expected, refused",
+    [
+        (None, "none", False),
+        (None, "design", True),
+        ("design", "none", True),
+        ("design", "design", False),
+        ("plan", "design", True),
+        ("plan", None, False),
+    ],
+)
+def test_expected_phase_distinguishes_unchecked_and_absent(actual, expected, refused):
+    item = make_item("work/feature-phase", phase=actual, effort="medium")
+    plan = advance((item,), item.path, today=TODAY, expected_phase=expected)
+    assert plan.refusal == ("phase-mismatch" if refused else None)
+    if refused:
+        assert plan.changes == ()
+        assert plan.stamp_source is None and not plan.sync_plan_table
+        assert plan.trigger is None
+        assert str(expected) in plan.detail
+        assert (actual or "none") in plan.detail
+
+
+@pytest.mark.parametrize("expected", ["design", "execute"])
+def test_phase_mismatch_precedes_effort_and_return_requirements(expected):
+    item = make_item("work/bug-phase", type="Bug", phase="finish")
+    plan = advance((item,), item.path, today=TODAY, expected_phase=expected, return_=True)
+    assert plan.refusal == "phase-mismatch"
+    assert plan.changes == ()
+
+
+def test_matching_finish_can_return_and_matching_invalid_values_keep_refusal():
+    item = make_item("work/bug-phase", type="Bug", phase="finish")
+    assert advance((item,), item.path, today=TODAY, expected_phase="finish", return_=True).refusal is None
+    assert (
+        advance((item,), item.path, today=TODAY, expected_phase="finish", return_=True, resolved_in="pr-1").refusal
+        == "return-not-available"
+    )
+
+
+def test_expected_phase_does_not_override_missing_or_unreadable_path():
+    assert advance((), "work/missing", today=TODAY, expected_phase="design").refusal == "unknown-path"
+    assert (
+        advance(
+            (),
+            "work/unreadable",
+            today=TODAY,
+            expected_phase="design",
+            unreadable={"work/unreadable.md": "decode failed"},
+        ).refusal
+        == "unreadable-member"
+    )
+
+
+def test_phase_mismatch_precedes_unsized_bug_effort_requirement():
+    item = make_item("work/bug-phase", type="Bug", phase="design")
+    assert advance((item,), item.path, today=TODAY, expected_phase="plan").refusal == "phase-mismatch"
+
+
 def _plan_for(items, path, **kwargs) -> AdvancePlan:
     return advance(items, path if path.startswith("work/") else f"work/{path}", today=TODAY, **kwargs)
 

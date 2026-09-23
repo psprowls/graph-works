@@ -19,6 +19,7 @@ from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import stage_advance as stage
 from graph_works_core.work import commands as work
 from graph_works_core.workspace import decision_owner as owners
+from graph_works_core.workspace import provenance
 from okf_io import load
 from work_tracker_okf.decisions import ledger_ref
 from work_tracker_okf.sources import upsert
@@ -87,6 +88,90 @@ def _file_skip(layout):
     return lambda: work.run_decision_add(
         layout, ITEM, question="Stop?", hold="skip", phase="execute", on=TODAY, decided_by="coordinator", dry_run=False
     )
+
+
+def _design_with_artifacts(layout) -> Path:
+    page = layout.bundle_dir / f"{ITEM}.md"
+    doc = load(page)
+    for key, value in {"phase": "design", "status": "draft", "work_status": "open"}.items():
+        doc.set(key, value)
+    page.write_text(doc.serialize(), encoding="utf-8", newline="")
+    for filename in ("01-design.md", "02-plan.md"):
+        (layout.bundle_dir / ITEM / "references" / filename).write_text(
+            "# Produced artifact\n", encoding="utf-8", newline=""
+        )
+    return page
+
+
+def test_two_guarded_writers_serialize_and_only_one_applies(tmp_path: Path, monkeypatch) -> None:
+    layout = _layout(tmp_path)
+    page = _design_with_artifacts(layout)
+
+    def call():
+        return stage.run_stage_advance(
+            layout, ITEM, today=TODAY, expected_phase="design", infer_worktree=False, dry_run=False
+        )
+
+    entered, release = _pause(monkeypatch, stage, "apply_mutation")
+    paused_apply = stage.apply_mutation
+    applications = 0
+
+    def counted(*args, **kwargs):
+        nonlocal applications
+        applications += 1
+        return paused_apply(*args, **kwargs)
+
+    monkeypatch.setattr(stage, "apply_mutation", counted)
+    first, second = _Run(call), _Run(call)
+    try:
+        first.start()
+        assert entered.wait(WAIT)
+        second.start()
+        second.join(timeout=0.5)
+        assert second.is_alive()
+    finally:
+        release.set()
+        for writer in (first, second):
+            if writer.ident is not None:
+                writer.join(WAIT)
+            assert not writer.is_alive()
+    assert first.error is None and second.error is None
+    assert first.result.outcome.plan.refusal is None
+    assert first.result.application is not None and first.result.application.ok
+    assert second.result.outcome.plan.refusal == "phase-mismatch"
+    assert second.result.application is None
+    assert second.result.results_path is None and second.result.pointer_path is None
+    assert applications == 1
+    fm = load(page).fm_data()
+    assert fm["phase"] == "plan"
+    assert not any(s["id"] == "plan" for s in fm.get("sources", []))
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_stale_guard_preserves_page_artifacts_and_pointer(tmp_path: Path, dry_run: bool) -> None:
+    layout = _layout(tmp_path)
+    page = _design_with_artifacts(layout)
+    refs = layout.bundle_dir / ITEM / "references"
+    pointer = layout.cache_dir / provenance.ACTIVE_WORK_FILENAME
+    provenance.write_active_work(layout, ITEM, "design", updated=TODAY.isoformat())
+    watched = (page, refs / "01-design.md", refs / "02-plan.md", pointer)
+    before = {path: path.read_bytes() for path in watched}
+
+    result = stage.run_stage_advance(
+        layout,
+        ITEM,
+        today=TODAY,
+        expected_phase="plan",
+        worktree="/tmp/stale-place",
+        branch="stale-branch",
+        infer_worktree=False,
+        dry_run=dry_run,
+    )
+
+    assert result.outcome.plan.refusal == "phase-mismatch"
+    assert result.application is None
+    assert result.results_path is None and result.pointer_path is None
+    assert {path: path.read_bytes() for path in watched} == before
 
 
 def test_filing_wins_and_the_waiting_advance_is_refused(tmp_path: Path, monkeypatch) -> None:

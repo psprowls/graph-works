@@ -18,7 +18,7 @@ import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.commands import run_orchestrate
 from graph_works_core.orchestrate.placement import run_record_placement
-from graph_works_core.orchestrate.stage_advance import run_stage_advance
+from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
 from graph_works_core.workspace.errors import WorkspaceConfigError, WorkspaceError
@@ -337,6 +337,9 @@ def advance(
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the advance as JSON."),
+    expected_phase: ExpectedPhase | None = typer.Option(  # noqa: B008 - Typer declares options in defaults
+        None, "--from", help="Expected current phase; none means no phase. Omit to leave unchecked."
+    ),
 ) -> None:
     """Apply the routing table's next transition for PATH.
 
@@ -366,6 +369,7 @@ def advance(
             layout,
             path,
             today=_today(),
+            expected_phase=expected_phase,
             effort=effort or None,
             owner=owner or None,
             resolved_in=resolved_in or None,

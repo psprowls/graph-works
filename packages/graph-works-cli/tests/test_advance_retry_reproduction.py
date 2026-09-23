@@ -107,3 +107,39 @@ def test_a_retried_effort_advance_moves_a_second_phase_onto_a_missing_plan(works
     assert [s["resource"] for s in plan_sources] == [f"/{path}/references/02-plan.md"]
     assert not (workspace / "okf" / path / "references" / "02-plan.md").exists()  # DEFECT: dangling
     assert "02-plan.md" not in stderr  # DEFECT: the dangling stamp is not even warned about
+
+
+def test_guarded_retry_refuses_even_with_a_real_plan(workspace: Path) -> None:
+    path = _epic_at_design(workspace)
+    refs = workspace / "okf" / path / "references"
+    refs.mkdir(parents=True, exist_ok=True)
+    for filename in ("01-design.md", "02-plan.md"):
+        (refs / filename).write_text("# Produced artifact\n", encoding="utf-8", newline="")
+    args = ("--from", "design", "--effort", "large")
+    code, _, stderr = _advance(workspace, path, *args)
+    assert code == 0, stderr
+    before = _page(workspace, path).read_bytes()
+    for extra in ((), ("--dry-run",), ("--json",)):
+        code, stdout, stderr = _advance(workspace, path, *args, *extra)
+        assert code != 0
+        if extra == ("--json",):
+            payload = json.loads(stdout)["error"]["payload"]
+            assert payload["refusal"]["reason"] == "phase-mismatch"
+        else:
+            assert "phase-mismatch" in stderr
+        assert _page(workspace, path).read_bytes() == before
+
+
+@pytest.mark.parametrize("value", ["bogus", "None", ""])
+def test_from_rejects_invalid_cli_choices(workspace: Path, value: str) -> None:
+    path = _epic_at_design(workspace)
+    code, _, _ = _advance(workspace, path, "--from", value)
+    assert code == 2
+
+
+def test_from_none_matches_absent_phase_and_omission_is_unchecked(workspace: Path) -> None:
+    path = _file_epic(workspace)
+    code, _, stderr = _advance(workspace, path, "--from", "none")
+    assert code == 0, stderr
+    code, _, stderr = _advance(workspace, path, "--effort", "large")
+    assert code == 0, stderr

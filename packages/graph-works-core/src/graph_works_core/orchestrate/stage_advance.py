@@ -24,6 +24,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from okf_io import Bundle, load_bundle
+from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
 from work_tracker_okf.advance import RefusalReason
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
@@ -116,6 +117,7 @@ def run_stage_advance(
     path: str,
     *,
     today: date,
+    expected_phase: ExpectedPhase | None = None,
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
@@ -215,6 +217,7 @@ def run_stage_advance(
             hold=hold_for(items, bundle.root, path) if dry_run else None,
             dry_run=dry_run,
             today=today,
+            expected_phase=expected_phase,
             effort=effort,
             owner=owner,
             resolved_in=resolved_in,
@@ -241,6 +244,7 @@ def run_stage_advance(
             hold=hold_in(context, path),
             dry_run=False,
             today=today,
+            expected_phase=expected_phase,
             effort=effort,
             owner=owner,
             resolved_in=resolved_in,
@@ -265,6 +269,7 @@ def _advance(
     *,
     hold: HoldFact | None,
     today: date,
+    expected_phase: ExpectedPhase | None,
     effort: str | None,
     owner: str | None,
     resolved_in: str | None,
@@ -317,6 +322,7 @@ def _advance(
         bundle,
         path,
         today=today,
+        expected_phase=expected_phase,
         effort=effort,
         owner=owner,
         resolved_in=resolved_in,

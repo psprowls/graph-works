@@ -44,7 +44,7 @@ from okf_io import (
     parse,
 )
 
-from work_tracker_okf.advance import AdvancePlan, advance
+from work_tracker_okf.advance import AdvancePlan, ExpectedPhase, advance
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.decisions import DecisionApplication, DecisionPlan, HoldFact, apply_plan, ledger_ref
 from work_tracker_okf.filing import FilingPlan, FilingRefusal, FilingSeed, _materialize_frontmatter, plan_filing
@@ -328,6 +328,7 @@ def advance_and_stamp(
     path: str,
     *,
     today: date,
+    expected_phase: ExpectedPhase | None = None,
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
@@ -370,6 +371,7 @@ def advance_and_stamp(
         items,
         path,
         today=today,
+        expected_phase=expected_phase,
         effort=effort,
         owner=owner,
         resolved_in=resolved_in,

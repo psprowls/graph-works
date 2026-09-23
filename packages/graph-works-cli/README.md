@@ -20,6 +20,14 @@ Root commands:
 - `gw ingest --source PATH [--json]` ingests one source.
 - `gw query --query TEXT [--limit N]` answers a query with citations.
 
+For stage completion, `gw work advance PATH --from PHASE` checks the item's current phase under
+the advance lock before applying a transition. Use `--from none` for an item with no phase yet;
+omitting `--from` leaves the current phase unchecked for compatibility with existing callers.
+The accepted values are `none`, `design`, `plan`, `execute`, `finish`, and `done`. A stale value
+returns `phase-mismatch` without changing the item, artifacts, or active-work pointer. This guard
+only checks the phase: it does not make repeated calls without `--from` idempotent, and it does
+not check whether a produced design or plan artifact exists.
+
 Wiki commands:
 
 - `gw wiki lint [--json]`

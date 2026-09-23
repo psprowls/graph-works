@@ -417,6 +417,11 @@ def record_placement(
     worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
     branch: str = typer.Option(..., "--branch", help="The observed branch name, without `refs/heads/`."),
     repo_name: str = typer.Option("", "--repo-name", help="Select among several declared repositories."),
+    repo: str = typer.Option(
+        "",
+        "--repo",
+        help="Declared repository the observed pair lives in; another than the item's own writes repo_stamps.",
+    ),
     dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the placement record as JSON."),
@@ -431,6 +436,10 @@ def record_placement(
 
     `--repo-name` selects the code repository when `workspace.yaml` declares
     several; without it such a workspace refuses rather than guess.
+
+    `--repo` names the repository the pair was observed in. A repository
+    other than PATH's own records under `repo_stamps`; its own records the
+    scalar pair.
     """
     layout = resolve_workspace(workspace)
     try:
@@ -443,6 +452,7 @@ def record_placement(
             branch=branch,
             today=_today(),
             repo_name=repo_name or None,
+            repo=repo or None,
             dry_run=dry_run,
         )
     except WorkspaceError as exc:

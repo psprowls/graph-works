@@ -429,6 +429,7 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "current_phase": plan.current_phase,
         "before": {"worktree": plan.before[0], "branch": plan.before[1]},
         "after": {"worktree": plan.after[0], "branch": plan.after[1]},
+        "repo": plan.repo,
         "changed": plan.changed,
         "applied": application is not None,
         "written": result.written,

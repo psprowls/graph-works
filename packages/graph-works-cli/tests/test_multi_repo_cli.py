@@ -236,3 +236,22 @@ def test_work_file_repo_writes_the_repo_field(two_repos: tuple[Path, Path, Path]
     assert result.exit_code == 0, result.output
     path = json.loads(result.stdout)["path"]
     assert load(root / "okf" / f"{path}.md").fm_data()["repo"] == "ui"
+
+
+def test_work_record_placement_repo_writes_repo_stamps(two_repos: tuple[Path, Path, Path]) -> None:
+    root, _code, _ui = two_repos
+    args = ["work", "file", "--title", "Placed", "--kind", "Feature", "--summary", "d", "--affects", "apps/ui"]
+    path = json.loads(runner.invoke(app, [*args, "--repo", "code", "--workspace", str(root), "--json"]).stdout)["path"]
+    document = load(root / "okf" / f"{path}.md")
+    document.set("phase", "design")
+    document.save()
+    worktree = str(Path(Path.cwd().anchor, "wt", "placed"))
+
+    result = runner.invoke(app, [*_placement_args(root, path, "design", worktree), "--repo", "ui"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["written"] is True and payload["repo"] == "ui"
+    assert load(root / "okf" / f"{path}.md").fm_data()["repo_stamps"] == {
+        "ui": {"worktree": worktree, "branch": "feature/placed"}
+    }

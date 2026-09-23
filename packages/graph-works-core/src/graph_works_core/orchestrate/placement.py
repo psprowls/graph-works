@@ -19,19 +19,21 @@ observation; this module proves only that the item is entitled to it now.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from types import MappingProxyType
 
 from okf_io import Bundle, load_bundle, parse
-from work_tracker_okf.items import IGNORE, load_items
+from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.placement import PlacementPlan, apply_placement, plan_placement
 
 from graph_works_core.workspace.decision_owner import locked_decision_owner
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo, resolve_repos
+from graph_works_core.workspace.repos import declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
@@ -49,6 +51,21 @@ class PlacementRecord:
         return self.application is not None and self.application.ok
 
 
+def _stamp_target(
+    layout: WorkspaceLayout, items: Sequence[WorkItem], path: str, *, repo: str, repo_name: str | None
+) -> str | None:
+    """`repo` when it names a repository other than *path*'s own, else `None` (the scalar pair)."""
+    declared = declared_repositories(layout)
+    if repo not in declared:
+        raise WorkspaceError(
+            f"{path}: --repo {repo!r} names no declared repository in {layout.manifest_path}; "
+            f"declared: {sorted(declared)}"
+        )
+    by_path = {item.path: item for item in items}
+    own = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
+    return None if own.name == repo else repo
+
+
 def run_record_placement(
     layout: WorkspaceLayout,
     path: str,
@@ -59,20 +76,30 @@ def run_record_placement(
     branch: str,
     today: date,
     repo_name: str | None = None,
+    repo: str | None = None,
     dry_run: bool = True,
 ) -> PlacementRecord:
     """Record (*worktree*, *branch*) on *path* for its *phase* dispatch under *root*.
 
-    The code repo for postcondition validation is `resolve_repo(layout,
-    repo_name=repo_name)` -- strict: several declared repositories and no
-    *repo_name* raise `WorkspaceError` rather than guess. Selection stays
-    strict, but the validation itself checks `affects` against every
-    declared repo (`resolve_repos(layout)`), not only the selected one --
-    matching `work file`/`work advance` (`stage_advance._advance`'s
-    `repo_root=resolved_repo, repo_roots=declared`). The differential
-    postcondition gate excuses a pre-existing `affects-missing` finding
-    either way, so this only bites when baseline capture itself fails and
-    the gate falls back to its absolute form.
+    The code repo for postcondition validation is now *path*'s own --
+    `resolve_item_repo`'s strict chain: the nearest `repo:` over *path* and
+    its ancestors, then *repo_name*, then the sole declared repository;
+    several declared with no `repo:` and no *repo_name* still raise
+    `WorkspaceError` rather than guess. The validation itself checks
+    `affects` against every declared repo (`resolve_repos(layout)`), not
+    only the resolved one -- matching `work file`/`work advance`
+    (`stage_advance._advance`'s `repo_root=resolved_repo, repo_roots=declared`).
+    The differential postcondition gate excuses a pre-existing
+    `affects-missing` finding either way, so this only bites when baseline
+    capture itself fails and the gate falls back to its absolute form.
+
+    *repo* names the repository the observed pair actually lives in. When it
+    names a declared repository other than *path*'s own, the pair is written
+    under `repo_stamps[repo]` instead of the scalar `worktree`/`branch`
+    pair; when it names *path*'s own, the scalar pair is written as usual.
+    An undeclared *repo* raises `WorkspaceError`. *path*'s own repository is
+    resolved (honouring *repo_name*) whenever *repo* is given, in both dry
+    and live runs, so a dry run can plan the foreign-vs-own distinction too.
 
     Dry runs and unknown paths plan without locking, like `run_stage_advance`.
     A live record takes the decision owner's lock, re-plans against the
@@ -82,25 +109,31 @@ def run_record_placement(
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    if dry_run or not any(item.path == path for item in items):
+    known = any(item.path == path for item in items)
+    if dry_run or not known:
+        target = _stamp_target(layout, items, path, repo=repo, repo_name=repo_name) if repo and known else None
         return PlacementRecord(
-            plan=plan_placement(items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today)
+            plan=plan_placement(
+                items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today, repo=target
+            )
         )
     with locked_decision_owner(layout, path) as context:
+        target = _stamp_target(layout, context.items, path, repo=repo, repo_name=repo_name) if repo else None
         plan = plan_placement(
-            context.items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today
+            context.items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today, repo=target
         )
         if plan.refusal is not None or not plan.changed:
             return PlacementRecord(plan=plan)
-        repo, repo_note = resolve_repo(layout, repo_name=repo_name)
+        by_path = {item.path: item for item in context.items}
+        item_repo = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
         application = apply_mutation(
             layout,
             _mutation(context.bundle, plan),
-            repo_root=repo,
+            repo_root=item_repo.path,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
         )
-        return PlacementRecord(plan=plan, application=application, repo_note=repo_note)
+        return PlacementRecord(plan=plan, application=application, repo_note=item_repo.note)
 
 
 def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:

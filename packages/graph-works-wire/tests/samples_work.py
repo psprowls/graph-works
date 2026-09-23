@@ -113,6 +113,7 @@ def placement(*, applied: bool) -> object:
         current_phase="execute",
         before=(None, None),
         after=("/wt", "b"),
+        repo=None,
         changed=True,
         refusal=None if applied else "stale",
         detail="d",

@@ -3653,7 +3653,7 @@
     },
     {
       "name": "gw work record-placement",
-      "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites only `worktree`, `branch` and `updated`. Refuses -- writing nothing --\nwhen PATH is not ROOT or its descendant, when a descendant is recorded at\n`design` or `plan`, when PATH's phase is no longer `--phase`, and for an\ninvalid or terminal item or an invalid observation. An identical pair is a\nno-op. The values must be observed, never the planner's requested names.\n\n`--repo-name` selects the code repository when `workspace.yaml` declares\nseveral; without it such a workspace refuses rather than guess.",
+      "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites only `worktree`, `branch` and `updated`. Refuses -- writing nothing --\nwhen PATH is not ROOT or its descendant, when a descendant is recorded at\n`design` or `plan`, when PATH's phase is no longer `--phase`, and for an\ninvalid or terminal item or an invalid observation. An identical pair is a\nno-op. The values must be observed, never the planner's requested names.\n\n`--repo-name` selects the code repository when `workspace.yaml` declares\nseveral; without it such a workspace refuses rather than guess.\n\n`--repo` names the repository the pair was observed in. A repository\nother than PATH's own records under `repo_stamps`; its own records the\nscalar pair.",
       "short_help": "Record where a dispatched stage runs.",
       "usage": [
         "[OPTIONS]",
@@ -3718,6 +3718,17 @@
           ],
           "secondary_opts": [],
           "help": "Select among several declared repositories.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Declared repository the observed pair lives in; another than the item's own writes repo_stamps.",
           "required": false,
           "default": "",
           "is_flag": false

@@ -198,9 +198,12 @@ def resolve_item_repo(
     repositories = declared_repositories(layout)
     if len(repositories) > 1:
         raise WorkspaceError(
-            f"{label}: {layout.manifest_path} declares {len(repositories)} repositories "
-            f"({sorted(repositories)}) and {label} sets no repo:; add `repo: <name>` to it or an "
-            "ancestor, or pass repo_name= (--repo-name) to choose one"
+            _join(
+                f"{label}: {layout.manifest_path} declares {len(repositories)} repositories "
+                f"({sorted(repositories)}) and {label} sets no repo:; add `repo: <name>` to it or an "
+                "ancestor, or pass repo_name= (--repo-name) to choose one",
+                note,
+            )
         )
     path, strict_note = resolve_repo(layout)
     return ItemRepo(next(iter(repositories), None), path, "sole", _join(note, strict_note))

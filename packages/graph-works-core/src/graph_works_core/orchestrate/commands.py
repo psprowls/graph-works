@@ -1327,8 +1327,14 @@ def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, path: str) 
 
 def _repo_refusals(
     layout: WorkspaceLayout, items: Sequence[WorkItem], root: str, root_repo: ItemRepo
-) -> dict[str, BlockedItem]:
-    """Every descendant of *root* that does not plan in *root_repo*.
+) -> tuple[dict[str, BlockedItem], tuple[str, ...]]:
+    """Every descendant of *root* that does not plan in *root_repo*, plus a
+    warning for each descendant whose own resolution carried a non-`None`
+    `note` even though it did not refuse -- typically a malformed `repo:`
+    walked past as absent (`resolve_item_repo`'s `_malformed_note`). Such a
+    descendant silently inherits the root's repository; the note is the only
+    place that fact is recorded, so it must reach the caller even though the
+    descendant is not blocked.
 
     Each descendant resolves with the root's repository as its fallback, so
     an untagged one inherits it even when the root's came from `--repo-name`.
@@ -1340,12 +1346,15 @@ def _repo_refusals(
     by_path = {item.path: item for item in items}
     inherited = replace(root_repo, source="fallback", note=None)
     refusals: dict[str, BlockedItem] = {}
+    notes: list[str] = []
     for node in _descendants(items, root):
         try:
             resolved = resolve_item_repo(layout, node, by_path, fallback=lambda: inherited)
         except WorkspaceError as exc:
             refusals[node.path] = BlockedItem(path=node.path, kind="invalid", reason=str(exc))
             continue
+        if resolved.note:
+            notes.append(resolved.note)
         if resolved.name != root_repo.name:
             refusals[node.path] = BlockedItem(
                 path=node.path,
@@ -1355,7 +1364,7 @@ def _repo_refusals(
                     f"not {root_repo.name!r} where {root} plans; cross-repository children are not placed yet"
                 ),
             )
-    return refusals
+    return refusals, tuple(notes)
 
 
 def run_orchestrate(
@@ -1397,11 +1406,12 @@ def run_orchestrate(
 
     by_path = {item.path: item for item in items}
     repo_refusals: dict[str, BlockedItem] = {}
+    descendant_repo_notes: tuple[str, ...] = ()
     if repo is not None:
         root_repo = ItemRepo(None, repo, "flag")
     else:
         root_repo = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
-        repo_refusals = _repo_refusals(layout, items, path, root_repo)
+        repo_refusals, descendant_repo_notes = _repo_refusals(layout, items, path, root_repo)
     resolved_repo, repo_note = root_repo.path, root_repo.note
 
     code_repo = str(resolved_repo) if resolved_repo is not None else None
@@ -1441,7 +1451,7 @@ def run_orchestrate(
         open_decisions=decisions.open_,
         assumed_decisions=decisions.assumed,
         decision_counts=decisions.counts,
-        warnings=computed.warnings + decisions.warnings + ((repo_note,) if repo_note else ()),
+        warnings=computed.warnings + decisions.warnings + ((repo_note,) if repo_note else ()) + descendant_repo_notes,
         holds=open_holds(items, bundle.root, subtree),
         code_repo=code_repo,
         code_repo_name=root_repo.name if repo is None else None,

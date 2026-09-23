@@ -984,6 +984,20 @@ def test_a_cross_repo_child_is_refused_by_name(tmp_path: Path) -> None:
     assert all(d.slug != blocked.path for d in result.dispatches)
 
 
+def test_a_descendant_with_a_malformed_repo_surfaces_a_warning_and_is_not_blocked(tmp_path: Path) -> None:
+    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/epic-a", "ui")
+    document = load(layout.bundle_dir / "work/epic-a/children/feature-a.md")
+    document.set("repo", 3)
+    document.save()
+
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+
+    kinds = _kinds(result)
+    assert kinds.get("work/epic-a/children/feature-a") not in ("invalid", "cross-repo-child")
+    assert any("work/epic-a/children/feature-a" in warning for warning in result.warnings)
+
+
 def test_a_descendant_naming_an_undeclared_repo_blocks_only_itself(tmp_path: Path) -> None:
     from graph_works_core.work import commands as work
 
@@ -997,7 +1011,12 @@ def test_a_descendant_naming_an_undeclared_repo_blocks_only_itself(tmp_path: Pat
 
     kinds = _kinds(result)
     assert kinds["work/epic-a/children/feature-b"] == "invalid"
-    assert kinds.get("work/epic-a/children/feature-a") != "invalid"
+    (invalid,) = [b for b in result.blocked if b.path == "work/epic-a/children/feature-b"]
+    assert "work/epic-a/children/feature-b" in invalid.reason
+    assert "'nope'" in invalid.reason
+    sibling_kind = kinds.get("work/epic-a/children/feature-a")
+    sibling_dispatched = any(d.slug == "work/epic-a/children/feature-a" for d in result.dispatches)
+    assert sibling_dispatched or (sibling_kind is not None and sibling_kind not in ("invalid", "cross-repo-child"))
 
 
 def test_an_untagged_root_still_refuses_in_a_two_repo_workspace(tmp_path: Path) -> None:

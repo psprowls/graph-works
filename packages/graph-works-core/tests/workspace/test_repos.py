@@ -271,6 +271,15 @@ def test_item_repo_malformed_repo_is_absent_with_a_note(tmp_path):
     assert resolved.note is not None and CHILD in resolved.note and "malformed" in resolved.note
 
 
+def test_item_repo_strict_refusal_with_a_malformed_repo_mentions_it(tmp_path):
+    layout, _one, _two_path = _two(tmp_path)
+    index = _items(layout, child="repo: 3\n")
+    with pytest.raises(WorkspaceError) as excinfo:
+        repos.resolve_item_repo(layout, index[CHILD], index)
+    message = str(excinfo.value)
+    assert CHILD in message and "repo:" in message and "repo_name" in message and "malformed" in message
+
+
 def test_declared_repositories_is_empty_when_the_manifest_is_absent(tmp_path):
     layout = _workspace(tmp_path)
     layout.manifest_path.unlink()

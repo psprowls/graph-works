@@ -512,3 +512,36 @@ def test_apply_creates_repo_stamps_when_absent(tmp_path: Path) -> None:
     (item,) = load_written_items(tmp_path)
     assert item.worktree is None
     assert dict(item.repo_stamps) == {"ui": Stamp(WT, BR)}
+
+
+def test_apply_updates_an_existing_repo_stamp_entry_leaving_the_sibling_and_the_rest_of_the_page_untouched(
+    tmp_path: Path,
+) -> None:
+    write_item(
+        tmp_path,
+        SOLO,
+        "type: Bug\nwork_status: in-progress\nphase: execute\neffort: medium\n"
+        "opened: 2026-09-01\nupdated: 2026-09-01\n"
+        "repo_stamps:\n"
+        "  ui:\n    worktree: /old\n    branch: b\n"
+        "  other:\n    worktree: /wt/other\n    branch: b/other\n",
+    )
+    page = tmp_path / f"{SOLO}.md"
+    before_lines = page.read_text(encoding="utf-8").splitlines()
+    items = load_written_items(tmp_path)
+    plan = plan_placement(items, SOLO, root=SOLO, phase="execute", worktree=WT, branch="b", today=TODAY, repo="ui")
+    document = load(page)
+    apply_placement(document, plan)
+    document.save()
+
+    (item,) = load_written_items(tmp_path)
+    assert dict(item.repo_stamps) == {"ui": Stamp(WT, "b"), "other": Stamp("/wt/other", "b/other")}
+
+    after_lines = page.read_text(encoding="utf-8").splitlines()
+    assert len(before_lines) == len(after_lines)
+    changed = [i for i, (old, new) in enumerate(zip(before_lines, after_lines)) if old != new]
+    for i in changed:
+        assert "worktree:" in after_lines[i] or "updated:" in after_lines[i]
+    unchanged = [i for i in range(len(before_lines)) if i not in changed]
+    for i in unchanged:
+        assert before_lines[i] == after_lines[i]

@@ -123,8 +123,17 @@ crash/compaction resume the same code path as a normal cycle.
    joins those against each Task's `display_name` (`<work-path> · <phase>`,
    written by §3 step 2) because a dispatch key is not reversible to a path.
 
-   It joins by `taskId` and uses the last worker row for retries. Its actions
-   are durable-state decisions, not guesses from terminal presence:
+   It joins by `taskId`. **The latest attempt** of a Task — the one meaning of
+   "latest" everywhere in this skill — is its **first** row in this snapshot:
+   `worker-list` is newest first, so the last row is the *oldest* attempt.
+   When a Task has more than one attempt the helper cross-checks that row
+   against `worker-show --dispatch <id> --json` → `result.dispatch` for every
+   attempt: its `createdAt` (UTC; the zone-less form is UTC) must be the
+   newest, a tie broken only by `retryOfDispatchId` (a retried Dispatch is
+   never the latest), and no other attempt may name it as retried. Any
+   disagreement, unbreakable tie or failed read is `recovery-inspection` with
+   reason `latest-attempt-ambiguous` — never a guess. Its actions are
+   durable-state decisions, not guesses from terminal presence:
    - `live`: `workerState` is `ready` or `running` and dispatch status is not
      `outcome_unknown`.
    - `settled`: `workerState` is `succeeded`, the full untruncated task spec
@@ -152,7 +161,8 @@ crash/compaction resume the same code path as a normal cycle.
      task reservation but before start; unmarked `failed`/`stopped` and unknown
      worker states; `outcome_unknown` in either worker or dispatch state;
      and succeeded workers with missing, malformed, truncated or mismatched
-     envelopes/receipts, or an unsuccessful worker-show read.
+     envelopes/receipts, or an unsuccessful worker-show read; and any Task
+     whose latest attempt is `latest-attempt-ambiguous`.
      Live and unknown evidence takes precedence over a task's `blocked` status,
      so a stale/partial skip update cannot hide an active or ambiguous attempt.
    - `recovered-settled`: a recovery record (§4.1.1) for the latest attempt
@@ -504,7 +514,8 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    section.
 2. Find the checkpointed attempt's Task/Dispatch: refresh
    `task-list --run <run_id> --json`, find the Task whose title equals the
-   checkpoint's `dispatch_key`, and take its latest same-Run Dispatch id and
+   checkpoint's `dispatch_key`, and take its latest attempt's Dispatch id
+   (§2.1's definition — the classifier row's `dispatch_id`) and
    its full untruncated `spec` text — the same lookup the Failure Question's
    Retry branch (§4.1) already performs, reused here rather than
    re-implemented. Save that spec text to a temp file; it is step 5's
@@ -876,7 +887,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    step 5 and before any other dispatch this cycle:
 
    1. **Bind.** The observation binds to this `task_id`/`dispatch_id`: the
-      Task's latest same-Run worker row is this Dispatch and its `task_title`
+      Task's latest attempt (§2.1's definition) is this Dispatch and its `task_title`
       is the frozen dispatch key. If a newer attempt supersedes it, or identity
       cannot be established, record nothing — report every ID you have and
       enter inspection.
@@ -1107,8 +1118,8 @@ until it proves exit this helper cannot verify a recovery checkpoint.
    the complete paginated `worker-list --run <run_id> --json` snapshot exactly
    as in §2.1, and only then run
    `worker-show --dispatch <dispatch_id> --json`. The report's
-   `taskId`/`dispatchId` must name a Task in this Run whose latest worker
-   row is that Dispatch, whose `task_title` is the frozen dispatch key, and
+   `taskId`/`dispatchId` must name a Task in this Run whose latest attempt
+   (§2.1's definition) is that Dispatch, whose `task_title` is the frozen dispatch key, and
    whose full untruncated spec validates. A late report from an earlier
    attempt cannot recover, stop or complete the current one. Missing
    identity (a legacy wrapper without payload IDs) is unresolved inspection:
@@ -1178,6 +1189,7 @@ until it proves exit this helper cannot verify a recovery checkpoint.
    `succeeded`, file or commit evidence, and stop authority recorded:
    1. Refresh every worker-list page as in §2.1, assemble and validate the
       complete snapshot, then refresh worker-show; confirm no newer attempt
+      (by §2.1's latest-attempt definition)
       exists.
    2. If the latest attempt is not already positively settled:
       Before invoking worker-stop, persist its intent at `stop-requested` using the operation journal below.

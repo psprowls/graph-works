@@ -12,6 +12,7 @@ import re
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -73,6 +74,7 @@ HEX40 = re.compile(r"[0-9a-f]{40}")
 VERIFIED_CHECKPOINTS = {"stopped-verified": 1, "released-verified": 2, "completed-verified": 3}
 SETTLED_WORKER_STATES = {"stopped", "failed", "succeeded"}
 SETTLED_DISPATCH_STATUSES = {"failed", "completed"}
+AMBIGUOUS_ATTEMPT = "latest-attempt-ambiguous"
 
 
 def fail(message: str) -> NoReturn:
@@ -606,6 +608,63 @@ def worker_list_rows(orca: str, run_id: str) -> list[object]:
         cursor = next_cursor
 
 
+def created_instant(value: object) -> datetime | None:
+    """Orca's `createdAt`, in UTC; the zone-less `YYYY-MM-DD HH:MM:SS` form is UTC."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        instant = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        return None
+    if instant.tzinfo is None:
+        return instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(timezone.utc)
+
+
+def latest_attempt(
+    workers: list[object], task_id: object, *, orca: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """A Task's newest Dispatch row, and why it cannot be trusted, if it cannot.
+
+    worker-list is documented newest first, so the first same-Task row is the
+    candidate. When a Task has retries, worker-show's `createdAt` and
+    `retryOfDispatchId` must agree with that order; disagreement, an
+    unbreakable tie or an unreadable attempt keeps the candidate but reports
+    `latest-attempt-ambiguous` rather than guessing.
+    """
+    attempts = [
+        row for row in workers if isinstance(row, dict) and row.get("taskId") == task_id
+    ]
+    if len(attempts) <= 1:
+        return (attempts[0] if attempts else None), None
+    candidate = attempts[0]
+    shown: dict[object, tuple[datetime | None, object]] = {}
+    for row in attempts:
+        try:
+            dispatch = orca_json(
+                orca, "worker-show", "--dispatch", str(row.get("dispatchId"))
+            ).get("dispatch")
+        except SystemExit:
+            return candidate, AMBIGUOUS_ATTEMPT
+        if not isinstance(dispatch, dict):
+            return candidate, AMBIGUOUS_ATTEMPT
+        shown[row.get("dispatchId")] = (
+            created_instant(dispatch.get("createdAt")),
+            dispatch.get("retryOfDispatchId"),
+        )
+    retried = {retry_of for _created, retry_of in shown.values() if retry_of is not None}
+    newest, _ = shown[candidate.get("dispatchId")]
+    if newest is None or candidate.get("dispatchId") in retried:
+        return candidate, AMBIGUOUS_ATTEMPT
+    for dispatch_id, (created, _retry_of) in shown.items():
+        if dispatch_id == candidate.get("dispatchId"):
+            continue
+        if created is None or created > newest or (created == newest and dispatch_id not in retried):
+            return candidate, AMBIGUOUS_ATTEMPT
+    return candidate, None
+
+
 def liveness_gap(worker: dict[str, Any]) -> str | None:
     """Recovery needs positive fleet exit; saved authority and PTY status cannot supply it."""
     projection = worker.get("projection")
@@ -626,17 +685,17 @@ def mutation_identity_gap(record: dict[str, Any]) -> str | None:
 
 
 def settlement_gap(
-    record: dict[str, Any], task: object, workers: list[object], level: int
+    record: dict[str, Any],
+    task: object,
+    latest: tuple[dict[str, Any] | None, str | None],
+    level: int,
 ) -> str | None:
     """Why fresh Task/worker rows do not prove a verified checkpoint level, or None."""
-    attempts = [
-        row
-        for row in workers
-        if isinstance(row, dict) and row.get("taskId") == record["task_id"]
-    ]
-    if not attempts:
+    worker, ambiguity = latest
+    if worker is None:
         return "worker-missing"
-    worker = attempts[-1]
+    if ambiguity is not None:
+        return ambiguity
     if worker.get("dispatchId") != record["dispatch_id"]:
         return "newer-attempt"
     if worker.get("runId") != record["run_id"]:
@@ -722,7 +781,9 @@ def verify_checkpoint(record: dict[str, Any], orca: str) -> None:
     )
     gap = (
         mutation_identity_gap(record)
-        or settlement_gap(record, task, workers, level)
+        or settlement_gap(
+            record, task, latest_attempt(workers, record["task_id"], orca=orca), level
+        )
         or evidence_gap(record)
     )
     if gap is None and level == 3:
@@ -769,17 +830,15 @@ def validate_recovery_snapshot(payload: object, workers: list[object]) -> None:
 
 def reconcile_records(
     task: dict[str, object],
-    workers: list[object],
+    attempt: tuple[dict[str, Any] | None, str | None],
     candidates: list[dict[str, Any]],
     *,
     base: str,
     orca: str,
 ) -> tuple[str, dict[str, object]]:
     """Let a saved recovery record refine, never override, fresh Orca evidence."""
-    attempts = [
-        row for row in workers if isinstance(row, dict) and row.get("taskId") == task["id"]
-    ]
-    latest = attempts[-1].get("dispatchId") if attempts else None
+    worker = attempt[0]
+    latest = worker.get("dispatchId") if worker is not None else None
     current = [record for record in candidates if record.get("dispatch_id") == latest]
     record: dict[str, Any] | None = None
     problem = "record-not-latest-attempt"
@@ -793,7 +852,6 @@ def reconcile_records(
     checkpoint = record["checkpoint"] if record is not None else None
     if base == "live":
         return base, {"checkpoint": checkpoint, "reason": "current-evidence-wins"}
-    worker = attempts[-1] if attempts else None
     # Accepted completion is independent of recovery: it can owe release while
     # the reporting agent still idles live. A workerState/launch receipt alone
     # (the legacy shortcut) does not establish that Task AND Dispatch accepted it.
@@ -823,7 +881,7 @@ def reconcile_records(
             "checkpoint": checkpoint,
             "reason": "recovery-incomplete",
         }
-    gap = settlement_gap(record, task, workers, 3) or evidence_gap(record)
+    gap = settlement_gap(record, task, attempt, 3) or evidence_gap(record)
     if gap is None and not verified_success(task, latest, orca=orca):
         gap = "launch-proof-unverified"
     if gap is not None:
@@ -878,16 +936,13 @@ def classify_restart(args: argparse.Namespace) -> None:
     parked_stages = {checkpoint_stage(path) for path in getattr(args, "checkpoint", None) or []}
     if records:
         validate_recovery_snapshot(worker_payload, workers)
-    latest_by_task: dict[str, dict[str, object]] = {}
-    for worker in workers:
-        if isinstance(worker, dict) and isinstance(worker.get("taskId"), str):
-            latest_by_task[worker["taskId"]] = worker
     rows: list[dict[str, object]] = []
     for task in tasks:
         if not isinstance(task, dict) or not isinstance(task.get("id"), str):
             fail("Every task must carry an id.")
         task_id = task["id"]
-        worker = latest_by_task.get(task_id)
+        attempt = latest_attempt(workers, task_id, orca=args.orca)
+        worker = attempt[0]
         dispatch_id = worker.get("dispatchId") if worker is not None else None
         if worker is None:
             action = "deliberate-skip" if task.get("status") == "blocked" else "recovery-inspection"
@@ -916,10 +971,13 @@ def classify_restart(args: argparse.Namespace) -> None:
             "dispatch_id": dispatch_id,
             "action": action,
         }
-        if task_id in records:
+        if attempt[1] is not None:
+            row["action"] = "recovery-inspection"
+            row["recovery"] = {"checkpoint": None, "reason": attempt[1]}
+        elif task_id in records:
             row["action"], row["recovery"] = reconcile_records(
                 task,
-                workers,
+                attempt,
                 records[task_id],
                 base=action,
                 orca=args.orca,

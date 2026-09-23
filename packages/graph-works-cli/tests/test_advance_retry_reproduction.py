@@ -6,11 +6,17 @@ flip. See the spike's findings at
 (`references/01-design.md`), and the Bug it re-scopes,
 `work/epic-auto-drive-reliability/children/bug-gw-work-advance-can-silently-advance`.
 
-Assertions marked `DEFECT` record the wrong outcome on purpose. Whichever fix the Bug
-chooses (a from-phase precondition, refusing a dangling plan stamp, or routing that
-requires effort before writing), it changes at least one of them. Update those
-assertions *with* the fix, never before it. The rollback test is not a defect: it pins
-the atomicity the Bug's original premise asked for, which already holds.
+Assertions marked `DEFECT` record the wrong outcome on purpose, and which ones flip
+depends on which candidate fix the Bug chooses. Fix 2 (refuse a `complete` transition
+whose plan stamp target is missing) flips the retry test's `DEFECT` lines. Fix 3
+(routing requires effort before writing, so the planner refuses `effort-required`
+before any write) instead turns the rollback test's first call into that refusal,
+which flips its `DEFECT`-marked message assertions there. Fix 1 (a from-phase
+precondition, opt-in via `--from`/an expected-phase argument) flips nothing in this
+file, since neither test ever passes it; that fix needs its own retry-with-expected-
+phase test. Update those assertions *with* the fix, never before it. The rollback
+test's byte-for-byte equality is not a defect under any of the three: it pins the
+atomicity the Bug's original premise asked for, which already holds.
 """
 
 from __future__ import annotations
@@ -65,15 +71,18 @@ def _epic_at_design(workspace: Path) -> str:
 
 
 def test_a_failed_design_to_plan_advance_rolls_back_byte_for_byte(workspace: Path) -> None:
-    """H1 (partial apply) refuted: the failure writes nothing."""
+    """The byte-equality below is the atomicity pin (H1 refuted): the failure writes
+    nothing, and that already holds regardless of which fix the Bug chooses."""
     path = _epic_at_design(workspace)
     before = _page(workspace, path).read_bytes()
 
     code, _, stderr = _advance(workspace, path)
 
     assert code != 0
+    # DEFECT (fix 3): postcondition failure instead of an effort-required refusal
     assert "'effort' is a required property" in stderr
     assert "'affects' is a required property" not in stderr
+    # DEFECT (fix 3): postcondition failure instead of an effort-required refusal
     assert "apply was incomplete" in stderr
     assert _page(workspace, path).read_bytes() == before
 

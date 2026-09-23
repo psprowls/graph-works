@@ -777,6 +777,24 @@ def test_structural_refusal_precedes_ambiguous_repository(
     assert _snapshot(layout) == before
 
 
+@pytest.mark.parametrize("dry_run", [True, False], ids=["preview", "live"])
+@pytest.mark.parametrize("bad_path", [CHILD, EPIC])
+def test_invalid_item_precedes_ambiguous_repository(tmp_path: Path, bad_path: str, dry_run: bool) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    page = layout.bundle_dir / f"{bad_path}.md"
+    page.write_bytes(page.read_bytes().replace(b"phase: execute\n", b"phase: 17\n"))
+    before = _snapshot(layout)
+
+    record = _record(layout, dry_run=dry_run)
+
+    assert record.plan.refusal == "invalid-item"
+    assert bad_path in record.plan.detail and "phase" in record.plan.detail
+    assert record.plan.changes == () and not record.plan.changed
+    assert record.application is None and not record.written
+    assert _snapshot(layout) == before
+
+
 @pytest.mark.parametrize("dry_run", [True, False])
 def test_terminal_refusal_precedes_ambiguous_repository(tmp_path: Path, dry_run: bool) -> None:
     layout = _vault(tmp_path)

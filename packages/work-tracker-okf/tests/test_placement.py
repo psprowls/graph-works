@@ -539,7 +539,7 @@ def test_apply_updates_an_existing_repo_stamp_entry_leaving_the_sibling_and_the_
 
     after_lines = page.read_text(encoding="utf-8").splitlines()
     assert len(before_lines) == len(after_lines)
-    changed = [i for i, (old, new) in enumerate(zip(before_lines, after_lines)) if old != new]
+    changed = [i for i, (old, new) in enumerate(zip(before_lines, after_lines, strict=True)) if old != new]
     for i in changed:
         assert "worktree:" in after_lines[i] or "updated:" in after_lines[i]
     unchanged = [i for i in range(len(before_lines)) if i not in changed]

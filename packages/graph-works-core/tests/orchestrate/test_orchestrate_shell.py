@@ -1075,6 +1075,53 @@ def test_a_two_repo_advance_with_a_repo_name_uses_that_repo(tmp_path: Path, monk
     assert calls and calls[-1] is not None and calls[-1].resolve() == ui.resolve()
 
 
+def test_a_tagged_advance_from_another_repo_skips_inference_with_a_warning(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    layout, code, ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/feature-solo", "ui")
+    linked = tmp_path / "code-linked"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feature/code", str(linked)],
+        cwd=code,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    calls = _captured_repo_roots(monkeypatch)
+
+    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, cwd=linked, dry_run=False)
+
+    assert result.outcome.plan.refusal is None
+    changes = _stamped(result)
+    assert "worktree" not in changes and "branch" not in changes
+    assert any("worktree inference skipped" in warning for warning in result.warnings)
+    assert calls and calls[-1] is not None and calls[-1].resolve() == ui.resolve()
+
+
+def test_a_tagged_advance_from_its_own_repo_still_infers(tmp_path: Path) -> None:
+    import subprocess
+
+    layout, _code, ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/feature-solo", "ui")
+    linked = tmp_path / "ui-linked"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feature/ui", str(linked)], cwd=ui, check=True, capture_output=True, text=True
+    )
+
+    result = stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, cwd=linked, dry_run=False)
+
+    assert Path(str(_stamped(result)["worktree"])).resolve() == linked.resolve()
+    assert not any("worktree inference skipped" in warning for warning in result.warnings)
+
+
+def test_a_tagged_advance_refuses_a_conflicting_repo_name(tmp_path: Path) -> None:
+    layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/feature-solo", "ui")
+    with pytest.raises(WorkspaceError, match="conflicts"):
+        stage.run_stage_advance(layout, "work/feature-solo", today=TODAY, repo_name="code", dry_run=False)
+
+
 def test_a_descendant_read_only_advance_does_not_stamp_from_cwd(tmp_path: Path, monkeypatch) -> None:
     """The reproduction: a `plan` stage writes only into the vault, so the
     directory it happened to run in must not become the item's placement."""

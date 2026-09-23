@@ -37,7 +37,13 @@ from work_tracker_okf.sources import upsert
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo, resolve_repos
+from graph_works_core.workspace.repos import (
+    ItemRepo,
+    declared_repositories,
+    resolve_item_repo,
+    resolve_repo,
+    resolve_repos,
+)
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 #: The phases whose *completion* produces a results stub. A design or plan
@@ -71,6 +77,10 @@ class StageAdvance:
     evaluate. The gate fails **open**: an advance that cannot see a repo, or
     an item that declares no `affects`, proceeds -- but says so, because an
     unevaluable gate is otherwise indistinguishable from a gate that passed.
+    It also carries a skipped worktree inference when the item's repository
+    came from `repo:` (frontmatter) or `repo_name` (flag) and cwd is not in
+    that repository -- inference is skipped, never a silent guess, and a
+    foreign checkout is never stamped.
     """
 
     outcome: AdvanceOutcome
@@ -267,19 +277,33 @@ def _advance(
     repo_note: str | None = None
     resolved_repo = repo
     declared: tuple[Path, ...] = ()
+    item_repo: ItemRepo | None = None
     if resolved_repo is None:
-        resolved_repo, repo_note, declared = _resolve_repo(layout, repo_name=repo_name, cwd=cwd)
+        item_repo, declared = _resolve_repo(layout, items, item, repo_name=repo_name, cwd=cwd)
+        resolved_repo, repo_note = item_repo.path, item_repo.note
 
+    inference_warnings: tuple[str, ...] = ()
     stamped_worktree: str | None = None
     stamped_branch: str | None = None
     if worktree and branch:
         stamped_worktree, stamped_branch = worktree, branch
     elif infer_worktree and item is not None and resolved_repo is not None and _infers_from_cwd(item):
-        recorded = item.worktree
-        if not recorded or not Path(recorded).is_dir():
-            detected = provenance.worktree_state(cwd or Path.cwd(), resolved_repo)
-            if detected is not None:
-                stamped_worktree, stamped_branch = detected
+        here = cwd or Path.cwd()
+        if (
+            item_repo is not None
+            and item_repo.source in ("frontmatter", "flag")
+            and provenance.repository_of(here, (resolved_repo,)) is None
+        ):
+            inference_warnings = (
+                f"worktree inference skipped: {here} is not in {item.path}'s repository "
+                f"{item_repo.name!r} ({resolved_repo}); record placement explicitly if it runs elsewhere",
+            )
+        else:
+            recorded = item.worktree
+            if not recorded or not Path(recorded).is_dir():
+                detected = provenance.worktree_state(here, resolved_repo)
+                if detected is not None:
+                    stamped_worktree, stamped_branch = detected
 
     outcome = advance_and_stamp(
         bundle,
@@ -295,7 +319,7 @@ def _advance(
         hold=hold,
         dry_run=True,
     )
-    candidate = StageAdvance(outcome=outcome, repo_note=repo_note)
+    candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings)
     if not dry_run and before_apply is not None:
         before_apply(candidate)
     if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
@@ -314,7 +338,7 @@ def _advance(
             return StageAdvance(
                 outcome=replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False),
                 repo_note=repo_note,
-                warnings=warnings,
+                warnings=inference_warnings + warnings,
             )
 
     document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
@@ -409,38 +433,50 @@ def _advance(
         pointer_path=pointer_path,
         repo_note=repo_note,
         application=application,
-        warnings=warnings,
+        warnings=inference_warnings + warnings,
     )
 
 
 def _resolve_repo(
-    layout: WorkspaceLayout, *, repo_name: str | None, cwd: Path | None
-) -> tuple[Path | None, str | None, tuple[Path, ...]]:
-    """`(repo, note, declared)`: the code repo this advance reads, and every
-    declared one for postcondition validation.
+    layout: WorkspaceLayout,
+    items: Sequence[WorkItem],
+    item: WorkItem | None,
+    *,
+    repo_name: str | None,
+    cwd: Path | None,
+) -> tuple[ItemRepo, tuple[Path, ...]]:
+    """`(repo, declared)`: the code repo this advance reads, and every declared
+    one for postcondition validation.
 
-    One declared repo, or a *repo_name*, is `resolve_repo`'s answer. Several
-    declared and no name is where `resolve_repo` would refuse; an advance
-    instead takes the declared repo *cwd*'s repository belongs to
-    (`provenance.repository_of` -- a linked worktree of it counts). When none
-    does, the repo is `None` with a note: the same degrade as a workspace that
-    declares no repo, so inference is skipped and the commit gate fails open.
-    An advance never refuses over which repo it is in.
+    The item's own `repo:` (or an ancestor's) wins, then *repo_name*; both are
+    `resolve_item_repo`'s. Otherwise the cwd matcher answers: one declared
+    repo, or none, is `resolve_repo`'s answer; several are narrowed to the one
+    *cwd*'s repository belongs to (`provenance.repository_of` -- a linked
+    worktree of it counts). When none does, the repo is `None` with a note:
+    the same degrade as a workspace that declares no repo, so inference is
+    skipped and the commit gate fails open. The cwd matcher never refuses.
     """
     declared = resolve_repos(layout)
-    if repo_name is None and len(declared) > 1:
-        here = cwd or Path.cwd()
-        match = provenance.repository_of(here, declared)
-        if match is not None:
-            return match, None, declared
-        return (
-            None,
-            f"{layout.manifest_path}: {len(declared)} repositories declared and {here} is in none of them, "
-            "so no code repo was resolved",
-            declared,
-        )
-    resolved, note = resolve_repo(layout, repo_name=repo_name)
-    return resolved, note, declared
+
+    def by_cwd() -> ItemRepo:
+        names = declared_repositories(layout)
+        if len(names) > 1:
+            here = cwd or Path.cwd()
+            match = provenance.repository_of(here, tuple(names.values()))
+            if match is not None:
+                return ItemRepo(next(name for name, path in names.items() if path == match), match, "cwd")
+            return ItemRepo(
+                None,
+                None,
+                "cwd",
+                f"{layout.manifest_path}: {len(names)} repositories declared and {here} is in none of them, "
+                "so no code repo was resolved",
+            )
+        path, note = resolve_repo(layout)
+        return ItemRepo(next(iter(names), None), path, "sole", note)
+
+    by_path = {candidate.path: candidate for candidate in items}
+    return resolve_item_repo(layout, item, by_path, repo_name=repo_name, fallback=by_cwd), declared
 
 
 def _commit_gate(

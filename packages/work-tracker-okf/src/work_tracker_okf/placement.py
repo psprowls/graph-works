@@ -158,8 +158,9 @@ def _item_problem(item: WorkItem) -> str | None:
     tolerant projection is not. Routing alone proves a missing phase's entry.
     Holds and dependency gates do not invalidate a recorded phase.
     """
-    if item.invalid_optional_fields:
-        fields = ", ".join(item.invalid_optional_fields)
+    lossy = tuple(field for field in item.invalid_optional_fields if field in {"phase", "effort"})
+    if lossy:
+        fields = ", ".join(lossy)
         return f"{item.path} has invalid {fields}; expected nonempty text or null; repair it first"
     for field, value, allowed in (
         ("type", item.type, TYPES),

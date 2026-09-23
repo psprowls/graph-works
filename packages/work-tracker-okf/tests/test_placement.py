@@ -440,3 +440,8 @@ def test_raw_absent_or_null_effort_keeps_recorded_phase_on_item_and_root(tmp_pat
     plan = _plan(load_written_items(tmp_path))
     assert plan.refusal is None and plan.current_phase == "execute"
     assert plan.changed
+
+
+def test_a_malformed_repo_does_not_block_a_scalar_placement() -> None:
+    items = _vault(invalid_optional_fields=("repo",))
+    assert _plan(items).refusal is None

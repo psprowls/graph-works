@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from types import MappingProxyType
 
 from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
 from okf_ext.schemas import SchemaSet, declared_directories
@@ -40,6 +42,14 @@ def placement_directories(schema_set: SchemaSet) -> dict[str, str]:
 
 
 @dataclass(frozen=True, slots=True)
+class Stamp:
+    """One `repo_stamps` entry: where an item runs in a repository other than its own."""
+
+    worktree: str
+    branch: str
+
+
+@dataclass(frozen=True, slots=True)
 class WorkItem:
     """Tolerant item view, retaining lossy phase/effort projection failures.
 
@@ -48,6 +58,12 @@ class WorkItem:
     for existing readers; placement must distinguish them from absence.
     This is read metadata, never a frontmatter field. Direct constructors
     may omit it; vocabulary validation still checks their supplied values.
+
+    `invalid_optional_fields` also names a malformed `repo` (anything but
+    null or non-empty text) and a malformed `repo_stamps` (a non-mapping,
+    or any entry that is not exactly `{worktree, branch}` of non-empty
+    text). The malformed parts project as absent, and well-formed
+    `repo_stamps` entries are kept.
     """
 
     path: str
@@ -85,6 +101,8 @@ class WorkItem:
     target_date: str | None
     released_at: str | None
     invalid_optional_fields: tuple[str, ...] = ()
+    repo: str | None = None
+    repo_stamps: Mapping[str, Stamp] = MappingProxyType({})
 
 
 def _text(value: object) -> str:
@@ -101,11 +119,35 @@ def _text_tuple(value: object) -> tuple[str, ...]:
     return tuple(entry for entry in value if isinstance(entry, str))
 
 
+def _repo_stamps(value: object) -> tuple[Mapping[str, Stamp], bool]:
+    """`(well-formed entries, whether anything was malformed)`. Never raises."""
+    if value is None:
+        return MappingProxyType({}), False
+    if not isinstance(value, dict):
+        return MappingProxyType({}), True
+    stamps: dict[str, Stamp] = {}
+    malformed = False
+    for name, entry in value.items():
+        if (
+            isinstance(name, str)
+            and name
+            and isinstance(entry, dict)
+            and set(entry) == {"worktree", "branch"}
+            and _optional_text(entry["worktree"]) is not None
+            and _optional_text(entry["branch"]) is not None
+        ):
+            stamps[name] = Stamp(entry["worktree"], entry["branch"])
+        else:
+            malformed = True
+    return MappingProxyType(stamps), malformed
+
+
 def _project(location: ItemLocation, document: Document) -> WorkItem:
     data = document.fm_data(dates="iso")
     fm = document.fm
     source_ids = {source.id for source in fm.sources if source.id is not None}
     dependencies = parse_dependencies(data.get("depends_on"))
+    repo_stamps, stamps_malformed = _repo_stamps(data.get("repo_stamps"))
     return WorkItem(
         path=location.path,
         page_path=location.page,
@@ -141,10 +183,15 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
         version=_optional_text(data.get("version")),
         target_date=_optional_text(data.get("target_date")),
         released_at=_optional_text(data.get("released_at")),
-        invalid_optional_fields=tuple(
-            field
-            for field in ("phase", "effort")
-            if data.get(field) is not None and _optional_text(data[field]) is None
+        repo=_optional_text(data.get("repo")),
+        repo_stamps=repo_stamps,
+        invalid_optional_fields=(
+            *(
+                field
+                for field in ("phase", "effort", "repo")
+                if data.get(field) is not None and _optional_text(data[field]) is None
+            ),
+            *(("repo_stamps",) if stamps_malformed else ()),
         ),
     )
 
@@ -187,6 +234,7 @@ __all__ = [
     "ARCHIVE_IGNORE",
     "IGNORE",
     "WORK_DIR",
+    "Stamp",
     "WorkItem",
     "item_index",
     "load_items",

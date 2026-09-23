@@ -203,7 +203,22 @@ Run — there's nothing live yet). An unknown `--live` key makes the command
 exit nonzero and yields no usable plan. Stop dispatching from that result,
 inspect each named key against the task and vault state, and correct the
 mismatch before replanning. Do not silently omit the key or retry with an
-empty live list. On success, the result contains:
+empty live list.
+
+Repository selection comes from the item's nearest `repo:` metadata, including
+physical ancestors, and the repositories declared in `workspace.yaml`. For
+example, `repo: graph-works` selects that declared name. A workspace with
+several repositories needs an unambiguous selection; an existing branch stamp
+does not supply one. Do not add `--repo-name` to planner or placement calls.
+Never choose from cwd, `affects:` paths, the first declared repository, or an
+existing branch stamp.
+
+On a repository workspace refusal, surface the affected item and the command's
+repair guidance. Use the existing §4.2 question flow to obtain the human's
+repository choice; after the scoped metadata correction, replan before acting.
+Never launch workers from an error envelope.
+
+On success, the result contains:
 
 - `terminal` (bool), `max_parallel` / `slots_free` (ints), and `live` (the
   echoed input list).
@@ -914,10 +929,17 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       A descendant dispatched at `design` or `plan` is never recorded: it only
       reads from the shared epic worktree and must not be pinned to it.
    4. **Check.** Success is exit 0 with `refusal: null` and `after` equal to the
-      observation. Re-read with the same command plus `--dry-run`: `changed:
-      false` proves the item now carries the pair. Keep a receipt reference
-      (the command and where its JSON is kept) with this dispatch's evidence;
-      never store a preamble or a dispatch capability.
+      observation. A placement preview validates repository selection too.
+      Preview with `--dry-run` before recording when checking the pair; it is
+      read-only. The live call re-reads metadata under the item lock, so its
+      result remains authoritative if metadata changes after the preview.
+      Even an unchanged receipt can now refuse missing, unknown, or ambiguous
+      repository metadata. The placement command's `--repo`, when supplied,
+      names the observed stamp destination; it does not replace the item's
+      own `repo:` metadata. Re-read with the same command plus `--dry-run`
+      after recording: `changed: false` proves the item now carries the pair.
+      Keep a receipt reference (the command and where its JSON is kept) with
+      this dispatch's evidence; never store a preamble or a dispatch capability.
    5. **Refused.** When `refusal` is non-null, print
       `PLACEMENT UNRECORDED <key>: <refusal.reason> — <refusal.detail>` and
       halt this item into inspection. `phase-mismatch` means the worker took

@@ -224,6 +224,45 @@ assert_contains "skills/auto-drive/references/grace-period-protocol.md" "gw work
 assert_contains "skills/auto-drive/references/grace-period-protocol.md" "orca orchestration ask --resume" \
     "grace-period-protocol.md must document the --resume re-arm call"
 
+# Repository selection is owned by item metadata and the planner. Keep the
+# prerequisite and placement preview behavior visible to auto-drive readers.
+assert_contains "skills/auto-drive/SKILL.md" 'repo: graph-works' \
+    "auto-drive illustrates declared repository metadata"
+assert_contains "skills/auto-drive/SKILL.md" 'Never launch workers from an error envelope.' \
+    "auto-drive stops on repository resolution errors"
+assert_contains "skills/auto-drive/SKILL.md" 'A placement preview validates repository selection too.' \
+    "auto-drive explains placement preview parity"
+
+# Only executable examples are forbidden from passing a manual repository
+# selector. Prose can name the bad workaround while explaining the rule.
+if command_violations="$(python3 - "$PLUGIN_ROOT/skills/auto-drive/SKILL.md" <<'PY'
+import re
+import sys
+from pathlib import Path
+
+content = Path(sys.argv[1]).read_text(encoding="utf-8")
+logical_lines = re.sub(r"\\\r?\n[ \t]*", " ", content).splitlines()
+command = re.compile(r"^`?gw work (?:orchestrate|record-placement)\b")
+inline = re.compile(r"`(gw work (?:orchestrate|record-placement)\b[^`]*)`")
+
+for number, line in enumerate(logical_lines, 1):
+    candidates = [line.strip(), *(match.group(1) for match in inline.finditer(line))]
+    for candidate in candidates:
+        if command.match(candidate) and "--repo-name" in candidate:
+            print(f"line {number}: {candidate}")
+            break
+PY
+)"; then
+    if [[ -n "$command_violations" ]]; then
+        fail "auto-drive planner and placement examples omit --repo-name"
+        printf '%s\n' "$command_violations" | sed 's/^/      /'
+    else
+        pass "auto-drive planner and placement examples omit --repo-name"
+    fi
+else
+    fail "auto-drive planner and placement examples are inspectable"
+fi
+
 grep -q "grace-period-protocol.md" "$PLUGIN_ROOT/skills/finishing-relay/SKILL.md" \
   || fail "finishing-relay/SKILL.md R3 must point at the shared grace-period protocol"
 

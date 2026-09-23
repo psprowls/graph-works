@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 from work_tracker_okf._selection import path_index
@@ -128,6 +128,22 @@ def archive_held_by_ancestor(items: Sequence[WorkItem], item: WorkItem) -> bool:
     return False
 
 
+def declared_repo(item: WorkItem, items_by_path: Mapping[str, WorkItem]) -> tuple[str | None, str | None]:
+    """`(repo, setter_path)`: the nearest `repo:` over *item*, then its physical ancestors.
+
+    Nearest wins: the item itself, then `reversed(item.ancestor_paths)`
+    (which is root-first). Names only -- mapping a name to a path is
+    `graph_works_core.workspace.repos`'s job, since this band never reads
+    `workspace.yaml`. A malformed `repo:` projects as `None` and is walked
+    past like an absent one.
+    """
+    for path in (item.path, *reversed(item.ancestor_paths)):
+        holder = item if path == item.path else items_by_path.get(path)
+        if holder is not None and holder.repo is not None:
+            return holder.repo, holder.path
+    return None, None
+
+
 def unknown_depends_on(items: Sequence[WorkItem], edges: Sequence[DependencyEdge]) -> dict[str, None]:
     known = path_index(items)
     return {edge.path: None for edge in edges if edge.path not in known}
@@ -212,6 +228,7 @@ __all__ = [
     "child_gated",
     "child_rollup",
     "decision_owner",
+    "declared_repo",
     "descend",
     "nearest_epic",
     "nearest_parent",

@@ -227,7 +227,7 @@
       "key": "workflow.auto_drive.supervise_merges",
       "type": "bool",
       "default": false,
-      "description": "Mirror every finish-stage merge question to the human. Off by default: auto-drive answers `merge` itself for a non-root child, whose merge target is the epic's own integration branch.",
+      "description": "Mirror every finish-stage merge question to the human. Off by default: auto-drive answers `merge` itself for a non-root child whose merge target is its owner's own integration branch (never the release base, never a root's own finish).",
       "kind": "manifest",
       "env_var": null,
       "allowed": [],

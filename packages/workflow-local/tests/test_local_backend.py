@@ -54,6 +54,7 @@ def dispatch(
         reasoning_effort=None,
         worktree=worktree,
         merge_target="main",
+        auto_merge=False,
         prompt=" ".join(program),
     )
 

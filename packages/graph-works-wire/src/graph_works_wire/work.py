@@ -721,6 +721,7 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                 "reasoning_effort": dispatch.reasoning_effort,
                 "worktree": _worktree(dispatch.worktree),
                 "merge_target": dispatch.merge_target,
+                "auto_merge": dispatch.auto_merge,
                 "prompt": dispatch.prompt,
             }
             for dispatch in result.dispatches

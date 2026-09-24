@@ -100,6 +100,7 @@ def make_dispatch(
             action="reuse", path=worktree_path, branch="b", base_branch=None, exists=True, parent_path=None
         ),
         merge_target="main",
+        auto_merge=False,
         prompt=" ".join(program),
     )
 

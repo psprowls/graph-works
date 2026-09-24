@@ -38,6 +38,7 @@ PLANNED_DISPATCH_FIELDS = [
     ("worktree", "WorktreeAction"),
     ("merge_target", "str"),
     ("prompt", "str"),
+    ("auto_merge", "bool"),
 ]
 
 
@@ -107,6 +108,7 @@ def test_planned_dispatch_composes_a_worktree_action():
         reasoning_effort=None,
         worktree=worktree,
         merge_target="main",
+        auto_merge=False,
         prompt="do the thing",
     )
     assert dispatch.agent == "arbitrary-inert-agent"

@@ -216,7 +216,8 @@ CATALOG: tuple[ConfigEntry, ...] = (
         description=(
             "Mirror every finish-stage merge question to the human. "
             "Off by default: auto-drive answers `merge` itself for a non-root "
-            "child, whose merge target is the epic's own integration branch."
+            "child whose merge target is its owner's own integration branch "
+            "(never the release base, never a root's own finish)."
         ),
     ),
     ConfigEntry(

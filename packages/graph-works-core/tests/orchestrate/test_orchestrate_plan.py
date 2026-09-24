@@ -1609,6 +1609,113 @@ def test_supervise_merges_rides_on_a_terminal_plan_too() -> None:
     assert computed.supervise_merges is True
 
 
+def _child_at_finish(**overrides: object) -> tuple[str, str, tuple[WorkItem, ...]]:
+    """An epic with one stamped child sitting at `finish`."""
+    root = "work/epic-am"
+    child = f"{root}/children/feature-am"
+    epic = _item(
+        root,
+        type="Epic",
+        phase="execute",
+        work_status="in-progress",
+        child_paths=(child,),
+        worktree="/wt/epic-am",
+        branch="epic/am-1a2b3c4d",
+        affects=("packages/root",),
+    )
+    leaf = _item(
+        child,
+        phase="finish",
+        work_status="in-progress",
+        worktree="/wt/feature-am",
+        branch="feature/am-5e6f7a8b",
+        **overrides,
+    )
+    return root, child, (epic, leaf)
+
+
+_AM_WORKTREES = {"/wt/epic-am": True, "/wt/feature-am": True}
+
+
+def _only_dispatch(result):
+    [dispatch] = result.dispatches
+    return dispatch
+
+
+def test_a_non_root_child_at_finish_auto_merges_when_merges_are_unsupervised() -> None:
+    root, child, items = _child_at_finish()
+    dispatch = _only_dispatch(_plan(items, root, dispatch_rules=_branch_tail_rules(), worktree_exists=_AM_WORKTREES))
+    assert (dispatch.slug, dispatch.phase, dispatch.mode) == (child, "finish", "relay")
+    assert dispatch.merge_target == "epic/am-1a2b3c4d"
+    assert dispatch.auto_merge is True
+
+
+def test_supervised_merges_never_auto_merge() -> None:
+    root, _, items = _child_at_finish()
+    result = _plan(
+        items, root, supervise_merges=True, dispatch_rules=_branch_tail_rules(), worktree_exists=_AM_WORKTREES
+    )
+    assert _only_dispatch(result).auto_merge is False
+
+
+def test_the_roots_own_finish_never_auto_merges() -> None:
+    root = "work/lone-bug"
+    item = _item(root, type="Bug", phase="finish", work_status="in-progress", worktree="/wt/lone", branch="bug/lone-1")
+    dispatch = _only_dispatch(
+        _plan((item,), root, dispatch_rules=_branch_tail_rules(), worktree_exists={"/wt/lone": True})
+    )
+    assert (dispatch.phase, dispatch.mode) == ("finish", "relay")
+    assert dispatch.auto_merge is False
+
+
+def test_a_stamped_epic_root_at_finish_never_auto_merges() -> None:
+    root, items = _root_at_finish("Epic", worktree="/wt/epic-int", branch="epic/int-1a2b3c4d")
+    dispatch = _only_dispatch(
+        _plan(items, root, dispatch_rules=_branch_tail_rules(), worktree_exists={"/wt/epic-int": True})
+    )
+    assert dispatch.auto_merge is False
+
+
+def test_a_non_root_item_without_an_integration_owner_never_auto_merges(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The walk only reaches a non-root item through an owning Epic/Release/Feature,
+    # so "non-root, no owner" is a guard rather than a reachable shape: force it.
+    # The merge target is then the release base, which the policy never
+    # auto-answers, even though the item is not the plan's root.
+    monkeypatch.setattr(orchestrate, "enclosing_owner", lambda item, items: None)
+    root, child, items = _child_at_finish()
+    repo = ItemRepo("code", Path("/repo/code"), "frontmatter")
+    contexts = {
+        "git-code": RepositoryContext(
+            "git-code",
+            "/repo/code",
+            "main",
+            True,
+            {"epic/am-1a2b3c4d": ("/wt/epic-am",), "feature/am-5e6f7a8b": ("/wt/feature-am",)},
+            {"/wt/epic-am": True, "/wt/feature-am": True},
+            True,
+            checkout_usable_by_path={"/wt/epic-am": True, "/wt/feature-am": True},
+        ),
+    }
+    result = _plan(
+        items,
+        root,
+        dispatch_rules=_branch_tail_rules(),
+        item_repos={root: repo, child: repo},
+        repo_contexts=contexts,
+    )
+    [dispatch] = [d for d in result.dispatches if d.slug == child]
+    assert dispatch.merge_target == "main"
+    assert dispatch.auto_merge is False
+
+
+def test_a_non_finish_phase_never_auto_merges() -> None:
+    root, _, items = _child_at_finish()
+    items = (items[0], dataclasses.replace(items[1], phase="execute"))
+    dispatch = _only_dispatch(_plan(items, root, dispatch_rules=_branch_tail_rules(), worktree_exists=_AM_WORKTREES))
+    assert dispatch.phase == "execute"
+    assert dispatch.auto_merge is False
+
+
 def _epic_anchor(item, phase: str, *, is_root: bool):
     """Rule 2's setup: an unoccupied epic anchor at `/epic`, nothing else."""
     return orchestrate._resolve_worktree(

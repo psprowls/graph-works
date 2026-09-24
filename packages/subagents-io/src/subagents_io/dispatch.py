@@ -66,3 +66,7 @@ class PlannedDispatch:
     worktree: WorktreeAction
     merge_target: str
     prompt: str
+    # The coordinator may answer this finish-relay's merge question itself: the
+    # planner sets it only for a non-root item merging into its owner's
+    # integration branch with merges unsupervised. Opaque to backends.
+    auto_merge: bool

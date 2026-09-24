@@ -247,6 +247,7 @@ def orchestrate(*, busy: bool) -> object:
         reasoning_effort="high",
         worktree=worktree,
         merge_target="main",
+        auto_merge=True,
         prompt="go",
     )
     hold = ns(path="work/f", owner_path="work/f", ledger_path="/ledger.md", decision=ENTRY)

@@ -208,6 +208,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         reasoning_effort="high",
         worktree=worktree,
         merge_target="main",
+        auto_merge=True,
         prompt="go",
     )
     orchestration = SimpleNamespace(
@@ -238,6 +239,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     )
     orchestrate_result = work.orchestrate_payload(orchestration)
     assert orchestrate_result["dispatches"][0]["path"] == "work/a"
+    assert orchestrate_result["dispatches"][0]["auto_merge"] is True
     assert orchestrate_result["dispatches"][0]["worktree"]["parent_path"] == "/tmp/parent"
     assert orchestrate_result["advances"][0]["mode"] == "return"
     assert orchestrate_result["supervise_merges"] is False

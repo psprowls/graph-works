@@ -1337,6 +1337,17 @@ def plan(
 
         has_integration_owner = enclosing_owner(item, by_path) is not None if context is not None else not is_root
         merge_target = local_epic_branch if has_integration_owner else local_base
+        # Verdict for the coordinator's finish-relay question: only a non-root
+        # item merging into its owner's integration branch (never the release
+        # base, never the root's own finish) is auto-answered, and only when
+        # merges are unsupervised.
+        auto_merge = (
+            phase == "finish"
+            and entry.mode == "relay"
+            and not supervise_merges
+            and has_integration_owner
+            and not is_root
+        )
         key = session_name(item.path, item.type, phase)
         resolutions[key] = resolution
         finish_targets[key] = targets
@@ -1357,6 +1368,7 @@ def plan(
                 reasoning_effort=entry.reasoning_effort,
                 worktree=action,
                 merge_target=merge_target,
+                auto_merge=auto_merge,
                 prompt=_prompt(
                     path=item.path,
                     key=key,

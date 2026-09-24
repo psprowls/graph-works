@@ -39,6 +39,7 @@ def dispatch():
         reasoning_effort=None,
         worktree=WorktreeAction("reuse", "/tmp/example", "feature/example", None, True, None),
         merge_target="main",
+        auto_merge=False,
         prompt="Perform the test task.",
     )
 

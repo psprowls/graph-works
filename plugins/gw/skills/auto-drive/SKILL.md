@@ -222,8 +222,9 @@ Never launch workers from an error envelope.
 
 On success, the result contains:
 
-- `terminal` (bool), `max_parallel` / `slots_free` (ints), and `live` (the
-  echoed input list).
+- `terminal` (bool), `max_parallel` / `slots_free` (ints), `supervise_merges`
+  (bool, default `false`; display only — §4.3 reads each dispatch's
+  `auto_merge`, never this), and `live` (the echoed input list).
 - `repo` — `{"name": "<declared name>", "path": "<code repository>", "source": "frontmatter|flag|sole|fallback"}`,
   root metadata for the repository `workspace.yaml` declares, or `null` when none resolves.
   Each dispatch carries its own `repo={name,path,source}`; use that path for placement. A
@@ -238,7 +239,11 @@ On success, the result contains:
   profile field),
   `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main`,
   `path`, `branch`, `base_branch`, `exists`, `parent_path` — the existing
-  worktree a created one is linked beneath, `null` when none), `merge_target`, `prompt`.
+  worktree a created one is linked beneath, `null` when none), `merge_target`,
+  `auto_merge` (bool — core's verdict that §4.3 step 0 may answer this
+  dispatch's finish-relay `merge` question itself; true only for a non-root
+  item at `finish` whose merge target is its owner's integration branch, with
+  `supervise_merges` off), `prompt`.
 - `advances[]` — each: `path`, `reason`, `mode` (`advance` or `return`), `worktree`/`branch` (the epic's
   already-known worktree, when one exists — `null` otherwise, e.g. before any
   worker has ever been dispatched for this epic).
@@ -1440,18 +1445,88 @@ Triggered from §2.1's live-derivation or §2.7's wait-timeout `worker-show`.
 ### 4.3 `question` (finish-stage relay)
 
 A worker in `relay` mode (the finish stage) sends this via its own
-`orca orchestration ask` when it needs the merge/PR/hold/discard decision —
-this coordinator only relays it, it does not interpret the question —
-deciding what the options mean is the worker's job.
+`orca orchestration ask` when it needs the merge/PR/hold/discard decision.
+This coordinator applies **one fixed, published policy to one structurally
+identified case** — a child's merge into its owner's integration branch,
+step 0 — and relays everything else to the human unchanged. It never decides
+what the options *mean*; that is the worker's job.
+
+0. **Auto-answer `merge`?** Answer it yourself, without mirroring, when
+   **both** hold:
+
+   1. The sending dispatch's `auto_merge` is `true`. A live dispatch is
+      excluded from the plan's `dispatches[]` (it rides in `--live`), so read
+      the verdict from a fresh **read-only** plan that does not count the
+      sender as live:
+      1. Resolve the sender. The message's sender handle is `dispatch:<id>`;
+         join that id to its `taskId` through §2.1's worker-list snapshot,
+         then read that Task from `task-list`: its `task_title` is the
+         dispatch key, and its `display_name` split on the first ` · ` is the
+         path (§2.5.2's key-to-path rule). **Never** parse the question text.
+      2. Run `gw work orchestrate <work-path> --live <every live key except
+         that one> --json` and take the `dispatches[]` entry whose `key`
+         equals the sender's key. Act on nothing else in that plan — launch,
+         advance and record nothing from it.
+      3. If you cannot resolve the sender with certainty, if no entry carries
+         its key, or if more than one does, **mirror** — an unattributable
+         question is not a structurally identified case. Otherwise read that
+         entry's `auto_merge`.
+   2. The question's `options` include `merge`.
+
+   `auto_merge` already folds in everything about *where* the merge lands:
+   `supervise_merges` off, a non-root item, and a merge target that is the
+   owner's integration branch rather than the release base. Core computes it
+   next to `merge_target`, so this skill never re-derives it from paths or
+   frontmatter — do not compare `path` fields or walk parents yourself. An
+   Epic or Release root, a lone item, and any merge into the release base
+   carry `auto_merge: false` and mirror.
+
+   Guard 2 is the detached-HEAD guard. A worker on a detached HEAD drops
+   `merge` from its own options, and testing the options rather than
+   re-deriving git state keeps you out of the worker's business — any case
+   the worker itself judged un-mergeable falls through to the human
+   automatically. It also excludes the option-less discard-confirmation ask
+   of step 4, which must never be auto-answered.
+
+   **`pr`, `hold` and `discard` are never auto-answered, under any
+   condition.** This path produces the single literal string `merge` or it
+   mirrors; there is no third outcome.
+
+   **This is not the coordinator guessing an answer** (cf. §2.5.1, which
+   forbids exactly that). Nothing is inferred per question. The decision was
+   made once, by a human, at design time; it is recorded in this skill's
+   prose and in `workflow.auto_drive.supervise_merges`, which that human can
+   flip to take every merge question back. §2.5.1 bars inventing an answer
+   nobody gave — a standing, published policy applied to a structurally
+   verified class of question is the opposite of that.
+
+   When both hold, print exactly one notice in this session — no
+   `AskUserQuestion`, no outward worktree comment or status push:
+
+   ```
+   auto-merged <work-path> -> <merge_target> (child of <root-path>; not mirrored)
+   ```
+
+   Then go straight to step 2 with `merge` as the body. **Steps 2 and 3 are
+   not optional on this path**: an undelivered auto-answer strands the worker
+   exactly as an undelivered human answer does, and with no human watching
+   for it. If either guard fails, continue to step 1 and mirror as usual.
 
 1. Mirror the message's question text and options to the user as one
    `AskUserQuestion` in this session.
-2. `orca orchestration reply --id <message_id> --body "<the user's answer>" --run <run_id>`.
-   This works here because a `question` is sent via `orca orchestration ask`,
+2. Reply, and **read the response** — `--json` is not optional here:
+
+   ```
+   orca orchestration reply --id <message_id> --body "<the user's answer>" --run <run_id> --json
+   ```
+
+   This works because a `question` is sent via `orca orchestration ask`,
    whose sender handle is `dispatch:…` — `reply` addresses whatever handle
-   the original message was sent *from*, and Orca relays a reply on a
-   `dispatch:…` handle into the live worker session, unblocking its
-   blocking `ask` call.
+   the original message was sent *from*, and it is a *question thread* with a
+   dedicated `reply` branch that writes the answer onto the thread and wakes
+   the worker blocked inside its `ask`. The response carries
+   `{message, question, duplicate}`, and a delivered answer comes back with
+   `question.status == "answered"`.
 2a. **If `reply` refuses `dispatch_inactive`:** the question's Dispatch has
     ended. **Do not assume that means a park.** All four Dispatch-ending
     events close a pending question the same way — accepted success, accepted
@@ -1489,9 +1564,21 @@ deciding what the options mean is the worker's job.
        (§4.2) — its failure question is where retry / skip / stop gets
        decided. Never write the answer into an unrelated ledger entry to make
        it look saved.
-3. A typed-`discard` confirmation some finish flows require is just a
-   second question/reply round-trip initiated by the worker — handle it the
-   same way, no special-casing here.
+3. **Assert it landed.** If `question` is absent from the response, or its
+   `status` is anything but `"answered"`, the reply took `reply`'s *generic*
+   branch instead — it was inserted as a plain message addressed to whatever
+   handle the original was sent from, which is a passive mailbox, not a push
+   channel. **The worker is still blocked and did not get the answer.** Say
+   exactly that to the user and do not report the relay as complete; the
+   escalation channel in §4.4 is the way to reach that worker. `reply` returns
+   `ok: true` for both branches, so this assertion is the only thing standing
+   between a dropped decision and a confident report that it was delivered.
+   (A `dispatch_inactive` refusal is step 2a's, not this one.)
+4. A typed-`discard` confirmation some finish flows require is just a second
+   question/reply round-trip initiated by the worker — handle it the same way,
+   assertion included, no special-casing here. **It is never auto-answered**:
+   step 0 excludes it twice over — by the `pr`/`hold`/`discard` rule, and
+   structurally, because it is sent option-less and so fails guard 2.
 
 ### 4.4 `escalation`
 
@@ -1552,7 +1639,10 @@ without launching anything), then enter the record block at its step 1.
    task/dispatch IDs, record path, checkpoint and reason, and stop without
    reporting verified completion.
 2. Print a run summary: items resolved, branches merged back (from each
-   settled dispatch's `merge_target`), anything skipped (§4.1's skip
+   settled dispatch's `merge_target`), **auto-answered merges as their own
+   line item** — the §4.3 step 0 children, listed separately from the
+   questions a human actually answered, so a run that merged twelve children
+   unattended says so in one place — anything skipped (§4.1's skip
    choices this run — keys the fresh classifier calls `deliberate-skip`, not
    `parked`), anything **parked** (keys classified `parked`, each with the
    checkpoint and the decision id still awaiting an answer — say plainly that
@@ -1600,8 +1690,10 @@ before exiting — same mechanics as the failure question's Stop branch
   never patched around in this skill's prose.
 - Finish-stage relay behavior *inside* the worker — deciding what the
   merge/PR/hold/discard options mean and sending the `ask` — belongs to
-  `gw:finishing-relay`. This skill only mirrors the `question` it receives
-  (§4.3).
+  `gw:finishing-relay`. What this skill owns is only *who answers* the
+  `question` it receives: the standing auto-merge policy for a dispatch core
+  marks `auto_merge`, mirroring for everything else (§4.3). Whether a dispatch
+  is `auto_merge` is core's call, never derived here.
 - A vault-wide watcher or scheduled sweep mode. This skill drives exactly
   one path per invocation.
 - Auto-retry of failed stages, and automatic merge-conflict resolution for

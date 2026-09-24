@@ -118,6 +118,7 @@ def planned(**overrides):
             action="reuse", path="/tmp/wt", branch="psprowls/my-slug", base_branch=None, exists=True, parent_path=None
         ),
         merge_target="main",
+        auto_merge=False,
         prompt=PROMPT,
     )
     fields.update(overrides)

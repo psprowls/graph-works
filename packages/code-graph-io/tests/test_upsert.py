@@ -194,3 +194,23 @@ def test_upsert_uri_idempotent(conn: sqlite3.Connection) -> None:
     assert count == 1
     uri_row = conn.execute("SELECT uri FROM nodes WHERE kind='package' AND name='auth'").fetchone()
     assert uri_row == ("pkg:org/repo/auth",)
+
+
+def test_current_repo_does_not_leak_to_a_connection_reusing_a_freed_id() -> None:
+    """A never-cleared scope must stay bound to its own connection object.
+
+    CPython reuses a freed object's address, so a registry keyed by bare
+    `id(conn)` hands a stale member scope to whichever later connection lands
+    at that address — stamping its rows with a foreign `repo`.
+    """
+    leaked = sqlite3.connect(":memory:")
+    upsert.set_current_repo(leaked, "repo:acme/stale")
+    leaked.close()
+    del leaked
+
+    fresh = [sqlite3.connect(":memory:") for _ in range(200)]
+    try:
+        assert all(upsert._current_repo(c) is None for c in fresh)
+    finally:
+        for c in fresh:
+            c.close()

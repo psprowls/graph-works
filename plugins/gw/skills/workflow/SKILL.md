@@ -170,6 +170,18 @@ another stage, same as the stock skill it replaces.
 
   Omit this block entirely when `guidance` is empty (guidance skipped or no
   matches). Surface any `guidance_warnings` to the user as plain notes.
+- **Execute-stage coverage (step 3).** When the stage just dispatched is
+  `execute` — keyed on the stage, not on `action.skill`, which is used verbatim
+  and may be any configured skill — add: "Before you advance, write
+  `<workspace>/okf/<work-path>/references/03-execute-coverage.md`: one markdown
+  task-list line per item in this stage's design spec `## Acceptance` section,
+  each line `- [x]` when delivered or `- [ ]` when not, each with a one-line
+  justification. Where the spec has no `## Acceptance` section, enumerate its
+  `## Scope` / `## What this design changes` headings instead and say in the
+  file that you did. Mark honestly — an unchecked box is a normal, expected
+  outcome; an inaccurate checked box is not." This is the same text
+  `EXECUTE_TAIL` gives an unattended worker, and it is a bullet here rather
+  than a rider because riders carry behavior only for stock skills.
 - **Stage directives (riders).** Look `action.skill` up in the rider table
   below, keyed on its **last segment** — the part after the colon in a qualified
   `superpowers:brainstorming`. If a rider exists, open
@@ -216,6 +228,13 @@ the pipeline path — `<work-path>/references/01-design.md` and `02-plan.md`
 respectively — the same path `artifact.path` points to, so the file should
 already be there. If the skill instead wrote elsewhere, move the file to
 `artifact.path` and say so.
+
+**Execute-stage coverage (step 4).** For an execute stage, also read
+`<workspace>/okf/<work-path>/references/03-execute-coverage.md` back. Absent →
+note it and continue; the obligation is reported, not enforced. Present → show
+its lines as-is, and if any line is `- [ ]` (a marker scan, not comprehension)
+ask the user whether to stay in `execute` rather than advance; on *stay*, do not
+run step 5. The unattended equivalent is `auto-drive` §4.1's Coverage read.
 
 ### 5. Advance
 

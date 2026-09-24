@@ -421,6 +421,36 @@ assert_contains "skills/auto-drive/references/multi-repo-acceptance.md" \
     "installed-package adapter runtime" \
     "acceptance separates installed runtime evidence from source checks"
 
+# The execute-coverage report has a producer (core's EXECUTE_TAIL) and two
+# consumers, both prose: auto-drive §4.1's Coverage read (unattended) and the
+# workflow skill's step 3 obligation + step 4 read-back (attended). Nothing else
+# ties the prose to the producer, so pin each half; see
+# work/bug-auto-drive-execute-coverage-read.
+assert_contains "skills/auto-drive/SKILL.md" \
+    "### Coverage read (execute dispatches only)" \
+    "auto-drive carries the execute-stage Coverage read section"
+assert_contains "skills/auto-drive/SKILL.md" \
+    "references/03-execute-coverage.md" \
+    "auto-drive's Coverage read names the coverage file"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'any line is `- [ ]`' \
+    "auto-drive's Coverage read scans for unchecked items"
+assert_contains "skills/auto-drive/SKILL.md" \
+    "--from finish --return --no-infer-worktree" \
+    "auto-drive's Coverage read sends an item back with a guarded return"
+assert_contains "skills/auto-drive/SKILL.md" \
+    "run the coverage read" \
+    "auto-drive's success branch runs the coverage read for execute dispatches"
+assert_contains "skills/workflow/SKILL.md" \
+    "references/03-execute-coverage.md" \
+    "workflow names the coverage file for an execute stage"
+assert_contains "skills/workflow/SKILL.md" \
+    "**Execute-stage coverage (step 3).**" \
+    "workflow step 3 states the coverage obligation for an execute stage"
+assert_contains "skills/workflow/SKILL.md" \
+    "**Execute-stage coverage (step 4).**" \
+    "workflow step 4 reads the coverage file back and surfaces unchecked items"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

@@ -1178,6 +1178,13 @@ It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
   flag — `worker-release` takes only `--dispatch` and `--retry-request`)
   → if this key was attend-pending (§3), flip the card back:
   `orca worktree set --worktree <selector> --workspace-status in-progress`
+  → if the settled dispatch's phase was `execute`, run the coverage read
+  (**Coverage read**, below): resolve the work path and phase from the settled
+  task's `display_name` in the full task-list this branch just refreshed —
+  split on the first ` · `, left half the path, right half the phase, exactly
+  as §2.5.2 does; never parse the dispatch key. A row whose `display_name` is
+  missing or does not split cannot be resolved: say so in one line and
+  continue — the read is best-effort, never a reason to hold the delivery
   → nothing else; the next cycle's plan (§2.2) picks up the new state
   naturally.
 
@@ -1381,6 +1388,40 @@ until it proves exit this helper cannot verify a recovery checkpoint.
 A replayed delivery or a restart re-enters at step 1 and resumes from the
 record's checkpoint against fresh state. It never repeats a verified stop,
 release, Task completion or stage advance.
+
+### Coverage read (execute dispatches only)
+
+Runs from the Success branch only — on `accepted-success`, after §2.1's
+`settled` result and after `worker-release`, never on `claimed-unconfirmed`
+(§4.1.1 owns that path) and never before the ack rules. The producer is
+`EXECUTE_TAIL`: every execute dispatch is told to write
+`<workspace>/okf/<path>/references/03-execute-coverage.md`, one `- [x]` /
+`- [ ]` line per design-spec `## Acceptance` item, and to pass it as
+`--report-path`. Nothing gates on its contents; this step is what makes the
+report worth writing.
+
+1. Read `<workspace>/okf/<path>/references/03-execute-coverage.md`. Absent →
+   one-line note and continue. The obligation is unenforced, and a missing file
+   is not a failure.
+2. Surface the enumeration **as-is** — print the file's lines, do not
+   summarize them.
+3. If any line is `- [ ]` (a marker scan, not comprehension), raise one
+   `AskUserQuestion` with exactly two options — *send it back* / *accept
+   anyway*. No retry option: a dispatch that succeeded is not a recovery case,
+   and the failure question's Retry is authorized only by Orca's failure
+   response.
+   - **Send it back**: run `gw work next <path> --json` and capture `phase`.
+     Proceed only when it is `finish`; then run
+     `gw work advance <path> --from finish --return --no-infer-worktree`. The
+     next cycle's plan (§2.2) redispatches `execute` naturally: the task mirror
+     already records the settled dispatch, and §2.6's diff re-proposes the key
+     once the phase moves back. If the item is not at `finish`, report that
+     plainly and do not advance.
+   - **Accept anyway**: continue; the coverage file stands as the record.
+
+What this does and does not claim: it makes an omission visible to a human at
+the moment the worker settles, and gates nothing. It cannot repair a model
+that marks a box `- [x]` dishonestly.
 
 ### Failure question
 

@@ -35,7 +35,12 @@ grep -F '| `gw:finishing-relay` | Any | **No advance**' "$WORKFLOW" >/dev/null |
 grep -F 'missing or ambiguous, treat it as `none`' "$WORKFLOW" >/dev/null || fail "missing finish evidence holds"
 grep -F 'attended or relay' "$WORKFLOW" >/dev/null || fail "held-item hand-off covers both finish paths"
 grep -F 'merge target: `<merge target>`' "$WORKFLOW" >/dev/null || fail "held-item hand-off names the target"
-grep -F 'nearest Epic or Release ancestor whose frontmatter carries `branch:`' "$RIDERS" >/dev/null || fail "attended target follows ancestor branch stamp"
+grep -F '**Complete finish targets.**' "$RIDERS" >/dev/null || fail "attended finish uses complete repository targets"
+grep -F 'never reconstruct targets from scalar frontmatter' "$RIDERS" >/dev/null || fail "attended finish refuses scalar fallback"
+for document in "$RIDERS" "$RELAY"; do
+  grep -F 'finish-receipt.py inspect' "$document" >/dev/null || fail "finish inspects persisted evidence"
+  grep -F 'finish-receipt.py record' "$document" >/dev/null || fail "finish records each repository"
+done
 grep -F '**Confirm integrated.**' "$RIDERS" >/dev/null || fail "on-target menu can confirm integration"
 grep -F 'in any checkout, including a linked worktree' "$RIDERS" >/dev/null || fail "on-target check includes shared epic worktrees"
 grep -F 'Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>' "$RIDERS" >/dev/null || fail "attended finish reports an explicit outcome"
@@ -128,7 +133,7 @@ for step in 2 5; do
 done
 
 # Scope the opt-out to R5's resolving command, retaining both integration arguments.
-sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance opts out and preserves integration arguments"
+sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from receipt inspection> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance opts out and preserves integration arguments"
 
 
 cat >"$FIXTURE/dispatch.json" <<'JSON'

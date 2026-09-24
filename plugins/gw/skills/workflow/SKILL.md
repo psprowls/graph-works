@@ -301,3 +301,39 @@ finish the children (`gw next <work-path> --descend`) or explicitly move a
 complete child subtree with `gw work reparent <child-path> --parent
 <new-parent-path>`. Physical placement is ownership; do not add a hierarchy
 field to frontmatter.
+
+## Finish receipt verification and recovery
+
+Before presenting the integration choice, explain that automated receipt verification
+requires ancestry-preserving integration (fast-forward or merge commit). Squash and
+rebase results are not ancestry proof and remain unverified by this contract.
+
+Resolve `<plugin>` to this installed plugin's absolute directory. Run the helper
+with the core environment available: the command below works from the source
+workspace; from an external checkout add `--project <graph-works source root>`
+to `uv run`, or use the installed interpreter containing graph-works-core. Never
+assume the worker's current directory is the Graph Works source checkout.
+
+```bash
+uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>
+uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>
+```
+
+Inspect before any integration. After each repository's merge and merged-result
+checks pass, record that repository immediately, then commit the receipt and owner
+source link as workspace state using the workflow's normal workspace commit
+procedure. `record` derives commit evidence itself; never hand-author completion
+claims. Preserve source branches and worktrees until final verification.
+
+If a later repository fails, hold the entire finish and report already verified
+entries. If a merge succeeded but receipt persistence failed, run `record` again:
+it rediscovers current source ancestry in the target without another merge.
+Inspection returns only currently verified entries; stale entries remain historical
+receipt content and block completion until refreshed. A malformed receipt requires
+repair, not replacement. No cross-repository atomicity is promised.
+
+Run `inspect` again after recording every target. Only `complete: true` authorizes
+the single final advance; use its `resolved_in` verbatim and
+`gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in>`
+(with the required Release date when applicable). An incomplete inspection exits
+nonzero and names blockers. No helper mode merges or advances.

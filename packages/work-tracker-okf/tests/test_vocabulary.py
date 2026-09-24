@@ -41,6 +41,7 @@ def test_the_schema_files_are_exactly_TYPES() -> None:
         "execute-results",
         "execute-transcript",
         "finish-results",
+        "finish-receipt",
         "release-notes",
         "design-spec-extra",
     ],

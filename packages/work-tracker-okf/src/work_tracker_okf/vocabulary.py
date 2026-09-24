@@ -48,6 +48,7 @@ _SOURCE_ID_RE = re.compile(SOURCE_ID_PATTERN)
 #: The two artifacts whose presence remains meaningful to the item projection.
 SPEC_SOURCE_ID = "design"
 PLAN_SOURCE_ID = "plan"
+FINISH_RECEIPT_SOURCE_ID = "finish-receipt"
 
 
 def is_source_id(value: str) -> bool:
@@ -62,6 +63,7 @@ __all__ = [
     "DIAGNOSIS_TYPES",
     "DOCUMENT_STATUSES",
     "EFFORTS",
+    "FINISH_RECEIPT_SOURCE_ID",
     "PARENT_TYPES",
     "PHASES",
     "PLAN_SOURCE_ID",

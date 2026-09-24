@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from work_tracker_okf.items import WorkItem
+from okf_io import Bundle, Document, load_bundle, parse
+from work_tracker_okf.items import IGNORE, WorkItem, load_items
+from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
 
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
+from graph_works_core.workspace.provenance import probe_git
 from graph_works_core.workspace.repo_context import RepositoryContext, observe_repository
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo
 
@@ -149,3 +154,159 @@ def resolve_finish_targets(
             continue
         targets.append(FinishTarget(repo, worktree, branch, target))
     return FinishPlan(tuple(targets), tuple(blockers))
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedIntegration:
+    repo: str
+    source_branch: str
+    source_commit: str
+    target_branch: str
+    result_commit: str
+
+
+@dataclass(frozen=True, slots=True)
+class FinishVerification:
+    complete: bool
+    resolved_in: str | None
+    blockers: tuple[str, ...]
+    entries: tuple[VerifiedIntegration, ...]
+
+
+def read_finish_receipt(
+    layout: WorkspaceLayout, path: str
+) -> tuple[Document | None, tuple[VerifiedIntegration, ...], str | None]:
+    """Parse strictly; historical entries are not yet verified Git evidence."""
+    ref = artifact_ref(path, MANAGED_ARTIFACTS["finish-receipt"])
+    try:
+        raw = ref.path(layout.bundle_dir).read_bytes()
+    except FileNotFoundError:
+        return None, (), None
+    except OSError as exc:
+        return None, (), f"cannot read finish receipt: {exc}"
+    try:
+        doc = parse(raw.decode("utf-8"), path=ref.path(layout.bundle_dir))
+        data = doc.fm_data()
+        values = data.get("integrations")
+        if (
+            doc.parse_error
+            or data.get("type") != "Explanation"
+            or type(data.get("receipt_version")) is not int
+            or data.get("receipt_version") != 1
+            or data.get("owner") != path
+            or not isinstance(values, list)
+        ):
+            return None, (), "malformed finish receipt"
+        entries: list[VerifiedIntegration] = []
+        for value in values:
+            keys = ("repo", "source_branch", "source_commit", "target_branch", "result_commit")
+            if not isinstance(value, dict) or any(not isinstance(value.get(k), str) or not value[k] for k in keys):
+                return None, (), "malformed finish receipt integration"
+            entry = VerifiedIntegration(*(value[k] for k in keys))
+            if any(e.repo == entry.repo for e in entries):
+                return None, (), "duplicate finish receipt repository"
+            if not all(
+                re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) for sha in (entry.source_commit, entry.result_commit)
+            ):
+                return None, (), "malformed finish receipt commit"
+            entries.append(entry)
+        return doc, tuple(entries), None
+    except (UnicodeError, ValueError):
+        return None, (), "malformed finish receipt"
+
+
+def _commit(repo: Path, ref: str) -> str | None:
+    result = probe_git(repo, "rev-parse", "--verify", "--end-of-options", ref + "^{commit}")
+    sha = result.stdout.strip()
+    return sha if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", sha) else None
+
+
+def historical_integration(target: FinishTarget, entry: VerifiedIntegration) -> bool:
+    """Historical evidence may be stale, but must remain genuine repository-local ancestry."""
+    repo = target.repo.path
+    return bool(
+        repo is not None
+        and entry.repo == target.repo.name
+        and entry.source_branch == target.source_branch
+        and entry.target_branch == target.target_branch
+        and _commit(repo, entry.source_commit) == entry.source_commit
+        and _commit(repo, entry.result_commit) == entry.result_commit
+        and probe_git(repo, "merge-base", "--is-ancestor", entry.source_commit, entry.result_commit).returncode == 0
+    )
+
+
+def observe_integration(target: FinishTarget, entry: VerifiedIntegration | None = None) -> VerifiedIntegration | None:
+    """Prove current source ancestry in this target's repository; never mutate Git."""
+    repo = target.repo.path
+    if repo is None or target.repo.name is None:
+        return None
+    source = _commit(repo, "refs/heads/" + target.source_branch)
+    tip = _commit(repo, "refs/heads/" + target.target_branch)
+    if source is None or tip is None:
+        return None
+    if entry is None:
+        entry = VerifiedIntegration(target.repo.name, target.source_branch, source, target.target_branch, tip)
+    if (
+        entry.repo != target.repo.name
+        or entry.source_branch != target.source_branch
+        or entry.target_branch != target.target_branch
+        or entry.source_commit != source
+        or _commit(repo, entry.source_commit) != entry.source_commit
+        or _commit(repo, entry.result_commit) != entry.result_commit
+    ):
+        return None
+    for left, right in ((source, entry.result_commit), (entry.result_commit, tip)):
+        if probe_git(repo, "merge-base", "--is-ancestor", left, right).returncode != 0:
+            return None
+    return entry
+
+
+def inspect_finish(layout: WorkspaceLayout, path: str) -> FinishVerification:
+    """Reverify every recorded integration against live repository-local refs."""
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    items = load_items(bundle)
+    by_path = {item.path: item for item in items}
+    if path not in by_path:
+        return FinishVerification(False, None, (f"{path}: unknown finish owner",), ())
+    plan = resolve_finish_targets(layout, items, path)
+    _doc, entries, error = read_finish_receipt(layout, path)
+    blockers = list(plan.blockers)
+    if error:
+        blockers.append(error)
+    verified: list[VerifiedIntegration] = []
+    for target in plan.targets:
+        entry = next((e for e in entries if e.repo == target.repo.name), None)
+        if entry is None or observe_integration(target, entry) is None:
+            blockers.append(f"{target.repo.name}: incomplete integration into {target.target_branch}")
+        else:
+            verified.append(entry)
+    names = {target.repo.name for target in plan.targets}
+    if any(e.repo not in names for e in entries):
+        blockers.append("finish receipt contains an unexpected repository")
+    if not plan.targets:
+        blockers.append("no verified finish targets")
+    resolved = verified[0].result_commit if verified else None
+    return FinishVerification(not blockers, resolved, tuple(blockers), tuple(verified))
+
+
+def finish_read_guard(layout: WorkspaceLayout, path: str, *, bundle: Bundle | None = None) -> str:
+    """Bind owner, ancestors, repo configuration and receipt to their raw preimages."""
+    bundle = bundle if bundle is not None else load_bundle(layout.bundle_dir, ignore=IGNORE)
+    item = next((i for i in load_items(bundle) if i.path == path), None)
+    digest = hashlib.sha256()
+    members = (path, *item.ancestor_paths) if item is not None else (path,)
+    for member in members:
+        doc = bundle.concepts.get(member)
+        digest.update(repr((member, doc.serialize() if doc is not None else None)).encode("utf-8"))
+    paths = (
+        layout.manifest_path,
+        layout.manifest_path.with_name("workspace.local.yaml"),
+        artifact_ref(path, MANAGED_ARTIFACTS["finish-receipt"]).path(bundle.root),
+    )
+    for filename in paths:
+        try:
+            raw = filename.read_bytes()
+        except FileNotFoundError:
+            raw = None
+        digest.update(repr((str(filename), raw)).encode("utf-8"))
+    return digest.hexdigest()

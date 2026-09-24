@@ -48,6 +48,7 @@ def test_an_id_disagreeing_with_its_filename_is_a_warn(tmp_path: Path) -> None:
         ("plan-guidance", "02-plan-guidance.md"),
         ("plan-transcript-subagent-1", "02-plan-transcript-subagent-1.txt"),
         ("finish-results", "04-finish-results.md"),
+        ("finish-receipt", "04-finish-receipt.md"),
     ],
 )
 def test_an_agreeing_id_is_silent(tmp_path: Path, source_id: str, filename: str) -> None:

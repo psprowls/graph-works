@@ -156,3 +156,12 @@ def test_every_phase_has_a_transcript_managed_artifact(phase: str, filename: str
     ref = paths.artifact_ref("work/release-cutover", paths.MANAGED_ARTIFACTS[key])
     assert ref == ArtifactRef(rel=f"work/release-cutover/references/{filename}", source_id=key)
     assert ref.resource == f"/work/release-cutover/references/{filename}"
+
+
+def test_finish_receipt_is_separate_managed_artifact():
+    from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref
+    from work_tracker_okf.vocabulary import FINISH_RECEIPT_SOURCE_ID
+
+    ref = artifact_ref("work/epic-a", MANAGED_ARTIFACTS[FINISH_RECEIPT_SOURCE_ID])
+    assert ref.source_id == "finish-receipt"
+    assert ref.rel == "work/epic-a/references/04-finish-receipt.md"

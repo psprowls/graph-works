@@ -33,6 +33,7 @@ RefusalReason = Literal[
     "effort-required",
     "owner-required",
     "resolved-in-required",
+    "finish-incomplete",
     "children-open",
     "released-at-required",
     "uncommitted-work",
@@ -49,15 +50,15 @@ RefusalReason = Literal[
 #: mislabels that session's own transcript.
 Trigger = Literal["dispatch", "complete", "return"]
 
-#: The three reasons above that this module never produces itself. They are
-#: raised one band up, by the `execute -> finish` commit gate in
+#: The four reasons above that this module never produces itself. They are
+#: raised one band up, by the commit and finish receipt gates in
 #: `graph_works_core.orchestrate.stage_advance`, which cannot own the
 #: vocabulary: `RefusalReason` is the CLI's rendering contract
 #: (`rendering.advance_payload` reads `outcome.plan.refusal`), and a closed
 #: string vocabulary is band-legal here where a git observation is not.
 #: `return-not-available` and `unreadable-member` sit between them in
 #: `RefusalReason` but are *not* members: `advance()` produces both itself.
-GATE_REFUSALS: frozenset[str] = frozenset({"uncommitted-work", "no-commits", "no-affects-touched"})
+GATE_REFUSALS: frozenset[str] = frozenset({"uncommitted-work", "no-commits", "no-affects-touched", "finish-incomplete"})
 
 
 @dataclass(frozen=True, slots=True)

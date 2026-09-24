@@ -36,6 +36,8 @@ from work_tracker_okf.sources import upsert
 
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
+from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import (
     ItemRepo,
@@ -201,12 +203,19 @@ def run_stage_advance(
 
     Live advances hold the decision owner's lock across the read, hold
     resolution, routing, commit gate and mutation. Dry runs resolve holds
-    without locking. On win32, `okf_ext.locking` gives up after ten one-second
+    without locking except for receipt-guarded finish verification. On win32,
+    `okf_ext.locking` gives up after ten one-second
     retries and raises `OSError` naming the lock; the CLI reports it as `io`.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    if dry_run or not any(item.path == path for item in items):
+    receipt_finish = any(
+        item.path == path
+        and item.phase == "finish"
+        and (item.repo_stamps or "repo_stamps" in item.invalid_optional_fields)
+        for item in items
+    )
+    if (dry_run and not receipt_finish) or not any(item.path == path for item in items):
         return _advance(
             layout,
             bundle,
@@ -239,7 +248,7 @@ def run_stage_advance(
             context.items,
             path,
             hold=hold_in(context, path),
-            dry_run=False,
+            dry_run=dry_run,
             today=today,
             effort=effort,
             owner=owner,
@@ -313,6 +322,23 @@ def _advance(
                 if detected is not None:
                     stamped_worktree, stamped_branch = detected
 
+    finish_guard: str | None = None
+    finish_blockers: tuple[str, ...] = ()
+    if (
+        item is not None
+        and old_phase == "finish"
+        and not return_
+        and (item.repo_stamps or "repo_stamps" in item.invalid_optional_fields)
+    ):
+        finish_guard = finish_read_guard(layout, path, bundle=bundle)
+        verification = inspect_finish(layout, path)
+        finish_blockers = verification.blockers
+        if verification.complete:
+            if resolved_in is not None and resolved_in != verification.resolved_in:
+                finish_blockers = ("resolved_in does not agree with verified finish receipt",)
+            else:
+                resolved_in = verification.resolved_in
+
     outcome = advance_and_stamp(
         bundle,
         path,
@@ -327,6 +353,16 @@ def _advance(
         hold=hold,
         dry_run=True,
     )
+    if finish_blockers:
+        refused = replace(
+            outcome.plan,
+            refusal="finish-incomplete",
+            changes=(),
+            stamp_source=None,
+            detail="; ".join(finish_blockers),
+            trigger=None,
+        )
+        outcome = replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False)
     candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings)
     if not dry_run and before_apply is not None:
         before_apply(candidate)
@@ -420,9 +456,26 @@ def _advance(
         validate_paths=(path,),
         directory_preconditions=conditions,
     )
+
     # `bundle` is the lock-held projection (or the dry-run read), loaded with
     # `IGNORE`, so it satisfies `apply_mutation`'s baseline precondition.
-    application = apply_mutation(layout, mutation, repo_root=resolved_repo, repo_roots=declared, baseline_bundle=bundle)
+    def validate_finish() -> None:
+        verified = inspect_finish(layout, path)
+        if (
+            finish_read_guard(layout, path) != finish_guard
+            or not verified.complete
+            or verified.resolved_in != resolved_in
+        ):
+            raise WorkspaceError("finish evidence changed; inspect and retry before advancing")
+
+    application = apply_mutation(
+        layout,
+        mutation,
+        repo_root=resolved_repo,
+        repo_roots=declared,
+        baseline_bundle=bundle,
+        validate_read_set=validate_finish if finish_guard is not None else None,
+    )
     if application.ok:
         outcome = replace(outcome, written=True)
         if result_member is not None:

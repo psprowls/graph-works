@@ -264,6 +264,27 @@ resolves an item; the rider leaves the stock skill unmodified.
 > integrated targets explicitly because cross-repository atomicity is not
 > promised. PR, keep/hold and discard never resolve the item.
 >
+> **Receipt procedure.** Before presenting the choice explain that verification
+> requires ancestry-preserving fast-forward or merge commits. Squash/rebase does
+> not prove integration. Keep source worktrees and branches until verification.
+> Use the absolute installed plugin path and the core runtime (from an external
+> checkout add `--project <graph-works source root>` to `uv run`, or use an
+> installed interpreter with graph-works-core). Run before merging:
+>
+> `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>`
+>
+> After each repository's successful merge and merged-result checks, run:
+>
+> `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`
+>
+> Commit the receipt and owner source link through the normal workspace commit
+> procedure immediately. If receipt writing fails after a merge, retry `record`:
+> it rediscovers source ancestry without another merge. Preserve partial receipts
+> when a later target fails. Inspect again after every target is recorded; only
+> `complete: true` allows workflow's one advance, using that inspection's
+> `resolved_in` and `--no-infer-worktree`. Malformed receipts require repair;
+> stale evidence blocks until refreshed. Never hand-author completion claims.
+>
 > **On-target check.** Before Step 4's menu, compare
 > `git branch --show-current` with the confirmed merge target, in any checkout, including a linked worktree.
 > When they match, present exactly these three options:
@@ -286,8 +307,8 @@ resolves an item; the rider leaves the stock skill unmodified.
 > `Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>`
 >
 > Use `merge` only after a clean merge and green tests on the merged result,
-> with the target's resulting commit SHA as `resolved_in`. Use `confirm` only
-> for the confirmed on-target case, with HEAD's SHA. Use `pr` for PR creation,
+> with the complete receipt inspection's `resolved_in`. Use `confirm` only
+> for the confirmed on-target case, with receipt verification. Use `pr` for PR creation,
 > `keep` for keep-as-is, and `discard` for a confirmed discard; their
 > `resolved_in` is `none`. Failing tests, a stopped stage, or no choice made
 > produces `none` with `resolved_in: none`. Creating a PR never supplies a

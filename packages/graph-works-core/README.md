@@ -524,7 +524,9 @@ revalidates source tips and result ancestry on every read. Partial integration
 survives a restart and refuses completion with `finish-incomplete` and route
 blockers. Both attended and relay consumers inspect the receipt before the one
 final advance. PR, hold and discard never advance. The scalar `resolved_in`
-comes only from the owner's own repository; foreign-only owners omit it.
+prefers the owner's own repository when present; otherwise it uses the first
+verified repository in deterministic order. The receipt retains the complete
+multi-repository evidence.
 Release date requirements remain enforced. Git merges across repositories are
 not atomic; preserve sources until all proof is recorded. Squash/rebase alone
 cannot establish the required ancestry.

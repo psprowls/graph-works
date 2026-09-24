@@ -270,7 +270,8 @@ hand. `today` is always injected; nothing in this package reads the clock.
   shared target/receipt reader; `orchestrate.finish_receipt` is the writer.
   Finish targets include foreign-only and nested owner sources. Partial proof
   blocks advance until every target's current Git ancestry is verified; scalar
-  `resolved_in` belongs only to the owner's repository. Explicit `repo=Path`
+  `resolved_in` prefers the owner's repository, falling back to the first
+  verified target in deterministic order. Explicit `repo=Path`
   remains single-repository compatibility, not a multi-repository resolver.
 
 - `gw work advance` and `gw work decision *` share the decision owner's lock (`workspace.decision_owner.locked_decision_owner`). It is always taken before `apply_mutation`'s locks, never while holding them, and a non-dry-run advance holds it across route, commit gate and write.

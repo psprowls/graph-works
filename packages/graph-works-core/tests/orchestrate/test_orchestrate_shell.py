@@ -1491,3 +1491,27 @@ def test_unsafe_undeclared_anchor_worktree_refuses_adoption_and_use(
     result = orchestrate.run_orchestrate(layout, owner)
     assert not result.preparations and not result.dispatches
     assert _kinds(result)[child] == "worktree-unprovable"
+
+
+@pytest.mark.parametrize("tagged", [False, True])
+def test_explicit_repo_override_projects_dispatch_metadata(tmp_path: Path, tagged: bool) -> None:
+    """The singular Python override serializes without resolving foreign assignments."""
+    from graph_works_wire.work import orchestrate_payload
+
+    layout = _workspace(tmp_path / "workspace")
+    repo = _git_repo(tmp_path / "code")
+    path = "work/feature-explicit"
+    _write(layout, path, phase="design")
+    if tagged:
+        document = load(layout.bundle_dir / f"{path}.md")
+        document.set("repo", "undeclared-foreign")
+        document.save()
+
+    result = orchestrate.run_orchestrate(layout, path, repo=repo)
+    [dispatch] = result.dispatches
+    payload = orchestrate_payload(result)
+    assert result.dispatch_repos[dispatch.key] == ItemRepo(None, repo, "flag")
+    assert payload["dispatches"][0]["repo"] == {"name": None, "path": str(repo), "source": "flag"}
+    assert payload["dispatches"][0]["worktree"]["action"] == "create-top-level"
+    assert payload["dispatches"][0]["worktree"]["base_branch"] == "main"
+    assert payload["preparations"] == []

@@ -1733,6 +1733,15 @@ def run_orchestrate(
         finish_plans=finish_plans,
     )
 
+    if repo is not None:
+        # The explicit override retains singular scheduling and must not resolve
+        # authored foreign assignments. Its accepted dispatches still carry the
+        # same mandatory repository metadata as normally resolved dispatches.
+        computed = replace(
+            computed,
+            dispatch_repos=MappingProxyType({dispatch.key: root_repo for dispatch in computed.dispatches}),
+        )
+
     decisions = _resolve_decisions(items, bundle.root, path)
     subtree = {path, *(item.path for item in _descendants(items, path))}
     return OrchestrateResult(

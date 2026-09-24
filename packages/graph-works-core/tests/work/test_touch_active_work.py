@@ -141,6 +141,9 @@ def test_each_session_ends_labelled_with_the_phase_it_ran(tmp_path: Path) -> Non
     layout = _layout(tmp_path)
     path = "work/bug-a"
     _write(layout, path, phase="plan", work_status="open")
+    artifact = layout.bundle_dir / path / "references" / "02-plan.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# Plan\n", encoding="utf-8", newline="")
     assert work.run_regen_indexes(layout, dry_run=False).application.ok
 
     # plan session: step 3 touch, stage runs, step 5 exit advance (plan -> execute)

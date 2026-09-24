@@ -2,6 +2,7 @@
 
 import json
 import runpy
+import subprocess
 from dataclasses import fields
 from pathlib import Path
 
@@ -41,7 +42,20 @@ def item(workspace, stage):
     document.set("affects", ["packages/example"])
     document.set("effort", "small")
     if stage == "execute":
-        (workspace / "checkout").mkdir()
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(workspace.parent / "code"),
+                "worktree",
+                "add",
+                "-b",
+                "feature/integration",
+                str(workspace / "checkout"),
+            ],
+            check=True,
+            capture_output=True,
+        )
         document.set("phase", "execute")
         document.set("work_status", "accepted")
         document.set("spec_doc", path + "/references/01-design.md")
@@ -73,6 +87,24 @@ def rules(workspace):
     )
     code = workspace.parent / "code"
     code.mkdir(exist_ok=True)
+    subprocess.run(["git", "init", "-b", "main", str(code)], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(code),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "base",
+        ],
+        check=True,
+        capture_output=True,
+    )
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace("repositories: {}", f'repositories:\n  code:\n    path: "{code}"'),
         encoding="utf-8",

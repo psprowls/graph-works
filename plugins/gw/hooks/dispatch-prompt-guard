@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Synchronous UserPromptSubmit guard; no package manager/runtime installation.
+set -euo pipefail
+
+if ! command -v python3 >/dev/null 2>&1; then
+  printf '%s\n' '{"systemMessage":"Dispatch recovery was not verified: Python 3 is missing.","hookSpecificOutput":{"hookEventName":"UserPromptSubmit","additionalContext":"Dispatch recovery was not verified: Python 3 is missing. Do not guess incomplete work; request the full task if needed."}}'
+  exit 0
+fi
+
+HOOK_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec python3 "${HOOK_DIR}/dispatch-prompt-guard.py"

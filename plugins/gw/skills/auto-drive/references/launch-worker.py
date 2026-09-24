@@ -9,9 +9,12 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -73,6 +76,7 @@ HEX40 = re.compile(r"[0-9a-f]{40}")
 VERIFIED_CHECKPOINTS = {"stopped-verified": 1, "released-verified": 2, "completed-verified": 3}
 SETTLED_WORKER_STATES = {"stopped", "failed", "succeeded"}
 SETTLED_DISPATCH_STATUSES = {"failed", "completed"}
+AMBIGUOUS_ATTEMPT = "latest-attempt-ambiguous"
 
 
 def fail(message: str) -> NoReturn:
@@ -406,7 +410,7 @@ def place(args: argparse.Namespace) -> None:
     """Resolve where a dispatch goes before anything is created.
 
     Nothing here reads the caller's cwd, terminal or Orca worktree: the
-    repository comes from the plan's `repo.path`, the parent from the plan's
+    repository comes from the dispatch's `repo.path`, the parent from the plan's
     `parent_path`, and both are matched by explicit selectors. Every creation
     launches top-level; Orca's child mode would take both from the caller.
 
@@ -422,6 +426,15 @@ def place(args: argparse.Namespace) -> None:
     a cosmetic link would block otherwise-correct work.
     """
     _key, label, worktree = placement_dispatch(args.dispatch, "REFUSED")
+    dispatch = read_json(args.dispatch)
+    dispatch_repo = dispatch.get("repo")
+    repo_path = args.repo_path
+    if isinstance(dispatch_repo, dict):
+        selected_path = dispatch_repo.get("path")
+        if repo_path is not None and (not isinstance(selected_path, str)
+                or os.path.realpath(repo_path) != os.path.realpath(selected_path)):
+            fail(f"{label}: placement repository differs from dispatch repository")
+        repo_path = selected_path
     action = worktree["action"]
     repo_id: str | None = None
     parent_id: str | None = None
@@ -431,9 +444,9 @@ def place(args: argparse.Namespace) -> None:
     else:
         branch = text_field(worktree.get("branch"), label, "the worktree branch")
         base = text_field(worktree.get("base_branch"), label, "the worktree base_branch")
-        if args.repo_path is None:
+        if repo_path is None:
             fail(f"{label}: the plan names no code repository, and a new worktree is never placed by location.")
-        wanted = os.path.realpath(args.repo_path)
+        wanted = os.path.realpath(repo_path)
         repos = orca_top_json(args.orca, ["repo", "list"], label=label).get("repos")
         if not isinstance(repos, list):
             fail(f"{label}: orca repo list returned no repos array.")
@@ -478,6 +491,246 @@ def place(args: argparse.Namespace) -> None:
     sys.stdout.write(json.dumps(
         {"action": action, "placement_argv": argv, "repo_id": repo_id, "parent_worktree_id": parent_id}
     ))
+
+
+def preparation_runtime() -> list[str]:
+    """Locate the core runtime independently of the coordinator directory."""
+    helper = Path(__file__).resolve()
+    adapter = str(helper.with_name("record-preparation.py"))
+    project = helper.parents[5]
+    if ((project / "pyproject.toml").is_file()
+            and (project / "packages/graph-works-core/src/graph_works_core").is_dir()
+            and helper == project / "plugins/gw/skills/auto-drive/references/launch-worker.py"):
+        return ["uv", "run", "--project", str(project), "--package", "graph-works-core", "python", adapter]
+    executable = shutil.which("gw")
+    if executable is None:
+        fail("PREPARATION REFUSED: no installed gw runtime found")
+    try:
+        with Path(executable).resolve().open("r", encoding="utf-8") as stream:
+            first = stream.readline().strip()
+        interpreter = shlex.split(first[2:]) if first.startswith("#!") else []
+    except (OSError, UnicodeError, ValueError):
+        interpreter = []
+    if interpreter and Path(interpreter[0]).name == "env":
+        # Support ordinary Python console-script shebangs, not shell wrappers
+        # or env flags whose behavior would depend on undocumented activation.
+        interpreter = [shutil.which(interpreter[1]) or ""] if len(interpreter) == 2 else []
+    if not interpreter or not interpreter[0] or "python" not in Path(interpreter[0]).name.lower():
+        fail("PREPARATION REFUSED: installed gw has no discoverable Python runtime")
+    probe = (
+        "import inspect; from graph_works_core.orchestrate.placement import preparation_guard, run_record_placement; "
+        "from graph_works_core.workspace.transactions import apply_mutation; "
+        "assert 'expected_preparation' in inspect.signature(run_record_placement).parameters; "
+        "assert 'validate_read_set' in inspect.signature(apply_mutation).parameters"
+    )
+    try:
+        completed = subprocess.run(
+            [*interpreter, "-c", probe], cwd=str(Path(executable).resolve().parent),
+            check=False, capture_output=True, text=True,
+        )
+    except OSError as error:
+        fail(f"PREPARATION REFUSED: installed gw runtime cannot run: {error}")
+    if completed.returncode:
+        fail("PREPARATION REFUSED: installed gw core lacks guarded preparation capability; update its runtime")
+    return [*interpreter, adapter]
+
+
+def preparation_json(argv: list[str], label: str) -> dict[str, Any]:
+    try:
+        result = subprocess.run(argv, check=False, capture_output=True, text=True)
+        value = json.loads(result.stdout) if result.returncode == 0 else None
+    except (OSError, json.JSONDecodeError) as error:
+        fail(f"{label}: command failed: {error}")
+    if not isinstance(value, dict):
+        fail(f"{label}: command refused: {result.stderr.strip()}")
+    return value
+
+
+def preparation_git(path: str, *argv: str) -> str:
+    result = subprocess.run(["git", "-C", path, *argv], check=False, capture_output=True, text=True)
+    if result.returncode:
+        fail(f"PREPARATION REFUSED: cannot prove Git state at {path}: {result.stderr.strip()}")
+    return result.stdout.strip()
+
+
+def preparation_inventory(repo: str) -> dict[str, list[str]]:
+    inventory: dict[str, list[str]] = {}
+    path = None
+    for line in preparation_git(repo, "worktree", "list", "--porcelain").splitlines():
+        if line.startswith("worktree "):
+            path = line[len("worktree "):]
+        elif line.startswith("branch refs/heads/") and path is not None:
+            inventory.setdefault(line[len("branch refs/heads/"):], []).append(path)
+    return inventory
+
+
+def preparation_checkout(repo: str, path: str, branch: str, *, base_tip: str | None = None) -> None:
+    if not Path(path).is_absolute():
+        fail("PREPARATION REFUSED: returned worktree path is not absolute")
+    common = preparation_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    actual = preparation_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+    if os.path.realpath(common) != os.path.realpath(actual):
+        fail("PREPARATION REFUSED: wrong observed repository")
+    top = preparation_git(path, "rev-parse", "--show-toplevel")
+    if os.path.realpath(top) != os.path.realpath(path):
+        fail("PREPARATION REFUSED: returned path is not the checkout root")
+    if preparation_git(path, "symbolic-ref", "--short", "HEAD") != branch:
+        fail("PREPARATION REFUSED: wrong observed branch")
+    if preparation_git(path, "status", "--porcelain", "--untracked-files=all"):
+        fail("PREPARATION REFUSED: dirty integration checkout")
+    if base_tip is not None and preparation_git(path, "rev-parse", "HEAD") != base_tip:
+        fail("PREPARATION REFUSED: created checkout differs from expected base tip")
+
+
+def selected_preparation(plan: dict[str, Any], owner: str, repo: str) -> dict[str, Any]:
+    rows = [row for row in plan.get("preparations", []) if isinstance(row, dict)
+            and row.get("owner_path") == owner and isinstance(row.get("repo"), dict)
+            and row["repo"].get("name") == repo]
+    if len(rows) != 1:
+        fail("PREPARATION REFUSED: preparation changed; replan")
+    return rows[0]
+
+
+def prepare(args: argparse.Namespace) -> None:
+    """Provision one deterministic integration anchor; never start a worker.
+
+    Orca may prefix/sanitize --name. Only our durable preparation marker
+    authorizes renaming that newly created, clean base-tip checkout. Non-force
+    rename never replaces an existing branch. A crash remains discoverable by
+    marker or deterministic Git inventory; ambiguity always requires repair.
+    """
+    label = f"PREPARATION REFUSED {args.owner}/{args.repo_name}"
+    plan = read_json(args.plan_file)
+    if not isinstance(plan, dict):
+        fail(f"{label}: plan must be an object")
+    selected = selected_preparation(plan, args.owner, args.repo_name)
+    adapter = preparation_runtime()
+    common_args = ["--workspace", args.workspace, "--owner", args.owner]
+    guard = preparation_json([*adapter, "snapshot", *common_args], label)["guard"]
+    refresh_argv = ["gw", "work", "orchestrate", text_field(plan.get("path"), label, "root"),
+                    "--workspace", args.workspace, "--json"]
+    live = plan.get("live", [])
+    if live:
+        refresh_argv.extend(["--live", ",".join(live)])
+    current = selected_preparation(preparation_json(refresh_argv, label), args.owner, args.repo_name)
+    if current != selected:
+        fail(f"{label}: preparation changed; replan")
+    repo = text_field(selected["repo"].get("path"), label, "repo path")
+    branch = text_field(selected.get("branch"), label, "branch")
+    base = text_field(selected.get("base_branch"), label, "base branch")
+    phase = text_field(selected.get("owner_phase"), label, "owner phase")
+    marker = "gw-preparation:" + hashlib.sha256(
+        json.dumps([args.owner, args.repo_name, os.path.realpath(repo), branch], separators=(",", ":")).encode()
+    ).hexdigest()
+    inventory = preparation_inventory(repo)
+    matches = inventory.get(branch, [])
+    if len(matches) > 1:
+        fail(f"{label}: ambiguous deterministic worktrees")
+    if matches:
+        path = matches[0]
+    else:
+        branches = preparation_git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads").splitlines()
+        if branch in branches:
+            fail(f"{label}: branch exists without a provable checkout; repair")
+        repos = orca_top_json(args.orca, ["repo", "list"], label=label).get("repos", [])
+        registered = [row for row in repos if isinstance(row, dict) and isinstance(row.get("path"), str)
+                      and os.path.realpath(row["path"]) == os.path.realpath(repo)]
+        if len(registered) != 1:
+            fail(f"{label}: repository is not uniquely registered")
+        repo_id = text_field(registered[0].get("id"), label, "Orca repository id")
+        parent = selected["worktree"].get("parent_path")
+        if parent:
+            try:
+                shown = orca_top_json(args.orca, ["worktree", "show", "--worktree", f"path:{parent}"], label=label)
+            except SystemExit:
+                shown = {}
+            if isinstance(shown.get("worktree"), dict) and shown["worktree"].get("repoId") != repo_id:
+                fail(f"{label}: cross-repository parent")
+        base_tip = preparation_git(repo, "rev-parse", "--verify", f"{base}^{{commit}}")
+
+        def owned() -> list[dict[str, Any]]:
+            listing = orca_top_json(args.orca, ["worktree", "list", "--repo", f"id:{repo_id}"], label=label)
+            rows = listing.get("worktrees")
+            scope = listing.get("hostScope")
+            if (not isinstance(rows, list) or listing.get("truncated") is not False
+                    or listing.get("totalCount") != len(rows) or not isinstance(scope, dict)
+                    or scope.get("omittedHostIds") != []):
+                fail(f"{label}: incomplete worktree inventory; repair before creating")
+            observed_rows = []
+            for row in rows:
+                if not isinstance(row, dict):
+                    fail(f"{label}: malformed worktree inventory")
+                if "comment" not in row:
+                    row = orca_top_json(args.orca, ["worktree", "show", "--worktree",
+                        f"path:{text_field(row.get('path'), label, 'inventory path')}"], label=label).get("worktree")
+                    if not isinstance(row, dict):
+                        fail(f"{label}: cannot inspect preparation marker")
+                if row.get("comment") == marker:
+                    observed_rows.append(row)
+            return observed_rows
+
+        marked = owned()
+        if len(marked) > 1:
+            fail(f"{label}: ambiguous preparation markers; repair")
+        created = None
+        if not marked:
+            try:
+                result = orca_top_json(args.orca, ["worktree", "create", "--name", branch,
+                    "--repo", f"id:{repo_id}", "--base-branch", base, "--no-parent",
+                    "--setup", "skip", "--comment", marker], label=label)
+                created = result.get("worktree")
+                if not isinstance(created, dict):
+                    fail(f"{label}: create returned no worktree")
+            except SystemExit:
+                # A timeout/collision may have committed the creation. Never
+                # retry create or invent a suffix; re-observe once instead.
+                created = None
+            marked = owned()
+        if created is not None:
+            created_path = text_field(created.get("path"), label, "returned path")
+            if created.get("repoId") != repo_id:
+                fail(f"{label}: wrong returned repository")
+            created_branch = text_field(created.get("branch"), label, "returned branch").removeprefix(REF_PREFIX)
+            preparation_checkout(repo, created_path, created_branch, base_tip=base_tip)
+        matches = preparation_inventory(repo).get(branch, [])
+        if len(matches) > 1 or len(marked) > 1:
+            fail(f"{label}: ambiguous preparation worktrees; repair")
+        if matches:
+            path = matches[0]
+        else:
+            if len(marked) != 1:
+                fail(f"{label}: create not provable; repair")
+            row = marked[0]
+            path = os.path.realpath(text_field(row.get("path"), label, "observed path"))
+            if row.get("repoId") != repo_id:
+                fail(f"{label}: wrong observed repository")
+            if created is not None and os.path.realpath(str(created.get("path"))) != os.path.realpath(path):
+                fail(f"{label}: returned path differs from observed path")
+            observed = text_field(row.get("branch"), label, "observed branch").removeprefix(REF_PREFIX)
+            preparation_checkout(repo, path, observed, base_tip=base_tip)
+            if observed != branch:
+                # No -M: a competing creator winning this race is never overwritten.
+                try:
+                    preparation_git(path, "branch", "-m", branch)
+                except SystemExit:
+                    matches = preparation_inventory(repo).get(branch, [])
+                    if len(matches) != 1:
+                        fail(f"{label}: branch rename refused; repair")
+                    path = matches[0]
+    if preparation_inventory(repo).get(branch, []) != [path]:
+        fail(f"{label}: deterministic checkout not uniquely proven")
+    preparation_checkout(repo, path, branch)
+    # Creation changes only the proposed worktree action/path. Any change in
+    # owner phase, repo assignment, branch or base means no stamp is authorized.
+    fresh = selected_preparation(preparation_json(refresh_argv, label), args.owner, args.repo_name)
+    if any(fresh.get(field) != selected.get(field) for field in
+           ("owner_path", "owner_phase", "repo", "branch", "base_branch")):
+        fail(f"{label}: preparation changed after creation; replan")
+    recorded = preparation_json([*adapter, "record", *common_args, "--root", args.owner,
+        "--phase", phase, "--repo", args.repo_name, "--worktree", path,
+        "--branch", branch, "--expected", guard], label)
+    print(json.dumps({"owner": args.owner, "repo": args.repo_name, "path": path,
+                      "branch": branch, "record": recorded, "replan_required": True}))
 
 
 def started_worktree_id(start: object, orca: str, label: str) -> str:
@@ -606,6 +859,63 @@ def worker_list_rows(orca: str, run_id: str) -> list[object]:
         cursor = next_cursor
 
 
+def created_instant(value: object) -> datetime | None:
+    """Orca's `createdAt`, in UTC; the zone-less `YYYY-MM-DD HH:MM:SS` form is UTC."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    text = value.strip()
+    try:
+        instant = datetime.fromisoformat(text[:-1] + "+00:00" if text.endswith("Z") else text)
+    except ValueError:
+        return None
+    if instant.tzinfo is None:
+        return instant.replace(tzinfo=timezone.utc)
+    return instant.astimezone(timezone.utc)
+
+
+def latest_attempt(
+    workers: list[object], task_id: object, *, orca: str
+) -> tuple[dict[str, Any] | None, str | None]:
+    """A Task's newest Dispatch row, and why it cannot be trusted, if it cannot.
+
+    worker-list is documented newest first, so the first same-Task row is the
+    candidate. When a Task has retries, worker-show's `createdAt` and
+    `retryOfDispatchId` must agree with that order; disagreement, an
+    unbreakable tie or an unreadable attempt keeps the candidate but reports
+    `latest-attempt-ambiguous` rather than guessing.
+    """
+    attempts = [
+        row for row in workers if isinstance(row, dict) and row.get("taskId") == task_id
+    ]
+    if len(attempts) <= 1:
+        return (attempts[0] if attempts else None), None
+    candidate = attempts[0]
+    shown: dict[object, tuple[datetime | None, object]] = {}
+    for row in attempts:
+        try:
+            dispatch = orca_json(
+                orca, "worker-show", "--dispatch", str(row.get("dispatchId"))
+            ).get("dispatch")
+        except SystemExit:
+            return candidate, AMBIGUOUS_ATTEMPT
+        if not isinstance(dispatch, dict):
+            return candidate, AMBIGUOUS_ATTEMPT
+        shown[row.get("dispatchId")] = (
+            created_instant(dispatch.get("createdAt")),
+            dispatch.get("retryOfDispatchId"),
+        )
+    retried = {retry_of for _created, retry_of in shown.values() if retry_of is not None}
+    newest, _ = shown[candidate.get("dispatchId")]
+    if newest is None or candidate.get("dispatchId") in retried:
+        return candidate, AMBIGUOUS_ATTEMPT
+    for dispatch_id, (created, _retry_of) in shown.items():
+        if dispatch_id == candidate.get("dispatchId"):
+            continue
+        if created is None or created > newest or (created == newest and dispatch_id not in retried):
+            return candidate, AMBIGUOUS_ATTEMPT
+    return candidate, None
+
+
 def liveness_gap(worker: dict[str, Any]) -> str | None:
     """Recovery needs positive fleet exit; saved authority and PTY status cannot supply it."""
     projection = worker.get("projection")
@@ -626,17 +936,17 @@ def mutation_identity_gap(record: dict[str, Any]) -> str | None:
 
 
 def settlement_gap(
-    record: dict[str, Any], task: object, workers: list[object], level: int
+    record: dict[str, Any],
+    task: object,
+    latest: tuple[dict[str, Any] | None, str | None],
+    level: int,
 ) -> str | None:
     """Why fresh Task/worker rows do not prove a verified checkpoint level, or None."""
-    attempts = [
-        row
-        for row in workers
-        if isinstance(row, dict) and row.get("taskId") == record["task_id"]
-    ]
-    if not attempts:
+    worker, ambiguity = latest
+    if worker is None:
         return "worker-missing"
-    worker = attempts[-1]
+    if ambiguity is not None:
+        return ambiguity
     if worker.get("dispatchId") != record["dispatch_id"]:
         return "newer-attempt"
     if worker.get("runId") != record["run_id"]:
@@ -722,7 +1032,9 @@ def verify_checkpoint(record: dict[str, Any], orca: str) -> None:
     )
     gap = (
         mutation_identity_gap(record)
-        or settlement_gap(record, task, workers, level)
+        or settlement_gap(
+            record, task, latest_attempt(workers, record["task_id"], orca=orca), level
+        )
         or evidence_gap(record)
     )
     if gap is None and level == 3:
@@ -769,17 +1081,15 @@ def validate_recovery_snapshot(payload: object, workers: list[object]) -> None:
 
 def reconcile_records(
     task: dict[str, object],
-    workers: list[object],
+    attempt: tuple[dict[str, Any] | None, str | None],
     candidates: list[dict[str, Any]],
     *,
     base: str,
     orca: str,
 ) -> tuple[str, dict[str, object]]:
     """Let a saved recovery record refine, never override, fresh Orca evidence."""
-    attempts = [
-        row for row in workers if isinstance(row, dict) and row.get("taskId") == task["id"]
-    ]
-    latest = attempts[-1].get("dispatchId") if attempts else None
+    worker = attempt[0]
+    latest = worker.get("dispatchId") if worker is not None else None
     current = [record for record in candidates if record.get("dispatch_id") == latest]
     record: dict[str, Any] | None = None
     problem = "record-not-latest-attempt"
@@ -793,7 +1103,6 @@ def reconcile_records(
     checkpoint = record["checkpoint"] if record is not None else None
     if base == "live":
         return base, {"checkpoint": checkpoint, "reason": "current-evidence-wins"}
-    worker = attempts[-1] if attempts else None
     # Accepted completion is independent of recovery: it can owe release while
     # the reporting agent still idles live. A workerState/launch receipt alone
     # (the legacy shortcut) does not establish that Task AND Dispatch accepted it.
@@ -823,7 +1132,7 @@ def reconcile_records(
             "checkpoint": checkpoint,
             "reason": "recovery-incomplete",
         }
-    gap = settlement_gap(record, task, workers, 3) or evidence_gap(record)
+    gap = settlement_gap(record, task, attempt, 3) or evidence_gap(record)
     if gap is None and not verified_success(task, latest, orca=orca):
         gap = "launch-proof-unverified"
     if gap is not None:
@@ -878,16 +1187,13 @@ def classify_restart(args: argparse.Namespace) -> None:
     parked_stages = {checkpoint_stage(path) for path in getattr(args, "checkpoint", None) or []}
     if records:
         validate_recovery_snapshot(worker_payload, workers)
-    latest_by_task: dict[str, dict[str, object]] = {}
-    for worker in workers:
-        if isinstance(worker, dict) and isinstance(worker.get("taskId"), str):
-            latest_by_task[worker["taskId"]] = worker
     rows: list[dict[str, object]] = []
     for task in tasks:
         if not isinstance(task, dict) or not isinstance(task.get("id"), str):
             fail("Every task must carry an id.")
         task_id = task["id"]
-        worker = latest_by_task.get(task_id)
+        attempt = latest_attempt(workers, task_id, orca=args.orca)
+        worker = attempt[0]
         dispatch_id = worker.get("dispatchId") if worker is not None else None
         if worker is None:
             action = "deliberate-skip" if task.get("status") == "blocked" else "recovery-inspection"
@@ -916,10 +1222,13 @@ def classify_restart(args: argparse.Namespace) -> None:
             "dispatch_id": dispatch_id,
             "action": action,
         }
-        if task_id in records:
+        if attempt[1] is not None:
+            row["action"] = "recovery-inspection"
+            row["recovery"] = {"checkpoint": None, "reason": attempt[1]}
+        elif task_id in records:
             row["action"], row["recovery"] = reconcile_records(
                 task,
-                workers,
+                attempt,
                 records[task_id],
                 base=action,
                 orca=args.orca,
@@ -1298,6 +1607,13 @@ def parser() -> argparse.ArgumentParser:
     place_parser.add_argument("--repo-path")
     place_parser.add_argument("--out-placement", required=True)
     place_parser.set_defaults(func=place)
+    prepare_parser = commands.add_parser("prepare")
+    prepare_parser.add_argument("--orca", default="orca")
+    prepare_parser.add_argument("--plan-file", required=True)
+    prepare_parser.add_argument("--owner", required=True)
+    prepare_parser.add_argument("--repo-name", required=True)
+    prepare_parser.add_argument("--workspace", required=True)
+    prepare_parser.set_defaults(func=prepare)
     settle_parser = commands.add_parser("settle-placement")
     settle_parser.add_argument("--orca", default="orca")
     settle_parser.add_argument("--dispatch", required=True)

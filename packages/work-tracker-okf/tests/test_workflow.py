@@ -346,6 +346,25 @@ def test_the_design_complete_fork_asks_for_effort_on_bug_like_work():
         assert result.on_complete.requires == ("effort",)
 
 
+@pytest.mark.parametrize("kind", ["Epic", "Release", "Feature", "Bug", "Spike", "TechDebt"])
+@pytest.mark.parametrize("phase", [None, "design"])
+def test_design_completion_requires_effort_before_stable(kind: str, phase: str | None) -> None:
+    result = route(_state(type=kind, phase=phase, effort=None))
+    transition = result.on_complete
+    assert transition is not None
+    assert transition.document_status == "stable"
+    assert "effort" in transition.requires
+    assert transition.phase == ("plan" if kind in {"Epic", "Release", "Feature", "Spike"} else PLAN_OR_EXECUTE)
+
+
+def test_every_non_draft_transition_has_or_requires_effort() -> None:
+    for kind, status, phase, effort in _sweep():
+        result = route(_state(type=kind, work_status=status, phase=phase, effort=effort))
+        for transition in (result.on_dispatch, result.on_complete, result.on_return, result.repair):
+            if transition is not None and transition.document_status not in (None, "draft"):
+                assert effort is not None or "effort" in transition.requires, (kind, status, phase, transition)
+
+
 def test_small_bug_like_work_skips_planning_and_larger_does_not():
     small = route(_state(type="Bug", phase="design", effort="xtra-small")).on_complete
     large = route(_state(type="Bug", phase="design", effort="large")).on_complete
@@ -615,3 +634,43 @@ def test_blast_radius_is_routing_neutral_and_populated_from_item():
     state = state_for([item], item.path)
     assert state.blast_radius == "package"
     assert route(_state(blast_radius="system")) == route(_state(blast_radius=None))
+
+
+def test_foreign_stamp_owns_finish_branch(tmp_path):
+    from okf_io import load_bundle
+    from work_tracker_okf.items import load_items
+    from work_tracker_okf.workflow import state_for
+
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work/epic-a.md").write_text(
+        "---\ntype: Epic\nwork_status: in-progress\nphase: finish\n"
+        "repo_stamps:\n  ui: {worktree: /ui/epic, branch: epic/a}\n---\n",
+        encoding="utf-8",
+    )
+    item = load_items(load_bundle(tmp_path))[0]
+    assert item is not None
+    state = state_for((item,), item.path)
+    assert state is not None and state.has_branch
+    routed = route(state)
+    assert routed.dispatch is not None
+    assert routed.dispatch.stage == "finish"
+    assert routed.dispatch.variant == "branch"
+
+
+def test_foreign_stamp_release_still_requires_release_date(tmp_path):
+    from datetime import date
+
+    from okf_io import load_bundle
+    from work_tracker_okf.advance import advance
+    from work_tracker_okf.items import load_items
+
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work/release-a.md").write_text(
+        "---\ntype: Release\nwork_status: in-progress\nphase: finish\n"
+        "repo_stamps:\n  ui: {worktree: /ui/epic, branch: epic/a}\n---\n",
+        encoding="utf-8",
+    )
+    items = load_items(load_bundle(tmp_path))
+    result = advance(items, items[0].path, today=date(2026, 9, 23), resolved_in="abc1234")
+    assert result.refusal is not None
+    assert "released_at" in str(result)

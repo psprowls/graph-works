@@ -60,6 +60,7 @@ _KEY_ORDER: tuple[str, ...] = (
     "version",
     "target_date",
     "owner",
+    "repo",
     "affects",
     "depends_on",
 )
@@ -81,6 +82,7 @@ class FilingSeed:
     owner: str | None = None
     affects: tuple[str, ...] = ()
     tags: tuple[str, ...] = ()
+    repo: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +173,7 @@ def _frontmatter(seed: FilingSeed) -> Mapping[str, object]:
         ("version", seed.version),
         ("target_date", seed.target_date),
         ("owner", seed.owner),
+        ("repo", seed.repo),
     ):
         if value is not None:
             values[key] = value

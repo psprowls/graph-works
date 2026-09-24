@@ -683,6 +683,7 @@ def test_record_placement_distinguishes_write_replay_and_preview(workspace: Path
             "current_phase",
             "before",
             "after",
+            "repo",
             "changed",
             "applied",
             "written",

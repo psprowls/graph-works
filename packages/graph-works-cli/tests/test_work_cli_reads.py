@@ -231,6 +231,8 @@ def test_ingest_queue_renders_an_empty_queue_in_human_mode(workspace: Path) -> N
 
 
 def test_next_and_orchestrate_json_share_profile_and_provenance(workspace: Path):
+    import subprocess
+
     from okf_io import load
 
     path = file_item(workspace, "Dispatch equivalence")
@@ -246,6 +248,24 @@ def test_next_and_orchestrate_json_share_profile_and_provenance(workspace: Path)
     )
     code = workspace.parent / "code"
     code.mkdir()
+    subprocess.run(["git", "init", "-b", "main", str(code)], check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(code),
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.test",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "base",
+        ],
+        check=True,
+        capture_output=True,
+    )
     manifest = workspace / "workspace.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace("repositories: {}", f'repositories:\n  code:\n    path: "{code}"'),

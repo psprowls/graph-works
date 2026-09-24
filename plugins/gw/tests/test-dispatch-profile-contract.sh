@@ -25,6 +25,19 @@ grep -F 'Preflight — confirm the skill resolves.' "$WORKFLOW" >/dev/null || fa
 grep -F '<!-- rider-table:start -->' "$WORKFLOW" >/dev/null || fail "workflow preserves stage riders"
 grep -F 'One stage per invocation' "$WORKFLOW" >/dev/null || fail "workflow preserves one-stage advancement"
 grep -F 'This is reporting only' "$WORKFLOW" >/dev/null || fail "workflow reports routing without changing session"
+# Every executable advance site carries the phase captured for that action.
+grep -F 'JSON null maps to CLI `none`.' "$WORKFLOW" >/dev/null || fail "workflow must map absent phase"
+grep -F 'Preserve the captured expectation across retries, including sizing answers.' "$WORKFLOW" >/dev/null || fail "workflow retry expectation must stay fixed"
+grep -F 'On phase-mismatch, stop this action and replan; never retry it without a guard.' "$WORKFLOW" >/dev/null || fail "workflow must stop stale actions"
+grep -F 'gw work advance <work-path> --from <expected-phase> --effort <value>' "$WORKFLOW" >/dev/null || fail "workflow sizing must be guarded"
+grep -F 'gw work advance <work-path> --from <expected-phase>` directly (step 5)' "$WORKFLOW" >/dev/null || fail "workflow satisfied gate must be guarded"
+grep -F 'dispatching: run `gw work advance <work-path> --from <expected-phase>`' "$WORKFLOW" >/dev/null || fail "workflow dispatch must be guarded"
+grep -F 'For non-finish stages and satisfied gates, run `gw work advance <work-path> --from <expected-phase>`' "$WORKFLOW" >/dev/null || fail "workflow completion must be guarded"
+grep -F '| Attended finish | `merge` (clean merge, tests green on the merged result) | `gw work advance <work-path> --from finish --resolved-in <merge commit SHA>` |' "$WORKFLOW" >/dev/null || fail "attended merge must be guarded"
+grep -F '| Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --from finish --resolved-in <HEAD SHA>` |' "$WORKFLOW" >/dev/null || fail "attended confirm must be guarded"
+grep -F 'Revalidate the planned gate or return condition against the fresh next result before acting.' "$AUTO_DRIVE" >/dev/null || fail "fresh phase is not authorization for a stale action"
+grep -F 'gw work advance <path from entry> --from <expected-phase> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator gate must be guarded"
+grep -F 'gw work advance <work-path> --from <expected-phase> --effort <value> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator sizing must be guarded"
 # Finish outcomes must not resolve unintegrated work or double-advance relay.
 RIDERS="$PLUGIN_ROOT/skills/workflow/references/brief-riders.md"
 RELAY="$PLUGIN_ROOT/skills/finishing-relay/SKILL.md"
@@ -35,7 +48,12 @@ grep -F '| `gw:finishing-relay` | Any | **No advance**' "$WORKFLOW" >/dev/null |
 grep -F 'missing or ambiguous, treat it as `none`' "$WORKFLOW" >/dev/null || fail "missing finish evidence holds"
 grep -F 'attended or relay' "$WORKFLOW" >/dev/null || fail "held-item hand-off covers both finish paths"
 grep -F 'merge target: `<merge target>`' "$WORKFLOW" >/dev/null || fail "held-item hand-off names the target"
-grep -F 'nearest Epic or Release ancestor whose frontmatter carries `branch:`' "$RIDERS" >/dev/null || fail "attended target follows ancestor branch stamp"
+grep -F '**Complete finish targets.**' "$RIDERS" >/dev/null || fail "attended finish uses complete repository targets"
+grep -F 'never reconstruct targets from scalar frontmatter' "$RIDERS" >/dev/null || fail "attended finish refuses scalar fallback"
+for document in "$RIDERS" "$RELAY"; do
+  grep -F 'finish-receipt.py inspect' "$document" >/dev/null || fail "finish inspects persisted evidence"
+  grep -F 'finish-receipt.py record' "$document" >/dev/null || fail "finish records each repository"
+done
 grep -F '**Confirm integrated.**' "$RIDERS" >/dev/null || fail "on-target menu can confirm integration"
 grep -F 'in any checkout, including a linked worktree' "$RIDERS" >/dev/null || fail "on-target check includes shared epic worktrees"
 grep -F 'Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>' "$RIDERS" >/dev/null || fail "attended finish reports an explicit outcome"
@@ -50,8 +68,8 @@ grep -F 'Never invent a release date' "$RELAY" >/dev/null || fail "relay obtains
 grep -F -- '--released-at <date>' "$RELAY" >/dev/null || fail "relay passes the release date to the resolving advance"
 if grep -Fq 'Forked-child case' "$RELAY"; then fail "relay must not limit merging to forked children"; fi
 grep -F 'The coordinator performs no merge at wrap-up.' "$AUTO_DRIVE" >/dev/null || fail "wrap-up never merges the epic branch"
-grep -F 'whose frontmatter carries `branch:` owns an integration branch' "$AUTO_DRIVE" >/dev/null || fail "stamped root finish owns integration"
-grep -F 'An unstamped Epic or Release root owns no branch' "$AUTO_DRIVE" >/dev/null || fail "unstamped root keeps its direct finish"
+grep -F 'with a scalar branch or foreign `repo_stamps` owns integration targets' "$AUTO_DRIVE" >/dev/null || fail "stamped root finish owns integration"
+grep -F 'An owner without any source stamp' "$AUTO_DRIVE" >/dev/null || fail "unstamped root keeps its direct finish"
 if grep -Fq 'epic branch to `develop`' "$AUTO_DRIVE"; then fail "wrap-up must not hardcode a merge target"; fi
 if grep -Fq -- '--agent claude' "$AUTO_DRIVE"; then fail "auto-drive must use the planned agent"; fi
 if grep -Fq 'permission_mode' "$AUTO_DRIVE"; then fail "auto-drive must not promise permission-mode control"; fi
@@ -128,7 +146,11 @@ for step in 2 5; do
 done
 
 # Scope the opt-out to R5's resolving command, retaining both integration arguments.
-sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance opts out and preserves integration arguments"
+sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in from receipt inspection> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance guards finish and preserves integration arguments"
+grep -F 'On phase-mismatch, enter the **Escalation path**' "$RELAY" >/dev/null || fail "relay must escalate stale settlement"
+grep -F 'include the merge SHA in the' "$RELAY" >/dev/null || fail "relay escalation must preserve merge evidence"
+grep -F 'escalation body (or say the commits were already on the target in the trunk case)' "$RELAY" >/dev/null || fail "relay escalation must cover trunk integration"
+grep -F 'Do not claim settlement or send `worker_done` while escalating' "$RELAY" >/dev/null || fail "relay must not report false settlement"
 
 
 cat >"$FIXTURE/dispatch.json" <<'JSON'

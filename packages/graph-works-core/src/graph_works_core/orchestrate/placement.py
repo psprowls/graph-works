@@ -19,19 +19,21 @@ observation; this module proves only that the item is entitled to it now.
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from types import MappingProxyType
 
 from okf_io import Bundle, load_bundle, parse
-from work_tracker_okf.items import IGNORE, load_items
+from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.placement import PlacementPlan, apply_placement, plan_placement
 
 from graph_works_core.workspace.decision_owner import locked_decision_owner
+from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo, resolve_repos
+from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 
@@ -49,6 +51,47 @@ class PlacementRecord:
         return self.application is not None and self.application.ok
 
 
+def _prepare_placement(
+    layout: WorkspaceLayout,
+    items: Sequence[WorkItem],
+    path: str,
+    *,
+    root: str,
+    phase: str,
+    worktree: str,
+    branch: str,
+    today: date,
+    repo_name: str | None,
+    repo: str | None,
+) -> tuple[PlacementPlan, ItemRepo | None]:
+    """Plan first, then resolve the item's repository for eligible placements."""
+    by_path = {item.path: item for item in items}
+    own: ItemRepo | None = None
+    target: str | None = None
+    if repo and path in by_path:
+        declared = declared_repositories(layout)
+        if repo not in declared:
+            raise WorkspaceError(
+                f"{path}: --repo {repo!r} names no declared repository in {layout.manifest_path}; "
+                f"declared: {sorted(declared)}"
+            )
+        own = resolve_item_repo(layout, by_path[path], by_path, repo_name=repo_name)
+        target = None if own.name == repo else repo
+    plan = plan_placement(
+        items,
+        path,
+        root=root,
+        phase=phase,
+        worktree=worktree,
+        branch=branch,
+        today=today,
+        repo=target,
+    )
+    if plan.refusal is None and own is None:
+        own = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
+    return plan, own
+
+
 def run_record_placement(
     layout: WorkspaceLayout,
     path: str,
@@ -59,48 +102,117 @@ def run_record_placement(
     branch: str,
     today: date,
     repo_name: str | None = None,
+    repo: str | None = None,
     dry_run: bool = True,
+    expected_preparation: str | None = None,
 ) -> PlacementRecord:
     """Record (*worktree*, *branch*) on *path* for its *phase* dispatch under *root*.
 
-    The code repo for postcondition validation is `resolve_repo(layout,
-    repo_name=repo_name)` -- strict: several declared repositories and no
-    *repo_name* raise `WorkspaceError` rather than guess. Selection stays
-    strict, but the validation itself checks `affects` against every
-    declared repo (`resolve_repos(layout)`), not only the selected one --
-    matching `work file`/`work advance` (`stage_advance._advance`'s
-    `repo_root=resolved_repo, repo_roots=declared`). The differential
-    postcondition gate excuses a pre-existing `affects-missing` finding
-    either way, so this only bites when baseline capture itself fails and
-    the gate falls back to its absolute form.
+    Every eligible placement, including a preview or unchanged replay,
+    validates *path*'s repository and returns its selection note. The code
+    repo for postcondition validation is *path*'s own --
+    `resolve_item_repo`'s strict chain: the nearest `repo:` over *path* and
+    its ancestors, then *repo_name*, then the sole declared repository;
+    several declared with no `repo:` and no *repo_name* still raise
+    `WorkspaceError` rather than guess. The validation itself checks
+    `affects` against every declared repo (`resolve_repos(layout)`), not
+    only the resolved one -- matching `work file`/`work advance`
+    (`stage_advance._advance`'s `repo_root=resolved_repo, repo_roots=declared`).
+    The differential postcondition gate excuses a pre-existing
+    `affects-missing` finding either way, so this only bites when baseline
+    capture itself fails and the gate falls back to its absolute form.
+
+    *repo* names the repository the observed pair actually lives in. When it
+    names a declared repository other than *path*'s own, the pair is written
+    under `repo_stamps[repo]` instead of the scalar `worktree`/`branch`
+    pair; when it names *path*'s own, the scalar pair is written as usual.
+    An undeclared *repo* raises `WorkspaceError`. *path*'s own repository is
+    resolved (honouring *repo_name*) whenever *repo* is given, in both dry
+    and live runs, so a dry run can plan the foreign-vs-own distinction too.
 
     Dry runs and unknown paths plan without locking, like `run_stage_advance`.
-    A live record takes the decision owner's lock, re-plans against the
-    projection read inside it, and applies one journaled page write before
-    releasing it. A stale preimage returns a failed `MutationApplication`
-    and writes nothing.
+    A live record takes the decision owner's lock, re-plans and re-resolves
+    against the projection read inside it, and applies one journaled page
+    write before releasing it. A stale preimage returns a failed
+    `MutationApplication` and writes nothing.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    if dry_run or not any(item.path == path for item in items):
-        return PlacementRecord(
-            plan=plan_placement(items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today)
+    known = any(item.path == path for item in items)
+    if dry_run or not known:
+        plan, own = _prepare_placement(
+            layout,
+            items,
+            path,
+            root=root,
+            phase=phase,
+            worktree=worktree,
+            branch=branch,
+            today=today,
+            repo_name=repo_name,
+            repo=repo,
         )
+        return PlacementRecord(plan=plan, repo_note=own.note if own else None)
     with locked_decision_owner(layout, path) as context:
-        plan = plan_placement(
-            context.items, path, root=root, phase=phase, worktree=worktree, branch=branch, today=today
+        if (
+            expected_preparation is not None
+            and _preparation_guard(layout, context.bundle, path) != expected_preparation
+        ):
+            raise WorkspaceError(f"{path}: preparation changed; replan before recording")
+        plan, own = _prepare_placement(
+            layout,
+            context.items,
+            path,
+            root=root,
+            phase=phase,
+            worktree=worktree,
+            branch=branch,
+            today=today,
+            repo_name=repo_name,
+            repo=repo,
         )
         if plan.refusal is not None or not plan.changed:
-            return PlacementRecord(plan=plan)
-        repo, repo_note = resolve_repo(layout, repo_name=repo_name)
+            return PlacementRecord(plan=plan, repo_note=own.note if own else None)
+        assert own is not None
+
+        def validate_preparation() -> None:
+            if expected_preparation is not None and preparation_guard(layout, path) != expected_preparation:
+                raise WorkspaceError(f"{path}: preparation changed; replan before recording")
+
         application = apply_mutation(
             layout,
             _mutation(context.bundle, plan),
-            repo_root=repo,
+            repo_root=own.path,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
+            validate_read_set=validate_preparation if expected_preparation is not None else None,
         )
-        return PlacementRecord(plan=plan, application=application, repo_note=repo_note)
+        return PlacementRecord(plan=plan, application=application, repo_note=own.note)
+
+
+def preparation_guard(layout: WorkspaceLayout, path: str) -> str:
+    """Capture owner/ancestor bytes and repository configuration before provisioning.
+
+    The opaque token is checked under the placement lock and from fresh reads
+    under the bundle mutation lock immediately before effects. Provisioning
+    itself never holds either lock. Ancestors bind inherited repo assignments;
+    complete owner bytes bind phase, terminal state and every existing stamp.
+    """
+    return _preparation_guard(layout, load_bundle(layout.bundle_dir, ignore=IGNORE), path)
+
+
+def _preparation_guard(layout: WorkspaceLayout, bundle: Bundle, path: str) -> str:
+    items = {item.path: item for item in load_items(bundle)}
+    item = items.get(path)
+    if item is None:
+        raise WorkspaceError(f"{path}: unknown preparation owner")
+    digest = hashlib.sha256()
+    for member in (path, *item.ancestor_paths):
+        document = bundle.concepts.get(member)
+        digest.update(repr((member, document.serialize() if document is not None else None)).encode("utf-8"))
+    for config in (layout.manifest_path, layout.manifest_path.with_name("workspace.local.yaml")):
+        digest.update(repr((str(config), config.read_bytes() if config.exists() else None)).encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:
@@ -128,4 +240,4 @@ def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:
     )
 
 
-__all__ = ["PlacementRecord", "run_record_placement"]
+__all__ = ["PlacementRecord", "preparation_guard", "run_record_placement"]

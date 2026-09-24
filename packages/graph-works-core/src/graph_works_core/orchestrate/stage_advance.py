@@ -24,6 +24,7 @@ from pathlib import Path
 from types import MappingProxyType
 
 from okf_io import Bundle, load_bundle
+from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
 from work_tracker_okf.advance import RefusalReason
 from work_tracker_okf.advance import apply as apply_advance
 from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
@@ -36,8 +37,16 @@ from work_tracker_okf.sources import upsert
 
 from graph_works_core.workspace import anchor, provenance
 from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
+from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repo, resolve_repos
+from graph_works_core.workspace.repos import (
+    ItemRepo,
+    declared_repositories,
+    resolve_item_repo,
+    resolve_repo,
+    resolve_repos,
+)
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
 
 #: The phases whose *completion* produces a results stub. A design or plan
@@ -71,6 +80,10 @@ class StageAdvance:
     evaluate. The gate fails **open**: an advance that cannot see a repo, or
     an item that declares no `affects`, proceeds -- but says so, because an
     unevaluable gate is otherwise indistinguishable from a gate that passed.
+    It also carries a skipped worktree inference when the item's repository
+    came from `repo:` (frontmatter) or `repo_name` (flag) and cwd is not in
+    that repository -- inference is skipped, never a silent guess, and a
+    foreign checkout is never stamped.
     """
 
     outcome: AdvanceOutcome
@@ -106,6 +119,7 @@ def run_stage_advance(
     path: str,
     *,
     today: date,
+    expected_phase: ExpectedPhase | None = None,
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
@@ -150,17 +164,25 @@ def run_stage_advance(
     execute range, and a finish report claiming work it did not do is exactly
     what this pipeline exists to prevent.
 
-    `repo` defaults to `resolve_repo(layout, repo_name=repo_name)` rather than
-    to the layout's `repo_root`: in a split topology -- the workspace and the
-    code in different git repositories -- the walk-up resolves to the
-    workspace's own repo, and both `worktree_state` and `results_facts` then
-    degrade to `None` without a word. An explicit `repo` wins and skips the
-    config read. `repo_name` selects among several declared repositories and
-    is ignored when `repo` is given. With several declared and no name, the
-    repo is the declared one *cwd*'s repository belongs to, and none at all
-    (a `repo_note`, never a refusal) when it belongs to none -- see
-    `_resolve_repo`. Postcondition validation checks `affects` against every
-    declared repo either way.
+    `repo` defaults to `resolve_item_repo` rather than to the layout's
+    `repo_root`: in a split topology -- the workspace and the code in
+    different git repositories -- the walk-up resolves to the workspace's own
+    repo, and both `worktree_state` and `results_facts` then degrade to
+    `None` without a word. An explicit `repo` wins and skips resolution
+    entirely. Precedence otherwise (`_resolve_repo`): the item's own `repo:`
+    (or an ancestor's) wins first, then `repo_name`, then the cwd matcher --
+    one declared repo, or none, is `resolve_repo`'s answer; several are
+    narrowed to the one *cwd*'s repository belongs to, and none at all when
+    it belongs to none. The cwd matcher never refuses -- a resolved-`None`
+    repo comes back as a `repo_note`, not an error. But the chain above it
+    does refuse: a `WorkspaceError` naming the item is raised when the
+    chain's `repo:` names an undeclared repository, or when `repo_name`
+    conflicts with a `repo:` the chain already set -- deliberately, even for
+    a vault-only transition that touches no code at all. And when the repo
+    came from `repo:`/`repo_name` but cwd is outside it, worktree inference
+    is skipped rather than guessed, with an entry in `warnings` explaining
+    why. Postcondition validation checks `affects` against every declared
+    repo either way.
 
     `return_=True` walks the routing table's one backwards transition,
     `finish -> execute`. It writes no results stub: a return is not a stage
@@ -183,12 +205,19 @@ def run_stage_advance(
 
     Live advances hold the decision owner's lock across the read, hold
     resolution, routing, commit gate and mutation. Dry runs resolve holds
-    without locking. On win32, `okf_ext.locking` gives up after ten one-second
+    without locking except for receipt-guarded finish verification. On win32,
+    `okf_ext.locking` gives up after ten one-second
     retries and raises `OSError` naming the lock; the CLI reports it as `io`.
     """
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
-    if dry_run or not any(item.path == path for item in items):
+    receipt_finish = any(
+        item.path == path
+        and item.phase == "finish"
+        and (item.repo_stamps or "repo_stamps" in item.invalid_optional_fields)
+        for item in items
+    )
+    if (dry_run and not receipt_finish) or not any(item.path == path for item in items):
         return _advance(
             layout,
             bundle,
@@ -197,6 +226,7 @@ def run_stage_advance(
             hold=hold_for(items, bundle.root, path) if dry_run else None,
             dry_run=dry_run,
             today=today,
+            expected_phase=expected_phase,
             effort=effort,
             owner=owner,
             resolved_in=resolved_in,
@@ -221,8 +251,9 @@ def run_stage_advance(
             context.items,
             path,
             hold=hold_in(context, path),
-            dry_run=False,
+            dry_run=dry_run,
             today=today,
+            expected_phase=expected_phase,
             effort=effort,
             owner=owner,
             resolved_in=resolved_in,
@@ -247,6 +278,7 @@ def _advance(
     *,
     hold: HoldFact | None,
     today: date,
+    expected_phase: ExpectedPhase | None,
     effort: str | None,
     owner: str | None,
     resolved_in: str | None,
@@ -267,24 +299,56 @@ def _advance(
     repo_note: str | None = None
     resolved_repo = repo
     declared: tuple[Path, ...] = ()
+    item_repo: ItemRepo | None = None
     if resolved_repo is None:
-        resolved_repo, repo_note, declared = _resolve_repo(layout, repo_name=repo_name, cwd=cwd)
+        item_repo, declared = _resolve_repo(layout, items, item, repo_name=repo_name, cwd=cwd)
+        resolved_repo, repo_note = item_repo.path, item_repo.note
 
+    inference_warnings: tuple[str, ...] = ()
     stamped_worktree: str | None = None
     stamped_branch: str | None = None
     if worktree and branch:
         stamped_worktree, stamped_branch = worktree, branch
     elif infer_worktree and item is not None and resolved_repo is not None and _infers_from_cwd(item):
-        recorded = item.worktree
-        if not recorded or not Path(recorded).is_dir():
-            detected = provenance.worktree_state(cwd or Path.cwd(), resolved_repo)
-            if detected is not None:
-                stamped_worktree, stamped_branch = detected
+        here = cwd or Path.cwd()
+        if (
+            item_repo is not None
+            and item_repo.source in ("frontmatter", "flag")
+            and provenance.repository_of(here, (resolved_repo,)) is None
+        ):
+            inference_warnings = (
+                f"worktree inference skipped: {here} is not in {item.path}'s repository "
+                f"{item_repo.name!r} ({resolved_repo}); record placement explicitly if it runs elsewhere",
+            )
+        else:
+            recorded = item.worktree
+            if not recorded or not Path(recorded).is_dir():
+                detected = provenance.worktree_state(here, resolved_repo)
+                if detected is not None:
+                    stamped_worktree, stamped_branch = detected
+
+    finish_guard: str | None = None
+    finish_blockers: tuple[str, ...] = ()
+    if (
+        item is not None
+        and old_phase == "finish"
+        and not return_
+        and (item.repo_stamps or "repo_stamps" in item.invalid_optional_fields)
+    ):
+        finish_guard = finish_read_guard(layout, path, bundle=bundle)
+        verification = inspect_finish(layout, path)
+        finish_blockers = verification.blockers
+        if verification.complete:
+            if resolved_in is not None and resolved_in != verification.resolved_in:
+                finish_blockers = ("resolved_in does not agree with verified finish receipt",)
+            else:
+                resolved_in = verification.resolved_in
 
     outcome = advance_and_stamp(
         bundle,
         path,
         today=today,
+        expected_phase=expected_phase,
         effort=effort,
         owner=owner,
         resolved_in=resolved_in,
@@ -295,7 +359,18 @@ def _advance(
         hold=hold,
         dry_run=True,
     )
-    candidate = StageAdvance(outcome=outcome, repo_note=repo_note)
+    if finish_blockers:
+        refused = replace(
+            outcome.plan,
+            refusal="finish-incomplete",
+            route=replace(outcome.plan.route, blockers=outcome.plan.route.blockers + finish_blockers),
+            changes=(),
+            stamp_source=None,
+            detail="; ".join(finish_blockers),
+            trigger=None,
+        )
+        outcome = replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False)
+    candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings)
     if not dry_run and before_apply is not None:
         before_apply(candidate)
     if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
@@ -314,7 +389,7 @@ def _advance(
             return StageAdvance(
                 outcome=replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False),
                 repo_note=repo_note,
-                warnings=warnings,
+                warnings=inference_warnings + warnings,
             )
 
     document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
@@ -388,9 +463,26 @@ def _advance(
         validate_paths=(path,),
         directory_preconditions=conditions,
     )
+
     # `bundle` is the lock-held projection (or the dry-run read), loaded with
     # `IGNORE`, so it satisfies `apply_mutation`'s baseline precondition.
-    application = apply_mutation(layout, mutation, repo_root=resolved_repo, repo_roots=declared, baseline_bundle=bundle)
+    def validate_finish() -> None:
+        verified = inspect_finish(layout, path)
+        if (
+            finish_read_guard(layout, path) != finish_guard
+            or not verified.complete
+            or verified.resolved_in != resolved_in
+        ):
+            raise WorkspaceError("finish evidence changed; inspect and retry before advancing")
+
+    application = apply_mutation(
+        layout,
+        mutation,
+        repo_root=resolved_repo,
+        repo_roots=declared,
+        baseline_bundle=bundle,
+        validate_read_set=validate_finish if finish_guard is not None else None,
+    )
     if application.ok:
         outcome = replace(outcome, written=True)
         if result_member is not None:
@@ -409,38 +501,50 @@ def _advance(
         pointer_path=pointer_path,
         repo_note=repo_note,
         application=application,
-        warnings=warnings,
+        warnings=inference_warnings + warnings,
     )
 
 
 def _resolve_repo(
-    layout: WorkspaceLayout, *, repo_name: str | None, cwd: Path | None
-) -> tuple[Path | None, str | None, tuple[Path, ...]]:
-    """`(repo, note, declared)`: the code repo this advance reads, and every
-    declared one for postcondition validation.
+    layout: WorkspaceLayout,
+    items: Sequence[WorkItem],
+    item: WorkItem | None,
+    *,
+    repo_name: str | None,
+    cwd: Path | None,
+) -> tuple[ItemRepo, tuple[Path, ...]]:
+    """`(repo, declared)`: the code repo this advance reads, and every declared
+    one for postcondition validation.
 
-    One declared repo, or a *repo_name*, is `resolve_repo`'s answer. Several
-    declared and no name is where `resolve_repo` would refuse; an advance
-    instead takes the declared repo *cwd*'s repository belongs to
-    (`provenance.repository_of` -- a linked worktree of it counts). When none
-    does, the repo is `None` with a note: the same degrade as a workspace that
-    declares no repo, so inference is skipped and the commit gate fails open.
-    An advance never refuses over which repo it is in.
+    The item's own `repo:` (or an ancestor's) wins, then *repo_name*; both are
+    `resolve_item_repo`'s. Otherwise the cwd matcher answers: one declared
+    repo, or none, is `resolve_repo`'s answer; several are narrowed to the one
+    *cwd*'s repository belongs to (`provenance.repository_of` -- a linked
+    worktree of it counts). When none does, the repo is `None` with a note:
+    the same degrade as a workspace that declares no repo, so inference is
+    skipped and the commit gate fails open. The cwd matcher never refuses.
     """
     declared = resolve_repos(layout)
-    if repo_name is None and len(declared) > 1:
-        here = cwd or Path.cwd()
-        match = provenance.repository_of(here, declared)
-        if match is not None:
-            return match, None, declared
-        return (
-            None,
-            f"{layout.manifest_path}: {len(declared)} repositories declared and {here} is in none of them, "
-            "so no code repo was resolved",
-            declared,
-        )
-    resolved, note = resolve_repo(layout, repo_name=repo_name)
-    return resolved, note, declared
+
+    def by_cwd() -> ItemRepo:
+        names = declared_repositories(layout)
+        if len(names) > 1:
+            here = cwd or Path.cwd()
+            match = provenance.repository_of(here, tuple(names.values()))
+            if match is not None:
+                return ItemRepo(next(name for name, path in names.items() if path == match), match, "cwd")
+            return ItemRepo(
+                None,
+                None,
+                "cwd",
+                f"{layout.manifest_path}: {len(names)} repositories declared and {here} is in none of them, "
+                "so no code repo was resolved",
+            )
+        path, note = resolve_repo(layout)
+        return ItemRepo(next(iter(names), None), path, "sole", note)
+
+    by_path = {candidate.path: candidate for candidate in items}
+    return resolve_item_repo(layout, item, by_path, repo_name=repo_name, fallback=by_cwd), declared
 
 
 def _commit_gate(

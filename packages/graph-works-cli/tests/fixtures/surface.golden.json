@@ -2496,6 +2496,17 @@
           "required": false,
           "default": false,
           "is_flag": true
+        },
+        {
+          "name": "expected_phase",
+          "opts": [
+            "--from"
+          ],
+          "secondary_opts": [],
+          "help": "Expected current phase; none means no phase. Omit to leave unchecked.",
+          "required": false,
+          "default": null,
+          "is_flag": false
         }
       ],
       "commands": [],
@@ -3313,6 +3324,17 @@
           "is_flag": false
         },
         {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Declared repository this item's code lives in; descendants inherit it.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
           "name": "tags",
           "opts": [
             "--tags"
@@ -3642,7 +3664,7 @@
     },
     {
       "name": "gw work record-placement",
-      "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites only `worktree`, `branch` and `updated`. Refuses -- writing nothing --\nwhen PATH is not ROOT or its descendant, when a descendant is recorded at\n`design` or `plan`, when PATH's phase is no longer `--phase`, and for an\ninvalid or terminal item or an invalid observation. An identical pair is a\nno-op. The values must be observed, never the planner's requested names.\n\n`--repo-name` selects the code repository when `workspace.yaml` declares\nseveral; without it such a workspace refuses rather than guess.",
+      "help": "Record where a dispatched stage runs. Never advances PATH.\n\nWrites `worktree`, `branch` and `updated` -- or, with `--repo` naming a\nrepository other than PATH's own, `repo_stamps[NAME]` and `updated`\ninstead. Refuses -- writing nothing -- when PATH is not ROOT or its\ndescendant, when a descendant is recorded at `design` or `plan`, when\nPATH's phase is no longer `--phase`, and for an invalid or terminal item\nor an invalid observation. An identical pair is a no-op. The values must\nbe observed, never the planner's requested names.\n\n`--repo-name` selects the code repository when `workspace.yaml` declares\nseveral and PATH's chain sets no `repo:`; an item whose own or an\nancestor's `repo:` already resolves one needs neither flag, and a\nconflicting `--repo-name` refuses.\n\n`--repo` names the repository the pair was observed in. A repository\nother than PATH's own records under `repo_stamps`; its own records the\nscalar pair.",
       "short_help": "Record where a dispatched stage runs.",
       "usage": [
         "[OPTIONS]",
@@ -3707,6 +3729,17 @@
           ],
           "secondary_opts": [],
           "help": "Select among several declared repositories.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "repo",
+          "opts": [
+            "--repo"
+          ],
+          "secondary_opts": [],
+          "help": "Declared repository the observed pair lives in; one other than the item's own is recorded under repo_stamps.",
           "required": false,
           "default": "",
           "is_flag": false

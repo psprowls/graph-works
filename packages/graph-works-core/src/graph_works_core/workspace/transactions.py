@@ -35,7 +35,7 @@ import stat
 import sys
 import uuid
 from collections import Counter
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import date
@@ -2313,6 +2313,35 @@ def _capture_validation_state(
     return _ValidationState(findings=dict(findings), conditions=dict(conditions))
 
 
+#: The postcondition detail for a written lane index whose entries no longer
+#: match the item pages it lists -- a sibling rewrote one of them between the
+#: caller's plan and this locked apply. The one rollback cause a caller may
+#: fix by re-planning (`only_stale_inventory`); defined once so the message
+#: and the predicate cannot drift apart.
+STALE_INVENTORY_DETAIL = "generated direct-descendant inventory is stale"
+
+#: `apply_mutation`'s wrapping of a postcondition failure: the phase name
+#: (`"validation"`) plus `" failed: "`, then the details joined by `"; "`.
+_VALIDATION_FAILURE_PREFIX = "validation failed: "
+
+
+def only_stale_inventory(application: MutationApplication) -> bool:
+    """Whether *application* rolled back cleanly and every failure detail is
+    lane-index staleness (`STALE_INVENTORY_DETAIL`).
+
+    Anything else -- a refusal, another postcondition failure, a rollback or
+    journal failure alongside it -- answers `False`: those are not fixed by
+    re-planning, and retrying would hide them.
+    """
+    if not application.rolled_back or len(application.failures) != 1:
+        return False
+    failure = application.failures[0]
+    if not failure.startswith(_VALIDATION_FAILURE_PREFIX):
+        return False
+    details = failure.removeprefix(_VALIDATION_FAILURE_PREFIX).split("; ")
+    return all(detail.endswith(f": {STALE_INVENTORY_DETAIL}") for detail in details)
+
+
 def _validate_postconditions(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
@@ -2433,7 +2462,7 @@ def _validate_postconditions(
         )
         expected = reconcile_entries(current, tuple(render_entry(item) for item in direct))
         if current != expected:
-            failures.append(f"{member}: generated direct-descendant inventory is stale")
+            failures.append(f"{member}: {STALE_INVENTORY_DETAIL}")
     try:
         _assert_root_identity(validation_root, root)
     except (OSError, ValueError) as exc:
@@ -2603,6 +2632,7 @@ def _apply_mutation_locked(
     repo_roots: tuple[Path, ...] = (),
     baseline_bundle: Bundle | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
+    validate_read_set: Callable[[], None] | None = None,
 ) -> MutationApplication:
     transaction_root = layout.cache_dir / "work-mutations"
     resolved_bundle = layout.bundle_dir.resolve(strict=True)
@@ -2787,6 +2817,8 @@ def _apply_mutation_locked(
                     phase = "apply"
                     _assert_directory_identity(layout.cache_dir, cache, "cache")
                     _assert_directory_identity(configured_transaction_dir, transaction, "transaction")
+                    if validate_read_set is not None:
+                        validate_read_set()
                     for effect in _effects(plan, staged, root):
                         effect_attempted = True
                         _commit_effect(
@@ -2939,6 +2971,7 @@ def apply_mutation(
     repo_roots: tuple[Path, ...] = (),
     baseline_bundle: Bundle | None = None,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
+    validate_read_set: Callable[[], None] | None = None,
 ) -> MutationApplication:
     """Apply *plan* atomically, retaining durable recovery evidence in cache.
 
@@ -2970,6 +3003,13 @@ def apply_mutation(
     the planned journal records the requested budget before any live effect.
     Rollback and terminal-complete evidence verification retain that record;
     it grants no authority to replay or complete an interrupted transaction.
+
+    *validate_read_set* optionally revalidates caller-owned semantic inputs
+    from fresh reads under the bundle and executor locks immediately before
+    live effects. It must only read, acquire no additional locks, and raise
+    on stale input. Failure is journaled without applying effects. It is not
+    called for wholly empty plans, which have no commit to authorize. Like
+    ordinary preimages, it cannot serialize external writers that ignore locks.
 
     A plan with no writes, mkdirs, moves, deletes or directory preconditions
     (`_is_wholly_empty`) still opens the bundle root, takes `_bundle_root_lock`,
@@ -3005,9 +3045,16 @@ def apply_mutation(
                 repo_roots=repo_roots,
                 baseline_bundle=baseline_bundle,
                 allowed_new_findings=allowed_new_findings,
+                validate_read_set=validate_read_set,
             )
     finally:
         root.close()
 
 
-__all__ = ["EMPTY_TRANSACTION_ID", "MutationApplication", "apply_mutation"]
+__all__ = [
+    "EMPTY_TRANSACTION_ID",
+    "STALE_INVENTORY_DETAIL",
+    "MutationApplication",
+    "apply_mutation",
+    "only_stale_inventory",
+]

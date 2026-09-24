@@ -110,6 +110,12 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
   the exception: they use an immutable plan/apply pair where `apply` rechecks
   the ledger snapshot under the existing exclusive lock (plan capture never
   writes).
+- `repo:` names the item's code repository and is inherited down the physical
+  chain (`hierarchy.declared_repo`: the item, then `reversed(ancestor_paths)`,
+  nearest wins). This package returns names only; `graph_works_core.workspace.repos.resolve_item_repo`
+  maps them to paths. `repo_stamps[name]` holds `{worktree, branch}` for a
+  repository other than the item's own — the scalar pair keeps meaning "own".
+  `plan_placement(repo=)` is passed a name only for a foreign repository.
 
 `IGNORE` is the ordinary read/validation lens (excludes `references/*`,
 `.DS_Store`, and the schema/section declaration trees). `ARCHIVE_IGNORE`

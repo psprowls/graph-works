@@ -23,6 +23,7 @@ MANAGED_ARTIFACTS: Mapping[str, str] = MappingProxyType(
         "execute-coverage": "03-execute-coverage.md",
         "execute-transcript": "03-execute-transcript.jsonl",
         "finish-results": "04-finish-results.md",
+        "finish-receipt": "04-finish-receipt.md",
         "finish-transcript": "04-finish-transcript.jsonl",
     }
 )

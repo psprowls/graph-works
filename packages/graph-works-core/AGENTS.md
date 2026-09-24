@@ -263,6 +263,17 @@ hand. `today` is always injected; nothing in this package reads the clock.
   fields) — not one atomic snapshot. Both are known, accepted limits
   documented in the README rather than bugs to fix reflexively.
 
+- Multi-repository orchestration resolves assignments and observations in the
+  shell, then uses one frontier and global worker budget. Affects reservations
+  are keyed by Git common-directory identity. Preparations defer launch and
+  stamp the owning item's phase, never the child's. `workspace.finish` is the
+  shared target/receipt reader; `orchestrate.finish_receipt` is the writer.
+  Finish targets include foreign-only and nested owner sources. Partial proof
+  blocks advance until every target's current Git ancestry is verified; scalar
+  `resolved_in` prefers the owner's repository, falling back to the first
+  verified target in deterministic order. Explicit `repo=Path`
+  remains single-repository compatibility, not a multi-repository resolver.
+
 - `gw work advance` and `gw work decision *` share the decision owner's lock (`workspace.decision_owner.locked_decision_owner`). It is always taken before `apply_mutation`'s locks, never while holding them, and a non-dry-run advance holds it across route, commit gate and write.
 
 - **`__init__.py`'s hoisting rules are intentional, not an oversight if a

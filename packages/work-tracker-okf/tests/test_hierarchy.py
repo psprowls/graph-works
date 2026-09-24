@@ -7,6 +7,7 @@ from work_tracker_okf.hierarchy import (
     child_gated,
     child_rollup,
     decision_owner,
+    declared_repo,
     descend,
     nearest_epic,
     nearest_parent,
@@ -224,3 +225,49 @@ def test_sweep_eligible_is_false_for_open_and_archived_roots() -> None:
     assert sweep_eligible((), make_item("work/bug-open", work_status="open")) is False
     archived = make_item("work/_archive/bug-old", work_status="resolved", archived=True)
     assert sweep_eligible((archived,), archived) is False
+
+
+_E = "work/epic-a"
+_F = f"{_E}/children/feature-b"
+_B = f"{_F}/children/bug-c"
+
+
+def _chain(epic: str | None = None, feature: str | None = None, bug: str | None = None):
+    items = (
+        make_item(_E, type="Epic", repo=epic),
+        make_item(_F, type="Feature", repo=feature, parent_path=_E, ancestor_paths=(_E,)),
+        make_item(_B, type="Bug", repo=bug, parent_path=_F, ancestor_paths=(_E, _F)),
+    )
+    return {item.path: item for item in items}
+
+
+def test_declared_repo_reads_the_item_s_own_repo() -> None:
+    index = _chain(bug="ui")
+    assert declared_repo(index[_B], index) == ("ui", _B)
+
+
+def test_declared_repo_inherits_from_an_ancestor() -> None:
+    index = _chain(epic="code")
+    assert declared_repo(index[_B], index) == ("code", _E)
+
+
+def test_declared_repo_nearest_wins_across_three_levels() -> None:
+    index = _chain(epic="code", feature="ui")
+    assert declared_repo(index[_B], index) == ("ui", _F)
+    assert declared_repo(index[_E], index) == ("code", _E)
+
+
+def test_declared_repo_own_value_overrides_ancestors() -> None:
+    index = _chain(epic="code", feature="ui", bug="docs")
+    assert declared_repo(index[_B], index) == ("docs", _B)
+
+
+def test_declared_repo_absent_everywhere() -> None:
+    index = _chain()
+    assert declared_repo(index[_B], index) == (None, None)
+
+
+def test_declared_repo_skips_a_missing_ancestor() -> None:
+    index = _chain(epic="code")
+    del index[_F]
+    assert declared_repo(index[_B], index) == ("code", _E)

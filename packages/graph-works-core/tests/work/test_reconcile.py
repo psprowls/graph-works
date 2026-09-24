@@ -128,3 +128,46 @@ def test_missing_design_artifact_warns_without_writing(tmp_path: Path) -> None:
 def test_unknown_canonical_path_is_a_caller_error(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="work/missing"):
         reconcile.run_reconcile_context(_workspace(tmp_path), "work/missing")
+
+
+def _declare_two(layout, tmp_path: Path) -> tuple[Path, Path]:
+    code, ui = tmp_path / "code", tmp_path / "ui"
+    code.mkdir()
+    ui.mkdir()
+    layout.manifest_path.write_text(
+        f'version: 1\nrepositories:\n  code:\n    path: "{code.as_posix()}"\n  ui:\n    path: "{ui.as_posix()}"\n',
+        encoding="utf-8",
+    )
+    return code.resolve(), ui.resolve()
+
+
+def _tag(layout, path: str, repo: str) -> None:
+    page = layout.bundle_dir / f"{path}.md"
+    text = page.read_text(encoding="utf-8").replace("status: stable\n", f"status: stable\nrepo: {repo}\n")
+    page.write_text(text, encoding="utf-8")
+
+
+def test_reconcile_resolves_the_item_s_inherited_repo(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path)
+    _code, ui = _declare_two(layout, tmp_path)
+    _tag(layout, OWNER, "ui")
+    seen: list[Path | None] = []
+    real = reconcile.resolve_anchor
+
+    def capture(repo, *args, **kwargs):
+        seen.append(repo)
+        return real(repo, *args, **kwargs)
+
+    monkeypatch.setattr(reconcile, "resolve_anchor", capture)
+    context = reconcile.run_reconcile_context(layout, SUBJECT)
+    assert seen == [ui]
+    assert "no repo resolved; code drift unavailable" not in context.warnings
+
+
+def test_reconcile_refuses_an_untagged_item_among_several_repos(tmp_path: Path) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _workspace(tmp_path)
+    _declare_two(layout, tmp_path)
+    with pytest.raises(WorkspaceError, match=SUBJECT):
+        reconcile.run_reconcile_context(layout, SUBJECT)

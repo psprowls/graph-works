@@ -238,3 +238,83 @@ def test_record_apply_runs_while_the_owner_lock_is_held(tmp_path: Path, monkeypa
     monkeypatch.setattr(placement, "apply_mutation", probe)
     assert _record(layout)().written
     assert observed == [True]
+
+
+def test_guarded_preparation_waits_for_winning_stamp_and_refuses_overwrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = _layout(tmp_path)
+    expected = placement.preparation_guard(layout, ITEM)
+    entered, release = _pause(monkeypatch, placement, "apply_mutation")
+    first = _Run(_record(layout))
+    second = _Run(
+        lambda: placement.run_record_placement(
+            layout,
+            ITEM,
+            root=ITEM,
+            phase="execute",
+            worktree=WT,
+            branch="other",
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=expected,
+        )
+    )
+    try:
+        first.start()
+        assert entered.wait(WAIT)
+        second.start()
+        second.join(timeout=0.5)
+        assert second.is_alive(), "preparation record must wait for the placement lock"
+    finally:
+        release.set()
+        _join_all(first, second)
+    assert first.error is None and first.result.written
+    assert isinstance(second.error, placement.WorkspaceError)
+    assert "preparation changed" in str(second.error)
+    assert load(layout.bundle_dir / f"{ITEM}.md").fm_data()["branch"] == BR
+
+
+@pytest.mark.parametrize("changed", ["ancestor", "manifest"])
+def test_preparation_read_set_is_rechecked_after_waiting_for_bundle_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: str
+) -> None:
+    from graph_works_core.workspace import transactions
+    from test_record_placement import EPIC, NESTED, _vault
+
+    layout = _vault(tmp_path)
+    expected = placement.preparation_guard(layout, NESTED)
+    entered, release = _pause(monkeypatch, transactions, "_bundle_root_lock")
+    recording = _Run(
+        lambda: placement.run_record_placement(
+            layout,
+            NESTED,
+            root=NESTED,
+            phase="plan",
+            worktree=WT,
+            branch=BR,
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=expected,
+        )
+    )
+    target = layout.bundle_dir / f"{NESTED}.md"
+    before = target.read_bytes()
+    try:
+        recording.start()
+        assert entered.wait(WAIT)
+        if changed == "ancestor":
+            page = layout.bundle_dir / f"{EPIC}.md"
+            document = load(page)
+            document.set("repo", "other")
+            page.write_text(document.serialize(), encoding="utf-8", newline="")
+        else:
+            with layout.manifest_path.open("a", encoding="utf-8", newline="") as stream:
+                stream.write("\n# repository configuration changed\n")
+    finally:
+        release.set()
+        _join_all(recording)
+    assert recording.error is None
+    assert not recording.result.written
+    assert "preparation changed" in str(recording.result.application.failures)
+    assert target.read_bytes() == before

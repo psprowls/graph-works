@@ -3,10 +3,13 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 
+import pytest
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
+from graph_works_core.workspace.transactions import STALE_INVENTORY_DETAIL, MutationApplication
 
 TODAY = date(2026, 8, 17)
 
@@ -230,3 +233,116 @@ def test_regen_index_leaves_markers_on_a_non_required_lane_whose_entries_are_sta
     assert inert_index.read_text(encoding="utf-8") == original
     assert result.marker_strips == ()
     assert any("work/epic-active/children/_archive/index.md" in warning for warning in result.mutation.warnings)
+
+
+EPIC_ROOT = "work/epic-root"
+CHILD_A = f"{EPIC_ROOT}/children/feature-child-a"
+CHILD_B = f"{EPIC_ROOT}/children/feature-child-b"
+CHILDREN_INDEX = f"{EPIC_ROOT}/children/index.md"
+
+
+def _epic_with_two_children(layout) -> None:
+    """An epic, two children, and indexes already reconciled once, so every
+    later write is an update with a before-digest (as in the field)."""
+    _write_epic(layout, EPIC_ROOT)
+    for child in (CHILD_A, CHILD_B):
+        page = layout.bundle_dir / f"{child}.md"
+        page.parent.mkdir(parents=True, exist_ok=True)
+        page.write_text(_ITEM.format(slug=child.rsplit("/", 1)[-1]), encoding="utf-8")
+    first = work.run_regen_indexes(layout, dry_run=False)
+    assert first.application is not None and first.application.ok
+
+
+def _set_phase(layout, path: str, phase: str) -> None:
+    page = layout.bundle_dir / f"{path}.md"
+    text = page.read_text(encoding="utf-8")
+    page.write_text(re.sub(r"^phase: .*$", f"phase: {phase}", text, count=1, flags=re.MULTILINE), encoding="utf-8")
+
+
+def test_a_sibling_advance_between_plan_and_apply_is_replanned(tmp_path, monkeypatch):
+    """Reproduction of the field race, in-process: `child-a` is stale, and a
+    sibling advance of `child-b` lands after regen planned but before its
+    locked apply. Before the fix this rolled back with a stale-inventory
+    failure; now it re-plans once and writes both children's new state."""
+    layout = _workspace(tmp_path)
+    _epic_with_two_children(layout)
+    _set_phase(layout, CHILD_A, "execute")
+    real = work.apply_mutation
+    calls: list[int] = []
+
+    def sibling_advances_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            _set_phase(layout, CHILD_B, "design")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(work, "apply_mutation", sibling_advances_once)
+    result = work.run_regen_indexes(layout, dry_run=False)
+
+    assert len(calls) == 2
+    assert result.application is not None and result.application.ok
+    text = (layout.bundle_dir / CHILDREN_INDEX).read_text(encoding="utf-8")
+    assert "(feature-child-a.md) — open · execute" in text
+    assert "(feature-child-b.md) — open · design" in text
+
+
+def test_a_sibling_that_keeps_advancing_gives_up_after_the_bound(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    _epic_with_two_children(layout)
+    _set_phase(layout, CHILD_A, "execute")
+    index = layout.bundle_dir / CHILDREN_INDEX
+    before = index.read_bytes()
+    real = work.apply_mutation
+    calls: list[int] = []
+
+    def sibling_advances_every_time(*args, **kwargs):
+        calls.append(1)
+        _set_phase(layout, CHILD_B, "design" if len(calls) % 2 else "plan")
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(work, "apply_mutation", sibling_advances_every_time)
+    result = work.run_regen_indexes(layout, dry_run=False)
+
+    assert len(calls) == work.STALE_INVENTORY_ATTEMPTS == 3
+    assert result.application is not None
+    assert result.application.rolled_back and not result.application.ok
+    assert STALE_INVENTORY_DETAIL in result.application.failures[0]
+    assert index.read_bytes() == before
+
+
+def test_a_rollback_for_any_other_reason_is_not_retried(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    _epic_with_two_children(layout)
+    _set_phase(layout, CHILD_A, "execute")
+    calls: list[int] = []
+
+    def fails_otherwise(*args, **kwargs):
+        calls.append(1)
+        return MutationApplication(
+            transaction_id="t",
+            journal=tmp_path / "journal",
+            moved=(),
+            written=(),
+            created_directories=(),
+            warnings=(),
+            failures=("validation failed: work/bug-x: final work item did not reload",),
+            rolled_back=True,
+        )
+
+    monkeypatch.setattr(work, "apply_mutation", fails_otherwise)
+    result = work.run_regen_indexes(layout, dry_run=False)
+
+    assert len(calls) == 1
+    assert result.application is not None and not result.application.ok
+
+
+def test_a_dry_run_plans_once_and_applies_nothing(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    _epic_with_two_children(layout)
+    _set_phase(layout, CHILD_A, "execute")
+    monkeypatch.setattr(work, "apply_mutation", lambda *a, **k: pytest.fail("dry run must not apply"))
+
+    result = work.run_regen_indexes(layout)
+
+    assert result.application is None
+    assert any(plan.changed for plan in result.plans)

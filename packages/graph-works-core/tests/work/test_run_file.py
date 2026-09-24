@@ -255,3 +255,39 @@ def test_the_vertical_is_not_hoisted_to_the_front_door():
     assert not hasattr(graph_works_core, "run_status")
     assert not hasattr(graph_works_core, "StatusReport")
     assert graph_works_core.run_lint is not work.run_lint
+
+
+def test_run_file_replans_after_a_sibling_advance_between_plan_and_apply(tmp_path, monkeypatch) -> None:
+    """Filing a child writes the parent's children lane index, planned from
+    pages read before the lock -- the same race as `regen-index`."""
+    layout, config = seeded_workspace(tmp_path)
+    sibling_page = layout.bundle_dir / f"{SIBLING}.md"
+    real = work.apply_mutation
+    calls: list[int] = []
+
+    def sibling_advances_once(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            sibling_page.write_text(
+                sibling_page.read_text(encoding="utf-8").replace("work_status: open", "work_status: accepted"),
+                encoding="utf-8",
+            )
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(work, "apply_mutation", sibling_advances_once)
+    result = work.run_file(
+        layout,
+        config,
+        type="Feature",
+        title="Raced child",
+        description="d",
+        on=TODAY,
+        parent_path=EPIC,
+        dry_run=False,
+    )
+
+    assert len(calls) == 2
+    assert result.application is not None and result.application.ok
+    assert result.plan.filing.target.is_file()
+    index = (layout.bundle_dir / EPIC / "children" / "index.md").read_text(encoding="utf-8")
+    assert "(feature-sibling.md) — accepted · not started" in index

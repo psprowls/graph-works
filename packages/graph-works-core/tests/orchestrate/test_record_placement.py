@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import difflib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -17,8 +17,9 @@ from graph_works_core.work import commands as work
 from graph_works_core.workspace import decision_owner as owners
 from graph_works_core.workspace import transactions
 from graph_works_core.workspace.layout import WorkspaceLayout
-from okf_io import Bundle, load
+from okf_io import Bundle, load, load_bundle
 from work_tracker_okf.decisions import ledger_ref
+from work_tracker_okf.items import IGNORE, Stamp, WorkItem, load_items
 from work_tracker_okf.mutation import WorkMutationPlan
 from work_tracker_okf.placement import PlacementPlan
 from work_tracker_okf.sources import upsert
@@ -219,6 +220,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
         repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set=None,
     ) -> transactions.MutationApplication:
         page.write_bytes(external_edit)
         return original(
@@ -228,6 +230,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
             repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", edited_out_of_band)
@@ -283,6 +286,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
         repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set=None,
     ) -> transactions.MutationApplication:
         assert baseline_bundle is not None
         document = baseline_bundle.concepts[CHILD]
@@ -294,6 +298,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
             repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", check_baseline)
@@ -472,6 +477,342 @@ def test_several_declared_repos_still_refuse_without_a_repo_name(tmp_path: Path)
         _record(layout)
 
 
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("unchanged", [True, False])
+def test_eligible_placement_requires_repo_even_on_replay(tmp_path: Path, dry_run: bool, unchanged: bool) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    if unchanged:
+        assert _record(layout).written
+    _declare_two_repos(layout, tmp_path)
+    before = _snapshot(layout)
+    with pytest.raises(WorkspaceError, match="sets no repo"):
+        _record(layout, dry_run=dry_run)
+    assert _snapshot(layout) == before
+
+
+@pytest.mark.parametrize("tagged_path", [CHILD, EPIC])
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("unchanged", [True, False])
+def test_tagged_selection_is_validated_on_preview_and_replay(
+    tmp_path: Path, tagged_path: str, dry_run: bool, unchanged: bool
+) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, tagged_path, "code")
+    if unchanged:
+        assert _record(layout).written
+    before = _snapshot(layout)
+
+    result = _record(layout, dry_run=dry_run)
+    assert result.plan.refusal is None
+    assert result.plan.repo is None
+    assert result.plan.changed is (not unchanged)
+    assert result.written is (not dry_run and not unchanged)
+    if dry_run or unchanged:
+        assert _snapshot(layout) == before
+
+    for invalid, match in (("nope", "nope"), ("ui", "ui.*code")):
+        _tag(layout, tagged_path, invalid if invalid == "nope" else "code")
+        before_error = _snapshot(layout)
+        with pytest.raises(WorkspaceError, match=match) as exc:
+            placement.run_record_placement(
+                layout,
+                CHILD,
+                root=EPIC,
+                phase="execute",
+                worktree=WT,
+                branch=BR,
+                today=TODAY,
+                repo_name=None if invalid == "nope" else "ui",
+                dry_run=dry_run,
+            )
+        assert CHILD in str(exc.value)
+        assert _snapshot(layout) == before_error
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("unchanged", [True, False])
+@pytest.mark.parametrize("tagged_path", [CHILD, EPIC])
+def test_matching_repo_name_validates_tagged_selection(
+    tmp_path: Path, dry_run: bool, unchanged: bool, tagged_path: str
+) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, tagged_path, "code")
+    if unchanged:
+        assert _record(layout).written
+    before = _snapshot(layout)
+    record = placement.run_record_placement(
+        layout,
+        CHILD,
+        root=EPIC,
+        phase="execute",
+        worktree=WT,
+        branch=BR,
+        today=TODAY,
+        repo_name="code",
+        dry_run=dry_run,
+    )
+    assert record.plan.refusal is None and record.plan.repo is None
+    assert record.plan.changed is (not unchanged)
+    assert record.written is (not dry_run and not unchanged)
+    if dry_run or unchanged:
+        assert _snapshot(layout) == before
+
+
+@pytest.mark.parametrize("target", ["code", "ui", "nope"])
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("unchanged", [True, False])
+def test_explicit_target_requires_and_preserves_own_selection(
+    tmp_path: Path, target: str, dry_run: bool, unchanged: bool
+) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    if unchanged:
+        prior = placement.run_record_placement(
+            layout,
+            CHILD,
+            root=EPIC,
+            phase="execute",
+            worktree=WT,
+            branch=BR,
+            today=TODAY,
+            repo=target if target != "nope" else "code",
+            dry_run=False,
+        )
+        assert prior.written
+    before = _snapshot(layout)
+    if target == "nope":
+        with pytest.raises(WorkspaceError, match="nope") as exc:
+            placement.run_record_placement(
+                layout,
+                CHILD,
+                root=EPIC,
+                phase="execute",
+                worktree=WT,
+                branch=BR,
+                today=TODAY,
+                repo=target,
+                dry_run=dry_run,
+            )
+        assert CHILD in str(exc.value)
+        assert _snapshot(layout) == before
+        return
+    record = placement.run_record_placement(
+        layout,
+        CHILD,
+        root=EPIC,
+        phase="execute",
+        worktree=WT,
+        branch=BR,
+        today=TODAY,
+        repo=target,
+        dry_run=dry_run,
+    )
+    assert record.plan.refusal is None
+    assert record.plan.repo == (None if target == "code" else "ui")
+    assert record.plan.changed is (not unchanged)
+    assert record.written is (not dry_run and record.plan.changed)
+    if dry_run or not record.plan.changed:
+        assert _snapshot(layout) == before
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize("target", [None, "ui"])
+@pytest.mark.parametrize("unchanged", [True, False])
+def test_foreign_target_cannot_replace_missing_own_repo(
+    tmp_path: Path, dry_run: bool, target: str | None, unchanged: bool
+) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    if unchanged:
+        assert _record(layout).written
+    _declare_two_repos(layout, tmp_path)
+    before = _snapshot(layout)
+    with pytest.raises(WorkspaceError, match="sets no repo") as exc:
+        placement.run_record_placement(
+            layout,
+            CHILD,
+            root=EPIC,
+            phase="execute",
+            worktree=WT,
+            branch=BR,
+            today=TODAY,
+            repo=target,
+            dry_run=dry_run,
+        )
+    assert CHILD in str(exc.value)
+    assert _snapshot(layout) == before
+
+
+def test_live_placement_uses_repository_tag_read_under_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    original_lock = owners.locked_decision_owner
+    original_apply = transactions.apply_mutation
+    observed: list[Path | None] = []
+
+    @contextmanager
+    def retag_before_lock(layout: WorkspaceLayout, path: str) -> Iterator[owners.DecisionContext]:
+        _tag(layout, EPIC, "ui")
+        with original_lock(layout, path) as context:
+            yield context
+
+    def check_repo_root(
+        layout: WorkspaceLayout,
+        plan: WorkMutationPlan,
+        *,
+        repo_root: Path | None = None,
+        repo_roots: tuple[Path, ...] = (),
+        baseline_bundle: Bundle | None = None,
+        allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set: Callable[[], None] | None = None,
+    ) -> transactions.MutationApplication:
+        observed.append(repo_root)
+        return original_apply(
+            layout,
+            plan,
+            repo_root=repo_root,
+            repo_roots=repo_roots,
+            baseline_bundle=baseline_bundle,
+            allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
+        )
+
+    monkeypatch.setattr(placement, "locked_decision_owner", retag_before_lock)
+    monkeypatch.setattr(placement, "apply_mutation", check_repo_root)
+    result = _record(layout)
+    assert result.written
+    assert observed == [tmp_path / "ui"]
+
+
+def test_live_placement_refuses_tag_removed_before_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    original_lock = owners.locked_decision_owner
+    epic = layout.bundle_dir / f"{EPIC}.md"
+
+    @contextmanager
+    def remove_tag_before_lock(layout: WorkspaceLayout, path: str) -> Iterator[owners.DecisionContext]:
+        document = load(epic)
+        document.delete("repo")
+        document.save()
+        with original_lock(layout, path) as context:
+            yield context
+
+    monkeypatch.setattr(placement, "locked_decision_owner", remove_tag_before_lock)
+    with pytest.raises(WorkspaceError, match="sets no repo"):
+        _record(layout)
+    child = load(layout.bundle_dir / f"{CHILD}.md").fm_data()
+    assert "worktree" not in child and "branch" not in child
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_malformed_repo_note_survives_preview_apply_and_replay(tmp_path: Path, dry_run: bool) -> None:
+    layout = _vault(tmp_path)
+    document = load(layout.bundle_dir / f"{CHILD}.md")
+    document.set("repo", 42)
+    document.save()
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    by_path = {item.path: item for item in items}
+    expected = placement.resolve_item_repo(layout, by_path[CHILD], by_path).note
+    assert expected
+    preview = _record(layout, dry_run=True)
+    assert preview.repo_note == expected
+    if dry_run:
+        assert _record(layout, dry_run=True).repo_note == expected
+    assert _record(layout).repo_note == expected
+    assert _record(layout).repo_note == expected
+
+
+def test_zero_repositories_propagate_note_without_refusal(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    text = layout.manifest_path.read_text(encoding="utf-8")
+    seeded = 'repositories:\n  "repo":\n    path: ".."\n'
+    assert seeded in text
+    layout.manifest_path.write_text(text.replace(seeded, "repositories: {}\n"), encoding="utf-8")
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    by_path = {item.path: item for item in items}
+    expected = placement.resolve_item_repo(layout, by_path[CHILD], by_path).note
+    assert expected
+    before = _snapshot(layout)
+    preview = _record(layout, dry_run=True)
+    assert preview.plan.refusal is None and preview.repo_note == expected
+    assert _snapshot(layout) == before
+    applied = _record(layout)
+    assert applied.written and applied.repo_note == expected
+    replay = _record(layout)
+    assert replay.plan.refusal is None and not replay.plan.changed
+    assert replay.repo_note == expected and not replay.written
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+@pytest.mark.parametrize(
+    ("kwargs", "refusal"),
+    [
+        ({"path": NESTED, "root": EPIC, "phase": "plan"}, "read-only-descendant"),
+        ({"phase": "finish"}, "phase-mismatch"),
+        ({"root": SOLO}, "outside-root"),
+        ({"root": "work/nope"}, "unknown-root"),
+        ({"path": "work/nope"}, "unknown-path"),
+        ({"branch": "refs/heads/" + BR}, "invalid-pair"),
+        ({"phase": "done"}, "invalid-phase"),
+    ],
+)
+def test_structural_refusal_precedes_ambiguous_repository(
+    tmp_path: Path, kwargs: _RecordOverrides, refusal: str, dry_run: bool
+) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    before = _snapshot(layout)
+    record = _record(layout, dry_run=dry_run, **kwargs)
+    assert record.plan.refusal == refusal
+    assert record.application is None and not record.written
+    assert _snapshot(layout) == before
+
+
+@pytest.mark.parametrize("dry_run", [True, False], ids=["preview", "live"])
+@pytest.mark.parametrize("bad_path", [CHILD, EPIC])
+def test_invalid_item_precedes_ambiguous_repository(tmp_path: Path, bad_path: str, dry_run: bool) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    page = layout.bundle_dir / f"{bad_path}.md"
+    page.write_bytes(page.read_bytes().replace(b"phase: execute\n", b"phase: 17\n"))
+    before = _snapshot(layout)
+
+    record = _record(layout, dry_run=dry_run)
+
+    assert record.plan.refusal == "invalid-item"
+    assert bad_path in record.plan.detail and "phase" in record.plan.detail
+    assert record.plan.changes == () and not record.plan.changed
+    assert record.application is None and not record.written
+    assert _snapshot(layout) == before
+
+
+@pytest.mark.parametrize("dry_run", [True, False])
+def test_terminal_refusal_precedes_ambiguous_repository(tmp_path: Path, dry_run: bool) -> None:
+    layout = _vault(tmp_path)
+    _write(layout, CHILD, type="Feature", phase="done", work_status="resolved")
+    _declare_two_repos(layout, tmp_path)
+    before = _snapshot(layout)
+    record = _record(layout, phase="finish", dry_run=dry_run)
+    assert record.plan.refusal == "terminal"
+    assert record.application is None and not record.written
+    assert _snapshot(layout) == before
+
+
 def test_a_repo_name_selects_among_several_declared_repos(tmp_path: Path) -> None:
     layout = _vault(tmp_path)
     _declare_two_repos(layout, tmp_path)
@@ -520,3 +861,243 @@ def test_a_selected_repo_lacking_affects_needs_every_declared_repo_when_the_base
     assert record.application is not None, record.plan.refusal
     assert record.application.ok, record.application.failures
     assert record.written
+
+
+def _tag(layout: WorkspaceLayout, path: str, repo: str) -> None:
+    document = load(layout.bundle_dir / f"{path}.md")
+    document.set("repo", repo)
+    document.save()
+
+
+def _child(layout: WorkspaceLayout) -> WorkItem:
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    return next(item for item in items if item.path == CHILD)
+
+
+def test_a_tagged_item_records_without_a_repo_name(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = _record(layout)
+    assert record.written and record.plan.repo is None
+
+
+def test_repo_naming_another_repository_writes_repo_stamps(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui", dry_run=False
+    )
+    assert record.written and record.plan.repo == "ui"
+    child = _child(layout)
+    assert child.worktree is None
+    assert dict(child.repo_stamps) == {"ui": Stamp(WT, BR)}
+
+
+def test_repo_naming_the_item_s_own_repository_writes_the_scalar_pair(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="code", dry_run=False
+    )
+    assert record.written and record.plan.repo is None
+    child = _child(layout)
+    assert (child.worktree, child.branch) == (WT, BR)
+    assert dict(child.repo_stamps) == {}
+
+
+def test_repo_naming_an_undeclared_repository_refuses(tmp_path: Path) -> None:
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    with pytest.raises(WorkspaceError, match="nope"):
+        placement.run_record_placement(
+            layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="nope", dry_run=False
+        )
+
+
+def test_a_dry_run_with_repo_plans_the_foreign_target(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    record = placement.run_record_placement(
+        layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui", dry_run=True
+    )
+    assert record.plan.repo == "ui" and record.application is None
+
+
+def test_preparation_guard_records_only_unchanged_owner(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    guard = placement.preparation_guard(layout, EPIC)
+    result = placement.run_record_placement(
+        layout,
+        EPIC,
+        root=EPIC,
+        phase="execute",
+        worktree=WT,
+        branch=BR,
+        today=TODAY,
+        dry_run=False,
+        expected_preparation=guard,
+    )
+    assert result.written
+    with pytest.raises(placement.WorkspaceError, match="preparation changed"):
+        placement.run_record_placement(
+            layout,
+            EPIC,
+            root=EPIC,
+            phase="execute",
+            worktree=WT,
+            branch="different",
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=guard,
+        )
+
+
+@pytest.mark.parametrize("change", ["phase", "work_status", "repo", "stamp", "manifest"])
+def test_preparation_guard_refuses_changed_inputs(tmp_path: Path, change: str) -> None:
+    layout = _vault(tmp_path)
+    guard = placement.preparation_guard(layout, NESTED)
+    page = layout.bundle_dir / f"{NESTED}.md"
+    document = load(page)
+    if change == "manifest":
+        with layout.manifest_path.open("a", encoding="utf-8", newline="") as stream:
+            stream.write("\n# changed\n")
+    else:
+        key, value = {
+            "phase": ("phase", "execute"),
+            "work_status": ("work_status", "resolved"),
+            "repo": ("repo", "other"),
+            "stamp": ("branch", "other"),
+        }[change]
+        document.set(key, value)
+        page.write_text(document.serialize(), encoding="utf-8", newline="")
+    with pytest.raises(placement.WorkspaceError, match="preparation changed"):
+        placement.run_record_placement(
+            layout,
+            NESTED,
+            root=NESTED,
+            phase="plan",
+            worktree=WT,
+            branch=BR,
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=guard,
+        )
+
+
+def test_guarded_preparation_binds_inherited_assignment(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    guard = placement.preparation_guard(layout, NESTED)
+    page = layout.bundle_dir / f"{EPIC}.md"
+    document = load(page)
+    document.set("repo", "other")
+    page.write_text(document.serialize(), encoding="utf-8", newline="")
+    with pytest.raises(placement.WorkspaceError, match="preparation changed"):
+        placement.run_record_placement(
+            layout,
+            NESTED,
+            root=NESTED,
+            phase="plan",
+            worktree=WT,
+            branch=BR,
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=guard,
+        )
+
+
+def test_preparation_adapter_records_foreign_anchor_with_owner_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+    import runpy
+    import sys
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    adapter = Path(__file__).resolve().parents[4] / "plugins/gw/skills/auto-drive/references/record-preparation.py"
+    common = [str(adapter), "snapshot", "--workspace", str(layout.root), "--owner", EPIC]
+    monkeypatch.setattr(sys, "argv", common)
+    runpy.run_path(str(adapter), run_name="__main__")
+    guard = json.loads(capsys.readouterr().out)["guard"]
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(adapter),
+            "record",
+            *common[2:],
+            "--root",
+            EPIC,
+            "--phase",
+            "execute",
+            "--repo",
+            "ui",
+            "--worktree",
+            WT,
+            "--branch",
+            BR,
+            "--expected",
+            guard,
+        ],
+    )
+    runpy.run_path(str(adapter), run_name="__main__")
+    assert json.loads(capsys.readouterr().out)["written"] is True
+    owner = next(item for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE)) if item.path == EPIC)
+    assert owner.repo_stamps["ui"] == Stamp(WT, BR)
+    assert owner.worktree is None
+
+
+def test_preparation_runtime_runs_real_adapter_from_external_cwd(tmp_path: Path) -> None:
+    import json
+    import runpy
+    import subprocess
+
+    layout = _vault(tmp_path)
+    helper = Path(__file__).resolve().parents[4] / "plugins/gw/skills/auto-drive/references/launch-worker.py"
+    functions = runpy.run_path(str(helper))
+    argv = functions["preparation_runtime"]()
+    result = subprocess.run(
+        [*argv, "snapshot", "--workspace", str(layout.root), "--owner", EPIC],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["guard"] == placement.preparation_guard(layout, EPIC)
+    recorded = subprocess.run(
+        [
+            *argv,
+            "record",
+            "--workspace",
+            str(layout.root),
+            "--owner",
+            EPIC,
+            "--root",
+            EPIC,
+            "--phase",
+            "execute",
+            "--repo",
+            "repo",
+            "--worktree",
+            WT,
+            "--branch",
+            BR,
+            "--expected",
+            json.loads(result.stdout)["guard"],
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert recorded.returncode == 0, recorded.stderr
+    assert json.loads(recorded.stdout)["written"] is True

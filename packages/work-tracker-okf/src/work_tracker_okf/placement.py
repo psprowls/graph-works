@@ -24,7 +24,7 @@ observation to the current attempt is the coordinator's job.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import date
 from pathlib import PurePath
@@ -73,6 +73,9 @@ class PlacementPlan:
     changes: tuple[tuple[str, object], ...]
     refusal: PlacementRefusal | None
     detail: str
+    repo: str | None = None
+    """`None` is the scalar pair; a name is `repo_stamps[name]`, passed only
+    for a repository other than the item's own."""
 
     @property
     def changed(self) -> bool:
@@ -88,16 +91,21 @@ def plan_placement(
     worktree: str,
     branch: str,
     today: date,
+    repo: str | None = None,
 ) -> PlacementPlan:
     """Plan recording (*worktree*, *branch*) on *path* for a *phase* dispatch
     of the subtree rooted at *root*. Mutates nothing, reads no clock."""
     index = {item.path: item for item in items}
     item = index.get(path)
-    before = (item.worktree, item.branch) if item is not None else (None, None)
+    if item is None or repo is None:
+        before = (item.worktree, item.branch) if item is not None else (None, None)
+    else:
+        stamp = item.repo_stamps.get(repo)
+        before = (stamp.worktree, stamp.branch) if stamp is not None else (None, None)
     after = (worktree, branch)
 
     def refused(reason: PlacementRefusal, detail: str, current: str | None = None) -> PlacementPlan:
-        return PlacementPlan(path, root, phase, current, before, after, (), reason, detail)
+        return PlacementPlan(path, root, phase, current, before, after, (), reason, detail, repo)
 
     if item is None:
         return refused("unknown-path", f"unknown work item {path!r}")
@@ -109,9 +117,15 @@ def plan_placement(
         problem = _item_problem(candidate)
         if problem is not None:
             return refused("invalid-item", problem, item.phase)
+    if repo is not None and "repo_stamps" in item.invalid_optional_fields:
+        return refused(
+            "invalid-item",
+            f"{path} has a malformed repo_stamps; repair it before recording a placement for {repo!r}",
+            item.phase,
+        )
     if phase not in _DISPATCH_PHASES:
         return refused("invalid-phase", f"{phase!r} is not a dispatchable phase", item.phase)
-    problem = _pair_problem(worktree, branch)
+    problem = _pair_problem(worktree, branch, repo)
     if problem is not None:
         return refused("invalid-pair", problem, item.phase)
     if path != root and phase not in CODE_PHASES:
@@ -141,14 +155,38 @@ def plan_placement(
     if changes and item.updated != today.isoformat():
         # A `date`, not an ISO string: ruamel would quote a string that re-parses as a date.
         changes.append(("updated", today))
-    return PlacementPlan(path, root, phase, current, before, after, tuple(changes), None, "")
+    return PlacementPlan(path, root, phase, current, before, after, tuple(changes), None, "", repo)
 
 
 def apply_placement(document: Document, plan: PlacementPlan) -> None:
-    """Write *plan* into *document*. Nothing else on the page is touched."""
+    """Write *plan* into *document*. Nothing else on the page is touched.
+
+    A foreign-repository plan (`plan.repo` set) writes its pair under
+    `repo_stamps[plan.repo]`, leaving the scalar pair and every other entry
+    as they were; `updated` stays top-level either way.
+    """
     assert plan.refusal is None, f"refused placement ({plan.refusal}) must not be applied"
+    if plan.repo is None:
+        for key, value in plan.changes:
+            document.set(key, value)
+        return
+    pair = {key: value for key, value in plan.changes if key in ("worktree", "branch")}
+    if pair:
+        stamps = document.fm_raw.get("repo_stamps")
+        fresh = {"worktree": plan.after[0], "branch": plan.after[1]}
+        if not isinstance(stamps, MutableMapping):
+            document.set("repo_stamps", {plan.repo: fresh})
+        else:
+            entry = stamps.get(plan.repo)
+            if isinstance(entry, MutableMapping):
+                for key, value in pair.items():
+                    entry[key] = value
+            else:
+                stamps[plan.repo] = fresh
+            document.mark_dirty()
     for key, value in plan.changes:
-        document.set(key, value)
+        if key == "updated":
+            document.set(key, value)
 
 
 def _item_problem(item: WorkItem) -> str | None:
@@ -158,8 +196,9 @@ def _item_problem(item: WorkItem) -> str | None:
     tolerant projection is not. Routing alone proves a missing phase's entry.
     Holds and dependency gates do not invalidate a recorded phase.
     """
-    if item.invalid_optional_fields:
-        fields = ", ".join(item.invalid_optional_fields)
+    lossy = tuple(field for field in item.invalid_optional_fields if field in {"phase", "effort"})
+    if lossy:
+        fields = ", ".join(lossy)
         return f"{item.path} has invalid {fields}; expected nonempty text or null; repair it first"
     for field, value, allowed in (
         ("type", item.type, TYPES),
@@ -190,7 +229,9 @@ def _entry_phase(items: Sequence[WorkItem], item: WorkItem) -> str | None:
     return result.on_dispatch.phase
 
 
-def _pair_problem(worktree: str, branch: str) -> str | None:
+def _pair_problem(worktree: str, branch: str, repo: str | None = None) -> str | None:
+    if repo is not None and (not repo or repo != repo.strip() or "\n" in repo or "\r" in repo):
+        return f"repo {repo!r} is blank or carries surrounding whitespace or a line break"
     if not worktree or not branch:
         return "both --worktree and --branch are required and nonempty"
     for label, value in (("worktree", worktree), ("branch", branch)):

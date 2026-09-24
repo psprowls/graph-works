@@ -223,7 +223,10 @@ def test_an_incomplete_apply_over_http_is_500(tmp_path: Path) -> None:
 
     spec = replace(mutation_specs.ADVANCE, route="/v1/test/faulty", project=faulty)
     layout = serve_workspace(tmp_path)
-    write_item(layout, "work/feature-scratch", work_status="open", phase="design")
+    write_item(layout, "work/feature-scratch", work_status="open", phase="design", effort="small")
+    artifact = layout.bundle_dir / "work/feature-scratch/references/01-design.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# Design\n", encoding="utf-8", newline="")
     http, headers = make_client(layout, routes=(*routes.ROUTES, *routes.mutation_routes(spec)))
     planned = http.post("/v1/test/faulty/plan", json={"path": "work/feature-scratch"}, headers=headers)
     assert planned.status_code == 200

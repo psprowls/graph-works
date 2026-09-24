@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -116,9 +116,10 @@ from graph_works_core.workspace.dispatch import (
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repos
-from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
+from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, only_stale_inventory
 
 
 def _digest(content: bytes) -> str:
@@ -243,14 +244,17 @@ def run_file(
     version: str | None = None,
     target_date: date | None = None,
     owner: str | None = None,
+    repo: str | None = None,
     parent_path: str | None = None,
     depends_on: Sequence[DependencyEdge] = (),
     affects: Sequence[str] = (),
     tags: Sequence[str] = (),
     dry_run: bool = True,
 ) -> FilingRun:
-    """Plan one graph-aware page/index/log filing and optionally apply it."""
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    """Plan one graph-aware page/index/log filing and optionally apply it.
+
+    Re-plans after a concurrent sibling advance (see `_until_inventory_current`).
+    """
     seed = FilingSeed(
         type=type,
         title=title,
@@ -262,29 +266,32 @@ def run_file(
         version=version,
         target_date=target_date,
         owner=owner,
+        repo=repo,
         parent_path=parent_path,
         depends_on=tuple(depends_on),
         affects=tuple(affects),
         tags=tuple(tags),
     )
-    outcome = plan_file_and_reconcile(
-        bundle,
-        load_items(bundle),
-        seed,
-        load_sections(config.declarations_dir / SECTIONS_DIRNAME),
-    )
-    if dry_run or outcome.plan.refusal is not None:
-        return FilingRun(plan=outcome.plan)
+    sections = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
 
-    return FilingRun(
-        plan=outcome.plan,
-        application=apply_mutation(
-            layout,
-            _filing_mutation(bundle, outcome.plan),
-            repo_roots=_repo_roots(layout),
-            baseline_bundle=bundle,
-        ),
-    )
+    def attempt() -> FilingRun:
+        bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+        outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed, sections)
+        if dry_run or outcome.plan.refusal is not None:
+            return FilingRun(plan=outcome.plan)
+        return FilingRun(
+            plan=outcome.plan,
+            application=apply_mutation(
+                layout,
+                _filing_mutation(bundle, outcome.plan),
+                repo_roots=_repo_roots(layout),
+                baseline_bundle=bundle,
+            ),
+        )
+
+    # A sibling advance between planning the parent's lane index and the
+    # locked apply rolls the filing back as stale; re-plan from a fresh load.
+    return _until_inventory_current(attempt, lambda run: run.application)
 
 
 @dataclass(frozen=True, slots=True)
@@ -534,6 +541,7 @@ class NextResult:
     dispatch_preflight: str | None = None
     application: NextApplication = NextApplication()
     warnings: tuple[str, ...] = ()
+    finish_targets: tuple[FinishTarget, ...] = ()
 
 
 def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNormalization | None:
@@ -677,7 +685,11 @@ def _plan_route(bundle: Bundle, items: Sequence[WorkItem], path: str, *, descend
 def _plan_next(layout: WorkspaceLayout, path: str, *, descend: bool) -> tuple[NextResult, Bundle, WorkItem]:
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    preview, selected = _plan_route(bundle, tuple(load_items(bundle)), path, descend=descend)
+    items = tuple(load_items(bundle))
+    preview, selected = _plan_route(bundle, items, path, descend=descend)
+    if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
+        finish = resolve_finish_targets(layout, items, preview.selected_path)
+        preview = replace(preview, finish_targets=finish.targets, dispatch_preflight="; ".join(finish.blockers) or None)
     return preview, bundle, selected
 
 
@@ -704,7 +716,9 @@ def run_next(
     preview, bundle, selected = _plan_next(layout, path, descend=descend)
     if dry_run:
         resolution, preflight = _resolve_next_dispatch(layout, preview.state, preview.route)
-        return replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)
+        return replace(
+            preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
+        )
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
@@ -724,7 +738,7 @@ def run_next(
     return replace(
         preview,
         dispatch_resolution=resolution,
-        dispatch_preflight=preflight,
+        dispatch_preflight=preview.dispatch_preflight or preflight,
         state=persisted_state,
         route=persisted_route,
         child_rollup=persisted_state.child_rollup,
@@ -963,13 +977,36 @@ def _legacy_marker_strips(
     return tuple(strips), tuple(warnings)
 
 
-def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> RegenIndexesResult:
-    """Reconcile every required root and parent-owned work lane.
+#: How many times a lane-index-writing run applies before it reports a
+#: stale-inventory rollback as-is. Each retry follows a sibling write that has
+#: already committed, so under auto-drive's normal concurrency a third
+#: collision in a row is not expected; the bound only rules out livelock.
+STALE_INVENTORY_ATTEMPTS = 3
 
-    The same run also migrates every other `work/` index still carrying the
-    legacy marker lines, stripping only those lines (see
-    `_legacy_marker_strips`).
+
+def _until_inventory_current[R](run: Callable[[], R], application_of: Callable[[R], MutationApplication | None]) -> R:
+    """Run *run* (load, plan, apply) until its application is not a
+    stale-inventory rollback, at most `STALE_INVENTORY_ATTEMPTS` times.
+
+    Such a writer plans lane indexes from item pages it read *before* taking
+    the bundle lock, and its preconditions cover only the index bytes. A
+    sibling's `gw work advance` rewrites only its own page, so it passes
+    preflight, and the postcondition rolls the write back. Re-planning from a
+    fresh load is the fix. Every other outcome -- success, a dry run, a
+    refusal, any other failure -- returns at once. The same approach as
+    `work_tracker_okf.decisions._apply_until_current`.
     """
+    result = run()
+    for _ in range(STALE_INVENTORY_ATTEMPTS - 1):
+        application = application_of(result)
+        if application is None or not only_stale_inventory(application):
+            return result
+        result = run()
+    return result
+
+
+def _regen_indexes_once(layout: WorkspaceLayout, *, dry_run: bool) -> RegenIndexesResult:
+    """One load, plan and (unless `dry_run`) apply of `run_regen_indexes`."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
     lane_preconditions = _absent_index_lane_preconditions(bundle.root, items)
@@ -997,6 +1034,23 @@ def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> Regen
         None if dry_run else apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
     )
     return RegenIndexesResult(plans=plans, mutation=mutation, application=application, marker_strips=marker_strips)
+
+
+def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> RegenIndexesResult:
+    """Reconcile every required root and parent-owned work lane.
+
+    The same run also migrates every other `work/` index still carrying the
+    legacy marker lines, stripping only those lines (see
+    `_legacy_marker_strips`).
+
+    A sibling advance that lands between the plan and its locked apply makes
+    the postcondition roll the write back as stale; the run then re-plans from
+    a fresh load (`_until_inventory_current`). The result is the last attempt.
+    """
+    return _until_inventory_current(
+        lambda: _regen_indexes_once(layout, dry_run=dry_run),
+        lambda result: result.application,
+    )
 
 
 @dataclass(frozen=True, slots=True)

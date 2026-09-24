@@ -368,6 +368,7 @@ class FakeOrca:
         self.worker_page_has_more: dict[int, bool] = {}
         self.worker_page_totals: dict[int, object] = {}
         self.show_ok = True
+        self.dispatch_meta: dict[str, dict[str, object]] = {}
         self.commits: set[str] = {COMMIT}
         self.calls: list[list[str]] = []
 
@@ -402,7 +403,23 @@ class FakeOrca:
             "resource": {"releaseState": self.release_state},
             "projection": {"liveness": self.liveness},
         }
-        return [row, *self.extra_workers]
+        # Real worker-list is newest first; `extra_workers` is appended oldest
+        # to newest, so each later entry is a newer attempt of the same Task.
+        return [*reversed(self.extra_workers), row]
+
+    def dispatch(self, dispatch_id: str) -> dict[str, object]:
+        """worker-show's `result.dispatch`: creation order and the retry chain."""
+        order = [DISPATCH, *(str(row["dispatchId"]) for row in self.extra_workers)]
+        position = order.index(dispatch_id) if dispatch_id in order else 0
+        value: dict[str, object] = {
+            "id": dispatch_id,
+            "taskId": TASK,
+            "runId": RUN,
+            "createdAt": f"2026-09-13 20:{position:02d}:00",
+            "retryOfDispatchId": order[position - 1] if position else None,
+        }
+        value.update(self.dispatch_meta.get(dispatch_id, {}))
+        return value
 
     def workers(self, cursor: str | None = None) -> dict[str, object]:
         rows = self.worker_rows()
@@ -449,6 +466,7 @@ class FakeOrca:
                 "id": "show",
                 "ok": self.show_ok,
                 "result": {
+                    "dispatch": self.dispatch(argv[argv.index("--dispatch") + 1]),
                     "worker": {
                         "state": self.worker_state,
                         "startOptions": {"launch": RECEIPT},
@@ -978,6 +996,61 @@ class RestartTests(RecoveryFixture):
                         "recovery": {"checkpoint": checkpoint, "reason": reason},
                     },
                 )
+
+    def retried_twice(self) -> None:
+        """The run_7de888bf105a incident: abandoned root, failed retry, live retry-of-retry."""
+        self.orca.worker_state, self.orca.dispatch_status = "abandoned", "failed"
+        self.orca.liveness = {"verdict": "exited", "source": "resource_release"}
+        self.orca.extra_workers.append(
+            dict(RETRY_ROW, dispatchId="ctx_second", workerState="failed", dispatchStatus="failed")
+        )
+        self.orca.extra_workers.append(dict(RETRY_ROW))
+
+    def test_a_retried_task_classifies_on_its_newest_dispatch(self):
+        # worker-list is newest first; the last row is the oldest attempt, so
+        # taking it routes a running retry into recovery inspection.
+        self.retried_twice()
+        self.assertEqual(
+            self.classify(records=[])[TASK],
+            {"task_id": TASK, "dispatch_id": "ctx_retry", "action": "live"},
+        )
+
+    def test_the_retry_chain_breaks_a_created_at_tie(self):
+        self.retried_twice()
+        for dispatch_id in (DISPATCH, "ctx_second", "ctx_retry"):
+            self.orca.dispatch_meta[dispatch_id] = {"createdAt": "2026-09-13 20:00:00"}
+        self.assertEqual(self.classify(records=[])[TASK]["dispatch_id"], "ctx_retry")
+
+    def test_list_order_that_disagrees_with_creation_order_is_ambiguous(self):
+        self.retried_twice()
+        self.orca.dispatch_meta[DISPATCH] = {"createdAt": "2026-09-13 21:00:00"}
+        self.assertEqual(
+            self.classify(records=[])[TASK],
+            {
+                "task_id": TASK,
+                "dispatch_id": "ctx_retry",
+                "action": "recovery-inspection",
+                "recovery": {"checkpoint": None, "reason": "latest-attempt-ambiguous"},
+            },
+        )
+
+    def test_a_retried_row_that_is_itself_retried_is_ambiguous(self):
+        self.retried_twice()
+        self.orca.dispatch_meta[DISPATCH] = {"retryOfDispatchId": "ctx_retry"}
+        self.assertEqual(
+            self.classify(records=[])[TASK]["recovery"]["reason"], "latest-attempt-ambiguous"
+        )
+
+    def test_an_unreadable_attempt_on_a_retried_task_is_ambiguous(self):
+        self.retried_twice()
+        self.orca.show_ok = False
+        self.assertEqual(
+            self.classify(records=[])[TASK]["recovery"]["reason"], "latest-attempt-ambiguous"
+        )
+
+    def test_a_single_attempt_task_needs_no_ordering_read(self):
+        self.classify(records=[])
+        self.assertEqual([call for call in self.orca.calls if call[2] == "worker-show"], [])
 
     def test_a_parked_task_is_not_reported_as_a_deliberate_skip(self):
         # §2.5.2's worker-stop leaves exactly the deliberate-skip signature --

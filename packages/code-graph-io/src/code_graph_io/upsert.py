@@ -24,8 +24,11 @@ def _serialize(attrs: dict[str, Any]) -> str | None:
 
 
 # Connection-scoped current member repo URI (sqlite3.Connection forbids
-# arbitrary attributes, so key by id(conn)). Set/cleared by set_current_repo.
-_CURRENT_REPO: dict[int, str] = {}
+# arbitrary attributes and weak references, so key by id(conn)). Each entry
+# holds its connection and lookups match by identity: a bare id is reused once
+# a never-cleared connection is freed, which would hand its stale scope to an
+# unrelated connection. Set/cleared by set_current_repo.
+_CURRENT_REPO: dict[int, tuple[sqlite3.Connection, str]] = {}
 
 
 def _current_repo(conn: sqlite3.Connection) -> str | None:
@@ -39,7 +42,8 @@ def _current_repo(conn: sqlite3.Connection) -> str | None:
     parents and violate the strict-tree invariant). None → identical to the
     historical single-repo behavior.
     """
-    return _CURRENT_REPO.get(id(conn))
+    entry = _CURRENT_REPO.get(id(conn))
+    return entry[1] if entry is not None and entry[0] is conn else None
 
 
 def set_current_repo(conn: sqlite3.Connection, repo_uri: str | None) -> None:
@@ -47,7 +51,7 @@ def set_current_repo(conn: sqlite3.Connection, repo_uri: str | None) -> None:
     if repo_uri is None:
         _CURRENT_REPO.pop(id(conn), None)
     else:
-        _CURRENT_REPO[id(conn)] = repo_uri
+        _CURRENT_REPO[id(conn)] = (conn, repo_uri)
 
 
 def _node_id(conn: sqlite3.Connection, key: NodeKey) -> int | None:

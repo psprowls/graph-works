@@ -58,6 +58,7 @@ from graph_works_core.workspace.dispatch import (
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.finish import FinishPlan, FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import checked_bool, checked_int
 from graph_works_core.workspace.provenance import default_base, run_git
@@ -154,6 +155,7 @@ class OrchestratePlan:
     dispatch_resolutions: Mapping[str, DispatchResolution] = MappingProxyType({})
     dispatch_repos: Mapping[str, ItemRepo] = MappingProxyType({})
     preparations: tuple[AnchorPreparation, ...] = ()
+    finish_targets: Mapping[str, tuple[FinishTarget, ...]] = MappingProxyType({})
 
 
 #: The character budget for a session name. Orca renders it in a task row and
@@ -851,6 +853,7 @@ def plan(
     repo_refusals: Mapping[str, BlockedItem] = MappingProxyType({}),
     item_repos: Mapping[str, ItemRepo] | None = None,
     repo_contexts: Mapping[str, RepositoryContext] | None = None,
+    finish_plans: Mapping[str, FinishPlan] = MappingProxyType({}),
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
@@ -976,6 +979,12 @@ def plan(
             uncertain_live_affects.update(item.affects)
         identity = context.identity if context is not None else "<legacy>"
         live_affects.update((identity, member) for member in item.affects)
+        live_finish = finish_plans.get(item.path)
+        for target in live_finish.targets if live_finish is not None else ():
+            target_context = contexts_by_path.get(str(target.repo.path))
+            target_identity = target_context.identity if target_context else str(target.repo.path)
+            live_affects.update((target_identity, member) for member in item.affects)
+            live_worktree_owners.setdefault(target.worktree, set()).add(item.path)
         if item.worktree:
             live_worktree_owners.setdefault(item.worktree, set()).add(item.path)
 
@@ -1010,11 +1019,20 @@ def plan(
     dispatches: list[PlannedDispatch] = []
     resolutions: dict[str, DispatchResolution] = {}
     dispatch_repos: dict[str, ItemRepo] = {}
+    finish_targets: dict[str, tuple[FinishTarget, ...]] = {}
     preparations: dict[tuple[str, str], AnchorPreparation] = {}
     for item, result in candidates:
         repo_refusal = repo_refusals.get(item.path)
         if repo_refusal is not None:
             blocked.append(repo_refusal)
+            continue
+        finish = finish_plans.get(item.path)
+        if finish is not None and finish.blockers:
+            blocked.append(BlockedItem(item.path, "worktree-unprovable", "; ".join(finish.blockers)))
+            continue
+        targets = finish.targets if finish is not None else ()
+        if any(t.worktree in accepted_worktrees or t.worktree in live_worktree_owners for t in targets):
+            blocked.append(BlockedItem(item.path, "worktree-pending", "a finish target is occupied by another worker"))
             continue
         item_repo, context = evidence(item)
         if item_repos is not None and (item_repo is None or (item_repo.path is not None and context is None)):
@@ -1022,6 +1040,12 @@ def plan(
             continue
         identity = context.identity if context is not None else "<legacy>"
         affects = {(identity, member) for member in item.affects}
+        for target in targets:
+            target_context = next(
+                (c for c in (repo_contexts or {}).values() if str(target.repo.path) in c.checkout_usable_by_path), None
+            )
+            target_identity = target_context.identity if target_context else str(target.repo.path)
+            affects.update((target_identity, member) for member in item.affects)
         if not affects:
             blocked.append(
                 BlockedItem(
@@ -1086,7 +1110,7 @@ def plan(
         local_epic_path = epic_worktree_path
         local_epic_branch = epic_branch
         local_repo_known = repo_known
-        if context is not None:
+        if context is not None and not targets:
             local_exists = context.path_exists
             selected_path = str(item_repo.path) if item_repo and item_repo.path else context.path
             usable = context.checkout_usable_by_path.get(
@@ -1184,6 +1208,15 @@ def plan(
             placement_item = replace(item, phase=None)
             placement_root = True
             local_epic_branch = branch_name(item.path, item.type)
+        if targets:
+            first = targets[0]
+            item_repo = first.repo
+            placement_item = replace(item, worktree=first.worktree, branch=first.source_branch)
+            local_exists = {first.worktree: True}
+            local_inventory = {first.source_branch: first.worktree}
+            local_base = first.target_branch
+            local_epic_branch = first.target_branch
+            local_epic_path = None
         action, claimed_now = _resolve_worktree(
             placement_item,
             epic_worktree_path=local_epic_path,
@@ -1257,6 +1290,8 @@ def plan(
         merge_target = local_epic_branch if has_integration_owner else local_base
         key = session_name(item.path, item.type, phase)
         resolutions[key] = resolution
+        finish_targets[key] = targets
+        accepted_worktrees.update(t.worktree for t in targets)
         if item_repo is not None:
             dispatch_repos[key] = item_repo
         dispatches.append(
@@ -1299,6 +1334,7 @@ def plan(
         dispatch_resolutions=MappingProxyType(resolutions),
         dispatch_repos=MappingProxyType(dispatch_repos),
         preparations=tuple(preparations.values()),
+        finish_targets=MappingProxyType(finish_targets),
     )
 
 
@@ -1369,6 +1405,10 @@ class OrchestrateResult:
     @property
     def dispatch_repos(self) -> Mapping[str, ItemRepo]:
         return self.plan.dispatch_repos
+
+    @property
+    def finish_targets(self) -> Mapping[str, tuple[FinishTarget, ...]]:
+        return self.plan.finish_targets
 
     @property
     def preparations(self) -> tuple[AnchorPreparation, ...]:
@@ -1638,6 +1678,19 @@ def run_orchestrate(
             for item in items
         )
 
+    subtree_paths = {path, *(item.path for item in _descendants(items, path))}
+    finish_plans = {
+        item.path: resolve_finish_targets(
+            layout,
+            items,
+            item.path,
+            single_repo=root_repo if repo is not None else None,
+            repo_contexts=repo_contexts or {},
+        )
+        for item in items
+        if item.path in subtree_paths and item.phase == "finish"
+    }
+
     computed = plan(
         planning_items,
         path,
@@ -1661,6 +1714,7 @@ def run_orchestrate(
         repo_refusals=repo_refusals,
         item_repos=item_repos,
         repo_contexts=repo_contexts,
+        finish_plans=finish_plans,
     )
 
     decisions = _resolve_decisions(items, bundle.root, path)

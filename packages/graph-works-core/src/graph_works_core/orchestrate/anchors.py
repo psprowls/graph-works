@@ -9,6 +9,7 @@ from pathlib import PurePath
 from subagents_io.dispatch import WorktreeAction
 from work_tracker_okf.items import WorkItem
 
+from graph_works_core.workspace.finish import enclosing_owner as enclosing_owner
 from graph_works_core.workspace.repo_context import RepositoryContext
 from graph_works_core.workspace.repos import ItemRepo
 
@@ -40,22 +41,6 @@ def integration_branch(owner_path: str, owner_type: str) -> str:
     from .commands import branch_name
 
     return branch_name(owner_path, owner_type)
-
-
-def enclosing_owner(item: WorkItem, items: Mapping[str, WorkItem]) -> WorkItem | None:
-    parent = item.parent_path
-    seen: set[str] = set()
-    while parent and parent not in seen:
-        seen.add(parent)
-        owner = items.get(parent)
-        if owner is None:
-            return None
-        if owner.type in {"Epic", "Release"} or (
-            owner.type == "Feature" and (owner.active_child_paths or owner.archived_child_paths)
-        ):
-            return owner
-        parent = owner.parent_path
-    return None
 
 
 def select_anchor(

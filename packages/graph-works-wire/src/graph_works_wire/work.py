@@ -39,6 +39,7 @@ from graph_works_core.work.commands import (
 )
 from graph_works_core.work.reconcile import ReconcileContext
 from graph_works_core.workspace.dispatch import DispatchResolution
+from graph_works_core.workspace.finish import FinishTarget
 
 from graph_works_wire._jsonable import jsonable
 from graph_works_wire.config import rule_payload
@@ -292,6 +293,19 @@ def _usable_on_dispatch(result: NextResult) -> Transition | None:
     return None if result.dispatch_preflight is not None else result.route.on_dispatch
 
 
+def _finish_target(target: FinishTarget) -> dict[str, Any]:
+    return {
+        "repo": {
+            "name": target.repo.name,
+            "path": str(target.repo.path) if target.repo.path else None,
+            "source": target.repo.source,
+        },
+        "worktree": target.worktree,
+        "source_branch": target.source_branch,
+        "target_branch": target.target_branch,
+    }
+
+
 def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     """The `gw work next` contract: phase, status, blockers, on_complete,
     action, normalized, child_rollup -- plus the donor-compatible additions
@@ -304,6 +318,7 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     """
     resolution = _usable_resolution(result)
     return {
+        "finish_targets": [_finish_target(t) for t in result.finish_targets],
         "requested_path": result.requested_path,
         "selected_path": result.selected_path,
         "work_status": result.state.work_status,
@@ -692,6 +707,7 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                     else None,
                     "source": result.dispatch_repos[dispatch.key].source,
                 },
+                "finish_targets": [_finish_target(t) for t in result.plan.finish_targets.get(dispatch.key, ())],
                 "key": dispatch.key,
                 "path": dispatch.slug,
                 "phase": dispatch.phase,

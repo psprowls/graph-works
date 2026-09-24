@@ -247,13 +247,19 @@ resolves an item; the rider leaves the stock skill unmodified.
 
 **Rider.**
 
-> **Merge target.** Read the item's canonical ownership ancestors in the
-> workspace. Use the `branch:` stamp from the nearest Epic or Release ancestor whose frontmatter carries `branch:`
-> as the merge target. If there is no such ancestor (including a root item),
-> use the repository's default base. Use this concrete target as Step 3's base
-> branch, name it, and have the human confirm it before proceeding; do not guess
-> a child's target from `git merge-base`. Integrating a child into its epic's
-> branch resolves the child; merging the epic onward is the parent's finish.
+> **Complete finish targets.** Consume the entire supplied `finish_targets`
+> list in its given order. Each entry names the repository, worktree,
+> source_branch and target_branch. Use that exact target as the stock skill's
+> base branch; never reconstruct targets from scalar frontmatter or fall back
+> to trunk for a missing enclosing anchor. Include tests and the integration
+> choice for every target in one reviewable set. Execute the chosen outcome
+> for each target, collecting pre/post integration commit evidence and merged
+> test results for the workflow-owned receipt. The stock skill does not
+> advance the item. Workflow advances exactly once after every target is
+> verified integrated. Any failed check, conflict, missing evidence or
+> unverified integration holds the entire finish stage; report already
+> integrated targets explicitly because cross-repository atomicity is not
+> promised. PR, keep/hold and discard never resolve the item.
 >
 > **On-target check.** Before Step 4's menu, compare
 > `git branch --show-current` with the confirmed merge target, in any checkout, including a linked worktree.
@@ -271,7 +277,9 @@ resolves an item; the rider leaves the stock skill unmodified.
 > Off target, keep the stock menu with the confirmed merge target as its base.
 > Detached HEAD keeps the stock reduced menu; it cannot confirm integration.
 >
-> **Outcome report.** End the stage with this one line, including after a stop:
+> **Outcome report.** First list every repository target, its outcome, test
+> results and integration evidence. End with this overall outcome line,
+> including after a stop; merge/confirm means the entire set integrated:
 > `Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>`
 >
 > Use `merge` only after a clean merge and green tests on the merged result,

@@ -205,6 +205,17 @@ already be there. If the skill instead wrote elsewhere, move the file to
 
 ### 5. Advance
 
+For a finish dispatch, include the complete `next.finish_targets` list in
+both the attended brief and relay brief: repository, worktree, source branch
+and target branch for every entry. Require test results and an integration
+choice for the entire set. The outcome rows below apply only after **every**
+target has verified integration evidence and green merged-result checks.
+Record that evidence as the workflow-owned finish receipt; missing evidence,
+a conflict or a failed check holds the entire stage. Advance exactly once,
+never once per repository. Preserve Release date requirements. PR, hold/keep
+and discard never resolve. The relay owns its one advance; attended workflow
+owns its one advance after the stock finishing skill returns.
+
 For non-finish stages and satisfied gates, run `gw work advance <work-path>`
 with whatever flags the stage produced (`--effort` if the command demands it).
 Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to the finish-outcome rows below too.

@@ -220,6 +220,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
         repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set=None,
     ) -> transactions.MutationApplication:
         page.write_bytes(external_edit)
         return original(
@@ -229,6 +230,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
             repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", edited_out_of_band)
@@ -284,6 +286,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
         repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set=None,
     ) -> transactions.MutationApplication:
         assert baseline_bundle is not None
         document = baseline_bundle.concepts[CHILD]
@@ -295,6 +298,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
             repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", check_baseline)

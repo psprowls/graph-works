@@ -31,7 +31,7 @@ the example values shown in this skill or in any other document.
 
 ## R1 — Verify tests
 
-Run the project's test suite (same discovery approach as
+For every entry in the supplied `finish_targets` list, run that repository's test suite (same discovery approach as
 `finishing-a-development-branch` Step 1 — `npm test` / `cargo test` /
 `pytest` / `go test ./...`, whichever the repo uses).
 
@@ -43,13 +43,14 @@ body. Wait for the coordinator's instructions before doing anything else.
 
 ## R2 — Detect state
 
-Read the merge target verbatim from the `Auto-drive context:` line in this
-session's dispatch prompt — never guess it via `git merge-base`:
+Read the complete `finish_targets` list supplied by workflow (or from
+`gw work next <work-path> --json`). Each entry supplies repository, worktree,
+source_branch and target_branch. Validate every entry; missing evidence or
+any blocker enters the Escalation path and holds the entire finish stage.
+Use each entry's target_branch verbatim. The scalar Auto-drive merge target
+is context only; it cannot replace this complete set or justify trunk fallback.
 
-```
-Auto-drive context: relay the merge/PR/hold/discard decision via one
-`orca orchestration ask`; merge target is `<branch>`.
-```
+For each target, in its source worktree:
 
 Classify the current git state:
 
@@ -68,10 +69,10 @@ git worktree list --porcelain
   advance" with `resolved_in` = current HEAD SHA (`git rev-parse HEAD`).
   Never merge a branch into itself.
 - **Integration-branch case** (current branch differs from the merge target,
-  not detached): this worker's branch must be merged into the merge target.
+  not detached): this target's source branch must be merged into the merge target.
   That covers a forked child merging into its epic's branch and a stamped Epic or Release root finishing its own integration branch
   into the base its dispatch named. The mechanics are identical, and the
-  target is always the one the `Auto-drive context:` line names. Find the
+  target is always that entry's `target_branch`. Find the
   worktree that has the merge target checked out by scanning
   `git worktree list --porcelain` for the block whose `branch` line reads
   `refs/heads/<merge target>`. The R4 merge executes there, not in this
@@ -79,7 +80,8 @@ git worktree list --porcelain
   enter the **Escalation path**. Never check the target out yourself and
   never merge from this worker's worktree.
 
-**Dirty state has no automated check.** R2 does not run `git status`. Every
+**Dirty state blocks the whole set.** Run `git status --porcelain` in each source
+and target checkout and require clean output. Every
 stage ends with a commit, so uncommitted changes at finish-stage are
 anomalous — if you notice them, enter the **Escalation path** rather than
 proceeding.
@@ -90,9 +92,13 @@ HEAD`; this is `resolved_in` for the trunk-case merge), the
 full commit list with commit count and one-line summary (`git log
 <merge-base>..HEAD --oneline` against the merge target — the full list feeds
 the discard re-ask in R4, the one-line summary feeds the R3 question text),
-and R1's test result.
+and R1's test result, for every repository target.
 
 ## R3 — One ask
+
+Ask once for the entire target set. Include each repository, source/target
+branch, commit summary and test result in the question. The answer applies
+to all targets; remove merge if any target is detached or unverified.
 
 Send exactly one `orca orchestration ask`, using this session's own
 `--from` / `--dispatch-capability` from its dispatch preamble:
@@ -127,6 +133,11 @@ reply in the R5 report — don't guess at unrecognized intent.
 
 ## R4 — Execute the choice
 
+Process each supplied target in order using its own worktree and branches.
+Collect before/after commit evidence and merged-result checks for each
+target. Any conflict or failed check holds the whole stage; explicitly report
+what already integrated. Cross-repository atomicity is not promised.
+
 ### `merge`
 
 - **Trunk case:** no-op merge — the commits are already on the merge
@@ -134,7 +145,7 @@ reply in the R5 report — don't guess at unrecognized intent.
   R2.
 - **Integration-branch case:**
   ```bash
-  git -C <target worktree path from R2> merge <this worker's branch>
+  git -C <target worktree path from R2> merge <this target's source_branch>
   ```
   **Conflicts:** never auto-resolve (parent-epic policy). Enter the
   **Escalation path** with the conflict file list in the body; wait for
@@ -149,7 +160,7 @@ reply in the R5 report — don't guess at unrecognized intent.
 ### `pr`
 
 ```bash
-git push -u origin <this worker's branch>
+git push -u origin <this target's source_branch>
 gh pr create --title "<path title>" --body "$(cat <<'EOF'
 ## Summary
 <2-3 bullets of what changed>
@@ -191,7 +202,10 @@ The shared rule is: only a verified integration resolves — same rule
 as attended `workflow` step 5. The trunk-case confirmation counts as
 integration into the merge target; PR, hold and discard do not.
 
-- **`merge`:**
+- **`merge`:** Only after every target is proven integrated and all checks
+  pass, record the complete evidence as the workflow-owned finish receipt.
+  Missing evidence holds the entire stage. Run the advance below exactly once
+  for the item, never once per target.
   **Release items only — the date.** `gw work advance` refuses to resolve a
   Release without `released_at`. Read the item's frontmatter first: if
   `released_at:` is set to a valid `YYYY-MM-DD` date, advance as below. A

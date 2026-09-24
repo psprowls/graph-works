@@ -214,8 +214,10 @@ Never choose from cwd, `affects:` paths, the first declared repository, or an
 existing branch stamp.
 
 On a repository workspace refusal, surface the affected item and the command's
-repair guidance. Use the existing §4.2 question flow to obtain the human's
-repository choice; after the scoped metadata correction, replan before acting.
+repair guidance. For a prelaunch refusal, use a coordinator `AskUserQuestion`
+to obtain a human choice of a declared repository.
+Correct only the affected item's `repo:` metadata or the intended ancestor's
+metadata within the scope agreed in that answer, then replan before acting.
 Never launch workers from an error envelope.
 
 On success, the result contains:
@@ -930,9 +932,8 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       reads from the shared epic worktree and must not be pinned to it.
    4. **Check.** Success is exit 0 with `refusal: null` and `after` equal to the
       observation. A placement preview validates repository selection too.
-      Preview with `--dry-run` before recording when checking the pair; it is
-      read-only. The live call re-reads metadata under the item lock, so its
-      result remains authoritative if metadata changes after the preview.
+      `--dry-run` is read-only. The live call re-reads metadata under the item
+      lock, so its result is authoritative if metadata changes after a preview.
       Even an unchanged receipt can now refuse missing, unknown, or ambiguous
       repository metadata. The placement command's `--repo`, when supplied,
       names the observed stamp destination; it does not replace the item's

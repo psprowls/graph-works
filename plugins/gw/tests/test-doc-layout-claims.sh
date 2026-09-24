@@ -230,6 +230,8 @@ assert_contains "skills/auto-drive/SKILL.md" 'repo: graph-works' \
     "auto-drive illustrates declared repository metadata"
 assert_contains "skills/auto-drive/SKILL.md" 'Never launch workers from an error envelope.' \
     "auto-drive stops on repository resolution errors"
+assert_contains "skills/auto-drive/SKILL.md" 'For a prelaunch refusal, use a coordinator `AskUserQuestion`' \
+    "auto-drive asks for a repository choice before any worker exists"
 assert_contains "skills/auto-drive/SKILL.md" 'A placement preview validates repository selection too.' \
     "auto-drive explains placement preview parity"
 

@@ -191,3 +191,94 @@ def test_next_blocks_entire_finish_when_one_target_is_unverified(tmp_path, monke
     assert payload["action"] is None
     assert payload["blockers"]
     assert [t.repo.name for t in result.finish_targets] == ["core"]
+
+
+@pytest.mark.parametrize("leaf_type", ["Feature", "Bug"])
+def test_unstamped_leaf_finishes_verified_declared_checkout(tmp_path, monkeypatch, leaf_type):
+    from graph_works_core.orchestrate import commands
+    from graph_works_core.work.commands import run_next
+    from graph_works_core.workspace import finish
+
+    layout, _items, path = setup(tmp_path, monkeypatch, scalar=False)
+    page = layout.bundle_dir / f"{path}.md"
+    page.write_text(
+        f"---\ntype: {leaf_type}\nrepo: core\nphase: finish\nwork_status: in-progress\naffects: [packages]\n---\n",
+        encoding="utf-8",
+    )
+    previous = finish.observe_repository
+
+    def observe(repo, **kwargs):
+        context = previous(repo, **kwargs)
+        return replace(
+            context,
+            inventory={**context.inventory, "main": (str(repo),)},
+            path_exists={**context.path_exists, str(repo): True},
+        )
+
+    monkeypatch.setattr(finish, "observe_repository", observe)
+    monkeypatch.setattr(commands, "observe_repository", observe)
+    monkeypatch.setattr(commands, "repository_identity", lambda p: str(p))
+    attended = run_next(layout, path)
+    assert len(attended.finish_targets) == 1
+    target = attended.finish_targets[0]
+    assert (target.worktree, target.source_branch, target.target_branch) == ("/core", "main", "main")
+    automated = commands.run_orchestrate(layout, path)
+    assert len(automated.dispatches) == 1, automated.blocked
+    assert automated.finish_targets[automated.dispatches[0].key] == attended.finish_targets
+    assert not load_items(load_bundle(layout.bundle_dir))[0].branch
+
+
+def test_unstamped_leaf_without_checkout_evidence_blocks(tmp_path, monkeypatch):
+    layout, items, path = setup(tmp_path, monkeypatch)
+    item = replace(items[0], type="Bug", worktree=None, branch=None, repo_stamps={})
+    result = resolve_finish_targets(layout, (item,), path)
+    assert not result.targets
+    assert result.blockers
+
+
+@pytest.mark.parametrize("same_worktree", [True, False])
+def test_live_foreign_source_stays_reserved_after_anchor_revalidation_fails(tmp_path, monkeypatch, same_worktree):
+    from graph_works_core.orchestrate.commands import plan, session_name
+    from graph_works_core.workspace.dispatch_config import load_dispatch_config
+    from graph_works_core.workspace.finish import FinishPlan
+    from work_tracker_okf.items import Stamp
+
+    layout, items, root_path = setup(tmp_path, monkeypatch)
+    root = items[0]
+    live_path = f"{root_path}/children/feature-live"
+    ready_path = f"{root_path}/children/feature-ready"
+    live_item = replace(
+        root,
+        path=live_path,
+        type="Feature",
+        parent_path=root_path,
+        ancestor_paths=(root_path,),
+        affects=("live-only",),
+        worktree=None,
+        branch=None,
+        repo_stamps={"ui": Stamp("/ui/epic", "epic/a")},
+    )
+    ready_item = replace(live_item, path=ready_path, affects=("ready-only",) if same_worktree else live_item.affects)
+    root = replace(root, phase="execute", active_child_paths=(live_path, ready_path))
+    targets = resolve_finish_targets(layout, items, root_path).targets[1:]
+    from pathlib import Path
+
+    from graph_works_core.workspace import finish
+
+    context = finish.observe_repository(Path("/ui"))
+    if not same_worktree:
+        targets = (replace(targets[0], worktree="/ui/other"),)
+    result = plan(
+        (root, live_item, ready_item),
+        root_path,
+        dispatch_rules=load_dispatch_config(layout).rules,
+        max_parallel=2,
+        workspace=str(layout.root),
+        default_base="main",
+        live=(session_name(live_path, "Feature", "finish"),),
+        repo_contexts={"ui": context},
+        finish_plans={live_path: FinishPlan((), ("enclosing anchor dirty",)), ready_path: FinishPlan(targets, ())},
+    )
+    assert not result.dispatches
+    expected_kind = "worktree-pending" if same_worktree else "affects-overlap"
+    assert any(b.path == ready_path and b.kind == expected_kind for b in result.blocked)

@@ -979,6 +979,22 @@ def plan(
             uncertain_live_affects.update(item.affects)
         identity = context.identity if context is not None else "<legacy>"
         live_affects.update((identity, member) for member in item.affects)
+        # Live occupancy outlives fresh admission checks. In particular a
+        # dirty enclosing target must not release a still-running source.
+        for live_stamp in item.repo_stamps.values():
+            live_worktree_owners.setdefault(live_stamp.worktree, set()).add(item.path)
+            stamp_context = next(
+                (
+                    c
+                    for c in (repo_contexts or {}).values()
+                    if any(live_stamp.worktree in paths for paths in c.inventory.values())
+                ),
+                None,
+            )
+            if stamp_context is None:
+                uncertain_live_affects.update(item.affects)
+            else:
+                live_affects.update((stamp_context.identity, member) for member in item.affects)
         live_finish = finish_plans.get(item.path)
         for target in live_finish.targets if live_finish is not None else ():
             target_context = contexts_by_path.get(str(target.repo.path))
@@ -1055,7 +1071,7 @@ def plan(
                 )
             )
             continue
-        if item_repos is not None and any(member in uncertain_live_affects for _, member in affects):
+        if any(member in uncertain_live_affects for _, member in affects):
             blocked.append(
                 BlockedItem(item.path, "worktree-unprovable", "live item's repository is unavailable for affects check")
             )

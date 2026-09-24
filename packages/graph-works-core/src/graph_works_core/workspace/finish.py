@@ -67,11 +67,36 @@ def resolve_finish_targets(
         blockers.append(f"{path}: repair malformed repo_stamps before finishing")
     if single_repo is not None and item.repo_stamps:
         return FinishPlan((), (f"{path}: explicit repo override cannot finish foreign repo_stamps",))
+    observed = dict(repo_contexts)
+
+    def context_for(repo: ItemRepo) -> RepositoryContext:
+        assert repo.path is not None
+        context = next((c for c in observed.values() if str(repo.path) in c.checkout_usable_by_path), None)
+        if context is None:
+            context = observe_repository(repo.path)
+            observed[context.identity] = context
+        return context
+
     candidates: list[tuple[ItemRepo, str | None, str | None]] = []
     try:
         declared = declared_repositories(layout)
         if item.branch or item.worktree:
             candidates.append((single_repo or resolve_item_repo(layout, item, by_path), item.worktree, item.branch))
+        elif not item.repo_stamps and item.type not in {"Epic", "Release"}:
+            # Main-mode leaves may finish without owning a dedicated branch.
+            # The declared checkout is the compatibility location, but its
+            # current branch must be observed rather than inferred from trunk.
+            own_repo = single_repo or resolve_item_repo(layout, item, by_path)
+            if own_repo.path is None:
+                blockers.append(f"{path}: no repository checkout can be verified for unstamped finish")
+            else:
+                checkout = str(own_repo.path.resolve())
+                context = context_for(own_repo)
+                branches = [branch for branch, paths in context.inventory.items() if checkout in paths]
+                if len(branches) != 1:
+                    blockers.append(f"{path}: cannot verify current branch of unstamped finish checkout {checkout!r}")
+                else:
+                    candidates.append((own_repo, checkout, branches[0]))
         for name, stamp in sorted(item.repo_stamps.items()):
             if name not in declared:
                 blockers.append(f"{path}: stamped repo {name!r} is not declared")
@@ -86,9 +111,7 @@ def resolve_finish_targets(
             blockers.append(f"{path}: repair incomplete finish stamp for {repo.name!r}")
             continue
         worktree = str(Path(worktree).resolve())
-        context = next((c for c in repo_contexts.values() if str(repo.path) in c.checkout_usable_by_path), None)
-        if context is None:
-            context = observe_repository(repo.path, paths=(Path(worktree),))
+        context = context_for(repo)
         if (
             not context.identity_known
             or not context.inventory_known

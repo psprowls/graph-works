@@ -29,6 +29,9 @@ Every `orca orchestration` command below uses **this session's own**
 values printed in the dispatch preamble that launched this session — never
 the example values shown in this skill or in any other document.
 
+An empty `finish_targets` list is missing evidence, never proof of integration.
+Enter the Escalation path and hold the finish stage until targets are verified.
+
 ## R1 — Verify tests
 
 For every entry in the supplied `finish_targets` list, run that repository's test suite (same discovery approach as

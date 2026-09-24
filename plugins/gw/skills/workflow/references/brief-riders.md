@@ -247,6 +247,9 @@ resolves an item; the rider leaves the stock skill unmodified.
 
 **Rider.**
 
+> An empty finish target list is missing evidence, never proof of integration.
+> Hold the finish stage and repair the target resolution before presenting choices.
+>
 > **Complete finish targets.** Consume the entire supplied `finish_targets`
 > list in its given order. Each entry names the repository, worktree,
 > source_branch and target_branch. Use that exact target as the stock skill's

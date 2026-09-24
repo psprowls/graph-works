@@ -97,10 +97,24 @@ def test_distinct_repositories_share_one_budget_without_affects_collision() -> N
     }
     contexts = {
         "git-code": RepositoryContext(
-            "git-code", "/repo/code", "main", True, {"feature/code": ("/wt/code",)}, {"/wt/code": True}, True
+            "git-code",
+            "/repo/code",
+            "main",
+            True,
+            {"feature/code": ("/wt/code",)},
+            {"/wt/code": True},
+            True,
+            checkout_usable_by_path={"/wt/code": True},
         ),
         "git-ui": RepositoryContext(
-            "git-ui", "/repo/ui", "main", True, {"feature/ui": ("/wt/ui",)}, {"/wt/ui": True}, True
+            "git-ui",
+            "/repo/ui",
+            "main",
+            True,
+            {"feature/ui": ("/wt/ui",)},
+            {"/wt/ui": True},
+            True,
+            checkout_usable_by_path={"/wt/ui": True},
         ),
     }
     items = (
@@ -141,6 +155,7 @@ def test_same_repository_overlap_still_blocks_and_missing_context_is_local() -> 
         {"feature/one": ("/wt/one",), "feature/two": ("/wt/two",)},
         {"/wt/one": True, "/wt/two": True},
         True,
+        checkout_usable_by_path={"/wt/one": True, "/wt/two": True},
     )
     items = (dataclasses.replace(items[0], worktree="/wt/one", branch="feature/one"), *items[1:])
     result = _plan(items, root, item_repos=repos, repo_contexts={context.identity: context})

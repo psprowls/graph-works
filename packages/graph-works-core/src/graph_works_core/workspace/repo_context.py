@@ -23,6 +23,7 @@ class RepositoryContext:
     inventory: Mapping[str, tuple[str, ...]]
     path_exists: Mapping[str, bool | None]
     inventory_known: bool
+    # Declared checkouts and every inventoried worktree, including undeclared anchors.
     checkout_usable_by_path: Mapping[str, bool] = MappingProxyType({})
     identity_known: bool = True
     branches: frozenset[str] = frozenset()
@@ -89,10 +90,6 @@ def observe_repository(
     canonical = _canonical(repo)
     proven_identity = identity if identity is not None else repository_identity(repo)
     selected_checkouts = {canonical, *(_canonical(path) for path in checkouts)}
-    eligibility: dict[str, bool] = {}
-    for checkout in selected_checkouts:
-        status = probe_git(Path(checkout), "status", "--porcelain")
-        eligibility[checkout] = status.returncode == 0 and not status.stdout.strip() and _exists(checkout) is True
     listed = probe_git(repo, "worktree", "list", "--porcelain")
     known = listed.returncode == 0
     inventory = _inventory(listed.stdout) if known else MappingProxyType({})
@@ -100,6 +97,11 @@ def observe_repository(
     candidates = selected_checkouts | {_canonical(path) for path in paths}
     for members in inventory.values():
         candidates.update(members)
+    eligibility: dict[str, bool] = {}
+    inventoried_checkouts = selected_checkouts | {path for members in inventory.values() for path in members}
+    for checkout in inventoried_checkouts:
+        status = probe_git(Path(checkout), "status", "--porcelain")
+        eligibility[checkout] = status.returncode == 0 and not status.stdout.strip() and _exists(checkout) is True
     observed = MappingProxyType({path: _exists(path) for path in candidates})
     return RepositoryContext(
         identity=proven_identity or canonical,

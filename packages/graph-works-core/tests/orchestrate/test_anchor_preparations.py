@@ -69,7 +69,10 @@ def test_stamp_then_replan_uses_the_exact_foreign_anchor():
     items, repos, contexts = fixture()
     items = (replace(items[0], repo_stamps={"code": Stamp("/code-anchor", "epic/a")}), *items[1:])
     contexts["git-code"] = replace(
-        contexts["git-code"], inventory={"epic/a": ("/code-anchor",)}, path_exists={"/code-anchor": True}
+        contexts["git-code"],
+        inventory={"epic/a": ("/code-anchor",)},
+        path_exists={"/code-anchor": True},
+        checkout_usable_by_path={"/code-anchor": True},
     )
     result = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
     assert not result.preparations
@@ -88,7 +91,10 @@ def test_nested_feature_prepares_outer_then_inner_from_outer_branch():
     assert [p.owner_path for p in first.preparations] == [ROOT]
     items = (replace(items[0], repo_stamps={"code": Stamp("/outer", "epic/outer")}), *items[1:])
     contexts["git-code"] = replace(
-        contexts["git-code"], inventory={"epic/outer": ("/outer",)}, path_exists={"/outer": True}
+        contexts["git-code"],
+        inventory={"epic/outer": ("/outer",)},
+        path_exists={"/outer": True},
+        checkout_usable_by_path={"/outer": True},
     )
     second = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
     (prep,) = second.preparations
@@ -100,6 +106,7 @@ def test_nested_feature_prepares_outer_then_inner_from_outer_branch():
         contexts["git-code"],
         inventory={"epic/outer": ("/outer",), "feature/inner": ("/inner",)},
         path_exists={"/outer": True, "/inner": True},
+        checkout_usable_by_path={"/outer": True, "/inner": True},
     )
     third = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
     (dispatch,) = third.dispatches
@@ -122,7 +129,10 @@ def test_existing_deterministic_worktree_requires_stamp_before_dispatch():
     items, repos, contexts = fixture()
     branch = orchestrate.integration_branch(ROOT, "Epic")
     contexts["git-code"] = replace(
-        contexts["git-code"], inventory={branch: ("/anchor",)}, path_exists={"/anchor": True}
+        contexts["git-code"],
+        inventory={branch: ("/anchor",)},
+        path_exists={"/anchor": True},
+        checkout_usable_by_path={"/anchor": True},
     )
     result = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
     (prep,) = result.preparations
@@ -159,7 +169,14 @@ def test_preparation_does_not_reserve_affects_or_capacity_in_other_repo():
     )
     repos[SIBLING] = repos[ROOT]
     contexts["git-ui"] = RepositoryContext(
-        "git-ui", "/ui", "main", True, {"epic/ui": ("/ui-anchor",)}, {"/ui-anchor": True}, True
+        "git-ui",
+        "/ui",
+        "main",
+        True,
+        {"epic/ui": ("/ui-anchor",)},
+        {"/ui-anchor": True},
+        True,
+        checkout_usable_by_path={"/ui-anchor": True},
     )
     result = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts, max_parallel=1)
     assert len(result.preparations) == 1
@@ -185,3 +202,18 @@ def test_dirty_deterministic_checkout_cannot_be_adopted():
     result = _plan(items, ROOT, item_repos=repos, repo_contexts=contexts)
     assert not result.preparations and not result.dispatches
     assert all(b.kind == "worktree-unprovable" for b in result.blocked)
+
+
+def test_missing_cleanliness_evidence_refuses_adoption_and_stamped_anchor():
+    items, repos, contexts = fixture()
+    branch = orchestrate.integration_branch(ROOT, "Epic")
+    contexts["git-code"] = replace(
+        contexts["git-code"],
+        inventory={branch: ("/anchor",)},
+        path_exists={"/anchor": True},
+        checkout_usable_by_path={},
+    )
+    for owner in (items[0], replace(items[0], repo_stamps={"code": Stamp("/anchor", branch)})):
+        result = _plan((owner, *items[1:]), ROOT, item_repos=repos, repo_contexts=contexts)
+        assert not result.preparations and not result.dispatches
+        assert all(b.kind == "worktree-unprovable" for b in result.blocked)

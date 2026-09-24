@@ -62,7 +62,7 @@ def test_linked_checkout_has_own_dirty_state_under_shared_identity(tmp_path: Pat
     linked = tmp_path / "linked"
     _git(repo, "worktree", "add", "-b", "feature/linked", str(linked))
     (linked / "dirty.txt").write_text("local\n", encoding="utf-8")
-    context = observe_repository(repo, checkouts=(linked,))
+    context = observe_repository(repo)  # Inventory paths are checked even without a manifest declaration.
     assert context.checkout_usable_by_path[str(repo.resolve())] is True
     assert context.checkout_usable_by_path[str(linked.resolve())] is False
 

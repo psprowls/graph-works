@@ -92,7 +92,7 @@ def select_anchor(
                 "worktree-unprovable",
                 f"repair integration stamp on {owner.path}: path and branch are not verified in this repository",
             )
-        if path in context.checkout_usable_by_path and not context.checkout_usable_by_path[path]:
+        if context.checkout_usable_by_path.get(path) is not True:
             return AnchorRefusal(
                 "worktree-unprovable",
                 f"repair integration anchor on {owner.path}: selected checkout is dirty or unreadable",
@@ -118,7 +118,7 @@ def select_anchor(
         path = matches[0]
         if context.path_exists.get(path) is not True:
             return AnchorRefusal("worktree-unprovable", f"repair missing integration worktree for {branch!r}")
-        if path in context.checkout_usable_by_path and not context.checkout_usable_by_path[path]:
+        if context.checkout_usable_by_path.get(path) is not True:
             return AnchorRefusal("worktree-unprovable", f"repair dirty or unreadable integration checkout {path!r}")
         action = WorktreeAction("reuse", path, branch, None, True, None)
     else:

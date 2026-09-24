@@ -1451,3 +1451,43 @@ def test_foreign_anchor_branch_without_worktree_is_a_repair_case(tmp_path: Path)
     result = orchestrate.run_orchestrate(layout, owner)
     assert not result.preparations and not result.dispatches
     assert _kinds(result)[child] == "worktree-unprovable"
+
+
+@pytest.mark.parametrize("stamped", [False, True])
+@pytest.mark.parametrize("state", ["dirty", "unreadable"])
+def test_unsafe_undeclared_anchor_worktree_refuses_adoption_and_use(
+    tmp_path: Path, stamped: bool, state: str, monkeypatch
+) -> None:
+    import subprocess
+
+    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
+    owner, child = "work/epic-a", "work/epic-a/children/feature-a"
+    _tag(layout, owner, "ui")
+    _tag(layout, child, "code")
+    document = load(layout.bundle_dir / f"{child}.md")
+    document.set("phase", "execute")
+    document.save()
+    branch = orchestrate.integration_branch(owner, "Epic")
+    anchor = tmp_path / "undeclared-anchor"
+    subprocess.run(["git", "worktree", "add", "-b", branch, str(anchor)], cwd=code, check=True, capture_output=True)
+    if state == "dirty":
+        (anchor / "uncommitted.txt").write_text("local work\n", encoding="utf-8")
+    else:
+        from graph_works_core.workspace import repo_context
+        from graph_works_core.workspace.provenance import GitOutcome
+
+        real_probe = repo_context.probe_git
+
+        def unreadable_status(cwd, *args):
+            if cwd == anchor.resolve() and args == ("status", "--porcelain"):
+                return GitOutcome(None, "", "error")
+            return real_probe(cwd, *args)
+
+        monkeypatch.setattr(repo_context, "probe_git", unreadable_status)
+    if stamped:
+        document = load(layout.bundle_dir / f"{owner}.md")
+        document.set("repo_stamps", {"code": {"worktree": str(anchor), "branch": branch}})
+        document.save()
+    result = orchestrate.run_orchestrate(layout, owner)
+    assert not result.preparations and not result.dispatches
+    assert _kinds(result)[child] == "worktree-unprovable"

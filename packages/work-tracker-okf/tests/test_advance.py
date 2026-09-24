@@ -8,9 +8,69 @@ from work_tracker_okf.advance import AdvancePlan, FieldChange, advance, apply
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import load_items
+from work_tracker_okf.vocabulary import EFFORTS
 from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition
 
 TODAY = date(2026, 8, 10)
+
+
+@pytest.mark.parametrize(
+    "actual, expected, refused",
+    [
+        (None, "none", False),
+        (None, "design", True),
+        ("design", "none", True),
+        ("design", "design", False),
+        ("plan", "design", True),
+        ("plan", None, False),
+    ],
+)
+def test_expected_phase_distinguishes_unchecked_and_absent(actual, expected, refused):
+    item = make_item("work/feature-phase", phase=actual, effort="medium")
+    plan = advance((item,), item.path, today=TODAY, expected_phase=expected)
+    assert plan.refusal == ("phase-mismatch" if refused else None)
+    if refused:
+        assert plan.changes == ()
+        assert plan.stamp_source is None and not plan.sync_plan_table
+        assert plan.trigger is None
+        assert str(expected) in plan.detail
+        assert (actual or "none") in plan.detail
+
+
+@pytest.mark.parametrize("expected", ["design", "execute"])
+def test_phase_mismatch_precedes_effort_and_return_requirements(expected):
+    item = make_item("work/bug-phase", type="Bug", phase="finish")
+    plan = advance((item,), item.path, today=TODAY, expected_phase=expected, return_=True)
+    assert plan.refusal == "phase-mismatch"
+    assert plan.changes == ()
+
+
+def test_matching_finish_can_return_and_matching_invalid_values_keep_refusal():
+    item = make_item("work/bug-phase", type="Bug", phase="finish")
+    assert advance((item,), item.path, today=TODAY, expected_phase="finish", return_=True).refusal is None
+    assert (
+        advance((item,), item.path, today=TODAY, expected_phase="finish", return_=True, resolved_in="pr-1").refusal
+        == "return-not-available"
+    )
+
+
+def test_expected_phase_does_not_override_missing_or_unreadable_path():
+    assert advance((), "work/missing", today=TODAY, expected_phase="design").refusal == "unknown-path"
+    assert (
+        advance(
+            (),
+            "work/unreadable",
+            today=TODAY,
+            expected_phase="design",
+            unreadable={"work/unreadable.md": "decode failed"},
+        ).refusal
+        == "unreadable-member"
+    )
+
+
+def test_phase_mismatch_precedes_unsized_bug_effort_requirement():
+    item = make_item("work/bug-phase", type="Bug", phase="design")
+    assert advance((item,), item.path, today=TODAY, expected_phase="plan").refusal == "phase-mismatch"
 
 
 def _plan_for(items, path, **kwargs) -> AdvancePlan:
@@ -286,6 +346,39 @@ def test_the_design_complete_fork_refuses_without_an_effort():
     assert plan.changes == ()
 
 
+@pytest.mark.parametrize("kind", ["Epic", "Release", "Feature", "Bug", "Spike", "TechDebt"])
+def test_unsized_design_completion_refuses_before_changes(kind: str) -> None:
+    item = make_item("work/unsized", type=kind, phase="design", effort=None)
+    plan = _plan_for((item,), item.path)
+    assert plan.refusal == "effort-required"
+    assert plan.changes == ()
+    assert plan.stamp_source is None and plan.trigger is None
+
+
+@pytest.mark.parametrize("effort", sorted(EFFORTS))
+@pytest.mark.parametrize("source", ["stored", "supplied"])
+@pytest.mark.parametrize("kind", ["Feature", "Bug", "TechDebt"])
+def test_valid_effort_allows_design_completion(kind: str, source: str, effort: str) -> None:
+    item = make_item("work/sized", type=kind, phase="design", effort=effort if source == "stored" else None)
+    plan = _plan_for((item,), item.path, **({"effort": effort} if source == "supplied" else {}))
+    assert plan.refusal is None
+    assert plan.transition is not None
+    expected = "execute" if kind in {"Bug", "TechDebt"} and effort in {"xtra-small", "small"} else "plan"
+    assert plan.transition.phase == expected
+    assert plan.transition.document_status == "stable"
+    assert ("effort" in _keys(plan)) is (source == "supplied")
+
+
+@pytest.mark.parametrize("source", ["stored", "supplied"])
+def test_invalid_effort_is_blocked_by_validation(source: str) -> None:
+    item = make_item("work/invalid-size", phase="design", effort="huge" if source == "stored" else None)
+    plan = _plan_for((item,), item.path, **({"effort": "huge"} if source == "supplied" else {}))
+    assert plan.refusal == "blocked"
+    assert "effort 'huge' not in" in plan.detail
+    assert "artifact-missing" not in plan.detail
+    assert plan.changes == ()
+
+
 def test_the_sentinel_phase_is_refused_by_its_own_guard(monkeypatch):
     """Guard two of three: even if `requires` is accidentally stripped from a
     row, the sentinel phase alone still refuses -- removing `requires`
@@ -529,7 +622,7 @@ def test_apply_raises_nothing_of_its_own_on_an_unparseable_document():
 
 
 def test_advance_stamps_worktree_and_branch_when_supplied() -> None:
-    items = (make_item("x", type="Feature", work_status="open", phase="design"),)
+    items = (make_item("x", type="Feature", work_status="open", phase="design", effort="medium"),)
     plan = _plan_for(items, "x", worktree="/tmp/wt/x", branch="feature/x")
     assert plan.refusal is None
     changed = {change.key: change.after for change in plan.changes}
@@ -538,13 +631,13 @@ def test_advance_stamps_worktree_and_branch_when_supplied() -> None:
 
 
 def test_advance_without_provenance_keywords_changes_nothing_extra() -> None:
-    items = (make_item("x", type="Feature", work_status="open", phase="design"),)
+    items = (make_item("x", type="Feature", work_status="open", phase="design", effort="medium"),)
     assert "worktree" not in _keys(_plan_for(items, "x"))
     assert "branch" not in _keys(_plan_for(items, "x"))
 
 
 def test_advance_does_not_rewrite_an_unchanged_worktree() -> None:
-    items = (make_item("x", type="Feature", work_status="open", phase="design", worktree="/tmp/wt/x"),)
+    items = (make_item("x", type="Feature", work_status="open", phase="design", effort="medium", worktree="/tmp/wt/x"),)
     assert "worktree" not in _keys(_plan_for(items, "x", worktree="/tmp/wt/x"))
 
 

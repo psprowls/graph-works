@@ -2496,6 +2496,17 @@
           "required": false,
           "default": false,
           "is_flag": true
+        },
+        {
+          "name": "expected_phase",
+          "opts": [
+            "--from"
+          ],
+          "secondary_opts": [],
+          "help": "Expected current phase; none means no phase. Omit to leave unchecked.",
+          "required": false,
+          "default": null,
+          "is_flag": false
         }
       ],
       "commands": [],

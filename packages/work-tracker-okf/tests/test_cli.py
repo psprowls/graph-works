@@ -328,6 +328,9 @@ def test_advance_exits_nonzero_when_the_written_page_fails_post_write_lint(tmp_p
     _init(tmp_path)
     path = _file(tmp_path)
     assert runner.invoke(app, ["advance", str(tmp_path), path, "--today", TODAY]).exit_code == 0
+    artifact = tmp_path / path / "references" / "01-design.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# Design\n", encoding="utf-8")
     result = runner.invoke(
         app,
         ["advance", str(tmp_path), path, "--today", TODAY, "--effort", "small"],
@@ -340,6 +343,9 @@ def test_advance_enforces_effort_and_owner_gates(tmp_path: Path) -> None:
     _init(tmp_path)
     path = _file(tmp_path, type_name="TechDebt", affects="packages/work-tracker-okf")
     assert runner.invoke(app, ["advance", str(tmp_path), path, "--today", TODAY]).exit_code == 0
+    artifact = tmp_path / path / "references" / "01-design.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("# Design\n", encoding="utf-8")
     effort = runner.invoke(app, ["advance", str(tmp_path), path, "--today", TODAY])
     assert effort.exit_code == 1 and "effort-required" in effort.stderr
     assert runner.invoke(app, ["advance", str(tmp_path), path, "--today", TODAY, "--effort", "small"]).exit_code == 0

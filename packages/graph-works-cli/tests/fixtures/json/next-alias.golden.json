@@ -24,7 +24,9 @@
     "phase": "plan",
     "work_status": null,
     "document_status": "stable",
-    "requires": [],
+    "requires": [
+      "effort"
+    ],
     "sync_plan_table": false,
     "stamp_source": "design"
   },

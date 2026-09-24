@@ -308,7 +308,12 @@ def _design_complete(state: RouteState) -> Transition:
             )
         if state.effort in SMALL_EFFORTS:
             return Transition(phase="execute", document_status="stable", stamp_source=SPEC_SOURCE_ID)
-    return Transition(phase="plan", document_status="stable", stamp_source=SPEC_SOURCE_ID)
+    return Transition(
+        phase="plan",
+        document_status="stable",
+        stamp_source=SPEC_SOURCE_ID,
+        requires=("effort",) if state.effort is None else (),
+    )
 
 
 def _design(state: RouteState) -> RouteResult:

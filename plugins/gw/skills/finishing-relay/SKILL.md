@@ -204,9 +204,14 @@ integration into the merge target; PR, hold and discard do not.
   happened (or, in the trunk case, the commits were already on the target).
   `pr`, `hold` and `discard` do not resolve, so they never need a date.
   ```bash
-  gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]
+  gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]
   ```
-  Then send `worker_done --outcome succeeded` (this session's own dispatch
+  On phase-mismatch, enter the **Escalation path** with the refusal output;
+  retain the `--from finish` guard and do not retry using a newly observed
+  phase. The merge may already have happened, so include the merge SHA in the
+  escalation body (or say the commits were already on the target in the trunk case).
+  Do not claim settlement or send `worker_done` while escalating.
+  Only after a successful advance, send `worker_done --outcome succeeded` (this session's own dispatch
   preamble command, `--task-id`/`--dispatch-id` filled in from it) with a
   body naming the merge target, the resolved-in reference, and a one-line
   summary of what shipped.
@@ -228,7 +233,7 @@ integration into the merge target; PR, hold and discard do not.
 
 Entered from R1 (failing tests), R2 (no single worktree has the merge target
 checked out), R4 (merge conflicts, post-merge test failure) and R5 (no usable
-release date):
+release date or phase-mismatch):
 
 1. Send an escalation with the concrete failure output (test failures,
    conflict file list) in the body:

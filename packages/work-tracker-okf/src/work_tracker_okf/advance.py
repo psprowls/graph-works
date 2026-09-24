@@ -25,9 +25,13 @@ from work_tracker_okf.items import WorkItem
 from work_tracker_okf.vocabulary import PARENT_TYPES
 from work_tracker_okf.workflow import PLAN_OR_EXECUTE, RouteResult, Transition, route, state_for
 
+ExpectedPhase = Literal["none", "design", "plan", "execute", "finish", "done"]
+
 RefusalReason = Literal[
     "unknown-path",
     "unreadable-member",
+    "phase-mismatch",
+    "artifact-missing",
     "blocked",
     "nothing-to-advance",
     "effort-required",
@@ -108,6 +112,7 @@ def advance(
     path: str,
     *,
     today: date,
+    expected_phase: ExpectedPhase | None = None,
     effort: str | None = None,
     owner: str | None = None,
     resolved_in: str | None = None,
@@ -146,6 +151,11 @@ def advance(
             return _refused(path, None, None, "unreadable-member", f"{path}.md {detail}")
         return _refused(path, None, None, "unknown-path", f"unknown path {path!r}")
     result = route(state)
+    actual_phase = item.phase if item.phase is not None else "none"
+    if expected_phase is not None and actual_phase != expected_phase:
+        return _refused(
+            path, result, None, "phase-mismatch", f"expected phase {expected_phase!r}; observed phase {actual_phase!r}"
+        )
     if result.blockers:
         return _refused(path, result, None, "blocked", "; ".join(result.blockers))
     if return_:
@@ -304,4 +314,13 @@ def apply(document: Document, plan: AdvancePlan) -> None:
         document.set(change.key, change.after)
 
 
-__all__ = ["GATE_REFUSALS", "AdvancePlan", "FieldChange", "RefusalReason", "Trigger", "advance", "apply"]
+__all__ = [
+    "GATE_REFUSALS",
+    "AdvancePlan",
+    "ExpectedPhase",
+    "FieldChange",
+    "RefusalReason",
+    "Trigger",
+    "advance",
+    "apply",
+]

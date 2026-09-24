@@ -346,6 +346,25 @@ def test_the_design_complete_fork_asks_for_effort_on_bug_like_work():
         assert result.on_complete.requires == ("effort",)
 
 
+@pytest.mark.parametrize("kind", ["Epic", "Release", "Feature", "Bug", "Spike", "TechDebt"])
+@pytest.mark.parametrize("phase", [None, "design"])
+def test_design_completion_requires_effort_before_stable(kind: str, phase: str | None) -> None:
+    result = route(_state(type=kind, phase=phase, effort=None))
+    transition = result.on_complete
+    assert transition is not None
+    assert transition.document_status == "stable"
+    assert "effort" in transition.requires
+    assert transition.phase == ("plan" if kind in {"Epic", "Release", "Feature", "Spike"} else PLAN_OR_EXECUTE)
+
+
+def test_every_non_draft_transition_has_or_requires_effort() -> None:
+    for kind, status, phase, effort in _sweep():
+        result = route(_state(type=kind, work_status=status, phase=phase, effort=effort))
+        for transition in (result.on_dispatch, result.on_complete, result.on_return, result.repair):
+            if transition is not None and transition.document_status not in (None, "draft"):
+                assert effort is not None or "effort" in transition.requires, (kind, status, phase, transition)
+
+
 def test_small_bug_like_work_skips_planning_and_larger_does_not():
     small = route(_state(type="Bug", phase="design", effort="xtra-small")).on_complete
     large = route(_state(type="Bug", phase="design", effort="large")).on_complete

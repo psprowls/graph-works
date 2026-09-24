@@ -99,6 +99,9 @@ def test_ensure_plan_row_is_idempotent_and_valid(tmp_path: Path) -> None:
 
 def test_advance_and_stamp_registers_the_canonical_design_source(root: Path) -> None:
     page = _write_feature(root)
+    target = root / ITEM / "references" / "01-design.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# Design\n", encoding="utf-8")
     outcome = advance_and_stamp(
         load_bundle(root, ignore=IGNORE),
         ITEM,
@@ -123,12 +126,114 @@ def test_advance_and_stamp_defaults_to_a_write_free_dry_run(root: Path) -> None:
 
 def test_plan_complete_stamps_plan_and_syncs_the_row(root: Path) -> None:
     page = _write_feature(root, phase="plan")
+    target = root / ITEM / "references" / "02-plan.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("# Plan\n", encoding="utf-8")
     outcome = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, dry_run=False)
     data = load(page).fm_data()
     assert outcome.plan_row
     assert data["work_status"] == "accepted"
     assert data["sources"][0]["resource"] == f"/{ITEM}/references/02-plan.md"
     assert f"Execute implementation plan: /{ITEM}/references/02-plan.md" in load(page).body
+
+
+@pytest.mark.parametrize("phase, filename", [("design", "01-design.md"), ("plan", "02-plan.md")])
+@pytest.mark.parametrize("directory", [False, True])
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_completion_requires_a_regular_artifact(
+    root: Path, phase: str, filename: str, directory: bool, dry_run: bool
+) -> None:
+    _write_feature(root, phase=phase)
+    target = root / ITEM / "references" / filename
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if directory:
+        target.mkdir()
+    before = _snapshot_bytes(root)
+    outcome = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium", dry_run=dry_run)
+    assert outcome.plan.refusal == "artifact-missing"
+    assert str(target) in outcome.plan.detail
+    assert outcome.plan.changes == ()
+    assert outcome.plan.stamp_source is None and not outcome.plan.sync_plan_table
+    assert outcome.plan.trigger is None
+    assert outcome.stamped is None and outcome.stamp_title is None
+    assert not outcome.plan_row and not outcome.written
+    assert _snapshot_bytes(root) == before
+
+
+def test_stale_source_does_not_satisfy_canonical_artifact(root: Path) -> None:
+    page = _write_feature(root)
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(
+            "affects:", f"sources:\n  - id: design\n    resource: /{ITEM}/references/old-design.md\naffects:"
+        ),
+        encoding="utf-8",
+    )
+    outcome = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium")
+    assert outcome.plan.refusal == "artifact-missing"
+
+
+@pytest.mark.parametrize("source", [None, "old-design.md"])
+def test_canonical_artifact_succeeds_without_current_source(root: Path, source: str | None) -> None:
+    page = _write_feature(root)
+    if source:
+        page.write_text(
+            page.read_text(encoding="utf-8").replace(
+                "affects:", f"sources:\n  - id: design\n    resource: /{ITEM}/references/{source}\naffects:"
+            ),
+            encoding="utf-8",
+        )
+    target = root / ITEM / "references" / "01-design.md"
+    target.parent.mkdir(parents=True)
+    target.write_text("Plain text without frontmatter\n", encoding="utf-8")
+    outcome = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium", dry_run=False)
+    assert outcome.plan.refusal is None and outcome.written
+    assert outcome.stamped is not None and outcome.stamped.resource == f"/{ITEM}/references/01-design.md"
+
+
+def test_missing_artifact_does_not_override_phase_mismatch(root: Path) -> None:
+    _write_feature(root)
+    outcome = advance_and_stamp(
+        load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, expected_phase="plan", effort="medium"
+    )
+    assert outcome.plan.refusal == "phase-mismatch"
+
+
+def test_dispatch_and_finish_return_do_not_require_artifacts(root: Path) -> None:
+    _write_feature(root, phase="finish", work_status="in-progress")
+    returned = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, return_=True)
+    assert returned.plan.refusal is None and returned.plan.stamp_source is None
+    page = _write_feature(root)
+    page.write_text(page.read_text(encoding="utf-8").replace("phase: design\n", ""), encoding="utf-8")
+    dispatched = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY)
+    assert dispatched.plan.refusal is None and dispatched.plan.stamp_source is None
+    assert page.exists()
+
+
+def test_artifact_stat_permission_error_propagates(root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _write_feature(root)
+    target = root / ITEM / "references" / "01-design.md"
+    original_stat = Path.stat
+
+    def denied(path: Path, *args, **kwargs):
+        if path == target:
+            raise PermissionError("denied")
+        return original_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied)
+    with pytest.raises(PermissionError, match="denied"):
+        advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium")
+
+
+def test_artifact_symlink_uses_resolved_file_type(root: Path) -> None:
+    _write_feature(root)
+    target = root / ITEM / "references" / "01-design.md"
+    target.parent.mkdir(parents=True)
+    target.symlink_to("missing.md")
+    missing = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium")
+    assert missing.plan.refusal == "artifact-missing"
+    (target.parent / "missing.md").write_text("# Design\n", encoding="utf-8")
+    present = advance_and_stamp(load_bundle(root, ignore=IGNORE), ITEM, today=TODAY, effort="medium")
+    assert present.plan.refusal is None
 
 
 def test_composed_filing_preflights_page_indexes_and_log_without_writing(root: Path, section_set) -> None:

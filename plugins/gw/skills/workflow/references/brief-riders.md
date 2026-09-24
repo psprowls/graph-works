@@ -247,13 +247,43 @@ resolves an item; the rider leaves the stock skill unmodified.
 
 **Rider.**
 
-> **Merge target.** Read the item's canonical ownership ancestors in the
-> workspace. Use the `branch:` stamp from the nearest Epic or Release ancestor whose frontmatter carries `branch:`
-> as the merge target. If there is no such ancestor (including a root item),
-> use the repository's default base. Use this concrete target as Step 3's base
-> branch, name it, and have the human confirm it before proceeding; do not guess
-> a child's target from `git merge-base`. Integrating a child into its epic's
-> branch resolves the child; merging the epic onward is the parent's finish.
+> An empty finish target list is missing evidence, never proof of integration.
+> Hold the finish stage and repair the target resolution before presenting choices.
+>
+> **Complete finish targets.** Consume the entire supplied `finish_targets`
+> list in its given order. Each entry names the repository, worktree,
+> source_branch and target_branch. Use that exact target as the stock skill's
+> base branch; never reconstruct targets from scalar frontmatter or fall back
+> to trunk for a missing enclosing anchor. Include tests and the integration
+> choice for every target in one reviewable set. Execute the chosen outcome
+> for each target, collecting pre/post integration commit evidence and merged
+> test results for the workflow-owned receipt. The stock skill does not
+> advance the item. Workflow advances exactly once after every target is
+> verified integrated. Any failed check, conflict, missing evidence or
+> unverified integration holds the entire finish stage; report already
+> integrated targets explicitly because cross-repository atomicity is not
+> promised. PR, keep/hold and discard never resolve the item.
+>
+> **Receipt procedure.** Before presenting the choice explain that verification
+> requires ancestry-preserving fast-forward or merge commits. Squash/rebase does
+> not prove integration. Keep source worktrees and branches until verification.
+> Use the absolute installed plugin path and the core runtime (from an external
+> checkout add `--project <graph-works source root>` to `uv run`, or use an
+> installed interpreter with graph-works-core). Run before merging:
+>
+> `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py inspect <work-path> --workspace <workspace>`
+>
+> After each repository's successful merge and merged-result checks, run:
+>
+> `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`
+>
+> Commit the receipt and owner source link through the normal workspace commit
+> procedure immediately. If receipt writing fails after a merge, retry `record`:
+> it rediscovers source ancestry without another merge. Preserve partial receipts
+> when a later target fails. Inspect again after every target is recorded; only
+> `complete: true` allows workflow's one advance, using that inspection's
+> `resolved_in` and `--no-infer-worktree`. Malformed receipts require repair;
+> stale evidence blocks until refreshed. Never hand-author completion claims.
 >
 > **On-target check.** Before Step 4's menu, compare
 > `git branch --show-current` with the confirmed merge target, in any checkout, including a linked worktree.
@@ -271,12 +301,14 @@ resolves an item; the rider leaves the stock skill unmodified.
 > Off target, keep the stock menu with the confirmed merge target as its base.
 > Detached HEAD keeps the stock reduced menu; it cannot confirm integration.
 >
-> **Outcome report.** End the stage with this one line, including after a stop:
+> **Outcome report.** First list every repository target, its outcome, test
+> results and integration evidence. End with this overall outcome line,
+> including after a stop; merge/confirm means the entire set integrated:
 > `Finish outcome: <merge|confirm|pr|keep|discard|none>; merge target: <branch>; resolved_in: <SHA|none>`
 >
 > Use `merge` only after a clean merge and green tests on the merged result,
-> with the target's resulting commit SHA as `resolved_in`. Use `confirm` only
-> for the confirmed on-target case, with HEAD's SHA. Use `pr` for PR creation,
+> with the complete receipt inspection's `resolved_in`. Use `confirm` only
+> for the confirmed on-target case, with receipt verification. Use `pr` for PR creation,
 > `keep` for keep-as-is, and `discard` for a confirmed discard; their
 > `resolved_in` is `none`. Failing tests, a stopped stage, or no choice made
 > produces `none` with `resolved_in: none`. Creating a PR never supplies a

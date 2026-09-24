@@ -158,3 +158,17 @@ def test_projection_is_plain_json_data(name: str, index: int) -> None:
     payload = SAMPLES[name][index]()
     assert_plain(payload)
     assert_round_trip_equal(json.loads(json.dumps(payload)), payload)
+
+
+def test_orchestration_projects_repository_identity_and_preparations() -> None:
+    payload = WORK["work.orchestrate_payload"][0]()
+    assert payload["repo"]["path"] == "/code"
+    assert payload["dispatches"][0]["repo"] == {"name": "ui", "path": "/ui", "source": "item"}
+    preparation = payload["preparations"][0]
+    assert preparation["owner_phase"] == "execute"
+    assert preparation["owner_path"] == "work/e"
+    assert preparation["repo"] == payload["dispatches"][0]["repo"]
+    assert preparation["branch"] == "epic/e"
+    assert preparation["base_branch"] == "main"
+    assert preparation["worktree"]["action"] == "create"
+    assert WORK["work.orchestrate_payload"][1]()["preparations"] == []

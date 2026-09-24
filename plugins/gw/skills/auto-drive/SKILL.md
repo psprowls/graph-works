@@ -51,7 +51,7 @@ explanation — no degraded mode, no partial loop:
    precondition failure, not a mid-loop error.
 
 No repository selector is resolved here. A creation's repository comes from
-the plan's own top-level `repo.path` (§2.2), matched to an Orca repository by
+each dispatch's own `repo.path` (§2.2), matched to an Orca repository by
 `launch-worker.py place` at launch time (§3).
 No launch reads the coordinator's location.
 
@@ -225,7 +225,8 @@ On success, the result contains:
 - `terminal` (bool), `max_parallel` / `slots_free` (ints), and `live` (the
   echoed input list).
 - `repo` — `{"name": "<declared name>", "path": "<code repository>", "source": "frontmatter|flag|sole|fallback"}`,
-  the repository `workspace.yaml` declares, or `null` when none resolves. A
+  root metadata for the repository `workspace.yaml` declares, or `null` when none resolves.
+  Each dispatch carries its own `repo={name,path,source}`; use that path for placement. A
   `null` repo never plans a creation: those items arrive in `blocked[]` as
   `worktree-unprovable`. `source` says why that repository was chosen;
   `frontmatter` means the item (or an ancestor) sets `repo:`.
@@ -283,6 +284,48 @@ On success, the result contains:
   `phase` and `checkpoint` are carried. §2.5's park/skip rendering and
   §2.5.2's park handling both read `holds[]` for exactly those three fields;
   `blocked[]` has none of them.
+
+#### Prepare repository integration anchors before launching
+
+`preparations[]` contains `owner_path`, `owner_phase`, `repo`, `branch`,
+`base_branch`, and `worktree`. It reserves no worker slot. Save the complete
+plan, then process preparations **serially**:
+
+```bash
+python3 "$PLUGIN_ROOT/skills/auto-drive/references/launch-worker.py" prepare \
+  --plan-file <saved-plan.json> --owner <owner_path> --repo-name <repo.name> \
+  --workspace <workspace-path>
+```
+
+The repository name selects the emitted preparation; it never overrides an
+item's assignment. The helper captures an owner/ancestor/configuration guard,
+re-fetches `gw work orchestrate` with the same root/live keys, and refuses a
+changed preparation. It adopts one proven deterministic checkout or creates
+an explicitly repository-selected top-level worktree with setup skipped and
+no agent. A durable Orca comment marker identifies its creation across crashes.
+If Orca prefixes the name, only that marked, clean checkout at the expected
+base tip may be renamed with non-force `git branch -m`. Existing branches are
+never overwritten; ambiguous inventory, marker, or missing checkout requires
+repair. Creation errors trigger observation, never another suffixed create.
+
+The helper uses `record-preparation.py snapshot|record` as a thin adapter to
+core. In the source plugin it selects an absolute source project with
+`uv run --project <source-root> --package graph-works-core python`; installed
+plugins discover the `gw` Python interpreter and probe guarded preparation
+capability. An incompatible or undiscoverable runtime refuses explicitly.
+Neither path resolves the runtime from the coordinator's working directory. The record call carries `--root <owner_path> --phase <owner_phase>
+--repo <repo.name>` and the captured guard. Core rechecks owner/ancestor and
+repository configuration bytes under the existing decision-owner lock and
+re-reads that set under the bundle mutation lock immediately before effects,
+before recording scalar or foreign `repo_stamps`. Orca runs outside that lock. A
+refused stamp leaves a discoverable checkout and authorizes no child launch.
+
+**Replan after every attempt**, successful or refused, before processing
+another preparation or dispatch. Launch children only from a fresh plan after
+the anchor stamp persists. Failure blocks its dependents; unrelated valid
+fresh dispatches can still consume the shared free slots. Do not manufacture
+a worker/task for preparation. Use `dispatch.repo.path` for both normal and
+retry placement arguments; the top-level plan `repo` is root metadata only.
 
 ### 2.3 Terminal?
 
@@ -601,7 +644,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
 
    ```
    python3 references/launch-worker.py place --dispatch <dispatch-json> \
-     --repo-path <plan repo.path> --out-placement <placement-json-file> \
+     --repo-path <dispatch repo.path> --out-placement <placement-json-file> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
 
@@ -750,11 +793,11 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 
    ```
    python3 references/launch-worker.py place --dispatch <dispatch-json> \
-     --repo-path <plan repo.path> --out-placement <placement-json> \
+     --repo-path <dispatch repo.path> --out-placement <placement-json> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
 
-   Omit `--repo-path` only when the plan's `repo` is `null` (then only `reuse`
+   Omit `--repo-path` only when the dispatch's `repo.path` is `null` (then only `reuse`
    and `main` can be planned). Create the `orca-placement/` directory first.
    The result file is durable on purpose: §5 re-reads it to repair lineage
    after a restart. A non-zero exit prints `PLACEMENT REFUSED <key>: <reason>`:
@@ -816,7 +859,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    - `fork-child` and `create-top-level` → `--worktree new-top-level --name
      <worktree.branch> --base-branch <worktree.base_branch> --repo id:<repo
      id>`, where the repo id is the single `orca repo list --json` entry whose
-     path resolves to the plan's `repo.path` (zero or several matches refuse).
+     path resolves to the dispatch's `repo.path` (zero or several matches refuse).
      Orca's caller-context child mode is never used: it takes both the
      repository and the parent from the calling terminal. For a non-null
      `worktree.parent_path`, `place` also resolves `orca worktree show
@@ -1516,15 +1559,20 @@ without launching anything), then enter the record block at its step 1.
    nobody looked at" is exactly the silent failure the ledger exists to
    prevent. Printing costs nothing; skip only when both lists are empty.
 4. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
-   whose frontmatter carries `branch:` owns an integration branch its children
-   merged into, so `gw work orchestrate` plans a finish dispatch for it rather
-   than an advance. That worker (`gw:finishing-relay`) merges the branch into
-   the `merge_target` its dispatch named and resolves the root only after
-   verified integration; a `pr`, `hold` or `discard` outcome leaves the root at
-   `phase: finish`, so the plan is not terminal. An unstamped Epic or Release root owns no branch
-   and resolves through a planned advance with nothing to merge. Report the
-   root's integration, from its settled finish dispatch's `merge_target` and
-   `resolved_in`, in step 2's summary; never merge it again here.
+   with a scalar branch or foreign `repo_stamps` owns integration targets, so
+   orchestration emits a finish dispatch. The worker consumes every
+   `finish_targets` entry, records each successful repository integration and
+   inspects the durable receipt before exactly one final advance. Partial
+   integration survives restart and keeps the owner at `phase: finish`; `pr`,
+   `hold` and `discard` also leave it there. An owner without any source stamp
+   has nothing to merge and may use a planned advance. Report target-by-target
+   integration from the settled worker evidence; `resolved_in` prefers the
+   owner's own repository when present, otherwise the first verified repository
+   in deterministic order. The receipt holds the complete multi-repository
+   evidence. Never merge these targets again at wrap-up.
+
+For disposable native validation and recorded limits, see
+[Multi-repository acceptance](references/multi-repo-acceptance.md).
 
 **User stop** (mid-run, on explicit instruction): exit the loop between
 cycles — never mid-dispatch. Live workers keep running independently; offer

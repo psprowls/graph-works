@@ -395,6 +395,13 @@ assert_contains "skills/workflow/SKILL.md" \
     "this finish session's own" \
     "workflow's archive offer names the finish transcript archiving-in-session drops"
 
+assert_contains "skills/auto-drive/SKILL.md" \
+    "references/multi-repo-acceptance.md" \
+    "auto-drive links the disposable multi-repository acceptance procedure"
+assert_contains "skills/auto-drive/references/multi-repo-acceptance.md" \
+    "installed-package adapter runtime" \
+    "acceptance separates installed runtime evidence from source checks"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

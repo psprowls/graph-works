@@ -39,6 +39,14 @@ from work_tracker_okf.vocabulary import (
 )
 from work_tracker_okf.workflow import RouteResult, route, state_for
 
+from graph_works_core.orchestrate.anchors import (
+    Anchor,
+    AnchorPreparation,
+    AnchorRefusal,
+    enclosing_owner,
+    integration_branch,
+    select_anchor,
+)
 from graph_works_core.workspace.decision_owner import HoldReport, holds_by_path, open_holds
 from graph_works_core.workspace.dispatch import (
     DispatchProfileError,
@@ -50,9 +58,11 @@ from graph_works_core.workspace.dispatch import (
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.finish import FinishPlan, FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import checked_bool, checked_int
 from graph_works_core.workspace.provenance import default_base, run_git
+from graph_works_core.workspace.repo_context import RepositoryContext, observe_repository, repository_identity
 from graph_works_core.workspace.repos import ItemRepo, resolve_item_repo
 
 WALK_DEPTH_CAP = 10_000
@@ -143,6 +153,9 @@ class OrchestratePlan:
     blocked: tuple[BlockedItem, ...]
     warnings: tuple[str, ...]
     dispatch_resolutions: Mapping[str, DispatchResolution] = MappingProxyType({})
+    dispatch_repos: Mapping[str, ItemRepo] = MappingProxyType({})
+    preparations: tuple[AnchorPreparation, ...] = ()
+    finish_targets: Mapping[str, tuple[FinishTarget, ...]] = MappingProxyType({})
 
 
 #: The character budget for a session name. Orca renders it in a task row and
@@ -838,6 +851,9 @@ def plan(
     repo_known: bool = True,
     code_repo: str | None = None,
     repo_refusals: Mapping[str, BlockedItem] = MappingProxyType({}),
+    item_repos: Mapping[str, ItemRepo] | None = None,
+    repo_contexts: Mapping[str, RepositoryContext] | None = None,
+    finish_plans: Mapping[str, FinishPlan] = MappingProxyType({}),
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
@@ -887,13 +903,15 @@ def plan(
     to comparing against `repo_path` -- unchanged behaviour for a direct
     caller that only ever passed `repo_path`.
 
-    `repo_refusals` is `path -> BlockedItem`, one entry for every descendant
-    that resolves to another repository (`cross-repo-child`) or cannot
-    resolve its own `repo:` at all (`invalid`). `run_orchestrate` computes it,
-    because resolution reads `workspace.yaml`; a refused path is blocked with
-    that exact `BlockedItem` before any reservation and is excluded from
-    `_epic_stamp`'s descendant fallback, so a cross-repo child's scalar pair
-    can never become the epic worktree.
+    `repo_refusals` is `path -> BlockedItem` for items whose repository
+    cannot be resolved. `run_orchestrate` computes it because resolution
+    reads `workspace.yaml`; a refused path reserves nothing.
+
+    `item_repos` and `repo_contexts` select independently observed Git
+    evidence for each item. Contexts are keyed by canonical common-directory
+    identity; the singular arguments above remain the compatibility path.
+    A candidate without its own evidence refuses locally. Affects reservations
+    include repository identity, while capacity and holds remain global.
     """
     exists = worktree_exists or {}
     inventory = worktree_inventory or {}
@@ -939,15 +957,59 @@ def plan(
     # unrelated behaviour this task does not touch (see
     # `test_worktree_rule_3_forks_a_child_branch_when_the_epic_worktree_is_live`,
     # which pins the self-blocking as-is).
-    live_affects: set[str] = set()
+    contexts_by_path = {
+        path: context
+        for context in (repo_contexts or {}).values()
+        for path in {context.path, *context.checkout_usable_by_path}
+    }
+
+    def evidence(item: WorkItem) -> tuple[ItemRepo | None, RepositoryContext | None]:
+        if item_repos is None:
+            return None, None
+        item_repo = item_repos.get(item.path)
+        return item_repo, contexts_by_path.get(str(item_repo.path)) if item_repo and item_repo.path else None
+
+    live_affects: set[tuple[str, str]] = set()
+    uncertain_live_affects: set[str] = set()
     live_worktree_owners: dict[str, set[str]] = {}
     for key in live:
         item = by_session[key]
-        live_affects.update(item.affects)
+        _, context = evidence(item)
+        if item_repos is not None and context is None:
+            uncertain_live_affects.update(item.affects)
+        identity = context.identity if context is not None else "<legacy>"
+        live_affects.update((identity, member) for member in item.affects)
+        # Live occupancy outlives fresh admission checks. In particular a
+        # dirty enclosing target must not release a still-running source.
+        for live_stamp in item.repo_stamps.values():
+            live_worktree_owners.setdefault(live_stamp.worktree, set()).add(item.path)
+            stamp_context = next(
+                (
+                    c
+                    for c in (repo_contexts or {}).values()
+                    if any(live_stamp.worktree in paths for paths in c.inventory.values())
+                ),
+                None,
+            )
+            if stamp_context is None:
+                uncertain_live_affects.update(item.affects)
+            else:
+                live_affects.update((stamp_context.identity, member) for member in item.affects)
+        live_finish = finish_plans.get(item.path)
+        for target in live_finish.targets if live_finish is not None else ():
+            target_context = contexts_by_path.get(str(target.repo.path))
+            target_identity = target_context.identity if target_context else str(target.repo.path)
+            live_affects.update((target_identity, member) for member in item.affects)
+            live_worktree_owners.setdefault(target.worktree, set()).add(item.path)
         if item.worktree:
             live_worktree_owners.setdefault(item.worktree, set()).add(item.path)
 
-    stamp = _epic_stamp(items, root_item, exclude=frozenset(repo_refusals)) if root_item is not None else None
+    stamp = None
+    if root_item is not None:
+        if item_repos is None:
+            stamp = _epic_stamp(items, root_item, exclude=frozenset(repo_refusals))
+        elif root_item.worktree and root_item.branch:
+            stamp = (root_item.worktree, root_item.branch)
     epic_worktree_path = stamp[0] if stamp else None
     epic_branch = stamp[1] if stamp else branch_name(root, root_item.type if root_item else "")
 
@@ -967,17 +1029,39 @@ def plan(
     # call actually emits, never a candidate still on its way through the
     # gates: reserving for a candidate that a later gate refuses starves every
     # overlapping sibling behind it, identically on each cycle.
-    accepted_affects: set[str] = set()
+    accepted_affects: set[tuple[str, str]] = set()
     accepted_worktrees: set[str] = set()
-    epic_worktree_claimed = False
+    epic_worktree_claimed: set[str] = set()
     dispatches: list[PlannedDispatch] = []
     resolutions: dict[str, DispatchResolution] = {}
+    dispatch_repos: dict[str, ItemRepo] = {}
+    finish_targets: dict[str, tuple[FinishTarget, ...]] = {}
+    preparations: dict[tuple[str, str], AnchorPreparation] = {}
     for item, result in candidates:
         repo_refusal = repo_refusals.get(item.path)
         if repo_refusal is not None:
             blocked.append(repo_refusal)
             continue
-        affects = set(item.affects)
+        finish = finish_plans.get(item.path)
+        if finish is not None and finish.blockers:
+            blocked.append(BlockedItem(item.path, "worktree-unprovable", "; ".join(finish.blockers)))
+            continue
+        targets = finish.targets if finish is not None else ()
+        if any(t.worktree in accepted_worktrees or t.worktree in live_worktree_owners for t in targets):
+            blocked.append(BlockedItem(item.path, "worktree-pending", "a finish target is occupied by another worker"))
+            continue
+        item_repo, context = evidence(item)
+        if item_repos is not None and (item_repo is None or (item_repo.path is not None and context is None)):
+            blocked.append(BlockedItem(item.path, "invalid", "repository evidence unavailable for this item"))
+            continue
+        identity = context.identity if context is not None else "<legacy>"
+        affects = {(identity, member) for member in item.affects}
+        for target in targets:
+            target_context = next(
+                (c for c in (repo_contexts or {}).values() if str(target.repo.path) in c.checkout_usable_by_path), None
+            )
+            target_identity = target_context.identity if target_context else str(target.repo.path)
+            affects.update((target_identity, member) for member in item.affects)
         if not affects:
             blocked.append(
                 BlockedItem(
@@ -987,13 +1071,21 @@ def plan(
                 )
             )
             continue
+        if any(member in uncertain_live_affects for _, member in affects):
+            blocked.append(
+                BlockedItem(item.path, "worktree-unprovable", "live item's repository is unavailable for affects check")
+            )
+            continue
         overlap = affects & (live_affects | accepted_affects)
         if overlap:
             blocked.append(
                 BlockedItem(
                     path=item.path,
                     kind="affects-overlap",
-                    reason=("affects overlap with a live or already-planned dispatch: " + ", ".join(sorted(overlap))),
+                    reason=(
+                        "affects overlap with a live or already-planned dispatch: "
+                        + ", ".join(sorted(member for _, member in overlap))
+                    ),
                 )
             )
             continue
@@ -1026,21 +1118,135 @@ def plan(
             continue
         entry = resolution.profile
 
+        local_exists = exists
+        local_inventory = inventory
+        local_repo_path = repo_path
+        local_code_repo = code_repo
+        local_base = default_base
+        local_epic_path = epic_worktree_path
+        local_epic_branch = epic_branch
+        local_repo_known = repo_known
+        if context is not None and not targets:
+            local_exists = context.path_exists
+            selected_path = str(item_repo.path) if item_repo and item_repo.path else context.path
+            usable = context.checkout_usable_by_path.get(
+                selected_path, context.checkout_usable if selected_path == context.path else False
+            )
+            local_repo_path = selected_path if usable else None
+            local_code_repo = selected_path
+            local_base = context.default_base
+            local_repo_known = context.identity_known and context.inventory_known
+            owner = enclosing_owner(item, by_path)
+            local_epic_path = None
+            local_epic_branch = branch_name(item.path, item.type)
+            if owner is None and item.path == root:
+                local_epic_path = item.worktree
+                local_epic_branch = item.branch or local_epic_branch
+            if not usable and (item.worktree == selected_path or local_epic_path == selected_path):
+                blocked.append(
+                    BlockedItem(
+                        item.path, "worktree-unprovable", "selected checkout has uncommitted or unreadable state"
+                    )
+                )
+                continue
+            if not context.identity_known or not context.inventory_known:
+                blocked.append(
+                    BlockedItem(item.path, "worktree-unprovable", "repository Git identity or inventory is unavailable")
+                )
+                continue
+            matching = context.inventory.get(item.branch or "", ())
+            if item.worktree and item.branch and (len(matching) != 1 or item.worktree != matching[0]):
+                blocked.append(
+                    BlockedItem(
+                        item.path,
+                        "worktree-unprovable",
+                        "stamped worktree and branch are not verified in this repository",
+                    )
+                )
+                continue
+            if any(len(paths) > 1 for paths in context.inventory.values()):
+                blocked.append(
+                    BlockedItem(
+                        item.path, "worktree-ambiguous", "repository inventory contains duplicate branch observations"
+                    )
+                )
+                continue
+            if owner is not None and item_repo is not None and item_repos is not None:
+                selected = select_anchor(
+                    owner,
+                    items=by_path,
+                    repos=item_repos,
+                    repo=item_repo,
+                    context=context,
+                    prepare=phase not in READ_ONLY_PHASES,
+                )
+                if isinstance(selected, AnchorRefusal):
+                    blocked.append(BlockedItem(item.path, selected.kind, selected.reason))
+                    continue
+                if isinstance(selected, AnchorPreparation):
+                    if selected.worktree.path is None and not provisions_worktrees:
+                        blocked.append(
+                            BlockedItem(
+                                item.path,
+                                "worktree-unsupported",
+                                "integration preparation needs a backend that provisions worktrees",
+                            )
+                        )
+                        continue
+                    preparations.setdefault((selected.owner_path, context.identity), selected)
+                    blocked.append(
+                        BlockedItem(item.path, "worktree-pending", "repository integration anchor requires preparation")
+                    )
+                    continue
+                if isinstance(selected, Anchor):
+                    local_epic_path, local_epic_branch = selected.worktree, selected.branch
+                elif phase in READ_ONLY_PHASES:
+                    # Vault-only work needs a reading checkout, not a new owner stamp.
+                    local_epic_path = local_repo_path
+                    local_epic_branch = next(
+                        (branch for branch, paths in context.inventory.items() if local_repo_path in paths), local_base
+                    )
+            if local_epic_path is not None:
+                anchor_paths = context.inventory.get(local_epic_branch, ())
+                if len(anchor_paths) != 1 or local_epic_path != anchor_paths[0]:
+                    blocked.append(
+                        BlockedItem(
+                            item.path, "worktree-unprovable", "integration anchor is not verified in this repository"
+                        )
+                    )
+                    continue
+            local_inventory = {branch: paths[0] for branch, paths in context.inventory.items() if paths}
+
         is_root = item.path == root
+        placement_item = item
+        placement_root = is_root
+        if context is not None and phase in READ_ONLY_PHASES and local_epic_path is None and not item.worktree:
+            placement_item = replace(item, phase=None)
+            placement_root = True
+            local_epic_branch = branch_name(item.path, item.type)
+        if targets:
+            first = targets[0]
+            item_repo = first.repo
+            placement_item = replace(item, worktree=first.worktree, branch=first.source_branch)
+            local_exists = {first.worktree: True}
+            local_inventory = {first.source_branch: first.worktree}
+            local_base = first.target_branch
+            local_epic_branch = first.target_branch
+            local_epic_path = None
         action, claimed_now = _resolve_worktree(
-            item,
-            epic_worktree_path=epic_worktree_path,
-            epic_branch=epic_branch,
+            placement_item,
+            epic_worktree_path=local_epic_path,
+            epic_branch=local_epic_branch,
             live_worktree_owners=live_worktree_owners,
             accepted_worktrees=accepted_worktrees,
-            epic_worktree_claimed=epic_worktree_claimed,
-            worktree_exists=exists,
-            default_base=default_base,
+            epic_worktree_claimed=identity in epic_worktree_claimed,
+            worktree_exists=local_exists,
+            default_base=local_base,
             phase=phase,
-            is_root=is_root,
-            repo_path=repo_path,
-            inventory=inventory,
-            code_repo=code_repo,
+            is_root=placement_root,
+            repo_path=local_repo_path,
+            inventory=local_inventory,
+            code_repo=local_code_repo,
         )
         if isinstance(action, _Refusal):
             # Consumes no slot and claims no worktree: a refused item is not a
@@ -1068,7 +1274,7 @@ def plan(
                 )
             )
             continue
-        if action.path is None and not repo_known:
+        if action.path is None and not local_repo_known:
             blocked.append(
                 BlockedItem(
                     path=item.path,
@@ -1080,7 +1286,8 @@ def plan(
                 )
             )
             continue
-        epic_worktree_claimed = epic_worktree_claimed or claimed_now
+        if claimed_now:
+            epic_worktree_claimed.add(identity)
         # Same entitlement as `_resolve_worktree`'s rule 2: a read-only
         # descendant (design/plan) inheriting the *epic anchor* writes no
         # code, so its `reuse` has nothing to protect and must not occupy the
@@ -1095,9 +1302,14 @@ def plan(
         if action.path and (own_stamp or is_root or phase not in READ_ONLY_PHASES):
             accepted_worktrees.add(action.path)
 
-        merge_target = epic_branch if item.path != root else default_base
+        has_integration_owner = enclosing_owner(item, by_path) is not None if context is not None else not is_root
+        merge_target = local_epic_branch if has_integration_owner else local_base
         key = session_name(item.path, item.type, phase)
         resolutions[key] = resolution
+        finish_targets[key] = targets
+        accepted_worktrees.update(t.worktree for t in targets)
+        if item_repo is not None:
+            dispatch_repos[key] = item_repo
         dispatches.append(
             PlannedDispatch(
                 key=key,
@@ -1136,6 +1348,9 @@ def plan(
         blocked=tuple(blocked),
         warnings=tuple(warnings),
         dispatch_resolutions=MappingProxyType(resolutions),
+        dispatch_repos=MappingProxyType(dispatch_repos),
+        preparations=tuple(preparations.values()),
+        finish_targets=MappingProxyType(finish_targets),
     )
 
 
@@ -1202,6 +1417,18 @@ class OrchestrateResult:
     @property
     def dispatch_resolutions(self) -> Mapping[str, DispatchResolution]:
         return self.plan.dispatch_resolutions
+
+    @property
+    def dispatch_repos(self) -> Mapping[str, ItemRepo]:
+        return self.plan.dispatch_repos
+
+    @property
+    def finish_targets(self) -> Mapping[str, tuple[FinishTarget, ...]]:
+        return self.plan.finish_targets
+
+    @property
+    def preparations(self) -> tuple[AnchorPreparation, ...]:
+        return self.plan.preparations
 
     @property
     def advances(self) -> tuple[PlannedAdvance, ...]:
@@ -1327,27 +1554,27 @@ def _resolve_decisions(items: Sequence[WorkItem], bundle_root: Path, path: str) 
 
 def _repo_refusals(
     layout: WorkspaceLayout, items: Sequence[WorkItem], root: str, root_repo: ItemRepo
-) -> tuple[dict[str, BlockedItem], tuple[str, ...]]:
-    """Every descendant of *root* that does not plan in *root_repo*, plus a
-    warning for each descendant whose own resolution carried a non-`None`
-    `note` even though it did not refuse -- typically a malformed `repo:`
-    walked past as absent (`resolve_item_repo`'s `_malformed_note`). Such a
-    descendant silently inherits the root's repository; the note is the only
-    place that fact is recorded, so it must reach the caller even though the
-    descendant is not blocked.
+) -> tuple[dict[str, BlockedItem], tuple[str, ...], dict[str, ItemRepo]]:
+    """Descendant refusals, notes, and each resolved `ItemRepo`.
 
-    Each descendant resolves with the root's repository as its fallback, so
-    an untagged one inherits it even when the root's came from `--repo-name`.
-    A different answer is `cross-repo-child` -- placing work in a second
-    repository is not built yet, and guessing would place it in the wrong
-    one. A descendant whose own resolution refuses (an undeclared `repo:`)
-    is `invalid` for itself only; the rest of the subtree still plans.
+    Resolve ancestors and descendants independently. Untagged descendants
+    retain the root's fallback (including `--repo-name`); malformed tags
+    surface notes, and undeclared repository names refuse only that item.
     """
     by_path = {item.path: item for item in items}
     inherited = replace(root_repo, source="fallback", note=None)
     refusals: dict[str, BlockedItem] = {}
     notes: list[str] = []
-    for node in _descendants(items, root):
+    item_repos = {root: root_repo}
+    ancestors = []
+    parent = by_path.get(root)
+    seen = {root}
+    while parent is not None and parent.parent_path and parent.parent_path not in seen:
+        seen.add(parent.parent_path)
+        parent = by_path.get(parent.parent_path)
+        if parent is not None:
+            ancestors.append(parent)
+    for node in [*ancestors, *_descendants(items, root)]:
         try:
             resolved = resolve_item_repo(layout, node, by_path, fallback=lambda: inherited)
         except WorkspaceError as exc:
@@ -1355,16 +1582,8 @@ def _repo_refusals(
             continue
         if resolved.note:
             notes.append(resolved.note)
-        if resolved.name != root_repo.name:
-            refusals[node.path] = BlockedItem(
-                path=node.path,
-                kind="cross-repo-child",
-                reason=(
-                    f"{node.path} resolves to repository {resolved.name!r} ({resolved.source}), "
-                    f"not {root_repo.name!r} where {root} plans; cross-repository children are not placed yet"
-                ),
-            )
-    return refusals, tuple(notes)
+        item_repos[node.path] = resolved
+    return refusals, tuple(notes), item_repos
 
 
 def run_orchestrate(
@@ -1385,9 +1604,8 @@ def run_orchestrate(
     not the layout's `repo_root`. An explicit `repo` still wins and **skips
     that resolution entirely**: an argument is not a default. `repo_name`
     selects among several declared repositories and is ignored when `repo`
-    is given. Descendants that resolve to a different repository than the
-    root are blocked `cross-repo-child`; a descendant whose own `repo:`
-    cannot be resolved is blocked `invalid` for itself only.
+    is given. Descendants use independently observed repository contexts;
+    an undeclared `repo:` blocks only that descendant.
 
     `provisions_worktrees` passes straight through to `plan()` -- see its
     docstring; this shell resolves no backend itself; that is a caller's job.
@@ -1407,40 +1625,122 @@ def run_orchestrate(
     by_path = {item.path: item for item in items}
     repo_refusals: dict[str, BlockedItem] = {}
     descendant_repo_notes: tuple[str, ...] = ()
+    item_repos: dict[str, ItemRepo] | None = None
+    repo_contexts: dict[str, RepositoryContext] | None = None
     if repo is not None:
         root_repo = ItemRepo(None, repo, "flag")
     else:
         root_repo = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
-        repo_refusals, descendant_repo_notes = _repo_refusals(layout, items, path, root_repo)
-    resolved_repo, repo_note = root_repo.path, root_repo.note
+        repo_refusals, descendant_repo_notes, item_repos = _repo_refusals(layout, items, path, root_repo)
+        repo_contexts = {}
+        canonical_repos: dict[str, ItemRepo] = {}
+        for item_path, selected in item_repos.items():
+            if selected.path is None:
+                continue
+            canonical_path = str(selected.path.resolve())
+            canonical_repos[item_path] = replace(selected, path=Path(canonical_path))
+        item_repos.update(canonical_repos)
+        selected_by_identity: dict[str, list[tuple[str, ItemRepo]]] = {}
+        proven_identities: dict[str, str | None] = {}
+        for item_path, selected in item_repos.items():
+            if selected.path is not None:
+                identity = repository_identity(selected.path)
+                key = identity or str(selected.path)
+                proven_identities[key] = identity
+                selected_by_identity.setdefault(key, []).append((item_path, selected))
+        for key, selected_items in selected_by_identity.items():
+            checkout = selected_items[0][1].path
+            assert checkout is not None
+            selected_paths = {item_path for item_path, _ in selected_items}
+            context = observe_repository(
+                checkout,
+                paths=(Path(item.worktree) for item in items if item.path in selected_paths and item.worktree),
+                checkouts=(selected.path for _, selected in selected_items if selected.path is not None),
+                identity=proven_identities[key],
+            )
+            repo_contexts[context.identity] = context
+    selected_root = item_repos.get(path, root_repo) if item_repos is not None else root_repo
+    resolved_repo, repo_note = selected_root.path, root_repo.note
+    root_context = None
+    if resolved_repo is not None and repo_contexts is not None:
+        root_context = next(
+            (ctx for ctx in repo_contexts.values() if str(resolved_repo) in ctx.checkout_usable_by_path), None
+        )
 
     code_repo = str(resolved_repo) if resolved_repo is not None else None
     repo_path = code_repo
-    if resolved_repo is not None and _checkout_is_dirty(resolved_repo):
+    if root_context is not None:
+        repo_path = code_repo if root_context.checkout_usable_by_path[str(resolved_repo)] else None
+    elif resolved_repo is not None and _checkout_is_dirty(resolved_repo):
         # Withhold the checkout rather than dispatch into someone's edits.
         # `None` is the fully-supported "behave as before" value, so this
         # degrades to today's create-top-level cold start. The repository
         # itself is still known and still reported.
         repo_path = None
 
+    planning_items = items
+    if item_repos is not None:
+        planning_items = tuple(
+            replace(
+                item,
+                worktree=str(Path(item.worktree).resolve()) if item.worktree else None,
+                repo_stamps=MappingProxyType(
+                    {
+                        name: replace(stamp, worktree=str(Path(stamp.worktree).resolve()))
+                        for name, stamp in item.repo_stamps.items()
+                    }
+                ),
+            )
+            for item in items
+        )
+
+    subtree_paths = {path, *(item.path for item in _descendants(items, path))}
+    finish_plans = {
+        item.path: resolve_finish_targets(
+            layout,
+            items,
+            item.path,
+            single_repo=root_repo if repo is not None else None,
+            repo_contexts=repo_contexts or {},
+        )
+        for item in items
+        if item.path in subtree_paths and item.phase == "finish"
+    }
+
     computed = plan(
-        items,
+        planning_items,
         path,
         dispatch_rules=config.rules,
         max_parallel=max_parallel,
         supervise_merges=supervise_merges,
         live=live,
-        worktree_exists=_stat_worktrees(items, repo_path),
+        worktree_exists=root_context.path_exists if root_context is not None else _stat_worktrees(items, repo_path),
         holds=holds_by_path(items, bundle.root),
         provisions_worktrees=provisions_worktrees,
         workspace=str(layout.root),
-        default_base=default_base(resolved_repo),
+        default_base=root_context.default_base if root_context is not None else default_base(resolved_repo),
         repo_path=repo_path,
-        worktree_inventory=_worktree_inventory(resolved_repo),
+        worktree_inventory=(
+            {branch: paths[0] for branch, paths in root_context.inventory.items() if len(paths) == 1}
+            if root_context is not None
+            else _worktree_inventory(resolved_repo)
+        ),
         repo_known=code_repo is not None,
         code_repo=code_repo,
         repo_refusals=repo_refusals,
+        item_repos=item_repos,
+        repo_contexts=repo_contexts,
+        finish_plans=finish_plans,
     )
+
+    if repo is not None:
+        # The explicit override retains singular scheduling and must not resolve
+        # authored foreign assignments. Its accepted dispatches still carry the
+        # same mandatory repository metadata as normally resolved dispatches.
+        computed = replace(
+            computed,
+            dispatch_repos=MappingProxyType({dispatch.key: root_repo for dispatch in computed.dispatches}),
+        )
 
     decisions = _resolve_decisions(items, bundle.root, path)
     subtree = {path, *(item.path for item in _descendants(items, path))}
@@ -1465,12 +1765,14 @@ __all__ = [
     "DISPATCH_PHASES",
     "WORKER_PLACEMENT_LINE",
     "WORKSPACE_VAR",
+    "AnchorPreparation",
     "BlockedItem",
     "HoldReport",
     "OrchestratePlan",
     "OrchestrateResult",
     "PlannedAdvance",
     "branch_name",
+    "integration_branch",
     "plan",
     "run_orchestrate",
 ]

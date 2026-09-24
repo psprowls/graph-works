@@ -107,6 +107,7 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
 
     result = SimpleNamespace(
         requested_path="work/e",
+        finish_targets=(),
         selected_path="work/a",
         descent=SimpleNamespace(path=("work/e", "work/a"), leaf=None, blocked_at="work/a", reason="blocked"),
         route=SimpleNamespace(blockers=("base",)),
@@ -217,7 +218,11 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         supervise_merges=False,
         live=("x",),
         dispatches=(dispatch,),
-        plan=SimpleNamespace(dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())}),
+        dispatch_repos={dispatch.key: SimpleNamespace(name="code", path=Path("/code"), source="sole")},
+        preparations=(),
+        plan=SimpleNamespace(
+            finish_targets={}, dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())}
+        ),
         advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b", mode="return"),),
         blocked=(SimpleNamespace(path="work/c", kind="dependency", reason="wait"),),
         decisions_owner_path="work/e",
@@ -265,6 +270,7 @@ def test_orchestrate_payload_carries_holds() -> None:
         supervise_merges=False,
         live=(),
         dispatches=(),
+        preparations=(),
         advances=(),
         blocked=(),
         decisions_owner_path="work/e",
@@ -433,3 +439,30 @@ def test_open_decisions_payload_reuses_the_decision_projection() -> None:
         ]
     }
     assert work.open_decisions_payload([]) == {"decisions": []}
+
+
+def test_finish_target_projection_is_explicit_and_ordered() -> None:
+    from graph_works_core.workspace.finish import FinishTarget
+    from graph_works_core.workspace.repos import ItemRepo
+    from samples_work import BUNDLE, next_result
+
+    result = next_result(full=True)
+    result.finish_targets = (
+        FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main"),
+        FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk"),
+    )
+    result.state.phase = "finish"
+    assert work.next_payload(result, bundle_root=BUNDLE)["finish_targets"] == [
+        {
+            "repo": {"name": "core", "path": "/core", "source": "frontmatter"},
+            "worktree": "/core/epic",
+            "source_branch": "epic/a",
+            "target_branch": "main",
+        },
+        {
+            "repo": {"name": None, "path": None, "source": "sole"},
+            "worktree": "/ui/epic",
+            "source_branch": "epic/a",
+            "target_branch": "trunk",
+        },
+    ]

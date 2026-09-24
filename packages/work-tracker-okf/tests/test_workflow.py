@@ -634,3 +634,43 @@ def test_blast_radius_is_routing_neutral_and_populated_from_item():
     state = state_for([item], item.path)
     assert state.blast_radius == "package"
     assert route(_state(blast_radius="system")) == route(_state(blast_radius=None))
+
+
+def test_foreign_stamp_owns_finish_branch(tmp_path):
+    from okf_io import load_bundle
+    from work_tracker_okf.items import load_items
+    from work_tracker_okf.workflow import state_for
+
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work/epic-a.md").write_text(
+        "---\ntype: Epic\nwork_status: in-progress\nphase: finish\n"
+        "repo_stamps:\n  ui: {worktree: /ui/epic, branch: epic/a}\n---\n",
+        encoding="utf-8",
+    )
+    item = load_items(load_bundle(tmp_path))[0]
+    assert item is not None
+    state = state_for((item,), item.path)
+    assert state is not None and state.has_branch
+    routed = route(state)
+    assert routed.dispatch is not None
+    assert routed.dispatch.stage == "finish"
+    assert routed.dispatch.variant == "branch"
+
+
+def test_foreign_stamp_release_still_requires_release_date(tmp_path):
+    from datetime import date
+
+    from okf_io import load_bundle
+    from work_tracker_okf.advance import advance
+    from work_tracker_okf.items import load_items
+
+    (tmp_path / "work").mkdir()
+    (tmp_path / "work/release-a.md").write_text(
+        "---\ntype: Release\nwork_status: in-progress\nphase: finish\n"
+        "repo_stamps:\n  ui: {worktree: /ui/epic, branch: epic/a}\n---\n",
+        encoding="utf-8",
+    )
+    items = load_items(load_bundle(tmp_path))
+    result = advance(items, items[0].path, today=date(2026, 9, 23), resolved_in="abc1234")
+    assert result.refusal is not None
+    assert "released_at" in str(result)

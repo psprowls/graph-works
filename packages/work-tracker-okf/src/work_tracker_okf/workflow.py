@@ -63,8 +63,8 @@ class RouteState:
     `hold` is resolved by the caller from a ledger read; this module stays pure
     and never reads a decisions ledger or the filesystem itself.
 
-    `has_branch` is branch *ownership* only, from the item's `branch:` stamp: a
-    stamped Epic or Release owns the integration branch its descendants merged
+    `has_branch` is branch *ownership* only, from the item's scalar `branch:`
+    or `repo_stamps`: a stamped Epic or Release owns the integration branch its descendants merged
     into, so it finishes like any other branch (D-002). Never a name, never a
     Git read."""
 
@@ -507,7 +507,7 @@ def state_for(
         dependency_issues=(*item.dependency_issues, *structural_issues),
         child_rollup=rollup,
         open_descendants=open_descendants,
-        has_branch=bool(item.branch),
+        has_branch=bool(item.branch or item.repo_stamps),
     )
 
 

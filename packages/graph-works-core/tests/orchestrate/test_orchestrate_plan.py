@@ -5,11 +5,14 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import re
+from pathlib import Path
 from unittest import mock
 
 import pytest
 from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.orchestrate.commands import BlockedItem
+from graph_works_core.workspace.repo_context import RepositoryContext
+from graph_works_core.workspace.repos import ItemRepo
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import Stamp, WorkItem
 
@@ -76,6 +79,201 @@ def _plan(items: tuple[WorkItem, ...], root: str, **overrides: object):
     }
     kwargs.update(overrides)
     return orchestrate.plan(items, root, **kwargs)  # type: ignore[arg-type]
+
+
+def test_distinct_repositories_share_one_budget_without_affects_collision() -> None:
+    root = "work/epic-r"
+    code = f"{root}/children/feature-code"
+    ui = f"{root}/children/feature-ui"
+    items = (
+        _item(root, type="Epic", phase="execute", active_child_paths=(code, ui)),
+        _item(code, phase="execute", affects=("packages/a",), worktree="/wt/code", branch="feature/code"),
+        _item(ui, phase="execute", affects=("packages/a",), worktree="/wt/ui", branch="feature/ui"),
+    )
+    repos = {
+        root: ItemRepo("code", Path("/repo/code"), "frontmatter"),
+        code: ItemRepo("code", Path("/repo/code"), "frontmatter"),
+        ui: ItemRepo("ui", Path("/repo/ui"), "frontmatter"),
+    }
+    contexts = {
+        "git-code": RepositoryContext(
+            "git-code",
+            "/repo/code",
+            "main",
+            True,
+            {"feature/code": ("/wt/code",)},
+            {"/wt/code": True},
+            True,
+            checkout_usable_by_path={"/wt/code": True},
+        ),
+        "git-ui": RepositoryContext(
+            "git-ui",
+            "/repo/ui",
+            "main",
+            True,
+            {"feature/ui": ("/wt/ui",)},
+            {"/wt/ui": True},
+            True,
+            checkout_usable_by_path={"/wt/ui": True},
+        ),
+    }
+    items = (
+        dataclasses.replace(
+            items[0], worktree="/wt/code", branch="feature/code", repo_stamps={"ui": Stamp("/wt/ui", "feature/ui")}
+        ),
+        *items[1:],
+    )
+    result = _plan(items, root, item_repos=repos, repo_contexts=contexts)
+    assert {d.slug for d in result.dispatches} == {code, ui}
+    assert result.slots_free == 2
+    assert {result.dispatch_repos[d.key].name for d in result.dispatches} == {"code", "ui"}
+    limited = _plan(items, root, item_repos=repos, repo_contexts=contexts, max_parallel=1)
+    assert len(limited.dispatches) == 1
+    assert any(b.kind == "capacity" for b in limited.blocked)
+    live = orchestrate.session_name(code, "Feature", "execute")
+    occupied = _plan(items, root, item_repos=repos, repo_contexts=contexts, live=(live,), max_parallel=1)
+    assert not occupied.dispatches
+    assert any(b.kind == "capacity" for b in occupied.blocked)
+
+
+def test_same_repository_overlap_still_blocks_and_missing_context_is_local() -> None:
+    root = "work/epic-r"
+    first, second, missing = (f"{root}/children/feature-{suffix}" for suffix in ("one", "two", "missing"))
+    items = (
+        _item(root, type="Epic", phase="execute", active_child_paths=(first, second, missing)),
+        _item(first, phase="execute", worktree="/wt/one", branch="feature/one"),
+        _item(second, phase="execute", worktree="/wt/two", branch="feature/two"),
+        _item(missing, phase="execute", affects=("packages/b",)),
+    )
+    repos = {path: ItemRepo("code", Path("/repo/code"), "frontmatter") for path in (root, first, second)}
+    repos[missing] = ItemRepo("unknown", Path("/repo/unknown"), "frontmatter")
+    context = RepositoryContext(
+        "git-code",
+        "/repo/code",
+        "main",
+        True,
+        {"feature/one": ("/wt/one",), "feature/two": ("/wt/two",)},
+        {"/wt/one": True, "/wt/two": True},
+        True,
+        checkout_usable_by_path={"/wt/one": True, "/wt/two": True},
+    )
+    items = (dataclasses.replace(items[0], worktree="/wt/one", branch="feature/one"), *items[1:])
+    result = _plan(items, root, item_repos=repos, repo_contexts={context.identity: context})
+    assert len(result.dispatches) == 1
+    blocked = {b.path: b.kind for b in result.blocked}
+    assert blocked[second] == "affects-overlap"
+    assert blocked[missing] == "invalid"
+
+
+def test_unverified_root_anchor_cannot_place_a_child() -> None:
+    root, child = "work/epic-r", "work/epic-r/children/feature-a"
+    items = (
+        _item(root, type="Epic", phase="execute", active_child_paths=(child,), worktree="/wt/foreign", branch="epic/r"),
+        _item(child, phase="execute"),
+    )
+    selected = ItemRepo("code", Path("/repo/code"), "frontmatter")
+    context = RepositoryContext("git-code", "/repo/code", "main", True, {"main": ("/repo/code",)}, {}, True)
+    result = _plan(items, root, item_repos={root: selected, child: selected}, repo_contexts={context.identity: context})
+    assert not result.dispatches
+    assert [(b.path, b.kind) for b in result.blocked] == [(child, "worktree-unprovable")]
+
+
+def test_unknown_live_repository_does_not_authorize_overlapping_candidate() -> None:
+    root, live_path, ready = (
+        "work/epic-r",
+        "work/epic-r/children/feature-live",
+        "work/epic-r/children/feature-ready",
+    )
+    items = (
+        _item(root, type="Epic", phase="execute", active_child_paths=(live_path, ready)),
+        _item(live_path, phase="execute", worktree="/wt/live", branch="feature/live"),
+        _item(ready, phase="execute", worktree="/wt/ready", branch="feature/ready"),
+    )
+    selected = ItemRepo("code", Path("/repo/code"), "frontmatter")
+    context = RepositoryContext(
+        "git-code", "/repo/code", "main", True, {"feature/ready": ("/wt/ready",)}, {"/wt/ready": True}, True
+    )
+    result = _plan(
+        items,
+        root,
+        live=(orchestrate.session_name(live_path, "Feature", "execute"),),
+        item_repos={ready: selected},
+        repo_contexts={context.identity: context},
+    )
+    assert not result.dispatches
+    assert {blocked.path: blocked.kind for blocked in result.blocked}[ready] == "worktree-unprovable"
+
+
+def test_shared_git_identity_preserves_each_declared_checkout() -> None:
+    root = "work/epic-r"
+    first, second = (f"{root}/children/feature-{suffix}" for suffix in ("first", "second"))
+    items = (
+        _item(root, type="Epic", phase="execute", active_child_paths=(first, second)),
+        _item(first, phase="execute", affects=("packages/a",), worktree="/repo/primary", branch="main"),
+        _item(second, phase="execute", affects=("packages/b",), worktree="/repo/linked", branch="feature/linked"),
+    )
+    selected = {
+        root: ItemRepo("primary", Path("/repo/primary"), "frontmatter"),
+        first: ItemRepo("primary", Path("/repo/primary"), "frontmatter"),
+        second: ItemRepo("linked", Path("/repo/linked"), "frontmatter"),
+    }
+    context = RepositoryContext(
+        "git-common",
+        "/repo/primary",
+        "main",
+        True,
+        {"main": ("/repo/primary",), "feature/linked": ("/repo/linked",)},
+        {"/repo/primary": True, "/repo/linked": True},
+        True,
+        checkout_usable_by_path={"/repo/primary": True, "/repo/linked": True},
+    )
+    items = (
+        dataclasses.replace(
+            items[0],
+            worktree="/repo/primary",
+            branch="main",
+            repo_stamps={"linked": Stamp("/repo/linked", "feature/linked")},
+        ),
+        *items[1:],
+    )
+    result = _plan(items, root, item_repos=selected, repo_contexts={context.identity: context})
+    assert {d.slug for d in result.dispatches} == {first, second}
+    assert {result.dispatch_repos[d.key].path for d in result.dispatches} == {
+        Path("/repo/primary"),
+        Path("/repo/linked"),
+    }
+
+
+def test_dirty_declared_checkout_cannot_reuse_its_scalar_stamp() -> None:
+    path = "work/feature-a"
+    item = _item(path, phase="execute", worktree="/repo/linked", branch="feature/linked")
+    selected = ItemRepo("linked", Path("/repo/linked"), "frontmatter")
+    context = RepositoryContext(
+        "git-common",
+        "/repo/primary",
+        "main",
+        True,
+        {"feature/linked": ("/repo/linked",)},
+        {"/repo/linked": True},
+        True,
+        checkout_usable_by_path={"/repo/primary": True, "/repo/linked": False},
+    )
+    result = _plan((item,), path, item_repos={path: selected}, repo_contexts={context.identity: context})
+    assert result.dispatches == ()
+    assert [(b.path, b.kind) for b in result.blocked] == [(path, "worktree-unprovable")]
+
+
+def test_failed_git_identity_refuses_fresh_root_creation() -> None:
+    path = "work/feature-a"
+    selected = ItemRepo("code", Path("/repo/code"), "sole")
+    context = RepositoryContext(
+        "/repo/code", "/repo/code", "main", False, {}, {"/repo/code": True}, False, identity_known=False
+    )
+    result = _plan(
+        (_item(path, phase="design"),), path, item_repos={path: selected}, repo_contexts={context.identity: context}
+    )
+    assert result.dispatches == ()
+    assert [(b.path, b.kind) for b in result.blocked] == [(path, "worktree-unprovable")]
 
 
 def test_lone_item_dispatch_key_and_prompt_use_full_path() -> None:

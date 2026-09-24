@@ -116,6 +116,7 @@ from graph_works_core.workspace.dispatch import (
 from graph_works_core.workspace.dispatch_artifacts import missing_design_source
 from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
+from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
@@ -536,6 +537,7 @@ class NextResult:
     dispatch_preflight: str | None = None
     application: NextApplication = NextApplication()
     warnings: tuple[str, ...] = ()
+    finish_targets: tuple[FinishTarget, ...] = ()
 
 
 def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNormalization | None:
@@ -679,7 +681,11 @@ def _plan_route(bundle: Bundle, items: Sequence[WorkItem], path: str, *, descend
 def _plan_next(layout: WorkspaceLayout, path: str, *, descend: bool) -> tuple[NextResult, Bundle, WorkItem]:
     """Load the bundle once and plan *path* over it (`_plan_route`)."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    preview, selected = _plan_route(bundle, tuple(load_items(bundle)), path, descend=descend)
+    items = tuple(load_items(bundle))
+    preview, selected = _plan_route(bundle, items, path, descend=descend)
+    if preview.route.dispatch is not None and preview.route.dispatch.stage == "finish":
+        finish = resolve_finish_targets(layout, items, preview.selected_path)
+        preview = replace(preview, finish_targets=finish.targets, dispatch_preflight="; ".join(finish.blockers) or None)
     return preview, bundle, selected
 
 
@@ -706,7 +712,9 @@ def run_next(
     preview, bundle, selected = _plan_next(layout, path, descend=descend)
     if dry_run:
         resolution, preflight = _resolve_next_dispatch(layout, preview.state, preview.route)
-        return replace(preview, dispatch_resolution=resolution, dispatch_preflight=preflight)
+        return replace(
+            preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
+        )
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
@@ -726,7 +734,7 @@ def run_next(
     return replace(
         preview,
         dispatch_resolution=resolution,
-        dispatch_preflight=preflight,
+        dispatch_preflight=preview.dispatch_preflight or preflight,
         state=persisted_state,
         route=persisted_route,
         child_rollup=persisted_state.child_rollup,

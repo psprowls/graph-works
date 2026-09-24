@@ -286,6 +286,7 @@ def test_render_orchestrate_prints_holds(capsys: pytest.CaptureFixture[str]) -> 
         supervise_merges=False,
         live=(),
         dispatches=(),
+        preparations=(),
         advances=(),
         blocked=(),
         decisions_owner_path="work/e",

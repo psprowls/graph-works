@@ -371,3 +371,47 @@ def test_work_record_placement_repo_writes_repo_stamps(two_repos: tuple[Path, Pa
     assert load(root / "okf" / f"{path}.md").fm_data()["repo_stamps"] == {
         "ui": {"worktree": worktree, "branch": "feature/placed"}
     }
+
+
+def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tuple[Path, Path, Path]) -> None:
+    import subprocess
+
+    root, code, ui = two_repos
+    for repo in (code, ui):
+        subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(repo),
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.test",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "base",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    owner = root / "okf/work/epic-root.md"
+    owner.parent.mkdir(parents=True, exist_ok=True)
+    owner.write_text("---\ntype: Epic\nphase: execute\nwork_status: in-progress\n---\n", encoding="utf-8")
+    child = root / "okf/work/epic-root/children/feature-ui.md"
+    child.parent.mkdir(parents=True)
+    child.write_text(
+        "---\ntype: Feature\nphase: design\nwork_status: open\nrepo: ui\naffects: [apps/ui]\n---\n",
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app, ["work", "orchestrate", "work/epic-root", "--repo-name", "code", "--workspace", str(root), "--json"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["repo"] == {"name": "code", "path": str(code.resolve()), "source": "flag"}
+    [dispatch] = payload["dispatches"]
+    assert dispatch["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
+    assert dispatch["worktree"]["path"] == str(ui.resolve())
+    assert payload["preparations"] == []

@@ -48,6 +48,7 @@ def next_result(*, full: bool) -> object:
     dropped = ns(path="work/b", ref=ns(source_id="design", resource="/work/b/references/01-design.md"))
     return ns(
         requested_path="work/e",
+        finish_targets=(),
         selected_path="work/a",
         state=ns(work_status="open", type="Feature", phase="design", effort="medium"),
         route=ns(
@@ -257,7 +258,20 @@ def orchestrate(*, busy: bool) -> object:
         supervise_merges=busy,
         live=("x",) if busy else (),
         dispatches=(dispatch,) if busy else (),
-        plan=ns(dispatch_resolutions={dispatch.key: RESOLUTION}),
+        plan=ns(finish_targets={}, dispatch_resolutions={dispatch.key: RESOLUTION}),
+        dispatch_repos={dispatch.key: ns(name="ui", path=Path("/ui"), source="item")},
+        preparations=(
+            ns(
+                owner_path="work/e",
+                owner_phase="execute",
+                repo=ns(name="ui", path=Path("/ui"), source="item"),
+                branch="epic/e",
+                base_branch="main",
+                worktree=worktree,
+            ),
+        )
+        if busy
+        else (),
         advances=(ns(path="work/b", reason="done", worktree="w", branch="b", mode="return"),) if busy else (),
         blocked=(ns(path="work/c", kind="dependency", reason="wait"),) if busy else (),
         decisions_owner_path="work/e",

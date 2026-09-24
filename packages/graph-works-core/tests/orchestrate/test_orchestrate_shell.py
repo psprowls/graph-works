@@ -71,12 +71,8 @@ def _initialized_workspace(tmp_path: Path):
 
 
 def _declare_repo(monkeypatch, tmp_path: Path) -> Path:
-    """Stand in for a declared code repository with a plain directory.
-
-    Not a git checkout, so the dirty check fails closed (the checkout is
-    withheld) and `default_base` falls back -- a cold start still mints."""
-    code = tmp_path / "code"
-    code.mkdir(parents=True, exist_ok=True)
+    """Declare a real code repository for shell dispatch tests."""
+    code = _git_repo(tmp_path / "code")
     monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo("code", code, "sole"))
     return code
 
@@ -332,6 +328,7 @@ def test_the_declared_code_repo_is_reported_even_when_its_checkout_is_withheld(t
     path = "work/feature-a"
     _write(layout, path, phase="design")
     code = _declare_repo(monkeypatch, tmp_path)
+    (code / "dirty.txt").write_text("local edit\n", encoding="utf-8")
     result = orchestrate.run_orchestrate(layout, path)
     assert result.code_repo == str(code)
     assert result.dispatches[0].worktree.action == "create-top-level"
@@ -984,17 +981,110 @@ def test_an_untagged_child_inherits_the_root_s_flag_repository(tmp_path: Path) -
     assert "cross-repo-child" not in _kinds(result).values()
 
 
-def test_a_cross_repo_child_is_refused_by_name(tmp_path: Path) -> None:
+def test_a_cross_repo_child_requires_an_owner_anchor(tmp_path: Path) -> None:
     layout, _code, _ui = _two_repo_stamping_workspace(tmp_path)
     _tag(layout, "work/epic-a", "ui")
     _tag(layout, "work/epic-a/children/feature-a", "code")
 
+    child = load(layout.bundle_dir / "work/epic-a/children/feature-a.md")
+    child.set("phase", "execute")
+    child.save()
     result = orchestrate.run_orchestrate(layout, "work/epic-a")
 
+    (preparation,) = result.plan.preparations
+    assert preparation.owner_path == "work/epic-a"
+    assert preparation.repo.name == "code"
+    assert preparation.worktree.action == "create-top-level"
+    assert preparation.worktree.parent_path is None
     (blocked,) = [b for b in result.blocked if b.path == "work/epic-a/children/feature-a"]
-    assert blocked.kind == "cross-repo-child"
-    assert "'code'" in blocked.reason and "'ui'" in blocked.reason
+    assert blocked.kind == "worktree-pending"
     assert all(d.slug != blocked.path for d in result.dispatches)
+
+
+def test_dirty_foreign_checkout_does_not_withhold_clean_repository_dispatch(tmp_path: Path, monkeypatch) -> None:
+    layout, code, ui = _two_repo_stamping_workspace(tmp_path)
+    _tag(layout, "work/epic-a", "code")
+    _tag(layout, "work/epic-a/children/feature-a", "ui")
+    (ui / "dirty.txt").write_text("local edit\n", encoding="utf-8")
+    sibling = "work/epic-a/children/feature-clean"
+    _write(layout, sibling, phase="plan", affects=("packages/b",))
+    from graph_works_core.work import commands as work
+
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    observed = {}
+    real_plan = orchestrate.plan
+
+    def capture(*args, **kwargs):
+        observed.update(kwargs["repo_contexts"])
+        return real_plan(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrate, "plan", capture)
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+    dispatch = next(d for d in result.dispatches if d.slug == "work/epic-a/children/feature-a")
+    assert dispatch.worktree.action == "create-top-level"
+    assert dispatch.worktree.parent_path is None
+    assert result.dispatch_repos[dispatch.key].path == ui.resolve()
+    assert not result.preparations
+    clean = next(d for d in result.dispatches if d.slug == sibling)
+    assert clean.worktree.path == str(code.resolve())
+    assert result.dispatch_repos[clean.key].path == code.resolve()
+    assert len(observed) == 2
+    by_path = {context.path: context for context in observed.values()}
+    assert by_path[str(code.resolve())].checkout_usable
+    assert not by_path[str(ui.resolve())].checkout_usable
+    assert all(
+        context.inventory_known and context.inventory["main"] == (context.path,) for context in observed.values()
+    )
+
+
+def test_linked_declared_checkouts_keep_separate_eligibility(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    layout, code, ui = _two_repo_stamping_workspace(tmp_path)
+    linked = tmp_path / "code-linked"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feature/linked", str(linked)],
+        cwd=code,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    manifest = layout.manifest_path.read_text(encoding="utf-8")
+    layout.manifest_path.write_text(manifest.replace(str(ui), str(linked)), encoding="utf-8")
+    _tag(layout, "work/epic-a", "code")
+    child = "work/epic-a/children/feature-a"
+    _tag(layout, child, "ui")
+    (linked / "dirty.txt").write_text("local\n", encoding="utf-8")
+    captured = {}
+    real_plan = orchestrate.plan
+
+    def capture(*args, **kwargs):
+        captured.update(kwargs)
+        return real_plan(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrate, "plan", capture)
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+    (dispatch,) = result.dispatches
+    assert dispatch.worktree.action == "create-top-level"
+    assert result.dispatch_repos[dispatch.key].path == linked.resolve()
+    selected = captured["item_repos"]
+    assert selected["work/epic-a"].path == code.resolve()
+    assert selected[child].path == linked.resolve()
+    (context,) = captured["repo_contexts"].values()
+    assert context.checkout_usable_by_path[str(code.resolve())] is True
+    assert context.checkout_usable_by_path[str(linked.resolve())] is False
+
+
+def test_non_git_declared_repository_refuses_fresh_root(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path / "workspace")
+    path = "work/feature-a"
+    _write(layout, path, phase="design")
+    code = tmp_path / "plain-directory"
+    code.mkdir()
+    monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo("code", code, "sole"))
+    result = orchestrate.run_orchestrate(layout, path)
+    assert result.dispatches == ()
+    assert [(b.path, b.kind) for b in result.blocked] == [(path, "worktree-unprovable")]
 
 
 def test_a_descendant_with_a_malformed_repo_surfaces_a_warning_and_is_not_blocked(tmp_path: Path) -> None:
@@ -1319,3 +1409,122 @@ def test_an_open_decision_at_design_stops_advance_stamping_plan(tmp_path: Path) 
     result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
     assert result.outcome.plan.refusal == "blocked"
     assert load(layout.bundle_dir / f"{path}.md").fm_data()["phase"] == "design"
+
+
+def test_foreign_anchor_adoption_stamp_and_replan_use_real_repository(tmp_path: Path) -> None:
+    import subprocess
+
+    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
+    owner, child = "work/epic-a", "work/epic-a/children/feature-a"
+    _tag(layout, owner, "ui")
+    _tag(layout, child, "code")
+    page = layout.bundle_dir / f"{child}.md"
+    before = page.read_bytes()
+    readonly = orchestrate.run_orchestrate(layout, owner)
+    assert not readonly.preparations
+    assert readonly.dispatches[0].worktree.path == str(code.resolve())
+    assert page.read_bytes() == before
+    assert not load(layout.bundle_dir / f"{owner}.md").fm_data().get("repo_stamps")
+    document = load(page)
+    document.set("phase", "execute")
+    document.save()
+    (prep,) = orchestrate.run_orchestrate(layout, owner).preparations
+    anchor = tmp_path / "code-anchor"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", prep.branch, str(anchor), prep.base_branch],
+        cwd=code,
+        check=True,
+        capture_output=True,
+    )
+    (adoption,) = orchestrate.run_orchestrate(layout, owner).preparations
+    assert adoption.worktree.action == "reuse"
+    assert adoption.worktree.path == str(anchor.resolve())
+    document = load(layout.bundle_dir / f"{owner}.md")
+    document.set("repo_stamps", {"code": {"worktree": str(anchor), "branch": prep.branch}})
+    document.save()
+    replanned = orchestrate.run_orchestrate(layout, owner)
+    assert not replanned.preparations
+    (dispatch,) = replanned.dispatches
+    assert dispatch.worktree.parent_path == str(anchor.resolve())
+    assert dispatch.worktree.base_branch == dispatch.merge_target == prep.branch
+
+
+def test_foreign_anchor_branch_without_worktree_is_a_repair_case(tmp_path: Path) -> None:
+    import subprocess
+
+    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
+    owner, child = "work/epic-a", "work/epic-a/children/feature-a"
+    _tag(layout, owner, "ui")
+    _tag(layout, child, "code")
+    document = load(layout.bundle_dir / f"{child}.md")
+    document.set("phase", "execute")
+    document.save()
+    branch = orchestrate.integration_branch(owner, "Epic")
+    subprocess.run(["git", "branch", branch], cwd=code, check=True, capture_output=True)
+    result = orchestrate.run_orchestrate(layout, owner)
+    assert not result.preparations and not result.dispatches
+    assert _kinds(result)[child] == "worktree-unprovable"
+
+
+@pytest.mark.parametrize("stamped", [False, True])
+@pytest.mark.parametrize("state", ["dirty", "unreadable"])
+def test_unsafe_undeclared_anchor_worktree_refuses_adoption_and_use(
+    tmp_path: Path, stamped: bool, state: str, monkeypatch
+) -> None:
+    import subprocess
+
+    layout, code, _ui = _two_repo_stamping_workspace(tmp_path)
+    owner, child = "work/epic-a", "work/epic-a/children/feature-a"
+    _tag(layout, owner, "ui")
+    _tag(layout, child, "code")
+    document = load(layout.bundle_dir / f"{child}.md")
+    document.set("phase", "execute")
+    document.save()
+    branch = orchestrate.integration_branch(owner, "Epic")
+    anchor = tmp_path / "undeclared-anchor"
+    subprocess.run(["git", "worktree", "add", "-b", branch, str(anchor)], cwd=code, check=True, capture_output=True)
+    if state == "dirty":
+        (anchor / "uncommitted.txt").write_text("local work\n", encoding="utf-8")
+    else:
+        from graph_works_core.workspace import repo_context
+        from graph_works_core.workspace.provenance import GitOutcome
+
+        real_probe = repo_context.probe_git
+
+        def unreadable_status(cwd, *args):
+            if cwd == anchor.resolve() and args == ("status", "--porcelain"):
+                return GitOutcome(None, "", "error")
+            return real_probe(cwd, *args)
+
+        monkeypatch.setattr(repo_context, "probe_git", unreadable_status)
+    if stamped:
+        document = load(layout.bundle_dir / f"{owner}.md")
+        document.set("repo_stamps", {"code": {"worktree": str(anchor), "branch": branch}})
+        document.save()
+    result = orchestrate.run_orchestrate(layout, owner)
+    assert not result.preparations and not result.dispatches
+    assert _kinds(result)[child] == "worktree-unprovable"
+
+
+@pytest.mark.parametrize("tagged", [False, True])
+def test_explicit_repo_override_projects_dispatch_metadata(tmp_path: Path, tagged: bool) -> None:
+    """The singular Python override serializes without resolving foreign assignments."""
+    from graph_works_wire.work import orchestrate_payload
+
+    layout = _workspace(tmp_path / "workspace")
+    repo = _git_repo(tmp_path / "code")
+    path = "work/feature-explicit"
+    _write(layout, path, phase="design")
+    if tagged:
+        document = load(layout.bundle_dir / f"{path}.md")
+        document.set("repo", "undeclared-foreign")
+        document.save()
+
+    result = orchestrate.run_orchestrate(layout, path, repo=repo)
+    [dispatch] = result.dispatches
+    payload = orchestrate_payload(result)
+    assert result.dispatch_repos[dispatch.key] == ItemRepo(None, repo, "flag")
+    assert payload["dispatches"][0]["repo"] == {"name": None, "path": str(repo), "source": "flag"}
+    assert payload["dispatches"][0]["worktree"]["action"] == "create-top-level"
+    assert payload["dispatches"][0]["worktree"]["base_branch"] == "main"
+    assert payload["preparations"] == []

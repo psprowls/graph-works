@@ -159,17 +159,14 @@ def test_a_recorded_renamed_fork_child_reuses_its_execute_commit_at_finish(
     assert load(layout.bundle_dir / f"{EPIC}.md").fm_data()["branch"] == EPIC_BRANCH
 
 
-def test_without_a_record_the_finish_stage_forks_away_from_the_commit(
+def test_without_a_record_finish_uses_verified_declared_checkout(
     world: tuple[WorkspaceLayout, Path, Path],
 ) -> None:
-    """The unstamped child under a stamped epic takes the anchor's fork rule.
+    """Unstamped finish can only identify the declared checkout, not hidden work.
 
-    That rule precedes cold-start inventory adoption in `_resolve_worktree`.
-    Also, this fixture's fixed branch suffix differs from the current path hash,
-    and `wt-fork` differs from the item's basename, so `_adopt`'s exact branch,
-    flattened-branch and directory matches would not recover it. Other
-    unstamped placements can be rescued by adoption; this is not a claim about
-    every renamed branch or proof of the historical installed-runtime cause.
+    Recording actual placement is required to associate an execute commit in a
+    renamed fork with the child. The compatibility fallback must never invent
+    a new fork at finish and imply that it contains those changes.
     """
     layout, repo, fork = world
     current_planned = orchestrate.branch_name(CHILD, "Bug")
@@ -182,9 +179,8 @@ def test_without_a_record_the_finish_stage_forks_away_from_the_commit(
     assert fm["phase"] == "finish"
     assert fm.get("worktree") is None and fm.get("branch") is None
     dispatch = _finish_dispatch(layout, repo)
-    assert dispatch.worktree.action == "fork-child"
-    assert dispatch.worktree.path is None
-    assert dispatch.worktree.base_branch == EPIC_BRANCH
+    assert dispatch.worktree.action == "main"
+    assert dispatch.worktree.path == str(repo)
     assert dispatch.merge_target == EPIC_BRANCH
-    assert _git(repo, "rev-parse", dispatch.worktree.base_branch) != commit
+    assert _git(repo, "rev-parse", "HEAD") != commit
     assert _git(fork, "rev-parse", "HEAD") == commit

@@ -104,6 +104,7 @@ def run_record_placement(
     repo_name: str | None = None,
     repo: str | None = None,
     dry_run: bool = True,
+    expected_preparation: str | None = None,
 ) -> PlacementRecord:
     """Record (*worktree*, *branch*) on *path* for its *phase* dispatch under *root*.
 
@@ -153,6 +154,11 @@ def run_record_placement(
         )
         return PlacementRecord(plan=plan, repo_note=own.note if own else None)
     with locked_decision_owner(layout, path) as context:
+        if (
+            expected_preparation is not None
+            and _preparation_guard(layout, context.bundle, path) != expected_preparation
+        ):
+            raise WorkspaceError(f"{path}: preparation changed; replan before recording")
         plan, own = _prepare_placement(
             layout,
             context.items,
@@ -168,14 +174,45 @@ def run_record_placement(
         if plan.refusal is not None or not plan.changed:
             return PlacementRecord(plan=plan, repo_note=own.note if own else None)
         assert own is not None
+
+        def validate_preparation() -> None:
+            if expected_preparation is not None and preparation_guard(layout, path) != expected_preparation:
+                raise WorkspaceError(f"{path}: preparation changed; replan before recording")
+
         application = apply_mutation(
             layout,
             _mutation(context.bundle, plan),
             repo_root=own.path,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
+            validate_read_set=validate_preparation if expected_preparation is not None else None,
         )
         return PlacementRecord(plan=plan, application=application, repo_note=own.note)
+
+
+def preparation_guard(layout: WorkspaceLayout, path: str) -> str:
+    """Capture owner/ancestor bytes and repository configuration before provisioning.
+
+    The opaque token is checked under the placement lock and from fresh reads
+    under the bundle mutation lock immediately before effects. Provisioning
+    itself never holds either lock. Ancestors bind inherited repo assignments;
+    complete owner bytes bind phase, terminal state and every existing stamp.
+    """
+    return _preparation_guard(layout, load_bundle(layout.bundle_dir, ignore=IGNORE), path)
+
+
+def _preparation_guard(layout: WorkspaceLayout, bundle: Bundle, path: str) -> str:
+    items = {item.path: item for item in load_items(bundle)}
+    item = items.get(path)
+    if item is None:
+        raise WorkspaceError(f"{path}: unknown preparation owner")
+    digest = hashlib.sha256()
+    for member in (path, *item.ancestor_paths):
+        document = bundle.concepts.get(member)
+        digest.update(repr((member, document.serialize() if document is not None else None)).encode("utf-8"))
+    for config in (layout.manifest_path, layout.manifest_path.with_name("workspace.local.yaml")):
+        digest.update(repr((str(config), config.read_bytes() if config.exists() else None)).encode("utf-8"))
+    return digest.hexdigest()
 
 
 def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:
@@ -203,4 +240,4 @@ def _mutation(bundle: Bundle, plan: PlacementPlan) -> WorkMutationPlan:
     )
 
 
-__all__ = ["PlacementRecord", "run_record_placement"]
+__all__ = ["PlacementRecord", "preparation_guard", "run_record_placement"]

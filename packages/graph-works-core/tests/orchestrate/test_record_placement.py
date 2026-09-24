@@ -220,6 +220,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
         repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set=None,
     ) -> transactions.MutationApplication:
         page.write_bytes(external_edit)
         return original(
@@ -229,6 +230,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
             repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", edited_out_of_band)
@@ -284,6 +286,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
         repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set=None,
     ) -> transactions.MutationApplication:
         assert baseline_bundle is not None
         document = baseline_bundle.concepts[CHILD]
@@ -295,6 +298,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
             repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", check_baseline)
@@ -922,3 +926,176 @@ def test_a_dry_run_with_repo_plans_the_foreign_target(tmp_path: Path) -> None:
         layout, CHILD, root=EPIC, phase="execute", worktree=WT, branch=BR, today=TODAY, repo="ui", dry_run=True
     )
     assert record.plan.repo == "ui" and record.application is None
+
+
+def test_preparation_guard_records_only_unchanged_owner(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    guard = placement.preparation_guard(layout, EPIC)
+    result = placement.run_record_placement(
+        layout,
+        EPIC,
+        root=EPIC,
+        phase="execute",
+        worktree=WT,
+        branch=BR,
+        today=TODAY,
+        dry_run=False,
+        expected_preparation=guard,
+    )
+    assert result.written
+    with pytest.raises(placement.WorkspaceError, match="preparation changed"):
+        placement.run_record_placement(
+            layout,
+            EPIC,
+            root=EPIC,
+            phase="execute",
+            worktree=WT,
+            branch="different",
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=guard,
+        )
+
+
+@pytest.mark.parametrize("change", ["phase", "work_status", "repo", "stamp", "manifest"])
+def test_preparation_guard_refuses_changed_inputs(tmp_path: Path, change: str) -> None:
+    layout = _vault(tmp_path)
+    guard = placement.preparation_guard(layout, NESTED)
+    page = layout.bundle_dir / f"{NESTED}.md"
+    document = load(page)
+    if change == "manifest":
+        with layout.manifest_path.open("a", encoding="utf-8", newline="") as stream:
+            stream.write("\n# changed\n")
+    else:
+        key, value = {
+            "phase": ("phase", "execute"),
+            "work_status": ("work_status", "resolved"),
+            "repo": ("repo", "other"),
+            "stamp": ("branch", "other"),
+        }[change]
+        document.set(key, value)
+        page.write_text(document.serialize(), encoding="utf-8", newline="")
+    with pytest.raises(placement.WorkspaceError, match="preparation changed"):
+        placement.run_record_placement(
+            layout,
+            NESTED,
+            root=NESTED,
+            phase="plan",
+            worktree=WT,
+            branch=BR,
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=guard,
+        )
+
+
+def test_guarded_preparation_binds_inherited_assignment(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    guard = placement.preparation_guard(layout, NESTED)
+    page = layout.bundle_dir / f"{EPIC}.md"
+    document = load(page)
+    document.set("repo", "other")
+    page.write_text(document.serialize(), encoding="utf-8", newline="")
+    with pytest.raises(placement.WorkspaceError, match="preparation changed"):
+        placement.run_record_placement(
+            layout,
+            NESTED,
+            root=NESTED,
+            phase="plan",
+            worktree=WT,
+            branch=BR,
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=guard,
+        )
+
+
+def test_preparation_adapter_records_foreign_anchor_with_owner_phase(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+    import runpy
+    import sys
+
+    layout = _vault(tmp_path)
+    _declare_two_repos(layout, tmp_path)
+    _tag(layout, EPIC, "code")
+    adapter = Path(__file__).resolve().parents[4] / "plugins/gw/skills/auto-drive/references/record-preparation.py"
+    common = [str(adapter), "snapshot", "--workspace", str(layout.root), "--owner", EPIC]
+    monkeypatch.setattr(sys, "argv", common)
+    runpy.run_path(str(adapter), run_name="__main__")
+    guard = json.loads(capsys.readouterr().out)["guard"]
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(adapter),
+            "record",
+            *common[2:],
+            "--root",
+            EPIC,
+            "--phase",
+            "execute",
+            "--repo",
+            "ui",
+            "--worktree",
+            WT,
+            "--branch",
+            BR,
+            "--expected",
+            guard,
+        ],
+    )
+    runpy.run_path(str(adapter), run_name="__main__")
+    assert json.loads(capsys.readouterr().out)["written"] is True
+    owner = next(item for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE)) if item.path == EPIC)
+    assert owner.repo_stamps["ui"] == Stamp(WT, BR)
+    assert owner.worktree is None
+
+
+def test_preparation_runtime_runs_real_adapter_from_external_cwd(tmp_path: Path) -> None:
+    import json
+    import runpy
+    import subprocess
+
+    layout = _vault(tmp_path)
+    helper = Path(__file__).resolve().parents[4] / "plugins/gw/skills/auto-drive/references/launch-worker.py"
+    functions = runpy.run_path(str(helper))
+    argv = functions["preparation_runtime"]()
+    result = subprocess.run(
+        [*argv, "snapshot", "--workspace", str(layout.root), "--owner", EPIC],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["guard"] == placement.preparation_guard(layout, EPIC)
+    recorded = subprocess.run(
+        [
+            *argv,
+            "record",
+            "--workspace",
+            str(layout.root),
+            "--owner",
+            EPIC,
+            "--root",
+            EPIC,
+            "--phase",
+            "execute",
+            "--repo",
+            "repo",
+            "--worktree",
+            WT,
+            "--branch",
+            BR,
+            "--expected",
+            json.loads(result.stdout)["guard"],
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert recorded.returncode == 0, recorded.stderr
+    assert json.loads(recorded.stdout)["written"] is True

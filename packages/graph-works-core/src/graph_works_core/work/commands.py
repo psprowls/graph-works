@@ -49,7 +49,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -119,7 +119,7 @@ from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repos
-from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
+from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, only_stale_inventory
 
 
 def _digest(content: bytes) -> str:
@@ -978,13 +978,36 @@ def _legacy_marker_strips(
     return tuple(strips), tuple(warnings)
 
 
-def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> RegenIndexesResult:
-    """Reconcile every required root and parent-owned work lane.
+#: How many times a lane-index-writing run applies before it reports a
+#: stale-inventory rollback as-is. Each retry follows a sibling write that has
+#: already committed, so under auto-drive's normal concurrency a third
+#: collision in a row is not expected; the bound only rules out livelock.
+STALE_INVENTORY_ATTEMPTS = 3
 
-    The same run also migrates every other `work/` index still carrying the
-    legacy marker lines, stripping only those lines (see
-    `_legacy_marker_strips`).
+
+def _until_inventory_current[R](run: Callable[[], R], application_of: Callable[[R], MutationApplication | None]) -> R:
+    """Run *run* (load, plan, apply) until its application is not a
+    stale-inventory rollback, at most `STALE_INVENTORY_ATTEMPTS` times.
+
+    Such a writer plans lane indexes from item pages it read *before* taking
+    the bundle lock, and its preconditions cover only the index bytes. A
+    sibling's `gw work advance` rewrites only its own page, so it passes
+    preflight, and the postcondition rolls the write back. Re-planning from a
+    fresh load is the fix. Every other outcome -- success, a dry run, a
+    refusal, any other failure -- returns at once. The same approach as
+    `work_tracker_okf.decisions._apply_until_current`.
     """
+    result = run()
+    for _ in range(STALE_INVENTORY_ATTEMPTS - 1):
+        application = application_of(result)
+        if application is None or not only_stale_inventory(application):
+            return result
+        result = run()
+    return result
+
+
+def _regen_indexes_once(layout: WorkspaceLayout, *, dry_run: bool) -> RegenIndexesResult:
+    """One load, plan and (unless `dry_run`) apply of `run_regen_indexes`."""
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     items = load_items(bundle)
     lane_preconditions = _absent_index_lane_preconditions(bundle.root, items)
@@ -1012,6 +1035,23 @@ def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> Regen
         None if dry_run else apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
     )
     return RegenIndexesResult(plans=plans, mutation=mutation, application=application, marker_strips=marker_strips)
+
+
+def run_regen_indexes(layout: WorkspaceLayout, *, dry_run: bool = True) -> RegenIndexesResult:
+    """Reconcile every required root and parent-owned work lane.
+
+    The same run also migrates every other `work/` index still carrying the
+    legacy marker lines, stripping only those lines (see
+    `_legacy_marker_strips`).
+
+    A sibling advance that lands between the plan and its locked apply makes
+    the postcondition roll the write back as stale; the run then re-plans from
+    a fresh load (`_until_inventory_current`). The result is the last attempt.
+    """
+    return _until_inventory_current(
+        lambda: _regen_indexes_once(layout, dry_run=dry_run),
+        lambda result: result.application,
+    )
 
 
 @dataclass(frozen=True, slots=True)

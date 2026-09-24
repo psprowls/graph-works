@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import difflib
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
@@ -675,6 +675,7 @@ def test_live_placement_uses_repository_tag_read_under_lock(tmp_path: Path, monk
         repo_roots: tuple[Path, ...] = (),
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
+        validate_read_set: Callable[[], None] | None = None,
     ) -> transactions.MutationApplication:
         observed.append(repo_root)
         return original_apply(
@@ -684,6 +685,7 @@ def test_live_placement_uses_repository_tag_read_under_lock(tmp_path: Path, monk
             repo_roots=repo_roots,
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
+            validate_read_set=validate_read_set,
         )
 
     monkeypatch.setattr(placement, "locked_decision_owner", retag_before_lock)

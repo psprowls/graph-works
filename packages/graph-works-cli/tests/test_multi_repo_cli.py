@@ -1,11 +1,10 @@
 """A workspace declaring two code repositories, at the CLI boundary.
 
-`resolve_repo` refuses when several repositories are declared and no name
-selects one. The verbs here used to reach it with no name and no way to pass
-one, so a second `repositories:` entry broke all of them. Each test pins the
-decided multi-repo behaviour for one verb: validate against every declared
-repo (work/archive/wiki lint), or expose `--repo-name` and keep strict
-resolution (wiki drift, orchestrate, record-placement).
+An item's `repo:` metadata, including an ancestor's tag, selects its code
+repository for orchestration and placement. Optional `--repo-name` flags can
+select an otherwise ambiguous repository. Other verbs validate against every
+declared repository (work/archive/wiki lint); wiki drift still requires an
+explicit name when several repositories are declared.
 """
 
 from __future__ import annotations
@@ -197,6 +196,123 @@ def _placement_args(root: Path, path: str, phase: str, worktree: str) -> list[st
         str(root),
         "--json",
     ]
+
+
+@pytest.mark.parametrize(
+    ("tag", "flag"),
+    [(None, None), ("nope", None), ("ui", "code")],
+    ids=("ambiguous", "unknown-tag", "conflicting-flag"),
+)
+@pytest.mark.parametrize("unchanged_pair", (False, True), ids=("new-pair", "unchanged-pair"))
+def test_placement_preview_and_live_refuse_invalid_repo_selection(
+    two_repos: tuple[Path, Path, Path], tag: str | None, flag: str | None, unchanged_pair: bool
+) -> None:
+    root, _code, _ui = two_repos
+    path = _file(root, "Invalid placement", "apps/ui")
+    page = root / "okf" / f"{path}.md"
+    document = load(page)
+    document.set("phase", "design")
+    if tag is not None:
+        document.set("repo", tag)
+    worktree = str(root / "observed")
+    if unchanged_pair:
+        document.set("worktree", worktree)
+        document.set("branch", "feature/placed")
+    document.save()
+    before = page.read_bytes()
+    args = _placement_args(root, path, "design", worktree)
+    if flag is not None:
+        args.extend(("--repo-name", flag))
+
+    errors = []
+    for suffix in (["--dry-run"], []):
+        result = runner.invoke(app, [*args, *suffix])
+        assert result.exit_code == exit_codes.SCHEMA_MISMATCH, result.output
+        errors.append(json.loads(result.stdout)["error"])
+        assert page.read_bytes() == before
+    assert errors[0] == errors[1]
+    assert errors[0]["reason"] == "workspace"
+    assert errors[0]["payload"] is None
+    assert path in errors[0]["message"]
+
+
+@pytest.mark.parametrize("direct_tag", (False, True), ids=("inherited-tag", "direct-tag"))
+def test_inherited_repo_placement_lifecycle_through_cli(two_repos: tuple[Path, Path, Path], direct_tag: bool) -> None:
+    root, _code, ui = two_repos
+    epic = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "UI epic",
+            "--kind",
+            "Epic",
+            "--summary",
+            "d",
+            "--repo",
+            "ui",
+            "--workspace",
+            str(root),
+            "--json",
+        ],
+    )
+    assert epic.exit_code == 0, epic.output
+    epic_path = json.loads(epic.stdout)["path"]
+    child_args = [
+        "work",
+        "file",
+        "--title",
+        "UI feature",
+        "--kind",
+        "Feature",
+        "--summary",
+        "d",
+        "--parent-path",
+        epic_path,
+        "--affects",
+        "apps/ui",
+        "--workspace",
+        str(root),
+        "--json",
+    ]
+    if direct_tag:
+        child_args.extend(("--repo", "ui"))
+    child = runner.invoke(app, child_args)
+    assert child.exit_code == 0, child.output
+    child_path = json.loads(child.stdout)["path"]
+    page = root / "okf" / f"{child_path}.md"
+    document = load(page)
+    document.set("phase", "design")
+    document.save()
+
+    orchestrated = runner.invoke(app, ["work", "orchestrate", child_path, "--workspace", str(root), "--json"])
+    assert orchestrated.exit_code == 0, orchestrated.output
+    assert json.loads(orchestrated.stdout)["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
+
+    worktree = str(root / "observed")
+    args = _placement_args(root, child_path, "design", worktree)
+    for suffix, expected in (
+        (["--dry-run"], (True, False)),
+        ([], (True, True)),
+        (["--dry-run"], (False, False)),
+        ([], (False, False)),
+    ):
+        before = page.read_bytes()
+        result = runner.invoke(app, [*args, *suffix])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert (payload["changed"], payload["written"]) == expected
+        assert payload["refusal"] is None
+        stored = load(page).fm_data()
+        assert "repo_stamps" not in stored
+        if not direct_tag:
+            assert "repo" not in stored
+        if expected[1]:
+            assert stored["worktree"] == worktree
+            assert stored["branch"] == "feature/placed"
+        else:
+            assert page.read_bytes() == before
 
 
 def test_work_record_placement_repo_name_selects_the_declared_repo(two_repos: tuple[Path, Path, Path]) -> None:

@@ -132,12 +132,18 @@ def run_record_placement(
             return PlacementRecord(plan=plan)
         by_path = {item.path: item for item in context.items}
         item_repo = resolve_item_repo(layout, by_path.get(path), by_path, repo_name=repo_name)
+
+        def validate_preparation() -> None:
+            if expected_preparation is not None and preparation_guard(layout, path) != expected_preparation:
+                raise WorkspaceError(f"{path}: preparation changed; replan before recording")
+
         application = apply_mutation(
             layout,
             _mutation(context.bundle, plan),
             repo_root=item_repo.path,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
+            validate_read_set=validate_preparation if expected_preparation is not None else None,
         )
         return PlacementRecord(plan=plan, application=application, repo_note=item_repo.note)
 
@@ -145,8 +151,9 @@ def run_record_placement(
 def preparation_guard(layout: WorkspaceLayout, path: str) -> str:
     """Capture owner/ancestor bytes and repository configuration before provisioning.
 
-    The opaque token is checked again under the placement lock. Provisioning
-    itself never holds that lock. Ancestors bind inherited repo assignments;
+    The opaque token is checked under the placement lock and from fresh reads
+    under the bundle mutation lock immediately before effects. Provisioning
+    itself never holds either lock. Ancestors bind inherited repo assignments;
     complete owner bytes bind phase, terminal state and every existing stamp.
     """
     return _preparation_guard(layout, load_bundle(layout.bundle_dir, ignore=IGNORE), path)

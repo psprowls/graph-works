@@ -317,6 +317,38 @@ class PreparationTests(unittest.TestCase):
             self.run_helper("prepare", fake, plan_file=self.write("plan.json", plan),
                             owner="work/epic", repo_name="ui", workspace=WIKI)
 
+class PreparationRuntimeTests(unittest.TestCase):
+    def test_installed_runtime_is_probed_and_never_uses_caller_project(self):
+        import sys
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            executable = root / "gw"
+            executable.write_text(f"#!{sys.executable}\n", encoding="utf-8", newline="")
+            helper = root / "cache/plugin/skills/auto-drive/references/launch-worker.py"
+            function = HELPER["preparation_runtime"]
+            for status in (0, 1):
+                with (patch.dict(function.__globals__, {"__file__": str(helper)}),
+                      patch("shutil.which", return_value=str(executable)),
+                      patch("subprocess.run", return_value=subprocess.CompletedProcess([], status, "", "")) as run):
+                    if status:
+                        with self.assertRaisesRegex(SystemExit, "lacks guarded preparation capability"):
+                            function()
+                    else:
+                        argv = function()
+                        self.assertEqual(argv, [sys.executable, str(helper.resolve().with_name("record-preparation.py"))])
+                    self.assertEqual(run.call_args.args[0][:2], [sys.executable, "-c"])
+                    self.assertEqual(run.call_args.kwargs["cwd"], str(executable.resolve().parent))
+
+    def test_unknown_installed_runtime_refuses_explicitly(self):
+        with tempfile.TemporaryDirectory() as temp:
+            helper = Path(temp) / "cache/plugin/skills/auto-drive/references/launch-worker.py"
+            function = HELPER["preparation_runtime"]
+            with (patch.dict(function.__globals__, {"__file__": str(helper)}),
+                  patch("shutil.which", return_value=None)):
+                with self.assertRaisesRegex(SystemExit, "no installed gw runtime"):
+                    function()
+
+
 class PreparationLifecycleTests(unittest.TestCase):
     write = PlacementTests.write
     run_helper = PlacementTests.run_helper

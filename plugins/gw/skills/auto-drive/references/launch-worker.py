@@ -9,6 +9,8 @@ import hashlib
 import json
 import os
 import re
+import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -491,6 +493,48 @@ def place(args: argparse.Namespace) -> None:
     ))
 
 
+def preparation_runtime() -> list[str]:
+    """Locate the core runtime independently of the coordinator directory."""
+    helper = Path(__file__).resolve()
+    adapter = str(helper.with_name("record-preparation.py"))
+    project = helper.parents[5]
+    if ((project / "pyproject.toml").is_file()
+            and (project / "packages/graph-works-core/src/graph_works_core").is_dir()
+            and helper == project / "plugins/gw/skills/auto-drive/references/launch-worker.py"):
+        return ["uv", "run", "--project", str(project), "--package", "graph-works-core", "python", adapter]
+    executable = shutil.which("gw")
+    if executable is None:
+        fail("PREPARATION REFUSED: no installed gw runtime found")
+    try:
+        with Path(executable).resolve().open("r", encoding="utf-8") as stream:
+            first = stream.readline().strip()
+        interpreter = shlex.split(first[2:]) if first.startswith("#!") else []
+    except (OSError, UnicodeError, ValueError):
+        interpreter = []
+    if interpreter and Path(interpreter[0]).name == "env":
+        # Support ordinary Python console-script shebangs, not shell wrappers
+        # or env flags whose behavior would depend on undocumented activation.
+        interpreter = [shutil.which(interpreter[1]) or ""] if len(interpreter) == 2 else []
+    if not interpreter or not interpreter[0] or "python" not in Path(interpreter[0]).name.lower():
+        fail("PREPARATION REFUSED: installed gw has no discoverable Python runtime")
+    probe = (
+        "import inspect; from graph_works_core.orchestrate.placement import preparation_guard, run_record_placement; "
+        "from graph_works_core.workspace.transactions import apply_mutation; "
+        "assert 'expected_preparation' in inspect.signature(run_record_placement).parameters; "
+        "assert 'validate_read_set' in inspect.signature(apply_mutation).parameters"
+    )
+    try:
+        completed = subprocess.run(
+            [*interpreter, "-c", probe], cwd=str(Path(executable).resolve().parent),
+            check=False, capture_output=True, text=True,
+        )
+    except OSError as error:
+        fail(f"PREPARATION REFUSED: installed gw runtime cannot run: {error}")
+    if completed.returncode:
+        fail("PREPARATION REFUSED: installed gw core lacks guarded preparation capability; update its runtime")
+    return [*interpreter, adapter]
+
+
 def preparation_json(argv: list[str], label: str) -> dict[str, Any]:
     try:
         result = subprocess.run(argv, check=False, capture_output=True, text=True)
@@ -560,8 +604,7 @@ def prepare(args: argparse.Namespace) -> None:
     if not isinstance(plan, dict):
         fail(f"{label}: plan must be an object")
     selected = selected_preparation(plan, args.owner, args.repo_name)
-    adapter = ["uv", "run", "--package", "graph-works-core", "python",
-               str(Path(__file__).with_name("record-preparation.py"))]
+    adapter = preparation_runtime()
     common_args = ["--workspace", args.workspace, "--owner", args.owner]
     guard = preparation_json([*adapter, "snapshot", *common_args], label)["guard"]
     refresh_argv = ["gw", "work", "orchestrate", text_field(plan.get("path"), label, "root"),

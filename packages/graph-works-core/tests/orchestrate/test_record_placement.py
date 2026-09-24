@@ -713,3 +713,51 @@ def test_preparation_adapter_records_foreign_anchor_with_owner_phase(
     owner = next(item for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE)) if item.path == EPIC)
     assert owner.repo_stamps["ui"] == Stamp(WT, BR)
     assert owner.worktree is None
+
+
+def test_preparation_runtime_runs_real_adapter_from_external_cwd(tmp_path: Path) -> None:
+    import json
+    import runpy
+    import subprocess
+
+    layout = _vault(tmp_path)
+    helper = Path(__file__).resolve().parents[4] / "plugins/gw/skills/auto-drive/references/launch-worker.py"
+    functions = runpy.run_path(str(helper))
+    argv = functions["preparation_runtime"]()
+    result = subprocess.run(
+        [*argv, "snapshot", "--workspace", str(layout.root), "--owner", EPIC],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["guard"] == placement.preparation_guard(layout, EPIC)
+    recorded = subprocess.run(
+        [
+            *argv,
+            "record",
+            "--workspace",
+            str(layout.root),
+            "--owner",
+            EPIC,
+            "--root",
+            EPIC,
+            "--phase",
+            "execute",
+            "--repo",
+            "repo",
+            "--worktree",
+            WT,
+            "--branch",
+            BR,
+            "--expected",
+            json.loads(result.stdout)["guard"],
+        ],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert recorded.returncode == 0, recorded.stderr
+    assert json.loads(recorded.stdout)["written"] is True

@@ -291,12 +291,16 @@ base tip may be renamed with non-force `git branch -m`. Existing branches are
 never overwritten; ambiguous inventory, marker, or missing checkout requires
 repair. Creation errors trigger observation, never another suffixed create.
 
-The helper uses `uv run --package graph-works-core python
-<references>/record-preparation.py snapshot|record` as a thin adapter to the
-core API. The record call carries `--root <owner_path> --phase <owner_phase>
+The helper uses `record-preparation.py snapshot|record` as a thin adapter to
+core. In the source plugin it selects an absolute source project with
+`uv run --project <source-root> --package graph-works-core python`; installed
+plugins discover the `gw` Python interpreter and probe guarded preparation
+capability. An incompatible or undiscoverable runtime refuses explicitly.
+Neither path resolves the runtime from the coordinator's working directory. The record call carries `--root <owner_path> --phase <owner_phase>
 --repo <repo.name>` and the captured guard. Core rechecks owner/ancestor and
-repository configuration bytes under the existing decision-owner lock before
-recording scalar or foreign `repo_stamps`. Orca runs outside that lock. A
+repository configuration bytes under the existing decision-owner lock and
+re-reads that set under the bundle mutation lock immediately before effects,
+before recording scalar or foreign `repo_stamps`. Orca runs outside that lock. A
 refused stamp leaves a discoverable checkout and authorizes no child launch.
 
 **Replan after every attempt**, successful or refused, before processing

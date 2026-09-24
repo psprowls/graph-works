@@ -5,23 +5,23 @@ description: Invoked explicitly as /gw:archive [work-path...]. Archives terminal
 
 # Archive terminal work items
 
-Move terminal work items from their active lanes to the corresponding local `_archive/` lane.
+Move terminal **top-level** work items, with their whole subtree, into `work/_archive/`. Children are never archived on their own; they move with their root.
 
 ## Usage
 
 ```
 /gw:archive          # Claude Code
 $archive                      # Codex
-/gw:archive work/release-r1/children/epic-e1/children/bug-parser
+/gw:archive work/release-r1
 ```
 
-Without arguments: sweep mode — all terminal-status items.
-With canonical-path arguments: targeted mode — those items only.
+Without arguments: sweep mode — every top-level item whose whole subtree is terminal.
+With canonical-path arguments: targeted mode — those top-level items only. A child path is refused with `not-top-level`, which names the root to archive instead.
 
 ## What happens
 
 1. Run `gw work archive --dry-run [WORK_PATHS...]` to build the plan.
-2. Present the plan: items to move, items skipped (with reasons), any wikilink referrers that will become broken.
+2. Present the plan: roots to move (with their subtrees) and any wikilink referrers that will become broken. Sweep prints moves and silently skips roots with open descendants; targeted mode prints each refused path and its kind (for example `not-top-level`) to stderr and exits non-zero.
 3. Ask for confirmation before executing.
 4. On confirmation, run `gw work archive [WORK_PATHS...]` (without `--dry-run`).
 5. Report moved canonical paths and reconciled indexes.

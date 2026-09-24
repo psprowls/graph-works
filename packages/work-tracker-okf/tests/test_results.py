@@ -100,7 +100,7 @@ def test_write_results_creates_the_references_directory(tmp_path: Path) -> None:
 
 
 def test_write_results_preserves_archive_segments_in_identity(tmp_path: Path) -> None:
-    path = "work/release-r1/children/epic-migration/children/_archive/bug-fixed"
+    path = "work/_archive/release-r1/children/epic-migration/children/bug-fixed"
     write_item(tmp_path, path, "type: Bug\nwork_status: resolved\n")
     target = write_results(tmp_path, path, _FACTS)
     assert target == artifact_ref(path, MANAGED_ARTIFACTS["execute-results"]).path(tmp_path)

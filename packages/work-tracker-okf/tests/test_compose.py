@@ -140,7 +140,6 @@ def test_composed_filing_preflights_page_indexes_and_log_without_writing(root: P
     assert {index.lane for index in outcome.plan.indexes} == {
         "work",
         "work/epic-migration/children",
-        "work/epic-migration/children/_archive",
     }
     assert any(index.lane == "work" and index.changed for index in outcome.plan.indexes)
     assert outcome.plan.log is not None and outcome.plan.log.changed

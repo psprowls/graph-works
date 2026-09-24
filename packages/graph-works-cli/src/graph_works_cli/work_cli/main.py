@@ -599,10 +599,12 @@ def archive(
     `[[wikilink]]` forms are not an OKF link form, are never rewritten, and
     are reported to stderr as stranded instead -- per lane, never merged.
 
-    Sweep mode reports no skips -- a sweep's non-candidates were never
-    candidates. Targeted mode reports one per named path that did not move,
-    and exits non-zero, because there the caller named the path and is owed
-    an answer. The wiki lane is never involved.
+    Only top-level items archive; a child moves with its root. Sweep mode
+    selects every top-level item whose whole subtree is terminal and skips
+    the rest silently. Targeted mode prints each refused path with its
+    refusal kind to stderr -- `not-top-level` names the root to archive
+    instead -- and exits non-zero with nothing applied. The wiki lane is
+    never involved.
     """
     layout = resolve_workspace(workspace)
     targeted = list(path or ())

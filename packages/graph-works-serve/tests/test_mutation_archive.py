@@ -23,6 +23,8 @@ OPEN = "work/feature-open"
 AT = datetime(2026, 9, 18, 14, 3, 7, tzinfo=UTC)
 PLAN = "/v1/work/archive/plan"
 APPLY = "/v1/work/archive/apply"
+CHILD_PARENT = "work/epic-done"
+CHILD = f"{CHILD_PARENT}/children/bug-done"
 
 
 def _seed(layout: WorkspaceLayout) -> None:
@@ -140,4 +142,20 @@ def test_repeated_plans_are_deterministic(env: Env) -> None:
     second = client.post(PLAN, json={"paths": [DONE]}, headers=headers)
     assert first.status_code == second.status_code == 200
     assert first.json() == second.json()
+    assert snapshot(layout) == before
+
+
+def test_archiving_a_child_plans_200_refused_not_top_level_and_applies_422(env: Env) -> None:
+    layout, client, headers = env
+    write_item(layout, CHILD_PARENT, work_status="resolved", phase="done", status="stable", effort="medium")
+    write_item(layout, CHILD, work_status="resolved", phase="done", status="stable", effort="small")
+    (layout.bundle_dir / CHILD_PARENT / "children").mkdir(parents=True, exist_ok=True)
+
+    planned = client.post(PLAN, json={"paths": [CHILD]}, headers=headers)
+    assert planned.status_code == 200
+    assert [refusal["kind"] for refusal in planned.json()["plan"]["refusals"]] == ["not-top-level"]
+    before = snapshot(layout)
+    response = _apply(client, headers, {"paths": [CHILD]}, planned.json())
+    assert response.status_code == 422
+    assert response.json()["error"]["reason"] == "refused"
     assert snapshot(layout) == before

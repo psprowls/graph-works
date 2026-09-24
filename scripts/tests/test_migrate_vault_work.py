@@ -361,9 +361,7 @@ def test_projected_migration_reloads_as_only_path_native_items(tmp_path: Path) -
         "work/index.md",
         "work/_archive/index.md",
         "work/epic-parent/children/index.md",
-        "work/epic-parent/children/_archive/index.md",
         "work/epic-parent/children/feature-child/children/index.md",
-        "work/epic-parent/children/feature-child/children/_archive/index.md",
     }
 
 

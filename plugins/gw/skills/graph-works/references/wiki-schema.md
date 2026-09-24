@@ -27,7 +27,7 @@ Ingest reads material directly from any filesystem path; there is no staging inb
     ├── index.md                    # content catalog — updated every ingest/scan
     ├── log.md                      # append-only timeline
     ├── work/                       # unified bugs, tech debt, features, initiatives, spikes
-    │   └── _archive/                # terminal-status items; consider archiving when status is terminal
+    │   └── _archive/                # archived top-level items, each with its whole subtree
     ├── repositories/<repo>/
     │   ├── repository.md           # the repository's own entity page
     │   ├── packages/<name>.md
@@ -205,9 +205,8 @@ lane; `Bug`, `TechDebt`, `TestGap`, and `Spike` are leaves. Every item owns the
 directory beside its page. Managed artifacts live under its `references/`
 directory: `00-decisions.md`, `01-design.md`, `02-plan.md`,
 `03-execute-results.md`, `03-execute-transcript.jsonl`, and
-`04-finish-results.md`. Each lane has its own `index.md` and may have a local
-`_archive/`. Physical placement defines ancestry; no `parent` or `children`
-frontmatter aliases exist.
+`04-finish-results.md`. Each lane has its own `index.md`. Physical placement defines ancestry; no
+`parent` or `children` frontmatter aliases exist.
 
 ```yaml
 ---
@@ -244,9 +243,9 @@ explicit: `--dep path=<canonical>,blocks=<phase>,needs=<phase>`.
 The plan is the `## Plan` body table. `sources[]` registers owned artifacts by
 filename-derived id; `resource` is root-absolute within the OKF bundle.
 
-Archive commands move an item to the `_archive/` lane owned by its current
-parent (or `work/_archive/` for roots), preserving its owned directory and
-repairing path references. Indexes are Markdown filesystem projections
+Archive moves a top-level item, with its owned directory and whole `children/`
+subtree unchanged, to `work/_archive/<name>`. A child is never archived on its
+own. Path references are repaired. Indexes are Markdown filesystem projections
 reconciled by `gw work regen-index`; there is no JSON sidecar.
 
 ### Source pages

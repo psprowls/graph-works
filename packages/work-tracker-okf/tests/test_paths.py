@@ -5,17 +5,28 @@ from work_tracker_okf import paths
 from work_tracker_okf.paths import PHASE_ORDINALS, ArtifactRef, checkpoint_ref
 
 
-def test_nested_archive_path_derives_owner_and_ancestors() -> None:
-    location = paths.parse_item_path("work/release-cutover/children/epic-migration/children/_archive/bug-old-link")
+def test_a_legacy_nested_archive_path_does_not_parse() -> None:
+    assert paths.parse_item_path("work/release-cutover/children/epic-migration/children/_archive/bug-old-link") is None
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "work/epic/children/_archive/bug",
+        "work/_archive/epic/children/_archive/bug",
+        "work/epic/children/feature/children/_archive/bug",
+    ],
+)
+def test_a_nested_archive_segment_is_not_an_item_path(value: str) -> None:
+    assert paths.parse_item_path(value) is None
+
+
+def test_every_descendant_of_an_archived_root_is_archived() -> None:
+    location = paths.parse_item_path("work/_archive/epic/children/feature/children/bug")
     assert location is not None
-    assert location.parent_path == "work/release-cutover/children/epic-migration"
-    assert location.ancestor_paths == (
-        "work/release-cutover",
-        "work/release-cutover/children/epic-migration",
-    )
-    assert location.lane == "work/release-cutover/children/epic-migration/children/_archive"
     assert location.archived is True
-    assert location.page == "work/release-cutover/children/epic-migration/children/_archive/bug-old-link.md"
+    assert location.lane == "work/_archive/epic/children/feature/children"
+    assert location.ancestor_paths == ("work/_archive/epic", "work/_archive/epic/children/feature")
 
 
 @pytest.mark.parametrize(
@@ -48,6 +59,8 @@ def test_root_item_paths_parse_in_active_and_archive_lanes(item_path: str, lane:
         "work/release-cutover/children/_archive/bug/children",
         "work/_archive/_archive/release-cutover",
         "work/release-cutover/children/children/epic-migration",
+        "work/_archive/release-cutover/children/_archive/epic-migration",
+        "work/release-cutover/children/_archive/epic-migration/children/_archive/feature-import",
     ],
 )
 def test_parser_refuses_non_item_members(member: str) -> None:
@@ -58,16 +71,15 @@ def test_parser_refuses_non_item_members(member: str) -> None:
     ("item_path", "parent_path"),
     [
         ("work/_archive/release-cutover/children/epic-migration", "work/_archive/release-cutover"),
-        ("work/_archive/release-cutover/children/_archive/epic-migration", "work/_archive/release-cutover"),
         (
-            "work/release-cutover/children/_archive/epic-migration/children/_archive/feature-import",
-            "work/release-cutover/children/_archive/epic-migration",
+            "work/_archive/release-cutover/children/epic-migration/children/feature-import",
+            "work/_archive/release-cutover/children/epic-migration",
         ),
     ],
 )
-def test_an_archive_lane_may_hold_a_subtree_at_any_depth(item_path: str, parent_path: str) -> None:
-    """Archiving moves a family intact, so `_archive` is a lane the walk passes
-    through rather than one that ends the path."""
+def test_an_archived_root_holds_its_subtree_at_any_depth(item_path: str, parent_path: str) -> None:
+    """Archiving moves a family intact beneath `work/_archive/`, so the walk
+    continues through `children/` lanes below the archived root."""
     location = paths.parse_item_path(item_path)
     assert location is not None
     assert location.path == item_path
@@ -90,7 +102,6 @@ def test_path_helpers_preserve_the_extensionless_identity() -> None:
     assert paths.owned_dir(item_path) == ArtifactRef(rel=item_path)
     assert paths.references_dir(item_path) == ArtifactRef(rel=f"{item_path}/references")
     assert paths.child_lane(item_path) == f"{item_path}/children"
-    assert paths.child_lane(item_path, archived=True) == f"{item_path}/children/_archive"
 
 
 def test_managed_artifacts_have_root_absolute_resource_and_filename_ids(tmp_path: Path) -> None:

@@ -48,7 +48,7 @@ def layout(ctx: RuleContext) -> Iterable[Finding]:
             yield Finding(
                 code="structure.illegal-lane",
                 severity="error",
-                message="work-item page is outside a root, `children`, or `_archive` lane",
+                message="work-item page is outside a root or `children` lane",
                 spec=_SPEC,
                 path=f"{concept_id}.md",
                 line=None,

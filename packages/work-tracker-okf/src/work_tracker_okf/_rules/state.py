@@ -15,9 +15,8 @@ from collections.abc import Iterable
 from okf_io import Finding, Rule, RuleContext, Severity
 
 from work_tracker_okf._rules._common import LaneConfig, active, days_since, items, text_key, with_documents
-from work_tracker_okf.hierarchy import archive_held_by_ancestor
+from work_tracker_okf.hierarchy import sweep_eligible
 from work_tracker_okf.items import WorkItem
-from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 CODES: tuple[str, ...] = (
     "state.phase-status-incoherent",
@@ -146,24 +145,20 @@ def staleness(ctx: RuleContext) -> Iterable[Finding]:
 
 
 def terminal(ctx: RuleContext) -> Iterable[Finding]:
-    """14: a terminal item still under `work/` **that the policy allows archiving**.
+    """14: a terminal item still under `work/` **that the sweep would archive**.
 
     `warn`, where work-io graded it `info` (C5-D). okf-io has two severities and
     this cannot be the harder one: it would sink child 6's zero-errors gate on an
     item that is merely finished and not yet swept. `active` already excludes
     archived items, which is what makes "still under `work/`" the claim.
 
-    A terminal child whose nearest non-archived ancestor is non-terminal is
-    **not** reported: the archive policy forbids sweeping it, so warning about
-    it would ask for an operation `plan_archive` now refuses. The predicate is
-    `hierarchy.archive_held_by_ancestor` -- the same one `_default_targets` and
-    `plan_archive` use -- so the lint cannot disagree with the planner.
+    The rule fires exactly when `archive._default_targets` would select the
+    item, because both use `hierarchy.sweep_eligible`. Children and roots with
+    an open descendant are therefore silent.
     """
     projection = items(ctx)
     for item in active(ctx):
-        if item.work_status not in TERMINAL_STATUSES:
-            continue
-        if archive_held_by_ancestor(projection, item):
+        if not sweep_eligible(projection, item):
             continue
         yield _finding(
             "state.archive-eligible",

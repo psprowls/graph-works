@@ -145,10 +145,9 @@ class Floor:
 def is_live(concept_ids: Sequence[str]) -> bool:
     """False when every carrier sits in an archive lane.
 
-    The predicate is a path *segment* test at any depth, matching
-    `work_tracker_okf.mutation:424` -- `work/_archive/<slug>` and
-    `work/<slug>/children/_archive/<child>` are both archived, and a future
-    nesting is too. Narrowing it to a literal prefix would silently call an
+    The predicate is a path *segment* test, so everything beneath
+    `work/_archive/<slug>` -- including `work/_archive/<slug>/children/<child>`
+    -- is archived. Narrowing it to a literal prefix would silently call an
     archived page live.
 
     A tag whose entire corpus is finished work is not a vocabulary entry; it is

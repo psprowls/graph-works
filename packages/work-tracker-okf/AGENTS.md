@@ -71,8 +71,8 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
 
 ## Invariants
 
-- Item pages occupy root, `children`, or local `_archive` lanes beneath
-  `work/`.
+- Item pages occupy root or `children` lanes beneath `work/`; `_archive`
+  appears only as `work/_archive/`, the one lane for archived top-level roots.
 - `Release` is root-only; `Release`, `Epic`, and `Feature` may own children.
 - Hierarchy and archived state come from the physical path — never duplicated
   in frontmatter.

@@ -420,9 +420,9 @@ def _targets(
         if parent is None:
             lane = "work/_archive" if node.archived else "work"
         else:
+            # Archive is top-level only: a child never gets its own archive
+            # lane; it rides under its (possibly archived) root.
             lane = f"{target_for(parent)}/children"
-            if node.archived:
-                lane = f"{lane}/_archive"
         target = f"{lane}/{basenames[old_path]}"
         targets[old_path] = target
         return target
@@ -520,8 +520,9 @@ def _legacy_items(
                 work_status=_text(data.get("workflow_status")) or item.work_status,
                 parent_path=parents[node.old_path],
                 ancestor_paths=ancestors(node.old_path),
-                active_child_paths=tuple(sorted(children.get(node.old_path, ()))),
-                archived_child_paths=tuple(sorted(archived_children.get(node.old_path, ()))),
+                child_paths=tuple(
+                    sorted((*children.get(node.old_path, ()), *archived_children.get(node.old_path, ())))
+                ),
                 dependency_edges=dependencies[node.old_path],
                 dependency_issues=(),
             )

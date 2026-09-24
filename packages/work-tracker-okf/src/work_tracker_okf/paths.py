@@ -69,12 +69,9 @@ def _is_basename(value: str) -> bool:
 def parse_item_path(value: str) -> ItemLocation | None:
     """Parse an extensionless, bundle-relative item path without reading disk.
 
-    An `_archive` lane may appear at any depth and does not end the path: an
-    archived subtree keeps its internal shape, which is what lets the spec
-    require a `children/index.md` and `children/_archive/index.md` "including
-    after its subtree is archived". `archived` is therefore sticky -- once any
-    lane on the way down is an archive lane, every item below it is archived by
-    ancestry.
+    Grammar: `work/[_archive/]<name>(/children/<name>)*`. `_archive` is legal
+    only as the second segment -- one archive marker per archived top-level
+    root -- and `archived` is inherited by every descendant of that root.
     """
     parts = value.split("/")
     if not parts or parts[0] != "work":
@@ -93,10 +90,6 @@ def parse_item_path(value: str) -> ItemLocation | None:
             return None
         cursor += 1
         lane = f"{item_paths[-1]}/children"
-        if cursor < len(parts) and parts[cursor] == "_archive":
-            archived = True
-            lane = f"{lane}/_archive"
-            cursor += 1
         if cursor >= len(parts) or not _is_basename(parts[cursor]):
             return None
         item_paths.append(f"{lane}/{parts[cursor]}")
@@ -114,10 +107,9 @@ def parse_item_path(value: str) -> ItemLocation | None:
     )
 
 
-def child_lane(item_path: str, *, archived: bool = False) -> str:
-    """The active or archived child lane owned by *item_path*."""
-    suffix = "/_archive" if archived else ""
-    return f"{item_path}/children{suffix}"
+def child_lane(item_path: str) -> str:
+    """The child lane owned by *item_path*."""
+    return f"{item_path}/children"
 
 
 def item_page(item_path: str) -> ArtifactRef:

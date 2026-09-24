@@ -34,8 +34,7 @@ def _item(path: str, **overrides: object) -> WorkItem:
         "affects": ("packages/a",),
         "parent_path": parent_path,
         "ancestor_paths": (parent_path,) if parent_path else (),
-        "active_child_paths": (),
-        "archived_child_paths": (),
+        "child_paths": (),
         "dependency_edges": (),
         "dependency_issues": (),
         "owner": None,
@@ -182,7 +181,7 @@ def test_structural_parent_frontier_dispatches_child_path() -> None:
     root = "work/epic-a"
     child = f"{root}/children/feature-a"
     items = (
-        _item(root, type="Epic", phase="execute", active_child_paths=(child,), affects=("packages/root",)),
+        _item(root, type="Epic", phase="execute", child_paths=(child,), affects=("packages/root",)),
         _item(child, worktree="/wt/feature-a", branch="feature/a"),
     )
     result = _plan(items, root)
@@ -214,7 +213,7 @@ def test_shared_worktree_is_not_dispatched_twice() -> None:
     first = f"{root}/children/feature-a"
     second = f"{root}/children/feature-b"
     items = (
-        _item(root, type="Epic", phase="execute", active_child_paths=(first, second), affects=("packages/root",)),
+        _item(root, type="Epic", phase="execute", child_paths=(first, second), affects=("packages/root",)),
         _item(first, worktree="/wt/epic", branch="epic/a", affects=("packages/a",)),
         _item(second, worktree="/wt/epic", branch="epic/a", affects=("packages/b",), opened="2026-08-02"),
     )
@@ -229,7 +228,7 @@ def test_plan_blocks_an_unprovable_item_without_consuming_a_slot() -> None:
         type="Epic",
         phase="execute",
         affects=("packages/root",),
-        active_child_paths=("work/epic-r/children/bug-x",),
+        child_paths=("work/epic-r/children/bug-x",),
     )
     child = _item("work/epic-r/children/bug-x", type="Bug", phase="execute", affects=("packages/a",))
 
@@ -256,7 +255,7 @@ def test_plan_dispatches_into_an_adopted_worktree() -> None:
         type="Epic",
         phase="execute",
         affects=("packages/root",),
-        active_child_paths=("work/epic-r/children/bug-x",),
+        child_paths=("work/epic-r/children/bug-x",),
     )
     child = _item("work/epic-r/children/bug-x", type="Bug", phase="execute", affects=("packages/a",))
     planned = orchestrate.branch_name(child.path, child.type)
@@ -334,7 +333,7 @@ def test_affects_overlap_with_a_live_canonical_path_blocks_dispatch() -> None:
     first = f"{root}/children/feature-a"
     second = f"{root}/children/feature-b"
     items = (
-        _item(root, type="Epic", phase="execute", active_child_paths=(first, second), affects=("packages/root",)),
+        _item(root, type="Epic", phase="execute", child_paths=(first, second), affects=("packages/root",)),
         _item(first, affects=("packages/shared",)),
         _item(second, affects=("packages/shared",), opened="2026-08-02"),
     )
@@ -347,7 +346,7 @@ def test_capacity_blocks_only_candidates_past_the_free_slots() -> None:
     first = f"{root}/children/feature-a"
     second = f"{root}/children/feature-b"
     items = (
-        _item(root, type="Epic", phase="execute", affects=("packages/root",), active_child_paths=(first, second)),
+        _item(root, type="Epic", phase="execute", affects=("packages/root",), child_paths=(first, second)),
         _item(first, worktree="/wt/feature-a", branch="feature/a", affects=("packages/a",)),
         _item(second, affects=("packages/b",), opened="2026-08-02"),
     )
@@ -401,7 +400,7 @@ def test_frontier_depth_cap_blocks_a_path_instead_of_walking_forever(monkeypatch
             type="Epic",
             phase="execute",
             affects=(f"packages/{number}",),
-            active_child_paths=(paths[number + 1],) if number + 1 < len(paths) else (),
+            child_paths=(paths[number + 1],) if number + 1 < len(paths) else (),
         )
         for number, path in enumerate(paths)
     )
@@ -1038,7 +1037,7 @@ def test_a_planned_fork_carries_its_parent_through_plan() -> None:
             worktree="/epic",
             branch="epic/root",
             affects=("packages/r",),
-            active_child_paths=(child,),
+            child_paths=(child,),
         ),
         _item(child, type="Bug", phase="execute", affects=("packages/x",)),
     )
@@ -1140,8 +1139,8 @@ def test_plan_blocks_items_without_affects() -> None:
 def test_frontier_reports_a_parent_cycle_in_a_gated_tree() -> None:
     root_path = "work/epic-root"
     child_path = "work/epic-child"
-    root = _item(root_path, type="Epic", phase="execute", parent_path=child_path, active_child_paths=(child_path,))
-    child = _item(child_path, type="Epic", phase="execute", parent_path=root_path, active_child_paths=(root_path,))
+    root = _item(root_path, type="Epic", phase="execute", parent_path=child_path, child_paths=(child_path,))
+    child = _item(child_path, type="Epic", phase="execute", parent_path=root_path, child_paths=(root_path,))
 
     _candidates, _advances, blocked = orchestrate._frontier((root, child), root_path)
 
@@ -1152,7 +1151,7 @@ def test_frontier_reports_a_parent_cycle_in_a_gated_tree() -> None:
 def test_frontier_plans_an_advance_when_the_current_artifact_is_complete() -> None:
     path = "work/epic-a"
     child_path = "work/epic-a/children/feature-done"
-    item = _item(path, type="Epic", phase="execute", active_child_paths=(child_path,))
+    item = _item(path, type="Epic", phase="execute", child_paths=(child_path,))
     child = _item(child_path, work_status="resolved")
     _candidates, advances, blocked = orchestrate._frontier((item, child), path)
     assert blocked == []
@@ -1167,7 +1166,7 @@ def test_frontier_repairs_an_epic_reopened_by_a_post_finish_child() -> None:
     root = "work/epic-a"
     done_child = f"{root}/children/feature-done"
     late_child = f"{root}/children/bug-late"
-    epic = _item(root, type="Epic", phase="finish", active_child_paths=(done_child, late_child))
+    epic = _item(root, type="Epic", phase="finish", child_paths=(done_child, late_child))
     done = _item(done_child, work_status="resolved")
     late = _item(late_child, type="Bug", work_status="open", phase="execute")
     items = (epic, done, late)
@@ -1190,8 +1189,8 @@ def test_frontier_sees_an_open_grandchild_beneath_a_terminal_direct_child() -> N
     root = "work/epic-a"
     feat = f"{root}/children/feature-done"
     grandchild = f"{feat}/children/bug-gc"
-    epic = _item(root, type="Epic", phase="execute", active_child_paths=(feat,))
-    feature = _item(feat, type="Feature", phase="finish", work_status="resolved", active_child_paths=(grandchild,))
+    epic = _item(root, type="Epic", phase="execute", child_paths=(feat,))
+    feature = _item(feat, type="Feature", phase="finish", work_status="resolved", child_paths=(grandchild,))
     gc = _item(grandchild, type="Bug", work_status="open", phase="execute")
     items = (epic, feature, gc)
 
@@ -1209,8 +1208,8 @@ def test_descend_and_frontier_agree_on_the_widened_execute_window() -> None:
     root = "work/epic-a"
     feat = f"{root}/children/feature-done"
     grandchild = f"{feat}/children/bug-gc"
-    epic = _item(root, type="Epic", phase="execute", active_child_paths=(feat,))
-    feature = _item(feat, type="Feature", phase="finish", work_status="resolved", active_child_paths=(grandchild,))
+    epic = _item(root, type="Epic", phase="execute", child_paths=(feat,))
+    feature = _item(feat, type="Feature", phase="finish", work_status="resolved", child_paths=(grandchild,))
     gc = _item(grandchild, type="Bug", work_status="open", phase="execute")
     items = (epic, feature, gc)
 
@@ -1234,7 +1233,7 @@ def test_regression_the_real_epic_reopens_then_dispatches_its_four_children() ->
     )
     child_paths = tuple(f"{root}/children/{name}" for name in names)
     old_child = f"{root}/children/bug-orchestrate-drops-post-finish-children"
-    epic = _item(root, type="Epic", phase="finish", active_child_paths=(old_child, *child_paths))
+    epic = _item(root, type="Epic", phase="finish", child_paths=(old_child, *child_paths))
     old = _item(old_child, work_status="resolved")
     children = tuple(
         _item(path, type="TestGap", work_status="open", phase="execute", effort="small") for path in child_paths
@@ -1473,7 +1472,7 @@ def test_a_child_design_dispatch_reuses_the_epic_anchor_and_records_nothing() ->
             phase="execute",
             worktree="/epic",
             branch="epic/root",
-            active_child_paths=(child,),
+            child_paths=(child,),
             affects=("packages/root",),
         ),
         _item(child, type="TechDebt", phase="design", affects=("packages/a",)),
@@ -1506,7 +1505,7 @@ def test_a_read_only_dispatch_does_not_occupy_the_slot_for_a_later_dispatch() ->
             phase="execute",
             worktree="/epic",
             branch="epic/root",
-            active_child_paths=(first_child, second_child, code_child),
+            child_paths=(first_child, second_child, code_child),
             affects=("packages/root",),
         ),
         _item(first_child, type="TechDebt", phase="design", affects=("packages/a",)),
@@ -1550,7 +1549,7 @@ def test_dispatch_profile_errors_preserve_relay_blocker_and_do_not_claim_placeme
         attributes=frozenset({"variant"}),
     )
     result = _plan(
-        (_item(root, type="Epic", phase="execute", active_child_paths=(child,)), _item(child)),
+        (_item(root, type="Epic", phase="execute", child_paths=(child,)), _item(child)),
         root,
         dispatch_rules=rules,
     )
@@ -1599,7 +1598,7 @@ def _overlapping_children(*names: str, first: dict[str, object] | None = None) -
         _RESERVE_ROOT,
         type="Epic",
         phase="execute",
-        active_child_paths=paths,
+        child_paths=paths,
         affects=("packages/root",),
         worktree="/wt/epic",
         branch="epic/reserve",
@@ -1715,7 +1714,7 @@ def test_a_sibling_accepted_after_a_refusal_reserves_for_later_overlaps(reverse_
 def test_a_refused_candidate_never_lets_capacity_be_exceeded() -> None:
     items, (first, second) = _overlapping_children("feature-a", "feature-b", first=_GONE_STAMP)
     third = f"{_RESERVE_ROOT}/children/feature-c"
-    epic = dataclasses.replace(items[0], active_child_paths=(first, second, third))
+    epic = dataclasses.replace(items[0], child_paths=(first, second, third))
     items = (epic, *items[1:], _item(third, affects=("packages/other",)))
     result = _plan(items, _RESERVE_ROOT, max_parallel=1, worktree_exists={"/wt/gone": False, "/wt/epic": True})
     assert [dispatch.slug for dispatch in result.dispatches] == [second]
@@ -1751,7 +1750,7 @@ def _root_at_finish(type_: str, **overrides: object) -> tuple[str, tuple[WorkIte
         type=type_,
         phase="finish",
         work_status="in-progress",
-        active_child_paths=(child,),
+        child_paths=(child,),
         affects=("packages/root",),
         **overrides,
     )
@@ -1815,7 +1814,7 @@ def test_a_nested_stamped_epic_finishes_into_its_parent_integration_branch() -> 
             type="Epic",
             phase="execute",
             work_status="in-progress",
-            active_child_paths=(mid,),
+            child_paths=(mid,),
             worktree="/wt/epic-int",
             branch="epic/int-1a2b3c4d",
             affects=("packages/root",),
@@ -1825,7 +1824,7 @@ def test_a_nested_stamped_epic_finishes_into_its_parent_integration_branch() -> 
             type="Epic",
             phase="finish",
             work_status="in-progress",
-            active_child_paths=(leaf,),
+            child_paths=(leaf,),
             worktree="/wt/epic-mid",
             branch="epic/mid-5e6f7a8b",
             affects=("packages/mid",),
@@ -1859,7 +1858,7 @@ def test_only_the_root_advance_carries_the_epic_pair() -> None:
             work_status="in-progress",
             worktree="/epic",
             branch="epic/r",
-            active_child_paths=(mid,),
+            child_paths=(mid,),
             affects=("packages/root",),
         ),
         _item(
@@ -1867,7 +1866,7 @@ def test_only_the_root_advance_carries_the_epic_pair() -> None:
             type="Epic",
             phase="execute",
             work_status="in-progress",
-            active_child_paths=(leaf,),
+            child_paths=(leaf,),
             ancestor_paths=(root,),
         ),
         _item(leaf, type="Bug", phase="done", work_status="resolved", parent_path=mid, ancestor_paths=(mid, root)),
@@ -1892,7 +1891,7 @@ def test_the_root_advance_still_carries_the_epic_pair(root: str) -> None:
             work_status="in-progress",
             worktree="/epic",
             branch="epic/r",
-            active_child_paths=(child,),
+            child_paths=(child,),
             affects=("packages/root",),
         ),
         _item(child, type="Bug", phase="done", work_status="resolved"),
@@ -1917,7 +1916,7 @@ def test_a_nested_return_advance_carries_no_epic_pair() -> None:
             work_status="in-progress",
             worktree="/epic",
             branch="epic/r",
-            active_child_paths=(mid,),
+            child_paths=(mid,),
             affects=("packages/root",),
         ),
         _item(
@@ -1925,7 +1924,7 @@ def test_a_nested_return_advance_carries_no_epic_pair() -> None:
             type="Epic",
             phase="finish",
             work_status="in-progress",
-            active_child_paths=(leaf,),
+            child_paths=(leaf,),
             ancestor_paths=(root,),
         ),
         _item(
@@ -1978,7 +1977,7 @@ def test_every_dispatch_prompt_hands_placement_to_the_coordinator(phase: str, is
                 work_status="in-progress",
                 worktree="/epic",
                 branch="epic/r",
-                active_child_paths=(slug,),
+                child_paths=(slug,),
                 affects=("packages/root",),
             ),
             _item(slug, type="Bug", phase=phase, work_status="in-progress", owner="pat", has_plan_artifact=True),

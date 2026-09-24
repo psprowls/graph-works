@@ -135,10 +135,10 @@ def test_an_epic_past_decomposition_with_no_children_is_a_warn(tmp_path: Path) -
     assert lane_report(tmp_path, today=TODAY).by_code("graph.epic-without-children")[0].severity == "warn"
 
 
-def test_an_epic_with_a_direct_archived_child_is_silent(tmp_path: Path) -> None:
+def test_an_epic_with_a_direct_resolved_child_is_silent(tmp_path: Path) -> None:
     epic = "work/epic-x"
     write_item(tmp_path, epic, "type: Epic\nwork_status: open\nphase: execute\n")
-    write_item(tmp_path, f"{epic}/children/_archive/bug-old", "type: Bug\nwork_status: resolved\n")
+    write_item(tmp_path, f"{epic}/children/bug-old", "type: Bug\nwork_status: resolved\n")
     assert "graph.epic-without-children" not in codes_for(tmp_path)
 
 

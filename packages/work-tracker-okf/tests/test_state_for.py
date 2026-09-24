@@ -25,7 +25,7 @@ def test_childless_release_and_epic_keep_zero_rollups() -> None:
 def test_a_feature_with_children_carries_full_paths() -> None:
     child_path = "work/feat/children/bug-child"
     items = [
-        make_item("feat", type="Feature", active_child_paths=(child_path,)),
+        make_item("feat", type="Feature", child_paths=(child_path,)),
         make_item(
             child_path,
             type="Bug",
@@ -43,14 +43,14 @@ def test_open_descendants_sees_past_a_terminal_direct_child() -> None:
     child_path = "work/feat/children/done"
     grandchild_path = f"{child_path}/children/gc"
     items = [
-        make_item("feat", type="Feature", active_child_paths=(child_path,)),
+        make_item("feat", type="Feature", child_paths=(child_path,)),
         make_item(
             child_path,
             type="Feature",
             parent_path="work/feat",
             ancestor_paths=("work/feat",),
             work_status="resolved",
-            active_child_paths=(grandchild_path,),
+            child_paths=(grandchild_path,),
         ),
         make_item(
             grandchild_path,
@@ -77,7 +77,7 @@ def test_a_feature_with_an_open_grandchild_still_requires_children_terminal() ->
             type="Feature",
             phase="execute",
             work_status="in-progress",
-            active_child_paths=(child_path,),
+            child_paths=(child_path,),
         ),
         make_item(
             child_path,
@@ -85,7 +85,7 @@ def test_a_feature_with_an_open_grandchild_still_requires_children_terminal() ->
             parent_path="work/feat",
             ancestor_paths=("work/feat",),
             work_status="resolved",
-            active_child_paths=(grandchild_path,),
+            child_paths=(grandchild_path,),
         ),
         make_item(
             grandchild_path,

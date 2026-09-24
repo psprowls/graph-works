@@ -306,10 +306,9 @@ def plan_filing(root: Path, items: Sequence[WorkItem], seed: FilingSeed, section
     required_directories = [references_dir(path).rel]
     required_indexes: list[str] = []
     if seed.type in PARENT_TYPES:
-        active_lane = child_lane(path)
-        archived_lane = child_lane(path, archived=True)
-        required_directories.extend((active_lane, archived_lane))
-        required_indexes.extend((f"{active_lane}/index.md", f"{archived_lane}/index.md"))
+        lane = child_lane(path)
+        required_directories.append(lane)
+        required_indexes.append(f"{lane}/index.md")
     return FilingPlan(
         seed=seed,
         path=path,

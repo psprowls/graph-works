@@ -19,15 +19,15 @@ work/release-cutover/
       references/
       children/
         feature-import.md
-        _archive/
-          bug-old-link.md
+        bug-old-link.md
 work/_archive/
   index.md
 ```
 
 `Release` items are root-only. `Release`, `Epic`, and `Feature` may own a
-`children/` lane. Every other type is a leaf. An archive is local to the lane
-that owned the item, so moving a subtree preserves its identity and ancestry.
+`children/` lane. Every other type is a leaf. Only top-level items are
+archived: the root moves to `work/_archive/` with its whole `children/` subtree
+unchanged, so identity and ancestry are preserved.
 Indexes exist at each lane; hierarchy is inferred from the filesystem and is
 never duplicated in frontmatter.
 
@@ -109,7 +109,7 @@ if plan.refusal is None:
 ```
 
 Archive, reparent, and Release-adoption planners map the complete owned subtree,
-including nested attachments and local archive lanes. The workspace transaction
+including nested attachments and every descendant. The workspace transaction
 executor applies those plans atomically and reconciles every affected index.
 
 `IGNORE` is the normal read/validation lens. `ARCHIVE_IGNORE` exposes members

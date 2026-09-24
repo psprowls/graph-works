@@ -26,7 +26,6 @@ warn	structure.index-entry-missing	work/index.md	work_tracker_okf._rules.structu
 warn	structure.index-entry-non-direct	work/index.md	work_tracker_okf._rules.structure	lane index entry `work/spike-wrong-parent-type/children/feature-accepted-no-plan.md` is not a direct descendant of this lane
 warn	structure.index-entry-stale	work/index.md	work_tracker_okf._rules.structure	lane index entry `work/gone.md` names no work item
 warn	structure.index-entry-unreadable	work/index.md	work_tracker_okf._rules.structure	lane index link-bullet is not a readable entry: '- [Bug: an unbalanced ] in link text](bug-unreadable-entry.md) — open · not started'
-warn	state.archive-eligible	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` is terminal; the item is still under `work/`
 warn	state.resolved-without-ref	work/spike-wrong-parent-type.md	work_tracker_okf._rules.state	`work_status: resolved` with no `resolved_in`
 error	structure.children-on-leaf	work/spike-wrong-parent-type.md	work_tracker_okf._rules.structure	`type: Spike` may not own the child lane `work/spike-wrong-parent-type/children`
 error	graph.depends-on-invalid	work/spike-wrong-parent-type/children/feature-accepted-no-plan.md	work_tracker_okf._rules.graph	`depends_on` has invalid blocks: blocks 'build' is invalid
@@ -41,6 +40,6 @@ error	structure.source-escape	work/tech-debt-mitigated.md	work_tracker_okf._rule
 error	structure.source-id-duplicate	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[].id` 'plan' is duplicated within this item
 warn	structure.source-missing	work/tech-debt-mitigated.md	work_tracker_okf._rules.structure	`sources[1].resource` '/work/tech-debt-mitigated/references/02-plan-guidance.md' is not a bundle member
 warn	targets.source-id-mismatch	work/tech-debt-mitigated.md	§5.1	`sources[0].id` 'plan' disagrees with its filename, which implies 'design'
-error	structure.illegal-lane	work/tech-debt-mitigated/feature-skips-children.md	work_tracker_okf._rules.structure	work-item page is outside a root, `children`, or `_archive` lane
+error	structure.illegal-lane	work/tech-debt-mitigated/feature-skips-children.md	work_tracker_okf._rules.structure	work-item page is outside a root or `children` lane
 warn	state.archive-eligible	work/test-gap-wontfix.md	work_tracker_okf._rules.state	`work_status: wontfix` is terminal; the item is still under `work/`
 warn	state.wontfix-without-rationale	work/test-gap-wontfix.md	work_tracker_okf._rules.state	`work_status: wontfix` with no `rationale`

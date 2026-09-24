@@ -22,6 +22,11 @@ def _terminal_tree(root: Path, *, child_status: str = "resolved") -> tuple[str, 
     return release, epic, feature
 
 
+def _terminal_leaf(root: Path, name: str = "work/bug-done") -> str:
+    write_item(root, name, "type: Bug\nwork_status: resolved\n")
+    return name
+
+
 def _snapshot(root: Path) -> dict[str, tuple[str, bytes | str]]:
     snapshot: dict[str, tuple[str, bytes | str]] = {}
     pending = [root]
@@ -39,20 +44,89 @@ def _snapshot(root: Path) -> dict[str, tuple[str, bytes | str]]:
     return snapshot
 
 
-def test_leaf_archive_uses_its_nearest_local_archive_lane(tmp_path: Path) -> None:
+def test_a_child_target_is_refused_as_not_top_level(tmp_path: Path) -> None:
     _release, epic, feature = _terminal_tree(tmp_path)
     bundle = load_bundle(tmp_path)
 
     plan = plan_archive(bundle, load_items(bundle), (feature,))
 
+    assert not plan.ok
+    refusal = next(refusal for refusal in plan.refusals if refusal.kind == "not-top-level")
+    assert refusal.path == feature
+    assert refusal.detail == (f"only top-level items are archived; children move with their root — archive {epic}")
+    assert plan.writes == plan.moves == plan.deletes == ()
+
+
+def test_a_top_level_leaf_archives_to_the_root_archive_lane(tmp_path: Path) -> None:
+    leaf = _terminal_leaf(tmp_path)
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), (leaf,))
+
     assert plan.ok, plan.refusals
-    assert plan.path_mapping == {feature: f"{epic}/children/_archive/feature-done"}
+    assert plan.path_mapping == {leaf: "work/_archive/bug-done"}
+
+
+def test_naming_a_root_and_its_child_refuses_the_child_as_not_top_level(tmp_path: Path) -> None:
+    _release, epic, feature = _terminal_tree(tmp_path)
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), (epic, feature))
+
+    assert not plan.ok
+    assert {(refusal.path, refusal.kind) for refusal in plan.refusals} == {(feature, "not-top-level")}
+    assert plan.writes == plan.moves == plan.deletes == ()
+
+
+def test_an_archived_descendant_reports_already_archived_not_not_top_level(tmp_path: Path) -> None:
+    child = "work/_archive/epic-old/children/bug-old"
+    write_item(tmp_path, "work/_archive/epic-old", "type: Epic\nwork_status: resolved\n")
+    write_item(tmp_path, child, "type: Bug\nwork_status: resolved\n")
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), (child,))
+
+    assert [refusal.kind for refusal in plan.refusals] == ["already-archived"]
+
+
+def test_sweep_skips_a_root_with_an_open_descendant_and_archives_a_sibling_root(tmp_path: Path) -> None:
+    held = "work/epic-held"
+    write_item(tmp_path, held, "type: Epic\nwork_status: resolved\n")
+    write_item(tmp_path, f"{held}/children/bug-open", "type: Bug\nwork_status: open\n")
+    (tmp_path / held / "children").mkdir(parents=True, exist_ok=True)
+    leaf = _terminal_leaf(tmp_path)
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), None)
+
+    assert plan.ok, plan.refusals
+    assert plan.path_mapping == {leaf: "work/_archive/bug-done"}
+
+
+def test_round_trip_reload_after_archiving_a_three_level_root(tmp_path: Path) -> None:
+    epic = "work/epic-three"
+    feature = f"{epic}/children/feature-mid"
+    bug = f"{feature}/children/bug-leaf"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: resolved\n")
+    write_item(tmp_path, feature, "type: Feature\nwork_status: resolved\n")
+    write_item(tmp_path, bug, "type: Bug\nwork_status: wontfix\n")
+    (tmp_path / feature / "children").mkdir(parents=True, exist_ok=True)
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_archive(bundle, load_items(bundle), None)
+    assert plan.ok, plan.refusals
+    _apply_mutation(plan)
+
+    reprojected = {item.path: item for item in load_items(load_bundle(tmp_path, ignore=IGNORE))}
+    moved_bug = "work/_archive/epic-three/children/feature-mid/children/bug-leaf"
+    assert reprojected[moved_bug].parent_path == "work/_archive/epic-three/children/feature-mid"
+    assert all(item.archived for item in reprojected.values())
+    assert not any("/children/_archive" in path for path in reprojected)
+    assert not list(tmp_path.rglob("_archive/*/children/_archive"))
 
 
 def test_parent_archive_normalizes_terminal_descendants_before_moving_parent(tmp_path: Path) -> None:
     _release, epic, feature = _terminal_tree(tmp_path)
-    archived_bug = f"{epic}/children/_archive/bug-old"
-    write_item(tmp_path, archived_bug, "type: Bug\nwork_status: resolved\n")
     bundle = load_bundle(tmp_path)
 
     plan = plan_archive(bundle, load_items(bundle), (epic,))
@@ -60,7 +134,6 @@ def test_parent_archive_normalizes_terminal_descendants_before_moving_parent(tmp
     assert plan.ok, plan.refusals
     assert plan.path_mapping[epic] == "work/_archive/epic-migration"
     assert plan.path_mapping[feature] == "work/_archive/epic-migration/children/feature-done"
-    assert plan.path_mapping[archived_bug] == "work/_archive/epic-migration/children/bug-old"
 
 
 def test_parent_archive_prunes_its_entry_and_rebases_the_lanes_other_links(tmp_path: Path) -> None:
@@ -120,6 +193,7 @@ def test_default_archive_targets_skip_active_archived_and_terminal_descendants()
     child = make_item(
         "work/epic/children/feature",
         work_status="resolved",
+        parent_path=terminal.path,
         ancestor_paths=(terminal.path,),
     )
     active = make_item("work/active", work_status="open")
@@ -139,7 +213,7 @@ def test_archive_refuses_unknown_and_already_archived_targets(tmp_path: Path) ->
 
 
 def test_archive_subtree_mapping_ignores_unknown_children() -> None:
-    root = make_item("work/epic", active_child_paths=("work/missing",))
+    root = make_item("work/epic", child_paths=("work/missing",))
     assert _archive_subtree_mapping((root,), root.path, "work/_archive/epic") == {root.path: "work/_archive/epic"}
     assert _archive_subtree_mapping((root,), "work/missing", "work/_archive/missing") == {}
 
@@ -154,7 +228,7 @@ def test_archive_subtree_mapping_is_iterative_beyond_1080_edges() -> None:
             type="Epic",
             work_status="resolved",
             parent_path=paths[index - 1] if index else None,
-            active_child_paths=(paths[index + 1],) if index + 1 < len(paths) else (),
+            child_paths=(paths[index + 1],) if index + 1 < len(paths) else (),
         )
         for index, path in enumerate(paths)
     )
@@ -187,8 +261,8 @@ def test_archive_requires_the_target_itself_to_be_terminal(tmp_path: Path) -> No
 
 
 def test_archive_refuses_an_existing_local_twin_without_writes(tmp_path: Path) -> None:
-    _release, epic, feature = _terminal_tree(tmp_path)
-    destination = f"{epic}/children/_archive/feature-done"
+    feature = _terminal_leaf(tmp_path)
+    destination = "work/_archive/bug-done"
     write_item(tmp_path, destination, "type: Feature\nwork_status: resolved\n")
     bundle = load_bundle(tmp_path)
 
@@ -199,18 +273,8 @@ def test_archive_refuses_an_existing_local_twin_without_writes(tmp_path: Path) -
     assert plan.writes == plan.moves == plan.deletes == ()
 
 
-def test_archive_refuses_overlapping_targets(tmp_path: Path) -> None:
-    _release, epic, feature = _terminal_tree(tmp_path)
-    bundle = load_bundle(tmp_path)
-
-    plan = plan_archive(bundle, load_items(bundle), (epic, feature))
-
-    assert not plan.ok
-    assert "overlapping-targets" in {refusal.kind for refusal in plan.refusals}
-
-
 def test_archive_plans_local_indexes_and_never_writes_during_planning(tmp_path: Path) -> None:
-    _release, epic, feature = _terminal_tree(tmp_path)
+    feature = _terminal_leaf(tmp_path)
     before = {
         path.relative_to(tmp_path).as_posix(): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()
     }
@@ -219,8 +283,8 @@ def test_archive_plans_local_indexes_and_never_writes_during_planning(tmp_path: 
     plan = plan_archive(bundle, load_items(bundle), (feature,))
 
     members = {write.member for write in plan.writes}
-    assert f"{epic}/children/index.md" in members
-    assert f"{epic}/children/_archive/index.md" in members
+    assert "work/index.md" in members
+    assert "work/_archive/index.md" in members
     after = {path.relative_to(tmp_path).as_posix(): path.read_bytes() for path in tmp_path.rglob("*") if path.is_file()}
     assert after == before
 
@@ -237,19 +301,19 @@ def test_archive_exposes_source_and_absent_destination_directory_preconditions(t
 
 
 def test_leaf_archive_preconditions_both_absent_conceptual_owned_roots(tmp_path: Path) -> None:
-    _release, _epic, feature = _terminal_tree(tmp_path)
+    feature = _terminal_leaf(tmp_path)
     bundle = load_bundle(tmp_path)
 
     plan = plan_archive(bundle, load_items(bundle), feature)
 
-    destination = f"{feature.rsplit('/', 1)[0]}/_archive/feature-done"
+    destination = "work/_archive/bug-done"
     conditions = {condition.member: condition.before_digest for condition in plan.directory_preconditions}
     assert conditions[feature] is None
     assert conditions[destination] is None
 
 
 def test_leaf_archive_apply_refuses_a_late_source_sidecar_without_effects(tmp_path: Path) -> None:
-    _release, _epic, feature = _terminal_tree(tmp_path)
+    feature = _terminal_leaf(tmp_path)
     bundle = load_bundle(tmp_path)
     plan = plan_archive(bundle, load_items(bundle), feature)
     late = tmp_path / feature / "references/late.bin"
@@ -264,8 +328,8 @@ def test_leaf_archive_apply_refuses_a_late_source_sidecar_without_effects(tmp_pa
 
 
 def test_leaf_archive_refuses_a_preexisting_destination_owned_root_without_effects(tmp_path: Path) -> None:
-    _release, epic, feature = _terminal_tree(tmp_path)
-    destination = tmp_path / epic / "children/_archive/feature-done"
+    feature = _terminal_leaf(tmp_path)
+    destination = tmp_path / "work/_archive/bug-done"
     destination.mkdir(parents=True)
     (destination / "unrelated.bin").write_bytes(b"do not adopt\n")
     before_plan = _snapshot(tmp_path)
@@ -280,10 +344,10 @@ def test_leaf_archive_refuses_a_preexisting_destination_owned_root_without_effec
 
 
 def test_leaf_archive_apply_refuses_a_post_plan_destination_owned_root_without_effects(tmp_path: Path) -> None:
-    _release, epic, feature = _terminal_tree(tmp_path)
+    feature = _terminal_leaf(tmp_path)
     bundle = load_bundle(tmp_path)
     plan = plan_archive(bundle, load_items(bundle), feature)
-    destination = tmp_path / epic / "children/_archive/feature-done"
+    destination = tmp_path / "work/_archive/bug-done"
     destination.mkdir(parents=True)
     (destination / "unrelated.bin").write_bytes(b"do not adopt\n")
     before_apply = _snapshot(tmp_path)
@@ -409,7 +473,7 @@ def test_archive_apply_refuses_a_post_plan_write_preimage_symlink_escape(tmp_pat
 
 @pytest.mark.parametrize("mutation", ["change", "remove"])
 def test_archive_apply_refuses_a_stale_moved_page_before_any_effect(tmp_path: Path, mutation: str) -> None:
-    _release, _epic, feature = _terminal_tree(tmp_path)
+    feature = _terminal_leaf(tmp_path)
     bundle = load_bundle(tmp_path)
     plan = plan_archive(bundle, load_items(bundle), feature)
     destination = plan.path_mapping[feature]
@@ -479,33 +543,12 @@ def test_archiving_a_root_parent_reprojects_its_whole_subtree(tmp_path: Path) ->
     assert not any(path.startswith("work/epic-migration") for path in reprojected)
 
 
-def test_archiving_a_nested_parent_reprojects_its_child(tmp_path: Path) -> None:
-    """The same round trip one level down -- a Feature archived into its Epic's
-    local lane still owns the child that travelled with it."""
-    _release, epic, feature = _terminal_tree(tmp_path)
-    nested = f"{feature}/children/bug-nested"
-    write_item(tmp_path, nested, "type: Bug\nwork_status: resolved\n")
-    bundle = load_bundle(tmp_path)
-
-    plan = plan_archive(bundle, load_items(bundle), feature)
-    assert plan.ok, plan.refusals
-    _apply_mutation(plan)
-
-    reprojected = {item.path: item for item in load_items(load_bundle(tmp_path, ignore=IGNORE))}
-    moved_feature = f"{epic}/children/_archive/feature-done"
-    moved_nested = f"{moved_feature}/children/bug-nested"
-    assert reprojected[moved_nested].parent_path == moved_feature
-    assert reprojected[moved_feature].parent_path == epic
-    assert reprojected[moved_feature].archived and reprojected[moved_nested].archived
-    assert reprojected[epic].archived is False
-
-
 def test_archive_moves_a_stray_item_level_index_instead_of_losing_it(tmp_path: Path) -> None:
     """A misplaced index.md living directly in an item's own directory (not
     a lane, not under references/) is still part of that item's owned
     subtree and must travel with it -- leaving it behind means the source
     directory never empties and the transactional apply aborts."""
-    _release, epic, feature = _terminal_tree(tmp_path)
+    feature = _terminal_leaf(tmp_path)
     (tmp_path / feature).mkdir(parents=True, exist_ok=True)
     (tmp_path / feature / "index.md").write_text("stray\n", encoding="utf-8")
     bundle = load_bundle(tmp_path)
@@ -513,7 +556,7 @@ def test_archive_moves_a_stray_item_level_index_instead_of_losing_it(tmp_path: P
     plan = plan_archive(bundle, load_items(bundle), (feature,))
     assert plan.ok, plan.refusals
 
-    stray_destination = f"{epic}/children/_archive/feature-done/index.md"
+    stray_destination = "work/_archive/bug-done/index.md"
     moved_stray = any(move.dest == stray_destination for move in plan.moves)
     written_stray = any(write.member == stray_destination for write in plan.writes)
     assert moved_stray or written_stray, (plan.moves, plan.writes)
@@ -531,7 +574,7 @@ def test_archive_refuses_rather_than_crashes_on_an_unreadable_stray_item_index(t
     `reserved_item_indexes` and crashed with an uncaught `KeyError` instead of
     returning a graceful `MutationRefusal` -- violating the planner's
     write-free, refusal-as-data contract."""
-    _release, _epic, feature = _terminal_tree(tmp_path)
+    feature = _terminal_leaf(tmp_path)
     (tmp_path / feature).mkdir(parents=True, exist_ok=True)
     (tmp_path / feature / "index.md").write_bytes(b"\xffnot UTF-8\n")
     bundle = load_bundle(tmp_path)
@@ -576,7 +619,7 @@ def test_default_targets_skip_a_terminal_child_under_a_live_ancestor() -> None:
     assert _default_targets((epic, child)) == ()
 
 
-def test_targeted_archive_of_a_child_under_a_live_ancestor_is_refused(tmp_path: Path) -> None:
+def test_targeted_archive_of_a_child_under_a_live_ancestor_is_refused_as_not_top_level(tmp_path: Path) -> None:
     epic = "work/epic-live"
     child = f"{epic}/children/bug-done"
     write_item(tmp_path, epic, "type: Epic\nwork_status: open\n")
@@ -586,29 +629,12 @@ def test_targeted_archive_of_a_child_under_a_live_ancestor_is_refused(tmp_path: 
     plan = plan_archive(bundle, load_items(bundle), (child,))
 
     assert not plan.ok
-    assert "ancestor-not-terminal" in {refusal.kind for refusal in plan.refusals}
-    assert "archive the root instead" in " ".join(refusal.detail for refusal in plan.refusals)
+    assert "not-top-level" in {refusal.kind for refusal in plan.refusals}
+    assert "archive work/epic-live" in " ".join(refusal.detail for refusal in plan.refusals)
     assert plan.writes == plan.moves == plan.deletes == ()
 
 
-def test_archiving_a_root_flattens_active_and_already_archived_children_alike(tmp_path: Path) -> None:
-    epic = "work/epic-migration"
-    active_child = f"{epic}/children/feature-done"
-    archived_child = f"{epic}/children/_archive/bug-old"
-    write_item(tmp_path, epic, "type: Epic\nwork_status: resolved\n")
-    write_item(tmp_path, active_child, "type: Feature\nwork_status: resolved\n")
-    write_item(tmp_path, archived_child, "type: Bug\nwork_status: resolved\n")
-    bundle = load_bundle(tmp_path)
-
-    plan = plan_archive(bundle, load_items(bundle), (epic,))
-
-    assert plan.ok, plan.refusals
-    assert plan.path_mapping[epic] == "work/_archive/epic-migration"
-    assert plan.path_mapping[active_child] == "work/_archive/epic-migration/children/feature-done"
-    assert plan.path_mapping[archived_child] == "work/_archive/epic-migration/children/bug-old"
-
-
-def test_flattened_destinations_still_parse_as_archived_by_ancestry(tmp_path: Path) -> None:
+def test_archived_root_descendants_parse_as_archived(tmp_path: Path) -> None:
     from work_tracker_okf.paths import parse_item_path
 
     location = parse_item_path("work/_archive/epic-migration/children/feature-done")

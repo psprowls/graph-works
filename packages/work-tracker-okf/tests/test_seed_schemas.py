@@ -1,6 +1,7 @@
 import importlib.resources
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 import pytest
 from okf_ext.schemas import load_schemas, schema_rule
@@ -96,8 +97,7 @@ def test_base_schema_accepts_active_and_root_archived_dependency_paths(tmp_path:
     "path",
     [
         "work/_archive/release-cutover/children/epic-migration",
-        "work/_archive/release-cutover/children/_archive/epic-migration",
-        "work/release-cutover/children/_archive/epic-migration/children/_archive/feature-import",
+        "work/_archive/release-cutover/children/epic-migration/children/feature-import",
     ],
 )
 def test_base_schema_accepts_dependency_paths_inside_an_archived_subtree(tmp_path: Path, path: str) -> None:
@@ -115,6 +115,7 @@ def test_base_schema_accepts_dependency_paths_inside_an_archived_subtree(tmp_pat
         "work/release-cutover/children",
         "work/release-cutover/children/epic-migration/children",
         "work/Release-Cutover",
+        "work/release-cutover/children/_archive/epic-migration",
     ],
 )
 def test_base_schema_still_refuses_dependency_paths_that_name_no_item(tmp_path: Path, path: str) -> None:
@@ -167,3 +168,24 @@ def test_release_fields_are_optional(tmp_path: Path) -> None:
         )
         == []
     )
+
+
+def _find_depends_on_path_pattern(schema: dict[str, Any]) -> str:
+    depends_on = schema["properties"]["depends_on"]
+    path = depends_on["items"]["properties"]["path"]
+    pattern = path["pattern"]
+    return str(pattern)
+
+
+def test_depends_on_path_pattern_rejects_a_nested_archive() -> None:
+    import json
+    import re
+    from importlib.resources import files
+
+    schema = json.loads(
+        files("work_tracker_okf").joinpath("assets/schema/_base.schema.json").read_text(encoding="utf-8")
+    )
+    pattern = re.compile(_find_depends_on_path_pattern(schema))
+    assert pattern.match("work/_archive/epic-a/children/bug-b")
+    assert pattern.match("work/epic-a/children/feature-b/children/bug-c")
+    assert not pattern.match("work/epic-a/children/_archive/bug-b")

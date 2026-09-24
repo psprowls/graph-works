@@ -15,7 +15,7 @@ _EPIC = f"{_RELEASE}/children/epic-conformant-vault"
 _FEATURE = f"{_EPIC}/children/feature-epic-feature-filing-writer"
 _LEAF = f"{_FEATURE}/children/test-gap-cover-the-upsert"
 _SPIKE = f"{_EPIC}/children/spike-path-layout-questions"
-_ARCHIVED = f"{_EPIC}/children/_archive/feature-epic-feature-archived-child"
+_ARCHIVED = f"{_EPIC}/children/feature-epic-feature-archived-child"
 
 _ACTIVE = (
     _RELEASE,
@@ -94,14 +94,16 @@ def test_the_vault_carries_only_the_ok_and_empty_plan_table_states(conformant_ro
     assert states[_EPIC] == "empty"
 
 
-def test_the_archived_child_still_belongs_to_its_active_parent(conformant_root: Path) -> None:
+def test_the_superseded_child_sits_in_its_parents_children_lane(conformant_root: Path) -> None:
     items = load_items(load_bundle(conformant_root, ignore=IGNORE))
     epic = next(item for item in items if item.path == _EPIC)
-    assert _ARCHIVED in epic.archived_child_paths
+    child = next(item for item in items if item.path == _ARCHIVED)
+    assert _ARCHIVED in epic.child_paths
     assert epic.archived is False
+    assert child.archived is False
 
 
-def test_the_archived_item_is_the_symmetric_shape(conformant_root: Path) -> None:
+def test_the_superseded_child_is_the_symmetric_shape(conformant_root: Path) -> None:
     assert (conformant_root / f"{_ARCHIVED}.md").is_file()
     assert (conformant_root / _ARCHIVED / "references").is_dir()
 
@@ -116,7 +118,6 @@ def test_both_index_files_are_present_and_carry_no_frontmatter(conformant_root: 
         "work/_archive",
         f"{_RELEASE}/children",
         f"{_EPIC}/children",
-        f"{_EPIC}/children/_archive",
         f"{_FEATURE}/children",
     }
     assert bundle.indexes["work"].has_frontmatter is False

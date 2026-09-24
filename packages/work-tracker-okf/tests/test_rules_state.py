@@ -188,8 +188,7 @@ def test_archive_eligible_still_fires_for_a_terminal_root(tmp_path: Path) -> Non
     assert ("state.archive-eligible", "work/bug-alone.md") in codes
 
 
-def test_archive_eligible_still_fires_for_a_terminal_child_of_a_terminal_epic(tmp_path: Path) -> None:
-    """The epic itself is the sweep target; the child is reported with it."""
+def test_archive_eligible_fires_for_the_terminal_root_and_is_silent_for_its_terminal_child(tmp_path: Path) -> None:
     epic = "work/epic-done"
     child = f"{epic}/children/bug-done"
     write_item(tmp_path, epic, "type: Epic\nwork_status: resolved\n")
@@ -197,7 +196,18 @@ def test_archive_eligible_still_fires_for_a_terminal_child_of_a_terminal_epic(tm
 
     codes = {(finding.code, finding.path) for finding in _findings(tmp_path)}
 
-    assert ("state.archive-eligible", f"{child}.md") in codes
+    assert ("state.archive-eligible", f"{epic}.md") in codes
+    assert ("state.archive-eligible", f"{child}.md") not in codes
+
+
+def test_archive_eligible_is_silent_for_a_terminal_root_with_an_open_descendant(tmp_path: Path) -> None:
+    epic = "work/epic-held"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: resolved\n")
+    write_item(tmp_path, f"{epic}/children/bug-open", "type: Bug\nwork_status: open\n")
+
+    codes = {(finding.code, finding.path) for finding in _findings(tmp_path)}
+
+    assert ("state.archive-eligible", f"{epic}.md") not in codes
 
 
 # --- the module's shape -----------------------------------------------------

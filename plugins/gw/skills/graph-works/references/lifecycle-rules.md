@@ -15,7 +15,7 @@ stable catalog to the responsible repair.
 - `state.phase-status-incoherent` — use `gw work advance`; do not hand-compose
   incompatible phase and work-status values.
 - `state.stuck-open`, `state.stuck-accepted` — review or advance aged work.
-- `state.archive-eligible` — preview and then archive the terminal path.
+- `state.archive-eligible` — fires only for a top-level item whose whole subtree is terminal; preview and then archive that root.
 
 ## Plan
 

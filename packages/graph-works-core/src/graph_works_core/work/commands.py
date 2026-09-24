@@ -903,16 +903,11 @@ def _absent_index_lane_preconditions(root: Path, items: Sequence[WorkItem]) -> M
     nothing creates. It is duplicated rather than imported for the same reason
     `_work_only_ignore` duplicates the lane partition: the vertical stays
     independent, and the copy stays small.
-
-    The archived child lane is claimed only for a parent that already has
-    archived children, matching the root-only archive policy.
     """
     lanes = {"work", "work/_archive"}
     for item in items:
         if not item.archived and item.type in PARENT_TYPES:
             lanes.add(child_lane(item.path))
-            if item.archived_child_paths:
-                lanes.add(child_lane(item.path, archived=True))
     conditions = {lane: DirectoryPrecondition(lane, None) for lane in sorted(lanes) if not os.path.lexists(root / lane)}
     return MappingProxyType(conditions)
 

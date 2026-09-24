@@ -99,13 +99,13 @@ def test_mutation_mapping_helpers_cover_missing_cycles_and_owned_members(tmp_pat
     root = make_item(
         "work/epic",
         type="Epic",
-        active_child_paths=("work/feature", "work/missing"),
+        child_paths=("work/feature", "work/missing"),
     )
     child = make_item(
         "work/feature",
         parent_path=root.path,
         ancestor_paths=(root.path,),
-        archived_child_paths=(root.path,),
+        child_paths=(root.path,),
     )
     assert [item.path for item in _subtree_items((root, child), (root.path, "work/unknown"))] == [
         root.path,
@@ -127,18 +127,15 @@ def test_future_item_and_lane_mappings_rewrite_all_structural_paths() -> None:
     root = make_item(
         "work/epic",
         type="Epic",
-        active_child_paths=("work/feature",),
-        archived_child_paths=("work/_archive/bug",),
+        child_paths=("work/feature", "work/_archive/bug"),
     )
     child = make_item("work/feature", type="Bug", parent_path=root.path, ancestor_paths=(root.path,))
-    mapping = {root.path: "work/_archive/epic", child.path: "work/_archive/epic/children/_archive/feature"}
+    mapping = {root.path: "work/_archive/epic", child.path: "work/_archive/epic/children/feature"}
     future = _future_items((root, child), mapping)
     assert future[0].archived
     assert future[1].parent_path == "work/_archive/epic"
-    assert _lane_mapping((root, child), mapping) == {
-        "work/epic/children": "work/_archive/epic/children",
-        "work/epic/children/_archive": "work/_archive/epic/children/_archive",
-    }
+    assert future[1].archived
+    assert _lane_mapping((root, child), mapping) == {"work/epic/children": "work/_archive/epic/children"}
     assert _lane_mapping((child,), {}) == {}
 
 

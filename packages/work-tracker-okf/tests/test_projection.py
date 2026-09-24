@@ -7,7 +7,7 @@ def test_rollup_keys_children_by_full_path() -> None:
     parent = "work/release"
     child = "work/release/children/epic"
     items = (
-        make_item(parent, type="Release", active_child_paths=(child,)),
+        make_item(parent, type="Release", child_paths=(child,)),
         make_item(child, parent_path=parent, work_status="resolved"),
     )
     assert dict(rollup(items).children) == {parent: ChildRollup(1, 1, ())}

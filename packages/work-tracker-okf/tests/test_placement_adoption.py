@@ -175,7 +175,6 @@ def test_the_path_composers_require_complete_canonical_paths() -> None:
     assert paths.item_page(item).rel == f"{item}.md"
     assert paths.references_dir(item).rel == f"{item}/references"
     assert paths.child_lane(item).endswith("/children")
-    assert paths.child_lane(item, archived=True).endswith("/children/_archive")
     assert paths.artifact_ref(item, paths.MANAGED_ARTIFACTS["design"]).rel == f"{item}/references/01-design.md"
 
 

@@ -14,7 +14,7 @@ _EXPECTED_CONCEPTS = {
     "work/spike-zeta",
     "work/tech-debt-delta",
     "work/test-gap-epsilon",
-    "work/epic-alpha/children/_archive/bug-theta",
+    "work/epic-alpha/children/bug-theta",
 }
 
 
@@ -34,7 +34,6 @@ def test_the_fixture_carries_both_index_files_and_a_non_markdown_artifact(minima
         "work",
         "work/_archive",
         "work/epic-alpha/children",
-        "work/epic-alpha/children/_archive",
     }
     assert "work/epic-alpha/children/feature-beta/references/03-execute-transcript.jsonl" in minimal_bundle.assets
 

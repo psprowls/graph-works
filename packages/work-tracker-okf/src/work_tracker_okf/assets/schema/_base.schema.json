@@ -24,7 +24,7 @@
         "properties": {
           "path": {
             "type": "string",
-            "pattern": "^work/(?:_archive/)?[a-z0-9]+(?:-[a-z0-9]+)*(?:/children/(?:_archive/)?[a-z0-9]+(?:-[a-z0-9]+)*)*$"
+            "pattern": "^work/(?:_archive/)?[a-z0-9]+(?:-[a-z0-9]+)*(?:/children/[a-z0-9]+(?:-[a-z0-9]+)*)*$"
           },
           "blocks": { "enum": ["design", "plan", "execute", "finish"] },
           "needs": { "enum": ["design", "plan", "execute", "finish", "resolved"] }

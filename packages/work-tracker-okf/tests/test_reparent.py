@@ -707,3 +707,19 @@ def test_reparent_rebases_a_dangling_stamped_resource(tmp_path: Path) -> None:
     moved_bundle = load_bundle(tmp_path, ignore=IGNORE)
     report = validate(moved_bundle, today=date(2026, 9, 2), extra_rules=lane_rules(repo_root=None))
     assert not report.by_code("structure.source-escape")
+
+
+def test_reparenting_a_parent_creates_no_archive_lane(tmp_path: Path) -> None:
+    epic = "work/epic-target"
+    feature = "work/feature-moving"
+    write_item(tmp_path, epic, "type: Epic\nwork_status: open\n")
+    write_item(tmp_path, feature, "type: Feature\nwork_status: open\n")
+    (tmp_path / epic / "children").mkdir(parents=True)
+    (tmp_path / feature / "children").mkdir(parents=True)
+    bundle = load_bundle(tmp_path)
+
+    plan = plan_reparent(bundle, load_items(bundle), feature, parent_path=epic)
+
+    assert plan.ok, plan.refusals
+    touched = {write.member for write in plan.writes} | set(plan.mkdirs)
+    assert not any("children/_archive" in member for member in touched)

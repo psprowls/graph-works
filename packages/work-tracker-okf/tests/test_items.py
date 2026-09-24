@@ -6,12 +6,14 @@ from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import WorkItem, item_index, load_items, unreadable_detail
 
 
-def test_projection_derives_containment_and_archive_children(path_native_bundle: Bundle) -> None:
+def test_projection_derives_containment_and_every_direct_child(path_native_bundle: Bundle) -> None:
     epic = item_index(load_items(path_native_bundle))["work/release-cutover/children/epic-migration"]
     assert epic.parent_path == "work/release-cutover"
     assert epic.ancestor_paths == ("work/release-cutover",)
-    assert epic.active_child_paths == ("work/release-cutover/children/epic-migration/children/feature-import",)
-    assert epic.archived_child_paths == ("work/release-cutover/children/epic-migration/children/_archive/bug-old-link",)
+    assert epic.child_paths == (
+        "work/release-cutover/children/epic-migration/children/bug-old-link",
+        "work/release-cutover/children/epic-migration/children/feature-import",
+    )
 
 
 def test_projection_uses_path_not_frontmatter_for_permanent_containment(tmp_path) -> None:
@@ -20,7 +22,7 @@ def test_projection_uses_path_not_frontmatter_for_permanent_containment(tmp_path
     )
     item = load_written_items(tmp_path)[0]
     assert item.parent_path == "work/release"
-    assert item.active_child_paths == ()
+    assert item.child_paths == ()
 
 
 def test_unreadable_detail_looks_up_by_the_dotmd_path(path_native_bundle: Bundle) -> None:

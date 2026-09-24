@@ -33,7 +33,7 @@ def _direct_children(items: Sequence[WorkItem], parent_path: str) -> tuple[WorkI
     parent = index.get(parent_path)
     if parent is None:
         return ()
-    return tuple(index[path] for path in (*parent.active_child_paths, *parent.archived_child_paths) if path in index)
+    return tuple(index[path] for path in parent.child_paths if path in index)
 
 
 def child_rollup(items: Sequence[WorkItem], parent_path: str) -> ChildRollup:
@@ -50,7 +50,7 @@ def active_nonterminal_descendants(items: Sequence[WorkItem], parent_path: str) 
     if parent is None:
         return ()
     found: list[str] = []
-    pending = list(reversed(parent.active_child_paths))
+    pending = list(reversed(parent.child_paths))
     seen = {parent_path}
     while pending:
         path = pending.pop()
@@ -62,7 +62,7 @@ def active_nonterminal_descendants(items: Sequence[WorkItem], parent_path: str) 
             continue
         if item.work_status not in TERMINAL_STATUSES:
             found.append(item.path)
-        pending.extend(reversed(item.active_child_paths))
+        pending.extend(reversed(item.child_paths))
     return tuple(sorted(found))
 
 
@@ -95,37 +95,40 @@ def decision_owner(items: Sequence[WorkItem], path: str) -> str | None:
     return path if path in path_index(items) else None
 
 
-def archive_held_by_ancestor(items: Sequence[WorkItem], item: WorkItem) -> bool:
-    """Whether *item* is a child the archive policy holds in place.
+def sweep_eligible(items: Sequence[WorkItem], item: WorkItem) -> bool:
+    """Whether the archive sweep selects *item*.
 
-    `True` exactly when *item*'s nearest **non-archived** ancestor exists and is
-    **not** terminal -- a resolved child of an open epic, in other words.
+    **A work item is archived only as a top-level root; its subtree rides
+    along, unchanged in shape.** So *item* must be top-level, not archived,
+    terminal, and every descendant at any depth must be terminal too. A root
+    with an open descendant is not an error, only not yet eligible -- the
+    sweep skips it rather than refusing the whole run.
 
-    **A work item is archived only as a root; children ride along, in place.**
-    Sweeping such a child mid-epic moves its path out from under a parent page
-    that still links to it at `children/<name>.md`, while the epic is being
-    assembled, for a distinction ("this child was archived separately") that
-    nothing needs.
-
-    Archived ancestors are skipped rather than consulted: an archived page is
-    frozen, and being contained by one says nothing about whether the live tree
-    above is still open. An ancestor the projection does not know does not hold
-    anything either -- an unresolvable path is not evidence of a live parent.
-
-    Written once and shared by `archive._default_targets`, `archive.plan_archive`
-    and `_rules.state.terminal`, so the lint cannot disagree with the planner
-    about what is archivable -- the same discipline `okf_io.migrate()` follows
-    in keeping reader, validator and writer on one set.
+    Written once and shared by `archive._default_targets` and
+    `_rules.state.terminal`, so the lint cannot disagree with the planner
+    about what the sweep will move.
     """
     from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
+    if item.ancestor_paths or item.parent_path is not None or item.archived:
+        return False
+    if item.work_status not in TERMINAL_STATUSES:
+        return False
     index = path_index(items)
-    for path in reversed(item.ancestor_paths):
-        ancestor = index.get(path)
-        if ancestor is None or ancestor.archived:
+    pending = list(item.child_paths)
+    seen = {item.path}
+    while pending:
+        path = pending.pop()
+        if path in seen:
             continue
-        return ancestor.work_status not in TERMINAL_STATUSES
-    return False
+        seen.add(path)
+        descendant = index.get(path)
+        if descendant is None:
+            continue
+        if descendant.work_status not in TERMINAL_STATUSES:
+            return False
+        pending.extend(descendant.child_paths)
+    return True
 
 
 def unknown_depends_on(items: Sequence[WorkItem], edges: Sequence[DependencyEdge]) -> dict[str, None]:
@@ -208,12 +211,12 @@ __all__ = [
     "ChildRollup",
     "DescendResult",
     "active_nonterminal_descendants",
-    "archive_held_by_ancestor",
     "child_gated",
     "child_rollup",
     "decision_owner",
     "descend",
     "nearest_epic",
     "nearest_parent",
+    "sweep_eligible",
     "unknown_depends_on",
 ]

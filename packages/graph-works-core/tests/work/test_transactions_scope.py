@@ -145,7 +145,6 @@ def workspace_with_a_broken_child(tmp_path: Path) -> tuple[WorkspaceLayout, Work
     _write_item(layout.bundle_dir, release, type="Release")
     _write_item(layout.bundle_dir, source, type="Bug", status="not-a-real-status")
     (layout.bundle_dir / release / "children").mkdir(parents=True)
-    (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
     assert plan.ok is True

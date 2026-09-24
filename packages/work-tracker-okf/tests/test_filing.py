@@ -75,11 +75,9 @@ def test_filing_a_parent_creates_owned_lanes_and_no_hierarchy_frontmatter(vault,
     assert set(plan.required_directories) == {
         "work/epic-bundle-migration/references",
         "work/epic-bundle-migration/children",
-        "work/epic-bundle-migration/children/_archive",
     }
     assert set(plan.required_indexes) == {
         "work/epic-bundle-migration/children/index.md",
-        "work/epic-bundle-migration/children/_archive/index.md",
     }
 
 
@@ -189,7 +187,7 @@ def test_apply_creates_scaffolding_but_does_not_register_gitkeep(vault: Path, se
     document = load(target)
     assert (plan.owned_directory / "references" / ".gitkeep").is_file()
     assert (plan.owned_directory / "children" / "index.md").is_file()
-    assert (plan.owned_directory / "children" / "_archive" / "index.md").is_file()
+    assert not (plan.owned_directory / "children" / "_archive").exists()
     assert "sources" not in document.fm_data()
 
 
@@ -197,7 +195,7 @@ def test_a_newly_filed_parent_seeds_an_empty_lane_index_with_no_markers(vault: P
     plan = plan_filing(vault, (), seed(type="Epic", title="Migration"), section_set)
     apply(plan)
     assert (plan.owned_directory / "children" / "index.md").read_text(encoding="utf-8") == ""
-    assert (plan.owned_directory / "children" / "_archive" / "index.md").read_text(encoding="utf-8") == ""
+    assert not (plan.owned_directory / "children" / "_archive").exists()
 
 
 def test_apply_a_leaf_creates_no_child_lane(vault: Path, section_set) -> None:

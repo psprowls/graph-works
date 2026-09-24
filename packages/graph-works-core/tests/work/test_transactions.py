@@ -241,7 +241,6 @@ def test_real_reparent_plan_applies_through_transaction_and_reloads_final_path(t
     _write_item(layout.bundle_dir, release, type="Release")
     _write_item(layout.bundle_dir, source, type="Bug")
     (layout.bundle_dir / release / "children").mkdir(parents=True)
-    (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
 
@@ -1336,7 +1335,6 @@ def test_baseline_capture_counts_findings_under_their_post_move_paths(tmp_path: 
     _write_item(layout.bundle_dir, release, type="Release")
     _write_item(layout.bundle_dir, path, type="Bug", affects=("src/gone.py",))
     (layout.bundle_dir / release / "children").mkdir(parents=True)
-    (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), path, release)
     root = transactions._open_root(layout.bundle_dir)
@@ -1497,7 +1495,6 @@ def test_real_reparent_preserves_mapped_nested_and_empty_directory_modes(tmp_pat
     nested.chmod(0o710)
     empty.chmod(0o750)
     (layout.bundle_dir / release / "children").mkdir(parents=True)
-    (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
 
@@ -1524,7 +1521,6 @@ def test_mapped_directory_mode_change_after_snapshot_refuses_before_effects(
     source_root.mkdir()
     source_root.chmod(0o500)
     (layout.bundle_dir / release / "children").mkdir(parents=True)
-    (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
     real_snapshot = transactions._create_snapshot
@@ -1560,7 +1556,6 @@ def test_mapped_directory_mode_change_refuses_a_drift_the_platform_can_only_repr
     source_root.mkdir()
     source_root.chmod(0o700)
     (layout.bundle_dir / release / "children").mkdir(parents=True)
-    (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
     real_snapshot = transactions._create_snapshot
@@ -3194,7 +3189,7 @@ def test_rollback_refuses_a_backup_holding_an_unsupported_entry_type(tmp_path: P
 def test_map_member_rewrites_pages_and_owned_directory_contents_deepest_first() -> None:
     mapping = {
         "work/epic-a": "work/_archive/epic-a",
-        "work/epic-a/children/bug-b": "work/epic-a/children/_archive/bug-b",
+        "work/epic-a/children/bug-b": "work/_archive/bug-b",
     }
 
     assert transactions._map_member(mapping, "work/epic-a.md") == "work/_archive/epic-a.md"
@@ -3202,9 +3197,7 @@ def test_map_member_rewrites_pages_and_owned_directory_contents_deepest_first() 
         transactions._map_member(mapping, "work/epic-a/references/01-design.md")
         == "work/_archive/epic-a/references/01-design.md"
     )
-    assert (
-        transactions._map_member(mapping, "work/epic-a/children/bug-b.md") == "work/epic-a/children/_archive/bug-b.md"
-    )
+    assert transactions._map_member(mapping, "work/epic-a/children/bug-b.md") == "work/_archive/bug-b.md"
     assert transactions._map_member(mapping, "work/index.md") == "work/index.md"
     assert transactions._map_member({}, "work/epic-a.md") == "work/epic-a.md"
 
@@ -3218,7 +3211,6 @@ def test_pre_existing_error_survives_a_real_move_and_is_excused_at_its_new_path(
     _write_item(layout.bundle_dir, release, type="Release")
     _write_item(layout.bundle_dir, source, type="Bug", affects=("src/gone.py",))
     (layout.bundle_dir / release / "children").mkdir(parents=True)
-    (layout.bundle_dir / release / "children/_archive").mkdir()
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
 

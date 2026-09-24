@@ -80,7 +80,7 @@ def test_the_recipe_leaves_the_item_pages_alone(minimal_root: Path) -> None:
         "work/bug-broken-eta",
         "work/bug-gamma",
         "work/epic-alpha",
-        "work/epic-alpha/children/_archive/bug-theta",
+        "work/epic-alpha/children/bug-theta",
         "work/epic-alpha/children/feature-beta",
         "work/spike-zeta",
         "work/tech-debt-delta",

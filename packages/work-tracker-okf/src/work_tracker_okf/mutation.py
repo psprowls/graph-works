@@ -157,7 +157,7 @@ def _subtree_items(items: Sequence[WorkItem], roots: Sequence[str]) -> tuple[Wor
         if item is None:
             continue
         found.append(item)
-        pending.extend(reversed((*item.active_child_paths, *item.archived_child_paths)))
+        pending.extend(reversed(item.child_paths))
     return tuple(sorted(found, key=lambda item: item.path))
 
 
@@ -427,8 +427,7 @@ def _future_items(items: Sequence[WorkItem], path_mapping: Mapping[str, str]) ->
                 archived="/_archive/" in f"/{path}/",
                 parent_path=parent,
                 ancestor_paths=ancestors,
-                active_child_paths=tuple(path_mapping.get(child, child) for child in item.active_child_paths),
-                archived_child_paths=tuple(path_mapping.get(child, child) for child in item.archived_child_paths),
+                child_paths=tuple(path_mapping.get(child, child) for child in item.child_paths),
             )
         )
     return tuple(remapped)
@@ -441,7 +440,6 @@ def _lane_mapping(items: Sequence[WorkItem], path_mapping: Mapping[str, str]) ->
         if destination is None or item.type not in PARENT_TYPES:
             continue
         mapping[child_lane(item.path)] = child_lane(destination)
-        mapping[child_lane(item.path, archived=True)] = child_lane(destination, archived=True)
     return mapping
 
 

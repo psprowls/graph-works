@@ -14,9 +14,10 @@ non-markdown member (`03-plan-transcript.txt`), one deliberately broken page
 ## `conformant/`
 
 The vault child 6's acceptance gate is built on: it validates with **zero
-errors** under both house rules raised to `severity="error"`. Six active items,
-one archived item in the symmetric shape, one working directory holding three
-artifacts including a `.jsonl`, and both lane index files.
+errors** under both house rules raised to `severity="error"`. Seven active
+items (one of them a superseded child in its parent's `children/` lane), one
+working directory holding three artifacts including a `.jsonl`, and both lane
+index files.
 
 ### Recorded edits
 
@@ -45,6 +46,17 @@ artifacts including a `.jsonl`, and both lane index files.
   the three warns §7.3 predicts" a meaningful property instead of one padded
   out with a stale item. Pinned by
   `test_conformant_vault.py::test_the_lane_warns_on_the_conformant_vault_are_exactly_the_three_expected`.
+- **`feature-epic-feature-archived-child` moved out of the epic's legacy
+  `children/_archive/` lane into `children/`, and gained a
+  `references/00-decisions.md`** (feature-archive-top-level-only). Only a
+  top-level root is archived now, and a nested `_archive` segment no longer
+  parses, so the child sits in its parent's `children/` lane as a superseded
+  item. Every `children/_archive/index.md` file went with it, and
+  `_archive/index.md` lost its hand-written line for it. Once active, the
+  `Feature` at `phase: done` owes a decision ledger; giving it one keeps the
+  lane warns at exactly the two expected rather than padding the set. Pinned by
+  `test_conformant_vault.py::test_the_superseded_child_sits_in_its_parents_children_lane`
+  and `test_the_lane_warns_on_the_conformant_vault_are_exactly_the_two_expected`.
 
 ### Known cosmetic divergence
 

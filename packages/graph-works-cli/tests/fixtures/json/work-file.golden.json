@@ -5,8 +5,7 @@
   "detail": "file work/feature-alpha as Feature",
   "indexes": [
     "<tmp>/works/okf/work/index.md",
-    "<tmp>/works/okf/work/feature-alpha/children/index.md",
-    "<tmp>/works/okf/work/feature-alpha/children/_archive/index.md"
+    "<tmp>/works/okf/work/feature-alpha/children/index.md"
   ],
   "logged": "- filed work/feature-alpha (Feature)",
   "warnings": [],

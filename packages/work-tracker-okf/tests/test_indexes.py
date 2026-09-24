@@ -229,7 +229,7 @@ def test_index_entries_are_sorted_by_filename() -> None:
     )
 
 
-def test_planner_covers_root_and_active_parent_child_lanes_without_archives_for_parents_with_no_archived_children(
+def test_planner_covers_root_and_active_parent_child_lanes(
     tmp_path: Path,
 ) -> None:
     release = "work/release-cutover"
@@ -270,19 +270,6 @@ def test_an_active_parent_with_no_archived_children_requires_no_archive_lane() -
 
     assert "work/epic-new/children" in lanes
     assert "work/epic-new/children/_archive" not in lanes
-
-
-def test_an_active_parent_that_has_archived_children_still_requires_its_archive_lane() -> None:
-    epic = make_item(
-        "work/epic-legacy",
-        type="Epic",
-        work_status="open",
-        archived_child_paths=("work/epic-legacy/children/_archive/bug-old",),
-    )
-
-    lanes = _required_lanes((epic,))
-
-    assert "work/epic-legacy/children/_archive" in lanes
 
 
 def test_the_two_root_lanes_are_always_required() -> None:

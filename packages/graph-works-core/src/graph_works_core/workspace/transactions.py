@@ -2107,8 +2107,6 @@ def _is_lane_index(member: str) -> bool:
     parts = lane.parts
     if parts[-1:] == ("children",):
         owner = PurePosixPath(*parts[:-1]).as_posix()
-    elif parts[-2:] == ("children", "_archive"):
-        owner = PurePosixPath(*parts[:-2]).as_posix()
     else:
         return False
     return parse_item_path(owner) is not None

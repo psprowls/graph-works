@@ -68,8 +68,7 @@ class WorkItem:
     affects: tuple[str, ...]
     parent_path: str | None
     ancestor_paths: tuple[str, ...]
-    active_child_paths: tuple[str, ...]
-    archived_child_paths: tuple[str, ...]
+    child_paths: tuple[str, ...]
     dependency_edges: tuple[DependencyEdge, ...]
     dependency_issues: tuple[DependencyIssue, ...]
     owner: str | None
@@ -125,8 +124,7 @@ def _project(location: ItemLocation, document: Document) -> WorkItem:
         affects=_text_tuple(data.get("affects")),
         parent_path=location.parent_path,
         ancestor_paths=location.ancestor_paths,
-        active_child_paths=(),
-        archived_child_paths=(),
+        child_paths=(),
         dependency_edges=dependencies.edges,
         dependency_issues=dependencies.issues,
         owner=_optional_text(data.get("owner")),
@@ -162,17 +160,12 @@ def load_items(bundle: Bundle) -> tuple[WorkItem, ...]:
         if location is not None:
             projected.append(_project(location, document))
 
-    active: dict[str, list[str]] = {}
-    archived: dict[str, list[str]] = {}
+    children: dict[str, list[str]] = {}
     for item in projected:
         if item.parent_path is not None:
-            (archived if item.archived else active).setdefault(item.parent_path, []).append(item.path)
+            children.setdefault(item.parent_path, []).append(item.path)
     return tuple(
-        replace(
-            item,
-            active_child_paths=tuple(sorted(active.get(item.path, ()))),
-            archived_child_paths=tuple(sorted(archived.get(item.path, ()))),
-        )
+        replace(item, child_paths=tuple(sorted(children.get(item.path, ()))))
         for item in sorted(projected, key=lambda item: item.path)
     )
 

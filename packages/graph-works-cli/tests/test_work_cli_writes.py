@@ -340,6 +340,26 @@ def test_archive_refusal_names_each_refusal_on_stderr(workspace: Path) -> None:
     assert "archive refused; nothing was applied" in result.stderr
 
 
+def test_archive_of_a_child_is_refused_not_top_level_and_names_the_root(workspace: Path) -> None:
+    epic = file_item(workspace, "Parent", kind="Epic")
+    child = file_item(workspace, "Kid", kind="Bug", parent=epic)
+    layout = resolve_workspace(str(workspace))
+    for path in (epic, child):
+        document = load(layout.bundle_dir / f"{path}.md")
+        document.set("work_status", "resolved")
+        document.save()
+
+    result = runner.invoke(app, ["work", "archive", child, "--workspace", str(workspace), "--json"])
+
+    assert result.exit_code == exit_codes.GENERIC
+    doc = json.loads(result.stdout)
+    assert doc["error"]["reason"] == "refused"
+    refusals = doc["error"]["payload"]["refusals"]
+    assert [refusal["kind"] for refusal in refusals] == ["not-top-level"]
+    assert f"archive {epic}" in refusals[0]["detail"]
+    assert layout.bundle_dir.joinpath(f"{child}.md").is_file()
+
+
 def test_archive_incomplete_apply_emits_the_envelope(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = SimpleNamespace(
         plan=SimpleNamespace(move_plan=None),

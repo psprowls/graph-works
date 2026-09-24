@@ -4,13 +4,13 @@ from work_tracker_okf.graph import cycle_nodes
 from work_tracker_okf.hierarchy import (
     ChildRollup,
     active_nonterminal_descendants,
-    archive_held_by_ancestor,
     child_gated,
     child_rollup,
     decision_owner,
     descend,
     nearest_epic,
     nearest_parent,
+    sweep_eligible,
     unknown_depends_on,
 )
 
@@ -20,7 +20,7 @@ def test_child_rollup_reads_only_direct_path_children() -> None:
     child = "work/release/children/epic"
     grandchild = f"{child}/children/feature"
     items = (
-        make_item(parent, type="Release", active_child_paths=(child,)),
+        make_item(parent, type="Release", child_paths=(child,)),
         make_item(child, parent_path=parent, work_status="open"),
         make_item(grandchild, parent_path=child, work_status="resolved"),
     )
@@ -38,7 +38,7 @@ def test_descend_is_iterative_past_python_recursion_depth() -> None:
                 type="Epic" if child_paths else "Bug",
                 phase="execute" if child_paths else None,
                 parent_path=paths[index - 1] if index else None,
-                active_child_paths=child_paths,
+                child_paths=child_paths,
             )
         )
     result = descend(items, paths[0])
@@ -68,12 +68,12 @@ def test_hierarchy_queries_handle_unknown_missing_archived_and_cycles() -> None:
     parent = make_item(
         "work/release",
         type="Release",
-        active_child_paths=("work/missing", "work/feature"),
+        child_paths=("work/missing", "work/feature"),
     )
     feature = make_item(
         "work/feature",
         parent_path=parent.path,
-        active_child_paths=("work/bug", "work/release"),
+        child_paths=("work/bug", "work/release"),
     )
     bug = make_item("work/bug", type="Bug", parent_path=feature.path, archived=True)
     items = (parent, feature, bug)
@@ -91,7 +91,7 @@ def test_decision_owner_prefers_the_nearest_parent_and_falls_back_to_the_item() 
     epic = make_item(
         "work/epic-a",
         type="Epic",
-        active_child_paths=("work/epic-a/children/bug-a",),
+        child_paths=("work/epic-a/children/bug-a",),
     )
     bug = make_item(
         "work/epic-a/children/bug-a",
@@ -114,7 +114,7 @@ def test_dispatch_helpers_cover_gating_unknown_edges_and_blocked_descent() -> No
         "work/release",
         type="Release",
         phase="execute",
-        active_child_paths=("work/feature",),
+        child_paths=("work/feature",),
     )
     edge = DependencyEdge("work/missing", "execute", "resolved")
     feature = make_item(
@@ -140,14 +140,14 @@ def test_child_gated_sees_open_grandchildren_beneath_a_terminal_child() -> None:
         "work/epic",
         type="Epic",
         phase="execute",
-        active_child_paths=("work/epic/children/feat",),
+        child_paths=("work/epic/children/feat",),
     )
     feat = make_item(
         "work/epic/children/feat",
         type="Feature",
         work_status="resolved",
         parent_path=epic.path,
-        active_child_paths=("work/epic/children/feat/children/gc",),
+        child_paths=("work/epic/children/feat/children/gc",),
     )
     grandchild = make_item(
         "work/epic/children/feat/children/gc",
@@ -165,7 +165,7 @@ def test_child_gated_admits_the_finish_phase_window_for_epics() -> None:
         "work/epic",
         type="Epic",
         phase="finish",
-        active_child_paths=("work/epic/children/late",),
+        child_paths=("work/epic/children/late",),
     )
     late = make_item(
         "work/epic/children/late",
@@ -178,63 +178,49 @@ def test_child_gated_admits_the_finish_phase_window_for_epics() -> None:
     assert child_gated(items, epic)
 
 
-def test_a_resolved_child_of_an_open_epic_is_held() -> None:
-    epic = make_item("work/epic-live", type="Epic", work_status="open")
-    child = make_item(
-        "work/epic-live/children/bug-done",
+def test_sweep_eligible_is_true_only_for_a_terminal_top_level_item_with_a_terminal_subtree() -> None:
+    root = make_item(
+        "work/epic-done",
+        type="Epic",
         work_status="resolved",
-        parent_path=epic.path,
-        ancestor_paths=(epic.path,),
-    )
-
-    assert archive_held_by_ancestor((epic, child), child) is True
-
-
-def test_a_resolved_child_of_a_resolved_epic_is_not_held() -> None:
-    epic = make_item("work/epic-done", type="Epic", work_status="resolved")
-    child = make_item(
-        "work/epic-done/children/bug-done",
-        work_status="resolved",
-        parent_path=epic.path,
-        ancestor_paths=(epic.path,),
-    )
-
-    assert archive_held_by_ancestor((epic, child), child) is False
-
-
-def test_a_root_with_no_ancestor_is_never_held() -> None:
-    root = make_item("work/bug-alone", work_status="resolved")
-
-    assert archive_held_by_ancestor((root,), root) is False
-
-
-def test_an_archived_ancestor_is_skipped_and_the_next_one_decides() -> None:
-    """An archived ancestor is frozen; it neither holds nor releases."""
-    epic = make_item("work/epic-live", type="Epic", work_status="open")
-    feature = make_item(
-        "work/epic-live/children/_archive/feature-old",
-        work_status="resolved",
-        archived=True,
-        parent_path=epic.path,
-        ancestor_paths=(epic.path,),
+        child_paths=("work/epic-done/children/bug-a",),
     )
     child = make_item(
-        "work/epic-live/children/_archive/feature-old/children/bug-x",
-        work_status="resolved",
-        archived=True,
-        parent_path=feature.path,
-        ancestor_paths=(epic.path, feature.path),
+        "work/epic-done/children/bug-a",
+        type="Bug",
+        work_status="wontfix",
+        parent_path=root.path,
+        ancestor_paths=(root.path,),
     )
+    assert sweep_eligible((root, child), root) is True
+    assert sweep_eligible((root, child), child) is False
 
-    assert archive_held_by_ancestor((epic, feature, child), child) is True
 
-
-def test_an_unknown_ancestor_does_not_hold() -> None:
-    orphan = make_item(
-        "work/epic-missing/children/bug-x",
+def test_sweep_eligible_is_false_for_a_root_with_an_open_descendant_at_any_depth() -> None:
+    root = make_item(
+        "work/epic-held",
+        type="Epic",
         work_status="resolved",
-        parent_path="work/epic-missing",
-        ancestor_paths=("work/epic-missing",),
+        child_paths=("work/epic-held/children/feature-a",),
     )
+    mid = make_item(
+        "work/epic-held/children/feature-a",
+        work_status="resolved",
+        parent_path=root.path,
+        ancestor_paths=(root.path,),
+        child_paths=("work/epic-held/children/feature-a/children/bug-b",),
+    )
+    leaf = make_item(
+        "work/epic-held/children/feature-a/children/bug-b",
+        type="Bug",
+        work_status="open",
+        parent_path=mid.path,
+        ancestor_paths=(root.path, mid.path),
+    )
+    assert sweep_eligible((root, mid, leaf), root) is False
 
-    assert archive_held_by_ancestor((orphan,), orphan) is False
+
+def test_sweep_eligible_is_false_for_open_and_archived_roots() -> None:
+    assert sweep_eligible((), make_item("work/bug-open", work_status="open")) is False
+    archived = make_item("work/_archive/bug-old", work_status="resolved", archived=True)
+    assert sweep_eligible((archived,), archived) is False

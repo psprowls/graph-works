@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from work_helpers import lane_report, write_item
+from work_helpers import lane_report, load_written_items, write_item
 from work_tracker_okf._rules.structure import _direct_entries
 
 
@@ -180,6 +180,23 @@ def test_a_blank_line_in_the_region_is_not_reported(path_native_root: Path) -> N
 
     codes = [f.code for f in lane_report(path_native_root).findings]
     assert "structure.index-entry-unreadable" not in codes
+
+
+def test_a_legacy_nested_archive_page_is_an_illegal_lane_not_a_crash(tmp_path: Path) -> None:
+    write_item(tmp_path, "work/epic-live", "type: Epic\nwork_status: open\n")
+    (tmp_path / "work/epic-live/children").mkdir(parents=True, exist_ok=True)
+    legacy = tmp_path / "work/epic-live/children/_archive/bug-old.md"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text(
+        "---\ntitle: T\ndescription: D\ntype: Bug\nwork_status: resolved\n---\n",
+        encoding="utf-8",
+    )
+
+    report = lane_report(tmp_path)
+
+    illegal = report.by_code("structure.illegal-lane")
+    assert [finding.path for finding in illegal] == ["work/epic-live/children/_archive/bug-old.md"]
+    assert "work/epic-live" in {item.path for item in load_written_items(tmp_path)}
 
 
 def _index_findings(root: Path) -> list[tuple[str, str]]:

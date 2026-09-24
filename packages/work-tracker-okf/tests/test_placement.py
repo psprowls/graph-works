@@ -42,7 +42,7 @@ def _vault(**child: object) -> tuple[WorkItem, ...]:
         phase="execute",
         work_status="in-progress",
         effort="medium",
-        active_child_paths=(CHILD, NESTED),
+        child_paths=(CHILD, NESTED),
     )
     child_defaults: dict[str, object] = {
         "type": "Feature",
@@ -61,7 +61,7 @@ def _vault(**child: object) -> tuple[WorkItem, ...]:
         effort="medium",
         parent_path=EPIC,
         ancestor_paths=(EPIC,),
-        active_child_paths=(GRANDCHILD,),
+        child_paths=(GRANDCHILD,),
     )
     grandchild = make_item(
         GRANDCHILD,

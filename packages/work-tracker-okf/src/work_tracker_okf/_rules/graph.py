@@ -124,7 +124,7 @@ def derived(ctx: RuleContext) -> Iterable[Finding]:
     for item in active(ctx):
         if item.type != "Epic" or item.phase not in _DECOMPOSED_PHASES:
             continue
-        if item.active_child_paths or item.archived_child_paths:
+        if item.child_paths:
             continue
         yield _finding(
             "graph.epic-without-children", "warn", item, f"`type: Epic` at `phase: {item.phase}` has no children"

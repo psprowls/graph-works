@@ -99,7 +99,7 @@ def test_a_stamped_release_resolves_with_its_date_and_a_resolution_ref():
 @pytest.mark.parametrize("type_", ["Epic", "Release"])
 def test_a_stamped_parent_with_an_open_child_is_blocked_not_resolved(type_: str):
     child_path = "work/parent-int/children/bug-late"
-    parent = _stamped(type_, active_child_paths=(child_path,))
+    parent = _stamped(type_, child_paths=(child_path,))
     child = make_item(
         child_path,
         type="Bug",
@@ -119,13 +119,13 @@ def test_a_stamped_parent_with_an_open_child_is_blocked_not_resolved(type_: str)
 def test_a_parent_with_an_open_grandchild_is_blocked_regardless_of_branch_ownership(type_: str, has_branch: bool):
     child_path = "work/parent-int/children/feature-done"
     grandchild_path = f"{child_path}/children/bug-late"
-    parent = _stamped(type_, branch=_STAMP["branch"] if has_branch else None, active_child_paths=(child_path,))
+    parent = _stamped(type_, branch=_STAMP["branch"] if has_branch else None, child_paths=(child_path,))
     child = make_item(
         child_path,
         type="Feature",
         parent_path=parent.path,
         ancestor_paths=(parent.path,),
-        active_child_paths=(grandchild_path,),
+        child_paths=(grandchild_path,),
         work_status="resolved",
         phase="done",
     )
@@ -252,7 +252,7 @@ def test_a_satisfied_gate_with_nothing_to_advance_is_still_advanceable():
             type="Epic",
             phase="execute",
             work_status="accepted",
-            active_child_paths=("work/epic/children/kid",),
+            child_paths=("work/epic/children/kid",),
         ),
         make_item(
             "epic/children/kid",
@@ -335,7 +335,7 @@ def test_open_children_refuse_a_feature_finishing():
             type="Feature",
             phase="finish",
             work_status="in-progress",
-            active_child_paths=("work/feat/children/kid",),
+            child_paths=("work/feat/children/kid",),
         ),
         make_item(
             "feat/children/kid",
@@ -357,7 +357,7 @@ def test_open_grandchildren_refuse_a_parent_finishing():
             type="Feature",
             phase="finish",
             work_status="in-progress",
-            active_child_paths=("work/feat/children/child",),
+            child_paths=("work/feat/children/child",),
         ),
         make_item(
             "feat/children/child",
@@ -365,7 +365,7 @@ def test_open_grandchildren_refuse_a_parent_finishing():
             parent_path="work/feat",
             ancestor_paths=("work/feat",),
             work_status="resolved",
-            active_child_paths=("work/feat/children/child/children/grandchild",),
+            child_paths=("work/feat/children/child/children/grandchild",),
         ),
         make_item(
             "feat/children/child/children/grandchild",

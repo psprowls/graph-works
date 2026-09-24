@@ -386,7 +386,16 @@ you know is out of date).
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
   `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`):
-  print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action. `capacity` and
+  print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action.
+  A `worktree-unprovable` for an unstamped root with no stale epic anchor whose
+  earlier stages all ran attended no longer occurs: an item at `design`, `plan`,
+  or `execute` with `work_status: accepted` has no code work to lose, and is
+  placed like a first dispatch. This is narrower than "read-only refusals are
+  gone": a `worktree-ambiguous` search, a stamped worktree that has vanished, and
+  a descendant at `plan`/`design` with no epic anchor ("dispatch the subtree root
+  first") still refuse. What remains of the root case is a code stage that may
+  have run whose worktree cannot be found (a lost stamp at `execute`/`finish`),
+  which is a human decision. `capacity` and
   `worktree-pending` resolve themselves next cycle as slots/worktrees free
   up; `deps`, `affects-overlap`, `human`, `cross-repo-child`, and `invalid`
   need a human decision outside this loop; `decisions` is a third case — it

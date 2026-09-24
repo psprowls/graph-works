@@ -488,6 +488,21 @@ def _adopt(item: WorkItem, *, inventory: Mapping[str, str]) -> tuple[str, str] |
 READ_ONLY_PHASES: frozenset[str] = frozenset({"design", "plan"})
 
 
+def _code_work_may_exist(item: WorkItem, phase: str) -> bool:
+    """Whether a stage that writes code could already have run for *item*.
+
+    A read-only phase cannot have produced a commit (see `READ_ONLY_PHASES`).
+    Neither can an `execute` still at `work_status: accepted`: plan completion
+    enters `execute` as `accepted`, and every execute dispatch flips it to
+    `in-progress` (`work_tracker_okf.workflow`, pinned by
+    `test_accepted_at_execute_is_the_state_no_execute_stage_has_started_from`).
+    Any other `execute`, and every `finish`, may have code work somewhere.
+    """
+    if phase in READ_ONLY_PHASES:
+        return False
+    return not (phase == "execute" and item.work_status == "accepted")
+
+
 def _resolve_worktree(
     item: WorkItem,
     *,
@@ -550,6 +565,13 @@ def _resolve_worktree(
     guesses, because a plan naming the wrong directory is well-formed and
     silent, and the three reproductions behind this rule were all caught only
     because a human happened to look.
+
+    The search-then-block rule applies only where code work may exist
+    (`_code_work_may_exist`). A cold-start item whose every prior stage was
+    vault-only -- an attended design or plan leaves no worktree -- has
+    nothing to lose: it adopts a findable worktree if there is one, and
+    otherwise is placed as a first dispatch (the root mints, a descendant
+    waits for its root).
     """
 
     def _occupied(path: str) -> bool:
@@ -571,14 +593,8 @@ def _resolve_worktree(
         against = code_repo if code_repo is not None else repo_path
         return None if against is not None and source == against else source
 
-    def _adopted_action(reason: str) -> tuple[WorktreeAction | _Refusal, bool]:
-        """Search for the item's real worktree; the action to take, or a refusal."""
-        found = _adopt(item, inventory=inventory)
-        if isinstance(found, _Refusal):
-            return found, False
-        if found is None:
-            return _Refusal(kind="worktree-unprovable", reason=reason), False
-        path, branch = found
+    def _place_adopted(path: str, branch: str, reason: str) -> tuple[WorktreeAction | _Refusal, bool]:
+        """Shape an adopted `(path, branch)` into the action to take."""
         if worktree_exists.get(path) is False:
             # Adopted a path the inventory names, but it is provably gone too
             # (e.g. a prunable-but-not-yet-pruned worktree). Adopting it would
@@ -610,6 +626,15 @@ def _resolve_worktree(
             ),
             is_main,
         )
+
+    def _adopted_action(reason: str) -> tuple[WorktreeAction | _Refusal, bool]:
+        """Search for the item's real worktree; the action to take, or a refusal."""
+        found = _adopt(item, inventory=inventory)
+        if isinstance(found, _Refusal):
+            return found, False
+        if found is None:
+            return _Refusal(kind="worktree-unprovable", reason=reason), False
+        return _place_adopted(*found, reason)
 
     if item.worktree and item.branch:
         if repo_path is not None and item.worktree == repo_path:
@@ -734,22 +759,30 @@ def _resolve_worktree(
         )
     )
     if item.phase is not None and phase != "design":
-        # At `plan()`'s own call site this is equivalent to
-        # `item.phase not in (None, "design")`, since the resolved `phase`
-        # argument always equals `item.phase` when the latter is set. The
-        # two-clause form only diverges for a direct caller (e.g. a test)
-        # that passes a `phase` different from `item.phase` -- keep both
-        # clauses; collapsing them changes that contract.
-        # Cold start, but the item has advanced at least once and is not at
-        # design: it has run before, so its work is somewhere. Dispatching
-        # the finish stage with nothing to merge is worse than not
-        # dispatching it. `item.phase is None` excludes a never-advanced item
-        # (e.g. a freshly filed TestGap routed straight to execute or plan)
-        # -- its first-ever dispatch has no prior work to find, so it is not
-        # held to this rule. Deliberately ahead of the descendant refusal
-        # below: a descendant whose real worktree is findable is placed in
-        # it, and only an unfindable one blocks.
-        return _adopted_action(cold_reason)
+        # At `plan()`'s own call site `phase` always equals `item.phase` when
+        # the latter is set; the two-clause form only diverges for a direct
+        # caller (e.g. a test) that passes a different `phase` -- keep both
+        # clauses. `item.phase is None` excludes a never-advanced item (e.g. a
+        # freshly filed TestGap routed straight to execute or plan): its
+        # first-ever dispatch has no prior work to find. Deliberately ahead of
+        # the descendant refusal below: a descendant whose real worktree is
+        # findable is placed in it, and only an unfindable one blocks.
+        if _code_work_may_exist(item, phase):
+            # A code stage may have run, so its work is somewhere. Dispatching
+            # the finish stage with nothing to merge is worse than not
+            # dispatching it: search, and refuse if the search fails.
+            return _adopted_action(cold_reason)
+        # Every stage so far was vault-only -- typically an attended
+        # `/gw:workflow` design or plan, which never allocates a worktree.
+        # There is no code work to lose. Still search first, so a dispatched
+        # read-only stage whose stamp was lost is reunited with its worktree
+        # instead of being given a second one; an ambiguous search still
+        # refuses. Finding nothing falls through to the cold-start tail.
+        found = _adopt(item, inventory=inventory)
+        if isinstance(found, _Refusal):
+            return found, False
+        if found is not None:
+            return _place_adopted(*found, cold_reason)
     if not is_root:
         # A descendant reached cold start, so it is dispatching before its own
         # subtree root ever did. Minting the anchor here would mean stamping

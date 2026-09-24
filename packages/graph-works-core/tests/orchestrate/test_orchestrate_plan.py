@@ -15,6 +15,7 @@ from graph_works_core.workspace.repo_context import RepositoryContext
 from graph_works_core.workspace.repos import ItemRepo
 from work_tracker_okf.dependencies import DependencyEdge
 from work_tracker_okf.items import Stamp, WorkItem
+from work_tracker_okf.workflow import RETURN_TO_EXECUTE, RouteState, route
 
 
 def _item(path: str, **overrides: object) -> WorkItem:
@@ -1678,8 +1679,16 @@ def test_the_subtree_root_reuses_the_epic_anchor_at_every_phase() -> None:
         assert action.path == "/epic", phase
 
 
-def _cold_start(item, phase: str, *, is_root: bool, repo_path: str | None = "/repo", claimed: bool = False):
-    """Rule 4's setup: no stamp, no epic anchor, nothing in the inventory."""
+def _cold_start(
+    item,
+    phase: str,
+    *,
+    is_root: bool,
+    repo_path: str | None = "/repo",
+    claimed: bool = False,
+    inventory: dict[str, str] | None = None,
+):
+    """Rule 4's setup: no stamp, no epic anchor, and (by default) nothing in the inventory."""
     return orchestrate._resolve_worktree(
         item,
         epic_worktree_path=None,
@@ -1691,7 +1700,7 @@ def _cold_start(item, phase: str, *, is_root: bool, repo_path: str | None = "/re
         default_base="main",
         phase=phase,
         repo_path=repo_path,
-        inventory={},
+        inventory=inventory or {},
         is_root=is_root,
     )
 
@@ -1741,6 +1750,120 @@ def test_a_descendant_cold_start_refuses_with_no_repo_path_either() -> None:
 
     assert isinstance(action, orchestrate._Refusal)
     assert action.kind == "worktree-unprovable"
+
+
+def test_a_root_cold_start_at_plan_mints_when_every_prior_stage_was_vault_only() -> None:
+    """The field report: design ran attended, so no worktree was ever made,
+    and the plan dispatch refused with `worktree-unprovable`."""
+    item = _item("work/bug-x", type="Bug", phase="plan")
+
+    action, claimed = _cold_start(item, "plan", is_root=True)
+
+    assert isinstance(action, orchestrate.WorktreeAction)
+    assert action.action == "create-top-level"
+    assert action.branch == "epic/root"
+    assert action.base_branch == "main"
+    assert action.path is None
+    assert claimed
+
+
+def test_a_root_cold_start_at_execute_accepted_mints_because_execute_never_ran() -> None:
+    """Same defect one stage later: design *and* plan ran attended."""
+    item = _item("work/bug-x", type="Bug", phase="execute", work_status="accepted")
+
+    action, claimed = _cold_start(item, "execute", is_root=True)
+
+    assert isinstance(action, orchestrate.WorktreeAction)
+    assert action.action == "create-top-level"
+    assert claimed
+
+
+def test_a_root_cold_start_at_execute_in_progress_still_refuses() -> None:
+    item = _item("work/bug-x", type="Bug", phase="execute", work_status="in-progress")
+
+    action, claimed = _cold_start(item, "execute", is_root=True)
+
+    assert isinstance(action, orchestrate._Refusal)
+    assert action.kind == "worktree-unprovable"
+    assert "say where the prior work is" in action.reason
+    assert not claimed
+
+
+def test_a_root_cold_start_at_finish_still_refuses() -> None:
+    item = _item("work/bug-x", type="Bug", phase="finish", work_status="in-progress")
+
+    action, claimed = _cold_start(item, "finish", is_root=True)
+
+    assert isinstance(action, orchestrate._Refusal)
+    assert action.kind == "worktree-unprovable"
+    assert not claimed
+
+
+def test_a_descendant_cold_start_at_plan_still_names_the_root_as_the_remedy() -> None:
+    item = _item("work/epic-r/children/bug-x", type="Bug", phase="plan")
+
+    action, claimed = _cold_start(item, "plan", is_root=False)
+
+    assert isinstance(action, orchestrate._Refusal)
+    assert action.kind == "worktree-unprovable"
+    assert "subtree root" in action.reason
+    assert not claimed
+
+
+def test_a_root_cold_start_adopts_a_findable_worktree_at_plan() -> None:
+    """A dispatched plan stage whose stamp was lost is reunited with its
+    worktree rather than given a second one."""
+    item = _item("work/bug-x", type="Bug", phase="plan")
+    planned = orchestrate.branch_name(item.path, item.type)
+
+    action, claimed = _cold_start(item, "plan", is_root=True, inventory={planned: "/wt/bug-x"})
+
+    assert isinstance(action, orchestrate.WorktreeAction)
+    assert action.action == "reuse"
+    assert action.path == "/wt/bug-x"
+    assert action.branch == planned
+    assert not claimed
+
+
+def test_a_root_cold_start_at_plan_refuses_an_ambiguous_adoption() -> None:
+    item = _item("work/bug-x", type="Bug", phase="plan")
+    flattened = orchestrate.branch_name(item.path, item.type).replace("/", "-")
+
+    action, claimed = _cold_start(
+        item,
+        "plan",
+        is_root=True,
+        inventory={f"alice/{flattened}": "/wt/a", f"bob/{flattened}": "/wt/b"},
+    )
+
+    assert isinstance(action, orchestrate._Refusal)
+    assert action.kind == "worktree-ambiguous"
+    assert not claimed
+
+
+def test_accepted_at_execute_is_the_state_no_execute_stage_has_started_from() -> None:
+    """`_code_work_may_exist` exempts exactly `execute`/`accepted`. That is
+    sound only while plan completion is the one way in with `accepted` and
+    every execute dispatch leaves it. Pin the workflow table, not just the
+    resolver, so a new transition that breaks the coupling fails here."""
+    planned = route(RouteState(type="Bug", work_status="open", phase="plan", effort="medium", has_spec_doc=True))
+    assert planned.on_complete is not None
+    assert (planned.on_complete.phase, planned.on_complete.work_status) == ("execute", "accepted")
+
+    dispatched = route(
+        RouteState(
+            type="Bug",
+            work_status="accepted",
+            phase="execute",
+            effort="medium",
+            has_spec_doc=True,
+            has_plan_doc=True,
+        )
+    )
+    assert dispatched.on_dispatch is not None
+    assert dispatched.on_dispatch.work_status == "in-progress"
+
+    assert RETURN_TO_EXECUTE.work_status == "in-progress"
 
 
 def test_a_child_design_dispatch_reuses_the_epic_anchor_and_records_nothing() -> None:

@@ -334,6 +334,22 @@ def test_the_declared_code_repo_is_reported_even_when_its_checkout_is_withheld(t
     assert result.dispatches[0].worktree.action == "create-top-level"
 
 
+def test_a_root_whose_design_ran_attended_is_placed_at_plan_not_refused(tmp_path: Path, monkeypatch) -> None:
+    """Reproduction: design ran attended (vault-only, no worktree), then the
+    item is handed to auto-drive at plan. Before the fix this blocked as
+    `worktree-unprovable` with 'say where the prior work is'."""
+    layout = _workspace(tmp_path / "workspace")
+    path = "work/feature-a"
+    _write(layout, path, phase="plan")
+    _declare_repo(monkeypatch, tmp_path)
+
+    result = orchestrate.run_orchestrate(layout, path)
+
+    assert [blocked.kind for blocked in result.blocked] == []
+    assert [dispatch.phase for dispatch in result.dispatches] == ["plan"]
+    assert result.dispatches[0].worktree.action == "create-top-level"
+
+
 def test_no_declared_code_repo_reports_null_and_blocks_a_worktree_creation(tmp_path: Path, monkeypatch) -> None:
     layout = _workspace(tmp_path)
     path = "work/feature-a"

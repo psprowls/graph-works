@@ -305,7 +305,7 @@ def test_inherited_repo_placement_lifecycle_through_cli(two_repos: tuple[Path, P
         assert (payload["changed"], payload["written"]) == expected
         assert payload["refusal"] is None
         stored = load(page).fm_data()
-        assert stored.get("repo_stamps") in (None, {})
+        assert "repo_stamps" not in stored
         if not direct_tag:
             assert "repo" not in stored
         if expected[1]:

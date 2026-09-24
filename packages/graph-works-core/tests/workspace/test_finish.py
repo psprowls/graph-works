@@ -1,6 +1,7 @@
 from dataclasses import replace
 
 import pytest
+from graph_works_core.workspace import finish as finish_module
 from graph_works_core.workspace.finish import resolve_finish_targets
 from graph_works_core.workspace.layout import layout_for
 from graph_works_core.workspace.repo_context import RepositoryContext
@@ -53,7 +54,7 @@ def setup(tmp_path, monkeypatch, *, scalar=True, nested=False):
             branches=frozenset({"main", "trunk", "epic/a", "epic/parent"}),
         )
 
-    monkeypatch.setattr("graph_works_core.workspace.finish.observe_repository", observe)
+    monkeypatch.setattr(finish_module, "observe_repository", observe)
     return layout, load_items(load_bundle(layout.bundle_dir)), path
 
 
@@ -282,3 +283,56 @@ def test_live_foreign_source_stays_reserved_after_anchor_revalidation_fails(tmp_
     assert not result.dispatches
     expected_kind = "worktree-pending" if same_worktree else "affects-overlap"
     assert any(b.path == ready_path and b.kind == expected_kind for b in result.blocked)
+
+
+@pytest.mark.parametrize("nested", [False, True])
+def test_real_git_foreign_only_owner_targets_nearest_anchor(tmp_path, nested):
+    import subprocess
+    from datetime import date
+
+    from graph_works_core import apply_init, plan_init
+
+    def git(repo, *args):
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    layout = apply_init(plan_init(tmp_path / "workspace", today=date(2026, 9, 23), topic="Finish")).layout
+    repos = {}
+    for name in ("code", "ui"):
+        repo = tmp_path / name
+        repo.mkdir()
+        git(repo, "init", "-b", "main")
+        git(repo, "config", "user.name", "Test")
+        git(repo, "config", "user.email", "test@example.test")
+        git(repo, "commit", "--allow-empty", "-m", "base")
+        repos[name] = repo
+    layout.manifest_path.write_text(
+        "version: 1\nrepositories:\n" + "".join(f"  {n}: {{path: {p}}}\n" for n, p in repos.items()), encoding="utf-8"
+    )
+    parent = tmp_path / "parent"
+    source = tmp_path / "source"
+    git(repos["ui"], "worktree", "add", "-b", "epic/parent", str(parent))
+    git(repos["ui"], "worktree", "add", "-b", "epic/child", str(source), "epic/parent")
+    owner = "work/epic-child"
+    if nested:
+        parent_page = layout.bundle_dir / "work/epic-parent.md"
+        parent_page.parent.mkdir(parents=True, exist_ok=True)
+        parent_page.write_text(
+            f"---\ntype: Epic\nrepo: code\nrepo_stamps:\n  ui: {{worktree: {parent}, branch: epic/parent}}\n---\n",
+            encoding="utf-8",
+        )
+        owner = "work/epic-parent/children/epic-child"
+    page = layout.bundle_dir / (owner + ".md")
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Epic\nrepo: code\nphase: finish\nwork_status: in-progress\nrepo_stamps:\n"
+        f"  ui: {{worktree: {source}, branch: epic/child}}\n---\n",
+        encoding="utf-8",
+    )
+    result = resolve_finish_targets(layout, load_items(load_bundle(layout.bundle_dir)), owner)
+    assert not result.blockers
+    [target] = result.targets
+    assert target.repo.name == "ui"
+    assert target.worktree == str(source)
+    assert target.target_branch == ("epic/parent" if nested else "main")

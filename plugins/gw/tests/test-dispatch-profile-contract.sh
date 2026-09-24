@@ -55,8 +55,8 @@ grep -F 'Never invent a release date' "$RELAY" >/dev/null || fail "relay obtains
 grep -F -- '--released-at <date>' "$RELAY" >/dev/null || fail "relay passes the release date to the resolving advance"
 if grep -Fq 'Forked-child case' "$RELAY"; then fail "relay must not limit merging to forked children"; fi
 grep -F 'The coordinator performs no merge at wrap-up.' "$AUTO_DRIVE" >/dev/null || fail "wrap-up never merges the epic branch"
-grep -F 'whose frontmatter carries `branch:` owns an integration branch' "$AUTO_DRIVE" >/dev/null || fail "stamped root finish owns integration"
-grep -F 'An unstamped Epic or Release root owns no branch' "$AUTO_DRIVE" >/dev/null || fail "unstamped root keeps its direct finish"
+grep -F 'with a scalar branch or foreign `repo_stamps` owns integration targets' "$AUTO_DRIVE" >/dev/null || fail "stamped root finish owns integration"
+grep -F 'An owner without any source stamp' "$AUTO_DRIVE" >/dev/null || fail "unstamped root keeps its direct finish"
 if grep -Fq 'epic branch to `develop`' "$AUTO_DRIVE"; then fail "wrap-up must not hardcode a merge target"; fi
 if grep -Fq -- '--agent claude' "$AUTO_DRIVE"; then fail "auto-drive must use the planned agent"; fi
 if grep -Fq 'permission_mode' "$AUTO_DRIVE"; then fail "auto-drive must not promise permission-mode control"; fi

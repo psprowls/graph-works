@@ -357,6 +357,7 @@ def _advance(
         refused = replace(
             outcome.plan,
             refusal="finish-incomplete",
+            route=replace(outcome.plan.route, blockers=outcome.plan.route.blockers + finish_blockers),
             changes=(),
             stamp_source=None,
             detail="; ".join(finish_blockers),

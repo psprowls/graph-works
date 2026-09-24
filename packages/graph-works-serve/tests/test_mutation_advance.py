@@ -196,3 +196,140 @@ def test_tampered_digest_writes_nothing(env: Env) -> None:
     assert response.status_code == 409
     assert response.json()["error"]["reason"] == "stale-plan"
     assert snapshot(layout) == before
+
+
+def test_multi_repository_public_lifecycle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Real Git evidence survives planning, placement, partial receipt and restart."""
+    from graph_works_core import apply_init, plan_init
+    from graph_works_core.orchestrate.finish_receipt import run_record_finish
+    from okf_io import load
+
+    monkeypatch.setattr(mutations, "now", lambda: AT)
+    layout = apply_init(plan_init(tmp_path / "workspace", today=AT.date(), topic="Lifecycle")).layout
+    repos = {}
+
+    def git(repo: Path, *args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    for name in ("code", "ui"):
+        repo = tmp_path / name
+        repo.mkdir()
+        (repo / "packages").mkdir()
+        git(repo, "init", "-b", "main")
+        git(repo, "config", "user.name", "Test")
+        git(repo, "config", "user.email", "test@example.test")
+        git(repo, "commit", "--allow-empty", "-m", "base")
+        repos[name] = repo
+    layout.manifest_path.write_text(
+        "version: 1\nworkflow: {dispatch_rules: dispatch.yaml}\nrepositories:\n"
+        + "".join(f"  {n}: {{path: {p}}}\n" for n, p in repos.items()),
+        encoding="utf-8",
+    )
+    owner = "work/epic-lifecycle"
+    child = owner + "/children/feature-ui"
+    anchor = tmp_path / "code-anchor"
+    git(repos["code"], "worktree", "add", "-b", "epic/lifecycle", str(anchor))
+    owner_page = layout.bundle_dir / (owner + ".md")
+    owner_page.parent.mkdir(parents=True, exist_ok=True)
+    owner_page.write_text(
+        "---\ntype: Epic\ntitle: Lifecycle\nwork_status: in-progress\nphase: execute\naffects: [packages]\nrepo: code\n"
+        f"worktree: {anchor}\nbranch: epic/lifecycle\n---\n",
+        encoding="utf-8",
+    )
+    child_page = layout.bundle_dir / (child + ".md")
+    child_page.parent.mkdir(parents=True)
+    child_page.write_text(
+        "---\ntype: Feature\ntitle: UI\nwork_status: open\nphase: execute\n"
+        "effort: small\naffects: [packages]\nrepo: ui\n---\n",
+        encoding="utf-8",
+    )
+    client, headers = make_client(layout)
+
+    def cli(*args: str) -> dict[str, Any]:
+        result = CliRunner().invoke(app, [*args, "--workspace", str(layout.root), "--json"])
+        payload = json.loads(result.stdout)
+        return payload.get("error", {}).get("payload", payload)
+
+    def plan() -> dict[str, Any]:
+        public = cli("work", "orchestrate", owner)
+        response = client.get("/v1/work/orchestrate", params={"path": owner}, headers=headers)
+        assert response.status_code == 200, response.text
+        assert public == response.json()
+        assert public["repo"]["name"] == "code"
+        return public
+
+    initial = plan()
+    assert initial["preparations"], json.dumps(initial)
+    [preparation] = initial["preparations"]
+    assert preparation["owner_path"] == owner
+    assert preparation["owner_phase"] == "execute"
+    assert preparation["repo"]["name"] == "ui"
+    assert preparation["worktree"]["action"] == "create-top-level"
+    foreign_anchor = tmp_path / "ui-anchor"
+    branch = preparation["worktree"]["branch"]
+    git(repos["ui"], "worktree", "add", "-b", branch, str(foreign_anchor), preparation["base_branch"])
+    recorded = cli(
+        "work",
+        "record-placement",
+        owner,
+        "--root",
+        owner,
+        "--phase",
+        preparation["owner_phase"],
+        "--repo",
+        "ui",
+        "--worktree",
+        str(foreign_anchor),
+        "--branch",
+        branch,
+    )
+    assert recorded["written"]
+    ready = plan()
+    assert ready["preparations"] == []
+    [dispatch] = ready["dispatches"]
+    assert dispatch["repo"]["name"] == "ui"
+    assert dispatch["worktree"]["action"] == "fork-child"
+    assert dispatch["worktree"]["parent_path"] == str(foreign_anchor)
+    assert dispatch["worktree"]["base_branch"] == dispatch["merge_target"] == branch
+    git(foreign_anchor, "commit", "--allow-empty", "-m", "child integrated")
+    document = load(child_page)
+    document.set("phase", "done")
+    document.set("work_status", "resolved")
+    document.save()
+    document = load(owner_page)
+    document.set("phase", "finish")
+    document.save()
+    finishing = plan()
+    assert finishing["dispatches"], json.dumps(finishing)
+    [dispatch] = finishing["dispatches"]
+    assert [target["repo"]["name"] for target in dispatch["finish_targets"]] == ["code", "ui"]
+    next_cli = cli("work", "next", owner)
+    next_http = client.get("/v1/work/next", params={"path": owner}, headers=headers).json()
+    assert next_cli["finish_targets"] == next_http["finish_targets"] == dispatch["finish_targets"]
+    git(repos["code"], "merge", "epic/lifecycle")
+    assert run_record_finish(layout, owner, repo_name="code", today=AT.date()).changed
+    params = {"path": owner}
+    partial = client.post(PLAN, json=params, headers=headers).json()
+    assert partial["plan"]["changed"] is False
+    assert partial["plan"]["blockers"]
+    assert partial["plan"]["refusal"]["reason"] == "finish-incomplete"
+    cli_partial = cli("work", "advance", owner, "--no-infer-worktree")
+    assert cli_partial["blockers"] == partial["plan"]["blockers"]
+    assert cli_partial["changed"] is False
+    assert _apply(client, headers, params, partial).status_code == 422
+    assert load(owner_page).fm_data()["phase"] == "finish"
+    # A new client represents a resumed controller; proof lives in the workspace.
+    client.close()
+    client, headers = make_client(layout)
+    git(repos["ui"], "merge", branch)
+    assert run_record_finish(layout, owner, repo_name="ui", today=AT.date()).changed
+    complete = client.post(PLAN, json=params, headers=headers).json()
+    assert complete["plan"]["refusal"] is None
+    assert _apply(client, headers, params, complete).status_code == 200
+    assert load(owner_page).fm_data()["phase"] == "done"
+    assert load(owner_page).fm_data()["resolved_in"] == git(repos["code"], "rev-parse", "HEAD")
+    repeated = client.post(PLAN, json=params, headers=headers).json()
+    assert repeated["plan"]["changed"] is False
+    client.close()

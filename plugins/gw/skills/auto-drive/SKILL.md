@@ -1507,15 +1507,19 @@ without launching anything), then enter the record block at its step 1.
    nobody looked at" is exactly the silent failure the ledger exists to
    prevent. Printing costs nothing; skip only when both lists are empty.
 4. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
-   whose frontmatter carries `branch:` owns an integration branch its children
-   merged into, so `gw work orchestrate` plans a finish dispatch for it rather
-   than an advance. That worker (`gw:finishing-relay`) merges the branch into
-   the `merge_target` its dispatch named and resolves the root only after
-   verified integration; a `pr`, `hold` or `discard` outcome leaves the root at
-   `phase: finish`, so the plan is not terminal. An unstamped Epic or Release root owns no branch
-   and resolves through a planned advance with nothing to merge. Report the
-   root's integration, from its settled finish dispatch's `merge_target` and
-   `resolved_in`, in step 2's summary; never merge it again here.
+   with a scalar branch or foreign `repo_stamps` owns integration targets, so
+   orchestration emits a finish dispatch. The worker consumes every
+   `finish_targets` entry, records each successful repository integration and
+   inspects the durable receipt before exactly one final advance. Partial
+   integration survives restart and keeps the owner at `phase: finish`; `pr`,
+   `hold` and `discard` also leave it there. An owner without any source stamp
+   has nothing to merge and may use a planned advance. Report target-by-target
+   integration from the settled worker evidence; `resolved_in` refers only to
+   the owner's own repository and is absent for a foreign-only owner. Never
+   merge these targets again at wrap-up.
+
+For disposable native validation and recorded limits, see
+[Multi-repository acceptance](references/multi-repo-acceptance.md).
 
 **User stop** (mid-run, on explicit instruction): exit the loop between
 cycles — never mid-dispatch. Live workers keep running independently; offer

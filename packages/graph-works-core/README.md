@@ -463,14 +463,12 @@ writes; `workspace.dispatch_projection` owns cache freshness and publication.
 See [Dispatch rules](docs/dispatch-rules.md) for YAML examples, matching and
 reset semantics, launch accounting, and exact manual cutover instructions.
 
-`orchestrate` splits planning, stage advancement and placement across three modules. In
-`commands.py`, `plan()` is IO-free — plain `WorkItem` data in, an
-`OrchestratePlan` out — so every rule (affects serialization, capacity, the
-four worktree rules, model resolution) is a table test, and `run_orchestrate()`
-is the shell around it that reads config, stats worktrees and runs git.
-`stage_advance.py` holds `run_stage_advance()`, the separate shell `gw work
-advance` routes through, and `placement.py` holds `run_record_placement()`,
-behind `gw work record-placement`. None re-exports another.
+`orchestrate.commands.plan()` is IO-free: it receives items, repository
+observations and finish plans and returns one ordered frontier. The shell
+`run_orchestrate()` resolves each item's repository and observes Git through
+`workspace.provenance.probe_git`. `stage_advance.py`, `placement.py` and
+`finish_receipt.py` own their separate mutations; shared repository and finish
+readers live in `workspace/` so the work and orchestration verticals agree.
 
 **A reservation describes an emitted dispatch, not a candidate.** `plan()`
 walks the sorted candidates once and checks each against every gate in order —
@@ -483,11 +481,11 @@ reserve. A dispatch the coordinator chooses not to launch after planning is
 outside `plan()`'s view: it still reserved in that plan.
 
 **Placement is recorded from observation, not inferred (D-006).** Orca's actual
-worktree and branch are knowable only after launch, and the recorded pair
+worktree and branch are established by native observation, and the recorded pair
 selects every later stage's placement. The coordinator therefore records the
 observed pair with `gw work record-placement` (`orchestrate/placement.py`),
-which writes only `worktree`, `branch` and `updated`, never fires a routing
-transition, and runs under the same decision-owner lock as `gw work advance`.
+which writes `worktree`/`branch` or the selected `repo_stamps` entry plus
+`updated`, never fires a routing transition, and runs under the same decision-owner lock as `gw work advance`.
 It refuses when the item's phase no longer matches the recorded dispatch, so a
 worker that finishes first produces a visible refusal instead of a stamp on the
 wrong stage. The subtree root is recorded at every phase — its stamp is the
@@ -499,18 +497,41 @@ top-level item, and never with `infer_worktree=False` (`--no-infer-worktree`),
 which every supervised worker passes. An explicit `--worktree`/`--branch` pair
 on an attended advance is still applied as stated.
 
-**Cold start mints the epic worktree; there is no opportunistic main-checkout
-placement.** `default_base` is trunk, and a stage dispatched onto trunk commits
-onto trunk. Only the subtree root may mint the anchor; a descendant that
-reaches cold start is dispatching out of order and blocks as
-`worktree-unprovable`, naming the root as the remedy. The cost is real and
-accepted: an epic whose root predates this rule and carries no stamp blocks its
-descendants until someone dispatches the root or stamps it by hand — a visible
-block rather than a silent misplacement.
+**Repository-local anchors are prepared lazily.** A runnable modifying child
+without its nearest owner's verified anchor emits a deferred `preparations[]`
+entry. Preparation consumes no worker slot and authorizes no child launch.
+Create or recover the deterministic worktree outside the workspace lock, verify
+its repository, branch, parent/base and cleanliness, then record the observed
+pair on `owner_path` at `owner_phase`. Own-repository pairs remain scalar;
+foreign pairs live in `repo_stamps`. A refused stamp leaves a discoverable
+worktree; replan before dispatch. Nested owners prepare from their nearest
+repository-local enclosing anchor. Read-only stages need no new anchor.
 
-`workspace.provenance` is the only module in this package that runs git. Every
-function degrades to `None` or a silent no-op: capturing provenance must never
-fail an advance.
+**Overlap is repository-scoped; capacity is global.** Each dispatch carries
+its own resolved `repo`; top-level `repo` remains root metadata. Equal affects
+paths in independent repositories do not overlap. Linked worktrees share a
+repository identity; different identities still share one `max_parallel`
+budget. Finish reserves every verified source target, including live sources
+whose fresh admission evidence later fails.
+
+**Finish proves every integration before one advance.** `finish_targets`
+contains the scalar source (if any) and every foreign source, ordered by
+repository. Each integrates into the nearest enclosing owner in that same
+repository, or its configured/default base at the top level. Foreign-only
+owners need no invented scalar stamp. `run_record_finish` derives Git ancestry
+evidence and persists `references/04-finish-receipt.md`; `inspect_finish`
+revalidates source tips and result ancestry on every read. Partial integration
+survives a restart and refuses completion with `finish-incomplete` and route
+blockers. Both attended and relay consumers inspect the receipt before the one
+final advance. PR, hold and discard never advance. The scalar `resolved_in`
+comes only from the owner's own repository; foreign-only owners omit it.
+Release date requirements remain enforced. Git merges across repositories are
+not atomic; preserve sources until all proof is recorded. Squash/rebase alone
+cannot establish the required ancestry.
+
+`workspace.provenance` owns Git subprocesses. Provenance capture degrades
+quietly when unavailable; placement and finish safety checks fail closed when
+that evidence cannot be established.
 
 **Nothing Orca-shaped reaches this package's API.** The prompt `plan()`
 assembles is four vendor-neutral lines; a vendor command can only enter through
@@ -521,19 +542,13 @@ in a missing shared dispatch document; authored documents stay untouched.
 Final profile validation blocks any relay with a missing tail. Add the intended
 `prompt_tail` to a matching shared/local dispatch rule, then run `gw config sync`.
 
-**The code repo comes from `workspace.yaml`'s `repositories` block, not from a
-`.git` walk-up.** Both shells default `repo` to `resolve_repo(layout,
-repo_name=…)`. The declared block is authoritative always, not only when the workspace and the
-code live in separate repositories — in that split topology `layout.repo_root`
-resolves to the *workspace's* repo, and `worktree_state` and `results_facts`
-then both degrade to `None` without a word. Ambiguity refuses rather than
-guesses: several declared repositories with no `repo_name` raise `WorkspaceError`, naming the
-set. Zero declared is not an error — it degrades, and says so, in
-`StageAdvance.repo_note` and in `run_orchestrate`'s `warnings`. An explicit
-`repo=` still wins and skips the config read entirely; an argument is not a
-default. `layout.repo_root` stays on the layout — gitignore placement and
-`scanner_excludes` are its documented job — but `orchestrate.commands` is no
-longer one of its readers.
+**Repository assignment comes from `workspace.yaml`, never `affects`.**
+An item's nearest inherited `repo:` wins, then `repo_name`, then a sole declared
+repository. Ambiguity refuses rather than guessing. Each repository's checkout
+eligibility, inventory and branch evidence remain independent. Explicit Python
+`repo=Path(...)` is the single-repository compatibility override; it does not
+manufacture foreign assignments, and foreign stamps are refused. `layout.repo_root`
+continues to locate the workspace's own repository, not the code repositories.
 
 Four limits worth knowing before you rely on the result:
 

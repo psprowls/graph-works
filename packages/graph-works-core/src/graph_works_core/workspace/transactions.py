@@ -2315,6 +2315,35 @@ def _capture_validation_state(
     return _ValidationState(findings=dict(findings), conditions=dict(conditions))
 
 
+#: The postcondition detail for a written lane index whose entries no longer
+#: match the item pages it lists -- a sibling rewrote one of them between the
+#: caller's plan and this locked apply. The one rollback cause a caller may
+#: fix by re-planning (`only_stale_inventory`); defined once so the message
+#: and the predicate cannot drift apart.
+STALE_INVENTORY_DETAIL = "generated direct-descendant inventory is stale"
+
+#: `apply_mutation`'s wrapping of a postcondition failure: the phase name
+#: (`"validation"`) plus `" failed: "`, then the details joined by `"; "`.
+_VALIDATION_FAILURE_PREFIX = "validation failed: "
+
+
+def only_stale_inventory(application: MutationApplication) -> bool:
+    """Whether *application* rolled back cleanly and every failure detail is
+    lane-index staleness (`STALE_INVENTORY_DETAIL`).
+
+    Anything else -- a refusal, another postcondition failure, a rollback or
+    journal failure alongside it -- answers `False`: those are not fixed by
+    re-planning, and retrying would hide them.
+    """
+    if not application.rolled_back or len(application.failures) != 1:
+        return False
+    failure = application.failures[0]
+    if not failure.startswith(_VALIDATION_FAILURE_PREFIX):
+        return False
+    details = failure.removeprefix(_VALIDATION_FAILURE_PREFIX).split("; ")
+    return all(detail.endswith(f": {STALE_INVENTORY_DETAIL}") for detail in details)
+
+
 def _validate_postconditions(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
@@ -2435,7 +2464,7 @@ def _validate_postconditions(
         )
         expected = reconcile_entries(current, tuple(render_entry(item) for item in direct))
         if current != expected:
-            failures.append(f"{member}: generated direct-descendant inventory is stale")
+            failures.append(f"{member}: {STALE_INVENTORY_DETAIL}")
     try:
         _assert_root_identity(validation_root, root)
     except (OSError, ValueError) as exc:
@@ -3024,4 +3053,10 @@ def apply_mutation(
         root.close()
 
 
-__all__ = ["EMPTY_TRANSACTION_ID", "MutationApplication", "apply_mutation"]
+__all__ = [
+    "EMPTY_TRANSACTION_ID",
+    "STALE_INVENTORY_DETAIL",
+    "MutationApplication",
+    "apply_mutation",
+    "only_stale_inventory",
+]

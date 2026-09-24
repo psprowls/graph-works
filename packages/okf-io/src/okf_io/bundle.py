@@ -187,7 +187,7 @@ def _files(root: Path, *, unreadable: dict[str, str]) -> Iterator[Path]:
     beside the bundle. A dot-directory nested *inside* the tree only exists
     because something deliberately created a path there, which is exactly what
     a repository-mirror lane does when it writes
-    ``repositories/<repo>/.agents/...``. The cut tracks the real difference
+    ``code-graph/<repo>/file-system/.agents/...``. The cut tracks the real difference
     between the bundle's housekeeping and the content the bundle carries, so
     it needs no list of names and cannot go stale. The OKF v0.2 spec says
     nothing about hidden entries; this is policy, not a spec requirement.

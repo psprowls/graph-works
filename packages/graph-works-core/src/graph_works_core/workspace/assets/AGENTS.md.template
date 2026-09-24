@@ -84,13 +84,13 @@ to the filesystem root.
 ├── {{CONFIG_DIR}}/           schema/, sections/, tags.yaml, cache/, worktrees/
 └── {{BUNDLE_DIR}}/           the bundle; the three lanes own everything inside
     ├── index.md, log.md      root index and the append-only timeline
-    ├── repositories/ dependencies/
+    ├── code-graph/
     ├── docs/                  explanations/ reference/ tutorials/ how-tos/
     ├── sources/ adrs/ proposals/
     └── work/
 ```
 
-There is no `raw/` and no `entities/`; both belonged to the legacy graph-wiki layout.
+There is no top-level `raw/` or `entities/`; both belonged to the legacy graph-wiki layout.
 Material is ingested from anywhere on disk, and entity pages live in per-type lanes.
 
 Three verticals write into this one bundle. Each owns its directories outright.
@@ -102,21 +102,21 @@ Graph-derived. One page per admitted code entity, regenerated from the code grap
 
 | Directory | Type | Filename |
 | --- | --- | --- |
-| `repositories/<repo>/` | `Repository` | `repository.md` |
-| `repositories/<repo>/packages/` | `Package` | `<name>.md` |
-| `repositories/<repo>/apps/` | `App` | `<name>.md` |
-| `repositories/<repo>/agent-plugins/` | `AgentPlugin` | `<name>.md` |
-| `repositories/<repo>/test-suites/` | `TestSuite` | `<name>.md` |
-| `repositories/<repo>/files/` | `File` | `<repo-relative-path>.md` |
-| `dependencies/` | `Dependency` | `<ecosystem>/<name>.md` |
+| `code-graph/` | `Repository` | `<repo>.md` |
+| `code-graph/<repo>/entities/packages/` | `Package` | `<name>.md` |
+| `code-graph/<repo>/entities/apps/` | `App` | `<name>.md` |
+| `code-graph/<repo>/entities/agent-plugins/` | `AgentPlugin` | `<name>.md` |
+| `code-graph/<repo>/entities/test-suites/` | `TestSuite` | `<name>.md` |
+| `code-graph/<repo>/entities/dependencies/<ecosystem>/` | `Dependency` | `<name>.md` |
+| `code-graph/<repo>/file-system/` | `File` | `<repo-relative-path>.md` |
 
-Entity pages are nested under their owning repository, one folder per kind, so a
-repository page reaches its members by relative path. `dependencies/` is the one
-sibling root, because a dependency belongs to no single repository. There are no
-top-level `packages/`, `apps/`, `agent-plugins/` or `test-suites/` directories.
+Everything a repository owns sits under `code-graph/<repo>/`, one folder per kind, so a
+repository page reaches its members by relative path. A dependency belongs to the
+repository that declares it. There are no top-level `repositories/`, `dependencies/`,
+`packages/`, `apps/`, `agent-plugins/` or `test-suites/` directories.
 
 Generated pages carry a `generated:` block (`by:`, `at:`) and a `resource:` URI such as
-`dependency:pypi/pytest`. Prose sections under the frontmatter (`## Why we depend on
+`dependency:<org>/<repo>/pypi/pytest`. Prose sections under the frontmatter (`## Why we depend on
 this`, `## Gotchas / workarounds`) are human- or agent-authored and **survive rescan** —
 that is where hard-won knowledge belongs.
 
@@ -241,7 +241,7 @@ Synthesize: direct answer → supporting detail → inline links and `` `code-pa
 
 ### Lint — `/gw:lint` → `gw wiki lint` / `gw work lint`
 
-Mechanical checks (orphans, broken links, missing frontmatter, duplicate titles, index
+Mechanical checks (orphans, broken links, missing frontmatter, index
 drift, log gaps), code drift (what is on disk vs. what the bundle claims), semantic
 checks (contradictions, stale claims, ADR chain health), and the work-lane conformance
 rules. Present findings as a report with suggested actions; append a `lint` entry.

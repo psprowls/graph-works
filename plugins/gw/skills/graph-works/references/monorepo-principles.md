@@ -48,11 +48,11 @@ The generic [wiki](../../wiki) pattern (entities/concepts/sources/synthesis/comp
 
 | Generic LLM Wiki | Code Wiki |
 |---|---|
-| `entities/` (people, orgs, places) | `repositories/<repo>/` + `dependencies/` (one graph-derived page per admitted entity kind: repository, package, app, agent_plugin, dependency, test_suite) |
+| `entities/` (people, orgs, places) | `code-graph/<repo>/` (one graph-derived page per admitted entity kind: repository, package, app, agent_plugin, dependency, test_suite) |
 | `concepts/` | `docs/explanations/` (cross-cutting patterns; `<a>-vs-<b>.md` comparisons live here) |
 | `sources/` | Same, but source types are: spec, PR, ticket, article, transcript, RFC |
 | `synthesis/` | `docs/explanations/` (tagged `architecture`) |
-| *(none)* | `dependencies/<ecosystem>/*` — one graph-derived page per dependency |
+| *(none)* | `code-graph/<repo>/entities/dependencies/<ecosystem>/*` — one graph-derived page per (repository, dependency) |
 | *(none)* | `adrs/` — dated, citable decisions |
 | Index-first retrieval | Same, plus **code-drift detection** (entities on disk vs. in wiki) |
 | One-time curation | Continuous — every scan/merge picks up new entities automatically |

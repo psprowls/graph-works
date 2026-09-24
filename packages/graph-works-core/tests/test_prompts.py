@@ -458,9 +458,9 @@ def test_code_wiki_categories_name_nested_repository_file_and_dependency_placeme
     schema_set = _full_schema_set(tmp_path)
     rendered = prompts.render_page_categories(schema_set)
 
-    assert "`files/`" in rendered
-    assert "`repositories/<repo>/repository`" in rendered
-    assert "`dependencies/<ecosystem>/`" in rendered
+    assert "`file-system/`" in rendered
+    assert "`code-graph/<repo>.md`" in rendered
+    assert "`entities/dependencies/<ecosystem>/`" in rendered
 
 
 def test_the_orchestrator_prompt_states_the_json_contract():

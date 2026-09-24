@@ -91,7 +91,7 @@ def test_apply_creates_and_fills_generated_sections_in_one_pass(tmp_path: Path) 
     result = apply_mirror(bundle_root, plan, today=_TODAY)
 
     assert result.created == ("a.py",)
-    target = bundle_root / "repositories" / "acme" / "files" / "a.py.md"
+    target = bundle_root / "code-graph" / "acme" / "file-system" / "a.py.md"
     assert target.exists()
     assert "not yet generated" not in target.read_text(encoding="utf-8")
     reader.close()
@@ -151,13 +151,13 @@ def test_apply_regenerates_a_pre_existing_page_on_a_later_run(tmp_path: Path) ->
     reader = open_reader(graph_dir=graph_dir)
 
     second_plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("a.py",), sha=_head(repo_root), at=_AT)
-    assert tuple(second_plan.updates) == ("repositories/acme/files/a.py",)
+    assert tuple(second_plan.updates) == ("code-graph/acme/file-system/a.py",)
 
     second_result = apply_mirror(bundle_root, second_plan, today=_TODAY)
     reader.close()
 
     assert second_result.created == ()
-    assert second_result.regenerated == ("repositories/acme/files/a.py",)
+    assert second_result.regenerated == ("code-graph/acme/file-system/a.py",)
 
 
 def test_apply_reports_generator_write_failures(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -169,7 +169,7 @@ def test_apply_reports_generator_write_failures(tmp_path: Path, monkeypatch: pyt
     repo = RepoConfig(name="acme", path=repo_root, ignore=())
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("a.py",), sha=_head(repo_root), at=_AT)
-    failure = WriteFailure(path="repositories/acme/files/a.py.md", kind="commit-error", error="disk full")
+    failure = WriteFailure(path="code-graph/acme/file-system/a.py.md", kind="commit-error", error="disk full")
     monkeypatch.setattr(
         "code_wiki_okf.mirror.apply.apply_generators",
         lambda *_args, **_kwargs: ApplyResult(written=(), failed=(failure,), skipped=()),
@@ -177,7 +177,7 @@ def test_apply_reports_generator_write_failures(tmp_path: Path, monkeypatch: pyt
 
     result = apply_mirror(bundle_root, plan, today=_TODAY)
 
-    assert result.failed == ("repositories/acme/files/a.py.md: commit-error: disk full",)
+    assert result.failed == ("code-graph/acme/file-system/a.py.md: commit-error: disk full",)
     assert result.regenerated == ()
 
 
@@ -202,7 +202,7 @@ def test_apply_live_preflight_refuses_late_conflict_without_partial_writes(tmp_p
         at=_AT,
     )
 
-    b_target = bundle_root / "repositories" / "acme" / "files" / "b.py.md"
+    b_target = bundle_root / "code-graph" / "acme" / "file-system" / "b.py.md"
     b_target.parent.mkdir(parents=True, exist_ok=True)
     if conflict == "occupied":
         b_target.write_text(
@@ -223,7 +223,7 @@ def test_apply_live_preflight_refuses_late_conflict_without_partial_writes(tmp_p
         apply_mirror(bundle_root, plan, today=_TODAY)
 
     assert _file_bytes(bundle_root) == before
-    assert not (bundle_root / "repositories" / "acme" / "files" / "a.py.md").exists()
+    assert not (bundle_root / "code-graph" / "acme" / "file-system" / "a.py.md").exists()
     reader.close()
 
 
@@ -328,9 +328,9 @@ def test_apply_guarded_deletion_removes_file_and_reconciles_index(tmp_path: Path
     apply_mirror(bundle_root, plan, today=_TODAY)
     reader.close()
 
-    a_target = bundle_root / "repositories" / "acme" / "files" / "a.py.md"
-    index_target = bundle_root / "repositories" / "acme" / "files" / "index.md"
-    repo_index_target = bundle_root / "repositories" / "acme" / "index.md"
+    a_target = bundle_root / "code-graph" / "acme" / "file-system" / "a.py.md"
+    index_target = bundle_root / "code-graph" / "acme" / "file-system" / "index.md"
+    repo_index_target = bundle_root / "code-graph" / "acme" / "index.md"
     assert a_target.exists()
     assert "a.py.md" in index_target.read_text(encoding="utf-8")
     assert repo_index_target.exists()
@@ -393,7 +393,7 @@ def test_apply_rename_preserves_notes_and_removes_old_path(tmp_path: Path) -> No
     apply_mirror(bundle_root, plan, today=_TODAY)
     reader.close()
 
-    old_target = bundle_root / "repositories" / "acme" / "files" / "a.py.md"
+    old_target = bundle_root / "code-graph" / "acme" / "file-system" / "a.py.md"
     custom_notes = "A human wrote this specific detail about a.py."
     _set_notes(old_target, custom_notes)
 
@@ -407,11 +407,11 @@ def test_apply_rename_preserves_notes_and_removes_old_path(tmp_path: Path) -> No
     plan2 = plan_mirror(bundle2, reader, repo, tracked=("renamed.py",), sha=sha_after, at=_AT)
     result2 = apply_mirror(bundle_root, plan2, today=_TODAY)
 
-    new_target = bundle_root / "repositories" / "acme" / "files" / "renamed.py.md"
+    new_target = bundle_root / "code-graph" / "acme" / "file-system" / "renamed.py.md"
     assert new_target.exists()
     assert _notes_body(new_target.read_text(encoding="utf-8")) == custom_notes
     assert not old_target.exists()
-    assert result2.moved == (("repositories/acme/files/a.py.md", "repositories/acme/files/renamed.py.md"),)
+    assert result2.moved == (("code-graph/acme/file-system/a.py.md", "code-graph/acme/file-system/renamed.py.md"),)
     reader.close()
 
 
@@ -437,7 +437,7 @@ def test_apply_reports_move_write_failures(tmp_path: Path, monkeypatch: pytest.M
             sha=_head(repo_root),
             at=_AT,
         )
-    failure = WriteFailure(path="repositories/acme/files/renamed.py.md", kind="commit-error", error="disk full")
+    failure = WriteFailure(path="code-graph/acme/file-system/renamed.py.md", kind="commit-error", error="disk full")
     monkeypatch.setattr(
         "code_wiki_okf.mirror.apply.moves.apply",
         lambda *_args, **_kwargs: MoveResult(moved=(), written=(), failed=(failure,), pruned=()),
@@ -445,7 +445,7 @@ def test_apply_reports_move_write_failures(tmp_path: Path, monkeypatch: pytest.M
 
     result = apply_mirror(bundle_root, plan, today=_TODAY)
 
-    assert result.failed == ("repositories/acme/files/renamed.py.md: commit-error: disk full",)
+    assert result.failed == ("code-graph/acme/file-system/renamed.py.md: commit-error: disk full",)
 
 
 def test_apply_declined_deletion_leaves_file_and_is_reported(tmp_path: Path) -> None:
@@ -472,7 +472,7 @@ def test_apply_declined_deletion_leaves_file_and_is_reported(tmp_path: Path) -> 
     apply_mirror(bundle_root, plan, today=_TODAY)
     reader.close()
 
-    a_target = bundle_root / "repositories" / "acme" / "files" / "a.py.md"
+    a_target = bundle_root / "code-graph" / "acme" / "file-system" / "a.py.md"
     _set_notes(a_target, "A human wrote this and does not want a.py's page deleted.")
 
     run_workspace([repo_root], graph_dir=graph_dir, full=True)
@@ -483,7 +483,7 @@ def test_apply_declined_deletion_leaves_file_and_is_reported(tmp_path: Path) -> 
 
     assert a_target.exists()
     assert len(result2.declined_deletions) == 1
-    assert result2.declined_deletions[0].path == "repositories/acme/files/a.py.md"
+    assert result2.declined_deletions[0].path == "code-graph/acme/file-system/a.py.md"
     reader.close()
 
 
@@ -513,10 +513,10 @@ def test_apply_reconciles_every_policy_affected_directory(tmp_path: Path) -> Non
         result = apply_mirror(bundle_root, plan, today=_TODAY)
 
     expected_directories = (
-        "repositories/acme",
-        "repositories/acme/files",
-        "repositories/acme/files/src",
-        "repositories/acme/files/src/pkg",
+        "code-graph/acme",
+        "code-graph/acme/file-system",
+        "code-graph/acme/file-system/src",
+        "code-graph/acme/file-system/src/pkg",
     )
     assert all((bundle_root / directory / "index.md").exists() for directory in expected_directories)
     assert {update.path for update in result.index_updates} == {
@@ -541,7 +541,7 @@ def test_apply_refuses_tampered_plan_identity_before_writes(tmp_path: Path, defe
     target = MirrorTarget(
         resource="file:local/acme/a.py",
         source_path="a.py",
-        member="repositories/acme/files/a.py.md",
+        member="code-graph/acme/file-system/a.py.md",
     )
     plan = MirrorPlan(
         repo="acme",
@@ -555,19 +555,21 @@ def test_apply_refuses_tampered_plan_identity_before_writes(tmp_path: Path, defe
     if defect == "source":
         plan = replace(plan, targets=(replace(target, source_path="b.py"),))
     elif defect == "member":
-        plan = replace(plan, targets=(replace(target, member="repositories/acme/files/wrong.py.md"),))
+        plan = replace(plan, targets=(replace(target, member="code-graph/acme/file-system/wrong.py.md"),))
     elif defect == "repo":
         plan = replace(plan, repo="other")
     elif defect == "create":
         plan = replace(plan, targets=(), creates={"a.py": ({"type": "File"}, Render())})
     elif defect == "update":
-        plan = replace(plan, targets=(), updates={"repositories/acme/files/a.py": Render()})
+        plan = replace(plan, targets=(), updates={"code-graph/acme/file-system/a.py": Render()})
     else:
         plan = replace(
             plan,
             moves=_empty_move_plan(
                 bundle_root,
-                moves=(Move("repositories/acme/files/a.py.md", "repositories/acme/files/b.py.md", is_asset=False),),
+                moves=(
+                    Move("code-graph/acme/file-system/a.py.md", "code-graph/acme/file-system/b.py.md", is_asset=False),
+                ),
             ),
         )
     before = _file_bytes(bundle_root)
@@ -598,14 +600,14 @@ def test_apply_refuses_live_update_drift_before_writes(tmp_path: Path, drift: st
         first = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("a.py",), sha=_head(repo_root), at=_AT)
         apply_mirror(bundle_root, first, today=_TODAY)
 
-    target = bundle_root / "repositories/acme/files/a.py.md"
+    target = bundle_root / "code-graph/acme/file-system/a.py.md"
     target.write_text(
         target.read_text(encoding="utf-8").replace("language: python", "language: rust"),
         encoding="utf-8",
     )
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("a.py",), sha=_head(repo_root), at=_AT)
-    assert tuple(plan.updates) == ("repositories/acme/files/a.py",)
+    assert tuple(plan.updates) == ("code-graph/acme/file-system/a.py",)
 
     if drift == "misplaced":
         wrong = bundle_root / "misplaced/a.py.md"
@@ -635,12 +637,12 @@ def test_apply_refuses_filesystem_equivalent_targets_before_writes(tmp_path: Pat
         MirrorTarget(
             resource="file:local/acme/Widget.py",
             source_path="Widget.py",
-            member="repositories/acme/files/Widget.py.md",
+            member="code-graph/acme/file-system/Widget.py.md",
         ),
         MirrorTarget(
             resource="file:local/acme/widget.py",
             source_path="widget.py",
-            member="repositories/acme/files/widget.py.md",
+            member="code-graph/acme/file-system/widget.py.md",
         ),
     )
     plan = MirrorPlan(
@@ -680,7 +682,7 @@ def test_apply_refuses_case_equivalent_ancestor_file_before_any_write(tmp_path: 
             at=_AT,
         )
 
-    occupied = bundle_root / "repositories" / "acme" / "FILES"
+    occupied = bundle_root / "code-graph" / "acme" / "FILE-SYSTEM"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     occupied.write_bytes(b"pre-existing ancestor file\n")
     before = _file_bytes(bundle_root)
@@ -698,7 +700,7 @@ def test_apply_refuses_directory_at_target_member_before_any_write(tmp_path: Pat
     target = MirrorTarget(
         resource="file:local/acme/a.py",
         source_path="a.py",
-        member="repositories/acme/files/a.py.md",
+        member="code-graph/acme/file-system/a.py.md",
     )
     plan = MirrorPlan(
         repo="acme",
@@ -736,7 +738,7 @@ def test_apply_refuses_directory_at_derived_index_before_any_write(tmp_path: Pat
             at=_AT,
         )
 
-    occupied = bundle_root / "repositories" / "acme" / "files" / "index.md"
+    occupied = bundle_root / "code-graph" / "acme" / "file-system" / "index.md"
     occupied.mkdir(parents=True)
     before = _file_bytes(bundle_root)
 

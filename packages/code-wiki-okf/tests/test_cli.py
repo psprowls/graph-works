@@ -284,7 +284,7 @@ def test_sync_command_default_applies_entity_changes(tmp_path: Path) -> None:
     result = runner.invoke(app, ["sync", str(bundle_root)])
 
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "repo-a" / "packages" / "widgets.md").exists()
+    assert (bundle_root / "code-graph" / "repo-a" / "entities" / "packages" / "widgets.md").exists()
     assert "entities: written" in result.output
 
 
@@ -303,7 +303,7 @@ def test_sync_command_config_error_exits_1(tmp_path: Path) -> None:
 
 
 def test_sync_command_two_repos_same_package_name_no_longer_collides(tmp_path: Path) -> None:
-    """Entity pages nest under `repositories/<repo>/<lane>/`, so two repos'
+    """Entity pages nest under `code-graph/<repo>/<lane>/`, so two repos'
     same-named packages resolve to two distinct paths and no longer raise --
     the CLI-level counterpart to
     `entities/test_sync.py::test_sync_two_repos_same_package_name_no_longer_collides`.
@@ -316,8 +316,8 @@ def test_sync_command_two_repos_same_package_name_no_longer_collides(tmp_path: P
     result = runner.invoke(app, ["sync", str(bundle_root)])
 
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "repo-a" / "packages" / "shared.md").exists()
-    assert (bundle_root / "repositories" / "repo-b" / "packages" / "shared.md").exists()
+    assert (bundle_root / "code-graph" / "repo-a" / "entities" / "packages" / "shared.md").exists()
+    assert (bundle_root / "code-graph" / "repo-b" / "entities" / "packages" / "shared.md").exists()
 
 
 # --- sync command: mirror-lane coverage ------------------------------------
@@ -355,16 +355,16 @@ def test_sync_command_creates_file_pages(tmp_path: Path) -> None:
     bundle_root = _scratch_workspace(tmp_path)
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "repo" / "files" / "a.py.md").exists()
+    assert (bundle_root / "code-graph" / "repo" / "file-system" / "a.py.md").exists()
 
 
 def test_sync_command_dry_run_writes_nothing(tmp_path: Path) -> None:
     bundle_root = _scratch_workspace(tmp_path)
     result = runner.invoke(app, ["sync", str(bundle_root), "--dry-run"])
     assert result.exit_code == 0, result.output
-    assert not (bundle_root / "repositories").exists()
-    assert "entities: would create repositories/repo/repository" in result.stdout
-    assert "catalog: would create repositories/repo/packages/index.md" in result.stdout
+    assert not (bundle_root / "code-graph").exists()
+    assert "entities: would create code-graph/repo" in result.stdout
+    assert "catalog: would create code-graph/repo/entities/packages/index.md" in result.stdout
     assert "repo: would create a.py" in result.stdout
 
 
@@ -432,8 +432,8 @@ def test_sync_command_syncs_every_configured_repo(tmp_path: Path) -> None:
 
     result = runner.invoke(app, ["sync", str(bundle_root)])
     assert result.exit_code == 0, result.output
-    assert (bundle_root / "repositories" / "repo_a" / "files" / "a.py.md").exists()
-    assert (bundle_root / "repositories" / "repo_b" / "files" / "b.py.md").exists()
+    assert (bundle_root / "code-graph" / "repo_a" / "file-system" / "a.py.md").exists()
+    assert (bundle_root / "code-graph" / "repo_b" / "file-system" / "b.py.md").exists()
     assert "repo_a: created 1" in result.output
     assert "repo_b: created 1" in result.output
 
@@ -462,7 +462,7 @@ def test_sync_command_exit_code_is_unchanged_by_stranded_wikilinks(tmp_path: Pat
     citing.parent.mkdir(parents=True, exist_ok=True)
     citing.write_text(
         "---\ntype: Explanation\ntitle: Citing\ndescription: d\n---\n\n"
-        "## Summary\n\nSee [[repositories/repo/files/a.py]] for the rest.\n",
+        "## Summary\n\nSee [[code-graph/repo/file-system/a.py]] for the rest.\n",
         encoding="utf-8",
     )
     _git(repo_root, "mv", "a.py", "renamed.py")
@@ -560,8 +560,8 @@ def test_echo_plan_reports_every_kind_of_change(tmp_path: Path, capsys: pytest.C
         root=tmp_path,
         moves=(
             Move(
-                source="repositories/acme/files/old.py.md",
-                dest="repositories/acme/files/new.py.md",
+                source="code-graph/acme/file-system/old.py.md",
+                dest="code-graph/acme/file-system/new.py.md",
                 is_asset=False,
             ),
         ),
@@ -575,12 +575,12 @@ def test_echo_plan_reports_every_kind_of_change(tmp_path: Path, capsys: pytest.C
         targets=(),
         moves=move_plan,
         creates={"a.py": ({}, Render())},
-        updates={"repositories/acme/files/b.py": Render()},
+        updates={"code-graph/acme/file-system/b.py": Render()},
         deletions=("c.py",),
         declined_deletions=(
             DeclinedDeletion(
                 resource="file:acme/d.py",
-                path="repositories/acme/files/d.py.md",
+                path="code-graph/acme/file-system/d.py.md",
                 reason="prose-edited",
             ),
         ),
@@ -588,10 +588,10 @@ def test_echo_plan_reports_every_kind_of_change(tmp_path: Path, capsys: pytest.C
     _echo_plan("acme", plan)
     output = capsys.readouterr().out
     assert "acme: would create a.py" in output
-    assert "acme: would update repositories/acme/files/b.py" in output
-    assert "acme: would move repositories/acme/files/old.py.md -> repositories/acme/files/new.py.md" in output
+    assert "acme: would update code-graph/acme/file-system/b.py" in output
+    assert "acme: would move code-graph/acme/file-system/old.py.md -> code-graph/acme/file-system/new.py.md" in output
     assert "acme: would delete c.py" in output
-    assert "acme: would decline deletion of repositories/acme/files/d.py.md (prose-edited)" in output
+    assert "acme: would decline deletion of code-graph/acme/file-system/d.py.md (prose-edited)" in output
 
 
 def _content_files(root: Path) -> dict[Path, bytes]:
@@ -819,7 +819,7 @@ def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
 
     The misplaced page is a `Dependency`, not a `Package`: narrowing (§5)
     drops the four repo-scoped types (Package/App/TestSuite/AgentPlugin) --
-    now nested under `repositories/<repo>/<lane>/` -- from
+    now nested under `code-graph/<repo>/<lane>/` -- from
     `placement.directory-mismatch`'s prefix check, but `Dependency` stays
     global and fully prefix-checkable, matching
     `test_placement_adoption.py::test_both_codes_fire_over_one_built_bundle`.
@@ -830,7 +830,7 @@ def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
     _init_empty_graph(bundle_root)
     (bundle_root / "packages").mkdir()
     (bundle_root / "packages" / "httpx.md").write_text(
-        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\necosystem: "pypi"\n---\n\n'
+        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:acme/demo/pypi/httpx"\necosystem: "pypi"\n---\n\n'
         "## Why we depend on this\n\nSome real text goes here, filled in properly for this test.\n\n"
         "## Gotchas / workarounds\n\nSome real text goes here too.\n",
         encoding="utf-8",
@@ -840,7 +840,7 @@ def test_validate_reports_a_misplaced_page_as_an_error(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "found at packages/httpx.md" in result.output
-    assert "expected dependencies/pypi/httpx" in result.output
+    assert "expected code-graph/demo/entities/dependencies/pypi/httpx" in result.output
 
 
 def test_validate_still_reports_sync_findings_alongside_new_rules(tmp_path: Path) -> None:
@@ -855,14 +855,14 @@ def test_validate_still_reports_sync_findings_alongside_new_rules(tmp_path: Path
 def test_echo_result_reports_every_kind_of_change(capsys: pytest.CaptureFixture[str]) -> None:
     result = MirrorResult(
         repo="acme",
-        moved=(("repositories/acme/files/old.py.md", "repositories/acme/files/new.py.md"),),
+        moved=(("code-graph/acme/file-system/old.py.md", "code-graph/acme/file-system/new.py.md"),),
         created=("a.py",),
-        regenerated=("repositories/acme/files/b.py",),
+        regenerated=("code-graph/acme/file-system/b.py",),
         deleted=("c.py",),
         declined_deletions=(
             DeclinedDeletion(
                 resource="file:acme/d.py",
-                path="repositories/acme/files/d.py.md",
+                path="code-graph/acme/file-system/d.py.md",
                 reason="prose-edited",
             ),
         ),
@@ -872,10 +872,10 @@ def test_echo_result_reports_every_kind_of_change(capsys: pytest.CaptureFixture[
     output = capsys.readouterr().out
     assert "acme: created 1, updated 1, moved 1, deleted 1" in output
     assert "acme: created a.py" in output
-    assert "acme: updated repositories/acme/files/b.py" in output
-    assert "acme: moved repositories/acme/files/old.py.md -> repositories/acme/files/new.py.md" in output
+    assert "acme: updated code-graph/acme/file-system/b.py" in output
+    assert "acme: moved code-graph/acme/file-system/old.py.md -> code-graph/acme/file-system/new.py.md" in output
     assert "acme: deleted c.py" in output
-    assert "acme: declined deletion of repositories/acme/files/d.py.md (prose-edited)" in output
+    assert "acme: declined deletion of code-graph/acme/file-system/d.py.md (prose-edited)" in output
 
 
 def test_echo_plan_reports_stranded_wikilinks_on_stderr(tmp_path, capsys):
@@ -885,8 +885,8 @@ def test_echo_plan_reports_stranded_wikilinks_on_stderr(tmp_path, capsys):
         root=tmp_path,
         moves=(
             Move(
-                source="repositories/acme/files/old.py.md",
-                dest="repositories/acme/files/new.py.md",
+                source="code-graph/acme/file-system/old.py.md",
+                dest="code-graph/acme/file-system/new.py.md",
                 is_asset=False,
             ),
         ),
@@ -894,7 +894,7 @@ def test_echo_plan_reports_stranded_wikilinks_on_stderr(tmp_path, capsys):
         refusals=(),
         unrebased=(),
         digests={},
-        stranded=(Stranded(member="concepts/citing.md", target="repositories/acme/files/old.py.md", line=9),),
+        stranded=(Stranded(member="concepts/citing.md", target="code-graph/acme/file-system/old.py.md", line=9),),
     )
     plan = MirrorPlan(
         repo="acme", targets=(), moves=move_plan, creates={}, updates={}, deletions=(), declined_deletions=()
@@ -910,7 +910,7 @@ def test_echo_result_summary_line_is_byte_identical_with_stranded_present(tmp_pa
     -- append, never alter."""
     result = MirrorResult(
         repo="acme",
-        moved=(("repositories/acme/files/old.py.md", "repositories/acme/files/new.py.md"),),
+        moved=(("code-graph/acme/file-system/old.py.md", "code-graph/acme/file-system/new.py.md"),),
         created=(),
         regenerated=(),
         deleted=(),

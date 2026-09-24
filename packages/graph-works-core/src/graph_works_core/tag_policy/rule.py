@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from datetime import date
 
-from code_wiki_okf.placement import is_entity_lane_page
+from code_wiki_okf.placement import entity_page
 from okf_ext.tags import TagInventory
 from okf_io import Bundle
 from work_tracker_okf.vocabulary import (
@@ -42,33 +42,14 @@ DEFAULT_CEILING = 0.40
 def entity_names(bundle: Bundle) -> frozenset[str]:
     """The names of every entity that already has its own page.
 
-    Structural, via `code_wiki_okf.placement.is_entity_lane_page` -- the
-    convention's own predicate, not a path pattern retyped here. The name is
-    the segment that identifies the entity: the repository name for a
-    `repositories/<repo>/repository` page, and the last segment for both a
-    repo lane page and a `dependencies/<ecosystem>/<name>` page.
-
-    `files/` pages are deliberately not entities. `is_entity_lane_page`
-    already excludes them (it is documented as the *non-File* entity shape),
-    and a tag named after a source file is a cross-cutting concern far more
-    often than a duplicate of a page nobody links.
-
-    The repository-page shape is identified by **position**
-    (`repositories/<repo>/repository`, exactly three segments), not by the
-    last segment's spelling: matching on `parts[-1] == "repository"` would
-    also fire for any other kind's own entity literally named `repository`
-    (e.g. `dependencies/<eco>/repository` or
-    `repositories/<repo>/packages/repository`), mis-deriving the ecosystem
-    or package name as the repo name instead.
+    Structural, via `code_wiki_okf.placement.entity_page` -- the layout's
+    own parser, not a path pattern retyped here. The name is the repository
+    name for a Repository page and the slug for every other entity page.
+    `file-system/` mirrors are deliberately not entities: a tag named after a
+    source file is a cross-cutting concern far more often than a duplicate
+    of a page nobody links.
     """
-    names: set[str] = set()
-    for concept_id in bundle.concepts:
-        if not is_entity_lane_page(concept_id):
-            continue
-        parts = concept_id.split("/")
-        is_repository_page = len(parts) == 3 and parts[0] == "repositories" and parts[-1] == "repository"
-        names.add(parts[1] if is_repository_page else parts[-1])
-    return frozenset(names)
+    return frozenset(page.name for concept_id in bundle.concepts if (page := entity_page(concept_id)) is not None)
 
 
 def field_values() -> frozenset[str]:

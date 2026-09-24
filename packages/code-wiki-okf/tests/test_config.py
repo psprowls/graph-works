@@ -301,3 +301,18 @@ def test_load_config_and_config_from_mapping_agree(tmp_path: Path) -> None:
         source=manifest.name,
     )
     assert from_file == from_mapping
+
+
+@pytest.mark.parametrize("repo_name", ["index", "Index", "INDEX"])
+def test_load_config_refuses_a_repository_named_index(tmp_path: Path, repo_name: str) -> None:
+    _write(tmp_path, f"version: 1\nrepositories:\n  {repo_name}:\n    path: ../x\n")
+    with pytest.raises(ConfigError, match=re.escape(f"`repositories.{repo_name}`")) as excinfo:
+        load_config(tmp_path, graph_dir="../graphs/code")
+    assert "code-graph/index.md" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("repo_name", ["indexer", "my-index", "index2"])
+def test_load_config_accepts_names_that_merely_contain_index(tmp_path: Path, repo_name: str) -> None:
+    _write(tmp_path, f"version: 1\nrepositories:\n  {repo_name}:\n    path: ../x\n")
+    config = load_config(tmp_path, graph_dir="../graphs/code")
+    assert tuple(repo.name for repo in config.repos) == (repo_name,)

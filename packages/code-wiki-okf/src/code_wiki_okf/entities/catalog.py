@@ -32,11 +32,16 @@ from okf_ext.writing import ApplyResult, PendingWrite, write_all
 from okf_io import Bundle, Document, load_bundle
 
 from code_wiki_okf.placement import (
+    CODE_GRAPH_LANE,
     PlacementContext,
     PlacementError,
     canonical_concept_id,
     context_from_resource,
+    entities_directory,
+    file_system_directory,
     is_code_wiki_type,
+    lane_directory,
+    repository_directory,
 )
 
 #: What this module writes for an empty list.
@@ -44,39 +49,28 @@ _NONE_PLACEHOLDER = "_(none)_"
 
 #: `## Contents` H3 groups, in fixed render order, and the `type` each holds.
 #:
-#: `Dependency`, `File` and `Repository` are absent: a dependency is
-#: ecosystem-wide rather than repo-scoped, a mirrored file already has its
-#: own generated `## Files` section on the owning page, and a repository does
-#: not contain itself.
+#: `File` and `Repository` are absent: a mirrored file already has its own
+#: generated `## Files` section on the owning page, and a repository does not
+#: contain itself. Dependencies are repository-owned (D-004), so they belong
+#: to the Repository page's contents like every other entity.
 CONTENT_GROUPS: tuple[tuple[str, str], ...] = (
     ("Apps", "App"),
     ("Packages", "Package"),
     ("Agent Plugins", "AgentPlugin"),
     ("Test Suites", "TestSuite"),
+    ("Dependencies", "Dependency"),
 )
 
-_ROOT_GROUPS: tuple[tuple[str, str], ...] = (
-    ("Repositories", "Repository"),
+#: `code-graph/<repo>/entities/index.md` groups. Dependencies list ecosystem
+#: directories, not pages; the lane indexes below list the pages.
+_ENTITY_GROUPS: tuple[tuple[str, str], ...] = (
     ("Packages", "Package"),
     ("Apps", "App"),
     ("Agent Plugins", "AgentPlugin"),
     ("Test Suites", "TestSuite"),
     ("Dependencies", "Dependency"),
 )
-_REPOSITORY_GROUPS: tuple[tuple[str, str], ...] = (
-    ("Repository", "Repository"),
-    ("Packages", "Package"),
-    ("Apps", "App"),
-    ("Agent Plugins", "AgentPlugin"),
-    ("Test Suites", "TestSuite"),
-    ("Files", "File"),
-)
-_REPOSITORY_LANE_BY_TYPE = {
-    "Package": "packages",
-    "App": "apps",
-    "AgentPlugin": "agent-plugins",
-    "TestSuite": "test-suites",
-}
+_REPOSITORY_LANE_TYPES: tuple[str, ...] = ("Package", "App", "AgentPlugin", "TestSuite")
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,7 +112,7 @@ def _bullets(entries: Sequence[CatalogEntry]) -> str:
 
 
 def render_contents(groups: Mapping[str, Sequence[CatalogEntry]]) -> str:
-    """A Repository page's `## Contents` body: four H3 groups, empties omitted.
+    """A Repository page's `## Contents` body: five H3 groups, empties omitted.
 
     Deliberately flat rather than nested per-package sub-lists: frontmatter
     already owns `depends_on`, `test_suites` and `entry_points`, and each
@@ -206,65 +200,83 @@ def contents_groups_from_entries(entries: Sequence[CatalogPage]) -> dict[str, tu
     }
 
 
+def _entries_of(items: Sequence[CatalogPage], type_name: str) -> tuple[CatalogEntry, ...]:
+    return tuple(item.entry for item in items if item.type_name == type_name)
+
+
 def _required_catalogs(
     classified: Sequence[CatalogPage],
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, Render], dict[str, Render]]:
-    """Return declarations, index renders, and Repository-page renders."""
+    """Return declarations, index renders, and Repository-page renders.
+
+    Every directory ID comes from `code_wiki_okf.placement`; nothing here
+    spells the layout.
+    """
     by_type: dict[str, list[CatalogPage]] = {}
     by_repository: dict[str, list[CatalogPage]] = {}
-    ecosystems: set[str] = set()
     for item in classified:
         by_type.setdefault(item.type_name, []).append(item)
         if item.context.repository is not None:
             by_repository.setdefault(item.context.repository, []).append(item)
-        if item.context.ecosystem is not None:
-            ecosystems.add(item.context.ecosystem)
 
-    headings: dict[str, tuple[str, ...]] = {
-        "": tuple(heading for heading, _type_name in _ROOT_GROUPS),
-        "repositories": ("Repositories",),
-        "dependencies": ("Dependencies",),
-    }
+    repositories = _section_body(tuple(item.entry for item in by_type.get("Repository", ())))
+    headings: dict[str, tuple[str, ...]] = {"": ("Repositories",), CODE_GRAPH_LANE: ("Repositories",)}
     index_renders: dict[str, Render] = {
-        "": Render(
-            sections={
-                heading: _section_body(tuple(item.entry for item in by_type.get(type_name, ())))
-                for heading, type_name in _ROOT_GROUPS
-            }
-        ),
-        "repositories": Render(
-            sections={"Repositories": _section_body(tuple(item.entry for item in by_type.get("Repository", ())))}
-        ),
-        "dependencies": Render(
-            sections={"Dependencies": _section_body(tuple(_index_entry(f"dependencies/{item}") for item in ecosystems))}
-        ),
+        "": Render(sections={"Repositories": repositories}),
+        CODE_GRAPH_LANE: Render(sections={"Repositories": repositories}),
     }
 
     concept_renders: dict[str, Render] = {}
     for repository, items in sorted(by_repository.items()):
-        prefix = f"repositories/{repository}"
-        headings[prefix] = tuple(heading for heading, _type_name in _REPOSITORY_GROUPS)
-        index_renders[prefix] = Render(
+        stub = repository_directory(repository)
+        headings[stub] = ("Repository",)
+        index_renders[stub] = Render(sections={"Repository": _section_body(_entries_of(items, "Repository"))})
+
+        dependency_items = tuple(item for item in items if item.type_name == "Dependency")
+        ecosystems = sorted({item.context.ecosystem for item in dependency_items if item.context.ecosystem})
+        dependency_lane = lane_directory(repository, "Dependency")
+        ecosystem_entries = tuple(
+            _index_entry(lane_directory(repository, "Dependency", ecosystem=ecosystem)) for ecosystem in ecosystems
+        )
+
+        entities = entities_directory(repository)
+        headings[entities] = tuple(heading for heading, _type_name in _ENTITY_GROUPS)
+        index_renders[entities] = Render(
             sections={
-                heading: _section_body(tuple(item.entry for item in items if item.type_name == type_name))
-                for heading, type_name in _REPOSITORY_GROUPS
+                heading: _section_body(
+                    ecosystem_entries if type_name == "Dependency" else _entries_of(items, type_name)
+                )
+                for heading, type_name in _ENTITY_GROUPS
             }
         )
-        for type_name, lane in _REPOSITORY_LANE_BY_TYPE.items():
-            directory = f"{prefix}/{lane}"
-            heading = next(heading for heading, candidate in _REPOSITORY_GROUPS if candidate == type_name)
+        for type_name in _REPOSITORY_LANE_TYPES:
+            heading = next(heading for heading, candidate in _ENTITY_GROUPS if candidate == type_name)
+            directory = lane_directory(repository, type_name)
             headings[directory] = (heading,)
-            index_renders[directory] = Render(
-                sections={heading: _section_body(tuple(item.entry for item in items if item.type_name == type_name))}
-            )
+            index_renders[directory] = Render(sections={heading: _section_body(_entries_of(items, type_name))})
+
+        if dependency_items:
+            headings[dependency_lane] = ("Dependencies",)
+            index_renders[dependency_lane] = Render(sections={"Dependencies": _section_body(ecosystem_entries)})
+            for ecosystem in ecosystems:
+                directory = lane_directory(repository, "Dependency", ecosystem=ecosystem)
+                headings[directory] = ("Dependencies",)
+                index_renders[directory] = Render(
+                    sections={
+                        "Dependencies": _section_body(
+                            tuple(item.entry for item in dependency_items if item.context.ecosystem == ecosystem)
+                        )
+                    }
+                )
 
         file_items = tuple(item for item in items if item.type_name == "File")
-        file_directories = {f"{prefix}/files"}
+        file_root = file_system_directory(repository)
+        file_directories = {file_root}
         for item in file_items:
             parent = PurePosixPath(item.entry.concept_id).parent.as_posix()
-            while parent.startswith(f"{prefix}/files"):
+            while parent.startswith(file_root):
                 file_directories.add(parent)
-                if parent == f"{prefix}/files":
+                if parent == file_root:
                     break
                 parent = PurePosixPath(parent).parent.as_posix()
         for directory in sorted(file_directories):
@@ -290,14 +302,6 @@ def _required_catalogs(
                 frontmatter=repository_page.owned_frontmatter,
                 sections={"Contents": render_contents(contents_groups_from_entries(items))},
             )
-
-    for ecosystem in sorted(ecosystems):
-        directory = f"dependencies/{ecosystem}"
-        ecosystem_entries = tuple(
-            item.entry for item in by_type.get("Dependency", ()) if item.context.ecosystem == ecosystem
-        )
-        headings[directory] = ("Dependencies",)
-        index_renders[directory] = Render(sections={"Dependencies": _section_body(ecosystem_entries)})
 
     return headings, index_renders, concept_renders
 

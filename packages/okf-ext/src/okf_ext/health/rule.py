@@ -30,13 +30,12 @@ TOPIC = "health"
 
 CODES = (
     "health.uncited",  # no other concept's prose links to this one
-    "health.duplicate-title",  # two or more concepts share a `title`
     "health.log-gap",  # the newest dated log section is old, or there is none
 )
 
 #: Unpacked from `CODES` rather than re-typed, so a code-string edit to one
 #: cannot silently drift from the other -- the habit `tags/vocabulary.py` set.
-_CODE_UNCITED, _CODE_DUPLICATE_TITLE, _CODE_LOG_GAP = CODES
+_CODE_UNCITED, _CODE_LOG_GAP = CODES
 
 #: `Finding.spec` is "the thing that says so". These codes cite no OKF section
 #: -- an uncited concept is a conformant concept -- so they cite the module that
@@ -72,39 +71,6 @@ def _uncited(context: RuleContext, severity: Severity) -> Iterator[Finding]:
             path=f"{concept_id}.md",
             line=None,
         )
-
-
-def _duplicate_titles(context: RuleContext, severity: Severity) -> Iterator[Finding]:
-    """One finding per participating concept, not one per group.
-
-    Per-concept so each finding carries a real document's path and the line of
-    its own `title` key, with the message naming the others. Concepts with no
-    title are skipped: `frontmatter.title-recommended` already reports those,
-    and a group keyed on the empty string would collapse every untitled
-    document into one false cluster.
-    """
-    groups: dict[str, list[str]] = {}
-    for concept_id in sorted(context.bundle.concepts):
-        document = context.bundle.concepts[concept_id]
-        if document.parse_error is not None:
-            continue
-        title = (document.fm.title or "").strip()
-        if not title:
-            continue
-        groups.setdefault(title, []).append(concept_id)
-    for title, members in sorted(groups.items()):
-        if len(members) < 2:
-            continue
-        for concept_id in members:
-            others = ", ".join(f"`{other}.md`" for other in members if other != concept_id)
-            yield Finding(
-                code=_CODE_DUPLICATE_TITLE,
-                severity=severity,
-                message=f"Title `{title}` is also carried by {others}.",
-                spec=_SPEC,
-                path=f"{concept_id}.md",
-                line=context.bundle.concepts[concept_id].frontmatter_line("title"),
-            )
 
 
 def _log_gaps(context: RuleContext, severity: Severity, log_gap_days: int) -> Iterator[Finding]:
@@ -154,10 +120,10 @@ def health_rule(*, severity: Severity = "warn", log_gap_days: int = 14) -> Rule:
     """Build an `okf_io.Rule` that checks a bundle's internal coherence.
 
     **Every code is `warn` by default.** `Report.ok` is a claim about OKF v0.2
-    conformance, and none of these three describes a conformance failure -- an
+    conformance, and neither of these two describes a conformance failure -- an
     uncited concept is a conformant concept. The knob exists because okf-io's
     `strict=True` promotes *every* warning, including the deliberately `warn`
-    `links.broken`, so a team wanting CI red on a duplicate title should not
+    `links.broken`, so a team wanting CI red on an uncited concept should not
     also get CI red on a dead link.
 
     *log_gap_days* defaults to 14, the threshold the wiki-io linter used.
@@ -165,7 +131,6 @@ def health_rule(*, severity: Severity = "warn", log_gap_days: int = 14) -> Rule:
 
     def rule(context: RuleContext) -> Iterable[Finding]:
         yield from _uncited(context, severity)
-        yield from _duplicate_titles(context, severity)
         yield from _log_gaps(context, severity, log_gap_days)
 
     return rule

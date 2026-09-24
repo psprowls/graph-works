@@ -126,7 +126,7 @@ def _collect_mirror_paths(bundle_root: Path, repo_name: str) -> set[str]:
     excluding `index.md` at any depth -- those are the lane's own reconciled
     directory indexes, not a mirrored tracked file.
     """
-    root = bundle_root / "repositories" / repo_name / "files"
+    root = bundle_root / "code-graph" / repo_name / "file-system"
     if not root.exists():
         return set()
     return {path.relative_to(root).as_posix() for path in root.rglob("*.md") if path.name != "index.md"}
@@ -203,7 +203,7 @@ def test_rename_preserves_prose_and_repairs_inbound_links(tmp_path: Path) -> Non
 
     _sync(bundle_root, repo_root, graph_dir)
 
-    mirror_root = bundle_root / "repositories" / _REPO_NAME / "files"
+    mirror_root = bundle_root / "code-graph" / _REPO_NAME / "file-system"
     base_target = mirror_root / "src" / "pkg" / "base.py.md"
     user_target = mirror_root / "src" / "pkg" / "user.py.md"
     assert base_target.exists()

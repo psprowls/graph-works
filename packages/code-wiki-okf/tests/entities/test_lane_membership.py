@@ -5,23 +5,24 @@ from __future__ import annotations
 from code_wiki_okf.placement import is_entity_lane_page
 
 
-def test_a_global_lane_page_is_a_member() -> None:
-    assert is_entity_lane_page("dependencies/pypi/requests") is True
+def test_a_repository_scoped_dependency_page_is_a_member() -> None:
+    assert is_entity_lane_page("code-graph/repo-a/entities/dependencies/pypi/requests") is True
+    assert is_entity_lane_page("dependencies/pypi/requests") is False
 
 
 def test_the_repository_page_itself_is_a_member() -> None:
-    assert is_entity_lane_page("repositories/repo-a/repository") is True
+    assert is_entity_lane_page("code-graph/repo-a") is True
 
 
 def test_a_nested_repo_scoped_lane_page_is_a_member() -> None:
-    assert is_entity_lane_page("repositories/repo-a/packages/widgets") is True
-    assert is_entity_lane_page("repositories/repo-a/apps/cli-app") is True
-    assert is_entity_lane_page("repositories/repo-a/test-suites/tests") is True
-    assert is_entity_lane_page("repositories/repo-a/agent-plugins/demo-plugin") is True
+    assert is_entity_lane_page("code-graph/repo-a/entities/packages/widgets") is True
+    assert is_entity_lane_page("code-graph/repo-a/entities/apps/cli-app") is True
+    assert is_entity_lane_page("code-graph/repo-a/entities/test-suites/tests") is True
+    assert is_entity_lane_page("code-graph/repo-a/entities/agent-plugins/demo-plugin") is True
 
 
 def test_a_nested_mirror_file_page_is_not_a_member() -> None:
-    assert is_entity_lane_page("repositories/repo-a/files/src/mod.py") is False
+    assert is_entity_lane_page("code-graph/repo-a/file-system/src/mod.py") is False
 
 
 def test_a_flat_legacy_style_lane_page_is_not_a_member() -> None:

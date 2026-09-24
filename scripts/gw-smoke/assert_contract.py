@@ -36,30 +36,25 @@ def main() -> int:
         return 1
 
     repo = config.repos[0]
-    prefix = f"repositories/{repo.name}"
+    prefix = f"code-graph/{repo.name}"
     expected = {
-        "agent-plugins/index.md",
-        "apps/index.md",
-        "dependencies/index.md",
-        "dependencies/npm/index.md",
-        "dependencies/pypi/code-graph-io.md",
-        "dependencies/pypi/index.md",
         "index.md",
-        "packages/index.md",
-        "repositories/index.md",
-        "test-suites/index.md",
-        f"{prefix}/agent-plugins/gw.md",
-        f"{prefix}/agent-plugins/index.md",
-        f"{prefix}/apps/code-wiki-okf.md",
-        f"{prefix}/apps/index.md",
-        f"{prefix}/files/index.md",
-        f"{prefix}/files/packages/code-wiki-okf/README.md.md",
+        "code-graph/index.md",
+        f"code-graph/{repo.name}.md",
         f"{prefix}/index.md",
-        f"{prefix}/packages/graph-works-cli.md",
-        f"{prefix}/packages/index.md",
-        f"{prefix}/repository.md",
-        f"{prefix}/test-suites/index.md",
-        f"{prefix}/test-suites/packages__code-wiki-okf__tests.md",
+        f"{prefix}/entities/index.md",
+        f"{prefix}/entities/agent-plugins/gw.md",
+        f"{prefix}/entities/agent-plugins/index.md",
+        f"{prefix}/entities/apps/code-wiki-okf.md",
+        f"{prefix}/entities/apps/index.md",
+        f"{prefix}/entities/dependencies/index.md",
+        f"{prefix}/entities/dependencies/pypi/index.md",
+        f"{prefix}/entities/packages/graph-works-cli.md",
+        f"{prefix}/entities/packages/index.md",
+        f"{prefix}/entities/test-suites/index.md",
+        f"{prefix}/entities/test-suites/packages__code-wiki-okf__tests.md",
+        f"{prefix}/file-system/index.md",
+        f"{prefix}/file-system/packages/code-wiki-okf/README.md.md",
     }
     members = {member.relative_to(layout.bundle_dir).as_posix() for member in layout.bundle_dir.rglob("*.md")}
     missing = sorted(expected - members)
@@ -68,19 +63,13 @@ def main() -> int:
         for member in missing:
             print(f"  {member}", file=sys.stderr)
         return 1
-    if "files/index.md" in members:
-        print("unexpected global files/index.md", file=sys.stderr)
-        return 1
-    discovery_extras = sorted(
-        member
-        for lane in ("agent-plugins", "apps", "packages", "test-suites")
-        for member in members
-        if member.startswith(f"{lane}/") and member != f"{lane}/index.md"
+    legacy_roots = sorted(
+        lane
+        for lane in ("repositories", "dependencies", "files", "agent-plugins", "apps", "packages", "test-suites")
+        if any(member.startswith(f"{lane}/") for member in members)
     )
-    if discovery_extras:
-        print("unexpected concept pages in discovery-only lanes:", file=sys.stderr)
-        for member in discovery_extras:
-            print(f"  {member}", file=sys.stderr)
+    if legacy_roots:
+        print(f"unexpected top-level pre-code-graph directories: {', '.join(legacy_roots)}", file=sys.stderr)
         return 1
 
     bundle = load_bundle(layout.bundle_dir)

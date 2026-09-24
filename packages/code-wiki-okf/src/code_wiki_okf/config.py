@@ -24,6 +24,8 @@ from typing import Any
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
+from code_wiki_okf.placement import filesystem_member_identity
+
 MANIFEST_FILENAME = "workspace.yaml"
 
 _DEFAULT_STATE_GATE_BRANCHES: tuple[str, ...] = ("main",)
@@ -226,6 +228,11 @@ def config_from_mapping(
 
     repos: list[RepoConfig] = []
     for repo_name, entry in repos_raw.items():
+        if filesystem_member_identity(str(repo_name)) == "index":
+            raise ConfigError(
+                f"{name}: `repositories.{repo_name}`: a repository named {repo_name!r} would collide with "
+                "code-graph/index.md; rename it"
+            )
         entry = _require_mapping(entry, name=name, where=f"`repositories.{repo_name}`")
         allowed_repo_keys = {"path", "ignore"}
         _reject_unknown_keys(entry, allowed=allowed_repo_keys, name=name, where=f"`repositories.{repo_name}`")

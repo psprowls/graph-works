@@ -84,7 +84,7 @@ class RuleContext:
     question about one document at a time honours it, through
     `okf_io._rules._common.concepts`. A rule that reasons *across* documents --
     `links.broken` off `ctx.links`, `identity.canonical-collision` off
-    `bundle.canonical_collisions`, a duplicate-title grouping -- must keep
+    `bundle.canonical_collisions` -- must keep
     reading the full bundle, or it would report an artifact of the scope rather
     than a fact about the corpus.
 

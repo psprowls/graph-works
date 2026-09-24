@@ -8,7 +8,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from code_graph_io import dependencies, packages, store, upsert
+from _argus_layout import ARGUS_FILES, ARGUS_IGNORE, write_layout
+from code_graph_io import _ignore, dependencies, packages, store, upsert
 from code_graph_io.records import GraphEdge, GraphNode, GraphRecords
 from code_graph_io.uri import RepoContext
 
@@ -307,17 +308,18 @@ def test_dependency_ingestion_from_workspace(tmp_path: Path, conn: sqlite3.Conne
     )
     _reconcile_dependencies(conn, tmp_path)
 
-    # Every distributable package and declared dependency has a facet.
+    # Every declared dependency has a facet; an unconsumed distributable package
+    # (pkg-a, pkg-b) does not -- a node exists only where something declares it.
     dep_rows = conn.execute("SELECT name, attrs_json, uri FROM nodes WHERE kind='dependency' ORDER BY name").fetchall()
     names = [r[0] for r in dep_rows]
-    assert names == ["boto3", "langchain-aws", "pkg-a", "pkg-b", "pytest"]
+    assert names == ["boto3", "langchain-aws", "pytest"]
     # boto3 attrs.versions_in_use collects both PEP 508 strings (sorted)
     boto3_row = next(row for row in dep_rows if row[0] == "boto3")
     boto3_attrs = json.loads(boto3_row[1])
     assert boto3_attrs["ecosystem"] == "pypi"
     assert boto3_attrs["url"] == "https://pypi.org/project/boto3/"
     assert boto3_attrs["versions_in_use"] == sorted(["boto3>=1.38", "boto3==1.40.0"])
-    assert boto3_row[2] == "dependency:pypi/boto3"
+    assert boto3_row[2] == "dependency:test/repo/pypi/boto3"
     # used_by edges from both consumer packages to boto3
     boto3_used_by = conn.execute(
         "SELECT COUNT(*) FROM edges e "
@@ -385,7 +387,10 @@ def test_workspace_dep_suppressed_and_depends_on_package_emitted(tmp_path: Path,
     )
     _reconcile_dependencies(conn, tmp_path)
 
-    assert conn.execute("SELECT COUNT(*) FROM nodes WHERE uri='dependency:pypi/code-graph-io'").fetchone()[0] == 1
+    assert (
+        conn.execute("SELECT COUNT(*) FROM nodes WHERE uri='dependency:test/repo/pypi/code-graph-io'").fetchone()[0]
+        == 1
+    )
 
     # Regression: the external dep STILL has a `dependency` node + used_by.
     boto3_node = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='boto3'").fetchone()[0]
@@ -416,7 +421,7 @@ def test_workspace_dep_suppressed_and_depends_on_package_emitted(tmp_path: Path,
         "SELECT dst.kind FROM edges e "
         "JOIN nodes src ON e.src = src.id "
         "JOIN nodes dst ON e.dst = dst.id "
-        "WHERE e.kind='used_by' AND src.name='beta' AND dst.uri='dependency:pypi/code-graph-io'"
+        "WHERE e.kind='used_by' AND src.name='beta' AND dst.uri='dependency:test/repo/pypi/code-graph-io'"
     ).fetchall()
     assert len(internal_used_by) == 1
     assert internal_used_by == [("dependency",)]
@@ -447,7 +452,7 @@ def test_internal_dep_edges_dedupe_per_consumer(tmp_path: Path, conn: sqlite3.Co
         "SELECT COUNT(*) FROM edges e "
         "JOIN nodes src ON e.src = src.id "
         "JOIN nodes dst ON e.dst = dst.id "
-        "WHERE e.kind='used_by' AND src.name='beta' AND dst.uri='dependency:pypi/alpha'"
+        "WHERE e.kind='used_by' AND src.name='beta' AND dst.uri='dependency:test/repo/pypi/alpha'"
     ).fetchone()[0]
     assert used_by_count == 1
     dop_count = conn.execute(
@@ -487,7 +492,7 @@ def test_internal_dep_on_app_target_resolves_package_kind(tmp_path: Path, conn: 
             "SELECT dst.kind FROM edges e "
             "JOIN nodes src ON e.src = src.id "
             "JOIN nodes dst ON e.dst = dst.id "
-            "WHERE e.kind=? AND src.name='beta' AND (dst.name='mytool' OR dst.uri='dependency:pypi/mytool')",
+            "WHERE e.kind=? AND src.name='beta' AND (dst.name='mytool' OR dst.uri='dependency:test/repo/pypi/mytool')",
             (kind,),
         ).fetchall()
         assert len(dst_kind) == 1, f"expected one {kind} edge to mytool"
@@ -1043,7 +1048,7 @@ def test_js_npm_dependency_parity_full_monorepo(tmp_path: Path, conn: sqlite3.Co
     react_attrs = json.loads(react_row[1])
     assert react_attrs["ecosystem"] == "npm"
     assert react_attrs["url"] == "https://www.npmjs.com/package/react"
-    assert react_row[2] == "dependency:npm/react"
+    assert react_row[2] == "dependency:test/repo/npm/react"
     assert "^18.2.0" in react_attrs["versions_in_use"]
 
     # used_by edge from jspkg to react
@@ -1667,3 +1672,263 @@ def test_dependency_registry_url_nuget() -> None:
 def test_dependency_registry_url_unsupported_still_raises() -> None:
     with pytest.raises(ValueError, match="unsupported dependency ecosystem"):
         packages._dependency_registry_url("gems", "rails")
+
+
+# ---------- requirements-based Python roots ----------
+
+
+def _by_path(found: tuple[packages.ManifestPackage, ...]) -> dict[str, packages.ManifestPackage]:
+    return {item.relative_path: item for item in found}
+
+
+def test_argus_backend_is_a_python_package(tmp_path: Path) -> None:
+    write_layout(tmp_path, ARGUS_FILES)
+
+    found = _by_path(
+        packages.discover_manifest_packages(tmp_path, ctx=_CTX, ignore=_ignore.compile_ignore(ARGUS_IGNORE))
+    )
+
+    assert set(found) == {"backend", "frontend"}, "forwarding root requirements.txt must not be a package"
+    backend = found["backend"]
+    assert (backend.name, backend.ecosystem, backend.language, backend.distributable) == (
+        "backend",
+        "pypi",
+        "python",
+        True,
+    )
+    assert backend.dependencies == (
+        packages.ManifestDependency("pypi", "fastapi", ">=0.110", False),
+        packages.ManifestDependency("pypi", "numpy", ">=1.26", False),
+        packages.ManifestDependency("pypi", "pydantic", ">=2", False),
+        packages.ManifestDependency("pypi", "pytest", ">=8", True),
+        packages.ManifestDependency("pypi", "uvicorn", "[standard]==0.30.1", False),
+    )
+    assert found["frontend"].name == "argus-frontend"
+
+
+def test_nested_requirements_root_is_admitted_when_not_ignored(tmp_path: Path) -> None:
+    write_layout(tmp_path, ARGUS_FILES)
+
+    found = _by_path(packages.discover_manifest_packages(tmp_path, ctx=_CTX))
+
+    assert set(found) == {"backend", "backend/scratch", "frontend"}
+    assert found["backend/scratch"].name == "scratch"
+
+
+def test_same_dir_include_is_not_forwarding(tmp_path: Path) -> None:
+    write_layout(
+        tmp_path,
+        {"svc/requirements.txt": "-r requirements-base.txt\n", "svc/requirements-base.txt": "flask\n", "svc/a.py": ""},
+    )
+
+    found = _by_path(packages.discover_manifest_packages(tmp_path, ctx=_CTX))
+
+    assert [dep.name for dep in found["svc"].dependencies] == ["flask"]
+
+
+@pytest.mark.parametrize("git", [False, True])
+def test_dev_sibling_symlinked_outside_repo_is_skipped(tmp_path: Path, capsys, git: bool) -> None:
+    repo = tmp_path / "repo"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "dev.txt").write_text("pytest\n", encoding="utf-8")
+    write_layout(repo, {"svc/requirements.txt": "flask\n", "svc/a.py": ""})
+    try:
+        (repo / "svc" / "requirements-dev.txt").symlink_to(outside / "dev.txt")
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks unsupported")
+    if git:
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "test"], cwd=repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=repo, check=True)
+
+    found = _by_path(packages.discover_manifest_packages(repo, ctx=_CTX))
+
+    assert [dep.name for dep in found["svc"].dependencies] == ["flask"]
+    err = capsys.readouterr().err
+    assert err.count("warning:") == 1
+    assert "dev.txt" in err
+
+
+def test_pyproject_beside_requirements_wins(tmp_path: Path) -> None:
+    write_layout(
+        tmp_path,
+        {
+            "svc/pyproject.toml": '[project]\nname = "svc-real"\n',
+            "svc/requirements.txt": "flask\n",
+            "svc/main.py": "",
+        },
+    )
+
+    assert [m.name for m in packages.discover_manifest_packages(tmp_path, ctx=_CTX)] == ["svc-real"]
+
+
+def test_requirements_under_pyproject_package_not_admitted(tmp_path: Path) -> None:
+    write_layout(
+        tmp_path,
+        {
+            "pyproject.toml": '[project]\nname = "mono"\n',
+            "docs/requirements.txt": "sphinx\n",
+            "docs/conf.py": "",
+        },
+    )
+
+    assert [m.name for m in packages.discover_manifest_packages(tmp_path, ctx=_CTX)] == ["mono"]
+
+
+def test_requirements_root_under_package_json_is_still_admitted(tmp_path: Path) -> None:
+    """A JS-first monorepo root must not swallow a Python backend (plan deviation 1)."""
+    write_layout(
+        tmp_path,
+        {
+            "package.json": json.dumps({"name": "argus-root", "devDependencies": {"husky": "^9"}}),
+            "backend/requirements.txt": "fastapi\n",
+            "backend/app.py": "",
+        },
+    )
+
+    assert {m.name for m in packages.discover_manifest_packages(tmp_path, ctx=_CTX)} == {"argus-root", "backend"}
+
+
+def test_requirements_without_python_source_not_admitted(tmp_path: Path) -> None:
+    write_layout(tmp_path, {"docs/requirements.txt": "sphinx\n", "docs/index.md": "# docs\n"})
+
+    assert packages.discover_manifest_packages(tmp_path, ctx=_CTX) == ()
+
+
+def test_python_source_gate_honours_ignore(tmp_path: Path) -> None:
+    write_layout(tmp_path, {"svc/requirements.txt": "flask\n", "svc/gen/x.py": ""})
+
+    found = packages.discover_manifest_packages(tmp_path, ctx=_CTX, ignore=_ignore.compile_ignore(["svc/gen/**"]))
+
+    assert found == ()
+
+
+def test_repo_root_requirements_named_after_repo(tmp_path: Path) -> None:
+    write_layout(tmp_path, {"requirements.txt": "flask\n", "main.py": ""})
+
+    (found,) = packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+
+    assert (found.name, found.relative_path) == ("repo", "")
+
+
+def test_requirements_root_name_collision_falls_back_to_path(tmp_path: Path) -> None:
+    write_layout(
+        tmp_path,
+        {
+            "libs/api/pyproject.toml": '[project]\nname = "api"\n',
+            "services/api/requirements.txt": "flask\n",
+            "services/api/app.py": "",
+        },
+    )
+
+    found = _by_path(packages.discover_manifest_packages(tmp_path, ctx=_CTX))
+
+    assert found["services/api"].name == "services-api"
+
+
+@pytest.mark.parametrize(
+    ("rel", "taken", "expected"),
+    [
+        ("backend", set(), "backend"),
+        ("a/b", {"b"}, "a-b"),
+        ("backend", {"backend"}, "backend-python"),
+        ("", set(), "repo"),
+        ("", {"repo"}, "repo-python"),
+        ("backend", {"backend", "backend-python"}, "backend-python-2"),
+    ],
+)
+def test_requirements_root_name(rel: str, taken: set[str], expected: str) -> None:
+    assert packages._requirements_root_name(rel, "repo", set(taken)) == expected
+
+
+def test_uncommitted_requirements_root_is_not_discovered_in_git_repo(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=tmp_path, check=True)
+    write_layout(
+        tmp_path,
+        {
+            "backend/requirements.txt": "fastapi\n",
+            "backend/app.py": "",
+            "other/requirements.txt": "flask\n",
+            "other/x.py": "",
+        },
+    )
+    subprocess.run(["git", "add", "backend"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+    assert [m.name for m in packages.discover_manifest_packages(tmp_path, ctx=_CTX)] == ["backend"]
+
+
+def test_untracked_python_source_does_not_satisfy_gate_in_git_repo(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "test"], cwd=tmp_path, check=True)
+    write_layout(tmp_path, {"svc/requirements.txt": "flask\n", "svc/x.py": ""})
+    subprocess.run(["git", "add", "svc/requirements.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+    assert packages.discover_manifest_packages(tmp_path, ctx=_CTX) == ()
+
+
+def test_refresh_requirements_root_writes_package_and_dependencies(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    write_layout(tmp_path, ARGUS_FILES)
+    manifests = packages.discover_manifest_packages(tmp_path, ctx=_CTX, ignore=_ignore.compile_ignore(ARGUS_IGNORE))
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX, manifests=manifests)
+    dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
+
+    row = conn.execute("SELECT uri, attrs_json FROM nodes WHERE kind='package' AND path='backend'").fetchone()
+    assert row is not None
+    assert row[0] == "pkg:test/repo/backend"
+    attrs = json.loads(row[1])
+    assert attrs["dependencies"] == ["fastapi>=0.110", "numpy>=1.26", "pydantic>=2", "uvicorn[standard]==0.30.1"]
+    assert attrs["dev_dependencies"] == ["pytest"]
+    assert attrs["language"] == "python"
+    dep_uris = {r[0] for r in conn.execute("SELECT uri FROM nodes WHERE kind='dependency'").fetchall()}
+    assert {
+        "dependency:test/repo/pypi/fastapi",
+        "dependency:test/repo/pypi/uvicorn",
+        "dependency:test/repo/pypi/numpy",
+    } <= dep_uris
+    assert "dependency:test/repo/npm/react" in dep_uris
+
+
+def test_requirements_root_pruned_when_it_gains_a_pyproject(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    write_layout(tmp_path, {"backend/requirements.txt": "fastapi\n", "backend/app.py": ""})
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+    write_layout(tmp_path, {"backend/pyproject.toml": '[project]\nname = "argus-backend"\n'})
+
+    packages.refresh(
+        conn, repo_root=tmp_path, ctx=_CTX, manifests=packages.discover_manifest_packages(tmp_path, ctx=_CTX)
+    )
+
+    names = [r[0] for r in conn.execute("SELECT name FROM nodes WHERE kind='package' ORDER BY name").fetchall()]
+    assert names == ["argus-backend"]
+
+
+def test_argus_backend_gets_server_app_facet(tmp_path: Path, conn: sqlite3.Connection) -> None:
+    write_layout(tmp_path, ARGUS_FILES)
+    manifests = packages.discover_manifest_packages(tmp_path, ctx=_CTX, ignore=_ignore.compile_ignore(ARGUS_IGNORE))
+
+    packages.refresh(conn, repo_root=tmp_path, ctx=_CTX, manifests=manifests)
+
+    apps = {
+        r[0]: json.loads(r[1])
+        for r in conn.execute("SELECT path, attrs_json FROM nodes WHERE kind='app' ORDER BY path").fetchall()
+    }
+    assert apps["backend"]["app_kind"] == "server"
+    assert apps["backend"]["app_signals"] == ["server"]
+    backend_uri = conn.execute("SELECT uri FROM nodes WHERE kind='app' AND path='backend'").fetchone()[0]
+    assert backend_uri == "app:test/repo/backend"
+    assert apps["frontend"]["app_kind"] == "spa"
+    facet = conn.execute(
+        "SELECT 1 FROM edges e JOIN nodes p ON e.src=p.id JOIN nodes a ON e.dst=a.id "
+        "WHERE e.kind='facet_of' AND p.kind='package' AND a.kind='app' AND p.path='backend' AND a.path='backend'"
+    ).fetchone()
+    assert facet is not None, "Package and App facets stay separate rows joined by facet_of"

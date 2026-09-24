@@ -17,7 +17,9 @@ def _seed(db: Path):
     # nodes
     c.execute("INSERT INTO nodes (id, kind, name, path, uri) VALUES (1,'package','pkg','pkg','pkg-uri')")
     c.execute("INSERT INTO nodes (id, kind, name, path) VALUES (3,'file','a.py','pkg/a.py')")
-    c.execute("INSERT INTO nodes (id, kind, name, uri) VALUES (4,'dependency','requests','dep-uri')")
+    c.execute(
+        "INSERT INTO nodes (id, kind, name, uri) VALUES (4,'dependency','requests','dependency:o/r/pypi/requests')"
+    )
     c.execute("INSERT INTO nodes (id, kind, name, uri) VALUES (5,'test_suite','pkg-tests','ts-uri')")
     c.execute("INSERT INTO nodes (id, kind, name, path, uri) VALUES (7,'app','myapp','apps/myapp','app-uri')")
     # edges
@@ -36,7 +38,7 @@ def test_consumer_packages_includes_repository(tmp_path: Path):
         c.execute("INSERT INTO nodes (id, kind, name, path, uri) VALUES (8,'repository','repo','','repo-uri')")
         c.execute("INSERT INTO edges (src, dst, kind) VALUES (8,4,'used_by')")  # repo used_by requests
         c.commit()
-        assert store.consumer_packages(kind="dependency", entity_name="requests") == ("pkg", "repo")
+        assert store.consumer_packages(kind="dependency", entity_uri="dependency:o/r/pypi/requests") == ("pkg", "repo")
     finally:
         store.close()
 
@@ -73,7 +75,7 @@ def test_package_or_app_by_dir(tmp_path: Path):
 def test_consumer_packages(tmp_path: Path):
     store = _seed(tmp_path / "code.db")
     try:
-        assert store.consumer_packages(kind="dependency", entity_name="requests") == ("pkg",)
+        assert store.consumer_packages(kind="dependency", entity_uri="dependency:o/r/pypi/requests") == ("pkg",)
         assert store.consumer_packages(kind="test_suite", entity_uri="ts-uri") == ("pkg",)
         assert store.consumer_packages(kind="package") == ()
     finally:

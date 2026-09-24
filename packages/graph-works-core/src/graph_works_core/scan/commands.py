@@ -216,6 +216,20 @@ def _repo_entity_refs(
                 relative_root=_entity_relative_root(node),
                 head=head,
             )
+    for node in reader.list_dependencies():
+        uri = str(node.attrs.get("uri") or "")
+        if not uri or node.attrs.get("repo") != repo_uri:
+            continue
+        refs[uri] = _EntityRef(
+            uri=uri,
+            type_name="Dependency",
+            describe_kind="dependency",
+            describe_identifier=uri.removeprefix("dependency:"),
+            name=node.name,
+            repo_path=repo_cfg.path,
+            relative_root="",
+            head=head,
+        )
     refs[repo_uri] = _EntityRef(
         uri=repo_uri,
         type_name="Repository",
@@ -237,9 +251,8 @@ def entity_refs(reader: GraphReader, config: Config) -> dict[str, _EntityRef]:
     `workspace.yaml` but absent from the graph contributes nothing, matching
     `sync`'s own skip.
 
-    Dependencies are ecosystem-wide: no repo, no root, no head. They can only
-    ever be `first_fill`, which is the correct consequence of `sync` passing
-    `sha=None` for them.
+    Dependencies are repository-owned (D-004): each carries its repository's
+    path and HEAD, like every other repo-owned kind.
     """
     repo_uris = {node.name: str(node.attrs.get("uri") or "") for node in reader.list_repositories()}
     refs: dict[str, _EntityRef] = {}
@@ -248,21 +261,6 @@ def entity_refs(reader: GraphReader, config: Config) -> dict[str, _EntityRef]:
         if not repo_uri:
             continue
         refs.update(_repo_entity_refs(reader, repo_cfg, repo_uri, head_commit(repo_cfg.path)))
-    for node in reader.list_dependencies():
-        uri = str(node.attrs.get("uri") or "")
-        if not uri:
-            continue
-        ecosystem = str(node.attrs.get("ecosystem", "pypi"))
-        refs[uri] = _EntityRef(
-            uri=uri,
-            type_name="Dependency",
-            describe_kind="dependency",
-            describe_identifier=f"{ecosystem}/{node.name}",
-            name=node.name,
-            repo_path=None,
-            relative_root="",
-            head=None,
-        )
     return refs
 
 
@@ -698,10 +696,15 @@ def _still_placeholder(body: str, specs: Sequence[SectionSpec]) -> bool:
     return False
 
 
+def _index_directory(member: str) -> str:
+    """The directory whose index lists *member*: its parent, uniformly."""
+    return PurePosixPath(member).parent.as_posix()
+
+
 @dataclass(frozen=True, slots=True)
 class _Staged:
     member: str
-    lane: str
+    index_directory: str
     filled: int
     stamped: bool
 
@@ -800,7 +803,12 @@ def apply_scan_results(
             )
         )
         staged.append(
-            _Staged(member=task.page_path, lane=task.page_path.split("/", 1)[0], filled=filled, stamped=stamp)
+            _Staged(
+                member=task.page_path,
+                index_directory=_index_directory(task.page_path),
+                filled=filled,
+                stamped=stamp,
+            )
         )
 
     if dry_run:
@@ -829,7 +837,7 @@ def apply_scan_results(
     reconciled = load_bundle(bundle_root)
     update_index(
         reconciled,
-        directories=sorted({item.lane for item in landed}),
+        directories=sorted({item.index_directory for item in landed}),
         create_missing=True,
         dry_run=False,
     )

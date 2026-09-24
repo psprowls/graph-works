@@ -8,7 +8,7 @@ from okf_io import parse
 _SECTIONS_DIR = Path(__file__).parents[2] / "src" / "code_wiki_okf" / "assets" / "sections"
 
 
-_MEMBER = "repositories/acme/files/src/pkg/base.py.md"
+_MEMBER = "code-graph/acme/file-system/src/pkg/base.py.md"
 
 
 def test_write_new_page_creates_file_at_mirrored_path(tmp_path: Path) -> None:

@@ -409,7 +409,7 @@ def test_lane_of_rejects_a_token_deeper_than_its_lane() -> None:
 
 
 def test_lane_of_rejects_an_unknown_first_segment() -> None:
-    assert _lane_of("repositories/foo", _DOCS_LANES) is None
+    assert _lane_of("code-graph/foo", _DOCS_LANES) is None
     assert _lane_of("work/foo", _DOCS_LANES) is None
     assert _lane_of("docs/foo", _DOCS_LANES) is None
 

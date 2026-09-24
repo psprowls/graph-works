@@ -152,8 +152,15 @@ class GraphReader:
         return queries.describe_test_suite(self._conn, suite_name=suite_name, uri=uri)
 
     @_locked
-    def describe_dependency(self, *, ecosystem: str, name: str) -> DependencyDescription | None:
-        return queries.describe_dependency(self._conn, ecosystem=ecosystem, name=name)
+    def describe_dependency(
+        self,
+        *,
+        uri: str | None = None,
+        repo: str | None = None,
+        ecosystem: str | None = None,
+        name: str | None = None,
+    ) -> DependencyDescription | None:
+        return queries.describe_dependency(self._conn, uri=uri, repo=repo, ecosystem=ecosystem, name=name)
 
     @_locked
     def describe_builtin(self, *, language: str, module_name: str) -> BuiltinDescription | None:

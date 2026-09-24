@@ -101,7 +101,7 @@ def test_doctored_last_updated_commit_fires_stale_page(synced_bundle) -> None:
 def test_orphan_after_source_removed_regardless_of_prose_edit(synced_bundle) -> None:
     repo_root, graph_dir, bundle_root, config, _first_sha = synced_bundle
 
-    page_path = bundle_root / "repositories" / "repo-a" / "files" / "src" / "mod.py.md"
+    page_path = bundle_root / "code-graph" / "repo-a" / "file-system" / "src" / "mod.py.md"
     assert page_path.exists()
 
     # A human-authored prose edit -- `apply_mirror`'s deletion guard (see
@@ -128,7 +128,7 @@ def test_orphan_after_source_removed_regardless_of_prose_edit(synced_bundle) -> 
     report = validate(load_bundle(bundle_root), today=_TODAY, extra_rules=[sync_rule(snapshot)])
     findings = report.by_code("sync.orphan-page")
     assert len(findings) == 1
-    assert findings[0].path == "repositories/repo-a/files/src/mod.py.md"
+    assert findings[0].path == "code-graph/repo-a/file-system/src/mod.py.md"
 
 
 def test_vendored_bundles_report_zero_sync_findings() -> None:

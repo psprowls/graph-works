@@ -84,7 +84,7 @@ def _package_reference(name: str, *, repo_name: str) -> str:
     Package's OWN name (`desc.package_name`), not `desc.name`.
 
     *repo_name* is required because Package is a repo-scoped lane: the page
-    lives at `repositories/<repo>/packages/<slug>.md`, matching
+    lives at `code-graph/<repo>/entities/packages/<slug>.md`, matching
     `entities.pages.default_concept_id`. A facet always sits in the same
     repository as the Package it is faceted off, so the caller's own
     `repo_name` is the right one. Hardcoding the bundle-root `packages/`

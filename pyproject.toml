@@ -211,7 +211,7 @@ type = "layers"
 containers = ["code_graph_io"]
 exhaustive = true
 layers = [
-    "_ignore : agent_plugins : builtins : classification : csharp_projects : dependencies : entry_points : exit_codes : graphml : handle : import_scan : packages : paths : queries : records : render : repo_context : resolve : schema : source_meta : store : structural_nodes : test_suites : testing : tokens : update : upsert : uri",
+    "_ignore : agent_plugins : builtins : classification : csharp_projects : dependencies : entry_points : exit_codes : graphml : handle : import_scan : packages : paths : queries : records : render : repo_context : requirements : resolve : schema : source_meta : store : structural_nodes : test_suites : testing : tokens : update : upsert : uri",
     "parser",
 ]
 

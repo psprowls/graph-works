@@ -49,9 +49,7 @@ def _write_crlf(path: Path, text: str) -> None:
 def _commit_crlf_as_is(root: Path) -> None:
     # `-c core.autocrlf=false` so `git add` stores the CRLF bytes verbatim,
     # regardless of the host's own autocrlf configuration.
-    subprocess.run(
-        ["git", "-c", "core.autocrlf=false", "add", "-A"], cwd=root, check=True, capture_output=True
-    )
+    subprocess.run(["git", "-c", "core.autocrlf=false", "add", "-A"], cwd=root, check=True, capture_output=True)
     _git("commit", "-q", "-m", "init", cwd=root)
 
 
@@ -77,9 +75,7 @@ def test_the_same_files_are_clean_once_the_blanket_rule_applies(tmp_path: Path) 
 
 def test_a_crlf_file_under_an_allowlisted_text_prefix_is_clean(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / ".gitattributes").write_text(
-        "packages/okf-io/tests/fixtures/** -text\n", encoding="utf-8", newline=""
-    )
+    (root / ".gitattributes").write_text("packages/okf-io/tests/fixtures/** -text\n", encoding="utf-8", newline="")
     _write_crlf(root / "packages/okf-io/tests/fixtures/edge/crlf.md", "line\n")
     _commit_crlf_as_is(root)
 
@@ -88,9 +84,7 @@ def test_a_crlf_file_under_an_allowlisted_text_prefix_is_clean(tmp_path: Path) -
 
 def test_a_crlf_file_under_a_non_allowlisted_text_prefix_is_reported(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / ".gitattributes").write_text(
-        "some/other/tree/** -text\n", encoding="utf-8", newline=""
-    )
+    (root / ".gitattributes").write_text("some/other/tree/** -text\n", encoding="utf-8", newline="")
     _write_crlf(root / "some/other/tree/crlf.md", "line\n")
     _commit_crlf_as_is(root)
 
@@ -148,9 +142,7 @@ def test_main_exits_zero_on_a_clean_tree(tmp_path: Path) -> None:
 
 def test_plugin_fork_experiments_are_byte_exact_without_exempting_adjacent_source(tmp_path: Path) -> None:
     root = _repo(tmp_path)
-    (root / ".gitattributes").write_text(
-        "packages/plugin-fork-io/** -text\n", encoding="utf-8", newline=""
-    )
+    (root / ".gitattributes").write_text("packages/plugin-fork-io/** -text\n", encoding="utf-8", newline="")
     fixture = "packages/plugin-fork-io/tests/fixtures/experiments/older-local/SKILL.md"
     adjacent = {
         "packages/plugin-fork-io/src/plugin_fork_io/normal.py",

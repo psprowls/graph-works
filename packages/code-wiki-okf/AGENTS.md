@@ -113,12 +113,19 @@ Both are hard errors because routine `sync` *refuses* rather than silently
 repairs a page at the wrong canonical path.
 
 The placement matrix (also in the README, repeated here because it's the
-thing new code most often gets wrong): `repositories/<repo>/repository.md`,
-`repositories/<repo>/{packages,apps,agent-plugins,test-suites}/<slug>.md`,
-`repositories/<repo>/files/<source-path>.md`, and
-`dependencies/<ecosystem>/<slug>.md`. Top-level `packages/`, `apps/`, etc.
-are discovery indexes only — they link to the canonical repository-owned
-pages, never duplicate them. Files have no top-level lane at all.
+thing new code most often gets wrong): `code-graph/<repo>.md`,
+`code-graph/<repo>/entities/{packages,apps,agent-plugins,test-suites}/<slug>.md`,
+`code-graph/<repo>/file-system/<source-path>.md`, and
+`code-graph/<repo>/entities/dependencies/<ecosystem>/<slug>.md` (dependency nodes
+are repository-scoped, `dependency:<org>/<repo>/<ecosystem>/<name>`, so one
+page per repository; sync iterates them per repository and stamps that
+repository's HEAD sha). `placement.py` is the only module that spells this
+shape: it exports `CODE_GRAPH_LANE`, the directory helpers
+(`repository_directory`, `entities_directory`, `lane_directory`,
+`file_system_directory`) and the structural parser `entity_page()`; every
+consumer calls those rather than retyping a path. The bundle-root and
+`code-graph` indexes list repositories only; the typed groups live in each
+repository's `entities/index.md`. There is no top-level lane for any entity.
 
 ### Two independent write lanes, reconciled through one plan
 

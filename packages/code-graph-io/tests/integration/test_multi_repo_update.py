@@ -178,19 +178,10 @@ def test_root_package_entry_point_has_no_empty_uri_duplicate(tmp_path):
         assert src_uri == pkg_uri_val, f"edge src uri {src_uri!r} != canonical {pkg_uri_val!r}"
 
 
-def test_shared_external_dependency_is_one_global_node(tmp_path):
-    """Two sibling repos that BOTH declare the SAME external dependency must
-    share ONE global (repo IS NULL), uri-bearing `dependency` node — not two
-    per-repo empty-uri stubs.
-
-    Regression guard for the connection-scoped upsert identity stamping/scoping
-    dependency nodes per member. A dependency's synthetic path
-    (`dependency:<eco>:<name>`) is non-None, so without the global-kind
-    exclusion `_insert_node` stamped it with member A's repo and member B's
-    `used_by` edge endpoint missed it under the repo-scoped `_node_id` lookup —
-    forking a second empty-uri stub stamped repo=B. Those uri-less stubs later
-    crash the wiki entity writer (`short_filename: empty uri`). Mirrors the
-    StickerGiant TS monorepo e2e failure where sibling repos share npm deps.
+def test_shared_external_dependency_is_one_node_per_repository(tmp_path):
+    """Two sibling repos that both declare the same external dependency get one
+    repo-stamped, uri-bearing node each (D-004). No `used_by` edge crosses
+    repositories, and no empty-uri stub leaks.
     """
     root = tmp_path / "mono"
     root.mkdir()
@@ -205,29 +196,20 @@ def test_shared_external_dependency_is_one_global_node(tmp_path):
 
     conn = store.read_only_connect(graph_dir(ws) / "code.db")
 
-    # Exactly ONE dependency node for the shared external name.
-    dep_rows = conn.execute("SELECT repo, uri FROM nodes WHERE kind='dependency' AND name='requests'").fetchall()
-    assert len(dep_rows) == 1, f"expected 1 dependency node, got {len(dep_rows)}: {dep_rows}"
-    (dep_repo, dep_uri_val) = dep_rows[0]
-
-    # It is GLOBAL (repo IS NULL) and carries a non-empty uri.
-    assert dep_repo is None, f"shared dependency node is repo-stamped: {dep_repo!r}"
-    assert dep_uri_val, f"shared dependency node has empty uri: {dep_uri_val!r}"
-
-    # No empty-uri dependency stubs leaked anywhere.
-    empty = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND (uri IS NULL OR uri='')").fetchone()[0]
-    assert empty == 0, f"{empty} empty-uri dependency stub(s) leaked"
-
-    # Both members' package nodes point at the SAME single global dependency
-    # node via `used_by` (one shared node, not two).
-    consumers = conn.execute(
-        "SELECT s.name FROM edges e "
-        "JOIN nodes s ON s.id = e.src "
-        "JOIN nodes d ON d.id = e.dst "
-        "WHERE e.kind='used_by' AND d.kind='dependency' AND d.name='requests' "
-        "ORDER BY s.name"
+    dep_rows = conn.execute(
+        "SELECT repo, uri, attrs_json FROM nodes WHERE kind='dependency' AND name='requests' ORDER BY repo"
     ).fetchall()
-    assert [c[0] for c in consumers] == ["alpha", "beta"], f"unexpected used_by consumers: {consumers}"
+    assert [(repo, uri) for repo, uri, _attrs in dep_rows] == [
+        ("repo:local/alpha", "dependency:local/alpha/pypi/requests"),
+        ("repo:local/beta", "dependency:local/beta/pypi/requests"),
+    ]
+    empty = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND (uri IS NULL OR uri='')").fetchone()[0]
+    assert empty == 0
+    edges = conn.execute(
+        "SELECT s.repo, d.repo FROM edges e JOIN nodes s ON s.id = e.src JOIN nodes d ON d.id = e.dst "
+        "WHERE e.kind='used_by' AND d.kind='dependency'"
+    ).fetchall()
+    assert edges and all(src_repo == dst_repo for src_repo, dst_repo in edges)
 
 
 def test_cross_repo_depends_on_package(tmp_path):
@@ -241,9 +223,9 @@ def test_cross_repo_depends_on_package(tmp_path):
     update.run_workspace([a, b], graph_dir=graph_dir(ws), full=True)
 
     conn = store.read_only_connect(graph_dir(ws) / "code.db")
-    ext = conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND uri='dependency:pypi/alpha'").fetchone()[
-        0
-    ]
+    ext = conn.execute(
+        "SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND uri='dependency:local/beta/pypi/alpha'"
+    ).fetchone()[0]
     assert ext == 1
     rows = conn.execute(
         """
@@ -270,16 +252,18 @@ def test_two_workspace_implementations_share_a_dependency_facet(tmp_path):
 
     conn = store.read_only_connect(graph_dir(ws) / "code.db")
     try:
-        deps = conn.execute("SELECT uri FROM nodes WHERE kind='dependency' AND uri='dependency:pypi/shared'").fetchall()
+        deps = conn.execute(
+            "SELECT uri FROM nodes WHERE kind='dependency' AND uri LIKE 'dependency:%/pypi/shared' ORDER BY uri"
+        ).fetchall()
         implementations = conn.execute(
             "SELECT dst.uri FROM edges JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
-            "WHERE src.uri='dependency:pypi/shared' AND edges.kind='implemented_by' ORDER BY dst.uri"
+            "WHERE src.uri='dependency:local/consumer/pypi/shared' AND edges.kind='implemented_by' ORDER BY dst.uri"
         ).fetchall()
         direct = conn.execute(
             "SELECT dst.uri FROM edges JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
             "WHERE src.name='consumer' AND edges.kind='depends_on_package' ORDER BY dst.uri"
         ).fetchall()
-        assert deps == [("dependency:pypi/shared",)]
+        assert deps == [("dependency:local/consumer/pypi/shared",)]
         assert implementations == [("pkg:local/alpha/shared",), ("pkg:local/beta/shared",)]
         assert direct == [("pkg:local/alpha/shared",), ("pkg:local/beta/shared",)]
     finally:

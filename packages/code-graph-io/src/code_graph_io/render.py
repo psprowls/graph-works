@@ -496,6 +496,7 @@ def format_suite(
 def format_dependency(desc: DependencyDescription, fmt: str) -> str:
     """Format a DependencyDescription on the sectioned spine."""
     attributes = [
+        Attr.scalar("repository", "repository", desc.repository),
         Attr.scalar("ecosystem", "ecosystem", desc.ecosystem),
         Attr.joined("versions_in_use", "versions_in_use", list(desc.versions_in_use)),
         Attr.scalar("ambiguous", "ambiguous", desc.ambiguous),

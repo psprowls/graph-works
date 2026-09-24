@@ -1,6 +1,6 @@
 ---
 name: lint
-description: Use when the user says "lint the wiki" or "check the wiki", weekly, after batch ingests, or after a scan — or when they invoke /gw:lint. Runs mechanical checks (orphans, broken links, stale pages, missing frontmatter, duplicate titles, log gaps, code drift), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), and the mechanical work-lifecycle catalog over every path-native item beneath the configured OKF bundle's work/ tree, then produces a markdown report with suggested actions.
+description: Use when the user says "lint the wiki" or "check the wiki", weekly, after batch ingests, or after a scan — or when they invoke /gw:lint. Runs mechanical checks (orphans, broken links, stale pages, missing frontmatter, log gaps, code drift), semantic checks (contradictions vault↔vault and vault↔code, stale claims, concept gaps, ADR chain health, cross-reference gaps, index drift), and the mechanical work-lifecycle catalog over every path-native item beneath the configured OKF bundle's work/ tree, then produces a markdown report with suggested actions.
 ---
 
 # Health-check the wiki
@@ -90,7 +90,7 @@ and lifecycle checks. Wiki rules are composed as follows:
 | Graph-backed page sync | `sync.missing-page`, `sync.stale-page`, `sync.orphan-page`; requires a graph reader. |
 | Obsidian rendering | `render.angle-bracket`, `render.callout`, `render.wikilink`, `render.wikilink-target`, `render.table-pipe`; always included. |
 | Declared headings | `sections.missing`, `sections.unfilled`, `sections.unexpected`, `sections.no-declaration-for-type`; requires section declarations. |
-| Wiki health | `health.uncited`, `health.duplicate-title`, `health.log-gap`; always included. |
+| Wiki health | `health.uncited`, `health.log-gap`; always included. |
 | Placement, schema, vocabulary | Code-wiki placement always applies; schema and vocabulary checks require their declaration files. |
 
 Absent wiki declarations leave the corresponding checks inactive; malformed

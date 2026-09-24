@@ -29,20 +29,18 @@ _RESOURCE_PREFIXES = {
     "Dependency": "dependency",
 }
 
-_REPOSITORIES_ROOT = "repositories"
-_DEPENDENCIES_ROOT = "dependencies"
-_REPOSITORY_MEMBER = "repository"
-_FILES_LANE = "files"
+CODE_GRAPH_LANE = "code-graph"
+_ENTITIES = "entities"
+_FILE_SYSTEM = "file-system"
 
-_REPO_LANES = {
+_ENTITY_LANES = {
     "Package": "packages",
     "App": "apps",
     "TestSuite": "test-suites",
     "AgentPlugin": "agent-plugins",
+    "Dependency": "dependencies",
 }
-
-GLOBAL_LANES: tuple[str, ...] = (_DEPENDENCIES_ROOT,)
-REPOSITORIES_LANE = _REPOSITORIES_ROOT
+_TYPE_BY_LANE = {lane: type_name for type_name, lane in _ENTITY_LANES.items()}
 
 _INVALID_COMPONENT_CHARACTERS = frozenset('<>:"/\\|?*')
 _WINDOWS_RESERVED_NAMES = frozenset(
@@ -91,23 +89,53 @@ def is_code_wiki_type(type_name: str) -> bool:
     return type_name in CODE_WIKI_TYPES
 
 
-def is_entity_lane_page(concept_id: str) -> bool:
-    """Whether *concept_id* has a canonical non-File entity shape.
+@dataclass(frozen=True, slots=True)
+class EntityPage:
+    """A loaded concept ID's structural entity identity.
 
-    This is the structural half of placement ownership used where callers
-    have a loaded concept ID but not its resource. Exact resource-to-ID
-    agreement remains :func:`placement_rule`'s job.
+    `name` is the final path segment -- the slug, not the unescaped graph
+    name -- and, for a Repository page, the repository name itself.
+    """
+
+    type_name: str
+    repository: str
+    name: str
+    ecosystem: str | None = None
+
+
+def entity_page(concept_id: str) -> EntityPage | None:
+    """Parse *concept_id* by **position** into its entity identity.
+
+    Recognises exactly ``code-graph/<repo>``,
+    ``code-graph/<repo>/entities/<lane>/<slug>`` for the four repository
+    lanes, and ``code-graph/<repo>/entities/dependencies/<eco>/<slug>``.
+    Everything else -- ``file-system/`` mirrors included -- is ``None``.
+    Spelling never decides: an entity named ``repository`` or ``entities``
+    parses like any other. Exact resource-to-ID agreement remains
+    :func:`placement_rule`'s job.
     """
     parts = concept_id.split("/")
-    if any(not part for part in parts):
-        return False
-    if parts[0] == _DEPENDENCIES_ROOT:
-        return len(parts) == 3
-    if parts[0] != _REPOSITORIES_ROOT:
-        return False
-    if len(parts) == 3:
-        return parts[2] == _REPOSITORY_MEMBER
-    return len(parts) == 4 and parts[2] in _REPO_LANES.values()
+    if any(not part for part in parts) or parts[0] != CODE_GRAPH_LANE:
+        return None
+    if len(parts) == 2:
+        return EntityPage(type_name="Repository", repository=parts[1], name=parts[1])
+    if len(parts) < 5 or parts[2] != _ENTITIES:
+        return None
+    type_name = _TYPE_BY_LANE.get(parts[3])
+    if type_name is None:
+        return None
+    if type_name == "Dependency":
+        if len(parts) != 6:
+            return None
+        return EntityPage(type_name=type_name, repository=parts[1], name=parts[5], ecosystem=parts[4])
+    if len(parts) != 5:
+        return None
+    return EntityPage(type_name=type_name, repository=parts[1], name=parts[4])
+
+
+def is_entity_lane_page(concept_id: str) -> bool:
+    """Whether *concept_id* has a canonical non-File entity shape."""
+    return entity_page(concept_id) is not None
 
 
 def _malformed(resource: str, reason: str) -> PlacementError:
@@ -128,11 +156,11 @@ def _repo_member_identity(resource: str, payload: str, *, member: str) -> tuple[
     return parts[0], parts[1], parts[2]
 
 
-def _dependency_identity(resource: str, payload: str) -> tuple[str, str]:
-    parts = payload.split("/", 1)
-    if len(parts) != 2 or not parts[0] or not parts[1]:
-        raise _malformed(resource, "expected <ecosystem>/<name>")
-    return parts[0], parts[1]
+def _dependency_identity(resource: str, payload: str) -> tuple[str, str, str, str]:
+    parts = payload.split("/", 3)
+    if len(parts) != 4 or not all(parts):
+        raise _malformed(resource, "expected <organization>/<repository>/<ecosystem>/<name>")
+    return parts[0], parts[1], parts[2], parts[3]
 
 
 def context_from_resource(type_name: str, resource: str) -> PlacementContext:
@@ -157,8 +185,10 @@ def context_from_resource(type_name: str, resource: str) -> PlacementContext:
         return PlacementContext(type_name=type_name, resource=resource, repository=repository)
 
     if type_name == "Dependency":
-        ecosystem, name = _dependency_identity(resource, payload)
-        return PlacementContext(type_name=type_name, resource=resource, name=name, ecosystem=ecosystem)
+        _organization, repository, ecosystem, name = _dependency_identity(resource, payload)
+        return PlacementContext(
+            type_name=type_name, resource=resource, repository=repository, ecosystem=ecosystem, name=name
+        )
 
     member = "source-path" if type_name == "File" else "name"
     _organization, repository, identity = _repo_member_identity(resource, payload, member=member)
@@ -230,36 +260,57 @@ def _safe_source_path(value: str, *, resource: str) -> str:
     return "/".join(_safe_component(part, resource=resource) for part in PurePosixPath(value).parts)
 
 
+def repository_directory(repository: str) -> str:
+    """``code-graph/<repo>``: the directory beside the Repository page."""
+    return f"{CODE_GRAPH_LANE}/{_safe_component(repository, resource=f'{CODE_GRAPH_LANE}/{repository}')}"
+
+
+def entities_directory(repository: str) -> str:
+    """``code-graph/<repo>/entities``."""
+    return f"{repository_directory(repository)}/{_ENTITIES}"
+
+
+def file_system_directory(repository: str) -> str:
+    """``code-graph/<repo>/file-system``: the File mirror lane."""
+    return f"{repository_directory(repository)}/{_FILE_SYSTEM}"
+
+
+def lane_directory(repository: str, type_name: str, *, ecosystem: str | None = None) -> str:
+    """One entity lane under ``entities/``; a Dependency may add its ecosystem."""
+    lane = _ENTITY_LANES.get(type_name)
+    base = entities_directory(repository)
+    if lane is None:
+        raise PlacementError(resource=f"{base}/?", reason=f"{type_name} has no entity lane")
+    directory = f"{base}/{lane}"
+    if type_name == "Dependency" and ecosystem is not None:
+        directory = f"{directory}/{_safe_component(ecosystem, resource=f'{directory}/{ecosystem}')}"
+    return directory
+
+
 def canonical_concept_id(context: PlacementContext) -> str:
     """Return the exact bundle concept ID dictated by *context.resource*."""
     context = _validated_context(context)
     resource = context.resource
+    repository = _safe_component(
+        _required(context.repository, resource=resource, field="repository"), resource=resource
+    )
 
     if context.type_name == "Repository":
-        repository = _safe_component(
-            _required(context.repository, resource=resource, field="repository"), resource=resource
-        )
-        return f"{_REPOSITORIES_ROOT}/{repository}/{_REPOSITORY_MEMBER}"
-    if context.type_name in _REPO_LANES:
-        repository = _safe_component(
-            _required(context.repository, resource=resource, field="repository"), resource=resource
-        )
-        name = _slug(_required(context.name, resource=resource, field="name"), resource=resource)
-        return "/".join((_REPOSITORIES_ROOT, repository, _REPO_LANES[context.type_name], name))
+        return repository_directory(repository)
     if context.type_name == "File":
-        repository = _safe_component(
-            _required(context.repository, resource=resource, field="repository"), resource=resource
-        )
         source = _safe_source_path(
             _required(context.source_path, resource=resource, field="source path"), resource=resource
         )
-        return f"{_REPOSITORIES_ROOT}/{repository}/{_FILES_LANE}/{source}"
+        return f"{file_system_directory(repository)}/{source}"
     if context.type_name == "Dependency":
         ecosystem = _safe_component(
             _required(context.ecosystem, resource=resource, field="ecosystem"), resource=resource
         )
         name = _slug(_required(context.name, resource=resource, field="name"), resource=resource)
-        return f"{_DEPENDENCIES_ROOT}/{ecosystem}/{name}"
+        return f"{lane_directory(repository, 'Dependency', ecosystem=ecosystem)}/{name}"
+    if context.type_name in _ENTITY_LANES:
+        name = _slug(_required(context.name, resource=resource, field="name"), resource=resource)
+        return f"{lane_directory(repository, context.type_name)}/{name}"
     raise PlacementError(resource=resource, reason=f"unsupported code-wiki type {context.type_name}")
 
 
@@ -283,14 +334,17 @@ def filesystem_member_identity(member: str) -> str:
 def affected_directories(context: PlacementContext) -> tuple[str, ...]:
     """Return ordered directory IDs whose indexes a canonical member affects.
 
-    Repository-owned members start at their repository root; the bundle-wide
-    ``repositories`` catalog remains separately owned.  Dependencies retain
-    their bundle-wide lane index and add their ecosystem directory.
+    Every member affects each directory from ``code-graph/<repo>`` down to
+    its own parent. The Repository page (``code-graph/<repo>``) affects
+    ``code-graph/<repo>`` alone -- the stub index there links it. The
+    bundle-root and ``code-graph`` indexes stay catalog-owned and are never
+    returned.
     """
     concept_id = canonical_concept_id(context)
+    if context.type_name == "Repository":
+        return (concept_id,)
     parts = concept_id.split("/")[:-1]
-    first_depth = 2 if context.type_name != "Dependency" else 1
-    return tuple("/".join(parts[:depth]) for depth in range(first_depth, len(parts) + 1))
+    return tuple("/".join(parts[:depth]) for depth in range(2, len(parts) + 1))
 
 
 def placement_rule(*, severity: Literal["error", "warning"] = "error") -> Rule:
@@ -353,17 +407,22 @@ def placement_rule(*, severity: Literal["error", "warning"] = "error") -> Rule:
 
 
 __all__ = [
+    "CODE_GRAPH_LANE",
     "CODE_WIKI_TYPES",
-    "GLOBAL_LANES",
-    "REPOSITORIES_LANE",
+    "EntityPage",
     "PlacementContext",
     "PlacementError",
     "affected_directories",
     "canonical_concept_id",
     "canonical_member",
     "context_from_resource",
+    "entities_directory",
+    "entity_page",
+    "file_system_directory",
     "filesystem_member_identity",
     "is_code_wiki_type",
     "is_entity_lane_page",
+    "lane_directory",
     "placement_rule",
+    "repository_directory",
 ]

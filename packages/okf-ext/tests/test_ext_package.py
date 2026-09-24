@@ -67,8 +67,11 @@ def test_version_is_static_and_pinned():
     nothing observable changes -- additive, so a patch too.
 
     `0.4.14` prevents lossy proposal body regeneration with an explicit
-    refusal; safe merges keep their behavior, so this is a safety patch."""
-    assert okf_ext.__version__ == "0.4.14"
+    refusal; safe merges keep their behavior, so this is a safety patch.
+
+    `0.5.0` removes `health.duplicate-title` (`health.CODES` shrinks from
+    three codes to two) -- a public-surface removal, so a minor."""
+    assert okf_ext.__version__ == "0.5.0"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

@@ -78,7 +78,7 @@ Gotchas that span several files:
   (currently 3) gates whether the on-disk DB shape matches what this build's
   code expects at all — a mismatch raises `SchemaMismatchError` and refuses
   to open unless `full=True`, which drops and recreates `code.db`.
-  `schema.DERIVER_VERSION` (currently 11) tracks *derivation logic* changes
+  `schema.DERIVER_VERSION` (currently 12) tracks *derivation logic* changes
   (classification rules, derived-edge rules, new attrs) that don't change the
   table shape but do make existing rows stale; a mismatch there silently
   forces `full=True` on the next `run_workspace()` call instead of raising.
@@ -103,6 +103,28 @@ Gotchas that span several files:
   Every other emitter (`structural_nodes`, `agent_plugins`, `entry_points`,
   `test_suites`) runs *after* the purge and gets pruning for free. Reordering
   any of this silently reintroduces either false deletions or orphaned nodes.
+- **A Python package is a `pyproject.toml` with `[project].name` OR a
+  requirements root.** `packages._discover_requirements_roots` admits a
+  tracked `requirements.txt` directory (named after the directory, or the
+  repo at the root, with a deterministic path-based fallback on collision)
+  unless it is at or under an admitted `pyproject.toml`, has no Python
+  source, or is a forwarding file (no lines of its own, only `-r` includes
+  into subdirectories). A `package.json` directory does not suppress one.
+  Includes are read by `requirements.py` (cycle-safe, `-c` not followed,
+  UTF-16 BOM decoded); dev-named files (`requirements-dev.txt`, …) feed the
+  `dev` group. The root flows through `refresh`/`dependencies`/`test_suites`
+  as an ordinary `ManifestPackage` — there is no parallel path.
+- **Python `server` apps need two pieces of evidence.** `classify` emits
+  `server` only for a runtime server dependency (fastapi, flask, django, …)
+  *plus* a top-level entry file (`app.py`, `main.py`, `manage.py`, …) whose
+  first 64 KiB instantiates or runs the server. A dependency alone is not
+  an App. `_FRAMEWORK_PRECEDENCE` and `queries._VALID_APP_KINDS` must list
+  the same kinds.
+- **Pytest configs are read wherever they are**, not only in admitted
+  packages: `test_suites._pytest_config_dirs` finds every tracked
+  `pytest.ini`/`pyproject.toml`, and a declared test root attaches to its
+  owning Package or, failing that, the Repository. `pytest.ini` `testpaths`
+  is still read with a single-line regex (multi-line values are missed).
 - **The strict-tree invariant is always checked, once, at the very end.**
   `physically_contains` must form a tree — no node may have more than one
   such parent edge. `_enforce_strict_tree_invariant` runs inside the same

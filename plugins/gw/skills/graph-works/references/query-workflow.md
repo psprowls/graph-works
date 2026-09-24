@@ -32,8 +32,8 @@ This is the `claude_code`-backend default (the one `gw query` runs unless a work
 Scan the index and pick the 3-10 pages most likely to contain the answer, from `top_pages` and the index together. A good monorepo query usually pulls across categories:
 
 - `docs/explanations/` — for cross-cutting patterns and high-level syntheses; filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns
-- `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — for specific package/app surface area
-- `dependencies/<ecosystem>/` for "how do we use X library" questions
+- `code-graph/<repo>/entities/packages/`, `code-graph/<repo>/entities/apps/` — for specific package/app surface area
+- `code-graph/<repo>/entities/dependencies/<ecosystem>/` for "how do we use X library" questions
 - `work/` for "why does X fail / what's planned / what's in progress"
 - `adrs/` for "why did we do it this way"
 - `sources/` for evidence and original context
@@ -56,7 +56,7 @@ Format:
 - **Direct answer** — 1-3 sentences
 - **Supporting detail** — organized thematically
 - **Inline citations** — mix of:
-  - wiki page links: `[xxx](/repositories/<repo>/packages/xxx.md)`, `[yyy](/sources/yyy.md)`
+  - wiki page links: `[xxx](/code-graph/<repo>/entities/packages/xxx.md)`, `[yyy](/sources/yyy.md)`
   - code paths with line numbers: `` `packages/foo/src/bar.ts:42` ``
 - **Related pages** — 3-5 links at the end
 

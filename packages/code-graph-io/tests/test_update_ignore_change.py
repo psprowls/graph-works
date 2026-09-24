@@ -30,7 +30,7 @@ def _seed_repo_with_a_package_worth_ignoring(tmp_path: Path) -> None:
     write_and_commit(
         tmp_path,
         {
-            "pyproject.toml": '[project]\nname = "realpkg"\nversion = "0.1.0"\n',
+            "pyproject.toml": '[project]\nname = "realpkg"\nversion = "0.1.0"\ndependencies = ["requests"]\n',
             "src/realpkg/__init__.py": "",
             "src/realpkg/keep.py": "def keep_me():\n    return 1\n",
             "pkg/pyproject.toml": genpkg_toml,
@@ -107,10 +107,11 @@ def test_ignored_manifest_yields_no_dependency_node(tmp_path: Path) -> None:
     conn = _ro(tmp_path)
     try:
         assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='genpkg'").fetchone()[0] == 0
-        # The un-ignored sibling manifest still gets its own dependency node —
+        # The un-ignored sibling manifest still declares a dependency, so that
+        # node exists (a node exists only where something declares it) —
         # proves the absence above is the ignore glob at work, not a
         # collateral break of dependency reconciliation itself.
-        assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='realpkg'").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency' AND name='requests'").fetchone()[0] == 1
     finally:
         conn.close()
 

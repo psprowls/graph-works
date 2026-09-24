@@ -146,7 +146,7 @@ back files.
 `RuleContext.scope` — and `validate(scope=)`, which sets it — is one of
 okf-io's extension points (see the root `AGENTS.md`): a `frozenset[str] | None`
 of bundle-relative member paths that constrains *per-document* iteration only.
-A rule reasoning across documents (`links.broken`, a duplicate-title grouping)
+A rule reasoning across documents (`links.broken`, `identity.canonical-collision`)
 must still read the whole bundle regardless of scope, or it would report an
 artifact of the scope rather than the bundle. `validate(links=)` is a related
 but separate parameter — passing a pre-built `LinkGraph` is an optimisation

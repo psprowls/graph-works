@@ -23,6 +23,7 @@ chose.
 from __future__ import annotations
 
 from code_graph_io import GraphReader, NodeRecord, exit_codes, render
+from code_graph_io.uri import dependency_identifier_from_path
 
 #: Every kind `_describe` renders. `builtin` is last on purpose: it is the
 #: fall-through, so there is no `if kind == "builtin"` branch that can never
@@ -61,7 +62,7 @@ def _identifier_for(match: NodeRecord) -> str:
     if match.kind == "file":
         return match.path  # type: ignore[return-value]  # file nodes always carry a path
     if match.kind == "dependency":
-        return f"{match.attrs.get('ecosystem', 'pypi')}/{match.name}"
+        return dependency_identifier_from_path(match.path or "") or match.name
     if match.kind == "builtin":
         return f"builtin:{match.path}/{match.name}"
     return match.name
@@ -157,13 +158,17 @@ def _describe(
         return exit_codes.SUCCESS, render.format_entry_point(entry, fmt), ""
 
     if kind == "dependency":
-        # No ecosystem argument reaches here, so the `ecosystem/name` prefix
-        # carries it and a bare name means pypi.
-        if "/" in identifier:
-            ecosystem, _, dep_name = identifier.partition("/")
-        else:
-            ecosystem, dep_name = "pypi", identifier
-        dependency = reader.describe_dependency(ecosystem=ecosystem, name=dep_name)
+        # `<org>/<repo>/<ecosystem>/<name>`: org, repo and ecosystem never hold
+        # `/`, so a scoped npm name survives `split("/", 3)`. No default
+        # ecosystem -- a malformed identifier is reported, not guessed.
+        parts = identifier.split("/", 3)
+        if len(parts) != 4 or not all(parts):
+            return (
+                exit_codes.GENERIC,
+                "",
+                f"error: malformed dependency identifier: {identifier} (expected <org>/<repo>/<ecosystem>/<name>)",
+            )
+        dependency = reader.describe_dependency(uri=f"dependency:{identifier}")
         if dependency is None:
             return exit_codes.GENERIC, "", f"error: dependency not found: {identifier}"
         return exit_codes.SUCCESS, render.format_dependency(dependency, fmt), ""

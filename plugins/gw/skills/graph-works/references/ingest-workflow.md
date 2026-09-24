@@ -14,7 +14,7 @@ Sources are read from any filesystem path:
 ## Inputs
 
 - Path to a source file. Any filesystem path, or repo-relative for in-repo docs.
-- The current state of `<workspace>/okf/` (especially `index.md`, relevant `repositories/`, `docs/explanations/`, `docs/reference/`)
+- The current state of `<workspace>/okf/` (especially `index.md`, relevant `code-graph/`, `docs/explanations/`, `docs/reference/`)
 
 ## Step-by-step
 
@@ -78,7 +78,7 @@ Path: `<workspace>/okf/sources/<YYYY-MM>-<slug>.md`. Required frontmatter per `.
 
 ### 5. Link the code entities (never edit entity pages)
 
-For each code entity (package, app, dependency) the source touches, add a root-absolute markdown link — `[<name>](/repositories/<repo>/<kind-folder>/<name>.md)` — under the source summary's `## Touches` section. Entity pages are scanner-owned — **do not edit them**. The scanner regenerates each entity's reciprocal reference from these forward-links on the next `/gw:scan`. Set the source page's `entity_uri:` frontmatter to the primary/canonical entity's URI from `entity_match.uri` in the brief (or `null` if none).
+For each code entity (package, app, dependency) the source touches, add a root-absolute markdown link — `[<name>](/code-graph/<repo>/entities/<kind-folder>/<name>.md)` — under the source summary's `## Touches` section. Entity pages are scanner-owned — **do not edit them**. The scanner regenerates each entity's reciprocal reference from these forward-links on the next `/gw:scan`. Set the source page's `entity_uri:` frontmatter to the primary/canonical entity's URI from `entity_match.uri` in the brief (or `null` if none).
 
 ### 6. Update / create explanation and reference pages
 

@@ -274,7 +274,9 @@ def render_evidence(
     if not normalization:
         out.append("none")
     else:
-        out.extend(f"- `{cluster.canonical}` <- {', '.join(f'`{m}`' for m in cluster.members)}" for cluster in normalization)
+        out.extend(
+            f"- `{cluster.canonical}` <- {', '.join(f'`{m}`' for m in cluster.members)}" for cluster in normalization
+        )
     out += [
         "",
         "## Quarantine",
@@ -328,7 +330,9 @@ def gate_failures(vocab_path: Path) -> list[str]:
 
     for definition in CONTRIBUTED_TAGS:
         if definition.name not in vocab.known:
-            failures.append(f"quarantine: `{definition.name}` is missing; it is the package route's, not yours to remove")
+            failures.append(
+                f"quarantine: `{definition.name}` is missing; it is the package route's, not yours to remove"
+            )
             continue
         is_deprecated = definition.name in vocab.deprecated
         if is_deprecated != definition.deprecated:
@@ -348,9 +352,7 @@ def gate_failures(vocab_path: Path) -> list[str]:
     if not plan.ok:
         failures.extend(f"plan_vocabulary_merge refused: {refusal.kind}: {refusal.error}" for refusal in plan.refusals)
     if not plan.is_empty:
-        failures.append(
-            f"plan_vocabulary_merge would still add {list(plan.added)}; the two routes have not converged"
-        )
+        failures.append(f"plan_vocabulary_merge would still add {list(plan.added)}; the two routes have not converged")
     return failures
 
 

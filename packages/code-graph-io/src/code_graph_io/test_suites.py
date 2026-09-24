@@ -3,7 +3,8 @@
 Discovers test root directories from filesystem layout (conventional
 tests/, __tests__/ and package-local equivalents) and framework config
 (pyproject [tool.pytest.ini_options] testpaths, pytest.ini, jest/vitest
-'roots'). Emits one TestSuite per root, re-parents every is_test=true
+'roots'; pytest.ini/pyproject testpaths from any directory holding one,
+package or not). Emits one TestSuite per root, re-parents every is_test=true
 File node from Repository to its suite, and derives tests edges from
 import scans of the test files.
 
@@ -22,17 +23,15 @@ import re
 import sqlite3
 import sys
 import tomllib
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from code_graph_io import _ignore, upsert
 from code_graph_io.import_scan import scan_files_imports
 from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
-from code_graph_io.structural_nodes import (
-    _owning_package,
-)
+from code_graph_io.structural_nodes import _owning_package, _tracked_files
 from code_graph_io.uri import RepoContext, repo_uri, test_suite_uri
 
 # --- Module-private constants ---
@@ -51,7 +50,9 @@ _UNIT_FILENAME_GLOBS = (
     "*_test.ts",
 )
 
-_PYTEST_INI_FILENAMES = frozenset({"pytest.ini"})
+# Files whose presence makes a directory a pytest-config dir, whether or not a
+# Package was admitted there. _read_pytest_testpaths reads both.
+_PYTEST_CONFIG_FILENAMES = frozenset({"pytest.ini", "pyproject.toml"})
 _JS_TEST_CONFIG_GLOBS = ("jest.config.*", "vitest.config.*")
 
 
@@ -104,6 +105,35 @@ def _read_pytest_testpaths(pkg_dir: Path) -> Iterable[list[str]]:
             print(f"[test_suites] warning: {ini} unreadable: {exc}", file=sys.stderr)
 
 
+def _pytest_config_dirs(
+    repo_root: Path,
+    skip_dirs: frozenset[str],
+    ignore: _ignore.IgnoreSpec | None,
+) -> list[str]:
+    """Repo-relative dirs holding a pytest-capable config, tracked-gated.
+
+    Independent of package admission: a ``pytest.ini`` in a directory that
+    is not a Package (or a tool-only ``pyproject.toml``) still declares test
+    roots. With no git context this falls back to a filesystem walk, like
+    ``structural_nodes.emit``.
+    """
+    tracked = _tracked_files(repo_root)
+    if tracked:
+        rels = [rel for rel in tracked if PurePosixPath(rel).name in _PYTEST_CONFIG_FILENAMES]
+    else:
+        rels = [
+            path.relative_to(repo_root).as_posix()
+            for filename in sorted(_PYTEST_CONFIG_FILENAMES)
+            for path in repo_root.rglob(filename)
+        ]
+    dirs = {
+        "" if (parent := PurePosixPath(rel).parent.as_posix()) == "." else parent
+        for rel in rels
+        if not _ignore.should_skip(rel, skip_dirs, ignore)
+    }
+    return sorted(dirs)
+
+
 def _classify_suite_kind(suite_rel: str, file_rels: list[str]) -> str:
     """kind classification: dir-name precedence then filename fallback."""
     parts = suite_rel.lower().split("/")
@@ -130,6 +160,8 @@ def _discover_test_roots(
     skip_dirs: frozenset[str],
     pkg_rows: list[tuple[str, str | None, str | None]],
     ignore: _ignore.IgnoreSpec | None = None,
+    *,
+    config_dirs: Sequence[str] = (),
 ) -> list[_TestRoot]:
     """Discover conventional + config-declared test root directories.
 
@@ -142,6 +174,9 @@ def _discover_test_roots(
       - pyproject [tool.pytest.ini_options] testpaths -> additional roots
         relative to the Package directory.
       - pytest.ini [pytest] testpaths via single-line regex.
+      - the same, read from every directory in *config_dirs* (a pytest config in
+        a dir that is not a Package attaches to the owning Package if any, else
+        the Repository).
     """
     roots: list[_TestRoot] = []
     seen: set[str] = set()
@@ -207,34 +242,37 @@ def _discover_test_roots(
                     language=lang,
                 )
 
-    # Config-driven roots — pyproject testpaths.
+    # Config-driven roots — pytest testpaths, from Python packages AND from any
+    # directory holding a pytest config, admitted as a package or not.
     pkg_index = _build_pkg_index(pkg_rows)
-    for _pkg_name, pkg_rel, pkg_attrs_json in pkg_rows:
-        pkg_attrs = json.loads(pkg_attrs_json) if pkg_attrs_json else {}
-        lang = pkg_attrs.get("language")
-        pkg_dir = (repo_root / pkg_rel) if pkg_rel else repo_root
-        if lang == "python":
-            for cfg_paths in _read_pytest_testpaths(pkg_dir):
-                for tp_rel in cfg_paths:
-                    full = (pkg_dir / tp_rel).resolve()
-                    try:
-                        rel = full.relative_to(repo_root).as_posix()
-                    except ValueError:
-                        continue
-                    if not full.is_dir():
-                        continue
-                    owner = _owning_package(rel, pkg_index)
-                    if owner is None:
-                        _add(rel, "repository", language="python")
-                    else:
-                        own_name, own_rel = owner
-                        _add(
-                            rel,
-                            "package",
-                            owner_name=own_name,
-                            owner_pkg_rel=own_rel,
-                            language="python",
-                        )
+    python_pkg_dirs = {
+        pkg_rel or ""
+        for _pkg_name, pkg_rel, pkg_attrs_json in pkg_rows
+        if (json.loads(pkg_attrs_json) if pkg_attrs_json else {}).get("language") == "python"
+    }
+    for dir_rel in sorted(python_pkg_dirs | set(config_dirs)):
+        cfg_dir = (repo_root / dir_rel) if dir_rel else repo_root
+        for cfg_paths in _read_pytest_testpaths(cfg_dir):
+            for tp_rel in cfg_paths:
+                full = (cfg_dir / tp_rel).resolve()
+                try:
+                    rel = full.relative_to(repo_root).as_posix()
+                except ValueError:
+                    continue
+                if not full.is_dir():
+                    continue
+                owner = _owning_package(rel, pkg_index)
+                if owner is None:
+                    _add(rel, "repository", language="python")
+                else:
+                    own_name, own_rel = owner
+                    _add(
+                        rel,
+                        "package",
+                        owner_name=own_name,
+                        owner_pkg_rel=own_rel,
+                        language="python",
+                    )
 
     return roots
 
@@ -268,7 +306,8 @@ def emit(
     # the right kind. Now always "package" per the scoped query above.
     pkg_kind_map: dict[str, str] = {r[0]: r[3] for r in pkg_rows_raw}
 
-    roots = _discover_test_roots(repo_root, skip_dirs, pkg_rows, ignore)
+    config_dirs = _pytest_config_dirs(repo_root, skip_dirs, ignore)
+    roots = _discover_test_roots(repo_root, skip_dirs, pkg_rows, ignore, config_dirs=config_dirs)
 
     # Map each TestRoot's rel_path -> list of test File rel-paths it owns.
     root_files: dict[str, list[str]] = {r.rel_path: [] for r in roots}

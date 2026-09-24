@@ -68,8 +68,8 @@ This is the `claude_code`-backend default — it returns a `top_pages` list, eac
 
 Pick 3-10 pages across categories most likely to contain the answer:
 - `docs/explanations/` — cross-cutting patterns and high-level syntheses (filter by the `architecture` tag for big-picture questions, `pattern` for reusable patterns)
-- `repositories/<repo>/packages/`, `repositories/<repo>/apps/` — package/app surface area
-- `dependencies/<ecosystem>/` — external-library questions
+- `code-graph/<repo>/entities/packages/`, `code-graph/<repo>/entities/apps/` — package/app surface area
+- `code-graph/<repo>/entities/dependencies/<ecosystem>/` — external-library questions
 - `work/` — bug / tech-debt / planned / in-progress questions
 - `adrs/` — "why did we do it this way"
 - `sources/` — evidence and original context

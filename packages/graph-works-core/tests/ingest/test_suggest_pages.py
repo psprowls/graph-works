@@ -138,23 +138,27 @@ def test_an_unparseable_rank_and_confidence_fall_back():
     assert parsed[0]["confidence"] == "medium"
 
 
-def test_catalog_lanes_covers_global_discovery_indexes_but_not_a_top_level_files_lane(tmp_path):
+def test_catalog_lanes_are_the_proposal_lanes_plus_code_graph_and_sources(tmp_path):
     root = make_bundle(tmp_path)
     schema_set, _section_set = declarations(root)
-    lanes = set(catalog_lanes(lane_set(schema_set), schema_set))
+    proposal_lanes = lane_set(schema_set)
+    lanes = catalog_lanes(proposal_lanes, schema_set)
 
-    assert {
+    expected = tuple(
+        dict.fromkeys((*(lane.directory.rstrip("/") for lane in proposal_lanes.lanes), "code-graph", "sources"))
+    )
+    assert lanes == expected
+    for absent in (
         "repositories",
         "packages",
         "apps",
         "agent-plugins",
         "test-suites",
         "dependencies",
-        "docs/explanations",
-        "adrs",
-        "sources",
-    } <= lanes
-    assert "files" not in lanes
+        "files",
+        "file-system",
+    ):
+        assert absent not in lanes
 
 
 def test_the_curated_index_lists_existing_pages_with_their_lane(tmp_path):

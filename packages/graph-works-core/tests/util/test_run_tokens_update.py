@@ -246,7 +246,7 @@ def test_the_entity_lane_is_reached_by_the_bundle_walk(tmp_path):
             at=datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
         )
 
-    pkg_page = bundle_root / "repositories/repo-a/packages/widgets.md"
+    pkg_page = bundle_root / "code-graph/repo-a/entities/packages/widgets.md"
     assert "tokens:" not in pkg_page.read_text(encoding="utf-8")
 
     layout = WorkspaceLayout(
@@ -259,5 +259,5 @@ def test_the_entity_lane_is_reached_by_the_bundle_walk(tmp_path):
 
     update = run_tokens_update(layout, dry_run=False)
 
-    assert "repositories/repo-a/packages/widgets" in [stamp.page for stamp in update.updated]
+    assert "code-graph/repo-a/entities/packages/widgets" in [stamp.page for stamp in update.updated]
     assert "tokens: " in pkg_page.read_text(encoding="utf-8")

@@ -32,7 +32,7 @@ def test_describe_covers_every_one_of_the_nine_kinds(reader):
         ("path", "packages/widgets/src/a.py", "packages/widgets/src/a.py"),
         ("test_suite", "tests", "test_suite tests"),
         ("entry_point", "widgets:demo-cli", "demo-cli"),
-        ("dependency", "requests", "dependency requests"),
+        ("dependency", "acme/demo/pypi/requests", "dependency requests"),
         ("agent_plugin", "demo-plugin", "agent_plugin demo-plugin"),
         ("builtin", "python/json", "builtin json"),
     ]
@@ -70,7 +70,7 @@ def test_unknown_kind_is_generic_and_names_the_valid_set(reader):
         ("path", "no/such/file.py"),
         ("test_suite", "absent"),
         ("dependency", "absent"),
-        ("dependency", "npm/absent"),
+        ("dependency", "acme/demo/npm/absent"),
         ("agent_plugin", "absent"),
         ("builtin", "python/absent"),
         ("entry_point", "widgets:absent"),
@@ -96,10 +96,19 @@ def test_a_builtin_uri_prefix_is_accepted(reader):
     assert "builtin json" in out
 
 
-def test_a_bare_dependency_name_defaults_to_pypi(reader):
-    code, out, _ = graph_tools._describe(reader, "dependency", "requests")
+def test_a_scoped_dependency_identifier_describes_the_node(reader):
+    code, out, _ = graph_tools._describe(reader, "dependency", "acme/demo/pypi/requests")
     assert code == exit_codes.SUCCESS
     assert "pypi" in out
+    assert "repository:" in out and "repo:acme/demo" in out
+
+
+@pytest.mark.parametrize("identifier", ["requests", "pypi/requests", "acme/demo/pypi/", "//pypi/x"])
+def test_a_malformed_dependency_identifier_is_a_usage_error(reader, identifier):
+    code, out, err = graph_tools._describe(reader, "dependency", identifier)
+    assert code == exit_codes.GENERIC
+    assert out == ""
+    assert "malformed dependency identifier" in err
 
 
 def test_an_ambiguous_bare_entry_point_is_ambiguous_seven(reader):
@@ -315,12 +324,11 @@ def test_kind_none_infers_file_kind_and_uses_path_identifier(reader):
 
 def test_kind_none_infers_dependency_kind_and_uses_ecosystem_name_identifier(reader):
     """When kind=None resolves to a single dependency match, _identifier_for
-    constructs the ecosystem/name identifier."""
+    constructs the org/repo/ecosystem/name identifier."""
     # Selector "requests" resolves to exactly one dependency node
     inferred = graph_tools._describe(reader, None, "requests")
-    # Should match the explicit kind="dependency" call with the bare name
-    # (which defaults to pypi ecosystem)
-    explicit = graph_tools._describe(reader, "dependency", "requests")
+    # Should match the explicit kind="dependency" call with the scoped identifier
+    explicit = graph_tools._describe(reader, "dependency", "acme/demo/pypi/requests")
     assert inferred == explicit
 
 
@@ -356,3 +364,41 @@ def test_describe_symbol_in_package_reaches_the_dispatch(reader):
     assert code == exit_codes.SUCCESS
     assert "packages/widgets/src/b.py" in out
     assert "apps/console/src/index.ts" not in out
+
+
+def test_a_scoped_npm_dependency_round_trips_through_identifier_and_describe(tmp_path: Path):
+    from code_graph_io import upsert
+    from code_graph_io.records import GraphNode, GraphRecords
+    from code_graph_io.testing import raw_conn
+
+    db_dir = tmp_path / "graph"
+    db_dir.mkdir()
+    conn = raw_conn(db_dir / "code.db", create=True)
+    try:
+        upsert.upsert_records(
+            conn,
+            GraphRecords(
+                nodes=[
+                    GraphNode(
+                        kind="dependency",
+                        name="@scope/pkg",
+                        path="dependency:o/r:npm:@scope/pkg",
+                        line=None,
+                        attrs={"ecosystem": "npm", "name": "@scope/pkg", "uri": "dependency:o/r/npm/@scope/pkg"},
+                    )
+                ],
+                edges=[],
+            ),
+        )
+    finally:
+        conn.close()
+    handle = open_reader(graph_dir=db_dir)
+    try:
+        match = next(m for m in handle.find(name="@scope/pkg") if m.kind == "dependency")
+        identifier = graph_tools._identifier_for(match)
+        assert identifier == "o/r/npm/@scope/pkg"
+        code, out, _ = graph_tools._describe(handle, "dependency", identifier)
+    finally:
+        handle.close()
+    assert code == exit_codes.SUCCESS
+    assert "dependency @scope/pkg" in out

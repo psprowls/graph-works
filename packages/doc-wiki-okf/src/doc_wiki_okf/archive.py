@@ -188,7 +188,7 @@ def _lane_of(token: str, lanes: Sequence[str]) -> str | None:
     A token is `<lane>/<slug>`: the longest member of *lanes* that prefixes
     *token*, with exactly one path segment left over. A bare word, a token
     deeper than its lane (`"docs/explanations/a/b"`), and an unknown lane
-    (`"repositories/foo"`, `"work/foo"`) all name no lane.
+    (`"code-graph/foo"`, `"work/foo"`) all name no lane.
 
     The "one segment left over" half is the old "exactly one slash" rule,
     preserved rather than relaxed: a page sits directly in its lane.

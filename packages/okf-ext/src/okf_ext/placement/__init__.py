@@ -8,9 +8,9 @@ Two codes, one factory, and no vocabulary of its own. `placement_rule` takes a
 composed by the caller because a capability may not import a sibling -- plus an
 optional `depth` map for two types sharing one directory.
 
-Split from `health` along a real seam: `health.duplicate-title` is its twin in
-shape, but `health_rule` takes one severity for all three of its codes, and a
-caller needing `duplicate-resource` at `error` would drag `health.uncited` and
+Split from `health` along a real seam: placement codes need their own severity
+knob, but `health_rule` takes one severity for all its codes, and a caller
+needing `duplicate-resource` at `error` would drag `health.uncited` and
 `health.log-gap` up with it.
 
 **This module imports no sibling capability**, and never the top-level

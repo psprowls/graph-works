@@ -388,7 +388,9 @@ def test_frontmatter_leaves_an_unmutated_page_byte_identical(tmp_path: Path) -> 
     root = vault_root(tmp_path)
     target = root / "adrs/0002-crlf.md"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_bytes("﻿---\r\ntitle: Already fine\r\ntype: Adr\r\nstatus: stable\r\n---\r\n\r\n# Already fine\r\n".encode())
+    target.write_bytes(
+        "﻿---\r\ntitle: Already fine\r\ntype: Adr\r\nstatus: stable\r\n---\r\n\r\n# Already fine\r\n".encode()
+    )
     before = target.read_bytes()
     _decide(tmp_path, rows=())
 
@@ -902,10 +904,18 @@ UNMATCHED_MD = ".gw/migration/entities-unmatched.md"
 
 
 def _entity_lane(root: Path) -> None:
-    page(root, "entities/pkg_okf-io__ab12cd.md", "# okf-io\n",
-         frontmatter="title: okf-io\nkind: package\nuri: pkg:psprowls/agent-workspace/okf-io\n")
-    page(root, "entities/dependency_ruamel__ff00aa.md", "# ruamel.yaml\n",
-         frontmatter="title: ruamel.yaml\nkind: dependency\nuri: dependency:pypi/ruamel-yaml\n")
+    page(
+        root,
+        "entities/pkg_okf-io__ab12cd.md",
+        "# okf-io\n",
+        frontmatter="title: okf-io\nkind: package\nuri: pkg:psprowls/agent-workspace/okf-io\n",
+    )
+    page(
+        root,
+        "entities/dependency_ruamel__ff00aa.md",
+        "# ruamel.yaml\n",
+        frontmatter="title: ruamel.yaml\nkind: dependency\nuri: dependency:pypi/ruamel-yaml\n",
+    )
 
 
 def test_entities_snapshots_every_page_before_touching_anything(tmp_path: Path) -> None:
@@ -939,14 +949,17 @@ def test_entities_quarantines_rather_than_deleting(tmp_path: Path) -> None:
     assert (quarantine / "pkg_okf-io__ab12cd.md").is_file()
 
 
-@pytest.mark.parametrize(("uri", "expected"), [
-    ("pkg:o/r/x", "repositories/r/packages/x"),
-    ("repo:o/r", "repositories/r/repository"),
-    ("app:o/r/x", "repositories/r/apps/x"),
-    ("agent_plugin:o/r/x", "repositories/r/agent-plugins/x"),
-    ("test_suite:o/r/x", "repositories/r/test-suites/x"),
-    ("dependency:pypi/x", "dependencies/pypi/x"),
-])
+@pytest.mark.parametrize(
+    ("uri", "expected"),
+    [
+        ("pkg:o/r/x", "code-graph/r/entities/packages/x"),
+        ("repo:o/r", "code-graph/r"),
+        ("app:o/r/x", "code-graph/r/entities/apps/x"),
+        ("agent_plugin:o/r/x", "code-graph/r/entities/agent-plugins/x"),
+        ("test_suite:o/r/x", "code-graph/r/entities/test-suites/x"),
+        ("dependency:o/r/pypi/x", "code-graph/r/entities/dependencies/pypi/x"),
+    ],
+)
 def test_successor_id_is_derived_from_the_uri_alone(uri: str, expected: str) -> None:
     """Pure: resource identity is the only input. No filesystem, no bundle
     (`placement.py:233-263`). The regenerated lane verifies the map; it does not
@@ -959,10 +972,13 @@ def test_successor_id_is_derived_from_the_uri_alone(uri: str, expected: str) -> 
 def test_successor_id_applies_a_repo_rename_before_parsing(tmp_path: Path) -> None:
     from migrate_vault import successor_id
 
-    assert successor_id(
-        "app:psprowls/agent-workspace/code-wiki-okf",
-        repo_renames={"agent-workspace": "graph-works"},
-    ) == "repositories/graph-works/apps/code-wiki-okf"
+    assert (
+        successor_id(
+            "app:psprowls/agent-workspace/code-wiki-okf",
+            repo_renames={"agent-workspace": "graph-works"},
+        )
+        == "code-graph/graph-works/entities/apps/code-wiki-okf"
+    )
 
 
 def test_entities_rewrites_a_markdown_link_to_the_successor_path(tmp_path: Path) -> None:
@@ -970,13 +986,17 @@ def test_entities_rewrites_a_markdown_link_to_the_successor_path(tmp_path: Path)
 
     root = vault_root(tmp_path)
     _entity_lane(root)
-    page(root, "repositories/r/packages/okf-io.md", "# okf-io\n",
-         frontmatter="title: okf-io\ntype: Package\nresource: pkg:psprowls/r/okf-io\n")
+    page(
+        root,
+        "code-graph/r/entities/packages/okf-io.md",
+        "# okf-io\n",
+        frontmatter="title: okf-io\ntype: Package\nresource: pkg:psprowls/r/okf-io\n",
+    )
     page(root, "concepts/a.md", "See [okf-io](/entities/pkg_okf-io__ab12cd.md).\n", frontmatter="title: A\n")
 
     cmd_entities(_args(vault=root, write=True, repo_rename=["agent-workspace=r"], scan=False))
 
-    assert "/repositories/r/packages/okf-io.md" in (root / "concepts/a.md").read_text(encoding="utf-8")
+    assert "/code-graph/r/entities/packages/okf-io.md" in (root / "concepts/a.md").read_text(encoding="utf-8")
 
 
 def test_entities_rewrites_a_sources_entity_uri(tmp_path: Path) -> None:
@@ -988,10 +1008,13 @@ def test_entities_rewrites_a_sources_entity_uri(tmp_path: Path) -> None:
 
     root = vault_root(tmp_path)
     _entity_lane(root)
-    page(root, "repositories/r/packages/okf-io.md", "# okf-io\n",
-         frontmatter="title: okf-io\ntype: Package\nresource: pkg:psprowls/r/okf-io\n")
-    page(root, "sources/s.md", "# S\n",
-         frontmatter="title: S\nentity_uri: pkg:psprowls/agent-workspace/okf-io\n")
+    page(
+        root,
+        "code-graph/r/entities/packages/okf-io.md",
+        "# okf-io\n",
+        frontmatter="title: okf-io\ntype: Package\nresource: pkg:psprowls/r/okf-io\n",
+    )
+    page(root, "sources/s.md", "# S\n", frontmatter="title: S\nentity_uri: pkg:psprowls/agent-workspace/okf-io\n")
 
     cmd_entities(_args(vault=root, write=True, repo_rename=["agent-workspace=r"], scan=False))
 
@@ -1022,8 +1045,7 @@ def test_entities_report_separates_pre_existing_breakage_from_new(tmp_path: Path
 
     root = vault_root(tmp_path)
     _entity_lane(root)
-    page(root, "concepts/a.md",
-         "Gone: [x](/entities/pkg_never-existed__000000.md)\n", frontmatter="title: A\n")
+    page(root, "concepts/a.md", "Gone: [x](/entities/pkg_never-existed__000000.md)\n", frontmatter="title: A\n")
 
     cmd_entities(_args(vault=root, write=True, repo_rename=[], scan=False))
 
@@ -1361,7 +1383,7 @@ def test_gate_fails_assertion_four_on_an_unreviewed_unmatched_report(tmp_path: P
         "# Entity remap — unmatched\n\n"
         "| old member | uri | computed successor | inbound refs | expected because |\n"
         "|---|---|---|---:|---|\n"
-        "| `entities/pkg_x__00.md` | `pkg:o/r/x` | `repositories/r/packages/x` | 4 | repo rename |\n",
+        "| `entities/pkg_x__00.md` | `pkg:o/r/x` | `code-graph/r/entities/packages/x` | 4 | repo rename |\n",
         encoding="utf-8",
         newline="",
     )
@@ -1419,16 +1441,28 @@ def _whole_vault(tmp_path: Path) -> Path:
 
     # work: a live parent, a live child, one archived item in the nested form
     plan_body = "## Plan\n\n| Action | Done when | Rationale |\n| --- | --- | --- |\n"
-    page(root, "work/2026-08-11-epic-cutover.md", f"# Cutover\n\n{plan_body}",
-         frontmatter="title: Cutover\nkind: epic\nstatus: in-progress\nsummary: the epic\n"
-                     "owner: pat\neffort: medium\nopened: 2026-08-11\nupdated: 2026-08-11\n"
-                     "affects:\n  - scripts\nchildren:\n- 2026-08-12-feature-sweep\n")
-    page(root, "work/2026-08-12-feature-sweep.md", f"# Sweep\n\n{plan_body}",
-         frontmatter="title: Sweep\nkind: feature\nstatus: open\nparent: 2026-08-11-epic-cutover\n"
-                     "summary: the feature\neffort: small\nopened: 2026-08-12\nupdated: 2026-08-12\n"
-                     "affects:\n  - scripts\n")
-    page(root, "work/2026-08-11-epic-cutover/01-design-spec.md", "# Spec\n",
-         frontmatter="title: Spec\nkind: bug\nstatus: draft\n")
+    page(
+        root,
+        "work/2026-08-11-epic-cutover.md",
+        f"# Cutover\n\n{plan_body}",
+        frontmatter="title: Cutover\nkind: epic\nstatus: in-progress\nsummary: the epic\n"
+        "owner: pat\neffort: medium\nopened: 2026-08-11\nupdated: 2026-08-11\n"
+        "affects:\n  - scripts\nchildren:\n- 2026-08-12-feature-sweep\n",
+    )
+    page(
+        root,
+        "work/2026-08-12-feature-sweep.md",
+        f"# Sweep\n\n{plan_body}",
+        frontmatter="title: Sweep\nkind: feature\nstatus: open\nparent: 2026-08-11-epic-cutover\n"
+        "summary: the feature\neffort: small\nopened: 2026-08-12\nupdated: 2026-08-12\n"
+        "affects:\n  - scripts\n",
+    )
+    page(
+        root,
+        "work/2026-08-11-epic-cutover/01-design-spec.md",
+        "# Spec\n",
+        frontmatter="title: Spec\nkind: bug\nstatus: draft\n",
+    )
     _archived_item(root)
 
     # sources, adrs, concepts

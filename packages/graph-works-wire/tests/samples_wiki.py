@@ -344,7 +344,7 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
                         "Packages",
                         2,
                         True,
-                        (TreePage("repositories/r/packages/a", "a", "Package"),),
+                        (TreePage("code-graph/r/entities/packages/a", "a", "Package"),),
                         (TreeNode("Extra", 3, True, (), ()),),
                     ),
                 )

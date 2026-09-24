@@ -96,9 +96,7 @@ def in_scope(relative: str) -> bool:
 
 
 def _tracked_files(root: Path) -> list[str]:
-    result = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True
-    )
+    result = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True)
     return [entry for entry in result.stdout.decode("utf-8").split("\0") if entry]
 
 
@@ -115,7 +113,7 @@ def _opaque(call: ast.Call) -> bool:
 
 
 def _mode(call: ast.Call) -> str | None:
-    """"r" or "w" for a text-mode IO call; None when the call is not one.
+    """ "r" or "w" for a text-mode IO call; None when the call is not one.
 
     Returns None for binary modes, for `os.open` (file-descriptor level, and
     so unaffected by either default), and for a computed mode -- which is not
@@ -197,9 +195,7 @@ def find_violations(root: Path) -> list[Violation]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description=__doc__.splitlines()[0] if __doc__ else "", allow_abbrev=False
-    )
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "", allow_abbrev=False)
     parser.add_argument("root", type=Path, nargs="?", default=Path("."), help="repo root to scan (default: cwd)")
     args = parser.parse_args(argv)
 
@@ -215,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
         '  newline="" for content whose bytes are a contract (okf members, seeds, ledgers) --\n'
         "            it writes the string's own line endings through untouched.\n"
         '  newline="\\n" for formats defined as LF (JSON, JSONL).\n'
-        "Or write bytes: `path.write_bytes(text.encode(\"utf-8\"))` has neither default.\n"
+        'Or write bytes: `path.write_bytes(text.encode("utf-8"))` has neither default.\n'
         f"To exempt a call deliberately, put `{PRAGMA} <reason>` on a line it spans.",
         file=sys.stderr,
     )

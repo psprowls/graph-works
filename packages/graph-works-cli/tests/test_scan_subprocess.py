@@ -135,7 +135,7 @@ def test_scan_emit_and_apply_round_trip_across_processes_and_refuse_unsafe_hando
 
     worklist = json.loads(worklist_path.read_text(encoding="utf-8"))
     package_task = next(task for task in worklist["prose_tasks"] if task["uri"] == PACKAGE_URI)
-    page_path = bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
+    page_path = bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     pristine_bundle = _bundle_files(bundle_dir)
     # Emit writes this structural page. Only apply may land the task's prose.
     assert FILLED_PURPOSE not in page_path.read_text(encoding="utf-8")

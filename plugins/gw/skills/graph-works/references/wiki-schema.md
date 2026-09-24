@@ -28,14 +28,19 @@ Ingest reads material directly from any filesystem path; there is no staging inb
     ├── log.md                      # append-only timeline
     ├── work/                       # unified bugs, tech debt, features, initiatives, spikes
     │   └── _archive/                # archived top-level items, each with its whole subtree
-    ├── repositories/<repo>/
-    │   ├── repository.md           # the repository's own entity page
-    │   ├── packages/<name>.md
-    │   ├── apps/<name>.md
-    │   ├── agent-plugins/<name>.md
-    │   ├── test-suites/<name>.md
-    │   └── files/<source-path>.md
-    ├── dependencies/<ecosystem>/<name>.md   # sibling root, NOT nested under repositories/
+    ├── code-graph/
+    │   ├── index.md             # Repositories
+    │   ├── <repo>.md            # the repository's own entity page
+    │   └── <repo>/
+    │       ├── index.md         # stub: Repository link + Subdirectories
+    │       ├── entities/
+    │       │   ├── index.md     # Packages, Apps, Agent Plugins, Test Suites, Dependencies
+    │       │   ├── packages/<name>.md
+    │       │   ├── apps/<name>.md
+    │       │   ├── agent-plugins/<name>.md
+    │       │   ├── test-suites/<name>.md
+    │       │   └── dependencies/<ecosystem>/<name>.md   # one per (repository, dependency)
+    │       └── file-system/<source-path>.md
     ├── docs/tutorials/ docs/how-tos/ docs/reference/ docs/explanations/   # Diátaxis lanes
     ├── sources/                    # one summary page per ingested source
     │   └── references/             # copies of ingested material (the ingest flow copies here; originals are never moved)
@@ -47,11 +52,10 @@ Ingest reads material directly from any filesystem path; there is no staging inb
     └── .cursorrules                # (optional) Cursor
 ```
 
-Entity pages are nested under `repositories/<repo>/`, one folder per kind
-(`packages/`, `apps/`, `agent-plugins/`, `test-suites/`), plus the repository's
-own `repository.md`. `dependency` is the one entity kind that is NOT nested
-under `repositories/` — it is a sibling root, `dependencies/<ecosystem>/<name>.md`.
-There is no `entities/` folder and no filename-prefix scheme.
+Entity pages are nested under `code-graph/<repo>/entities/`, one folder per kind
+(`packages/`, `apps/`, `agent-plugins/`, `test-suites/`, `dependencies/`), beside the
+repository's own `code-graph/<repo>.md` and its `file-system/` mirror. Dependencies are per repository, not global: one Dependency per (repository, dependency); `used_by` and `versions_in_use` describe that repository only. The implementing Package page aggregates across repositories.
+There is no top-level `entities/` folder (only the per-repository one above) and no filename-prefix scheme.
 
 ## Iron rules
 
@@ -70,8 +74,8 @@ Read those rather than copying another page's shape.
 
 | Lane | `type` | Directory | Required keys | Written by |
 |---|---|---|---|---|
-| Entities | `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | `repositories/<repo>/…` | `type`, `title`, `resource` | `gw scan` |
-| Dependencies | `Dependency` | `dependencies/<ecosystem>/` | `type`, `title`, `resource`, `ecosystem` | `gw scan` |
+| Entities | `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | `code-graph/<repo>/…` | `type`, `title`, `resource` | `gw scan` |
+| Dependencies | `Dependency` | `code-graph/<repo>/entities/dependencies/<ecosystem>/` | `type`, `title`, `resource`, `ecosystem` | `gw scan` |
 | Diátaxis | `Explanation`, `Reference`, `HowTo`, `Tutorial` | `docs/explanations/`, `docs/reference/`, `docs/how-tos/`, `docs/tutorials/` | `type`, `title`, `description` | authors, via proposals |
 | Sources | `Source` | `sources/` | `type`, `title`, `description`, `source_path` | `gw ingest` |
 | ADRs | `Adr` | `adrs/` | `type`, `title`, `description`, `decision_date` | authors, or `gw wiki proposal promote` |
@@ -102,7 +106,7 @@ it; curated lanes do.
 
 ### Entity pages
 
-Entity pages live under `<workspace>/okf/repositories/<repo>/` (one folder per kind — `packages/`, `apps/`, `agent-plugins/`, `test-suites/`, `files/` — plus the repository's own `repository.md`), except `dependency` pages, which live at the sibling root `<workspace>/okf/dependencies/<ecosystem>/<name>.md`.
+Entity pages live under `<workspace>/okf/code-graph/<repo>/` (`entities/{packages,apps,agent-plugins,test-suites}/`, `entities/dependencies/<ecosystem>/`, and the `file-system/` mirror — plus the repository's own `code-graph/<repo>.md`).
 
 Identity keys — `type`, `title`, `resource` — are on every page. `description` and
 `tags` are optional. Each type also has **scanner-owned keys**, listed under
@@ -163,7 +167,7 @@ architecture` discriminator is gone; use `tags:` (for example `architecture`).
 ### Dependency pages
 
 `/gw:scan` writes one graph-derived page per dependency into
-`dependencies/<ecosystem>/<name>.md`. The `Dependency` shape is shipped by
+`code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md`. One Dependency per (repository, dependency); `used_by` and `versions_in_use` describe that repository only. The implementing Package page aggregates across repositories. The `Dependency` shape is shipped by
 `code-wiki-okf` and installed at `.gw/schema/Dependency.schema.json` and
 `.gw/sections/Dependency.yaml`.
 
@@ -176,7 +180,7 @@ architecture` discriminator is gone; use `tags:` (for example `architecture`).
 ---
 type: Dependency
 title: React
-resource: dependency:npm/react
+resource: dependency:acme/web/npm/react
 ecosystem: npm
 description: UI library used by the web application.
 tags: [frontend, ui]
@@ -296,23 +300,23 @@ updated: 2026-04-20
 ## Naming conventions
 
 - **Filenames:** `kebab-case.md` — lowercase, hyphens, no spaces
-- **Entity pages** are nested under `repositories/<repo>/`, one folder per kind, no
+- **Entity pages** are nested under `code-graph/<repo>/entities/`, one folder per kind, no
   filename prefix:
 
   | Kind | Path | Example |
   |---|---|---|
-  | `repository` | `repositories/<repo>/repository.md` | `repositories/my-monorepo/repository.md` |
-  | `package` | `repositories/<repo>/packages/<name>.md` | `repositories/my-monorepo/packages/common-aws-node-ts.md` |
-  | `app` | `repositories/<repo>/apps/<name>.md` | `repositories/my-monorepo/apps/web-next-ts.md` |
-  | `agent_plugin` | `repositories/<repo>/agent-plugins/<name>.md` | `repositories/my-monorepo/agent-plugins/graph-works.md` |
-  | `dependency` | `dependencies/<ecosystem>/<name>.md` (sibling root, not nested) | `dependencies/npm/react.md` |
-  | `test_suite` | `repositories/<repo>/test-suites/<name>.md` | `repositories/my-monorepo/test-suites/common-aws-node-ts.md` |
+  | `repository` | `code-graph/<repo>.md` | `code-graph/my-monorepo.md` |
+  | `package` | `code-graph/<repo>/entities/packages/<name>.md` | `code-graph/my-monorepo/entities/packages/common-aws-node-ts.md` |
+  | `app` | `code-graph/<repo>/entities/apps/<name>.md` | `code-graph/my-monorepo/entities/apps/web-next-ts.md` |
+  | `agent_plugin` | `code-graph/<repo>/entities/agent-plugins/<name>.md` | `code-graph/my-monorepo/entities/agent-plugins/graph-works.md` |
+  | `dependency` | `code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md` | `code-graph/my-monorepo/entities/dependencies/npm/react.md` |
+  | `test_suite` | `code-graph/<repo>/entities/test-suites/<name>.md` | `code-graph/my-monorepo/entities/test-suites/common-aws-node-ts.md` |
 
 - **Explanations:** `docs/explanations/<slug>.md` — e.g. `docs/explanations/global-context.md`. Comparisons live here too: `docs/explanations/<a>-vs-<b>.md` for two-way, `docs/explanations/<topic>-options.md` for n-way.
 - **Sources:** `sources/<YYYY-MM>-<short-slug>.md` — e.g. `sources/2026-04-auth-migration-spec.md`
 - **ADRs:** `adrs/<YYYY-MM-DD>-<slug>.md` — e.g. `adrs/2026-02-14-move-to-esm.md`. Dated by the decision, never numbered: there is no id to allocate and nothing to collide on.
 - **Architecture syntheses:** `docs/explanations/<topic>.md` tagged `architecture` — e.g. `docs/explanations/request-flow.md`
-- **Dependencies:** `dependencies/<ecosystem>/<name>.md` — use the registry name (`dependencies/npm/react.md`, `dependencies/npm/react-native-maps.md`). For scoped npm packages, replace `/` with `__` (`dependencies/npm/@tanstack__react-query.md`). Service pages use a slug derived from the service name, under the `dependencies/` root (`dependencies/mongodb-atlas.md`).
+- **Dependencies:** `code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md` — use the registry name (`code-graph/web/entities/dependencies/npm/react.md`). For scoped npm packages, replace `/` with `__` (`code-graph/web/entities/dependencies/npm/@tanstack__react-query.md`). Service pages use a slug derived from the service name under the same `dependencies/` folder.
 - **Work:** `<work-path>.md`, where `<work-path>` is an extensionless canonical
   path such as `work/release-cutover/children/epic-migration/children/feature-parser`.
   Each basename is stable kebab-case; dates are lifecycle metadata, not identity.
@@ -411,11 +415,11 @@ Three categories use markdown tables in the body for structured rows. Header row
 Use root-absolute markdown links — `okf_io.LinkGraph` parses `[text](/path.md)` and cannot see a `[[wikilink]]` at all:
 
 ```
-[the AWS helpers package](/repositories/<repo>/packages/common-aws-node-ts.md)  # full path to entity page, custom display
-[common-aws-node-ts](/repositories/<repo>/packages/common-aws-node-ts.md)       # full path, display matches the stem
+[the AWS helpers package](/code-graph/<repo>/entities/packages/common-aws-node-ts.md)  # full path to entity page, custom display
+[common-aws-node-ts](/code-graph/<repo>/entities/packages/common-aws-node-ts.md)       # full path, display matches the stem
 ```
 
-Always use the full `/repositories/<repo>/<kind-folder>/<name>.md` path for entity pages — there is no stem-only resolution. Use full root-absolute paths for non-entity pages (explanations, sources, ADRs, etc.) too.
+Always use the full `/code-graph/<repo>/entities/<kind-folder>/<name>.md` path for entity pages — there is no stem-only resolution. Use full root-absolute paths for non-entity pages (explanations, sources, ADRs, etc.) too.
 
 Code references — when citing actual code — use a plain code reference (not a link):
 
@@ -425,7 +429,7 @@ See `packages/common-aws-node-ts/src/handlers/baseApiHandler.ts:42`
 
 ## Cross-reference rules
 
-- **Every package mentioned on an entity or explanation page must be a link** to `/repositories/<repo>/packages/<name>.md`.
+- **Every package mentioned on an entity or explanation page must be a link** to `/code-graph/<repo>/entities/packages/<name>.md`.
 - **Every ADR referenced in entity or explanation pages must be a link** to `/adrs/<YYYY-MM-DD>-<slug>.md`.
 - **Every claim on an entity page cites** either a source page (`[…](/sources/xxx.md)`) or a code path (backticked, with file:line).
 - **Contradictions get flagged inline** with a `> ⚠️ Contradiction:` callout naming the conflicting sources or code paths.
@@ -453,14 +457,14 @@ not operations.
 ## 2026-04-20
 
 - **scan** detected 3 new packages
-  Added repositories/my-monorepo/packages/timeline-data-node-ts.md,
-  repositories/my-monorepo/packages/timeline-domain-ts.md,
-  repositories/my-monorepo/packages/timeline-native-ts.md. No renames or deletions.
+  Added code-graph/my-monorepo/entities/packages/timeline-data-node-ts.md,
+  code-graph/my-monorepo/entities/packages/timeline-domain-ts.md,
+  code-graph/my-monorepo/entities/packages/timeline-native-ts.md. No renames or deletions.
 
 - **ingest** Auth Migration Spec
   Added sources/2026-04-auth-migration-spec.md. Updated docs/explanations/global-context,
-  repositories/my-monorepo/packages/shared-aws-node-ts.md,
-  repositories/my-monorepo/packages/shared-native-ts.md,
+  code-graph/my-monorepo/entities/packages/shared-aws-node-ts.md,
+  code-graph/my-monorepo/entities/packages/shared-native-ts.md,
   docs/explanations/request-flow, adrs/0014-jwt-sessions (new). Flagged contradiction
   with docs/explanations/global-context on session shape.
 ```

@@ -1170,7 +1170,7 @@ wheels = [
 
 [[package]]
 name = "okf-ext"
-version = "0.4.14"
+version = "0.5.0"
 source = { editable = "packages/okf-ext" }
 dependencies = [
     { name = "markdown-it-py" },

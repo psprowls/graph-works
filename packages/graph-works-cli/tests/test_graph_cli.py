@@ -415,9 +415,13 @@ def path_less_workspace(tmp_path: Path) -> Path:
                     GraphNode(
                         kind="dependency",
                         name="shared",
-                        path="dependency:pypi/shared",
+                        path="dependency:acme/demo:pypi:shared",
                         line=None,
-                        attrs={"ecosystem": "pypi", "versions_in_use": ["1.0.0"]},
+                        attrs={
+                            "ecosystem": "pypi",
+                            "versions_in_use": ["1.0.0"],
+                            "uri": "dependency:acme/demo/pypi/shared",
+                        },
                     ),
                     GraphNode(
                         kind="test_suite",

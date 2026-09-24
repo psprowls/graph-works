@@ -13,7 +13,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
   "okf-io>=0.2,<0.3",
-  "okf-ext[schemas]>=0.4.10,<0.5",
+  "okf-ext[schemas]>=0.5.0,<0.6",
   "code-graph-io>=0.3,<0.4",
   "typer>=0.12",
 ]

@@ -70,7 +70,7 @@ def test_a_file_inside_a_graphed_package_matches_by_path(tmp_path):
     )(repo, source, "Anything")
 
     assert match.uri == "pkg:acme/demo/okf-io"
-    assert match.entity_filename == "repositories/demo/packages/okf-io"
+    assert match.entity_filename == "code-graph/demo/entities/packages/okf-io"
 
 
 def test_a_source_outside_the_repo_falls_through_to_the_name_lookup(tmp_path):
@@ -87,7 +87,7 @@ def test_a_source_outside_the_repo_falls_through_to_the_name_lookup(tmp_path):
     )(repo, outside, "Okf Io")
 
     assert match.uri == "pkg:acme/demo/okf-io"
-    assert match.entity_filename == "repositories/demo/packages/okf-io"
+    assert match.entity_filename == "code-graph/demo/entities/packages/okf-io"
 
 
 def test_no_hit_anywhere_is_NO_ENTITY(tmp_path):
@@ -140,10 +140,10 @@ def test_the_page_id_uses_resource_identity_and_the_placement_policy(tmp_path):
 
     assert (
         page_id_for(schema_set, resource="pkg:acme/demo/@babel/core", kind="package")
-        == "repositories/demo/packages/@babel__core"
+        == "code-graph/demo/entities/packages/@babel__core"
     )
     assert page_id_for(schema_set, resource="pkg:acme/other/@babel/core", kind="package") == (
-        "repositories/other/packages/@babel__core"
+        "code-graph/other/entities/packages/@babel__core"
     )
 
 
@@ -197,4 +197,4 @@ def test_entity_match_scopes_same_relative_path_to_its_repository(tmp_path: Path
         )(beta, beta_source, "Anything")
 
     assert match.uri == "pkg:acme/beta/beta-pkg"
-    assert match.entity_filename == "repositories/beta/packages/beta-pkg"
+    assert match.entity_filename == "code-graph/beta/entities/packages/beta-pkg"

@@ -45,7 +45,7 @@ def _scratch_repo(tmp_path: Path) -> Path:
 
 
 def _write_page(bundle_root: Path, repo_name: str, rel_path: str, *, notes: str, last_commit: str | None) -> None:
-    path = bundle_root / "repositories" / repo_name / "files" / f"{rel_path}.md"
+    path = bundle_root / "code-graph" / repo_name / "file-system" / f"{rel_path}.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     commit_line = f"last_updated_commit: {last_commit}\n" if last_commit else ""
     path.write_text(
@@ -72,7 +72,7 @@ def test_new_tracked_path_becomes_a_create(tmp_path: Path) -> None:
     plan = plan_mirror(bundle, reader, repo, tracked=("a.py", "b.py"), sha=_head(repo_root), at=_AT)
 
     assert set(plan.creates) == {"a.py", "b.py"}
-    assert plan.target_for("a.py").member == "repositories/acme/files/a.py.md"
+    assert plan.target_for("a.py").member == "code-graph/acme/file-system/a.py.md"
     with pytest.raises(KeyError, match=r"missing\.py"):
         plan.target_for("missing.py")
     assert plan.moves.is_empty
@@ -114,7 +114,7 @@ def test_mirror_plan_recursively_freezes_move_digests(tmp_path: Path) -> None:
     repo = RepoConfig(name="acme", path=repo_root, ignore=())
 
     plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("a.py",), sha=_head(repo_root), at=_AT)
-    source_digests = {"repositories/acme/files/a.py.md": "before"}
+    source_digests = {"code-graph/acme/file-system/a.py.md": "before"}
     plan = replace(
         plan,
         moves=MovePlan(
@@ -126,12 +126,12 @@ def test_mirror_plan_recursively_freezes_move_digests(tmp_path: Path) -> None:
             digests=source_digests,
         ),
     )
-    source_digests["repositories/acme/files/a.py.md"] = "after"
+    source_digests["code-graph/acme/file-system/a.py.md"] = "after"
     digests = cast(dict[str, str], plan.moves.digests)
 
     with pytest.raises(TypeError):
-        digests["repositories/acme/files/a.py.md"] = "changed"
-    assert plan.moves.digests["repositories/acme/files/a.py.md"] == "before"
+        digests["code-graph/acme/file-system/a.py.md"] = "changed"
+    assert plan.moves.digests["code-graph/acme/file-system/a.py.md"] == "before"
     reader.close()
 
 
@@ -165,7 +165,7 @@ def test_vanished_path_with_edited_notes_is_declined(tmp_path: Path) -> None:
     assert plan.deletions == ()
     assert len(plan.declined_deletions) == 1
     assert plan.declined_deletions[0].reason == "prose-edited"
-    assert plan.declined_deletions[0].path == "repositories/acme/files/gone.py.md"
+    assert plan.declined_deletions[0].path == "code-graph/acme/file-system/gone.py.md"
     reader.close()
 
 
@@ -188,8 +188,8 @@ def test_git_rename_becomes_a_move_not_a_delete_plus_create(tmp_path: Path) -> N
 
     assert len(plan.moves.moves) == 1
     move = plan.moves.moves[0]
-    assert move.source == "repositories/acme/files/a.py.md"
-    assert move.dest == "repositories/acme/files/renamed.py.md"
+    assert move.source == "code-graph/acme/file-system/a.py.md"
+    assert move.dest == "code-graph/acme/file-system/renamed.py.md"
     assert "renamed.py" not in plan.creates
     assert plan.deletions == ()
     assert plan.declined_deletions == ()
@@ -265,8 +265,8 @@ def test_rename_is_found_when_another_deletion_candidates_stamp_is_more_recent(t
 
     assert len(plan.moves.moves) == 1
     move = plan.moves.moves[0]
-    assert move.source == "repositories/acme/files/a.py.md"
-    assert move.dest == "repositories/acme/files/renamed.py.md"
+    assert move.source == "code-graph/acme/file-system/a.py.md"
+    assert move.dest == "code-graph/acme/file-system/renamed.py.md"
     assert "renamed.py" not in plan.creates
     assert plan.deletions == ("other.py",)
     reader.close()
@@ -287,7 +287,7 @@ def test_a_wikilink_into_a_renamed_page_is_stranded(tmp_path: Path) -> None:
     citing.parent.mkdir(parents=True, exist_ok=True)
     citing.write_text(
         "---\ntype: Explanation\ntitle: Citing\ndescription: d\n---\n\n"
-        "## Summary\n\nSee [[repositories/acme/files/a.py]] for the rest.\n",
+        "## Summary\n\nSee [[code-graph/acme/file-system/a.py]] for the rest.\n",
         encoding="utf-8",
     )
 
@@ -300,7 +300,7 @@ def test_a_wikilink_into_a_renamed_page_is_stranded(tmp_path: Path) -> None:
     plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("renamed.py", "b.py"), sha=sha_after, at=_AT)
 
     assert [entry.member for entry in plan.moves.stranded] == ["concepts/citing.md"]
-    assert plan.moves.stranded[0].target == "repositories/acme/files/a.py.md"
+    assert plan.moves.stranded[0].target == "code-graph/acme/file-system/a.py.md"
     reader.close()
 
 
@@ -378,8 +378,8 @@ def test_file_targets_are_policy_members_and_reserved_indexes_are_refused(tmp_pa
     )
 
     assert plan.target_for("src/main.py").resource == "file:local/acme/src/main.py"
-    assert plan.target_for("src/main.py").member == "repositories/acme/files/src/main.py.md"
-    assert plan.target_for("src/index.md").member == "repositories/acme/files/src/index.md.md"
+    assert plan.target_for("src/main.py").member == "code-graph/acme/file-system/src/main.py.md"
+    assert plan.target_for("src/index.md").member == "code-graph/acme/file-system/src/index.md.md"
 
     with pytest.raises(PlacementError, match=r"index.md"):
         plan_mirror(
@@ -423,7 +423,7 @@ def test_misplaced_file_resource_is_not_moved_or_updated(tmp_path: Path) -> None
         path.relative_to(bundle_root).as_posix(): path.read_bytes() for path in bundle_root.rglob("*") if path.is_file()
     }
 
-    with pytest.raises(PlacementError, match=r"repositories/acme/files/a.py"):
+    with pytest.raises(PlacementError, match=r"code-graph/acme/file-system/a.py"):
         plan_mirror(load_bundle(bundle_root), reader, repo, tracked=("a.py",), sha=_head(repo_root), at=_AT)
 
     after = {
@@ -436,7 +436,7 @@ def test_misplaced_file_resource_is_not_moved_or_updated(tmp_path: Path) -> None
 def test_occupied_canonical_member_with_another_resource_refuses(tmp_path: Path) -> None:
     repo_root = _scratch_repo(tmp_path)
     bundle_root = tmp_path / "bundle"
-    occupied = bundle_root / "repositories" / "acme" / "files" / "a.py.md"
+    occupied = bundle_root / "code-graph" / "acme" / "file-system" / "a.py.md"
     occupied.parent.mkdir(parents=True)
     occupied.write_text(
         "---\ntype: File\ntitle: other.py\nresource: file:local/acme/other.py\n---\n",
@@ -474,7 +474,7 @@ def test_filesystem_equivalent_tracked_paths_collide_before_mirror_writes(tmp_pa
 def test_filesystem_equivalent_existing_member_refuses_mirror_target(tmp_path: Path) -> None:
     repo_root = _scratch_repo(tmp_path)
     bundle_root = tmp_path / "bundle"
-    occupied = bundle_root / "repositories" / "ACME" / "files" / "A.py.md"
+    occupied = bundle_root / "code-graph" / "ACME" / "file-system" / "A.py.md"
     occupied.parent.mkdir(parents=True)
     occupied.write_text("---\ntype: Note\ntitle: occupied\n---\n", encoding="utf-8")
     reader = _reader_for(repo_root, tmp_path / "graph")
@@ -489,7 +489,7 @@ def test_existing_file_page_requires_exact_declared_type(tmp_path: Path) -> None
     repo_root = _scratch_repo(tmp_path)
     bundle_root = tmp_path / "bundle"
     _write_page(bundle_root, "acme", "a.py", notes=_PLACEHOLDER, last_commit=_head(repo_root))
-    page = bundle_root / "repositories" / "acme" / "files" / "a.py.md"
+    page = bundle_root / "code-graph" / "acme" / "file-system" / "a.py.md"
     page.write_text(page.read_text(encoding="utf-8").replace("type: File", 'type: " File "'), encoding="utf-8")
     reader = _reader_for(repo_root, tmp_path / "graph")
     repo = RepoConfig(name="acme", path=repo_root, ignore=())

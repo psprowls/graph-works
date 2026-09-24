@@ -35,9 +35,7 @@ def _tracked_files(root: Path) -> list[str]:
     index holds it -- `-z` so a name containing a newline still splits
     correctly.
     """
-    result = subprocess.run(
-        ["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True
-    )
+    result = subprocess.run(["git", "ls-files", "-z"], cwd=root, check=True, capture_output=True)
     return [entry for entry in result.stdout.decode("utf-8").split("\0") if entry]
 
 

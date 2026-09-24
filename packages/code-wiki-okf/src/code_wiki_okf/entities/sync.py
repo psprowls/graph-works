@@ -164,10 +164,10 @@ def _repository_name(context: PlacementContext) -> str:
     return context.repository
 
 
-def _dependency_identity(context: PlacementContext) -> tuple[str, str]:
-    if context.ecosystem is None or context.name is None:
+def _dependency_name(context: PlacementContext) -> str:
+    if context.name is None:
         raise PlacementError(resource=context.resource, reason="placement context has no dependency identity")
-    return context.ecosystem, context.name
+    return context.name
 
 
 def _require_description[T](value: T | None, *, resource: str) -> T:
@@ -292,6 +292,7 @@ def plan_entities(
     all_apps = reader.list_apps()
     all_suites = reader.list_test_suites()
     all_plugins = reader.list_agent_plugins()
+    all_dependencies = reader.list_dependencies()
 
     writes: list[EntityWrite] = []
     warnings: list[str] = []
@@ -390,6 +391,28 @@ def plan_entities(
             )
             add(_write(context, title=node.name, render=render))
 
+        for node in _nodes_for_repo(all_dependencies, repo_uri):
+            context = context_from_resource("Dependency", _resource_text(node))
+            dependency_description = _require_description(
+                reader.describe_dependency(uri=context.resource),
+                resource=context.resource,
+            )
+            implementations = sorted(dependency_description.implemented_by)
+            if implementations:
+                # A Dependency whose node resolves to a workspace member gets no
+                # page (ADR 2026-08-22-code-wiki-placement as narrowed by ADR 2026-09-07-dependencies): `used_by` and
+                # `versions_in_use` move onto the implementing Package page
+                # instead. The graph node and its `implemented_by` edge are
+                # unaffected — only the write is skipped. Ambiguity is still
+                # reported: the warning is raised here, before the skip, so
+                # suppressing the page never suppresses the diagnostic.
+                if len(implementations) > 1:
+                    warnings.append(f"{context.resource} has multiple implementations: {', '.join(implementations)}")
+                continue
+            dependency_description = replace(dependency_description, implemented_by=implementations)
+            render = _stamp_provenance(render_dependency(dependency_description), sha=sha, at=generated_at)
+            add(_write(context, title=_dependency_name(context), render=render))
+
         package_count = len(_nodes_for_repo(all_packages, repo_uri))
         repository_context = context_from_resource("Repository", repo_uri)
         repository_render = _stamp_provenance(
@@ -398,29 +421,6 @@ def plan_entities(
             at=generated_at,
         )
         add(_write(repository_context, title=_repository_name(repository_context), render=repository_render))
-
-    for node in reader.list_dependencies():
-        context = context_from_resource("Dependency", _resource_text(node))
-        ecosystem, dependency_name = _dependency_identity(context)
-        dependency_description = _require_description(
-            reader.describe_dependency(ecosystem=ecosystem, name=dependency_name),
-            resource=context.resource,
-        )
-        implementations = sorted(dependency_description.implemented_by)
-        if implementations:
-            # A Dependency whose node resolves to a workspace member gets no
-            # page (ADR 2026-08-22-code-wiki-placement as narrowed by ADR 2026-09-07-dependencies): `used_by` and
-            # `versions_in_use` move onto the implementing Package page
-            # instead. The graph node and its `implemented_by` edge are
-            # unaffected — only the write is skipped. Ambiguity is still
-            # reported: the warning is raised here, before the skip, so
-            # suppressing the page never suppresses the diagnostic.
-            if len(implementations) > 1:
-                warnings.append(f"{context.resource} has multiple implementations: {', '.join(implementations)}")
-            continue
-        dependency_description = replace(dependency_description, implemented_by=implementations)
-        render = _stamp_provenance(render_dependency(dependency_description), sha=None, at=generated_at)
-        add(_write(context, title=dependency_name, render=render))
 
     ordered_writes = tuple(sorted(writes, key=lambda write: (write.member, write.context.resource)))
     _preflight_existing(bundle, index, ordered_writes)

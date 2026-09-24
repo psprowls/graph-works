@@ -43,7 +43,9 @@ def _task(worklist: ScanWorklist) -> ProseRefreshTask:
 
 
 def _page(layout) -> str:
-    return (layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md").read_text(encoding="utf-8")
+    return (layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md").read_text(
+        encoding="utf-8"
+    )
 
 
 def _results(*results: ProseRefreshResult) -> ScanResults:
@@ -72,7 +74,7 @@ async def test_a_splice_touches_only_its_own_section(synced):
 
 async def test_a_crlf_page_keeps_its_terminators(synced):
     layout, config, _repo, worklist = synced
-    path = layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
+    path = layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     path.write_bytes(path.read_text(encoding="utf-8").replace("\n", "\r\n").encode("utf-8"))
     apply_scan_results(
         worklist,
@@ -158,14 +160,14 @@ async def test_a_complete_fill_stamps_the_owning_repo_sha(synced):
         dry_run=False,
     )
     assert applied.stamped == 1
-    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
     assert document.fm_raw[PROSE_ANCHOR_KEY] == git(repo, "rev-parse", "HEAD")
     assert document.fm_raw[PROSE_ANCHOR_KEY] == document.fm_raw["last_updated_commit"]
 
 
 async def test_a_page_with_no_last_updated_commit_is_narrated_but_not_stamped(synced):
     layout, config, _repo, worklist = synced
-    write_page(layout, "repositories/demo/packages/widgets.md", package_page())
+    write_page(layout, "code-graph/demo/entities/packages/widgets.md", package_page())
     task = _task(worklist)
     applied = apply_scan_results(
         worklist,
@@ -287,7 +289,7 @@ async def test_a_partial_first_fill_increments_the_attempt_counter(synced):
         dry_run=False,
     )
     assert applied.stamped == 0
-    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
     assert document.fm_raw[PROSE_ATTEMPTS_KEY] == 1
 
 
@@ -302,7 +304,7 @@ async def test_a_second_partial_first_fill_increments_again(synced):
             today=TODAY,
             dry_run=False,
         )
-    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
     assert document.fm_raw[PROSE_ATTEMPTS_KEY] == 2
 
 
@@ -326,7 +328,7 @@ async def test_a_complete_fill_clears_the_attempt_counter(synced):
         dry_run=False,
     )
     assert applied.stamped == 1
-    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
     assert PROSE_ATTEMPTS_KEY not in document.fm_raw
 
 
@@ -348,5 +350,33 @@ async def test_a_partial_diff_refresh_does_not_increment(synced):
         today=TODAY,
         dry_run=False,
     )
-    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
     assert PROSE_ATTEMPTS_KEY not in document.fm_raw
+
+
+async def test_a_narrated_page_refreshes_the_index_of_its_own_parent_directory(synced, monkeypatch):
+    layout, config, _repo, worklist = synced
+    seen: list[list[str]] = []
+
+    def capture(bundle, *, directories, create_missing, dry_run):
+        seen.append(list(directories))
+        return ()
+
+    monkeypatch.setattr("graph_works_core.scan.commands.update_index", capture)
+    task = _task(worklist)
+    apply_scan_results(
+        worklist,
+        _results(ProseRefreshResult(uri=PACKAGE_URI, sections={heading: FILLED for heading in task.prose_sections})),
+        layout.bundle_dir,
+        config,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert seen == [["code-graph/demo/entities/packages"]]
+
+
+def test_the_index_directory_of_a_repository_page_is_the_code_graph_index():
+    from graph_works_core.scan.commands import _index_directory
+
+    assert _index_directory("code-graph/demo.md") == "code-graph"
+    assert _index_directory("code-graph/demo/entities/packages/widgets.md") == "code-graph/demo/entities/packages"

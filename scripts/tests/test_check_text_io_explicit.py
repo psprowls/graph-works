@@ -79,7 +79,7 @@ def test_fixture_directories_are_never_scanned():
     assert not in_scope("scripts/tests/fixtures/thing.py")
 
 
-_CLEAN = '''\
+_CLEAN = """\
 from pathlib import Path
 
 
@@ -87,7 +87,7 @@ def go(p: Path) -> None:
     p.write_text("x", encoding="utf-8", newline="\\n")
     p.read_text(encoding="utf-8")
     p.write_bytes(b"x")
-'''
+"""
 
 
 def test_a_fully_explicit_file_is_clean(tmp_path):
@@ -125,14 +125,7 @@ def test_a_keyword_on_a_continuation_line_is_seen(tmp_path):
     instance.
     """
     root = _repo(tmp_path)
-    source = (
-        "from pathlib import Path\n"
-        "Path('a').write_text(\n"
-        "    'x',\n"
-        "    encoding='utf-8',\n"
-        "    newline='\\n',\n"
-        ")\n"
-    )
+    source = "from pathlib import Path\nPath('a').write_text(\n    'x',\n    encoding='utf-8',\n    newline='\\n',\n)\n"
     _tracked(root, "scripts/multiline.py", source)
     assert find_violations(root) == []
 

@@ -1,4 +1,4 @@
-"""Reconcile global Dependency facets from the workspace manifest inventory."""
+"""Reconcile repository-scoped Dependency facets from the workspace manifest inventory."""
 
 from __future__ import annotations
 
@@ -11,18 +11,24 @@ from dataclasses import dataclass
 from code_graph_io import upsert
 from code_graph_io.packages import ManifestDependency, ManifestPackage
 from code_graph_io.records import GraphNode, as_graph_records
-from code_graph_io.uri import dependency_uri, pkg_uri, repo_uri
+from code_graph_io.uri import RepoContext, dependency_path, dependency_uri, pkg_uri, repo_uri
 
-_OWNERSHIP_KEY = "manifest_dependency_reconciler_v1"
+_OWNERSHIP_KEY = "manifest_dependency_reconciler_v2"
 _EdgeIdentity = tuple[str, str, str]
+
+
+_ScopedKey = tuple[RepoContext, str, str]  # (declaring repository, ecosystem, normalized name)
 
 
 @dataclass(frozen=True, slots=True)
 class WorkspaceImplementation:
-    dependency_uri: str
     package_uri: str
     package_key: tuple[str, str, str]
     repo_uri: str
+
+
+def _version_entry(key: _ScopedKey, dependency: ManifestDependency) -> str:
+    return f"{key[2]}{dependency.spec}" if dependency.ecosystem == "pypi" else dependency.spec
 
 
 def _normalize_name(ecosystem: str, name: str) -> str:
@@ -119,89 +125,89 @@ def reconcile_dependencies(
     conn: sqlite3.Connection,
     *,
     manifests: Sequence[ManifestPackage],
-    virtual_repository_dependencies: Mapping[str, Sequence[ManifestDependency]],
+    virtual_repository_dependencies: Mapping[RepoContext, Sequence[ManifestDependency]],
 ) -> None:
-    """Persist the workspace-wide Dependency facet and its three edge forms."""
+    """Persist one Dependency node per (repository, declared dependency) and its edges.
+
+    A node exists in repository R exactly when something in R declares the
+    dependency -- a package manifest (a `pkg:` consumer) or a virtual
+    repository root (a `repo:` consumer). Its `versions_in_use` is R's own
+    declared specs, and only R's consumers point `used_by` at it. Each scoped
+    node whose identity matches a distributable workspace manifest points
+    `implemented_by` at that package, which may live in another repository.
+    A distributable package nothing declares has no Dependency node.
+
+    Runs outside any member's `set_current_repo`, so the repo stamp is written
+    explicitly for each row rather than inherited from the current-repo scope.
+    """
     implementations: dict[tuple[str, str], list[WorkspaceImplementation]] = {}
-    display_names: dict[tuple[str, str], str] = {}
-    versions: dict[tuple[str, str], set[str]] = {}
-    declarations: list[tuple[str, ManifestDependency, bool]] = []
+    versions: dict[_ScopedKey, set[str]] = {}
+    declarations: list[tuple[_ScopedKey, str, bool]] = []
     previous_dependency_uris, previous_edge_identities = _load_ownership(conn)
+
+    def declare(ctx: RepoContext, consumer_uri: str, dependency: ManifestDependency, is_package_consumer: bool) -> None:
+        key: _ScopedKey = (ctx, *_identity(dependency.ecosystem, dependency.name))
+        declarations.append((key, consumer_uri, is_package_consumer))
+        bucket = versions.setdefault(key, set())
+        if dependency.spec:
+            bucket.add(_version_entry(key, dependency))
 
     for manifest in manifests:
         if not manifest.distributable:
             continue
-        key = _identity(manifest.ecosystem, manifest.name)
-        canonical_name = key[1]
-        dependency_uri_value = dependency_uri(manifest.ecosystem, canonical_name)
-        display_names.setdefault(key, canonical_name)
-        implementations.setdefault(key, []).append(
+        implementations.setdefault(_identity(manifest.ecosystem, manifest.name), []).append(
             WorkspaceImplementation(
-                dependency_uri=dependency_uri_value,
                 package_uri=pkg_uri(manifest.repo, manifest.name),
                 package_key=("package", manifest.name, manifest.relative_path),
                 repo_uri=repo_uri(manifest.repo),
             )
         )
         for dependency in manifest.dependencies:
-            declarations.append((pkg_uri(manifest.repo, manifest.name), dependency, True))
-            dependency_key = _identity(dependency.ecosystem, dependency.name)
-            display_names.setdefault(dependency_key, dependency_key[1])
-            if dependency.spec:
-                version = f"{dependency_key[1]}{dependency.spec}" if dependency.ecosystem == "pypi" else dependency.spec
-                versions.setdefault(dependency_key, set()).add(version)
+            declare(manifest.repo, pkg_uri(manifest.repo, manifest.name), dependency, True)
 
-    for repository_uri, repository_dependencies in virtual_repository_dependencies.items():
+    for repository, repository_dependencies in virtual_repository_dependencies.items():
         for dependency in repository_dependencies:
-            declarations.append((repository_uri, dependency, False))
-            dependency_key = _identity(dependency.ecosystem, dependency.name)
-            display_names.setdefault(dependency_key, dependency_key[1])
-            if dependency.spec:
-                version = f"{dependency_key[1]}{dependency.spec}" if dependency.ecosystem == "pypi" else dependency.spec
-                versions.setdefault(dependency_key, set()).add(version)
+            declare(repository, repo_uri(repository), dependency, False)
 
     for values in implementations.values():
         values.sort(key=lambda implementation: implementation.package_uri)
 
-    dependency_uris = {key: dependency_uri(key[0], display_name) for key, display_name in display_names.items()}
+    dependency_uris = {key: dependency_uri(key[0], key[1], key[2]) for key in versions}
     _delete_owned_edges(conn, previous_edge_identities)
+    ordered = sorted(dependency_uris.items(), key=lambda item: item[1])
     dependency_nodes = [
         GraphNode(
             kind="dependency",
-            name=display_names[key],
-            path=f"dependency:{key[0]}:{display_names[key]}",
+            name=key[2],
+            path=dependency_path(key[0], key[1], key[2]),
             line=None,
             attrs={
                 "uri": uri,
-                "ecosystem": key[0],
-                "name": display_names[key],
-                "url": _registry_url(key[0], display_names[key]),
-                "versions_in_use": sorted(versions.get(key, set())),
+                "ecosystem": key[1],
+                "name": key[2],
+                "url": _registry_url(key[1], key[2]),
+                "versions_in_use": sorted(versions[key]),
             },
         )
-        for key, uri in sorted(dependency_uris.items())
+        for key, uri in ordered
     ]
     upsert.upsert_records(conn, as_graph_records(nodes=dependency_nodes))
+    for key, uri in ordered:
+        conn.execute("UPDATE nodes SET repo=? WHERE kind='dependency' AND uri=?", (repo_uri(key[0]), uri))
 
     edge_identities: set[_EdgeIdentity] = set()
 
-    for key, values in implementations.items():
-        for implementation in values:
-            edge_identities.add((dependency_uris[key], "implemented_by", implementation.package_uri))
-            _insert_uri_edge(
-                conn,
-                src_uri=dependency_uris[key],
-                kind="implemented_by",
-                dst_uri=implementation.package_uri,
-            )
+    for key, uri in ordered:
+        for implementation in implementations.get((key[1], key[2]), ()):
+            edge_identities.add((uri, "implemented_by", implementation.package_uri))
+            _insert_uri_edge(conn, src_uri=uri, kind="implemented_by", dst_uri=implementation.package_uri)
 
-    for consumer_uri, dependency, is_package_consumer in declarations:
-        key = _identity(dependency.ecosystem, dependency.name)
+    for key, consumer_uri, is_package_consumer in declarations:
         dependency_uri_value = dependency_uris[key]
         edge_identities.add((consumer_uri, "used_by", dependency_uri_value))
         _insert_uri_edge(conn, src_uri=consumer_uri, kind="used_by", dst_uri=dependency_uri_value)
         if is_package_consumer:
-            for implementation in implementations.get(key, ()):
+            for implementation in implementations.get((key[1], key[2]), ()):
                 edge_identities.add((consumer_uri, "depends_on_package", implementation.package_uri))
                 _insert_uri_edge(
                     conn,

@@ -93,7 +93,7 @@ def _seed_repo(db_path: Path, org: str, repo: str, *, packages: Sequence[str] = 
 def test_package_lane_orphan_is_detected_after_removal_from_graph(tmp_path: Path) -> None:
     """`_existing_resources_by_lane` (`sync/snapshot.py`) folds every entity
     lane's prefix into one combined orphan check, but until now only the
-    `repositories/` prefix (Repository entity vs. mirror File pages, see
+    `code-graph/` prefix (Repository entity vs. mirror File pages, see
     `test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page`
     above) had end-to-end coverage. This proves the plain-prefix `packages/`
     path directly: a Package page synced once must be reported orphaned once
@@ -122,7 +122,7 @@ def test_package_lane_orphan_is_detected_after_removal_from_graph(tmp_path: Path
         entity_plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
         apply_entities(bundle_root, entity_plan, today=_TODAY)
 
-    package_doc = load_bundle(bundle_root).concept("repositories/repo-a/packages/widgets")
+    package_doc = load_bundle(bundle_root).concept("code-graph/repo-a/entities/packages/widgets")
     assert package_doc is not None
     package_resource = package_doc.fm.resource
     assert package_resource is not None
@@ -243,7 +243,7 @@ def test_prose_edited_orphan_is_reported_even_though_apply_declines_to_delete_it
         plan = plan_mirror(load_bundle(bundle_root), reader, repo, tracked=walked[repo.name], sha=sha, at=_AT)
         apply_mirror(bundle_root, plan, today=_TODAY)
 
-    page_path = bundle_root / "repositories" / "repo-a" / "files" / "src" / "mod.py.md"
+    page_path = bundle_root / "code-graph" / "repo-a" / "file-system" / "src" / "mod.py.md"
     assert page_path.exists()
     placeholder = (
         "> TODO: anything a reader should know about this file that the generated sections below don't capture."
@@ -267,10 +267,10 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
 ) -> None:
     """The canonical Repository entity and File page coexist below one repo.
 
-    `repositories/repo-a/repository` and
-    `repositories/repo-a/files/src/mod.py` must be classified from their
+    `code-graph/repo-a` and
+    `code-graph/repo-a/file-system/src/mod.py` must be classified from their
     declared types and canonical resources, not from their relative depths.
-    same `repositories/` prefix. Removing the mirrored file's *source* must
+    same `code-graph/` prefix. Removing the mirrored file's *source* must
     orphan only the mirror page, never the Repository entity page whose own
     resource (`repo:...`) is unrelated and still current. This is the
     guarantee the placement policy owns.
@@ -295,14 +295,14 @@ def test_repository_entity_page_is_never_miscounted_as_orphaned_mirror_page(
         apply_entities(bundle_root, entity_plan, today=_TODAY)
 
     after_sync = load_bundle(bundle_root)
-    assert (bundle_root / "repositories" / "repo-a" / "repository.md").exists()
-    repo_resource = after_sync.concepts["repositories/repo-a/repository"].fm.resource
+    assert (bundle_root / "code-graph" / "repo-a.md").exists()
+    repo_resource = after_sync.concepts["code-graph/repo-a"].fm.resource
     assert repo_resource is not None
 
     # Both lanes are fully synced and the source file still exists: nothing
     # should be orphaned yet. This is the "vice versa" half of the guarantee
     # -- if the depth check were instead too permissive (treating every
-    # `repositories/repo-a/**` mirror page as an entity resource too), the
+    # `code-graph/repo-a/**` mirror page as an entity resource too), the
     # still-current mirror File page would be wrongly folded into
     # `_existing_resources_by_lane` and then subtracted against
     # `entity_plan.current_resources` (which knows nothing about mirror
@@ -334,25 +334,25 @@ def _write_document(root: Path, concept_id: str, *, type_name: str, resource: st
 def test_existing_resources_use_declared_type_not_lane_shaped_depth(tmp_path: Path) -> None:
     _write_document(
         tmp_path,
-        "repositories/demo/packages/human-note",
+        "code-graph/demo/entities/packages/human-note",
         type_name="Concept",
         resource="concept:human-note",
     )
     _write_document(
         tmp_path,
-        "repositories/demo/packages/widgets",
+        "code-graph/demo/entities/packages/widgets",
         type_name="Package",
         resource="pkg:acme/demo/widgets",
     )
     _write_document(
         tmp_path,
-        "repositories/demo/packages/spaced",
+        "code-graph/demo/entities/packages/spaced",
         type_name=" Package ",
         resource="pkg:acme/demo/spaced",
     )
     _write_document(
         tmp_path,
-        "repositories/demo/files/src/main.py",
+        "code-graph/demo/file-system/src/main.py",
         type_name="File",
         resource="file:acme/demo/src/main.py",
     )
@@ -366,12 +366,12 @@ def test_existing_resources_use_declared_type_not_lane_shaped_depth(tmp_path: Pa
 def test_existing_resources_refuse_noncanonical_owned_page(tmp_path: Path) -> None:
     _write_document(
         tmp_path,
-        "repositories/demo/packages/main.py",
+        "code-graph/demo/entities/packages/main.py",
         type_name="File",
         resource="file:acme/demo/src/main.py",
     )
 
-    with pytest.raises(PlacementError, match=r"repositories/demo/files/src/main.py"):
+    with pytest.raises(PlacementError, match=r"code-graph/demo/file-system/src/main.py"):
         _existing_resources_by_lane(load_bundle(tmp_path))
 
 
@@ -383,7 +383,7 @@ def test_file_from_removed_repository_remains_owned_and_is_orphaned(tmp_path: Pa
     resource = "file:acme/retired/src/mod.py"
     _write_document(
         bundle_root,
-        "repositories/retired/files/src/mod.py",
+        "code-graph/retired/file-system/src/mod.py",
         type_name="File",
         resource=resource,
     )

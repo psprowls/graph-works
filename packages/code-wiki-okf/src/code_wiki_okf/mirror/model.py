@@ -57,7 +57,7 @@ class MirrorTarget:
 @dataclass(frozen=True, slots=True)
 class DeclinedDeletion:
     resource: str
-    path: str  # bundle-relative posix, e.g. "repositories/acme/files/src/pkg/base.py.md"
+    path: str  # bundle-relative posix, e.g. "code-graph/acme/file-system/src/pkg/base.py.md"
     reason: DeclineReason
 
 
@@ -121,7 +121,7 @@ class MirrorResult:
 
     `regenerated` names concept ids -- updates and freshly-created rich pages
     both land here, since both went through the same regeneration batch.
-    `index_updates` is scoped to this repo's own `repositories/<repo>/**`
+    `index_updates` is scoped to this repo's own `code-graph/<repo>/**`
     subtree; it never touches another repo's mirror or the bundle's other
     lanes.
     """

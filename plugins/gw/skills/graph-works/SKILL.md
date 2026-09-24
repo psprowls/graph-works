@@ -1,6 +1,6 @@
 ---
 name: graph-works
-description: Use when building or maintaining a persistent wiki alongside any source-code project — single packages, monorepos, or hybrid shapes. Builds a code graph and renders one page per entity (repository, package, app, agent_plugin, dependency, test_suite) nested under repositories/<repo>/ (one folder per kind) and dependencies/<ecosystem>/ for external packages. Triggers include "wiki this repo", "document this codebase", "graph-works", "ingest this spec/PR/article into the wiki", or whenever the user wants a compounding, cross-referenced knowledge base alongside source code.
+description: Use when building or maintaining a persistent wiki alongside any source-code project — single packages, monorepos, or hybrid shapes. Builds a code graph and renders one page per entity (repository, package, app, agent_plugin, dependency, test_suite) nested under code-graph/<repo>/ (one folder per kind) with dependencies under code-graph/<repo>/entities/dependencies/<ecosystem>/. Triggers include "wiki this repo", "document this codebase", "graph-works", "ingest this spec/PR/article into the wiki", or whenever the user wants a compounding, cross-referenced knowledge base alongside source code.
 context: fork
 version: 0.1.1
 author: psprowls
@@ -52,13 +52,19 @@ page, and managed artifacts live under that directory’s `references/` child.
     │   ├── <release>.md
     │   └── <release>/children/<epic>/children/<feature>.md
     │       # every item has a sibling owned directory with references/
-    ├── repositories/<repo>/
-    │   ├── repository.md        # the repository’s own entity page
-    │   ├── packages/<name>.md
-    │   ├── apps/<name>.md
-    │   ├── agent-plugins/<name>.md
-    │   └── test-suites/<name>.md
-    ├── dependencies/<ecosystem>/<name>.md   # sibling root, not nested under repositories/
+    ├── code-graph/
+    │   ├── index.md             # Repositories
+    │   ├── <repo>.md            # the repository's own entity page
+    │   └── <repo>/
+    │       ├── index.md         # stub: Repository link + Subdirectories
+    │       ├── entities/
+    │       │   ├── index.md     # Packages, Apps, Agent Plugins, Test Suites, Dependencies
+    │       │   ├── packages/<name>.md
+    │       │   ├── apps/<name>.md
+    │       │   ├── agent-plugins/<name>.md
+    │       │   ├── test-suites/<name>.md
+    │       │   └── dependencies/<ecosystem>/<name>.md   # one per (repository, dependency)
+    │       └── file-system/<source-path>.md
     ├── docs/tutorials/ docs/how-tos/ docs/reference/ docs/explanations/   # Diátaxis lanes
     ├── sources/                 # One summary page per ingested source
     │   └── references/          # gw ingest’s copies of ingested material
@@ -70,16 +76,16 @@ page, and managed artifacts live under that directory’s `references/` child.
 ```
 
 Every workspace package and app — plus the repository, external dependencies, and
-test suites — is rendered as a single page nested under `repositories/<repo>/`
-(one folder per kind), except `dependency` pages, which live at the sibling root
-`dependencies/<ecosystem>/<name>.md`. There is no filename-prefix scheme and no
-`entities/` folder — the graph is the sole source for which entities exist.
+test suites — is rendered as a single page nested under `code-graph/<repo>/`
+(one folder per kind), including `dependency` pages at
+`code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md` (one per repository and dependency). There is no filename-prefix scheme and no
+top-level `entities/` folder — the graph is the sole source for which entities exist.
 
 **Source of truth is the code itself.** The wiki is a compiled layer above it. If the wiki disagrees with the code, the code wins — the wiki gets updated.
 
 ## Four core operations
 
-1. **Scan** — build the code graph and render one page per admitted entity into `repositories/<repo>/` (and `dependencies/` for deps); the default scan then fills prose via a commit-gated **emit → fan-out → apply** pipeline (`## Narrative`, file/dir descriptions, `## Purpose`/`## Public API`). A bare `--no-narrate` invocation is the mechanical structural-only fast path (`## Narrative` placeholder + `— TODO` file-map rows). See `references/scan-workflow.md`.
+1. **Scan** — build the code graph and render one page per admitted entity into `code-graph/<repo>/` (dependencies included); the default scan then fills prose via a commit-gated **emit → fan-out → apply** pipeline (`## Narrative`, file/dir descriptions, `## Purpose`/`## Public API`). A bare `--no-narrate` invocation is the mechanical structural-only fast path (`## Narrative` placeholder + `— TODO` file-map rows). See `references/scan-workflow.md`.
 2. **Ingest** — `gw ingest --source <any path>` reads material directly (article, spec, PR, transcript) and classifies it. By default (`claude_code` backend) it returns a brief and writes nothing — the `ingest` skill discusses with you, then drafts a source summary, links relevant pages, updates the index, and appends to the log. `--backend bedrock` (or `vercel`) runs the fully autonomous one-call pipeline instead.
 3. **Query** — read `index.md`, drill into 3-10 pages, synthesize with inline root-absolute markdown links, offer to file the answer back. See `references/query-workflow.md`.
 4. **Lint** — health check including **code-drift detection**: packages on disk missing from the vault, vault pages referencing deleted/renamed packages, stale package summaries whose exports have changed. See `references/lint-workflow.md`.
@@ -93,7 +99,7 @@ test suites — is rendered as a single page nested under `repositories/<repo>/`
 #    <workspace>/okf/.
 /gw:onboard
 
-# 2. Scan the repo to render one repositories/<repo>/ page per admitted entity
+# 2. Scan the repo to render one code-graph/<repo>/ page per admitted entity
 /gw:scan
 
 # 3. Ingest a source (article, spec, PR) from anywhere on disk
@@ -117,7 +123,7 @@ Codex build namespaces plugin skills rather than exposing them flat.
 | Skill | Purpose |
 |---|---|
 | `onboard` | Locate or create the workspace (defaults to `<repo>/.works`), then configure it |
-| `scan` | Build the code graph; create/update/delete one page per admitted entity under `repositories/<repo>/` (or `dependencies/`) |
+| `scan` | Build the code graph; create/update/delete one page per admitted entity under `code-graph/<repo>/`  |
 | `ingest` | Read a source from any path, update vault, log it |
 | `query` | Search vault, synthesize answer with citations, offer to file back |
 | `lint` | Health check — orphans, broken links, stale claims, **code drift**, and the work-layer catalog |
@@ -149,8 +155,8 @@ Schema lives in `<workspace>/okf/CLAUDE.md` (Claude Code) or `<workspace>/okf/AG
 
 | `type` | What it documents | Directory |
 |---|---|---|
-| `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | Graph-derived entity pages, one per admitted entity — written by `gw scan` | `<workspace>/okf/repositories/<repo>/…` |
-| `Dependency` | An external package the repository depends on — written by `gw scan` | `<workspace>/okf/dependencies/<ecosystem>/<name>.md` |
+| `Repository`, `Package`, `App`, `AgentPlugin`, `TestSuite`, `File` | Graph-derived entity pages, one per admitted entity — written by `gw scan` | `<workspace>/okf/code-graph/<repo>/…` |
+| `Dependency` | An external package the repository depends on — written by `gw scan` | `<workspace>/okf/code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md` |
 | `Explanation` | Cross-cutting technical idea, pattern, or architecture synthesis. Comparisons (`<a>-vs-<b>.md`) live here too. | `<workspace>/okf/explanations/` |
 | `Reference`, `HowTo`, `Tutorial` | The other Diátaxis lanes | `docs/reference/`, `docs/how-tos/`, `docs/tutorials/` |
 | `Source` | Summary of an ingested spec, PR, article, transcript, etc. | `<workspace>/okf/sources/` |

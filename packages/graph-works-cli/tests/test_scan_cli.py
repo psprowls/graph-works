@@ -146,7 +146,7 @@ def test_normal_scan_exits_one_for_incomplete_entity_writes(
     initialized_workspace: Path,
 ) -> None:
     structural = StructuralSummary(
-        entities=SyncSummary(skipped=("repositories/demo/packages/widgets.md: commit-error: disk full",))
+        entities=SyncSummary(skipped=("code-graph/demo/entities/packages/widgets.md: commit-error: disk full",))
     )
 
     async def fake_run_scan(*args: object, **kwargs: object) -> ScanResult:
@@ -461,7 +461,7 @@ def test_emit_reports_incomplete_entity_writes_in_worklist_json(
     async def fake_build_worklist(*_args: object, **_kwargs: object) -> tuple[ScanWorklist, StructuralSummary]:
         return ScanWorklist(short_head="abc123"), StructuralSummary(
             entities=SyncSummary(
-                skipped=("repositories/demo/packages/widgets.md: commit-error: disk full",),
+                skipped=("code-graph/demo/entities/packages/widgets.md: commit-error: disk full",),
                 catalog_declined=(("packages/demo", "unadmitted"),),
             )
         )
@@ -472,7 +472,7 @@ def test_emit_reports_incomplete_entity_writes_in_worklist_json(
 
     assert result.exit_code == exit_codes.GENERIC
     assert json.loads(result.stdout)["entity_errors"] == [
-        "entity sync incomplete: repositories/demo/packages/widgets.md: commit-error: disk full",
+        "entity sync incomplete: code-graph/demo/entities/packages/widgets.md: commit-error: disk full",
         "packages/demo: unadmitted",
     ]
 

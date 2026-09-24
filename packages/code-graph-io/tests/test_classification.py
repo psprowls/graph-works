@@ -136,3 +136,66 @@ def test_classify_js_electron_before_spa(tmp_path: Path) -> None:
     assert app_kind == "electron"
     assert "electron" in signals
     assert "spa" in signals  # spa signal fires, but electron wins precedence
+
+
+# ---------- Python server signal ----------
+
+
+def _py(deps: list[str], *, scripts: bool = False) -> dict[str, object]:
+    return {"language": "python", "scripts_present": scripts, "dependencies": deps}
+
+
+def test_fastapi_dep_plus_app_instantiation_is_server(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_bytes(b"from fastapi import FastAPI\n\napp = FastAPI()\n")
+
+    assert classify(_py(["fastapi>=0.110"]), tmp_path) == ("app", "server", ["server"])
+
+
+def test_server_dep_without_entry_evidence_stays_package(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_bytes(b"from fastapi import APIRouter\n\nrouter = APIRouter()\n")
+
+    assert classify(_py(["fastapi"]), tmp_path) == ("package", None, [])
+
+
+def test_pyproject_flask_library_stays_package(tmp_path: Path) -> None:
+    """A library depending on Flask, with no top-level entry file, is not an App."""
+    (tmp_path / "src" / "flask_ext").mkdir(parents=True)
+    (tmp_path / "src" / "flask_ext" / "__init__.py").write_bytes(b"from flask import Flask\napp = Flask(__name__)\n")
+
+    assert classify(_py(["Flask>=3"]), tmp_path) == ("package", None, [])
+
+
+def test_instantiation_without_server_dep_stays_package(tmp_path: Path) -> None:
+    (tmp_path / "main.py").write_bytes(b"app = FastAPI()\n")
+
+    assert classify(_py(["requests"]), tmp_path) == ("package", None, [])
+
+
+def test_uvicorn_run_with_extras_and_pep503_normalisation(tmp_path: Path) -> None:
+    (tmp_path / "server.py").write_bytes(b"import uvicorn\nuvicorn.run('x:app')\n")
+
+    assert classify(_py(["Uvicorn[standard]==0.30.1"]), tmp_path)[1] == "server"
+
+
+def test_django_manage_py_is_server(tmp_path: Path) -> None:
+    (tmp_path / "manage.py").write_bytes(b"from django.core.management import execute_from_command_line\n")
+
+    assert classify(_py(["Django>=5"]), tmp_path)[1] == "server"
+
+
+def test_unreadable_entry_file_gives_no_signal(tmp_path: Path) -> None:
+    (tmp_path / "app.py").mkdir()  # opening a directory raises OSError
+
+    assert classify(_py(["fastapi"]), tmp_path) == ("package", None, [])
+
+
+def test_cli_and_server_signals_server_wins(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_bytes(b"app = Flask(__name__)\n")
+
+    assert classify(_py(["flask"], scripts=True), tmp_path) == ("app", "server", ["cli", "server"])
+
+
+def test_evidence_beyond_read_limit_is_ignored(tmp_path: Path) -> None:
+    (tmp_path / "app.py").write_bytes(b"#" * (64 * 1024) + b"\napp = FastAPI()\n")
+
+    assert classify(_py(["fastapi"]), tmp_path) == ("package", None, [])

@@ -124,19 +124,9 @@ def test_every_generated_section_is_required() -> None:
 def test_the_seed_declares_all_invariant_catalog_sections() -> None:
     """Every invariant global catalog path has a generated declaration."""
     section_set = _seed_sections()
-    assert tuple(section_set.indexes) == (
-        "",
-        "dependencies",
-        "repositories",
-    )
-    assert tuple(spec.heading for spec in section_set.indexes[""].sections) == (
-        "Repositories",
-        "Packages",
-        "Apps",
-        "Agent Plugins",
-        "Test Suites",
-        "Dependencies",
-    )
+    assert tuple(section_set.indexes) == ("", "code-graph")
+    assert tuple(spec.heading for spec in section_set.indexes[""].sections) == ("Repositories",)
+    assert tuple(spec.heading for spec in section_set.indexes["code-graph"].sections) == ("Repositories",)
     for declaration in section_set.indexes.values():
         assert all(spec.ownership == "generated" and spec.required for spec in declaration.sections)
         assert all("not yet generated" in spec.placeholder for spec in declaration.sections)
@@ -165,7 +155,7 @@ def test_a_renamed_generated_heading_now_reports_sections_missing(tmp_path: Path
     root = _bundle_with(
         tmp_path,
         "packages/widgets.md",
-        _PACKAGE_HEAD + _PACKAGE_PROSE + "## File map\n\n- [src/a.py](/repositories/acme/src/a.py.md)\n",
+        _PACKAGE_HEAD + _PACKAGE_PROSE + "## File map\n\n- [src/a.py](/code-graph/acme/src/a.py.md)\n",
     )
     findings = _sections_report(root).by_code("sections.missing")
     assert [f.path for f in findings] == ["packages/widgets.md"]

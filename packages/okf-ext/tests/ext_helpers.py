@@ -122,11 +122,8 @@ UNHEALTHY = FIXTURES / "unhealthy"
 
 #: What the health walk must report over `unhealthy/` at `today=2026-08-06` and
 #: the default 14-day gap, as `(code, path)`. `hub.md` is uncited because
-#: nothing cites *it*; `untitled.md` is absent because a concept with no title
-#: never joins a duplicate group.
+#: nothing cites *it*.
 HEALTH_EXPECTED = {
-    ("health.duplicate-title", "dup-a.md"),
-    ("health.duplicate-title", "dup-b.md"),
     ("health.log-gap", "log.md"),
     ("health.uncited", "hub.md"),
     ("health.uncited", "orphan.md"),

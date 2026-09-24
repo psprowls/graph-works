@@ -899,10 +899,9 @@ def successor_id(uri: str, *, repo_renames: dict[str, str] | None = None) -> str
 
     if repo_renames:
         parts = payload.split("/")
-        # `<org>/<repo>[/<name>]` for repo-scoped types; `<ecosystem>/<name>`
-        # for Dependency, whose first component is not a repository and is
-        # therefore never renamed.
-        if type_name != "Dependency" and len(parts) >= 2:
+        # `<org>/<repo>[/...]` for every type: a Dependency is repository-owned
+        # too (`dependency:<org>/<repo>/<eco>/<name>`).
+        if len(parts) >= 2:
             parts[1] = repo_renames.get(parts[1], parts[1])
             payload = "/".join(parts)
         uri = f"{prefix}:{payload}"
@@ -939,12 +938,16 @@ def cmd_entities(args: argparse.Namespace) -> PhaseReport:
     quarantine = out / "entities-preimage"
 
     # --- step 1: snapshot -------------------------------------------------
-    rows = _entity_snapshot(vault) if not snapshot_path.exists() else json.loads(
-        snapshot_path.read_text(encoding="utf-8")
-    )["rows"]
+    rows = (
+        _entity_snapshot(vault)
+        if not snapshot_path.exists()
+        else json.loads(snapshot_path.read_text(encoding="utf-8"))["rows"]
+    )
     if args.write and not snapshot_path.exists():
         snapshot_path.parent.mkdir(parents=True, exist_ok=True)
-        snapshot_path.write_text(json.dumps({"rows": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n")
+        snapshot_path.write_text(
+            json.dumps({"rows": rows}, indent=2, sort_keys=True) + "\n", encoding="utf-8", newline="\n"
+        )
     notes.append(f"{len(rows)} entity page(s) snapshotted")
 
     # --- step 2: quarantine ----------------------------------------------
@@ -957,7 +960,9 @@ def cmd_entities(args: argparse.Namespace) -> PhaseReport:
     if args.write and args.scan:
         completed = subprocess.run(
             ["uv", "run", "--package", "graph-works-cli", "gw", "scan", "--workspace", str(vault.parent)],
-            capture_output=True, text=True, check=False,
+            capture_output=True,
+            text=True,
+            check=False,
         )
         notes.append(f"gw scan exit={completed.returncode}")
         if completed.returncode != 0:
@@ -969,7 +974,7 @@ def cmd_entities(args: argparse.Namespace) -> PhaseReport:
 
     # --- step 4: match and rewrite ---------------------------------------
     bundle = load(vault, "entities")
-    successors: dict[str, str] = {}   # old member -> new member
+    successors: dict[str, str] = {}  # old member -> new member
     unmatched: list[dict] = []
     for row in rows:
         new_id = successor_id(row["uri"], repo_renames=renames)
@@ -1025,12 +1030,12 @@ def _rewrite_entity_references(
 ) -> list[str]:
     """Both surfaces, in one pass over the bundle.
 
-      * the markdown links -- by this point phase 5 has converted them, so they
-        are `[label](/entities/pkg_okf-io__ab12cd.md)` and the rewrite is a path
-        substitution through `Document.set_body` on the parsed original;
-      * the `sources/` `entity_uri:` values, through `Document.set`.
-        `entity_uri` is not an OKF reserved key and not an OKF reference form,
-        so nothing in `moves` or `validate` would ever have caught these.
+    * the markdown links -- by this point phase 5 has converted them, so they
+      are `[label](/entities/pkg_okf-io__ab12cd.md)` and the rewrite is a path
+      substitution through `Document.set_body` on the parsed original;
+    * the `sources/` `entity_uri:` values, through `Document.set`.
+      `entity_uri` is not an OKF reserved key and not an OKF reference form,
+      so nothing in `moves` or `validate` would ever have caught these.
     """
     uri_successors = {
         row["uri"]: f"{prefix}:{payload}"
@@ -1372,9 +1377,7 @@ def cmd_bundle(args: argparse.Namespace) -> PhaseReport:
     log_path = vault / "log.md"
     if log_path.is_file():
         original = log_path.read_text(encoding="utf-8")
-        has_legacy_heading = any(
-            _LEGACY_LOG_HEADING.match(line) for line in original.splitlines()
-        )
+        has_legacy_heading = any(_LEGACY_LOG_HEADING.match(line) for line in original.splitlines())
         if has_legacy_heading:
             reformatted = reformat_log(original)
             if reformatted != original:
@@ -1429,7 +1432,9 @@ def cmd_gate(args: argparse.Namespace) -> PhaseReport:
     # --- 1 ------------------------------------------------------------------
     report_1 = validate(bundle, today=args.today)
     for finding in report_1.errors:
-        refusals.append(Refusal(member=finding.path or "?", reason="validate-error", detail=f"{finding.code}: {finding.message}"))
+        refusals.append(
+            Refusal(member=finding.path or "?", reason="validate-error", detail=f"{finding.code}: {finding.message}")
+        )
     notes.append(f"validate: {len(report_1.errors)} error(s), {len(report_1.warnings)} warning(s)")
 
     # --- 2 ------------------------------------------------------------------

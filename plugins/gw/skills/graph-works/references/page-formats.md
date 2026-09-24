@@ -36,7 +36,7 @@ An unfilled prose section keeps its `> TODO:` placeholder, which lint reports as
 
 ## 1. Entity pages
 
-Scanner-owned. Nested under `repositories/<repo>/`, one folder per kind; see
+Scanner-owned. Nested under `code-graph/<repo>/`, one folder per kind; see
 `wiki-schema.md` for paths and the owned/provenance key tables.
 
 | `type` | Required headings | Optional headings |
@@ -76,17 +76,18 @@ What the package is for, in prose.
 The surface other packages import.
 
 ## Files
-- [packages/code-wiki-okf/pyproject.toml](/repositories/<repo>/files/packages/code-wiki-okf/pyproject.toml.md)
+- [packages/code-wiki-okf/pyproject.toml](/code-graph/<repo>/file-system/packages/code-wiki-okf/pyproject.toml.md)
 - ... one link per tracked file, generated
 ```
 
 Each `## Files` entry links to that file's own `File` page under
-`repositories/<repo>/files/`. A package's `TestSuite` page is a sibling entity, linked
+`code-graph/<repo>/file-system/`. A package's `TestSuite` page is a sibling entity, linked
 back through `tested_packages`.
 
 ## 2. Dependency page
 
-`/gw:scan` writes one page per dependency into `dependencies/<ecosystem>/<name>.md`.
+`/gw:scan` writes one page per dependency into `code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md`.
+It is one Dependency per (repository, dependency): `used_by` and `versions_in_use` describe that repository only; the implementing Package page aggregates across repositories.
 
 **Required frontmatter:** `type: Dependency`, `title`, `resource`, `ecosystem`.
 **Optional:** `description`, `tags`, `implemented_by`, `used_by`, `versions_in_use`.
@@ -98,7 +99,7 @@ back through `tested_packages`.
 ---
 type: Dependency
 title: React
-resource: dependency:npm/react
+resource: dependency:acme/web/npm/react
 ecosystem: npm
 description: UI library used by the web application.
 tags: [frontend, ui]
@@ -151,7 +152,7 @@ Optional extra section: the interface or code sketch, cited as
 What choosing this costs, and the alternatives.
 
 ## See also
-- [common-aws-node-ts](/repositories/<repo>/packages/common-aws-node-ts.md) — injects via middleware
+- [common-aws-node-ts](/code-graph/<repo>/entities/packages/common-aws-node-ts.md) — injects via middleware
 - [middleware-pipeline](/explanations/middleware-pipeline.md)
 - [2025-12-context-refactor-spec](/sources/2025-12-context-refactor-spec.md)
 ```
@@ -224,7 +225,7 @@ Two sentences max. What the source proposes, argues, or reports.
 - Spec claims `session.session_id` is unchanged, but see [global-context](/explanations/global-context.md) — field shape differs.
 
 ## Touches
-- [shared-aws-node-ts](/repositories/<repo>/packages/shared-aws-node-ts.md)
+- [shared-aws-node-ts](/code-graph/<repo>/entities/packages/shared-aws-node-ts.md)
 
 ## Decisions triggered
 - [0014-jwt-sessions](/adrs/0014-jwt-sessions.md) — stable

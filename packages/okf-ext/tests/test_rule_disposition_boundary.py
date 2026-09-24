@@ -21,7 +21,7 @@ _DISPOSITION: dict[str, str] = {
     "sections/rule.py": "scoped",
     "schemas/rule.py": "scoped",
     "placement/rule.py": "unscoped: resource-collision accumulates first_claim across documents",
-    "health/rule.py": "unscoped: duplicate-titles groups across documents; uncited reads backlinks",
+    "health/rule.py": "unscoped: uncited reads backlinks",
     "tags/vocabulary.py": "unscoped: not in any gate rule set; narrowing it buys nothing",
 }
 

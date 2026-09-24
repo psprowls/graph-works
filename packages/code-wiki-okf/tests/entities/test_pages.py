@@ -22,11 +22,11 @@ def test_slug_replaces_slash() -> None:
 def test_default_concept_id_delegates_placement_to_the_resource_policy() -> None:
     assert (
         default_concept_id(type_name="Package", resource="pkg:acme/repo-a/widgets")
-        == "repositories/repo-a/packages/widgets"
+        == "code-graph/repo-a/entities/packages/widgets"
     )
     assert (
-        default_concept_id(type_name="Dependency", resource="dependency:npm/@babel/core")
-        == "dependencies/npm/@babel__core"
+        default_concept_id(type_name="Dependency", resource="dependency:acme/repo-a/npm/@babel/core")
+        == "code-graph/repo-a/entities/dependencies/npm/@babel__core"
     )
 
 

@@ -117,8 +117,7 @@ def test_the_scanner_flags_a_quote_bearing_msys_argv(tmp_path: Path) -> None:
     offender = tmp_path / "scripts" / "bad.py"
     offender.parent.mkdir(parents=True)
     offender.write_text(
-        "import subprocess\n"
-        'subprocess.run(["sed", "-n", \'s/.*"x".*/\\1/p\', "file"])\n',
+        'import subprocess\nsubprocess.run(["sed", "-n", \'s/.*"x".*/\\1/p\', "file"])\n',
         encoding="utf-8",
         newline="\n",
     )
@@ -130,8 +129,7 @@ def test_the_scanner_ignores_a_quote_bearing_argv_for_a_non_msys_tool(tmp_path: 
     clean = tmp_path / "scripts" / "clean.py"
     clean.parent.mkdir(parents=True)
     clean.write_text(
-        "import subprocess\n"
-        'subprocess.run(["git", "log", \'--grep=say "hi"\'])\n',
+        'import subprocess\nsubprocess.run(["git", "log", \'--grep=say "hi"\'])\n',
         encoding="utf-8",
         newline="\n",
     )

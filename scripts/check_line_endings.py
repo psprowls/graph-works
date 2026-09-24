@@ -65,9 +65,7 @@ def _ls_files_eol(root: Path) -> list[tuple[str, str, str]]:
     `git ls-files --eol -z` -- `-z` so a name containing a newline still
     splits correctly.
     """
-    result = subprocess.run(
-        ["git", "ls-files", "--eol", "-z"], cwd=root, check=True, capture_output=True
-    )
+    result = subprocess.run(["git", "ls-files", "--eol", "-z"], cwd=root, check=True, capture_output=True)
     entries: list[tuple[str, str, str]] = []
     for line in result.stdout.decode("utf-8").split("\0"):
         if not line:
@@ -125,9 +123,7 @@ def find_violations(root: Path) -> list[Violation]:
                 )
             continue
         if index_eol in ("crlf", "mixed"):
-            violations.append(
-                Violation(path, f"checks out with unguarded {index_eol.upper()} line endings")
-            )
+            violations.append(Violation(path, f"checks out with unguarded {index_eol.upper()} line endings"))
     return violations
 
 

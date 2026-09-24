@@ -6,7 +6,7 @@ Recommended Obsidian configuration for a Code Wiki. None of this is strictly req
 
 **Important:** point Obsidian at `<workspace>/okf/` — that is the bundle root and the Obsidian vault root; there is no separate `wiki/` subdir to distinguish it from.
 
-1. Obsidian → "Open folder as vault" → pick `<workspace>/okf/`, e.g. `<repo>/.works/okf/`. The Obsidian sidebar will show `work/`, `repositories/`, `sources/`, etc. Naming the repo's workspace dir something distinctive makes it obvious which repo the vault belongs to when several are open.
+1. Obsidian → "Open folder as vault" → pick `<workspace>/okf/`, e.g. `<repo>/.works/okf/`. The Obsidian sidebar will show `work/`, `code-graph/`, `sources/`, etc. Naming the repo's workspace dir something distinctive makes it obvious which repo the vault belongs to when several are open.
 2. The repo root sits one level up — your repo-level `CLAUDE.md`, source code, and build artifacts stay outside Obsidian's view.
 
 **Note on CLAUDE.md files:** there are typically three relevant files when working from a graph-works workspace: the repo's root `CLAUDE.md` (build/style conventions), `<workspace>/CLAUDE.md` (workspace-level schema, owned by `gw`), and `<workspace>/okf/CLAUDE.md` (wiki schema, owned by this plugin). Claude Code loads all three by walking the tree; they describe different layers and don't conflict.
@@ -79,7 +79,8 @@ limit 10
 Dependencies grouped by ecosystem:
 ```dataview
 table ecosystem, versions_in_use, used_by
-from "dependencies"
+from "code-graph"
+where type = "Dependency"
 group by ecosystem
 ```
 

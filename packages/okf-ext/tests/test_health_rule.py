@@ -55,39 +55,6 @@ def test_a_concept_cited_only_by_an_index_is_still_uncited(tmp_path):
     assert [f.path for f in found] == ["solo.md"]
 
 
-# --- health.duplicate-title -------------------------------------------------
-
-
-def test_each_participant_gets_its_own_finding_naming_the_others():
-    found = [f for f in run(ext_helpers.unhealthy_bundle()) if f.code == "health.duplicate-title"]
-    assert {f.path for f in found} == {"dup-a.md", "dup-b.md"}
-    assert all(f.line == 3 for f in found)  # the `title:` key
-    by_path = {f.path: f.message for f in found}
-    assert "dup-b.md" in by_path["dup-a.md"]
-    assert "dup-a.md" in by_path["dup-b.md"]
-
-
-def test_untitled_concepts_never_form_a_group(tmp_path):
-    """A group keyed on the empty string would collapse every untitled document
-    into one false cluster. okf-io's `frontmatter.title-recommended` already
-    reports the missing title."""
-    bundle = build(
-        tmp_path,
-        a="---\ntype: Note\n---\n\n# A\n",
-        b="---\ntype: Note\n---\n\n# B\n",
-    )
-    assert not [f for f in run(bundle) if f.code == "health.duplicate-title"]
-
-
-def test_titles_are_compared_stripped(tmp_path):
-    bundle = build(
-        tmp_path,
-        a="---\ntype: Note\ntitle: '  Same  '\n---\n\n# A\n",
-        b="---\ntype: Note\ntitle: Same\n---\n\n# B\n",
-    )
-    assert len([f for f in run(bundle) if f.code == "health.duplicate-title"]) == 2
-
-
 # --- health.log-gap ---------------------------------------------------------
 
 

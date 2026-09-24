@@ -14,41 +14,9 @@ directories:
         required: true
         placeholder: |
           _(populated by `code-wiki-okf sync` — not yet generated)_
-      - heading: Packages
-        ownership: generated
-        required: true
-        placeholder: |
-          _(populated by `code-wiki-okf sync` — not yet generated)_
-      - heading: Apps
-        ownership: generated
-        required: true
-        placeholder: |
-          _(populated by `code-wiki-okf sync` — not yet generated)_
-      - heading: Agent Plugins
-        ownership: generated
-        required: true
-        placeholder: |
-          _(populated by `code-wiki-okf sync` — not yet generated)_
-      - heading: Test Suites
-        ownership: generated
-        required: true
-        placeholder: |
-          _(populated by `code-wiki-okf sync` — not yet generated)_
-      - heading: Dependencies
-        ownership: generated
-        required: true
-        placeholder: |
-          _(populated by `code-wiki-okf sync` — not yet generated)_
-  "repositories/":
+  "code-graph/":
     sections:
       - heading: Repositories
-        ownership: generated
-        required: true
-        placeholder: |
-          _(populated by `code-wiki-okf sync` — not yet generated)_
-  "dependencies/":
-    sections:
-      - heading: Dependencies
         ownership: generated
         required: true
         placeholder: |

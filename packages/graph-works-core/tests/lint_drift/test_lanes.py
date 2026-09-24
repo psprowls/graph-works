@@ -129,7 +129,7 @@ def test_the_wiki_lane_carries_every_declared_capability(workspace):
 
 def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
     bundle_dir = workspace.layout.bundle_dir
-    page = bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
+    page = bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     page.parent.mkdir(parents=True)
     page.write_text(
         "---\n"
@@ -195,7 +195,7 @@ def test_the_wiki_lane_rejects_the_retired_flat_package_lane(workspace):
 
     mismatch = [finding for finding in report.findings if finding.code == "placement.directory-mismatch"]
     assert len(mismatch) == 1
-    assert "repositories/demo/packages/widgets" in mismatch[0].message
+    assert "code-graph/demo/entities/packages/widgets" in mismatch[0].message
 
 
 def test_a_reader_adds_the_sync_rule(workspace, monkeypatch):

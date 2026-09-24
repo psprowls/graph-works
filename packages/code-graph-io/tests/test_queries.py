@@ -1128,7 +1128,7 @@ def test_valid_kinds_includes_unresolved_symbol(conn: sqlite3.Connection) -> Non
 
 def test_valid_app_kinds_contents() -> None:
     """_VALID_APP_KINDS frozenset enumerates the framework strings."""
-    assert frozenset({"cli", "electron", "expo", "nextjs", "spa"}) == queries._VALID_APP_KINDS
+    assert frozenset({"cli", "electron", "expo", "nextjs", "server", "spa"}) == queries._VALID_APP_KINDS
 
 
 def test_builtin_uri_shape() -> None:
@@ -1149,12 +1149,12 @@ def test_describe_dependency_returns_dependency_description(conn: sqlite3.Connec
                 GraphNode(
                     kind="dependency",
                     name="boto3",
-                    path=None,
+                    path="dependency:local/repo:pypi:boto3",
                     line=None,
                     attrs={
                         "ecosystem": "pypi",
                         "name": "boto3",
-                        "uri": "dependency:pypi/boto3",
+                        "uri": "dependency:local/repo/pypi/boto3",
                         "versions_in_use": ["boto3>=1.38", "boto3==1.39.0"],
                     },
                 ),
@@ -1169,18 +1169,18 @@ def test_describe_dependency_returns_dependency_description(conn: sqlite3.Connec
             edges=[
                 GraphEdge(
                     src=("package", "my-pkg", "src/my_pkg"),
-                    dst=("dependency", "boto3", None),
+                    dst=("dependency", "boto3", "dependency:local/repo:pypi:boto3"),
                     kind="used_by",
                     attrs={},
                 ),
             ],
         ),
     )
-    d = queries.describe_dependency(conn, ecosystem="pypi", name="boto3")
+    d = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/boto3")
     assert d is not None
     assert d.ecosystem == "pypi"
     assert d.name == "boto3"
-    assert d.uri == "dependency:pypi/boto3"
+    assert d.uri == "dependency:local/repo/pypi/boto3"
     assert d.versions_in_use == ["boto3>=1.38", "boto3==1.39.0"]
     assert d.used_by == ["pkg:local/repo/my-pkg"]
     assert d.implemented_by == []
@@ -1200,12 +1200,12 @@ def test_describe_package_used_by_and_versions_in_use_match_describe_dependency(
                 GraphNode(
                     kind="dependency",
                     name="shared-dep",
-                    path=None,
+                    path="dependency:local/repo:pypi:shared-dep",
                     line=None,
                     attrs={
                         "ecosystem": "pypi",
                         "name": "shared-dep",
-                        "uri": "dependency:pypi/shared-dep",
+                        "uri": "dependency:local/repo/pypi/shared-dep",
                         "versions_in_use": ["shared-dep>=1.0"],
                     },
                 ),
@@ -1233,27 +1233,27 @@ def test_describe_package_used_by_and_versions_in_use_match_describe_dependency(
             ],
             edges=[
                 GraphEdge(
-                    src=("dependency", "shared-dep", None),
+                    src=("dependency", "shared-dep", "dependency:local/repo:pypi:shared-dep"),
                     dst=("package", "impl-pkg", "src/impl_pkg"),
                     kind="implemented_by",
                     attrs={},
                 ),
                 GraphEdge(
                     src=("package", "consumer-pkg", "src/consumer_pkg"),
-                    dst=("dependency", "shared-dep", None),
+                    dst=("dependency", "shared-dep", "dependency:local/repo:pypi:shared-dep"),
                     kind="used_by",
                     attrs={},
                 ),
                 GraphEdge(
                     src=("repository", "root-repo", ""),
-                    dst=("dependency", "shared-dep", None),
+                    dst=("dependency", "shared-dep", "dependency:local/repo:pypi:shared-dep"),
                     kind="used_by",
                     attrs={"dev": True},
                 ),
             ],
         ),
     )
-    d = queries.describe_dependency(conn, ecosystem="pypi", name="shared-dep")
+    d = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/shared-dep")
     assert d is not None
     p = queries.describe_package(conn, name="impl-pkg")
     assert p is not None
@@ -1298,9 +1298,9 @@ def test_describe_dependency_retains_sorted_deduplicated_implementations(conn: s
                 GraphNode(
                     kind="dependency",
                     name="shared",
-                    path=None,
+                    path="dependency:local/repo:pypi:shared",
                     line=None,
-                    attrs={"ecosystem": "pypi", "name": "shared", "uri": "dependency:pypi/shared"},
+                    attrs={"ecosystem": "pypi", "name": "shared", "uri": "dependency:local/repo/pypi/shared"},
                 ),
                 GraphNode(
                     kind="package",
@@ -1326,19 +1326,19 @@ def test_describe_dependency_retains_sorted_deduplicated_implementations(conn: s
             ],
             edges=[
                 GraphEdge(
-                    src=("dependency", "shared", None),
+                    src=("dependency", "shared", "dependency:local/repo:pypi:shared"),
                     dst=("package", "second", "packages/second"),
                     kind="implemented_by",
                     attrs={},
                 ),
                 GraphEdge(
-                    src=("dependency", "shared", None),
+                    src=("dependency", "shared", "dependency:local/repo:pypi:shared"),
                     dst=("package", "first", "packages/first"),
                     kind="implemented_by",
                     attrs={},
                 ),
                 GraphEdge(
-                    src=("dependency", "shared", None),
+                    src=("dependency", "shared", "dependency:local/repo:pypi:shared"),
                     dst=("package", "duplicate-first", "packages/duplicate-first"),
                     kind="implemented_by",
                     attrs={},
@@ -1347,7 +1347,7 @@ def test_describe_dependency_retains_sorted_deduplicated_implementations(conn: s
         ),
     )
 
-    description = queries.describe_dependency(conn, ecosystem="pypi", name="shared")
+    description = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/shared")
 
     assert description is not None
     assert description.implemented_by == ["pkg:acme/one/shared", "pkg:acme/two/shared"]
@@ -1363,9 +1363,9 @@ def test_describe_dependency_with_one_implementation_is_not_ambiguous(conn: sqli
                 GraphNode(
                     kind="dependency",
                     name="solo",
-                    path=None,
+                    path="dependency:local/repo:pypi:solo",
                     line=None,
-                    attrs={"ecosystem": "pypi", "name": "solo", "uri": "dependency:pypi/solo"},
+                    attrs={"ecosystem": "pypi", "name": "solo", "uri": "dependency:local/repo/pypi/solo"},
                 ),
                 GraphNode(
                     kind="package",
@@ -1377,7 +1377,7 @@ def test_describe_dependency_with_one_implementation_is_not_ambiguous(conn: sqli
             ],
             edges=[
                 GraphEdge(
-                    src=("dependency", "solo", None),
+                    src=("dependency", "solo", "dependency:local/repo:pypi:solo"),
                     dst=("package", "solo-package", "packages/solo"),
                     kind="implemented_by",
                     attrs={},
@@ -1386,7 +1386,7 @@ def test_describe_dependency_with_one_implementation_is_not_ambiguous(conn: sqli
         ),
     )
 
-    description = queries.describe_dependency(conn, ecosystem="pypi", name="solo")
+    description = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/solo")
 
     assert description is not None
     assert description.implemented_by == ["pkg:acme/one/solo"]
@@ -1394,7 +1394,7 @@ def test_describe_dependency_with_one_implementation_is_not_ambiguous(conn: sqli
 
 
 def test_describe_dependency_returns_none_when_missing(conn: sqlite3.Connection) -> None:
-    assert queries.describe_dependency(conn, ecosystem="pypi", name="nonexistent") is None
+    assert queries.describe_dependency(conn, uri="dependency:local/repo/pypi/nonexistent") is None
 
 
 def test_describe_dependency_includes_app_only_consumer(conn: sqlite3.Connection) -> None:
@@ -1406,9 +1406,9 @@ def test_describe_dependency_includes_app_only_consumer(conn: sqlite3.Connection
                 GraphNode(
                     kind="dependency",
                     name="typer",
-                    path=None,
+                    path="dependency:local/repo:pypi:typer",
                     line=None,
-                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:pypi/typer"},
+                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:local/repo/pypi/typer"},
                 ),
                 GraphNode(
                     kind="app",
@@ -1426,14 +1426,14 @@ def test_describe_dependency_includes_app_only_consumer(conn: sqlite3.Connection
             edges=[
                 GraphEdge(
                     src=("app", "work-tracker-okf", "apps/work-tracker-okf"),
-                    dst=("dependency", "typer", None),
+                    dst=("dependency", "typer", "dependency:local/repo:pypi:typer"),
                     kind="used_by",
                     attrs={},
                 ),
             ],
         ),
     )
-    d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
+    d = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/typer")
     assert d is not None
     assert d.used_by == ["app:o/r/work-tracker-okf"]
 
@@ -1448,9 +1448,9 @@ def test_describe_dependency_includes_repository_consumer(conn: sqlite3.Connecti
                 GraphNode(
                     kind="dependency",
                     name="mypy",
-                    path=None,
+                    path="dependency:local/repo:pypi:mypy",
                     line=None,
-                    attrs={"ecosystem": "pypi", "name": "mypy", "uri": "dependency:pypi/mypy"},
+                    attrs={"ecosystem": "pypi", "name": "mypy", "uri": "dependency:local/repo/pypi/mypy"},
                 ),
                 GraphNode(
                     kind="repository",
@@ -1463,14 +1463,14 @@ def test_describe_dependency_includes_repository_consumer(conn: sqlite3.Connecti
             edges=[
                 GraphEdge(
                     src=("repository", "agent-workspace", ""),
-                    dst=("dependency", "mypy", None),
+                    dst=("dependency", "mypy", "dependency:local/repo:pypi:mypy"),
                     kind="used_by",
                     attrs={"dev": True},
                 ),
             ],
         ),
     )
-    d = queries.describe_dependency(conn, ecosystem="pypi", name="mypy")
+    d = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/mypy")
     assert d is not None
     assert d.used_by == ["repo:o/agent-workspace"]
 
@@ -1484,9 +1484,9 @@ def test_describe_dependency_used_by_matches_consumer_packages(conn: sqlite3.Con
                 GraphNode(
                     kind="dependency",
                     name="typer",
-                    path=None,
+                    path="dependency:local/repo:pypi:typer",
                     line=None,
-                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:pypi/typer"},
+                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:local/repo/pypi/typer"},
                 ),
                 GraphNode(
                     kind="package",
@@ -1506,22 +1506,22 @@ def test_describe_dependency_used_by_matches_consumer_packages(conn: sqlite3.Con
             edges=[
                 GraphEdge(
                     src=("package", "my-pkg", "src/my_pkg"),
-                    dst=("dependency", "typer", None),
+                    dst=("dependency", "typer", "dependency:local/repo:pypi:typer"),
                     kind="used_by",
                     attrs={},
                 ),
                 GraphEdge(
                     src=("app", "my-app", "apps/my-app"),
-                    dst=("dependency", "typer", None),
+                    dst=("dependency", "typer", "dependency:local/repo:pypi:typer"),
                     kind="used_by",
                     attrs={},
                 ),
             ],
         ),
     )
-    d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
+    d = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/typer")
     assert d is not None
-    cp = queries.consumer_packages(conn, kind="dependency", entity_name="typer")
+    cp = queries.consumer_packages(conn, kind="dependency", entity_uri="dependency:local/repo/pypi/typer")
     # Same consumer *set*, two representations: describe_dependency carries
     # page-resolvable URIs (ADR-0048), consumer_packages stays the
     # domain-agnostic name query it documents itself as. The guard is that
@@ -1543,9 +1543,9 @@ def test_describe_dependency_separates_same_named_package_and_app(conn: sqlite3.
                 GraphNode(
                     kind="dependency",
                     name="typer",
-                    path=None,
+                    path="dependency:local/repo:pypi:typer",
                     line=None,
-                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:pypi/typer"},
+                    attrs={"ecosystem": "pypi", "name": "typer", "uri": "dependency:local/repo/pypi/typer"},
                 ),
                 GraphNode(
                     kind="package",
@@ -1565,20 +1565,20 @@ def test_describe_dependency_separates_same_named_package_and_app(conn: sqlite3.
             edges=[
                 GraphEdge(
                     src=("package", "twin", "src/twin"),
-                    dst=("dependency", "typer", None),
+                    dst=("dependency", "typer", "dependency:local/repo:pypi:typer"),
                     kind="used_by",
                     attrs={},
                 ),
                 GraphEdge(
                     src=("app", "twin", "apps/twin"),
-                    dst=("dependency", "typer", None),
+                    dst=("dependency", "typer", "dependency:local/repo:pypi:typer"),
                     kind="used_by",
                     attrs={},
                 ),
             ],
         ),
     )
-    d = queries.describe_dependency(conn, ecosystem="pypi", name="typer")
+    d = queries.describe_dependency(conn, uri="dependency:local/repo/pypi/typer")
     assert d is not None
     assert d.used_by == ["app:o/r/twin", "pkg:local/repo/twin"]
 
@@ -2298,7 +2298,7 @@ def test_build_menu_dependency_form(conn: sqlite3.Connection) -> None:
     menu = queries.build_menu(conn, queries.resolve_selector(conn, selector="boto3"))
     assert menu[0].kind == "dependency"
     assert menu[0].address == ""
-    assert menu[0].command == "gw graph describe pypi/boto3 --kind dependency"
+    assert menu[0].command == "gw graph describe boto3 --kind dependency"
 
 
 def test_build_menu_test_suite_kind_uses_the_core_describe_spelling(conn: sqlite3.Connection) -> None:
@@ -2315,7 +2315,7 @@ def test_build_menu_test_suite_kind_uses_the_core_describe_spelling(conn: sqlite
 
 def test_build_menu_dependency_with_synthetic_path(conn: sqlite3.Connection) -> None:
     """A dependency node carrying a synthetic path/None line is addressed by the
-    `<ecosystem>/<name>` identifier (not --in-package None, and not the
+    `<org>/<repo>/<ecosystem>/<name>` identifier (not --in-package None, and not the
     `--ecosystem` flag that no longer exists) with a blank address (not ":None")."""
     upsert.upsert_records(
         conn,
@@ -2324,7 +2324,7 @@ def test_build_menu_dependency_with_synthetic_path(conn: sqlite3.Connection) -> 
                 GraphNode(
                     kind="dependency",
                     name="boto3",
-                    path="dependency:pypi:boto3",
+                    path="dependency:acme/app:pypi:boto3",
                     line=None,
                     attrs={"ecosystem": "pypi"},
                 ),
@@ -2335,7 +2335,7 @@ def test_build_menu_dependency_with_synthetic_path(conn: sqlite3.Connection) -> 
     menu = queries.build_menu(conn, queries.resolve_selector(conn, selector="boto3"))
     assert len(menu) == 1
     assert menu[0].kind == "dependency"
-    assert menu[0].command == "gw graph describe pypi/boto3 --kind dependency"
+    assert menu[0].command == "gw graph describe acme/app/pypi/boto3 --kind dependency"
     assert menu[0].address == ""
 
 
@@ -2649,3 +2649,151 @@ def test_resolve_entry_point_missing(seeded_db: sqlite3.Connection) -> None:
 
     desc, ambiguous = queries.resolve_entry_point(seeded_db, "no-such-ep")
     assert desc is None and ambiguous == []
+
+
+def _seed_scoped_dependency(
+    conn: sqlite3.Connection, *, org: str, repo: str, name: str, versions: list[str], consumer: str
+) -> None:
+    upsert.set_current_repo(conn, f"repo:{org}/{repo}")
+    try:
+        upsert.upsert_records(
+            conn,
+            GraphRecords(
+                nodes=[
+                    GraphNode(
+                        kind="dependency",
+                        name=name,
+                        path=f"dependency:{org}/{repo}:pypi:{name}",
+                        line=None,
+                        attrs={
+                            "uri": f"dependency:{org}/{repo}/pypi/{name}",
+                            "ecosystem": "pypi",
+                            "name": name,
+                            "versions_in_use": versions,
+                        },
+                    ),
+                    GraphNode(
+                        kind="package",
+                        name=consumer,
+                        path=f"{repo}/{consumer}",
+                        line=None,
+                        attrs={"uri": f"pkg:{org}/{repo}/{consumer}"},
+                    ),
+                ],
+                edges=[
+                    GraphEdge(
+                        src=("package", consumer, f"{repo}/{consumer}"),
+                        dst=("dependency", name, f"dependency:{org}/{repo}:pypi:{name}"),
+                        kind="used_by",
+                        attrs={},
+                    )
+                ],
+            ),
+        )
+    finally:
+        upsert.set_current_repo(conn, None)
+
+
+def test_describe_dependency_by_uri_returns_the_requested_repository(conn: sqlite3.Connection) -> None:
+    _seed_scoped_dependency(conn, org="acme", repo="a", name="requests", versions=["requests>=2"], consumer="alpha")
+    _seed_scoped_dependency(conn, org="acme", repo="b", name="requests", versions=["requests==2.31"], consumer="beta")
+
+    a = queries.describe_dependency(conn, uri="dependency:acme/a/pypi/requests")
+    b = queries.describe_dependency(conn, repo="repo:acme/b", ecosystem="pypi", name="requests")
+
+    assert a is not None and b is not None
+    assert (a.repository, a.versions_in_use, a.used_by) == ("repo:acme/a", ["requests>=2"], ["pkg:acme/a/alpha"])
+    assert (b.repository, b.versions_in_use, b.used_by) == ("repo:acme/b", ["requests==2.31"], ["pkg:acme/b/beta"])
+
+
+def test_describe_dependency_requires_a_complete_identity(conn: sqlite3.Connection) -> None:
+    with pytest.raises(ValueError, match="uri"):
+        queries.describe_dependency(conn, ecosystem="pypi", name="requests")
+
+
+def test_consumer_packages_for_dependency_is_scoped_to_the_node(conn: sqlite3.Connection) -> None:
+    _seed_scoped_dependency(conn, org="acme", repo="a", name="requests", versions=[], consumer="alpha")
+    _seed_scoped_dependency(conn, org="acme", repo="b", name="requests", versions=[], consumer="beta")
+
+    assert queries.consumer_packages(conn, kind="dependency", entity_uri="dependency:acme/a/pypi/requests") == (
+        "alpha",
+    )
+
+
+def test_describe_package_unions_every_scoped_implemented_node(conn: sqlite3.Connection) -> None:
+    upsert.upsert_records(
+        conn,
+        GraphRecords(
+            nodes=[
+                GraphNode(
+                    kind="package",
+                    name="library",
+                    path="lib/library",
+                    line=None,
+                    attrs={"uri": "pkg:acme/lib/library", "language": "python"},
+                )
+            ],
+            edges=[],
+        ),
+    )
+    _seed_scoped_dependency(conn, org="acme", repo="a", name="library", versions=["library>=1"], consumer="alpha")
+    _seed_scoped_dependency(conn, org="acme", repo="b", name="library", versions=["library>=2"], consumer="beta")
+    for repo in ("a", "b"):
+        upsert.upsert_records(
+            conn,
+            GraphRecords(
+                nodes=[],
+                edges=[
+                    GraphEdge(
+                        src=("dependency", "library", f"dependency:acme/{repo}:pypi:library"),
+                        dst=("package", "library", "lib/library"),
+                        kind="implemented_by",
+                        attrs={},
+                    )
+                ],
+            ),
+        )
+
+    description = queries.describe_package(conn, name="library", uri="pkg:acme/lib/library")
+
+    assert description is not None
+    assert description.used_by == ["pkg:acme/a/alpha", "pkg:acme/b/beta"]
+    assert description.versions_in_use == ["library>=1", "library>=2"]
+
+
+def test_build_menu_emits_the_four_part_dependency_identifier(conn: sqlite3.Connection) -> None:
+    _seed_scoped_dependency(conn, org="acme", repo="a", name="requests", versions=[], consumer="alpha")
+    matches = [m for m in queries.resolve_selector(conn, selector="requests") if m.kind == "dependency"]
+
+    menu = queries.build_menu(conn, matches)
+
+    assert [entry.command for entry in menu] == ["gw graph describe acme/a/pypi/requests --kind dependency"]
+
+
+def test_scoped_npm_name_survives_describe_and_menu(conn: sqlite3.Connection) -> None:
+    upsert.set_current_repo(conn, "repo:o/r")
+    try:
+        upsert.upsert_records(
+            conn,
+            GraphRecords(
+                nodes=[
+                    GraphNode(
+                        kind="dependency",
+                        name="@scope/pkg",
+                        path="dependency:o/r:npm:@scope/pkg",
+                        line=None,
+                        attrs={"uri": "dependency:o/r/npm/@scope/pkg", "ecosystem": "npm", "name": "@scope/pkg"},
+                    )
+                ],
+                edges=[],
+            ),
+        )
+    finally:
+        upsert.set_current_repo(conn, None)
+
+    d = queries.describe_dependency(conn, uri="dependency:o/r/npm/@scope/pkg")
+    assert d is not None and (d.name, d.ecosystem, d.repository) == ("@scope/pkg", "npm", "repo:o/r")
+    matches = [m for m in queries.resolve_selector(conn, selector="@scope/pkg") if m.kind == "dependency"]
+    assert [e.command for e in queries.build_menu(conn, matches)] == [
+        "gw graph describe o/r/npm/@scope/pkg --kind dependency"
+    ]

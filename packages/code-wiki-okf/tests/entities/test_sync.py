@@ -13,9 +13,9 @@ from code_graph_io.testing import open_store
 from code_wiki_okf.config import Config, RepoConfig, StateGateConfig
 from code_wiki_okf.entities.sync import EntityPlan, EntityWrite, apply_entities, plan_entities
 from code_wiki_okf.init import install_bundle
-from code_wiki_okf.placement import PlacementError, canonical_member, context_from_resource
+from code_wiki_okf.placement import PlacementError, canonical_member, context_from_resource, placement_rule
 from okf_ext.writing import ApplyResult, WriteFailure
-from okf_io import load_bundle
+from okf_io import load_bundle, validate
 
 _TODAY = date(2026, 1, 1)
 _AT = datetime(2026, 1, 1, tzinfo=UTC)
@@ -94,14 +94,14 @@ def _agent_plugin_node(org: str, repo: str, name: str) -> GraphNode:
     )
 
 
-def _dependency_node(ecosystem: str, name: str) -> GraphNode:
+def _dependency_node(org: str, repo: str, ecosystem: str, name: str) -> GraphNode:
     return GraphNode(
         kind="dependency",
         name=name,
-        path=None,
+        path=f"dependency:{org}/{repo}:{ecosystem}:{name}",
         line=None,
         attrs={
-            "uri": f"dependency:{ecosystem}/{name}",
+            "uri": f"dependency:{org}/{repo}/{ecosystem}/{name}",
             "ecosystem": ecosystem,
             "versions_in_use": ["1.0"],
         },
@@ -139,10 +139,13 @@ def _seed(graph_dir: Path, repos: Sequence[_RepoSeed], dependencies: Sequence[Gr
             nodes += [_agent_plugin_node(seed.org, seed.repo, name) for name in seed.agent_plugins]
             with store.transaction() as transaction:
                 transaction.upsert_records(GraphRecords(nodes=tuple(nodes), edges=()))
-        store.set_current_repo(None)
-        if dependencies:
+        for dependency in dependencies:
+            # split("/", 3), not rsplit: a scoped npm name carries its own slash.
+            scope = "/".join(str(dependency.attrs["uri"]).removeprefix("dependency:").split("/", 3)[:2])
+            store.set_current_repo(f"repo:{scope}")
             with store.transaction() as transaction:
-                transaction.upsert_records(GraphRecords(nodes=tuple(dependencies), edges=()))
+                transaction.upsert_records(GraphRecords(nodes=(dependency,), edges=()))
+        store.set_current_repo(None)
     finally:
         store.close()
 
@@ -150,14 +153,15 @@ def _seed(graph_dir: Path, repos: Sequence[_RepoSeed], dependencies: Sequence[Gr
 def _seed_dependency_edges(
     graph_dir: Path,
     *,
-    dependency: tuple[str, str],
+    dependency: tuple[str, str, str, str],
     implementations: Sequence[tuple[str, str]],
     consumer: tuple[str, str] | None = None,
 ) -> None:
-    _ecosystem, dependency_name = dependency
+    org, dep_repo, ecosystem, dependency_name = dependency
+    dependency_path = f"dependency:{org}/{dep_repo}:{ecosystem}:{dependency_name}"
     edges = [
         GraphEdge(
-            src=("dependency", dependency_name, None),
+            src=("dependency", dependency_name, dependency_path),
             dst=("package", package_name, f"packages/{repo}/{package_name}/pyproject.toml"),
             kind="implemented_by",
             attrs={},
@@ -169,7 +173,7 @@ def _seed_dependency_edges(
         edges.append(
             GraphEdge(
                 src=("package", package_name, f"packages/{repo}/{package_name}/pyproject.toml"),
-                dst=("dependency", dependency_name, None),
+                dst=("dependency", dependency_name, dependency_path),
                 kind="used_by",
                 attrs={},
             )
@@ -352,7 +356,7 @@ def test_plan_builds_the_complete_canonical_entity_matrix_before_apply(tmp_path:
                 agent_plugins=("reviewer",),
             )
         ],
-        dependencies=(_dependency_node("pypi", "httpx"),),
+        dependencies=(_dependency_node("acme", "demo", "pypi", "httpx"),),
     )
     bundle_root = _installed_bundle(tmp_path)
     config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
@@ -361,12 +365,12 @@ def test_plan_builds_the_complete_canonical_entity_matrix_before_apply(tmp_path:
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
     assert {write.member for write in plan.writes} == {
-        "repositories/demo/repository.md",
-        "repositories/demo/packages/lib.md",
-        "repositories/demo/apps/web.md",
-        "repositories/demo/test-suites/unit.md",
-        "repositories/demo/agent-plugins/reviewer.md",
-        "dependencies/pypi/httpx.md",
+        "code-graph/demo.md",
+        "code-graph/demo/entities/packages/lib.md",
+        "code-graph/demo/entities/apps/web.md",
+        "code-graph/demo/entities/test-suites/unit.md",
+        "code-graph/demo/entities/agent-plugins/reviewer.md",
+        "code-graph/demo/entities/dependencies/pypi/httpx.md",
     }
     assert not any((bundle_root / write.member).exists() for write in plan.writes)
 
@@ -377,13 +381,13 @@ def test_plan_builds_the_complete_canonical_entity_matrix_before_apply(tmp_path:
     assert all((bundle_root / write.member).is_file() for write in plan.writes)
 
     bundle = load_bundle(bundle_root)
-    repository = bundle.concept("repositories/demo/repository")
-    package = bundle.concept("repositories/demo/packages/lib")
-    dependency = bundle.concept("dependencies/pypi/httpx")
+    repository = bundle.concept("code-graph/demo")
+    package = bundle.concept("code-graph/demo/entities/packages/lib")
+    dependency = bundle.concept("code-graph/demo/entities/dependencies/pypi/httpx")
     assert repository is not None and repository.fm_raw["package_count"] == 1
     assert package is not None and package.fm.resource == "pkg:acme/demo/lib"
     assert dependency is not None and dependency.fm_raw["ecosystem"] == "pypi"
-    package_text = (bundle_root / "repositories/demo/packages/lib.md").read_text(encoding="utf-8")
+    package_text = (bundle_root / "code-graph/demo/entities/packages/lib.md").read_text(encoding="utf-8")
     assert "## Files\n\n_(none)_" in package_text
 
 
@@ -411,7 +415,7 @@ def test_entity_apply_reports_generator_write_failures(tmp_path: Path, monkeypat
     config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
-    failure = WriteFailure(path="repositories/demo/packages/lib.md", kind="commit-error", error="disk full")
+    failure = WriteFailure(path="code-graph/demo/entities/packages/lib.md", kind="commit-error", error="disk full")
     monkeypatch.setattr(
         "code_wiki_okf.entities.sync.apply_regenerations",
         lambda *_args, **_kwargs: ApplyResult(written=(), failed=(failure,), skipped=()),
@@ -419,7 +423,7 @@ def test_entity_apply_reports_generator_write_failures(tmp_path: Path, monkeypat
 
     summary = apply_entities(bundle_root, plan, today=_TODAY)
 
-    assert summary.skipped == ("repositories/demo/packages/lib.md: commit-error: disk full",)
+    assert summary.skipped == ("code-graph/demo/entities/packages/lib.md: commit-error: disk full",)
     assert not summary.ok
 
 
@@ -442,8 +446,8 @@ def test_same_name_packages_in_two_repositories_have_distinct_members(tmp_path: 
         write.context.resource: write.member for write in plan.writes if write.context.type_name == "Package"
     }
     assert package_writes == {
-        "pkg:acme/one/shared": "repositories/one/packages/shared.md",
-        "pkg:acme/two/shared": "repositories/two/packages/shared.md",
+        "pkg:acme/one/shared": "code-graph/one/entities/packages/shared.md",
+        "pkg:acme/two/shared": "code-graph/two/entities/packages/shared.md",
     }
 
 
@@ -468,10 +472,10 @@ def test_same_short_repository_name_with_two_resources_refuses(tmp_path: Path) -
             plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
     assert raised.value.resource in {"repo:acme/demo", "repo:other/demo"}
-    assert raised.value.expected == "repositories/demo/repository"
+    assert raised.value.expected == "code-graph/demo"
     assert "repo:acme/demo" in raised.value.reason
     assert "repo:other/demo" in raised.value.reason
-    assert not (bundle_root / "repositories/demo/repository.md").exists()
+    assert not (bundle_root / "code-graph/demo.md").exists()
 
 
 def test_same_named_entities_render_only_their_repository_metadata(tmp_path: Path) -> None:
@@ -486,12 +490,12 @@ def test_same_named_entities_render_only_their_repository_metadata(tmp_path: Pat
     apply_entities(bundle_root, plan, today=_TODAY)
 
     bundle = load_bundle(bundle_root)
-    one_package = bundle.concept("repositories/one/packages/shared")
-    two_package = bundle.concept("repositories/two/packages/shared")
-    one_suite = bundle.concept("repositories/one/test-suites/shared-tests")
-    two_suite = bundle.concept("repositories/two/test-suites/shared-tests")
-    one_plugin = bundle.concept("repositories/one/agent-plugins/shared-plugin")
-    two_plugin = bundle.concept("repositories/two/agent-plugins/shared-plugin")
+    one_package = bundle.concept("code-graph/one/entities/packages/shared")
+    two_package = bundle.concept("code-graph/two/entities/packages/shared")
+    one_suite = bundle.concept("code-graph/one/entities/test-suites/shared-tests")
+    two_suite = bundle.concept("code-graph/two/entities/test-suites/shared-tests")
+    one_plugin = bundle.concept("code-graph/one/entities/agent-plugins/shared-plugin")
+    two_plugin = bundle.concept("code-graph/two/entities/agent-plugins/shared-plugin")
     assert one_package is not None and one_package.fm_raw["version"] == "one.0"
     assert two_package is not None and two_package.fm_raw["version"] == "two.0"
     assert "one_package.py" in one_package.body and "two_package.py" not in one_package.body
@@ -505,8 +509,8 @@ def test_same_named_entities_render_only_their_repository_metadata(tmp_path: Pat
     assert "one-command" in one_plugin.body and "two-command" not in one_plugin.body
     assert "two-command" in two_plugin.body and "one-command" not in two_plugin.body
 
-    one_app = bundle.concept("repositories/one/apps/shared-app")
-    two_app = bundle.concept("repositories/two/apps/shared-app")
+    one_app = bundle.concept("code-graph/one/entities/apps/shared-app")
+    two_app = bundle.concept("code-graph/two/entities/apps/shared-app")
     assert one_app is not None and "one_app.ts" in one_app.body and "two_app.ts" not in one_app.body
     assert two_app is not None and "two_app.ts" in two_app.body and "one_app.ts" not in two_app.body
 
@@ -516,7 +520,7 @@ def test_existing_resource_at_wrong_member_refuses_without_duplicate(tmp_path: P
     _seed(graph_dir, [_RepoSeed("acme", "demo")])
     bundle_root = _installed_bundle(tmp_path)
     config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
-    wrong = bundle_root / "repositories" / "demo.md"
+    wrong = bundle_root / "code-graph" / "demo" / "repository.md"
     wrong.parent.mkdir(parents=True, exist_ok=True)
     wrong.write_text("---\ntype: Repository\ntitle: demo\nresource: repo:acme/demo\n---\n", encoding="utf-8")
 
@@ -524,10 +528,10 @@ def test_existing_resource_at_wrong_member_refuses_without_duplicate(tmp_path: P
         plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
     assert raised.value.resource == "repo:acme/demo"
-    assert raised.value.expected == "repositories/demo/repository"
-    assert "repositories/demo.md" in raised.value.reason
+    assert raised.value.expected == "code-graph/demo"
+    assert "code-graph/demo/repository.md" in raised.value.reason
     assert "delete" in raised.value.reason and "regenerate" in raised.value.reason
-    assert not (bundle_root / "repositories" / "demo" / "repository.md").exists()
+    assert not (bundle_root / "code-graph" / "demo.md").exists()
 
 
 def test_duplicate_resources_refuse_before_any_entity_write(tmp_path: Path) -> None:
@@ -549,7 +553,7 @@ def test_duplicate_resources_refuse_before_any_entity_write(tmp_path: Path) -> N
     assert raised.value.resource == "pkg:acme/demo/lib"
     assert "old/first.md" in raised.value.reason
     assert "old/second.md" in raised.value.reason
-    assert not (bundle_root / "repositories/demo/packages/lib.md").exists()
+    assert not (bundle_root / "code-graph/demo/entities/packages/lib.md").exists()
 
 
 def test_unregistered_page_at_a_canonical_target_refuses(tmp_path: Path) -> None:
@@ -557,7 +561,7 @@ def test_unregistered_page_at_a_canonical_target_refuses(tmp_path: Path) -> None
     _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
     bundle_root = _installed_bundle(tmp_path)
     config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
-    occupied = bundle_root / "repositories/demo/packages/lib.md"
+    occupied = bundle_root / "code-graph/demo/entities/packages/lib.md"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     before = "---\ntype: Package\ntitle: hand-authored\n---\n\nDo not overwrite.\n"
     occupied.write_text(before, encoding="utf-8")
@@ -603,11 +607,11 @@ def test_dependency_with_multiple_implementations_is_suppressed_but_still_warns(
             _RepoSeed("acme", "one", packages=("first",)),
             _RepoSeed("acme", "two", packages=("second",)),
         ],
-        dependencies=(_dependency_node("pypi", "shared"),),
+        dependencies=(_dependency_node("acme", "one", "pypi", "shared"),),
     )
     _seed_dependency_edges(
         graph_dir,
-        dependency=("pypi", "shared"),
+        dependency=("acme", "one", "pypi", "shared"),
         implementations=(("two", "second"), ("one", "first")),
     )
     bundle_root = _installed_bundle(tmp_path)
@@ -616,14 +620,14 @@ def test_dependency_with_multiple_implementations_is_suppressed_but_still_warns(
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    assert not [write for write in plan.writes if write.context.resource == "dependency:pypi/shared"]
+    assert not [write for write in plan.writes if write.context.resource == "dependency:acme/one/pypi/shared"]
     assert plan.warnings == (
-        "dependency:pypi/shared has multiple implementations: pkg:acme/one/first, pkg:acme/two/second",
+        "dependency:acme/one/pypi/shared has multiple implementations: pkg:acme/one/first, pkg:acme/two/second",
     )
 
     summary = apply_entities(bundle_root, plan, today=_TODAY)
     assert summary.warnings == plan.warnings
-    document = load_bundle(bundle_root).concept("dependencies/pypi/shared")
+    document = load_bundle(bundle_root).concept("code-graph/one/entities/dependencies/pypi/shared")
     assert document is None
 
 
@@ -635,11 +639,11 @@ def test_dependency_with_a_single_implementation_is_suppressed_and_does_not_warn
     _seed(
         graph_dir,
         [_RepoSeed("acme", "one", packages=("first",))],
-        dependencies=(_dependency_node("pypi", "solo"),),
+        dependencies=(_dependency_node("acme", "one", "pypi", "solo"),),
     )
     _seed_dependency_edges(
         graph_dir,
-        dependency=("pypi", "solo"),
+        dependency=("acme", "one", "pypi", "solo"),
         implementations=(("one", "first"),),
     )
     bundle_root = _installed_bundle(tmp_path)
@@ -648,7 +652,7 @@ def test_dependency_with_a_single_implementation_is_suppressed_and_does_not_warn
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    assert not [write for write in plan.writes if write.context.resource == "dependency:pypi/solo"]
+    assert not [write for write in plan.writes if write.context.resource == "dependency:acme/one/pypi/solo"]
     assert plan.warnings == ()
 
 
@@ -657,11 +661,11 @@ def test_dependency_with_a_consumer_and_no_implementation_remains(tmp_path: Path
     _seed(
         graph_dir,
         [_RepoSeed("acme", "demo", packages=("consumer",))],
-        dependencies=(_dependency_node("pypi", "external"),),
+        dependencies=(_dependency_node("acme", "demo", "pypi", "external"),),
     )
     _seed_dependency_edges(
         graph_dir,
-        dependency=("pypi", "external"),
+        dependency=("acme", "demo", "pypi", "external"),
         implementations=(),
         consumer=("demo", "consumer"),
     )
@@ -671,12 +675,61 @@ def test_dependency_with_a_consumer_and_no_implementation_remains(tmp_path: Path
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    dependency = next(write for write in plan.writes if write.context.resource == "dependency:pypi/external")
+    dependency = next(write for write in plan.writes if write.context.resource == "dependency:acme/demo/pypi/external")
     # A consumer URI, not a bare name (ADR-0048): the three admitted consumer
     # kinds are indistinguishable once flattened to names.
     assert dependency.frontmatter["used_by"] == ("pkg:acme/demo/consumer",)
     assert dependency.frontmatter["implemented_by"] == ()
     assert plan.warnings == ()
+
+
+def test_two_repository_sync_writes_one_dependency_page_per_repository(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(
+        graph_dir,
+        [_RepoSeed("acme", "one", packages=("first",)), _RepoSeed("acme", "two", packages=("second",))],
+        dependencies=(
+            _dependency_node("acme", "one", "npm", "@scope/pkg"),
+            _dependency_node("acme", "two", "npm", "@scope/pkg"),
+        ),
+    )
+    monkeypatch.setattr("code_wiki_okf.entities.sync.head_commit", lambda path: f"sha-of-{path.name}")
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("one", "two"), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    dependency_writes = [write for write in plan.writes if write.context.type_name == "Dependency"]
+    assert sorted(write.member for write in dependency_writes) == [
+        "code-graph/one/entities/dependencies/npm/@scope__pkg.md",
+        "code-graph/two/entities/dependencies/npm/@scope__pkg.md",
+    ]
+    shas = {write.context.repository: write.frontmatter.get("last_updated_commit") for write in dependency_writes}
+    assert shas == {"one": "sha-of-one", "two": "sha-of-two"}
+
+    apply_entities(bundle_root, plan, today=_TODAY)
+    report = validate(load_bundle(bundle_root), today=_TODAY, extra_rules=[placement_rule()])
+    assert not report.by_code("placement.duplicate-resource")
+    assert not report.by_code("placement.directory-mismatch")
+
+
+def test_dependency_of_an_unconfigured_repository_gets_no_page(tmp_path: Path) -> None:
+    graph_dir = tmp_path / "graph"
+    _seed(
+        graph_dir,
+        [_RepoSeed("acme", "one", packages=("first",)), _RepoSeed("acme", "ghost")],
+        dependencies=(_dependency_node("acme", "ghost", "pypi", "requests"),),
+    )
+    bundle_root = _installed_bundle(tmp_path)
+    config = _config(tmp_path, graph_dir, ("one",), bundle_root=bundle_root)
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
+
+    assert not [write for write in plan.writes if write.context.type_name == "Dependency"]
 
 
 def test_dependency_absent_from_the_reconciled_graph_is_not_planned(tmp_path: Path) -> None:
@@ -701,7 +754,7 @@ def test_entity_planning_refuses_invalid_or_naive_timestamps_before_writes(tmp_p
     with open_reader(graph_dir=graph_dir) as reader, pytest.raises(ValueError, match=r"ISO-8601|timezone offset"):
         plan_entities(load_bundle(bundle_root), reader, config, at=at)
 
-    assert not (bundle_root / "repositories/demo/repository.md").exists()
+    assert not (bundle_root / "code-graph/demo.md").exists()
 
 
 def test_unmatched_configured_repository_produces_no_entity_writes(tmp_path: Path) -> None:
@@ -722,7 +775,7 @@ def test_existing_canonical_resource_with_the_wrong_type_is_refused(tmp_path: Pa
     _seed(graph_dir, [_RepoSeed("acme", "demo", packages=("lib",))])
     bundle_root = _installed_bundle(tmp_path)
     config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
-    occupied = bundle_root / "repositories/demo/packages/lib.md"
+    occupied = bundle_root / "code-graph/demo/entities/packages/lib.md"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     occupied.write_text(
         "---\ntype: App\ntitle: lib\nresource: pkg:acme/demo/lib\n---\n",
@@ -749,10 +802,10 @@ def test_wrong_typed_page_pre_squatting_a_resource_refuses_before_any_write(tmp_
         plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
     assert raised.value.resource == "pkg:acme/demo/widgets"
-    assert raised.value.expected == "repositories/demo/packages/widgets"
+    assert raised.value.expected == "code-graph/demo/entities/packages/widgets"
     assert "apps/mismatch.md" in raised.value.reason
     assert "delete" in raised.value.reason and "regenerate" in raised.value.reason
-    assert not (bundle_root / "repositories" / "demo" / "packages" / "widgets.md").exists()
+    assert not (bundle_root / "code-graph" / "demo" / "entities" / "packages" / "widgets.md").exists()
 
 
 def test_entity_apply_revalidates_canonical_members_before_writes(tmp_path: Path) -> None:
@@ -800,8 +853,8 @@ def test_entity_plan_refuses_filesystem_equivalent_canonical_members(tmp_path: P
     with open_reader(graph_dir=graph_dir) as reader, pytest.raises(PlacementError, match="filesystem-equivalent"):
         plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
-    assert not (bundle_root / "repositories/demo/packages/Widget.md").exists()
-    assert not (bundle_root / "repositories/demo/packages/widget.md").exists()
+    assert not (bundle_root / "code-graph/demo/entities/packages/Widget.md").exists()
+    assert not (bundle_root / "code-graph/demo/entities/packages/widget.md").exists()
 
 
 def test_entity_apply_refuses_filesystem_equivalent_tampered_targets_before_writes(tmp_path: Path) -> None:
@@ -831,7 +884,7 @@ def test_entity_apply_refuses_late_filesystem_equivalent_occupant(tmp_path: Path
     config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
-    occupied = bundle_root / "repositories" / "demo" / "packages" / "WIDGET.md"
+    occupied = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "WIDGET.md"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     occupied.write_text("---\ntype: Note\ntitle: occupied\n---\n", encoding="utf-8")
     before = occupied.read_bytes()
@@ -851,7 +904,7 @@ def test_entity_apply_refuses_case_equivalent_ancestor_file_before_any_write(tmp
         plan = plan_entities(load_bundle(bundle_root), reader, config, at=_AT.isoformat())
 
     assert len(plan.writes) > 1
-    occupied = bundle_root / "repositories" / "demo" / "PACKAGES"
+    occupied = bundle_root / "code-graph" / "demo" / "entities" / "PACKAGES"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     occupied.write_bytes(b"pre-existing ancestor file\n")
     before = _bundle_member_bytes(bundle_root)
@@ -870,7 +923,7 @@ def test_entity_apply_refuses_case_equivalent_ancestor_file_before_any_write(tmp
         ("describe_app", "app:acme/demo/web"),
         ("describe_test_suite", "test_suite:acme/demo/unit"),
         ("describe_agent_plugin", "agent_plugin:acme/demo/reviewer"),
-        ("describe_dependency", "dependency:pypi/httpx"),
+        ("describe_dependency", "dependency:acme/demo/pypi/httpx"),
     ],
 )
 def test_plan_refuses_a_graph_node_it_cannot_describe(
@@ -899,7 +952,7 @@ def test_plan_refuses_a_graph_node_it_cannot_describe(
                 agent_plugins=("reviewer",),
             )
         ],
-        dependencies=(_dependency_node("pypi", "httpx"),),
+        dependencies=(_dependency_node("acme", "demo", "pypi", "httpx"),),
     )
     bundle_root = _installed_bundle(tmp_path)
     config = _config(tmp_path, graph_dir, ("demo",), bundle_root=bundle_root)

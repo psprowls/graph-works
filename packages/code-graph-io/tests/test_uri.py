@@ -10,6 +10,8 @@ from code_graph_io.uri import (
     RepoContext,
     agent_plugin_uri,
     app_uri,
+    dependency_identifier_from_path,
+    dependency_path,
     dependency_uri,
     entry_point_uri,
     file_uri,
@@ -80,14 +82,38 @@ def test_solution_uri() -> None:
     assert solution_uri(RepoContext("org", "repo"), "MyApp") == "solution:org/repo/MyApp"
 
 
-def test_dependency_uri() -> None:
-    assert dependency_uri("pypi", "boto3") == "dependency:pypi/boto3"
+_WEB = RepoContext(org="acme", repo="web")
 
 
-def test_dependency_uri_npm() -> None:
-    # Multi-ecosystem coverage; ecosystem is required to avoid cross-registry
-    # collision (e.g. `react` exists in npm and on PyPI as `react-py`).
-    assert dependency_uri("npm", "react") == "dependency:npm/react"
+def test_dependency_uri_is_repository_scoped() -> None:
+    assert dependency_uri(_WEB, "pypi", "boto3") == "dependency:acme/web/pypi/boto3"
+
+
+def test_dependency_uri_keeps_a_scoped_npm_name_intact() -> None:
+    assert dependency_uri(_WEB, "npm", "@babel/core") == "dependency:acme/web/npm/@babel/core"
+    assert dependency_uri(_WEB, "npm", "@babel/core").removeprefix("dependency:").split("/", 3) == [
+        "acme",
+        "web",
+        "npm",
+        "@babel/core",
+    ]
+
+
+def test_dependency_path_is_repository_scoped() -> None:
+    assert dependency_path(_WEB, "npm", "@babel/core") == "dependency:acme/web:npm:@babel/core"
+
+
+def test_dependency_identifier_round_trips_from_the_synthetic_path() -> None:
+    path = dependency_path(_WEB, "npm", "@babel/core")
+    assert dependency_identifier_from_path(path) == "acme/web/npm/@babel/core"
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["dependency:npm:react", "dependency:acme:npm:react", "dependency:acme/web:npm:", "src/app.py", ""],
+)
+def test_dependency_identifier_refuses_every_other_shape(path: str) -> None:
+    assert dependency_identifier_from_path(path) is None
 
 
 @pytest.mark.parametrize(

@@ -1,4 +1,4 @@
-"""Manifest scanning: pyproject.toml + package.json → kind:package nodes."""
+"""Manifest scanning: pyproject.toml, package.json and requirements.txt roots → kind:package nodes."""
 
 from __future__ import annotations
 
@@ -9,10 +9,10 @@ import sys
 import tomllib
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, Literal
 
-from code_graph_io import _ignore, upsert
+from code_graph_io import _ignore, requirements, upsert
 from code_graph_io.classification import classify
 from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
 from code_graph_io.uri import RepoContext, app_uri, pkg_uri
@@ -255,7 +255,11 @@ def _tracked_manifest_paths(repo_root: Path) -> frozenset[str]:
 
 
 def _discover_manifests(
-    repo_root: Path, skip_dirs: frozenset[str], ignore: _ignore.IgnoreSpec | None = None
+    repo_root: Path,
+    skip_dirs: frozenset[str],
+    ignore: _ignore.IgnoreSpec | None = None,
+    *,
+    tracked: frozenset[str] | None = None,
 ) -> list[tuple[Path, dict[str, Any]]]:
     """Every `pyproject.toml`/`package.json` under *repo_root*, tracked-gated.
 
@@ -269,7 +273,8 @@ def _discover_manifests(
     unfiltered `rglob` walk.
     """
     found: list[tuple[Path, dict[str, Any]]] = []
-    tracked = _tracked_manifest_paths(repo_root)
+    if tracked is None:
+        tracked = _tracked_manifest_paths(repo_root)
     for manifest_path in repo_root.rglob("pyproject.toml"):
         if _should_skip(manifest_path, repo_root, skip_dirs, ignore):
             continue
@@ -310,6 +315,127 @@ def _manifest_dependencies(info: Mapping[str, Any]) -> tuple[ManifestDependency,
     )
 
 
+_REQUIREMENTS_ROOT_FILENAME = "requirements.txt"
+
+
+def _requirements_candidates(
+    repo_root: Path, skip_dirs: frozenset[str], ignore: _ignore.IgnoreSpec | None, tracked: frozenset[str]
+) -> list[Path]:
+    """Tracked (or, with no git context, on-disk) ``requirements.txt`` files, by path."""
+    if tracked:
+        paths = [repo_root / rel for rel in tracked if PurePosixPath(rel).name == _REQUIREMENTS_ROOT_FILENAME]
+    else:
+        paths = list(repo_root.rglob(_REQUIREMENTS_ROOT_FILENAME))
+    kept = [p for p in paths if p.is_file() and not _should_skip(p, repo_root, skip_dirs, ignore)]
+    return sorted(kept, key=lambda p: p.relative_to(repo_root).as_posix())
+
+
+def _has_python_source(
+    root_dir: Path,
+    repo_root: Path,
+    skip_dirs: frozenset[str],
+    ignore: _ignore.IgnoreSpec | None,
+    tracked: frozenset[str],
+) -> bool:
+    """Whether *root_dir* holds at least one in-scope ``.py`` file, recursively."""
+    rel = root_dir.relative_to(repo_root).as_posix()
+    prefix = "" if rel == "." else f"{rel}/"
+    if tracked:
+        return any(
+            path.startswith(prefix) and path.endswith(".py") and not _ignore.should_skip(path, skip_dirs, ignore)
+            for path in tracked
+        )
+    return any(not _should_skip(path, repo_root, skip_dirs, ignore) for path in root_dir.rglob("*.py"))
+
+
+def _is_forwarding(read: requirements.RequirementsRead, root_dir: Path) -> bool:
+    """No requirement lines of its own, and every include points into a subdirectory."""
+    if read.has_own_requirements or not read.direct_includes:
+        return False
+    return all(target.parent != root_dir and target.parent.is_relative_to(root_dir) for target in read.direct_includes)
+
+
+def _requirements_root_name(relative_path: str, repo_name: str, taken: set[str]) -> str:
+    """Directory name (repo name at the root), falling back deterministically on collision.
+
+    Package URIs are ``pkg:{org}/{repo}/{name}``, so a name must be unique per repo.
+    """
+    base = PurePosixPath(relative_path).name if relative_path else repo_name
+    dashed = relative_path.replace("/", "-") if relative_path else repo_name
+    for candidate in (base, dashed, f"{dashed}-python"):
+        if candidate not in taken:
+            return candidate
+    suffix = 2
+    while f"{dashed}-python-{suffix}" in taken:
+        suffix += 1
+    return f"{dashed}-python-{suffix}"
+
+
+def _discover_requirements_roots(
+    repo_root: Path,
+    *,
+    repo_name: str,
+    skip_dirs: frozenset[str],
+    ignore: _ignore.IgnoreSpec | None,
+    tracked: frozenset[str],
+    manifests: Sequence[tuple[Path, dict[str, Any]]],
+) -> list[tuple[Path, dict[str, Any]]]:
+    """Requirements-only Python projects, in the same ``(dir, info)`` shape as manifests.
+
+    A real manifest wins. A candidate at or under an admitted ``pyproject.toml``
+    directory is skipped. A ``package.json`` directory does not suppress one,
+    because a Python backend inside a JS monorepo root is a separate project.
+    Requirements roots may nest among themselves. A forwarding file (nothing
+    of its own, only includes into subdirectories) is not a project. Neither
+    is a directory with no Python source.
+    """
+    python_dirs = [directory.resolve() for directory, info in manifests if info["language"] == "python"]
+    taken = {str(info["name"]) for _, info in manifests}
+    found: list[tuple[Path, dict[str, Any]]] = []
+    for requirements_path in _requirements_candidates(repo_root, skip_dirs, ignore, tracked):
+        root_dir = requirements_path.parent.resolve()
+        if any(root_dir.is_relative_to(directory) for directory in python_dirs):
+            continue
+        if not _has_python_source(root_dir, repo_root, skip_dirs, ignore, tracked):
+            continue
+        read = requirements.read_requirements(requirements_path, repo_root)
+        if _is_forwarding(read, root_dir):
+            continue
+        dev = list(read.dev)
+        seen = read.visited
+        for sibling in requirements.dev_sibling_files(requirements_path):
+            if not sibling.is_relative_to(repo_root.resolve()):
+                print(f"warning: skipping {sibling} (resolves outside the repository)", file=sys.stderr)
+                continue
+            if sibling in seen or _should_skip(sibling, repo_root, skip_dirs, ignore):
+                continue
+            if tracked and sibling.relative_to(repo_root).as_posix() not in tracked:
+                continue
+            extra = requirements.read_requirements(sibling, repo_root, dev=True, skip=seen)
+            dev.extend(extra.dev)
+            seen = extra.visited
+        relative_path = root_dir.relative_to(repo_root).as_posix()
+        relative_path = "" if relative_path == "." else relative_path
+        name = _requirements_root_name(relative_path, repo_name, taken)
+        taken.add(name)
+        found.append(
+            (
+                root_dir,
+                {
+                    "name": name,
+                    "version": "",
+                    "description": "",
+                    "dependencies": list(read.runtime),
+                    "dep_groups": {"dev": dev},
+                    "language": "python",
+                    "scripts_present": False,
+                    "virtual": False,
+                },
+            )
+        )
+    return found
+
+
 def discover_manifest_packages(
     repo_root: Path,
     *,
@@ -318,8 +444,18 @@ def discover_manifest_packages(
 ) -> tuple[ManifestPackage, ...]:
     """Discover typed manifest inventories, ordered by relative manifest path."""
     repo_root = Path(repo_root).resolve()
+    tracked = _tracked_manifest_paths(repo_root)
+    discovered = _discover_manifests(repo_root, _ignore.DEFAULT_SKIP_DIRS, ignore, tracked=tracked)
+    discovered += _discover_requirements_roots(
+        repo_root,
+        repo_name=ctx.repo,
+        skip_dirs=_ignore.DEFAULT_SKIP_DIRS,
+        ignore=ignore,
+        tracked=tracked,
+        manifests=discovered,
+    )
     manifests: list[ManifestPackage] = []
-    for package_dir, info in _discover_manifests(repo_root, _ignore.DEFAULT_SKIP_DIRS, ignore):
+    for package_dir, info in discovered:
         package_dir = package_dir.resolve()
         relative_path = package_dir.relative_to(repo_root).as_posix()
         relative_path = "" if relative_path == "." else relative_path

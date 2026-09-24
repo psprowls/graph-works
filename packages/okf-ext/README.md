@@ -158,8 +158,8 @@ test:
 
 > **Does it hold for any OKF v0.2 bundle, whoever wrote it?**
 
-A malformed callout renders badly in anyone's vault. Two concepts sharing a
-title is a problem in anyone's bundle. Those are tier 2.
+A malformed callout renders badly in anyone's vault. A log with no dated
+section is stale in anyone's bundle. Those are tier 2.
 
 A rule that encodes **one lane's vocabulary** belongs in that lane's tier-3
 package, not here. The two worked examples, both already surveyed and both

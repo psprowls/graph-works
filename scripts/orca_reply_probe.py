@@ -84,11 +84,17 @@ def probe_round_trip(runner: Runner, sender: str, capability: str, timeout_ms: i
         report.note("P2 live ask/reply round trip: skipped (no active dispatch)")
         return
     argv = [
-        "orca", "orchestration", "ask",
-        "--from", sender,
-        "--dispatch-capability", capability,
-        "--question", "orca-reply-probe: reply with anything to confirm the ask/reply path is live.",
-        "--timeout-ms", str(timeout_ms),
+        "orca",
+        "orchestration",
+        "ask",
+        "--from",
+        sender,
+        "--dispatch-capability",
+        capability,
+        "--question",
+        "orca-reply-probe: reply with anything to confirm the ask/reply path is live.",
+        "--timeout-ms",
+        str(timeout_ms),
         "--json",
     ]
     try:

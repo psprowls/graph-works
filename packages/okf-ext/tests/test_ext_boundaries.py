@@ -424,7 +424,7 @@ def test_the_documented_health_surface_is_present() -> None:
 
     assert callable(health.health_rule)
     assert health.TOPIC == "health"
-    assert health.CODES == ("health.uncited", "health.duplicate-title", "health.log-gap")
+    assert health.CODES == ("health.uncited", "health.log-gap")
 
 
 def test_the_documented_search_surface_is_present() -> None:

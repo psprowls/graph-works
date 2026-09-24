@@ -24,7 +24,10 @@ SCHEMA_VERSION = 3
 # that the full-mode purge's tracked set never matches, so nothing but a full
 # rebuild clears them. POSIX output is byte-identical; the bump costs one
 # rebuild there and is the only thing that reaches the stranded Windows rows.
-DERIVER_VERSION = 11
+# v12: requirements-only Python roots are admitted as Packages, Python
+# server apps classify as app_kind 'server', and pytest configs outside a
+# package add test roots. Existing graphs need a rebuild to pick these up.
+DERIVER_VERSION = 13
 
 _DDL_STATEMENTS = (
     """

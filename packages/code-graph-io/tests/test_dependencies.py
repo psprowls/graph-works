@@ -80,15 +80,71 @@ def _edge_triples(conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
     )
 
 
-def test_zero_consumer_package_has_dependency_facet_and_implementation(conn: sqlite3.Connection) -> None:
+def test_unconsumed_distributable_has_no_dependency_node(conn: sqlite3.Connection) -> None:
     manifests = (manifest("library"),)
     seed_packages(conn, manifests)
 
     dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
+
+    assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='dependency'").fetchone()[0] == 0
+    assert _edge_triples(conn) == set()
+
+
+def test_shared_external_dependency_is_one_node_per_repository(conn: sqlite3.Connection) -> None:
+    manifests = (
+        manifest("alpha", repo="a", dependencies=(dep("pypi", "requests", spec=">=2.30"),)),
+        manifest("beta", repo="b", dependencies=(dep("pypi", "requests", spec="==2.31.0"),)),
+    )
+    seed_packages(conn, manifests)
+
     dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
 
-    assert conn.execute("SELECT uri FROM nodes WHERE kind='dependency'").fetchall() == [("dependency:pypi/library",)]
-    assert _edge_triples(conn) == {("dependency", "implemented_by", "package")}
+    rows = conn.execute("SELECT uri, repo, attrs_json FROM nodes WHERE kind='dependency' ORDER BY uri").fetchall()
+    assert [(uri, repo) for uri, repo, _attrs in rows] == [
+        ("dependency:test/a/pypi/requests", "repo:test/a"),
+        ("dependency:test/b/pypi/requests", "repo:test/b"),
+    ]
+    assert [json.loads(attrs)["versions_in_use"] for _uri, _repo, attrs in rows] == [
+        ["requests>=2.30"],
+        ["requests==2.31.0"],
+    ]
+    crossing = conn.execute(
+        "SELECT COUNT(*) FROM edges e JOIN nodes src ON src.id=e.src JOIN nodes dst ON dst.id=e.dst "
+        "WHERE e.kind='used_by' AND dst.kind='dependency' AND src.uri NOT LIKE 'pkg:' || substr(dst.repo, 6) || '/%'"
+    ).fetchone()[0]
+    assert crossing == 0
+
+
+def test_workspace_package_consumed_by_two_repositories_has_two_implemented_nodes(conn: sqlite3.Connection) -> None:
+    manifests = (
+        manifest("library", repo="lib"),
+        manifest("alpha", repo="a", dependencies=(dep("pypi", "library", spec=">=1"),)),
+        manifest("beta", repo="b", dependencies=(dep("pypi", "library", spec=">=2"),)),
+    )
+    seed_packages(conn, manifests)
+
+    dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
+
+    implemented = conn.execute(
+        "SELECT src.uri, dst.uri FROM edges e JOIN nodes src ON src.id=e.src JOIN nodes dst ON dst.id=e.dst "
+        "WHERE e.kind='implemented_by' ORDER BY src.uri"
+    ).fetchall()
+    assert implemented == [
+        ("dependency:test/a/pypi/library", "pkg:test/lib/library"),
+        ("dependency:test/b/pypi/library", "pkg:test/lib/library"),
+    ]
+    assert conn.execute("SELECT COUNT(*) FROM nodes WHERE uri='dependency:test/lib/pypi/library'").fetchone()[0] == 0
+
+
+def test_scoped_npm_name_keeps_its_slash_in_uri_and_path(conn: sqlite3.Connection) -> None:
+    manifests = (manifest("web", ecosystem="npm", repo="web", dependencies=(dep("npm", "@Babel/Core"),)),)
+    seed_packages(conn, manifests)
+
+    dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
+
+    assert conn.execute("SELECT uri, path, name FROM nodes WHERE kind='dependency'").fetchall() == [
+        ("dependency:test/web/npm/@babel/core", "dependency:test/web:npm:@babel/core", "@babel/core")
+    ]
 
 
 def test_internal_package_dependency_emits_all_three_relationships(conn: sqlite3.Connection) -> None:
@@ -116,7 +172,7 @@ def test_external_dependency_has_consumer_but_no_implementation(conn: sqlite3.Co
     rows = conn.execute(
         "SELECT src.kind, edges.kind, dst.kind FROM edges "
         "JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
-        "WHERE dst.uri='dependency:pypi/requests'"
+        "WHERE dst.uri='dependency:test/repo/pypi/requests'"
     ).fetchall()
     assert rows == [("package", "used_by", "dependency")]
 
@@ -204,7 +260,7 @@ def test_two_implementations_are_both_linked_to_one_dependency(conn: sqlite3.Con
 
     implemented = conn.execute(
         "SELECT dst.uri FROM edges JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
-        "WHERE src.uri='dependency:pypi/library' AND edges.kind='implemented_by' ORDER BY dst.uri"
+        "WHERE src.uri='dependency:test/c/pypi/library' AND edges.kind='implemented_by' ORDER BY dst.uri"
     ).fetchall()
     direct = conn.execute(
         "SELECT dst.uri FROM edges JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
@@ -215,24 +271,21 @@ def test_two_implementations_are_both_linked_to_one_dependency(conn: sqlite3.Con
 
 
 def test_ecosystems_with_same_name_stay_separate(conn: sqlite3.Connection) -> None:
-    manifests = (
-        manifest("shared", ecosystem="pypi", repo="python", relative_path="python/shared"),
-        manifest("@Acme/Shared", ecosystem="npm", repo="javascript", relative_path="javascript/shared"),
-    )
+    manifests = (manifest("consumer", repo="mixed", dependencies=(dep("pypi", "shared"), dep("npm", "@Acme/Shared"))),)
     seed_packages(conn, manifests)
 
     dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
 
     assert conn.execute("SELECT uri FROM nodes WHERE kind='dependency' ORDER BY uri").fetchall() == [
-        ("dependency:npm/@acme/shared",),
-        ("dependency:pypi/shared",),
+        ("dependency:test/mixed/npm/@acme/shared",),
+        ("dependency:test/mixed/pypi/shared",),
     ]
 
 
 def test_dependency_identity_survives_removal_of_one_display_variant(conn: sqlite3.Connection) -> None:
     variants = (
-        manifest("Library", repo="a", relative_path="a/library"),
-        manifest("library", repo="b", relative_path="b/library"),
+        manifest("alpha", dependencies=(dep("pypi", "Library"),)),
+        manifest("beta", dependencies=(dep("pypi", "library"),)),
     )
     seed_packages(conn, variants)
 
@@ -242,7 +295,7 @@ def test_dependency_identity_survives_removal_of_one_display_variant(conn: sqlit
     dependencies.reconcile_dependencies(conn, manifests=variants[1:], virtual_repository_dependencies={})
     after = conn.execute("SELECT name, uri FROM nodes WHERE kind='dependency'").fetchall()
 
-    assert before == [("library", "dependency:pypi/library")]
+    assert before == [("library", "dependency:test/repo/pypi/library")]
     assert after == before
 
 
@@ -256,7 +309,7 @@ def test_lifecycle_removes_only_stale_relationships_and_orphaned_facets(conn: sq
 
     remaining = (manifest("consumer", dependencies=(dep("pypi", "library"),)),)
     dependencies.reconcile_dependencies(conn, manifests=remaining, virtual_repository_dependencies={})
-    assert conn.execute("SELECT 1 FROM nodes WHERE uri='dependency:pypi/library'").fetchone() is not None
+    assert conn.execute("SELECT 1 FROM nodes WHERE uri='dependency:test/repo/pypi/library'").fetchone() is not None
     assert (
         conn.execute(
             "SELECT COUNT(*) FROM edges JOIN nodes dst ON dst.id=edges.dst "
@@ -270,7 +323,7 @@ def test_lifecycle_removes_only_stale_relationships_and_orphaned_facets(conn: sq
 
 
 def test_guarded_stale_dependency_remains_owned_until_it_becomes_orphaned(conn: sqlite3.Connection) -> None:
-    manifests = (manifest("library"),)
+    manifests = (manifest("consumer", dependencies=(dep("pypi", "library"),)), manifest("library"))
     seed_packages(conn, manifests)
     dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
     conn.execute(
@@ -282,20 +335,20 @@ def test_guarded_stale_dependency_remains_owned_until_it_becomes_orphaned(conn: 
         "SELECT observer.id, dependency.id, 'observes', NULL "
         "FROM nodes observer, nodes dependency "
         "WHERE observer.uri='agent_plugin:test/repo/observer' "
-        "AND dependency.uri='dependency:pypi/library'"
+        "AND dependency.uri='dependency:test/repo/pypi/library'"
     )
 
     dependencies.reconcile_dependencies(conn, manifests=(), virtual_repository_dependencies={})
-    assert conn.execute("SELECT 1 FROM nodes WHERE uri='dependency:pypi/library'").fetchone() is not None
+    assert conn.execute("SELECT 1 FROM nodes WHERE uri='dependency:test/repo/pypi/library'").fetchone() is not None
 
     conn.execute("DELETE FROM edges WHERE kind='observes'")
     dependencies.reconcile_dependencies(conn, manifests=(), virtual_repository_dependencies={})
 
-    assert conn.execute("SELECT 1 FROM nodes WHERE uri='dependency:pypi/library'").fetchone() is None
+    assert conn.execute("SELECT 1 FROM nodes WHERE uri='dependency:test/repo/pypi/library'").fetchone() is None
 
 
 def test_app_package_participates_but_unrepresented_plugin_does_not(conn: sqlite3.Connection) -> None:
-    manifests = (manifest("app", app_kind="cli"),)
+    manifests = (manifest("consumer", dependencies=(dep("pypi", "app"),)), manifest("app", app_kind="cli"))
     seed_packages(conn, manifests)
     upsert.upsert_records(
         conn,
@@ -306,7 +359,13 @@ def test_app_package_participates_but_unrepresented_plugin_does_not(conn: sqlite
 
     dependencies.reconcile_dependencies(conn, manifests=manifests, virtual_repository_dependencies={})
 
-    assert conn.execute("SELECT uri FROM nodes WHERE kind='dependency'").fetchall() == [("dependency:pypi/app",)]
+    assert conn.execute("SELECT uri FROM nodes WHERE kind='dependency'").fetchall() == [
+        ("dependency:test/repo/pypi/app",)
+    ]
+    assert conn.execute(
+        "SELECT dst.uri FROM edges e JOIN nodes src ON src.id=e.src JOIN nodes dst ON dst.id=e.dst "
+        "WHERE e.kind='implemented_by' AND src.uri='dependency:test/repo/pypi/app'"
+    ).fetchall() == [("pkg:test/repo/app",)]
 
 
 def test_virtual_dependencies_are_sourced_from_repository(conn: sqlite3.Connection) -> None:
@@ -322,9 +381,10 @@ def test_virtual_dependencies_are_sourced_from_repository(conn: sqlite3.Connecti
     dependencies.reconcile_dependencies(
         conn,
         manifests=(virtual,),
-        virtual_repository_dependencies={virtual_repo_uri: (dep("pypi", "pytest"),)},
+        virtual_repository_dependencies={virtual.repo: (dep("pypi", "pytest"),)},
     )
 
+    assert conn.execute("SELECT repo FROM nodes WHERE kind='dependency'").fetchall() == [(virtual_repo_uri,)]
     assert conn.execute(
         "SELECT src.kind, edges.kind, dst.kind FROM edges "
         "JOIN nodes src ON src.id=edges.src JOIN nodes dst ON dst.id=edges.dst "
@@ -386,6 +446,6 @@ def test_two_spellings_of_one_distribution_collapse_to_one_version_entry(conn: s
     )
 
     attrs = json.loads(
-        conn.execute("SELECT attrs_json FROM nodes WHERE uri='dependency:pypi/ruamel-yaml'").fetchone()[0]
+        conn.execute("SELECT attrs_json FROM nodes WHERE uri='dependency:test/repo/pypi/ruamel-yaml'").fetchone()[0]
     )
     assert attrs["versions_in_use"] == ["ruamel-yaml>=0.18"]

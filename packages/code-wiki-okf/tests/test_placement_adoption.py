@@ -46,9 +46,9 @@ def test_the_seeded_schemas_pin_every_type_to_its_lane_segment() -> None:
         "AgentPlugin": "agent-plugins/",
         "App": "apps/",
         "Dependency": "dependencies/",
-        "File": "files/",
+        "File": "file-system/",
         "Package": "packages/",
-        "Repository": "repositories/",
+        "Repository": "code-graph/",
         "TestSuite": "test-suites/",
     }
 
@@ -56,12 +56,12 @@ def test_the_seeded_schemas_pin_every_type_to_its_lane_segment() -> None:
 @pytest.mark.parametrize(
     "concept_id",
     [
-        "repositories/demo/repository",
-        "repositories/demo/packages/lib",
-        "repositories/demo/apps/web",
-        "repositories/demo/agent-plugins/reviewer",
-        "repositories/demo/test-suites/unit",
-        "dependencies/pypi/httpx",
+        "code-graph/demo",
+        "code-graph/demo/entities/packages/lib",
+        "code-graph/demo/entities/apps/web",
+        "code-graph/demo/entities/agent-plugins/reviewer",
+        "code-graph/demo/entities/test-suites/unit",
+        "code-graph/demo/entities/dependencies/pypi/httpx",
     ],
 )
 def test_entity_lane_ownership_recognizes_canonical_entity_ids(concept_id: str) -> None:
@@ -71,10 +71,11 @@ def test_entity_lane_ownership_recognizes_canonical_entity_ids(concept_id: str) 
 @pytest.mark.parametrize(
     "concept_id",
     [
-        "repositories/demo/files/src/main.py",
-        "repositories/demo/repository/extra",
-        "dependencies/httpx",
-        "dependencies/pypi/httpx/extra",
+        "code-graph/demo/file-system/src/main.py",
+        "code-graph/demo/extra",
+        "dependencies/pypi/httpx",
+        "code-graph/demo/entities/dependencies/httpx",
+        "code-graph/demo/entities/dependencies/pypi/httpx/extra",
     ],
 )
 def test_entity_lane_ownership_refuses_file_and_noncanonical_ids(concept_id: str) -> None:
@@ -89,15 +90,15 @@ def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
     # exact ID computed from its resource.
     (root / "packages").mkdir()
     (root / "packages" / "httpx.md").write_text(
-        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\n---\n\n'
+        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:acme/demo/pypi/httpx"\n---\n\n'
         "## Why we depend on this\n\nReal text.\n\n## Gotchas / workarounds\n\nReal text.\n",
         encoding="utf-8",
     )
     # ...and a second page claiming the same resource, dropped by
     # find-by-resource and so invisible to deletion.
-    (root / "dependencies" / "pypi").mkdir(parents=True)
-    (root / "dependencies" / "pypi" / "httpx.md").write_text(
-        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:pypi/httpx"\n---\n\n'
+    (root / "code-graph" / "demo" / "entities" / "dependencies" / "pypi").mkdir(parents=True)
+    (root / "code-graph" / "demo" / "entities" / "dependencies" / "pypi" / "httpx.md").write_text(
+        '---\ntype: Dependency\ntitle: "httpx"\nresource: "dependency:acme/demo/pypi/httpx"\n---\n\n'
         "## Why we depend on this\n\nReal text.\n\n## Gotchas / workarounds\n\nReal text.\n",
         encoding="utf-8",
     )
@@ -112,8 +113,8 @@ def test_a_nested_package_page_trips_no_placement_finding(tmp_path: Path) -> Non
     """A Package at the exact resource-derived ID has no mismatch."""
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
-    (root / "repositories" / "repo-a" / "packages").mkdir(parents=True)
-    (root / "repositories" / "repo-a" / "packages" / "widgets.md").write_text(
+    (root / "code-graph" / "repo-a" / "entities" / "packages").mkdir(parents=True)
+    (root / "code-graph" / "repo-a" / "entities" / "packages" / "widgets.md").write_text(
         '---\ntype: Package\ntitle: "widgets"\nresource: "pkg:acme/repo-a/widgets"\n---\n\n'
         "## Purpose\n\nReal text.\n\n## Public API\n\nReal text.\n\n## Files\n\n_(none)_\n",
         encoding="utf-8",

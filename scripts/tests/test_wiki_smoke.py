@@ -56,7 +56,7 @@ def test_smoke_run_creates_one_mirror_page_per_tracked_file(tmp_path: Path) -> N
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
 
-    mirror_dir = bundle_dir / "repositories" / result.repo_name
+    mirror_dir = bundle_dir / "code-graph" / result.repo_name / "file-system"
     # Exclude index.md files (directory listings) and entity lane pages.
     mirror_pages = [
         p
@@ -71,7 +71,7 @@ def test_smoke_run_syncs_entities_when_repo_name_matches_the_graph(tmp_path: Pat
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
-    assert (tmp_path / "bundle" / "repositories" / result.repo_name / "repository.md").exists()
+    assert (tmp_path / "bundle" / "code-graph" / f"{result.repo_name}.md").exists()
 
 
 def test_smoke_run_flags_a_repo_name_mismatch_instead_of_silently_syncing_zero_entities(tmp_path: Path) -> None:
@@ -87,7 +87,7 @@ def test_smoke_run_flags_a_repo_name_mismatch_instead_of_silently_syncing_zero_e
 
     assert result.sync_exit_code != 0
     assert result.mismatch
-    assert not (tmp_path / "bundle" / "repositories" / "definitely-not-the-graphs-name" / "repository.md").exists()
+    assert not (tmp_path / "bundle" / "code-graph" / "definitely-not-the-graphs-name.md").exists()
 
 
 def test_main_exits_nonzero_on_a_repo_name_mismatch(tmp_path: Path) -> None:
@@ -122,8 +122,9 @@ def test_smoke_run_suppresses_the_packages_own_self_implemented_dependency(tmp_p
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
-    assert not (bundle_dir / "dependencies" / "pypi" / "config-io.md").exists()
-    assert not (bundle_dir / "dependencies" / "pypi" / "config_io.md").exists()
+    deps = bundle_dir / "code-graph" / result.repo_name / "entities" / "dependencies" / "pypi"
+    assert not (deps / "config-io.md").exists()
+    assert not (deps / "config_io.md").exists()
 
 
 def test_smoke_run_files_a_third_party_dependency_under_its_ecosystem(tmp_path: Path) -> None:
@@ -147,7 +148,8 @@ def test_smoke_run_files_a_third_party_dependency_under_its_ecosystem(tmp_path: 
 
     assert result.sync_exit_code == 0, result.sync_output
     assert not result.mismatch
-    assert (bundle_dir / "dependencies" / "pypi" / "ruamel-yaml.md").is_file()
+    page = bundle_dir / "code-graph" / result.repo_name / "entities" / "dependencies" / "pypi" / "ruamel-yaml.md"
+    assert page.is_file()
 
 
 def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:
@@ -161,12 +163,14 @@ def test_smoke_run_builds_the_global_discovery_catalogs(tmp_path: Path) -> None:
     assert result.sync_exit_code == 0, result.sync_output
     for member in (
         "index.md",
-        "repositories/index.md",
-        "dependencies/index.md",
-        "dependencies/pypi/index.md",
+        "code-graph/index.md",
+        f"code-graph/{result.repo_name}/entities/dependencies/index.md",
+        f"code-graph/{result.repo_name}/entities/dependencies/pypi/index.md",
     ):
         assert (bundle_dir / member).is_file(), member
 
     assert not (bundle_dir / "files").exists()
+    assert not (bundle_dir / "repositories").exists()
+    assert not (bundle_dir / "dependencies").exists(), "dependencies are per repository; no global lane"
     for lane in ("packages", "apps", "agent-plugins", "test-suites"):
         assert not (bundle_dir / lane).exists(), f"{lane} is a redundant global lane and must not exist"

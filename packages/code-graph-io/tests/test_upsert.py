@@ -151,7 +151,7 @@ def test_dependency_reidentified_by_uri_across_path_format_change(conn: sqlite3.
     than forking a second node that shares the live node's URI (the orphan-dup
     root cause behind the index-page double-listing bug).
     """
-    uri = "dependency:pypi/deepeval"
+    uri = "dependency:test/repo/pypi/deepeval"
     old = GraphNode(
         kind="dependency",
         name="deepeval",
@@ -164,7 +164,7 @@ def test_dependency_reidentified_by_uri_across_path_format_change(conn: sqlite3.
     new = GraphNode(
         kind="dependency",
         name="deepeval",
-        path="dependency:pypi:deepeval",
+        path="dependency:test/repo:pypi:deepeval",
         line=None,
         attrs={"uri": uri, "ecosystem": "pypi", "name": "deepeval"},
     )
@@ -172,7 +172,7 @@ def test_dependency_reidentified_by_uri_across_path_format_change(conn: sqlite3.
 
     rows = conn.execute("SELECT path FROM nodes WHERE kind='dependency' AND uri=?", (uri,)).fetchall()
     assert len(rows) == 1  # today: 2 (forked) → FAILS
-    assert rows[0][0] == "dependency:pypi:deepeval"  # path updated in place
+    assert rows[0][0] == "dependency:test/repo:pypi:deepeval"  # path updated in place
 
 
 def test_upsert_uri_idempotent(conn: sqlite3.Connection) -> None:

@@ -66,7 +66,7 @@ async def test_a_placeholder_body_is_a_first_fill(scanned):
     task = _package_task(worklist)
     assert task.trigger == "first_fill"
     assert set(task.prose_sections) == {"## Purpose", "## Public API"}
-    assert task.page_path == "repositories/demo/packages/widgets.md"
+    assert task.page_path == "code-graph/demo/entities/packages/widgets.md"
     assert summary.entities.written  # the structural pass ran and wrote pages
 
 
@@ -76,12 +76,12 @@ async def test_equal_anchors_on_a_written_page_are_not_stale(scanned):
     head = git(repo, "rev-parse", "HEAD")
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, last_updated_commit=head, prose_refreshed_commit=head),
     )
     worklist, _ = await _worklist(layout, config)
     # Not a whole-worklist emptiness check: the structural pass also scaffolds
-    # `repositories/demo/repository.md` with its own placeholder prose (§3.2's own
+    # `code-graph/demo.md` with its own placeholder prose (§3.2's own
     # `first_fill` rule, correctly applied to a page this suite never fills),
     # so it legitimately stays in every worklist below. The property under
     # test is the *package* page's own staleness classification.
@@ -95,7 +95,7 @@ async def test_differing_anchors_with_an_empty_scoped_diff_are_not_stale(scanned
     commit_change(repo, "README.md", "outside the entity root\n")
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, last_updated_commit=old, prose_refreshed_commit=old),
     )
     # The page's own anchors are equal here, so re-stamp `last_updated_commit`
@@ -114,7 +114,7 @@ async def test_differing_anchors_with_a_real_diff_carry_every_prose_heading(scan
     commit_change(repo, "packages/widgets/src/a.py", "def alpha():\n    return 2\n")
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, prose_refreshed_commit=old),
     )
     worklist, _ = await _worklist(layout, config)
@@ -129,7 +129,7 @@ async def test_an_unknown_anchor_is_a_diff_with_no_diff(scanned):
     await _worklist(layout, config)
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, prose_refreshed_commit="0" * 40),
     )
     worklist, _ = await _worklist(layout, config)
@@ -140,7 +140,7 @@ async def test_an_unknown_anchor_is_a_diff_with_no_diff(scanned):
 async def test_an_absent_anchor_on_written_prose_is_not_staleness(scanned):
     layout, config, _repo = scanned
     await _worklist(layout, config)
-    write_page(layout, "repositories/demo/packages/widgets.md", package_page(purpose=FILLED, public_api=FILLED))
+    write_page(layout, "code-graph/demo/entities/packages/widgets.md", package_page(purpose=FILLED, public_api=FILLED))
     worklist, _ = await _worklist(layout, config)
     # Still not a task -- but no longer *frozen*: `entities.sync` reconciles
     # this page (its `resource:` still resolves) and stamps `last_updated_commit`
@@ -148,7 +148,7 @@ async def test_an_absent_anchor_on_written_prose_is_not_staleness(scanned):
     # it back the page has an anchor-less, filled, dated page -- exactly the
     # adoption case (D5), not a silent skip.
     assert PACKAGE_URI not in [task.uri for task in worklist.prose_tasks]
-    assert "repositories/demo/packages/widgets.md" in worklist.adopted
+    assert "code-graph/demo/entities/packages/widgets.md" in worklist.adopted
 
 
 async def test_max_entities_truncates_from_the_tail_and_reports_the_drop(scanned):
@@ -233,7 +233,7 @@ async def test_a_dotted_package_directory_scopes_its_diff_to_itself(scanned):
     commit_change(repo, "packages/widgets/src/a.py", "def alpha():\n    return 2\n")
     write_page(
         layout,
-        "repositories/demo/packages/foobar.md",
+        "code-graph/demo/entities/packages/foobar.md",
         entity_page(
             "Package",
             title="foobar",
@@ -254,7 +254,7 @@ async def test_a_dotted_package_directory_still_sees_its_own_changes(scanned):
     commit_change(repo, "packages/foo.bar/src/b.py", "def beta():\n    return 2\n")
     write_page(
         layout,
-        "repositories/demo/packages/foobar.md",
+        "code-graph/demo/entities/packages/foobar.md",
         entity_page(
             "Package",
             title="foobar",
@@ -272,7 +272,7 @@ async def test_a_dotted_package_directory_still_sees_its_own_changes(scanned):
 def _repo_page(layout, *, prose_refreshed_commit=None):
     write_page(
         layout,
-        "repositories/demo/repository.md",
+        "code-graph/demo.md",
         entity_page(
             "Repository",
             title="demo",
@@ -363,13 +363,13 @@ async def test_a_page_whose_resource_no_longer_resolves_is_reported_not_dropped(
     await _worklist(layout, config)
     write_page(
         layout,
-        "repositories/demo/packages/ghost.md",
+        "code-graph/demo/entities/packages/ghost.md",
         entity_page(
             "Package", title="ghost", resource="pkg:acme/demo/ghost", bodies={"Purpose": FILLED, "Public API": FILLED}
         ),
     )
     worklist, _ = await _worklist(layout, config)
-    assert ("repositories/demo/packages/ghost.md", "unresolved-resource") in [
+    assert ("code-graph/demo/entities/packages/ghost.md", "unresolved-resource") in [
         (s.page, s.reason) for s in worklist.skipped
     ]
 
@@ -379,11 +379,11 @@ async def test_a_non_code_wiki_type_under_a_code_wiki_directory_is_ignored(scann
     await _worklist(layout, config)
     write_page(
         layout,
-        "repositories/demo/packages/odd.md",
+        "code-graph/demo/entities/packages/odd.md",
         '---\ntype: Concept\ntitle: "odd"\ndescription: ""\n---\n\n## Purpose\n\nprose\n',
     )
     worklist, _ = await _worklist(layout, config)
-    assert not [s for s in worklist.skipped if s.page == "repositories/demo/packages/odd.md"]
+    assert not [s for s in worklist.skipped if s.page == "code-graph/demo/entities/packages/odd.md"]
 
 
 async def test_a_page_outside_the_entity_lanes_is_never_reported(scanned):
@@ -426,16 +426,16 @@ async def test_a_written_page_with_no_anchor_is_adopted_without_a_model_call(sca
     head = git(repo, "rev-parse", "HEAD")
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, last_updated_commit=head),
     )
     worklist, _ = await _worklist(layout, config)
-    assert "repositories/demo/packages/widgets.md" in worklist.adopted
+    assert "code-graph/demo/entities/packages/widgets.md" in worklist.adopted
     assert PACKAGE_URI not in [task.uri for task in worklist.prose_tasks]
 
     from okf_io import load_bundle
 
-    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
     assert document.fm_raw[PROSE_ANCHOR_KEY] == head
     assert FILLED in document.body  # the prose itself is untouched
 
@@ -451,15 +451,15 @@ async def test_adoption_clears_a_stale_attempt_counter(scanned):
     head = git(repo, "rev-parse", "HEAD")
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, last_updated_commit=head, prose_refresh_attempts=3),
     )
     worklist, _ = await _worklist(layout, config)
-    assert "repositories/demo/packages/widgets.md" in worklist.adopted
+    assert "code-graph/demo/entities/packages/widgets.md" in worklist.adopted
 
     from okf_io import load_bundle
 
-    document = load_bundle(layout.bundle_dir).concepts["repositories/demo/packages/widgets"]
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
     assert document.fm_raw[PROSE_ANCHOR_KEY] == head
     assert PROSE_ATTEMPTS_KEY not in document.fm_raw
 
@@ -470,7 +470,7 @@ async def test_an_adopted_page_diff_tracks_on_the_next_commit(scanned):
     head = git(repo, "rev-parse", "HEAD")
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, last_updated_commit=head),
     )
     await _worklist(layout, config)  # adoption run
@@ -485,9 +485,11 @@ async def test_a_page_with_no_anchor_and_an_unfilled_section_still_first_fills(s
     layout, config, repo = scanned
     await _worklist(layout, config)
     head = git(repo, "rev-parse", "HEAD")
-    write_page(layout, "repositories/demo/packages/widgets.md", package_page(purpose=FILLED, last_updated_commit=head))
+    write_page(
+        layout, "code-graph/demo/entities/packages/widgets.md", package_page(purpose=FILLED, last_updated_commit=head)
+    )
     worklist, _ = await _worklist(layout, config)
-    assert "repositories/demo/packages/widgets.md" not in worklist.adopted
+    assert "code-graph/demo/entities/packages/widgets.md" not in worklist.adopted
     assert _package_task(worklist).trigger == "first_fill"
 
 
@@ -497,12 +499,12 @@ async def test_a_dry_run_reports_an_adoption_without_writing_it(scanned):
     head = git(repo, "rev-parse", "HEAD")
     path = write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, public_api=FILLED, last_updated_commit=head),
     )
     before = path.read_text(encoding="utf-8")
     worklist, _ = await _worklist(layout, config, dry_run=True)
-    assert "repositories/demo/packages/widgets.md" in worklist.adopted
+    assert "code-graph/demo/entities/packages/widgets.md" in worklist.adopted
     assert path.read_text(encoding="utf-8") == before
 
 
@@ -513,10 +515,12 @@ async def test_a_page_at_the_attempt_cap_stops_being_dispatched(scanned):
     every scan, forever."""
     layout, config, _repo = scanned
     await _worklist(layout, config)
-    write_page(layout, "repositories/demo/packages/widgets.md", package_page(purpose=FILLED, prose_refresh_attempts=3))
+    write_page(
+        layout, "code-graph/demo/entities/packages/widgets.md", package_page(purpose=FILLED, prose_refresh_attempts=3)
+    )
     worklist, _ = await _worklist(layout, config)
     assert PACKAGE_URI not in [task.uri for task in worklist.prose_tasks]
-    assert ("repositories/demo/packages/widgets.md", "attempts-exhausted") in [
+    assert ("code-graph/demo/entities/packages/widgets.md", "attempts-exhausted") in [
         (s.page, s.reason) for s in worklist.skipped
     ]
 
@@ -524,7 +528,9 @@ async def test_a_page_at_the_attempt_cap_stops_being_dispatched(scanned):
 async def test_a_page_below_the_attempt_cap_is_still_dispatched(scanned):
     layout, config, _repo = scanned
     await _worklist(layout, config)
-    write_page(layout, "repositories/demo/packages/widgets.md", package_page(purpose=FILLED, prose_refresh_attempts=2))
+    write_page(
+        layout, "code-graph/demo/entities/packages/widgets.md", package_page(purpose=FILLED, prose_refresh_attempts=2)
+    )
     worklist, _ = await _worklist(layout, config)
     assert _package_task(worklist).trigger == "first_fill"
 
@@ -537,7 +543,7 @@ async def test_a_real_diff_dispatches_a_page_even_at_the_cap(scanned):
     commit_change(repo, "packages/widgets/src/a.py", "def alpha():\n    return 4\n")
     write_page(
         layout,
-        "repositories/demo/packages/widgets.md",
+        "code-graph/demo/entities/packages/widgets.md",
         package_page(purpose=FILLED, prose_refreshed_commit=old, prose_refresh_attempts=9),
     )
     worklist, _ = await _worklist(layout, config)
@@ -550,15 +556,13 @@ async def test_a_malformed_attempt_counter_reads_as_zero(scanned):
     page = package_page(purpose=FILLED).replace(
         "---\n\n## Purpose", 'prose_refresh_attempts: "many"\n---\n\n## Purpose'
     )
-    write_page(layout, "repositories/demo/packages/widgets.md", page)
+    write_page(layout, "code-graph/demo/entities/packages/widgets.md", page)
     worklist, _ = await _worklist(layout, config)
     assert _package_task(worklist).trigger == "first_fill"
 
 
-async def test_a_dependency_ref_has_no_repo_no_root_and_no_head(scanned):
-    """F11: `entity_refs`' dependency branch is the only path where
-    `repo_path is None` -- precisely what `read_repo_file`'s "this entity has no
-    repository root" guard exists to handle, and it had no test."""
+async def test_dependency_refs_are_repository_owned(scanned):
+    """A dependency carries its repository's path and HEAD (D-004)."""
     from code_graph_io import open_reader
     from graph_works_core.graph import commands as graph
 
@@ -572,28 +576,27 @@ async def test_a_dependency_ref_has_no_repo_no_root_and_no_head(scanned):
 
     ref = refs[DEPENDENCY_URI]
     assert ref.type_name == "Dependency"
-    assert ref.repo_path is None
+    assert ref.repo_path == config.repos[0].path
+    assert ref.head is not None
     assert ref.relative_root == ""
-    assert ref.head is None
-    assert ref.absolute_root == ""
-    assert ref.describe_identifier == "pypi/httpx"
+    assert ref.describe_identifier == DEPENDENCY_URI.removeprefix("dependency:")
 
 
-async def test_a_dependency_page_can_only_ever_first_fill(scanned):
-    """No repo, no root, no head -- so the diff trigger can never rescue one.
-    They are the population the attempt counter protects most."""
-    layout, config, _repo = scanned
+async def test_an_unfilled_dependency_page_first_fills_against_its_repository(scanned):
+    """A dependency page with nothing filled is a first fill, and the task
+    is scoped to the owning repository's root and HEAD (D-004)."""
+    layout, config, repo = scanned
     await _worklist(layout, config)
     write_page(
         layout,
-        "dependencies/pypi/httpx.md",
+        "code-graph/demo/entities/dependencies/pypi/httpx.md",
         entity_page("Dependency", title="httpx", resource=DEPENDENCY_URI),
     )
     worklist, _ = await _worklist(layout, config)
     task = next(t for t in worklist.prose_tasks if t.uri == DEPENDENCY_URI)
     assert task.trigger == "first_fill"
-    assert task.entity_root == ""
-    assert task.owning_short_head is None
+    assert task.entity_root == str(repo)
+    assert task.owning_short_head is not None
 
 
 async def test_a_repository_absent_from_the_graph_contributes_no_refs(tmp_path):
@@ -649,7 +652,7 @@ def test_a_dependency_node_with_no_uri_contributes_no_ref(tmp_path):
             conn.execute(
                 "INSERT INTO nodes (id, kind, name, path, line, attrs_json, uri, repo) "
                 "VALUES (?, ?, ?, ?, NULL, ?, ?, ?)",
-                (99, "dependency", "orphan", "dependency:pypi:orphan", "{}", None, None),
+                (99, "dependency", "orphan", "dependency:acme/demo:pypi:orphan", "{}", None, None),
             )
     finally:
         conn.close()
@@ -725,7 +728,7 @@ async def test_a_page_whose_type_does_not_match_its_resource_refuses_sync(scanne
     await _worklist(layout, config)
     write_page(
         layout,
-        "repositories/demo/apps/mismatch.md",
+        "code-graph/demo/entities/apps/mismatch.md",
         entity_page(
             "App",
             title="mismatch",
@@ -745,9 +748,9 @@ async def test_a_page_whose_type_does_not_match_its_resource_refuses_sync(scanne
 async def test_an_unparseable_page_is_not_claimed_by_its_directory(scanned):
     layout, config, _repo = scanned
     await _worklist(layout, config)
-    write_page(layout, "repositories/demo/packages/broken.md", "---\ntype: [Package\n---\n\n## Purpose\n\nx\n")
+    write_page(layout, "code-graph/demo/entities/packages/broken.md", "---\ntype: [Package\n---\n\n## Purpose\n\nx\n")
     worklist, _ = await _worklist(layout, config)
-    assert not [s for s in worklist.skipped if s.page == "repositories/demo/packages/broken.md"]
+    assert not [s for s in worklist.skipped if s.page == "code-graph/demo/entities/packages/broken.md"]
 
 
 async def test_a_parse_error_outside_the_entity_lanes_is_never_reported(scanned):
@@ -789,7 +792,7 @@ def _results(*results: ProseRefreshResult) -> ScanResults:
 async def test_a_result_for_a_missing_page_is_reported(scanned):
     layout, config, _repo = scanned
     worklist, _ = await _worklist(layout, config)
-    (layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md").unlink()
+    (layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md").unlink()
     applied = apply_scan_results(
         worklist,
         _results(ProseRefreshResult(uri=PACKAGE_URI, sections={"## Purpose": FILLED})),
@@ -806,7 +809,7 @@ async def test_a_result_whose_headings_are_not_on_the_page_is_reported(scanned):
     because the page's body no longer carries it."""
     layout, config, _repo = scanned
     worklist, _ = await _worklist(layout, config)
-    path = layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
+    path = layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     text = path.read_text(encoding="utf-8")
     path.write_text(text.replace("## Purpose", "## Rationale"), encoding="utf-8")
     applied = apply_scan_results(

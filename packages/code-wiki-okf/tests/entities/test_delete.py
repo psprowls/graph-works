@@ -70,8 +70,8 @@ def test_dependency_with_implemented_by_is_guarded_like_any_other_page(tmp_path:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_dependency_page(
         tmp_path,
-        "dependencies/pypi/gone.md",
-        "dependency:pypi/gone",
+        "code-graph/repo/entities/dependencies/pypi/gone.md",
+        "dependency:acme/repo/pypi/gone",
         implemented_by="[pkg:acme/repo/gone]",
         why_text="A human wrote a detailed justification here.",
     )
@@ -79,7 +79,7 @@ def test_dependency_with_implemented_by_is_guarded_like_any_other_page(tmp_path:
     result = prune_entities(load_bundle(tmp_path), frozenset())
 
     assert result.deleted == ()
-    assert result.declined == (("dependencies/pypi/gone", "prose-edited"),)
+    assert result.declined == (("code-graph/repo/entities/dependencies/pypi/gone", "prose-edited"),)
     assert page.exists()
 
 
@@ -90,14 +90,14 @@ def test_unedited_dependency_with_implemented_by_is_deleted_like_any_other_page(
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_dependency_page(
         tmp_path,
-        "dependencies/pypi/gone.md",
-        "dependency:pypi/gone",
+        "code-graph/repo/entities/dependencies/pypi/gone.md",
+        "dependency:acme/repo/pypi/gone",
         implemented_by="[pkg:acme/repo/gone]",
     )
 
     result = prune_entities(load_bundle(tmp_path), frozenset())
 
-    assert result.deleted == ("dependencies/pypi/gone",)
+    assert result.deleted == ("code-graph/repo/entities/dependencies/pypi/gone",)
     assert result.declined == ()
     assert not page.exists()
 
@@ -108,8 +108,8 @@ def test_dependency_without_code_wiki_provenance_is_declined(tmp_path: Path) -> 
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_dependency_page(
         tmp_path,
-        "dependencies/pypi/gone.md",
-        "dependency:pypi/gone",
+        "code-graph/repo/entities/dependencies/pypi/gone.md",
+        "dependency:acme/repo/pypi/gone",
         implemented_by="[pkg:acme/repo/gone]",
         generated=False,
     )
@@ -117,7 +117,7 @@ def test_dependency_without_code_wiki_provenance_is_declined(tmp_path: Path) -> 
     result = prune_entities(load_bundle(tmp_path), frozenset())
 
     assert result.deleted == ()
-    assert result.declined == (("dependencies/pypi/gone", "not-generated"),)
+    assert result.declined == (("code-graph/repo/entities/dependencies/pypi/gone", "not-generated"),)
     assert page.exists()
 
 
@@ -127,8 +127,8 @@ def test_dependency_without_implemented_by_still_needs_the_prose_guard(tmp_path:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_dependency_page(
         tmp_path,
-        "dependencies/pypi/external.md",
-        "dependency:pypi/external",
+        "code-graph/repo/entities/dependencies/pypi/external.md",
+        "dependency:acme/repo/pypi/external",
         implemented_by="[]",
         why_text="A human wrote a detailed justification here.",
     )
@@ -136,7 +136,7 @@ def test_dependency_without_implemented_by_still_needs_the_prose_guard(tmp_path:
     result = prune_entities(load_bundle(tmp_path), frozenset())
 
     assert result.deleted == ()
-    assert result.declined == (("dependencies/pypi/external", "prose-edited"),)
+    assert result.declined == (("code-graph/repo/entities/dependencies/pypi/external", "prose-edited"),)
     assert page.exists()
 
 
@@ -155,7 +155,7 @@ def test_live_resource_is_never_a_prune_candidate(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_package_page(
         tmp_path,
-        "repositories/repo/packages/still-here.md",
+        "code-graph/repo/entities/packages/still-here.md",
         "pkg:acme/repo/still-here",
     )
 
@@ -170,7 +170,7 @@ def test_hand_edited_required_prose_is_retained_and_reported(tmp_path: Path) -> 
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_package_page(
         tmp_path,
-        "repositories/repo/packages/gone.md",
+        "code-graph/repo/entities/packages/gone.md",
         "pkg:acme/repo/gone",
         purpose_text="A human wrote this and it must remain linkable.",
     )
@@ -179,7 +179,7 @@ def test_hand_edited_required_prose_is_retained_and_reported(tmp_path: Path) -> 
     result = prune_entities(load_bundle(tmp_path), frozenset())
 
     assert result.deleted == ()
-    assert result.declined == (("repositories/repo/packages/gone", "prose-edited"),)
+    assert result.declined == (("code-graph/repo/entities/packages/gone", "prose-edited"),)
     assert page.read_bytes() == before
 
 
@@ -187,7 +187,7 @@ def test_hand_edited_optional_prose_is_also_retained(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_package_page(
         tmp_path,
-        "repositories/repo/packages/gone.md",
+        "code-graph/repo/entities/packages/gone.md",
         "pkg:acme/repo/gone",
         public_api_text="Use `gone.public_api()` for the supported surface.",
     )
@@ -195,7 +195,7 @@ def test_hand_edited_optional_prose_is_also_retained(tmp_path: Path) -> None:
     result = prune_entities(load_bundle(tmp_path), frozenset())
 
     assert result.deleted == ()
-    assert result.declined == (("repositories/repo/packages/gone", "prose-edited"),)
+    assert result.declined == (("code-graph/repo/entities/packages/gone", "prose-edited"),)
     assert page.exists()
 
 
@@ -203,7 +203,7 @@ def test_unstamped_code_wiki_page_is_retained_as_human_authored(tmp_path: Path) 
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
     page = _write_package_page(
         tmp_path,
-        "repositories/repo/packages/gone.md",
+        "code-graph/repo/entities/packages/gone.md",
         "pkg:acme/repo/gone",
         generated=False,
     )
@@ -211,13 +211,13 @@ def test_unstamped_code_wiki_page_is_retained_as_human_authored(tmp_path: Path) 
     result = prune_entities(load_bundle(tmp_path), frozenset())
 
     assert result.deleted == ()
-    assert result.declined == (("repositories/repo/packages/gone", "not-generated"),)
+    assert result.declined == (("code-graph/repo/entities/packages/gone", "not-generated"),)
     assert page.exists()
 
 
 def test_unrelated_human_page_under_generated_directory_is_outside_policy_ownership(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
-    page = tmp_path / "repositories/repo/packages/notes.md"
+    page = tmp_path / "code-graph/repo/entities/packages/notes.md"
     page.parent.mkdir(parents=True, exist_ok=True)
     before = "---\ntype: Note\ntitle: notes\nresource: note:repo/packages\n---\n\nHuman notes.\n"
     page.write_text(before, encoding="utf-8")
@@ -238,7 +238,7 @@ def test_all_seven_policy_types_are_owned_independently_of_depth(tmp_path: Path)
         "AgentPlugin": "agent_plugin:acme/repo/reviewer",
         "TestSuite": "test_suite:acme/repo/unit",
         "File": "file:acme/repo/src/main.py",
-        "Dependency": "dependency:pypi/httpx",
+        "Dependency": "dependency:acme/repo/pypi/httpx",
     }
     for index, (type_name, resource) in enumerate(resources.items()):
         path = tmp_path / f"arbitrary/depth/{index}.md"
@@ -257,7 +257,7 @@ def test_all_seven_policy_types_are_owned_independently_of_depth(tmp_path: Path)
 
 def test_unknown_type_with_a_resource_is_not_owned_or_reported(tmp_path: Path) -> None:
     install_bundle(tmp_path, today=_TODAY, dry_run=False)
-    page = tmp_path / "dependencies/pypi/handbook.md"
+    page = tmp_path / "code-graph/repo/entities/dependencies/pypi/handbook.md"
     page.parent.mkdir(parents=True, exist_ok=True)
     page.write_text(
         "---\ntype: Handbook\ntitle: handbook\nresource: handbook:dependencies\n"

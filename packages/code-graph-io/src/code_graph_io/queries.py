@@ -9,6 +9,8 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from code_graph_io.uri import dependency_identifier_from_path
+
 # A SQL bind-parameter list, built up alongside a WHERE clause. sqlite3 accepts
 # str / int / float / bytes / None, and these lists mix them freely.
 SqlParams = list[Any]
@@ -76,7 +78,7 @@ _VALID_KINDS = frozenset(
 # App framework kinds derived by classification.classify().
 # Write-time gate — keep in sync with _FRAMEWORK_PRECEDENCE in
 # code_graph_io/classification.py.
-_VALID_APP_KINDS = frozenset({"cli", "electron", "expo", "nextjs", "spa"})
+_VALID_APP_KINDS = frozenset({"cli", "electron", "expo", "nextjs", "server", "spa"})
 
 _RESOLVED_FILTER = "(e.attrs_json IS NULL OR json_extract(e.attrs_json, '$.resolution') != 'unresolved')"
 
@@ -249,11 +251,15 @@ class FileDescription:
 
 @dataclass(frozen=True)
 class DependencyDescription:
-    """Description of a `dependency` node."""
+    """Description of a `dependency` node.
+
+    `repository` is the owning `repo:<org>/<repo>` URI (D-004).
+    """
 
     ecosystem: str
     name: str
     uri: str
+    repository: str = ""
     versions_in_use: list[str] = field(default_factory=list)
     used_by: list[str] = field(default_factory=list)
     implemented_by: list[str] = field(default_factory=list)
@@ -467,7 +473,7 @@ def build_menu(conn: sqlite3.Connection, matches: list[NodeRecord]) -> list[Matc
                             when there is no containing package/app to narrow by;
                             otherwise `... <name> --kind <cli> --in-package <pkg>`
       * file             -> `... <path>` (resolves via the path describer)
-      * dependency       -> `... <ecosystem>/<name> --kind dependency`
+      * dependency       -> `... <org>/<repo>/<ecosystem>/<name> --kind dependency`
                             (dependency nodes carry a synthetic path; never
                             address them by `--in-package`)
       * other path-less  -> `... <name> --kind <cli>`
@@ -503,10 +509,10 @@ def build_menu(conn: sqlite3.Connection, matches: list[NodeRecord]) -> list[Matc
             # A bare file path resolves via q_describe.run's path-describer fallback.
             command = f"gw graph describe {m.path}"
         elif m.kind == "dependency":
-            # Dependency nodes carry a synthetic path; address them by ecosystem,
-            # never --in-package.
-            eco = m.attrs.get("ecosystem", "pypi")
-            command = f"gw graph describe {eco}/{m.name} --kind dependency"
+            # Dependency nodes carry a synthetic, repository-scoped path; the
+            # describe identifier is `<org>/<repo>/<ecosystem>/<name>`.
+            identifier = dependency_identifier_from_path(m.path or "") or m.name
+            command = f"gw graph describe {identifier} --kind dependency"
         else:
             # Path-less entities (package, app, test_suite, agent_plugin,
             # entry_point) resolve by name under their explicit kind.
@@ -808,38 +814,36 @@ def describe_package(
     ).fetchall()
     internal_dependents = [r[0] for r in internal_dependent_rows]
 
-    # Facts migrated from the implemented Dependency node, if this package
-    # implements one (ADR 2026-09-07-dependencies). Same consumer-kind filter and ordering as
-    # describe_dependency, so the two agree by construction.
-    used_by: list[str] = []
-    versions_in_use: list[str] = []
-    # ORDER BY is not cosmetic: a member shipping two distributable manifests
-    # (a pyproject.toml and a package.json, say) is implemented_by two
-    # Dependency nodes, and an unordered fetchone would pick between them by
-    # iteration order. No workspace member has both today; the ordering makes
-    # the day one does a stable choice rather than a flapping one.
-    implemented_dep_row = conn.execute(
+    # Facts aggregated over every repository-scoped Dependency node that is
+    # implemented_by this package (D-004): the "who else uses X" query. Same
+    # consumer-kind filter and ordering as describe_dependency. An unconsumed
+    # package has no such node, so both lists stay empty.
+    implemented_rows = conn.execute(
         "SELECT dep.id, dep.attrs_json FROM edges e "
         "JOIN nodes dep ON e.src = dep.id "
         "WHERE e.kind='implemented_by' AND e.dst = ? AND dep.kind='dependency' "
         "ORDER BY dep.uri",
         (package_id,),
-    ).fetchone()
-    if implemented_dep_row is not None:
-        dep_id, dep_attrs_json = implemented_dep_row
-        used_by_rows = conn.execute(
-            "SELECT DISTINCT p.uri FROM edges e "
-            "JOIN nodes p ON e.src = p.id "
-            "WHERE e.kind='used_by' AND e.dst = ? AND p.kind IN ('package', 'app', 'repository') "
-            "AND p.uri IS NOT NULL "
-            "ORDER BY p.uri",
-            (dep_id,),
-        ).fetchall()
-        used_by = [r[0] for r in used_by_rows]
+    ).fetchall()
+    consumer_uris: set[str] = set()
+    version_entries: set[str] = set()
+    for dep_id, dep_attrs_json in implemented_rows:
+        consumer_uris.update(
+            r[0]
+            for r in conn.execute(
+                "SELECT DISTINCT p.uri FROM edges e "
+                "JOIN nodes p ON e.src = p.id "
+                "WHERE e.kind='used_by' AND e.dst = ? AND p.kind IN ('package', 'app', 'repository') "
+                "AND p.uri IS NOT NULL",
+                (dep_id,),
+            ).fetchall()
+        )
         dep_attrs = json.loads(dep_attrs_json) if dep_attrs_json else {}
         versions = dep_attrs.get("versions_in_use") or []
         if isinstance(versions, list):
-            versions_in_use = list(versions)
+            version_entries.update(str(v) for v in versions)
+    used_by = sorted(consumer_uris)
+    versions_in_use = sorted(version_entries)
 
     return PackageDescription(
         name=name,
@@ -1317,8 +1321,19 @@ def describe_test_suite(
     return dataclasses.replace(desc, files=[r[0] for r in file_rows])
 
 
-def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) -> DependencyDescription | None:
-    """Return the description of a dependency node identified by (ecosystem, name).
+def describe_dependency(
+    conn: sqlite3.Connection,
+    *,
+    uri: str | None = None,
+    repo: str | None = None,
+    ecosystem: str | None = None,
+    name: str | None = None,
+) -> DependencyDescription | None:
+    """Return the description of the repository-scoped dependency node at *uri*.
+
+    `repo` (a `repo:<org>/<repo>` URI) + `ecosystem` + `name` is an equivalent
+    keyword form that composes `dependency:<org>/<repo>/<ecosystem>/<name>`;
+    `name` must already be the normalized spelling the node carries.
 
     Reads `versions_in_use` from the node's attrs, and populates `used_by`
     from inbound `used_by` edges. Consumer-side filters broaden to
@@ -1335,15 +1350,17 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
 
     Deduplicated and sorted by consumer URI. `conn` must be opened read-only.
     """
+    if uri is None:
+        if repo is None or ecosystem is None or name is None:
+            raise ValueError("describe_dependency needs uri, or repo + ecosystem + name")
+        uri = f"dependency:{repo.removeprefix('repo:')}/{ecosystem}/{name}"
     row = conn.execute(
-        "SELECT id, name, attrs_json, uri FROM nodes "
-        "WHERE kind='dependency' AND name = ? "
-        "AND json_extract(attrs_json, '$.ecosystem') = ?",
-        (name, ecosystem),
+        "SELECT id, name, attrs_json, uri, repo FROM nodes WHERE kind='dependency' AND uri = ?",
+        (uri,),
     ).fetchone()
     if not row:
         return None
-    dep_id, dep_name, attrs_json, uri = row
+    dep_id, dep_name, attrs_json, node_uri, node_repo = row
     attrs = json.loads(attrs_json) if attrs_json else {}
     used_by_rows = conn.execute(
         "SELECT DISTINCT p.uri FROM edges e "
@@ -1367,9 +1384,10 @@ def describe_dependency(conn: sqlite3.Connection, *, ecosystem: str, name: str) 
     if not isinstance(versions, list):
         versions = []
     return DependencyDescription(
-        ecosystem=attrs.get("ecosystem", ecosystem),
+        ecosystem=attrs.get("ecosystem", ecosystem or ""),
         name=dep_name,
-        uri=uri or "",
+        uri=node_uri or "",
+        repository=node_repo or "",
         versions_in_use=list(versions),
         used_by=used_by,
         implemented_by=implemented_by,
@@ -2053,7 +2071,7 @@ def consumer_packages(
 
     Per-kind logic:
       - dependency:  `used_by` consumers, `p.kind IN ('package','app','repository')`,
-                     by `dep.name` (DISTINCT, ORDER BY p.name).
+                     by the dependency node's `entity_uri` (DISTINCT, ORDER BY p.name).
       - test_suite:  `tests` packages/apps by `ts.uri` (DISTINCT, ORDER BY p.name).
     Any other kind returns `()`.
     """
@@ -2063,9 +2081,9 @@ def consumer_packages(
             "JOIN nodes p ON u.src = p.id "
             "JOIN nodes dep ON u.dst = dep.id "
             "WHERE u.kind='used_by' AND p.kind IN ('package', 'app', 'repository') "
-            "AND dep.kind='dependency' AND dep.name = ? "
+            "AND dep.kind='dependency' AND dep.uri = ? "
             "ORDER BY p.name",
-            (entity_name,),
+            (entity_uri,),
         ).fetchall()
         return tuple(r[0] for r in rows)
     if kind == "test_suite":

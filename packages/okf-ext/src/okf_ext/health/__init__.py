@@ -3,8 +3,8 @@
     from okf_ext import health
     report = validate(bundle, today=today, extra_rules=[health.health_rule()])
 
-Three codes, one factory. The unit of work is the **whole bundle**, and the
-inputs are `LinkGraph.backlinks`, concept titles and `parse_log` -- which is the
+Two codes, one factory. The unit of work is the **whole bundle**, and the
+inputs are `LinkGraph.backlinks` and `parse_log` -- which is the
 seam that separates this from `render`, whose unit is one document's markdown
 body and whose input is a markdown-it parse. They share no code and no data.
 

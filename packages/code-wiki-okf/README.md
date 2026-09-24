@@ -51,22 +51,39 @@ workspace does not. Canonical members follow this matrix:
 
 | Type | Canonical member |
 | --- | --- |
-| Repository | `repositories/<repo>/repository.md` |
-| Package | `repositories/<repo>/packages/<slug>.md` |
-| App | `repositories/<repo>/apps/<slug>.md` |
-| AgentPlugin | `repositories/<repo>/agent-plugins/<slug>.md` |
-| TestSuite | `repositories/<repo>/test-suites/<slug>.md` |
-| File | `repositories/<repo>/files/<source-path>.md` |
-| Dependency | `dependencies/<ecosystem>/<slug>.md` |
+| Repository | `code-graph/<repo>.md` |
+| Package | `code-graph/<repo>/entities/packages/<slug>.md` |
+| App | `code-graph/<repo>/entities/apps/<slug>.md` |
+| AgentPlugin | `code-graph/<repo>/entities/agent-plugins/<slug>.md` |
+| TestSuite | `code-graph/<repo>/entities/test-suites/<slug>.md` |
+| File | `code-graph/<repo>/file-system/<source-path>.md` |
+| Dependency | `code-graph/<repo>/entities/dependencies/<ecosystem>/<slug>.md` |
 
-Each repository and repository-local typed lane has an `index.md`. Top-level
-`packages/`, `apps/`, `agent-plugins/`, and `test-suites/` contain discovery
-indexes that link to canonical repository-owned pages; they do not duplicate
-concepts. Dependencies are canonical and global but grouped by ecosystem.
-Files have repository-local catalogs only — there is no top-level Files lane.
+The catalog indexes follow the same tree:
+
+```
+code-graph/index.md                                   Repositories
+code-graph/<repo>.md                                  Repository page
+code-graph/<repo>/index.md                            stub: Repository link + Subdirectories
+code-graph/<repo>/entities/index.md                   Packages, Apps, Agent Plugins, Test Suites, Dependencies
+code-graph/<repo>/entities/{packages,apps,agent-plugins,test-suites}/<slug>.md
+code-graph/<repo>/entities/dependencies/<ecosystem>/<slug>.md
+code-graph/<repo>/file-system/<repo-relative-path>.md
+```
+
+The bundle root `index.md` lists repositories only; there is no top-level
+`repositories/`, `dependencies/`, `packages/`, `apps/`, `agent-plugins/` or
+`test-suites/` lane. A repository named `index` is refused at config load,
+because it would collide with `code-graph/index.md`. Dependencies are
+repository-owned: one Dependency per (repository, dependency),
+`dependency:<org>/<repo>/<ecosystem>/<name>` (e.g. `dependency:acme/web/npm/react`);
+`used_by` and `versions_in_use` describe that repository only, and the
+implementing Package page aggregates across repositories. A scoped npm name is
+slugged (`@babel/core` → `@babel__core`).
 
 `x-okf-directory` in a type schema declares its lane segment, not a complete
-member path. `code_wiki_okf.placement` composes the repository or ecosystem
+member path (`code-graph/` for Repository, `file-system/` for File, `packages/`,
+`apps/`, `agent-plugins/`, `test-suites/` and `dependencies/` for the rest). `code_wiki_okf.placement` composes the repository or ecosystem
 context, constructs canonical IDs, and validates all seven types; generic
 `okf-ext` placement remains vocabulary-neutral.
 

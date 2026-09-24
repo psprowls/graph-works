@@ -226,7 +226,7 @@ async def test_apply_scan_worklist_lands_the_same_page_the_in_process_path_does(
     )
     assert applied.narrated == 1
     assert applied.stamped == 1
-    assert FILLED in (layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md").read_text(
+    assert FILLED in (layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md").read_text(
         encoding="utf-8"
     )
 

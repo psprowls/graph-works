@@ -381,10 +381,10 @@ def test_the_file_tools_refuse_an_entity_with_no_repository_root(tmp_path):
     """The `repo_path is None` path -- a Dependency page. Its `entity_root` is
     the empty string, so both file tools have nothing to resolve against."""
     task = ProseRefreshTask(
-        uri="dependency:pypi/httpx",
+        uri="dependency:acme/demo/pypi/httpx",
         kind="Dependency",
         name="httpx",
-        page_path="dependencies/pypi/httpx.md",
+        page_path="code-graph/demo/entities/dependencies/pypi/httpx.md",
         entity_root="",
         trigger="first_fill",
     )

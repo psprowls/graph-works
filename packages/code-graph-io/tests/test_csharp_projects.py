@@ -7,9 +7,9 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from code_graph_io import csharp_projects, store
+from code_graph_io import csharp_projects, store, upsert
 from code_graph_io._ignore import compile_ignore
-from code_graph_io.uri import RepoContext
+from code_graph_io.uri import RepoContext, repo_uri
 
 _CTX = RepoContext(org="test", repo="repo")
 
@@ -372,3 +372,30 @@ def test_malformed_csproj_is_skipped(tmp_path: Path, conn: sqlite3.Connection) -
     csharp_projects.refresh(conn, repo_root=tmp_path, ctx=_CTX)
 
     assert conn.execute("SELECT COUNT(*) FROM nodes WHERE kind='package'").fetchone()[0] == 0
+
+
+def test_two_repositories_referencing_one_nuget_package_keep_separate_versions(
+    tmp_path: Path, conn: sqlite3.Connection
+) -> None:
+    csproj = """<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="{version}" />
+  </ItemGroup>
+</Project>
+"""
+    for repo, version in (("alpha", "13.0.3"), ("beta", "12.0.1")):
+        repo_root = tmp_path / repo
+        (repo_root / "src" / "Lib").mkdir(parents=True)
+        (repo_root / "src" / "Lib" / "Lib.csproj").write_text(csproj.format(version=version), encoding="utf-8")
+        ctx = RepoContext(org="test", repo=repo)
+        upsert.set_current_repo(conn, repo_uri(ctx))
+        try:
+            csharp_projects.refresh(conn, repo_root=repo_root, ctx=ctx, current_repo=repo_uri(ctx))
+        finally:
+            upsert.set_current_repo(conn, None)
+
+    rows = conn.execute("SELECT uri, repo, attrs_json FROM nodes WHERE kind='dependency' ORDER BY uri").fetchall()
+    assert [(uri, repo, json.loads(attrs)["versions_in_use"]) for uri, repo, attrs in rows] == [
+        ("dependency:test/alpha/nuget/Newtonsoft.Json", "repo:test/alpha", ["13.0.3"]),
+        ("dependency:test/beta/nuget/Newtonsoft.Json", "repo:test/beta", ["12.0.1"]),
+    ]

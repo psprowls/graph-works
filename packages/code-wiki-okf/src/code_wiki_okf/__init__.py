@@ -28,15 +28,22 @@ from code_wiki_okf.git_state import (
 )
 from code_wiki_okf.init import BundleInstall, InitError, install_bundle, plan_install
 from code_wiki_okf.placement import (
+    CODE_GRAPH_LANE,
     CODE_WIKI_TYPES,
+    EntityPage,
     PlacementContext,
     PlacementError,
     affected_directories,
     canonical_concept_id,
     canonical_member,
     context_from_resource,
+    entities_directory,
+    entity_page,
+    file_system_directory,
     is_code_wiki_type,
+    lane_directory,
     placement_rule,
+    repository_directory,
 )
 from code_wiki_okf.provenance import (
     generated_value,
@@ -50,10 +57,12 @@ from code_wiki_okf.resources import (
 )
 
 __all__ = [
+    "CODE_GRAPH_LANE",
     "CODE_WIKI_TYPES",
     "BundleInstall",
     "Config",
     "ConfigError",
+    "EntityPage",
     "InitError",
     "PlacementContext",
     "PlacementError",
@@ -69,16 +78,21 @@ __all__ = [
     "changed_files_since",
     "compute_state_gate",
     "context_from_resource",
+    "entities_directory",
+    "entity_page",
+    "file_system_directory",
     "generated_value",
     "head_commit",
     "install_bundle",
     "is_clean_on_branches",
     "is_code_wiki_type",
+    "lane_directory",
     "last_updated_commit_value",
     "load_config",
     "ls_files",
     "placement_rule",
     "plan_install",
+    "repository_directory",
     "resource_index",
     "tokens_value",
 ]

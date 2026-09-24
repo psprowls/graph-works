@@ -49,8 +49,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from code_wiki_okf.entities.catalog import CONTENT_GROUPS
-from code_wiki_okf.placement import GLOBAL_LANES, REPOSITORIES_LANE
+from code_wiki_okf.placement import CODE_GRAPH_LANE
 from doc_wiki_okf.diataxis.classify import Unclassified, classify
 from doc_wiki_okf.diataxis.rubric import TYPE_NAMES
 from doc_wiki_okf.proposals.filing import plan_file
@@ -59,7 +58,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
 from okf_ext.proposals import ProposalPlan
 from okf_ext.proposals import apply as apply_plan
-from okf_ext.schemas import SchemaSet, declared_directories
+from okf_ext.schemas import SchemaSet
 from okf_io import Bundle
 
 from graph_works_core.agent_substrate.agent_tools import strip_code_fence
@@ -94,22 +93,14 @@ def catalog_lanes(lane_set: LaneSet, schema_set: SchemaSet) -> tuple[str, ...]:
     """Every lane the reasoner's catalog covers, as directory ids.
 
     The proposal lanes come off the `LaneSet` (whose directories come off
-    the loaded schemas). The four repository entity discovery indexes come
-    from the code-wiki catalog's public grouping plus those same schema
-    declarations; placement owns the repository and global lanes. `File` is
-    intentionally absent: its `files/` directory is repository-local, never a
-    top-level discovery index. `sources/` remains because the reasoner should
-    see what has already been ingested.
+    the loaded schemas). Every code-wiki page lives under placement's one
+    `code-graph` lane, and the reasoner's catalog is prefix-matched, so that
+    single lane covers every entity page. `sources/` remains because the
+    reasoner should see what has already been ingested.
     """
+    _ = schema_set
     proposal = tuple(lane.directory.rstrip("/") for lane in lane_set.lanes)
-    declared = declared_directories(schema_set)
-    repository_entities = tuple(
-        directory.rstrip("/")
-        for _heading, type_name in CONTENT_GROUPS
-        if (directory := declared.get(type_name)) is not None
-    )
-    placement_catalogs = (REPOSITORIES_LANE, *GLOBAL_LANES)
-    return tuple(dict.fromkeys((*proposal, *repository_entities, *placement_catalogs, SOURCES_LANE)))
+    return tuple(dict.fromkeys((*proposal, CODE_GRAPH_LANE, SOURCES_LANE)))
 
 
 def _string_list(value: object) -> list[str]:

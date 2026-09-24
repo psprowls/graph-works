@@ -12,8 +12,9 @@ NodeKey = tuple[str, str, str | None]
 # Ecosystem-global node kinds: identity is never repo-scoped and they are never
 # stamped with a member repo (mirrors update.py's end-of-pass stamp exclusion).
 # Their synthetic path is non-None, so without this they'd be treated like a
-# path-bearing member node and forked per repo.
-_GLOBAL_KINDS = frozenset({"builtin", "dependency"})
+# path-bearing member node and forked per repo. Dependency is NOT here: it is
+# minted per repository (`dependency:<org>/<repo>/<eco>/<name>`).
+_GLOBAL_KINDS = frozenset({"builtin"})
 _UNRESOLVED_SYMBOL_KIND = "unresolved_symbol"
 _SYMBOL_PLACEHOLDER_KINDS = frozenset({"function", "method", "class", "type"})
 _SYMBOL_PLACEHOLDER_EDGE_KINDS = frozenset({"calls", "exports"})
@@ -64,7 +65,7 @@ def _node_id(conn: sqlite3.Connection, key: NodeKey) -> int | None:
         return row[0] if row else None
     current_repo = _current_repo(conn)
     if current_repo is None or kind in _GLOBAL_KINDS:
-        # Single-repo, OR an ecosystem-global kind (builtin/dependency): identity
+        # Single-repo, OR an ecosystem-global kind (builtin): identity
         # is never repo-scoped. Global kinds carry a synthetic non-None path but
         # are shared across all members (repo IS NULL), so they must resolve to
         # the one global row regardless of which member is currently active.
@@ -96,8 +97,8 @@ def _insert_node(
     kind, name, path = key
     # Stamp the current member repo at insert time for path-bearing member nodes
     # so a later sibling member can't merge into this row. Pathless nodes
-    # (unresolved symbols) and ecosystem-global kinds (builtin, dependency —
-    # which carry a synthetic non-None path) stay repo=NULL.
+    # (unresolved symbols) and ecosystem-global kinds (builtin —
+    # which carries a synthetic non-None path) stay repo=NULL.
     repo = _current_repo(conn) if (path is not None and kind not in _GLOBAL_KINDS) else None
     cursor = conn.execute(
         "INSERT INTO nodes(kind, name, path, line, attrs_json, uri, repo) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -111,7 +112,7 @@ def _insert_node(
 def _dependency_id_by_uri(conn: sqlite3.Connection, uri: str | None) -> int | None:
     """Resolve an existing dependency row by its stable URI.
 
-    A dependency's `path` is a synthetic 1:1 function of (ecosystem, name) — the
+    A dependency's `path` is a synthetic 1:1 function of (repository, ecosystem, name) — the
     same identity the URI already carries. Keying identity on the URI lets a
     path-format change update the row in place instead of forking a duplicate
     (orphan) node that shares the live node's URI.

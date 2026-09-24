@@ -26,8 +26,8 @@ the twelve top-level page kinds. None of those six work-item types appear in
 it, and a single `work` row (from `work_tracker_okf.WORK_DIR`) stands in for
 all six.
 
-`File` declares the repository-local lane segment `files/`. Its row says so
-explicitly: the schema annotation is not a claim that a top-level `files/`
+`File` declares the repository-local lane segment `file-system/`. Its row says so
+explicitly: the schema annotation is not a claim that a top-level `file-system/`
 catalog exists. Repository and Dependency rows likewise name the additional
 resource identity that qualifies their canonical placement.
 
@@ -58,7 +58,7 @@ _TYPE_GLOSSES: Mapping[str, tuple[str, str]] = {
     "Package": ("package", "One library/service workspace — what it exports, who depends on it, key patterns"),
     "Dependency": (
         "dependency",
-        "An ecosystem-qualified external package or service under `dependencies/<ecosystem>/`",
+        "An external package one repository declares, under a repository's `entities/dependencies/<ecosystem>/`",
     ),
     "AgentPlugin": (
         "agent-plugin",
@@ -67,9 +67,9 @@ _TYPE_GLOSSES: Mapping[str, tuple[str, str]] = {
     "TestSuite": ("test-suite", "The test coverage for a package or app — what's covered, how to run it"),
     "Repository": (
         "repository",
-        "One version-controlled repository, represented by `repositories/<repo>/repository`",
+        "One version-controlled repository, represented by `code-graph/<repo>.md`",
     ),
-    "File": ("file", "A repository-local source-file mirror under that repository's `files/` lane"),
+    "File": ("file", "A repository-local source-file mirror under that repository's `file-system/` lane"),
     "Tutorial": ("tutorial", LANE_GLOSSES["tutorial"]),
     "HowTo": ("how-to", LANE_GLOSSES["how-to"]),
     "Reference": ("reference", LANE_GLOSSES["reference"]),

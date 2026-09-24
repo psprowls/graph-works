@@ -23,9 +23,9 @@ okf_version: 0.2
 - [Layering](/concepts/layering.md) — how the bands stack
 - [Untitled](concepts/untitled.md)
 
-## Packages
+## Repositories
 
-- [pkg-a](/repositories/r/packages/pkg-a.md)
+- [pkg-a](/code-graph/r/entities/packages/pkg-a.md)
 - [a directory](/work/index.md)
 - [a folder](work/)
 - [an asset](/scripts/tool.py)
@@ -34,7 +34,7 @@ okf_version: 0.2
 
 ### Extra
 
-- [pkg-b](/repositories/r/packages/pkg-b.md)
+- [pkg-b](/code-graph/r/entities/packages/pkg-b.md)
 
 # Subdirectories
 
@@ -56,8 +56,8 @@ def layout(tmp_path: Path):
     (layout.bundle_dir / "index.md").write_text(INDEX, encoding="utf-8")
     _page(layout, "concepts/layering", "type: Explanation\ntitle: Layering bands\ndescription: d\n")
     _page(layout, "concepts/untitled", "description: d\n")
-    _page(layout, "repositories/r/packages/pkg-a", "type: Package\ntitle: pkg-a\ndescription: d\n")
-    _page(layout, "repositories/r/packages/pkg-b", "type: Package\ntitle: pkg-b\ndescription: d\n")
+    _page(layout, "code-graph/r/entities/packages/pkg-a", "type: Package\ntitle: pkg-a\ndescription: d\n")
+    _page(layout, "code-graph/r/entities/packages/pkg-b", "type: Package\ntitle: pkg-b\ndescription: d\n")
     (layout.bundle_dir / "work").mkdir(exist_ok=True)
     (layout.bundle_dir / "work" / "index.md").write_text("# Work\n", encoding="utf-8")
     (layout.bundle_dir / "scripts").mkdir()
@@ -68,7 +68,7 @@ def layout(tmp_path: Path):
 def test_sections_nest_subsections_and_stop_at_the_next_title(layout) -> None:
     tree = run_wiki_tree(layout)
 
-    assert [(node.heading, node.level) for node in tree.sections] == [("Concepts", 2), ("Packages", 2)]
+    assert [(node.heading, node.level) for node in tree.sections] == [("Concepts", 2), ("Repositories", 2)]
     concepts, packages = tree.sections
     assert [(child.heading, child.level) for child in concepts.children] == [("Architecture", 3)]
     assert [(child.heading, child.level) for child in packages.children] == [("Extra", 3)]
@@ -87,10 +87,11 @@ def test_pages_take_title_and_type_with_fallbacks(layout) -> None:
 def test_only_links_to_bundle_pages_survive(layout) -> None:
     packages = run_wiki_tree(layout).sections[1]
 
-    assert [page.id for page in packages.pages] == ["repositories/r/packages/pkg-a"]
+    assert [page.id for page in packages.pages] == ["code-graph/r/entities/packages/pkg-a"]
 
 
 def test_generated_comes_from_root_index_declarations_and_is_inherited(layout) -> None:
+    # `Repositories` is the one root section the code-wiki declaration owns.
     concepts, packages = run_wiki_tree(layout).sections
 
     assert concepts.generated is False

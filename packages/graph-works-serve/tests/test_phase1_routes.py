@@ -158,20 +158,20 @@ okf_version: 0.2
 
 # Index
 
-## Packages
+## Repositories
 
-- [pkg-a](/repositories/r/packages/pkg-a.md) — the a package
+- [pkg-a](/code-graph/r/entities/packages/pkg-a.md) — the a package
 
 ### Extra
 
-- [pkg-b](repositories/r/packages/pkg-b.md)
-- [gone](/repositories/r/packages/gone.md)
+- [pkg-b](code-graph/r/entities/packages/pkg-b.md)
+- [gone](/code-graph/r/entities/packages/gone.md)
 """
 
 
 def test_wiki_tree_is_the_projection(client: TestClient, workspace: WorkspaceLayout) -> None:
     (workspace.bundle_dir / "index.md").write_text(_INDEX, encoding="utf-8", newline="\n")
-    packages = workspace.bundle_dir / "repositories" / "r" / "packages"
+    packages = workspace.bundle_dir / "code-graph" / "r" / "entities" / "packages"
     packages.mkdir(parents=True)
     for slug in ("pkg-a", "pkg-b"):
         (packages / f"{slug}.md").write_text(
@@ -184,11 +184,11 @@ def test_wiki_tree_is_the_projection(client: TestClient, workspace: WorkspaceLay
     body = response.json()
     assert body == wire_wiki.wiki_tree_payload(run_wiki_tree(workspace))
     (section,) = body["sections"]
-    assert (section["heading"], section["level"], section["generated"]) == ("Packages", 2, True)
-    assert section["pages"] == [{"id": "repositories/r/packages/pkg-a", "title": "pkg-a", "type": "Package"}]
+    assert (section["heading"], section["level"], section["generated"]) == ("Repositories", 2, True)
+    assert section["pages"] == [{"id": "code-graph/r/entities/packages/pkg-a", "title": "pkg-a", "type": "Package"}]
     (child,) = section["sections"]
     assert (child["heading"], child["level"], child["generated"], child["sections"]) == ("Extra", 3, True, [])
-    assert child["pages"] == [{"id": "repositories/r/packages/pkg-b", "title": "pkg-b", "type": "Package"}]
+    assert child["pages"] == [{"id": "code-graph/r/entities/packages/pkg-b", "title": "pkg-b", "type": "Package"}]
 
 
 def test_dispatch_rules_is_the_projection(client: TestClient, workspace: WorkspaceLayout) -> None:

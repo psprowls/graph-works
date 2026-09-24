@@ -118,7 +118,7 @@ _READER_DELEGATIONS = [
         (),
         {"suite_name": "s", "uri": "test_suite:o/r/s"},
     ),
-    ("describe_dependency", queries, "describe_dependency", (), {"ecosystem": "pypi", "name": "n"}),
+    ("describe_dependency", queries, "describe_dependency", (), {"uri": "dependency:o/r/pypi/n"}),
     ("describe_builtin", queries, "describe_builtin", (), {"language": "python", "module_name": "os"}),
     (
         "describe_agent_plugin",

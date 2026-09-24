@@ -267,9 +267,7 @@ def expand(bundle: Bundle, rules: Sequence[Rule]) -> Expansion:
             continue
         mapping[member] = claimed[0][1]
 
-    reserved = {
-        source: dest for source, dest in mapping.items() if PurePosixPath(source).name in RESERVED
-    }
+    reserved = {source: dest for source, dest in mapping.items() if PurePosixPath(source).name in RESERVED}
 
     # The reserved half of C2: two reserved sources (e.g. two lane indexes)
     # claiming one destination -- merging `explanations` and `references`
@@ -544,13 +542,9 @@ def render(prepared: Prepared) -> list[str]:
         lines.extend(f"  ~ {edit.member}: {edit.old} -> {edit.new}" for edit in plan.edits)
         if plan.stranded:
             lines.append(moves.stranded_summary(plan.stranded))
-    lines.extend(
-        f"  [reserved] {source} -> {dest}" for source, dest in sorted(prepared.expansion.reserved.items())
-    )
+    lines.extend(f"  [reserved] {source} -> {dest}" for source, dest in sorted(prepared.expansion.reserved.items()))
     if prepared.repair is not None:
-        lines.append(
-            f"  [reserved] {len(prepared.repair.edits)} provisional repair edit(s), recomputed on --write"
-        )
+        lines.append(f"  [reserved] {len(prepared.repair.edits)} provisional repair edit(s), recomputed on --write")
     return lines
 
 

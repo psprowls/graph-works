@@ -54,8 +54,10 @@ def test_render_package_owned_frontmatter_and_files_section() -> None:
         "versions_in_use": ["okf-io>=0.2", "okf-io>=0.2.4"],
     }
     assert render.sections.keys() == {"Files"}
-    assert "/repositories/agent-workspace/files/packages/okf-io/src/okf_io/bundle.py.md" in render.sections["Files"]
-    assert "/repositories/agent-workspace/files/packages/okf-io/src/okf_io/document.py.md" in render.sections["Files"]
+    assert "/code-graph/agent-workspace/file-system/packages/okf-io/src/okf_io/bundle.py.md" in render.sections["Files"]
+    assert (
+        "/code-graph/agent-workspace/file-system/packages/okf-io/src/okf_io/document.py.md" in render.sections["Files"]
+    )
 
 
 def test_render_package_empty_files_renders_none_placeholder() -> None:
@@ -87,8 +89,8 @@ def test_render_app_frontmatter_drops_packaging_facts_for_a_package_reference() 
         test_suites=[],
     )
     render = render_app(desc, repo_name="agent-workspace")
-    assert render.frontmatter == {"package": "[cli-app](/repositories/agent-workspace/packages/cli-app.md)"}
-    assert "/repositories/agent-workspace/files/apps/cli/src/index.ts.md" in render.sections["Files"]
+    assert render.frontmatter == {"package": "[cli-app](/code-graph/agent-workspace/entities/packages/cli-app.md)"}
+    assert "/code-graph/agent-workspace/file-system/apps/cli/src/index.ts.md" in render.sections["Files"]
 
 
 def test_render_test_suite_uses_passed_in_tested_packages() -> None:
@@ -111,7 +113,9 @@ def test_render_test_suite_lists_files_like_package_and_app() -> None:
         files=["packages/okf-io/tests/test_document.py"],
     )
     render = render_test_suite(desc, tested_packages=["okf-io"], repo_name="agent-workspace")
-    assert "/repositories/agent-workspace/files/packages/okf-io/tests/test_document.py.md" in render.sections["Files"]
+    assert (
+        "/code-graph/agent-workspace/file-system/packages/okf-io/tests/test_document.py.md" in render.sections["Files"]
+    )
 
 
 def test_render_test_suite_empty_files_renders_none_placeholder() -> None:
@@ -132,7 +136,7 @@ def test_render_dependency_preserves_zero_one_or_many_implementations(implemente
     desc = DependencyDescription(
         ecosystem="pypi",
         name="ruamel.yaml",
-        uri="dependency:pypi/ruamel.yaml",
+        uri="dependency:acme/one/pypi/ruamel.yaml",
         versions_in_use=["0.18.6"],
         used_by=["okf-io", "okf-ext"],
         implemented_by=implemented_by,
@@ -219,7 +223,7 @@ def test_render_agent_plugin_with_sibling_package_adds_package_reference() -> No
     assert render.frontmatter == {
         "ecosystem": "claude-code",
         "version": "1.0.0",
-        "package": "[graph-works](/repositories/agent-workspace/packages/graph-works.md)",
+        "package": "[graph-works](/code-graph/agent-workspace/entities/packages/graph-works.md)",
     }
 
 

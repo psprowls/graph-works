@@ -164,9 +164,7 @@ def test_two_rules_expand_into_one_mapping(bundle: Path) -> None:
 
 def test_a_nested_rule_keeps_the_remainder(bundle: Path) -> None:
     result = expanded(bundle, Rule("work/feature-x/references", "work/feature-x/artifacts"))
-    assert dict(result.ordinary) == {
-        "work/feature-x/references/01-design.md": "work/feature-x/artifacts/01-design.md"
-    }
+    assert dict(result.ordinary) == {"work/feature-x/references/01-design.md": "work/feature-x/artifacts/01-design.md"}
 
 
 # --- the two refusals the engine cannot see -----------------------------------
@@ -231,9 +229,7 @@ def test_a_cross_lane_link_is_computed_against_both_new_bases(bundle: Path) -> N
     relative = [e for e in prepared.plan.edits if e.member == "explanations/why-graphs.md"]
     assert ("../references/moves-api.md", "../reference/moves-api.md") in [(e.old, e.new) for e in relative]
     absolute = [e for e in prepared.plan.edits if e.member == "references/moves-api.md"]
-    assert ("/explanations/why-graphs.md", "/docs/explanations/why-graphs.md") in [
-        (e.old, e.new) for e in absolute
-    ]
+    assert ("/explanations/why-graphs.md", "/docs/explanations/why-graphs.md") in [(e.old, e.new) for e in absolute]
 
 
 def test_the_asset_moves_and_its_relative_reference_is_left_alone(bundle: Path) -> None:
@@ -414,9 +410,7 @@ def _poison_with_a_reference_style_link(bundle: Path) -> None:
     per `okf_ext.moves.plan.plan_move_many` (`plan.py:709-742`).
     """
     target = bundle / "sources" / "2026-08-spec.md"
-    target.write_bytes(
-        target.read_bytes() + b"\nSee [the explanations index][idx].\n\n[idx]: /explanations/index.md\n"
-    )
+    target.write_bytes(target.read_bytes() + b"\nSee [the explanations index][idx].\n\n[idx]: /explanations/index.md\n")
 
 
 def test_a_refused_repair_rolls_the_reserved_member_back_to_its_source(bundle: Path) -> None:
@@ -460,8 +454,10 @@ def test_a_second_run_after_a_refused_repair_reclassifies_and_retries(bundle: Pa
 
     # Fix the offending reference and confirm the move now completes.
     poisoned = bundle / "sources" / "2026-08-spec.md"
-    text = poisoned.read_bytes().decode("utf-8").replace(
-        "[idx]: /explanations/index.md", "[idx]: /docs/explanations/index.md"
+    text = (
+        poisoned.read_bytes()
+        .decode("utf-8")
+        .replace("[idx]: /explanations/index.md", "[idx]: /docs/explanations/index.md")
     )
     poisoned.write_bytes(text.encode("utf-8"))
 
@@ -514,11 +510,7 @@ def test_a_rules_level_refusal_exits_one_and_writes_nothing(
 
 def test_an_overlap_refusal_exits_one_and_writes_nothing(bundle: Path, tmp_path: Path) -> None:
     body = (
-        "moves:\n"
-        "  - dir: explanations\n"
-        "    to: docs/explanations\n"
-        "  - dir: explanations\n"
-        "    to: guides/explanations\n"
+        "moves:\n  - dir: explanations\n    to: docs/explanations\n  - dir: explanations\n    to: guides/explanations\n"
     )
     rules = write_rules(tmp_path, body)
     before = {p: p.read_bytes() for p in sorted(bundle.rglob("*")) if p.is_file()}

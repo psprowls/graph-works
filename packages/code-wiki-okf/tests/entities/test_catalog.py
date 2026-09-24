@@ -20,13 +20,15 @@ def test_an_empty_catalog_renders_the_none_placeholder():
     assert render_contents({}) == "_(none)_"
 
 
-def test_contents_renders_four_groups_in_a_fixed_order_omitting_empty_ones():
+def test_contents_renders_five_groups_in_a_fixed_order_omitting_empty_ones():
     groups = {
         "Packages": (CatalogEntry(title="widgets", concept_id="packages/widgets", description=""),),
         "Test Suites": (CatalogEntry(title="unit", concept_id="test-suites/unit", description=""),),
+        "Dependencies": (CatalogEntry(title="httpx", concept_id="dependencies/httpx", description=""),),
     }
     assert render_contents(groups) == (
         "### Packages\n\n- [widgets](/packages/widgets.md)\n\n### Test Suites\n\n- [unit](/test-suites/unit.md)\n"
+        "\n### Dependencies\n\n- [httpx](/dependencies/httpx.md)\n"
     )
 
 
@@ -97,38 +99,39 @@ def test_reconcile_catalogs_creates_every_invariant_catalog_from_actual_disk(tmp
     install_bundle(root, today=date(2026, 1, 1), dry_run=False)
     _write(
         root,
-        "repositories/one/repository.md",
-        _canonical_page("Repository", "one", "repo:acme/one"),
+        "code-graph/one.md",
+        # A Contents heading is the anchor the catalog splices into.
+        _canonical_page("Repository", "one", "repo:acme/one") + "\n## Contents\n\n_(none)_\n",
     )
     _write(
         root,
-        "repositories/two/repository.md",
+        "code-graph/two.md",
         _canonical_page("Repository", "two", "repo:acme/two"),
     )
     _write(
         root,
-        "repositories/one/packages/widgets.md",
+        "code-graph/one/entities/packages/widgets.md",
         _canonical_page("Package", "widgets", "pkg:acme/one/widgets"),
     )
     _write(
         root,
-        "repositories/two/packages/retained.md",
+        "code-graph/two/entities/packages/retained.md",
         _canonical_page("Package", "retained", "pkg:acme/two/retained"),
     )
     _write(
         root,
-        "repositories/one/files/src/main.py.md",
+        "code-graph/one/file-system/src/main.py.md",
         _canonical_page("File", "main.py", "file:acme/one/src/main.py"),
     )
     _write(
         root,
-        "dependencies/pypi/httpx.md",
-        _canonical_page("Dependency", "httpx", "dependency:pypi/httpx"),
+        "code-graph/one/entities/dependencies/pypi/httpx.md",
+        _canonical_page("Dependency", "httpx", "dependency:acme/one/pypi/httpx"),
     )
     _write(
         root,
-        "dependencies/npm/react.md",
-        _canonical_page("Dependency", "react", "dependency:npm/react"),
+        "code-graph/one/entities/dependencies/npm/react.md",
+        _canonical_page("Dependency", "react", "dependency:acme/one/npm/react"),
     )
     root_index = root / "index.md"
     root_index.write_text(root_index.read_text(encoding="utf-8") + "\nA human introduction.\n", encoding="utf-8")
@@ -137,51 +140,80 @@ def test_reconcile_catalogs_creates_every_invariant_catalog_from_actual_disk(tmp
 
     assert result.ok
     required = {
-        "repositories/index.md",
-        "dependencies/index.md",
-        "dependencies/npm/index.md",
-        "dependencies/pypi/index.md",
-        "repositories/one/index.md",
-        "repositories/one/packages/index.md",
-        "repositories/one/apps/index.md",
-        "repositories/one/agent-plugins/index.md",
-        "repositories/one/test-suites/index.md",
-        "repositories/one/files/index.md",
-        "repositories/one/files/src/index.md",
-        "repositories/two/index.md",
-        "repositories/two/packages/index.md",
-        "repositories/two/apps/index.md",
-        "repositories/two/agent-plugins/index.md",
-        "repositories/two/test-suites/index.md",
-        "repositories/two/files/index.md",
+        "code-graph/index.md",
+        "code-graph/one/index.md",
+        "code-graph/one/entities/index.md",
+        "code-graph/one/entities/packages/index.md",
+        "code-graph/one/entities/apps/index.md",
+        "code-graph/one/entities/agent-plugins/index.md",
+        "code-graph/one/entities/test-suites/index.md",
+        "code-graph/one/entities/dependencies/index.md",
+        "code-graph/one/entities/dependencies/npm/index.md",
+        "code-graph/one/entities/dependencies/pypi/index.md",
+        "code-graph/one/file-system/index.md",
+        "code-graph/one/file-system/src/index.md",
+        "code-graph/two/index.md",
+        "code-graph/two/entities/index.md",
+        "code-graph/two/entities/packages/index.md",
+        "code-graph/two/entities/apps/index.md",
+        "code-graph/two/entities/agent-plugins/index.md",
+        "code-graph/two/entities/test-suites/index.md",
+        "code-graph/two/file-system/index.md",
     }
-    assert required <= {path.relative_to(root).as_posix() for path in root.rglob("index.md")}
-    assert not (root / "files/index.md").exists()
-    assert not (root / "packages/index.md").exists()
-    assert not (root / "apps/index.md").exists()
-    assert not (root / "agent-plugins/index.md").exists()
-    assert not (root / "test-suites/index.md").exists()
+    assert required == {path.relative_to(root).as_posix() for path in (root / "code-graph").rglob("index.md")}
+    for stale in ("repositories", "dependencies", "files", "packages", "apps", "agent-plugins", "test-suites"):
+        assert not (root / stale).exists()
 
     root_text = root_index.read_text(encoding="utf-8")
     assert "A human introduction." in root_text
-    for heading in ("Repositories", "Packages", "Apps", "Agent Plugins", "Test Suites", "Dependencies"):
-        assert f"## {heading}" in root_text
-    assert "/repositories/one/packages/widgets.md" in root_text
-    assert "/repositories/two/packages/retained.md" in root_text
-    assert "/dependencies/npm/index.md" in (root / "dependencies/index.md").read_text(encoding="utf-8")
-    assert "/dependencies/npm/react.md" in (root / "dependencies/npm/index.md").read_text(encoding="utf-8")
-    assert "/repositories/one/files/src/index.md" in (root / "repositories/one/files/index.md").read_text(
-        encoding="utf-8"
+    assert "## Repositories" in root_text
+    for heading in ("Packages", "Apps", "Agent Plugins", "Test Suites", "Dependencies"):
+        assert f"## {heading}" not in root_text
+    assert "/code-graph/one.md" in root_text
+    assert "/code-graph/one/entities/packages/widgets.md" not in root_text
+
+    def read(member: str) -> str:
+        return (root / member).read_text(encoding="utf-8")
+
+    assert "/code-graph/one.md" in read("code-graph/index.md")
+    repo_stub = read("code-graph/one/index.md")
+    assert "## Repository" in repo_stub
+    assert "/code-graph/one.md" in repo_stub
+    assert "/code-graph/one/entities/packages/widgets.md" not in repo_stub
+    entities = read("code-graph/one/entities/index.md")
+    for heading in ("Packages", "Apps", "Agent Plugins", "Test Suites", "Dependencies"):
+        assert f"## {heading}" in entities
+    assert "/code-graph/one/entities/packages/widgets.md" in entities
+    assert "/code-graph/one/entities/dependencies/npm/index.md" in entities
+    assert "/code-graph/one/entities/dependencies/npm/index.md" in read("code-graph/one/entities/dependencies/index.md")
+    assert "/code-graph/one/entities/dependencies/npm/react.md" in read(
+        "code-graph/one/entities/dependencies/npm/index.md"
     )
-    assert "/repositories/one/files/src/main.py.md" in (root / "repositories/one/files/src/index.md").read_text(
-        encoding="utf-8"
-    )
+    assert "/code-graph/one/file-system/src/index.md" in read("code-graph/one/file-system/index.md")
+    assert "/code-graph/one/file-system/src/main.py.md" in read("code-graph/one/file-system/src/index.md")
+    contents = read("code-graph/one.md")
+    assert "### Dependencies" in contents
+    assert "/code-graph/one/entities/dependencies/npm/react.md" in contents
 
     actual = load_bundle(root)
     assert actual.by_type("Package") == (
-        "repositories/one/packages/widgets",
-        "repositories/two/packages/retained",
+        "code-graph/one/entities/packages/widgets",
+        "code-graph/two/entities/packages/retained",
     )
+
+
+def test_old_shape_dependency_page_is_skipped_not_crashed(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    install_bundle(root, today=date(2026, 1, 1), dry_run=False)
+    _write(root, "dependencies/pypi/httpx.md", _canonical_page("Dependency", "httpx", "dependency:pypi/httpx"))
+
+    _write(
+        root,
+        "repositories/one/packages/widgets.md",
+        _canonical_page("Package", "widgets", "pkg:acme/one/widgets"),
+    )
+
+    assert catalog_pages(load_bundle(root)) == ()
 
 
 def test_catalog_pages_excludes_a_page_that_is_not_at_its_canonical_placement(tmp_path: Path) -> None:
@@ -195,25 +227,25 @@ def test_catalog_pages_excludes_a_page_that_is_not_at_its_canonical_placement(tm
     install_bundle(root, today=date(2026, 1, 1), dry_run=False)
     _write(
         root,
-        "repositories/one/repository.md",
+        "code-graph/one.md",
         _canonical_page("Repository", "one", "repo:acme/one"),
     )
     _write(
         root,
-        "repositories/one/packages/widgets.md",
+        "code-graph/one/entities/packages/widgets.md",
         _canonical_page("Package", "widgets", "pkg:acme/one/widgets"),
     )
     _write(
         root,
-        "repositories/one/packages/misplaced.md",
+        "code-graph/one/entities/packages/misplaced.md",
         _canonical_page("Package", "widgets", "pkg:acme/one/widgets"),
     )
 
     pages = catalog_pages(load_bundle(root))
 
     concept_ids = {page.entry.concept_id for page in pages}
-    assert "repositories/one/packages/widgets" in concept_ids
-    assert "repositories/one/packages/misplaced" not in concept_ids
+    assert "code-graph/one/entities/packages/widgets" in concept_ids
+    assert "code-graph/one/entities/packages/misplaced" not in concept_ids
 
 
 def test_catalogs_follow_guarded_post_prune_disk_and_are_idempotent(tmp_path: Path) -> None:
@@ -221,12 +253,12 @@ def test_catalogs_follow_guarded_post_prune_disk_and_are_idempotent(tmp_path: Pa
     install_bundle(root, today=date(2026, 1, 1), dry_run=False)
     _write(
         root,
-        "repositories/one/repository.md",
+        "code-graph/one.md",
         _canonical_page("Repository", "one", "repo:acme/one"),
     )
     _write(
         root,
-        "repositories/one/packages/retained.md",
+        "code-graph/one/entities/packages/retained.md",
         _canonical_page(
             "Package",
             "retained",
@@ -237,21 +269,21 @@ def test_catalogs_follow_guarded_post_prune_disk_and_are_idempotent(tmp_path: Pa
     )
     _write(
         root,
-        "repositories/one/packages/removed.md",
+        "code-graph/one/entities/packages/removed.md",
         _canonical_page("Package", "removed", "pkg:acme/one/removed", generated=True),
     )
     reconcile_catalogs(load_bundle(root), today=date(2026, 1, 1))
 
     pruned = prune_entities(load_bundle(root), frozenset({"repo:acme/one"}))
-    assert pruned.deleted == ("repositories/one/packages/removed",)
-    assert pruned.declined == (("repositories/one/packages/retained", "prose-edited"),)
+    assert pruned.deleted == ("code-graph/one/entities/packages/removed",)
+    assert pruned.declined == (("code-graph/one/entities/packages/retained", "prose-edited"),)
     first = reconcile_catalogs(load_bundle(root), today=date(2026, 1, 1))
     after_first = {path.relative_to(root).as_posix(): path.read_bytes() for path in root.rglob("*") if path.is_file()}
     second = reconcile_catalogs(load_bundle(root), today=date(2026, 1, 1))
 
-    packages = (root / "index.md").read_text(encoding="utf-8")
-    assert "/repositories/one/packages/retained.md" in packages
-    assert "/repositories/one/packages/removed.md" not in packages
+    packages = (root / "code-graph/one/entities/packages/index.md").read_text(encoding="utf-8")
+    assert "/code-graph/one/entities/packages/retained.md" in packages
+    assert "/code-graph/one/entities/packages/removed.md" not in packages
     assert first.ok and second.ok
     assert second.written == ()
     assert {

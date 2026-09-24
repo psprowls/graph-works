@@ -36,7 +36,7 @@ _TODAY = date(2026, 1, 1)
 #: An entity type parked into the bundle's `schema/` to stand in for the
 #: composed workspace, where `workspace/init.py` points every lane installer at
 #: one shared declarations directory and thirteen types land in it. `Package`
-#: nests under `repositories/<repo>/` (ADR-0026), so its declared `packages/`
+#: nests under `code-graph/<repo>/` (ADR-0026), so its declared `packages/`
 #: is a prefix no correctly-placed page carries.
 _PACKAGE_SCHEMA = (
     '{\n  "$schema": "https://json-schema.org/draft/2020-12/schema",\n'
@@ -111,12 +111,12 @@ def test_both_codes_fire_over_one_built_bundle(tmp_path: Path) -> None:
 
 def test_a_repo_scoped_entity_page_trips_no_placement_finding(tmp_path: Path) -> None:
     """The narrowing, end to end: a `Package` page correctly nested under
-    `repositories/<repo>/packages/` must not be reported just because a shared
+    `code-graph/<repo>/entities/packages/` must not be reported just because a shared
     `schema/` declares `packages/` for it."""
     root = tmp_path / "bundle"
     install_bundle(root, today=_TODAY, dry_run=False)
     (root / "schema" / "Package.schema.json").write_text(_PACKAGE_SCHEMA, encoding="utf-8")
-    page = root / "repositories" / "orca" / "packages" / "okf-io.md"
+    page = root / "code-graph" / "orca" / "entities" / "packages" / "okf-io.md"
     page.parent.mkdir(parents=True)
     page.write_text(_PACKAGE_PAGE, encoding="utf-8")
 
@@ -137,7 +137,7 @@ def test_a_repo_scoped_entity_page_trips_no_placement_finding(tmp_path: Path) ->
         extra_rules=[placement_rule(declared_directories(schema_set), severity="error")],
     )
     assert [finding.path for finding in raw.findings if finding.code == CODES[0]] == [
-        "repositories/orca/packages/okf-io.md"
+        "code-graph/orca/entities/packages/okf-io.md"
     ]
 
 

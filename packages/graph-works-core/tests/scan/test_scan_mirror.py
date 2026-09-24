@@ -6,7 +6,7 @@ lane, and `okf_io._rules.links::broken` existence-checks every internal link
 including the absolute form (`adrs/0004-broken-links-are-warn`). Before this
 fix `build_scan_worklist` ran only the entity lane, so a scan of the fixture
 repo produced 3 `links.broken` findings and zero pages under
-`repositories/demo/`; the production run produced 1311.
+`code-graph/demo/`; the production run produced 1311.
 
 **Assert on the finding count, never on link counts.** The fixture holds two
 file nodes for `packages/widgets/src/a.py` under two repo URIs (`repo:acme/demo`
@@ -56,7 +56,7 @@ async def test_a_scan_writes_a_page_for_every_tracked_file(tmp_path: Path) -> No
 
     await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
 
-    mirror_root = layout.bundle_dir / "repositories" / REPO_NAME / "files"
+    mirror_root = layout.bundle_dir / "code-graph" / REPO_NAME / "file-system"
     for tracked in ("packages/widgets/src/a.py", "packages/foo.bar/src/b.py", "README.md"):
         assert (mirror_root / f"{tracked}.md").exists(), f"no mirror page for {tracked}"
 
@@ -79,4 +79,4 @@ async def test_a_dry_run_writes_no_mirror_page(tmp_path: Path) -> None:
 
     assert structural.mirror.plans  # a real preview: it saw work to do
     assert structural.mirror.results == ()
-    assert not (layout.bundle_dir / "repositories" / REPO_NAME / "files").exists()
+    assert not (layout.bundle_dir / "code-graph" / REPO_NAME / "file-system").exists()

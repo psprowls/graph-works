@@ -366,7 +366,9 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
         )
     for key in ("models", "overrides", "permission_mode"):
         if key in auto_drive:
-            refusals.append(f"workflow.auto_drive.{key}: retired dispatch setting; remove it and recreate rules explicitly.")
+            refusals.append(
+                f"workflow.auto_drive.{key}: retired dispatch setting; remove it and recreate rules explicitly."
+            )
     if "pipeline" in workflow:
         refusals.append("workflow.pipeline: retired dispatch setting; remove it and recreate rules explicitly.")
 
@@ -420,9 +422,7 @@ def dispose(raw: dict[str, object], *, root: Path, options: Options) -> Conversi
 
     raw_repo = options.repo_path if options.repo_path is not None else raw.get("repo-directory")
     if raw_repo is None:
-        refusals.append(
-            "no repository path: the v2 document carries no `repo-directory` and no --repo-path was given."
-        )
+        refusals.append("no repository path: the v2 document carries no `repo-directory` and no --repo-path was given.")
         repo_name = options.repo_name or "unknown"
         repo_relative = ""
     else:
@@ -638,7 +638,8 @@ def create_control_plane(layout: WorkspaceLayout) -> list[Path]:
     if not shared.exists():
         shared.write_text(
             "pipeline:\n  rules:\n  - match: {variant: branch}\n    prompt_tail: " + json.dumps(RELAY_TAIL_SEED) + "\n",
-            encoding="utf-8", newline="",
+            encoding="utf-8",
+            newline="",
         )
         created.append(shared)
     root_ignore = layout.root / GITIGNORE_FILENAME
@@ -744,7 +745,9 @@ def convert(
             continue
         explicit = _load_mapping(source)
         for key in (
-            "workflow.pipeline", "workflow.auto_drive.models", "workflow.auto_drive.overrides",
+            "workflow.pipeline",
+            "workflow.auto_drive.models",
+            "workflow.auto_drive.overrides",
             "workflow.auto_drive.permission_mode",
         ):
             if dotted.has(explicit, key):

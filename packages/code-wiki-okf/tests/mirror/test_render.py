@@ -53,7 +53,7 @@ def test_rich_file_gets_owned_keys(graph_repo) -> None:
     assert frontmatter["title"] == "user.py"
     assert frontmatter["resource"] == "file:local/pkg-repo/src/pkg/user.py"
     assert frontmatter["language"] == "python"
-    assert frontmatter["package"] == "[pkg](/repositories/pkg-repo/packages/pkg.md)"
+    assert frontmatter["package"] == "[pkg](/code-graph/pkg-repo/entities/packages/pkg.md)"
     assert isinstance(render, Render)
 
 
@@ -186,7 +186,7 @@ def test_render_file_scopes_same_relative_path_to_its_repository(tmp_path: Path)
         context = context_from_resource("File", "file:acme/beta/src/shared/module.js")
         frontmatter, render = render_file(reader, context, at=_AT, sha=_SHA)
 
-    assert frontmatter["package"] == "[beta-pkg](/repositories/beta/packages/beta-pkg.md)"
+    assert frontmatter["package"] == "[beta-pkg](/code-graph/beta/entities/packages/beta-pkg.md)"
     assert "`beta_symbol`" in render.sections["Symbols"]
     assert "alpha_symbol" not in render.sections["Symbols"]
     assert "beta_dep.js" in render.sections["Imports"]

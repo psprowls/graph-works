@@ -14,7 +14,7 @@ from typing import Any
 from code_graph_io import _ignore, upsert
 from code_graph_io.packages import _dependency_registry_url
 from code_graph_io.records import GraphEdge, GraphNode, as_graph_records
-from code_graph_io.uri import RepoContext, dependency_uri, pkg_uri, solution_uri
+from code_graph_io.uri import RepoContext, dependency_path, dependency_uri, pkg_uri, solution_uri
 
 # Classic .sln "Project(...) = "Name", "relative\path.csproj", "{GUID}"" line.
 _SLN_PROJECT_RE = re.compile(
@@ -130,7 +130,8 @@ def refresh(
     ignore: _ignore.IgnoreSpec | None = None,
 ) -> list[DiscoveredSolution]:
     """Rescan .sln/.csproj under `repo_root`; upsert solution/package/dependency
-    nodes and groups_project/used_by edges. Prunes vanished solutions/projects.
+    nodes and groups_project/used_by edges. The dependency nodes are this
+    repository's own (repository-scoped URIs). Prunes vanished solutions/projects.
 
     `ignore` is this member's compiled `ignore:` patterns, applied on top of
     the unconditional `_ignore.DEFAULT_SKIP_DIRS` floor — mirrors
@@ -194,7 +195,7 @@ def refresh(
         package_refs: dict[str, str] = info["package_refs"]
         for dep_name, version in package_refs.items():
             dep_key = ("nuget", dep_name)
-            dep_path = f"dependency:nuget:{dep_name}"
+            dep_path = dependency_path(ctx, "nuget", dep_name)
             bucket = dep_acc.setdefault(dep_key, {"versions_in_use": []})
             if version and version not in bucket["versions_in_use"]:
                 bucket["versions_in_use"].append(version)
@@ -227,7 +228,7 @@ def refresh(
 
     dep_nodes: list[GraphNode] = []
     for (ecosystem, dep_name), bucket in sorted(dep_acc.items()):
-        dep_path = f"dependency:{ecosystem}:{dep_name}"
+        dep_path = dependency_path(ctx, ecosystem, dep_name)
         dep_nodes.append(
             GraphNode(
                 kind="dependency",
@@ -235,7 +236,7 @@ def refresh(
                 path=dep_path,
                 line=None,
                 attrs={
-                    "uri": dependency_uri(ecosystem, dep_name),
+                    "uri": dependency_uri(ctx, ecosystem, dep_name),
                     "ecosystem": ecosystem,
                     "name": dep_name,
                     "url": _dependency_registry_url(ecosystem, dep_name),

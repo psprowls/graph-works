@@ -807,3 +807,99 @@ def test_suite_names_unique_after_multi_package_emit(tmp_path: Path) -> None:
     names = {r[0] for r in rows}
     assert "foo-unit-tests" in names, f"foo-unit-tests not found in {names}"
     assert "bar-unit-tests" in names, f"bar-unit-tests not found in {names}"
+
+
+# ---------- pytest configs outside packages ----------
+
+
+def _suite_parent(conn: sqlite3.Connection, suite_path: str) -> tuple[str, str] | None:
+    return conn.execute(
+        """
+        SELECT p.kind, p.name FROM edges e
+        JOIN nodes p ON e.src = p.id
+        JOIN nodes s ON e.dst = s.id
+        WHERE s.kind='test_suite' AND s.path=? AND e.kind='physically_contains'
+        """,
+        (suite_path,),
+    ).fetchone()
+
+
+def test_pytest_ini_in_non_package_dir_attaches_to_repository(tmp_path: Path) -> None:
+    _seed_root_pkg(tmp_path)
+    (tmp_path / "tools" / "checks").mkdir(parents=True)
+    (tmp_path / "tools" / "pytest.ini").write_text("[pytest]\ntestpaths = checks\n", encoding="utf-8")
+    (tmp_path / "tools" / "checks" / "test_a.py").write_text("", encoding="utf-8")
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert [p for _, p in _suite_rows(conn)] == ["tools/checks"]
+    parent = _suite_parent(conn, "tools/checks")
+    assert parent is not None and parent[0] == "repository"
+
+
+def test_tool_only_pyproject_testpaths_outside_packages(tmp_path: Path) -> None:
+    """A pyproject with no [project] is not a package, but its pytest config still counts."""
+    _seed_root_pkg(tmp_path)
+    (tmp_path / "ops" / "t").mkdir(parents=True)
+    (tmp_path / "ops" / "pyproject.toml").write_text('[tool.pytest.ini_options]\ntestpaths = ["t"]\n', encoding="utf-8")
+    (tmp_path / "ops" / "t" / "test_b.py").write_text("", encoding="utf-8")
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert "ops/t" in [p for _, p in _suite_rows(conn)]
+
+
+def test_pytest_ini_in_requirements_root_attaches_to_package(tmp_path: Path) -> None:
+    _seed_root_pkg(tmp_path)
+    backend = tmp_path / "backend"
+    (backend / "tests").mkdir(parents=True)
+    (backend / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+    (backend / "app.py").write_text("", encoding="utf-8")
+    (backend / "pytest.ini").write_text("[pytest]\ntestpaths = tests\n", encoding="utf-8")
+    (backend / "tests" / "test_x.py").write_text("", encoding="utf-8")
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    backend_suites = [p for _, p in _suite_rows(conn) if p.startswith("backend")]
+    assert backend_suites == ["backend/tests"], "package scan + config scan must not duplicate the root"
+    assert _suite_parent(conn, "backend/tests") == ("package", "backend")
+
+
+def test_pytest_config_in_non_python_package_dir_is_read(tmp_path: Path) -> None:
+    _seed_root_pkg(tmp_path)
+    web = tmp_path / "web"
+    _write_package_json(web, {"name": "web"})
+    (web / "pyspec").mkdir()
+    (web / "pytest.ini").write_text("[pytest]\ntestpaths = pyspec\n", encoding="utf-8")
+    (web / "pyspec" / "test_c.py").write_text("", encoding="utf-8")
+
+    conn = _setup(tmp_path)
+    _run_emit_pipeline(conn, tmp_path)
+
+    assert _suite_parent(conn, "web/pyspec") == ("package", "web")
+
+
+def test_pytest_config_dirs_honour_ignore_and_skip_dirs(tmp_path: Path) -> None:
+    for rel in ("pytest.ini", "a/pytest.ini", "vendor/x/pytest.ini", "node_modules/y/pyproject.toml"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("[pytest]\n", encoding="utf-8")
+
+    dirs = test_suites._pytest_config_dirs(tmp_path, _ignore.DEFAULT_SKIP_DIRS, _ignore.compile_ignore(["vendor/**"]))
+
+    assert dirs == ["", "a"]
+
+
+def test_pytest_config_dirs_are_tracked_gated_in_git(tmp_path: Path) -> None:
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.email", "t@example.com"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "config", "user.name", "t"], cwd=tmp_path, check=True)
+    for rel in ("a/pytest.ini", "b/pytest.ini"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("[pytest]\n", encoding="utf-8")
+    subprocess.run(["git", "add", "a/pytest.ini"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "init"], cwd=tmp_path, check=True)
+
+    assert test_suites._pytest_config_dirs(tmp_path, frozenset(), None) == ["a"]

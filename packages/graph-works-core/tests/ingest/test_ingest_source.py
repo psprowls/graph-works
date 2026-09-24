@@ -213,7 +213,7 @@ async def test_a_present_matcher_writes_the_uri_and_the_forward_link(workspace, 
     )
     page = (layout.bundle_dir / result.page).read_text(encoding="utf-8")
     assert result.entity_uri == resource
-    assert "[/repositories/demo/packages/okf-io.md](/repositories/demo/packages/okf-io.md)" in page
+    assert "[/code-graph/demo/entities/packages/okf-io.md](/code-graph/demo/entities/packages/okf-io.md)" in page
 
 
 async def test_a_matcher_and_a_gate_supplied_together_do_not_interfere(workspace, monkeypatch):
@@ -256,7 +256,7 @@ async def test_a_matcher_and_a_gate_supplied_together_do_not_interfere(workspace
     )
     page = (layout.bundle_dir / result.page).read_text(encoding="utf-8")
     assert result.entity_uri == resource
-    assert "[/repositories/demo/packages/okf-io.md](/repositories/demo/packages/okf-io.md)" in page
+    assert "[/code-graph/demo/entities/packages/okf-io.md](/code-graph/demo/entities/packages/okf-io.md)" in page
     assert "last_sync_commit" not in page
 
 
@@ -1109,7 +1109,7 @@ async def test_the_entity_match_re_runs_against_the_models_title(workspace, monk
         ),
     )
     assert result.entity_uri == resource
-    assert "[/repositories/demo/packages/okf-io.md](/repositories/demo/packages/okf-io.md)" in (
+    assert "[/code-graph/demo/entities/packages/okf-io.md](/code-graph/demo/entities/packages/okf-io.md)" in (
         layout.bundle_dir / result.page
     ).read_text(encoding="utf-8")
 

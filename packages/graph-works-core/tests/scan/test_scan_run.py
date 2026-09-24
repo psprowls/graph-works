@@ -93,7 +93,7 @@ async def test_narrate_false_reports_incomplete_entity_writes(ready, monkeypatch
         worklist, structural = await real_build(*args, **kwargs)
         entities = replace(
             structural.entities,
-            skipped=("repositories/demo/packages/widgets.md: commit-error: disk full",),
+            skipped=("code-graph/demo/entities/packages/widgets.md: commit-error: disk full",),
         )
         return worklist, replace(structural, entities=entities)
 
@@ -101,7 +101,9 @@ async def test_narrate_false_reports_incomplete_entity_writes(ready, monkeypatch
 
     result = await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
 
-    assert result.errors == ("entity sync incomplete: repositories/demo/packages/widgets.md: commit-error: disk full",)
+    assert result.errors == (
+        "entity sync incomplete: code-graph/demo/entities/packages/widgets.md: commit-error: disk full",
+    )
     assert not result.ok
 
 
@@ -269,8 +271,8 @@ async def test_dry_run_is_the_default_on_run_scan(ready, monkeypatch):
 async def test_apply_previews_its_counts_without_touching_a_file(ready):
     layout, config = ready
     worklist, _ = await scan.build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
-    task = next(t for t in worklist.prose_tasks if t.page_path == "repositories/demo/packages/widgets.md")
-    page = layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
+    task = next(t for t in worklist.prose_tasks if t.page_path == "code-graph/demo/entities/packages/widgets.md")
+    page = layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     log = layout.bundle_dir / "log.md"
     before_page = page.read_text(encoding="utf-8")
     before_log = log.read_text(encoding="utf-8")

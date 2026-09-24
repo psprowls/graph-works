@@ -6,7 +6,7 @@ or this repo's own working tree.
 
 Node shapes are read from the real emitters and the queries that consume
 them: `describe_builtin` matches `name = module_name AND path = language`,
-`describe_dependency` matches `name` plus `attrs.ecosystem`, and
+`describe_dependency` matches the `uri` column, and
 `describe_repository`/`describe_dependency`/`describe_agent_plugin` read the
 `uri` *column*, not an attr. Getting one of those wrong yields a silent None,
 not an error, which is why they are named here.
@@ -93,10 +93,10 @@ _NODES: tuple[tuple[int, str, str, str | None, int | None, dict[str, object] | N
         10,
         "dependency",
         "requests",
-        "dependency:pypi/requests",
+        f"dependency:{_ORG}/{_REPO}:pypi:requests",
         None,
         {"ecosystem": "pypi", "versions_in_use": ["2.31.0"]},
-        "dependency:pypi/requests",
+        f"dependency:{_ORG}/{_REPO}/pypi/requests",
     ),
     # `describe_builtin` keys on (name=module_name, path=language). The path
     # column carrying a language is not a typo.

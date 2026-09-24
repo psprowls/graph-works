@@ -75,7 +75,7 @@ def test_the_ceiling_is_exclusive_and_measured_against_tagged_pages(tmp_path):
 def test_a_tag_naming_an_entity_page_is_stripped(tmp_path):
     pages = {f"p{n}": ["okf-io"] for n in range(6)}
     pages.update({f"q{n}": ["filler"] for n in range(10)})
-    pages["repositories/graph-works/packages/okf-io"] = []
+    pages["code-graph/graph-works/entities/packages/okf-io"] = []
     result = dispose(tmp_path, pages)
     assert verdict_for(result, "okf-io") == ("strip", "entity-dup")
 
@@ -83,14 +83,14 @@ def test_a_tag_naming_an_entity_page_is_stripped(tmp_path):
 def test_a_dependency_page_also_counts_as_an_entity(tmp_path):
     pages = {f"p{n}": ["mypy"] for n in range(6)}
     pages.update({f"q{n}": ["filler"] for n in range(10)})
-    pages["dependencies/pypi/mypy"] = []
+    pages["code-graph/demo/entities/dependencies/pypi/mypy"] = []
     assert verdict_for(dispose(tmp_path, pages), "mypy") == ("strip", "entity-dup")
 
 
 def test_a_file_lane_page_is_not_an_entity(tmp_path):
     pages = {f"p{n}": ["thing"] for n in range(6)}
     pages.update({f"q{n}": ["filler"] for n in range(10)})
-    pages["repositories/graph-works/files/thing"] = []
+    pages["code-graph/graph-works/file-system/thing"] = []
     assert verdict_for(dispose(tmp_path, pages), "thing") == ("keep", "survivor")
 
 
@@ -138,29 +138,30 @@ def test_entity_names_reads_only_entity_lane_pages(tmp_path):
     root = build(
         tmp_path,
         {
-            "repositories/gw/repository": [],
-            "repositories/gw/packages/okf-io": [],
-            "dependencies/pypi/mypy": [],
-            "repositories/gw/files/x": [],
+            "code-graph/gw": [],
+            "code-graph/gw/entities/packages/okf-io": [],
+            "code-graph/demo/entities/dependencies/pypi/mypy": [],
+            "code-graph/gw/file-system/x": [],
             "concepts/thing": [],
         },
     )
     assert entity_names(load_bundle(root)) == frozenset({"gw", "okf-io", "mypy"})
 
 
-def test_entity_names_derives_a_dependency_named_repository_by_its_own_name(tmp_path):
-    """`dependencies/<eco>/repository` names a dependency literally called
-    `repository` -- it must not be mistaken for the repository-page shape
-    (`repositories/<repo>/repository`) just because the last segment matches.
-    Position, not spelling, decides which shape a page has."""
+def test_entity_names_reads_the_repository_name_and_positional_slugs(tmp_path):
+    """Position, not spelling, decides which shape a page has: an entity
+    literally named `repository` is an ordinary entity."""
     root = build(
         tmp_path,
         {
-            "dependencies/pypi/repository": [],
-            "repositories/gw/repository": [],
+            "code-graph/graph-works": [],
+            "code-graph/graph-works/entities/packages/repository": [],
+            "code-graph/graph-works/entities/dependencies/pypi/httpx": [],
+            "code-graph/graph-works/file-system/README.md": [],
+            "repositories/old/repository": [],
         },
     )
-    assert entity_names(load_bundle(root)) == frozenset({"repository", "gw"})
+    assert entity_names(load_bundle(root)) == frozenset({"graph-works", "repository", "httpx"})
 
 
 def test_field_values_covers_all_four_frontmatter_fields():

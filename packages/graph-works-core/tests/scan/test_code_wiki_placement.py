@@ -38,54 +38,55 @@ _TRACKED_FILES = (
 #:
 #: `console`, `foobar` and `widgets` are workspace-implemented (their own
 #: manifests self-implement their same-named Dependency node), so under
-#: ADR-0034 as narrowed by ADR-0048 they get no `dependencies/` page at all —
+#: ADR-0034 as narrowed by ADR-0048 they get no dependency page at all —
 #: `used_by`/`versions_in_use` migrate onto their Package pages instead. Only
 #: `httpx` (genuinely external, in both ecosystems here) keeps a page.
 _GLOBAL_MEMBERS = frozenset(
     {
         "index.md",
         "log.md",
-        "dependencies/index.md",
-        "dependencies/npm/httpx.md",
-        "dependencies/npm/index.md",
-        "dependencies/pypi/httpx.md",
-        "dependencies/pypi/index.md",
-        "repositories/index.md",
+        "code-graph/index.md",
     }
 )
 
 
 def _repository_members(repository: str, *, complete_entities: bool) -> frozenset[str]:
-    prefix = f"repositories/{repository}"
+    prefix = f"code-graph/{repository}"
     members = {
+        f"{prefix}.md",
         f"{prefix}/index.md",
-        f"{prefix}/repository.md",
-        f"{prefix}/agent-plugins/index.md",
-        f"{prefix}/apps/index.md",
-        f"{prefix}/files/index.md",
-        f"{prefix}/packages/index.md",
-        f"{prefix}/test-suites/index.md",
-        f"{prefix}/files/apps/index.md",
-        f"{prefix}/files/apps/console/index.md",
-        f"{prefix}/files/apps/console/src/index.md",
-        f"{prefix}/files/packages/index.md",
-        f"{prefix}/files/packages/foo.bar/index.md",
-        f"{prefix}/files/packages/foo.bar/src/index.md",
-        f"{prefix}/files/packages/widgets/index.md",
-        f"{prefix}/files/packages/widgets/src/index.md",
-        f"{prefix}/files/plugins/index.md",
-        f"{prefix}/files/plugins/demo-plugin/index.md",
-        f"{prefix}/files/tests/index.md",
-        *(f"{prefix}/files/{source}.md" for source in _TRACKED_FILES),
+        f"{prefix}/entities/index.md",
+        f"{prefix}/entities/agent-plugins/index.md",
+        f"{prefix}/entities/apps/index.md",
+        f"{prefix}/entities/packages/index.md",
+        f"{prefix}/entities/test-suites/index.md",
+        f"{prefix}/file-system/index.md",
+        f"{prefix}/file-system/apps/index.md",
+        f"{prefix}/file-system/apps/console/index.md",
+        f"{prefix}/file-system/apps/console/src/index.md",
+        f"{prefix}/file-system/packages/index.md",
+        f"{prefix}/file-system/packages/foo.bar/index.md",
+        f"{prefix}/file-system/packages/foo.bar/src/index.md",
+        f"{prefix}/file-system/packages/widgets/index.md",
+        f"{prefix}/file-system/packages/widgets/src/index.md",
+        f"{prefix}/file-system/plugins/index.md",
+        f"{prefix}/file-system/plugins/demo-plugin/index.md",
+        f"{prefix}/file-system/tests/index.md",
+        *(f"{prefix}/file-system/{source}.md" for source in _TRACKED_FILES),
     }
-    members.add(f"{prefix}/packages/widgets.md")
+    members.add(f"{prefix}/entities/packages/widgets.md")
     if complete_entities:
         members.update(
             {
-                f"{prefix}/agent-plugins/demo-plugin.md",
-                f"{prefix}/apps/console.md",
-                f"{prefix}/packages/foobar.md",
-                f"{prefix}/test-suites/tests.md",
+                f"{prefix}/entities/agent-plugins/demo-plugin.md",
+                f"{prefix}/entities/apps/console.md",
+                f"{prefix}/entities/packages/foobar.md",
+                f"{prefix}/entities/test-suites/tests.md",
+                f"{prefix}/entities/dependencies/index.md",
+                f"{prefix}/entities/dependencies/npm/httpx.md",
+                f"{prefix}/entities/dependencies/npm/index.md",
+                f"{prefix}/entities/dependencies/pypi/httpx.md",
+                f"{prefix}/entities/dependencies/pypi/index.md",
             }
         )
     return frozenset(members)
@@ -188,16 +189,16 @@ def _seed_npm_dependency(graph_dir: Path) -> None:
                     100,
                     "dependency",
                     "httpx",
-                    "dependency:npm:httpx",
+                    "dependency:acme/demo:npm:httpx",
                     json.dumps(
                         {
                             "ecosystem": "npm",
                             "versions_in_use": ["1.0.0"],
-                            "uri": "dependency:npm/httpx",
+                            "uri": "dependency:acme/demo/npm/httpx",
                             "repo": "repo:acme/demo",
                         }
                     ),
-                    "dependency:npm/httpx",
+                    "dependency:acme/demo/npm/httpx",
                     "repo:acme/demo",
                 ),
             )
@@ -279,13 +280,13 @@ async def test_workspace_location_does_not_change_inner_bundle_layout(tmp_path, 
 async def test_misplaced_page_refuses_scan_before_any_partial_sync_write(tmp_path) -> None:
     layout, config, _repositories = make_placement_workspace(tmp_path, "beside")
     await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
-    canonical = layout.bundle_dir / "repositories" / "demo" / "packages" / "widgets.md"
+    canonical = layout.bundle_dir / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     misplaced = layout.bundle_dir / "packages" / "widgets.md"
     misplaced.parent.mkdir(exist_ok=True)
     canonical.replace(misplaced)
     before = _bundle_bytes(layout.bundle_dir)
 
-    with pytest.raises(PlacementError, match="repositories/demo/packages/widgets"):
+    with pytest.raises(PlacementError, match="code-graph/demo/entities/packages/widgets"):
         await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
 
     assert _bundle_bytes(layout.bundle_dir) == before

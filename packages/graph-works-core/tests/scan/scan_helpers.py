@@ -32,7 +32,7 @@ DOTTED_PACKAGE_URI = "pkg:acme/demo/foobar"
 APP_URI = "app:acme/demo/console"
 SUITE_URI = "test_suite:acme/demo/tests"
 PLUGIN_URI = "agent_plugin:acme/demo/demo-plugin"
-DEPENDENCY_URI = "dependency:pypi/httpx"
+DEPENDENCY_URI = "dependency:acme/demo/pypi/httpx"
 
 
 class FakeResponse:
@@ -65,8 +65,8 @@ class FakeLLM:
 #: `packages/widgets/pyproject.toml`, which made `_entity_relative_root`'s
 #: suffix heuristic look correct by arriving at the right answer through the
 #: wrong route. Dependency nodes are the one exception: the builder stores
-#: `dependency:{ecosystem}:{name}` there, and `entity_refs` never reads it --
-#: a dependency has no repo, no root and no head.
+#: `dependency:{org}/{repo}:{ecosystem}:{name}` there, and `entity_refs` never
+#: reads it -- a dependency is owned by its repository (D-004).
 _NODES: tuple[tuple[int, str, str, str | None, dict[str, object], str], ...] = (
     (
         1,
@@ -121,7 +121,7 @@ _NODES: tuple[tuple[int, str, str, str | None, dict[str, object], str], ...] = (
         8,
         "dependency",
         "httpx",
-        "dependency:pypi:httpx",
+        "dependency:acme/demo:pypi:httpx",
         {"ecosystem": "pypi", "versions_in_use": ["0.27.0"], "uri": DEPENDENCY_URI},
         DEPENDENCY_URI,
     ),

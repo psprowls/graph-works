@@ -126,12 +126,12 @@ PY
 
 - **ingest** Auth Migration Spec
   Added sources/2026-04-auth-migration-spec.md. Updated docs/explanations/global-context,
-  repositories/my-monorepo/packages/shared-aws-node-ts.md, adrs/0014-jwt-sessions (new).
+  code-graph/my-monorepo/entities/packages/shared-aws-node-ts.md, adrs/0014-jwt-sessions (new).
 
 ## 2026-04-19
 
 - **scan** detected 3 new packages
-  Added repositories/my-monorepo/packages/timeline-native-ts.md, repositories/my-monorepo/packages/timeline-data-node-ts.md, repositories/my-monorepo/packages/timeline-domain-ts.md.
+  Added code-graph/my-monorepo/entities/packages/timeline-native-ts.md, code-graph/my-monorepo/entities/packages/timeline-data-node-ts.md, code-graph/my-monorepo/entities/packages/timeline-domain-ts.md.
 ```
 
 ## Reference

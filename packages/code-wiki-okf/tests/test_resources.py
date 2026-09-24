@@ -73,25 +73,25 @@ def test_resource_index_exposes_filesystem_equivalent_live_members(tmp_path: Pat
 
 
 def test_resource_index_detects_a_directory_at_a_target_file_member(tmp_path: Path) -> None:
-    occupied = tmp_path / "repositories" / "demo" / "files" / "a.py.md"
+    occupied = tmp_path / "code-graph" / "demo" / "file-system" / "a.py.md"
     occupied.mkdir(parents=True)
 
     index = resource_index(load_bundle(tmp_path))
 
-    assert index.filesystem_path_conflicts_for("repositories/demo/files/a.py.md") == (
-        "repositories/demo/files/a.py.md",
+    assert index.filesystem_path_conflicts_for("code-graph/demo/file-system/a.py.md") == (
+        "code-graph/demo/file-system/a.py.md",
     )
 
 
 def test_resource_index_detects_normalization_equivalent_ancestor_file(tmp_path: Path) -> None:
-    relative = "repositories/demo/f\N{LATIN SMALL LETTER I}\N{COMBINING ACUTE ACCENT}les"
+    relative = "code-graph/demo/f\N{LATIN SMALL LETTER I}\N{COMBINING ACUTE ACCENT}les"
     occupied = tmp_path / relative
     occupied.parent.mkdir(parents=True)
     occupied.write_bytes(b"pre-existing ancestor file\n")
 
     index = resource_index(load_bundle(tmp_path))
 
-    assert index.filesystem_path_conflicts_for("repositories/demo/f\N{LATIN SMALL LETTER I WITH ACUTE}les/a.py.md") == (
+    assert index.filesystem_path_conflicts_for("code-graph/demo/f\N{LATIN SMALL LETTER I WITH ACUTE}les/a.py.md") == (
         relative,
     )
 
@@ -105,14 +105,14 @@ def test_a_dot_nested_mirror_page_is_indexed(tmp_path: Path) -> None:
     """
     _write_concept(
         tmp_path,
-        "repositories/demo/.agents/skills/x/SKILL.md.md",
+        "code-graph/demo/.agents/skills/x/SKILL.md.md",
         "file:demo/.agents/skills/x/SKILL.md",
         type_="File",
     )
     index = resource_index(load_bundle(tmp_path))
     assert "file:demo/.agents/skills/x/SKILL.md" in index.by_resource
     assert index.by_resource["file:demo/.agents/skills/x/SKILL.md"].concept_id == (
-        "repositories/demo/.agents/skills/x/SKILL.md"
+        "code-graph/demo/.agents/skills/x/SKILL.md"
     )
 
 

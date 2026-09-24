@@ -4,7 +4,7 @@
 > An adaptation of [Andrej Karpathy's LLM Wiki pattern](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) targetting source code repositories.
 
 
-Turn any LLM CLI into a disciplined wiki maintainer for your repo. graph-works works on any repo shape — single package, workspace-style monorepo (Turborepo / pnpm / Nx / Bazel / Cargo / Go workspaces), or a hybrid. It builds a code graph and renders one page per entity (repository, package, app, agent_plugin, dependency, test_suite) nested under `repositories/<repo>/`, plus `dependencies/<ecosystem>/<name>.md` for deps. The LLM walks your code, cross-references packages and concepts, ingests specs and articles and PRs, and keeps everything current as the code evolves.
+Turn any LLM CLI into a disciplined wiki maintainer for your repo. graph-works works on any repo shape — single package, workspace-style monorepo (Turborepo / pnpm / Nx / Bazel / Cargo / Go workspaces), or a hybrid. It builds a code graph and renders one page per entity (repository, package, app, agent_plugin, dependency, test_suite) nested under `code-graph/<repo>/`, with dependencies at `code-graph/<repo>/entities/dependencies/<ecosystem>/<name>.md` (one per repository). The LLM walks your code, cross-references packages and concepts, ingests specs and articles and PRs, and keeps everything current as the code evolves.
 
 ## When to use
 
@@ -55,10 +55,10 @@ cd ~/my-repo
 
 | `type` | Example |
 |---|---|
-| `App` | `<workspace>/okf/repositories/<repo>/apps/web-next-ts.md` — Next.js app: platform, routes, deployment |
-| `Package` | `<workspace>/okf/repositories/<repo>/packages/common-aws-node-ts.md` — Lambda handlers, middleware, exports |
+| `App` | `<workspace>/okf/code-graph/<repo>/entities/apps/web-next-ts.md` — Next.js app: platform, routes, deployment |
+| `Package` | `<workspace>/okf/code-graph/<repo>/entities/packages/common-aws-node-ts.md` — Lambda handlers, middleware, exports |
 | `Explanation` | `<workspace>/okf/explanations/global-context.md` — cross-cutting concept; tag `architecture` for high-level syntheses, `pattern` for reusable patterns |
-| `Dependency` | `<workspace>/okf/dependencies/npm/react.md` — external lib: versions in use, upgrade notes, gotchas |
+| `Dependency` | `<workspace>/okf/code-graph/<repo>/entities/dependencies/npm/react.md` — external lib: versions in use, upgrade notes, gotchas |
 | `Source` | `<workspace>/okf/sources/2026-04-auth-migration-spec.md` — ingested spec with claims + citations |
 | `Adr` | `<workspace>/okf/adrs/0012-move-to-esm.md` — dated decision with context + consequences |
 
@@ -91,13 +91,19 @@ Only the schema loader file changes per tool. The scripts run identically everyw
     │   ├── <release>.md
     │   └── <release>/children/<epic>/children/<feature>.md
     │       # every item has a sibling owned directory with references/
-    ├── repositories/<repo>/
-    │   ├── repository.md        # the repository's own entity page
-    │   ├── packages/<name>.md
-    │   ├── apps/<name>.md
-    │   ├── agent-plugins/<name>.md
-    │   └── test-suites/<name>.md
-    ├── dependencies/<ecosystem>/<name>.md   # sibling root, not nested under repositories/
+    ├── code-graph/
+    │   ├── index.md             # Repositories
+    │   ├── <repo>.md            # the repository's own entity page
+    │   └── <repo>/
+    │       ├── index.md         # stub: Repository link + Subdirectories
+    │       ├── entities/
+    │       │   ├── index.md     # Packages, Apps, Agent Plugins, Test Suites, Dependencies
+    │       │   ├── packages/<name>.md
+    │       │   ├── apps/<name>.md
+    │       │   ├── agent-plugins/<name>.md
+    │       │   ├── test-suites/<name>.md
+    │       │   └── dependencies/<ecosystem>/<name>.md   # one per (repository, dependency)
+    │       └── file-system/<source-path>.md
     ├── docs/tutorials/ docs/how-tos/ docs/reference/ docs/explanations/   # Diátaxis lanes
     ├── sources/                 # One summary page per ingested source
     │   └── references/          # the ingest flow's copies of ingested material
@@ -112,7 +118,7 @@ Only the schema loader file changes per tool. The scripts run identically everyw
 
 ## Four operations
 
-- **Scan** — build the code graph from the repo (`package.json`, `pnpm-workspace.yaml`, `pyproject.toml`, `Cargo.toml`, `go.mod`) and write/update/delete one page per admitted entity under `repositories/<repo>/` (or `dependencies/`); surface deletions for human review
+- **Scan** — build the code graph from the repo (`package.json`, `pnpm-workspace.yaml`, `pyproject.toml`, `Cargo.toml`, `go.mod`) and write/update/delete one page per admitted entity under `code-graph/<repo>/` ; surface deletions for human review
 - **Ingest** — read a source, discuss with user, write summary, update 5-15 cross-referenced pages, update index, log
 - **Query** — index-first read, drill into 3-10 pages, synthesize with inline citations, offer to re-file the answer
 - **Lint** — mechanical checks (orphans, broken links, stale pages, missing frontmatter) + semantic checks (contradictions, cross-reference gaps) + **code-drift** (packages on disk vs. in vault)

@@ -76,7 +76,7 @@ def test_preflight_failure_leaves_valid_entity_unwritten(tmp_path: Path, monkeyp
         sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
     assert _bundle_bytes(bundle_root) == before
-    assert not (bundle_root / "repositories/demo/packages/widgets.md").exists()
+    assert not (bundle_root / "code-graph/demo/entities/packages/widgets.md").exists()
 
 
 def test_cross_lane_member_collision_leaves_bundle_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -90,7 +90,7 @@ def test_cross_lane_member_collision_leaves_bundle_unchanged(tmp_path: Path, mon
                 MirrorTarget(
                     resource="file:acme/demo/pyproject.toml",
                     source_path="pyproject.toml",
-                    member="repositories/demo/packages/widgets.md",
+                    member="code-graph/demo/entities/packages/widgets.md",
                 ),
             ),
             moves=MovePlan(root=bundle_root, moves=(), edits=(), refusals=(), unrebased=(), digests={}),
@@ -124,7 +124,7 @@ def test_cross_lane_filesystem_equivalent_collision_leaves_bundle_unchanged(
                 MirrorTarget(
                     resource="file:acme/demo/pyproject.toml",
                     source_path="pyproject.toml",
-                    member="repositories/demo/packages/Widgets.md",
+                    member="code-graph/demo/entities/packages/Widgets.md",
                 ),
             ),
             moves=MovePlan(root=bundle_root, moves=(), edits=(), refusals=(), unrebased=(), digests={}),
@@ -149,7 +149,7 @@ def test_composite_preflight_refuses_late_mirror_ancestor_conflict_before_entiti
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_sync(bundle_root, config=config, reader=reader, at=_AT)
 
-    occupied = bundle_root / "repositories" / "demo" / "FILES"
+    occupied = bundle_root / "code-graph" / "demo" / "FILE-SYSTEM"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     occupied.write_bytes(b"pre-existing ancestor file\n")
     before = _bundle_bytes(bundle_root)
@@ -172,7 +172,7 @@ def test_composite_preflight_refuses_late_mirror_equivalent_member_before_entiti
     target = next(
         target for mirror in plan.mirrors for target in mirror.targets if target.source_path == "pyproject.toml"
     )
-    occupied = bundle_root / "repositories" / "demo" / "FILES" / "PYPROJECT.TOML.md"
+    occupied = bundle_root / "code-graph" / "demo" / "FILE-SYSTEM" / "PYPROJECT.TOML.md"
     occupied.parent.mkdir(parents=True, exist_ok=True)
     occupied.write_bytes(b"pre-existing equivalent member\n")
     before = _bundle_bytes(bundle_root)
@@ -220,7 +220,7 @@ def test_composite_preflight_refuses_directory_at_derived_mirror_index_before_en
     with open_reader(graph_dir=graph_dir) as reader:
         plan = plan_sync(bundle_root, config=config, reader=reader, at=_AT)
 
-    occupied = bundle_root / "repositories" / "demo" / "files" / "index.md"
+    occupied = bundle_root / "code-graph" / "demo" / "file-system" / "index.md"
     occupied.mkdir(parents=True)
     before = _bundle_bytes(bundle_root)
     monkeypatch.setattr("code_wiki_okf.sync.run.plan_sync", lambda *_args, **_kwargs: plan)
@@ -241,11 +241,11 @@ def test_dry_run_reports_the_complete_plan_and_writes_nothing(tmp_path: Path) ->
         result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
 
     assert result.dry_run is True
-    assert "repositories/demo/packages/widgets" in result.entities.created
+    assert "code-graph/demo/entities/packages/widgets" in result.entities.created
     assert result.entities.updated == ()
     assert result.entities.written == result.entities.created
-    assert "repositories/demo/packages/index.md" in result.entities.catalog_created
-    assert "repositories/demo/packages/index.md" not in result.entities.catalog_updated
+    assert "code-graph/demo/entities/packages/index.md" in result.entities.catalog_created
+    assert "code-graph/demo/entities/packages/index.md" not in result.entities.catalog_updated
     assert set(result.entities.catalog_created).isdisjoint(result.entities.catalog_updated)
     assert "index.md" in result.entities.catalog_updated
     assert result.mirror.plans[0].creates
@@ -265,7 +265,7 @@ def test_mirror_result_failures_make_composite_summary_non_ok(tmp_path: Path, mo
             deleted=(),
             declined_deletions=(),
             index_updates=(),
-            failed=("repositories/demo/files/src/widgets.py.md: commit-error: disk full",),
+            failed=("code-graph/demo/file-system/src/widgets.py.md: commit-error: disk full",),
         )
 
     monkeypatch.setattr("code_wiki_okf.sync.run.apply_mirror", incomplete_apply)
@@ -273,7 +273,7 @@ def test_mirror_result_failures_make_composite_summary_non_ok(tmp_path: Path, mo
         result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
     assert result.mirror.failed_repos == (
-        ("demo", "repositories/demo/files/src/widgets.py.md: commit-error: disk full"),
+        ("demo", "code-graph/demo/file-system/src/widgets.py.md: commit-error: disk full"),
     )
     assert not result.ok
 
@@ -288,9 +288,9 @@ def test_dry_catalog_categories_match_post_mirror_catalog_application(tmp_path: 
         applied = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
     mirror_indexes = {
-        "repositories/demo/index.md",
-        "repositories/demo/files/index.md",
-        "repositories/demo/files/src/index.md",
+        "code-graph/demo/index.md",
+        "code-graph/demo/file-system/index.md",
+        "code-graph/demo/file-system/src/index.md",
     }
     assert mirror_indexes.isdisjoint(preview.entities.catalog_created)
     assert mirror_indexes <= set(preview.entities.catalog_updated)
@@ -333,9 +333,9 @@ def test_dry_run_reports_entity_updates_without_relabeling_them_as_creates(tmp_p
     with open_reader(graph_dir=graph_dir) as reader:
         preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
 
-    assert "repositories/demo/packages/widgets" in preview.entities.updated
-    assert "repositories/demo/packages/widgets" not in preview.entities.created
-    assert "repositories/demo/packages/widgets" in preview.entities.written
+    assert "code-graph/demo/entities/packages/widgets" in preview.entities.updated
+    assert "code-graph/demo/entities/packages/widgets" not in preview.entities.created
+    assert "code-graph/demo/entities/packages/widgets" in preview.entities.written
     assert _bundle_bytes(bundle_root) == before
 
 
@@ -344,7 +344,7 @@ def test_dry_run_reports_guarded_stale_delete_and_catalog_updates_without_writes
     with open_reader(graph_dir=graph_dir) as reader:
         sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
-    stale = bundle_root / "repositories/demo/packages/stale.md"
+    stale = bundle_root / "code-graph/demo/entities/packages/stale.md"
     stale.write_text(
         '---\ntype: Package\ntitle: "stale"\nresource: "pkg:acme/demo/stale"\n'
         "generated:\n  by: code-wiki-okf/0.4.0\n  at: '2026-01-01T00:00:00+00:00'\n---\n\n"
@@ -360,13 +360,14 @@ def test_dry_run_reports_guarded_stale_delete_and_catalog_updates_without_writes
     with open_reader(graph_dir=graph_dir) as reader:
         preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
 
-    assert preview.entities.deleted == ("repositories/demo/packages/stale",)
+    assert preview.entities.deleted == ("code-graph/demo/entities/packages/stale",)
     assert preview.entities.declined == ()
+    # The root and stub indexes list repositories only, so a package leaving
+    # changes just its lane index, the entities index and the Repository page.
     assert {
-        "index.md",
-        "repositories/demo/index.md",
-        "repositories/demo/packages/index.md",
-        "repositories/demo/repository.md",
+        "code-graph/demo/entities/index.md",
+        "code-graph/demo/entities/packages/index.md",
+        "code-graph/demo.md",
     } <= set(preview.entities.catalog_updated)
     assert preview.entities.catalog_created == ()
     assert _bundle_bytes(bundle_root) == before
@@ -377,7 +378,7 @@ def test_dry_run_reports_guarded_stale_decline_without_writes(tmp_path: Path) ->
     with open_reader(graph_dir=graph_dir) as reader:
         sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
-    stale = bundle_root / "repositories/demo/packages/retained.md"
+    stale = bundle_root / "code-graph/demo/entities/packages/retained.md"
     stale.write_text(
         '---\ntype: Package\ntitle: "retained"\nresource: "pkg:acme/demo/retained"\n'
         "generated:\n  by: code-wiki-okf/0.4.0\n  at: '2026-01-01T00:00:00+00:00'\n---\n\n"
@@ -393,7 +394,7 @@ def test_dry_run_reports_guarded_stale_decline_without_writes(tmp_path: Path) ->
         preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
 
     assert preview.entities.deleted == ()
-    assert preview.entities.declined == (("repositories/demo/packages/retained", "prose-edited"),)
+    assert preview.entities.declined == (("code-graph/demo/entities/packages/retained", "prose-edited"),)
     assert _bundle_bytes(bundle_root) == before
 
 
@@ -417,11 +418,57 @@ def test_second_composite_sync_is_idempotent_and_keeps_file_resources_current(tm
     assert second.entities.written == ()
     assert all(plan.is_empty for plan in second.mirror.plans)
     assert _bundle_bytes(bundle_root) == after_first
-    assert (bundle_root / "repositories/demo/files/src/widgets.py.md").is_file()
-    assert (bundle_root / "repositories/demo/packages/index.md").is_file()
-    assert "/repositories/demo/packages/widgets.md" in (bundle_root / "repositories/demo/packages/index.md").read_text(
-        encoding="utf-8"
+    assert (bundle_root / "code-graph/demo/file-system/src/widgets.py.md").is_file()
+    assert (bundle_root / "code-graph/demo/entities/packages/index.md").is_file()
+    assert "/code-graph/demo/entities/packages/widgets.md" in (
+        bundle_root / "code-graph/demo/entities/packages/index.md"
+    ).read_text(encoding="utf-8")
+
+
+def test_sync_into_an_empty_bundle_writes_exactly_the_code_graph_tree(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    repo_root = config.repos[0].path
+    (repo_root / "pyproject.toml").write_text(
+        '[project]\nname = "widgets"\nversion = "0.1.0"\ndependencies = ["httpx"]\n',
+        encoding="utf-8",
+        newline="",
     )
+    _git(repo_root, "commit", "-q", "-am", "add a dependency")
+    run_workspace([repo_root], graph_dir=graph_dir, full=True)
+    before = {path.relative_to(bundle_root).as_posix() for path in bundle_root.rglob("*.md")}
+
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+
+    assert result.ok is True
+    after = {path.relative_to(bundle_root).as_posix() for path in bundle_root.rglob("*.md")}
+    written = after - before
+    assert all(member.startswith("code-graph/") for member in written), sorted(written)
+    for stale in ("repositories", "dependencies", "files"):
+        assert not (bundle_root / stale).exists()
+    indexes = {member for member in written if member.endswith("/index.md")}
+    assert indexes == {
+        "code-graph/index.md",
+        "code-graph/demo/index.md",
+        "code-graph/demo/entities/index.md",
+        "code-graph/demo/entities/packages/index.md",
+        "code-graph/demo/entities/apps/index.md",
+        "code-graph/demo/entities/agent-plugins/index.md",
+        "code-graph/demo/entities/test-suites/index.md",
+        "code-graph/demo/entities/dependencies/index.md",
+        "code-graph/demo/entities/dependencies/pypi/index.md",
+        "code-graph/demo/file-system/index.md",
+        "code-graph/demo/file-system/src/index.md",
+    }
+    assert {
+        "code-graph/demo.md",
+        "code-graph/demo/entities/packages/widgets.md",
+        "code-graph/demo/entities/dependencies/pypi/httpx.md",
+        "code-graph/demo/file-system/pyproject.toml.md",
+        "code-graph/demo/file-system/src/widgets.py.md",
+    } <= written
+    assert "### Dependencies" in (bundle_root / "code-graph/demo.md").read_text(encoding="utf-8")
+    assert "## Repositories" in (bundle_root / "index.md").read_text(encoding="utf-8")
 
 
 def test_second_wet_sync_ignores_derived_index_conflict_for_an_empty_mirror_plan(tmp_path: Path) -> None:
@@ -429,7 +476,7 @@ def test_second_wet_sync_ignores_derived_index_conflict_for_an_empty_mirror_plan
     with open_reader(graph_dir=graph_dir) as reader:
         sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
-    unrelated_index = bundle_root / "repositories" / "demo" / "files" / "index.md"
+    unrelated_index = bundle_root / "code-graph" / "demo" / "file-system" / "index.md"
     unrelated_index.unlink()
     unrelated_index.mkdir()
     before = _bundle_bytes(bundle_root)
@@ -442,7 +489,7 @@ def test_second_wet_sync_ignores_derived_index_conflict_for_an_empty_mirror_plan
     # corrupted index and fails the run. Pin that, or a later change could
     # silence it and this test would still pass.
     assert second.ok is False
-    assert ("repositories/demo/files/index.md", "stale") in second.entities.catalog_declined
+    assert ("code-graph/demo/file-system/index.md", "stale") in second.entities.catalog_declined
     assert second.entities.written == ()
     assert all(plan.is_empty for plan in second.mirror.plans)
     assert all(
@@ -484,7 +531,7 @@ def test_non_git_skip_preserves_existing_file_pages(tmp_path: Path) -> None:
         result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
     assert result.mirror.skipped_repos == ("demo",)
-    assert (bundle_root / "repositories/demo/files/src/widgets.py.md").is_file()
+    assert (bundle_root / "code-graph/demo/file-system/src/widgets.py.md").is_file()
 
 
 def test_entity_named_index_is_refused_before_any_write(tmp_path: Path) -> None:
@@ -549,7 +596,6 @@ def test_multi_implementation_dependency_warns_without_selecting_one(tmp_path: P
                     edges=(),
                 )
             )
-        store.set_current_repo(None)
         with store.transaction() as transaction:
             transaction.upsert_records(
                 GraphRecords(
@@ -557,10 +603,10 @@ def test_multi_implementation_dependency_warns_without_selecting_one(tmp_path: P
                         GraphNode(
                             kind="dependency",
                             name="shared",
-                            path=None,
+                            path="dependency:acme/demo:pypi:shared",
                             line=None,
                             attrs={
-                                "uri": "dependency:pypi/shared",
+                                "uri": "dependency:acme/demo/pypi/shared",
                                 "ecosystem": "pypi",
                                 "versions_in_use": ["1.0"],
                             },
@@ -568,13 +614,13 @@ def test_multi_implementation_dependency_warns_without_selecting_one(tmp_path: P
                     ),
                     edges=(
                         GraphEdge(
-                            src=("dependency", "shared", None),
+                            src=("dependency", "shared", "dependency:acme/demo:pypi:shared"),
                             dst=("package", "widgets", ""),
                             kind="implemented_by",
                             attrs={},
                         ),
                         GraphEdge(
-                            src=("dependency", "shared", None),
+                            src=("dependency", "shared", "dependency:acme/demo:pypi:shared"),
                             dst=("package", "alternate", "alternate/pyproject.toml"),
                             kind="implemented_by",
                             attrs={},
@@ -590,13 +636,13 @@ def test_multi_implementation_dependency_warns_without_selecting_one(tmp_path: P
 
     assert result.ok
     assert result.warnings == (
-        "dependency:pypi/shared has multiple implementations: pkg:acme/demo/alternate, pkg:acme/demo/widgets",
+        "dependency:acme/demo/pypi/shared has multiple implementations: pkg:acme/demo/alternate, pkg:acme/demo/widgets",
     )
-    dependency = load_bundle(bundle_root).concept("dependencies/pypi/shared")
+    dependency = load_bundle(bundle_root).concept("code-graph/demo/entities/dependencies/pypi/shared")
     assert dependency is None
-    index_path = bundle_root / "dependencies/pypi/index.md"
+    index_path = bundle_root / "code-graph/demo/entities/dependencies/pypi/index.md"
     if index_path.exists():
-        assert "/dependencies/pypi/shared.md" not in index_path.read_text(encoding="utf-8")
+        assert "/code-graph/demo/entities/dependencies/pypi/shared.md" not in index_path.read_text(encoding="utf-8")
 
 
 def test_plan_time_preflight_refuses_an_entity_target_blocked_by_a_directory(tmp_path: Path) -> None:
@@ -605,7 +651,7 @@ def test_plan_time_preflight_refuses_an_entity_target_blocked_by_a_directory(tmp
     already occupied on disk can never leave the bundle half-written.
     """
     bundle_root, graph_dir, config = _workspace(tmp_path)
-    blocked = bundle_root / "repositories" / "demo" / "packages" / "widgets.md"
+    blocked = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
     blocked.parent.mkdir(parents=True, exist_ok=True)
     blocked.mkdir()
     before = _bundle_bytes(bundle_root)
@@ -625,7 +671,7 @@ def test_plan_time_preflight_refuses_a_case_equivalent_entity_occupant(tmp_path:
     guarantee, not a nicety.
     """
     bundle_root, graph_dir, config = _workspace(tmp_path)
-    occupant = bundle_root / "repositories" / "demo" / "packages" / "WIDGETS.md"
+    occupant = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "WIDGETS.md"
     occupant.parent.mkdir(parents=True, exist_ok=True)
     occupant.write_text("---\ntype: Package\n---\n", encoding="utf-8")
     before = _bundle_bytes(bundle_root)
@@ -653,7 +699,7 @@ def test_wet_sync_refuses_entity_target_drift_between_plan_and_apply(
 
     def plan_then_drift(bundle_root_arg: Path, *, config: Config, reader: object, at: str) -> run_module.SyncPlan:
         plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at)  # type: ignore[arg-type]
-        blocked = bundle_root / "repositories" / "demo" / "packages" / "widgets.md"
+        blocked = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "widgets.md"
         blocked.parent.mkdir(parents=True, exist_ok=True)
         blocked.mkdir()
         captured["after_drift"] = _bundle_bytes(bundle_root)
@@ -683,7 +729,7 @@ def test_wet_sync_refuses_a_case_equivalent_entity_target_drift_between_plan_and
 
     def plan_then_drift(bundle_root_arg: Path, *, config: Config, reader: object, at: str) -> run_module.SyncPlan:
         plan = real_plan_sync(bundle_root_arg, config=config, reader=reader, at=at)  # type: ignore[arg-type]
-        occupant = bundle_root / "repositories" / "demo" / "packages" / "WIDGETS.md"
+        occupant = bundle_root / "code-graph" / "demo" / "entities" / "packages" / "WIDGETS.md"
         occupant.parent.mkdir(parents=True, exist_ok=True)
         occupant.write_text("---\ntype: Package\n---\n", encoding="utf-8")
         captured["after_drift"] = _bundle_bytes(bundle_root)

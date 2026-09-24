@@ -232,8 +232,8 @@ def _update_one_repo(
     invoked once per workspace member. Global steps (dependency reconciliation,
     resolve.sweep, strict-tree invariant, workspace-level metadata) stay in
     `run_workspace`. After the pipeline runs, every node this member produced
-    that is still unstamped (`repo IS NULL`, excluding the global builtin /
-    dependency nodes) is stamped with this member's `repo:` URI, and the
+    that is still unstamped (`repo IS NULL`, excluding builtin nodes (global) and
+    dependency nodes (stamped by the reconciler)) is stamped with this member's `repo:` URI, and the
     per-repo `last_indexed_commit:<uri>` metadata key is written.
 
     Before computing `changed`, compares `ignore_patterns` against this
@@ -350,7 +350,7 @@ def _update_one_repo(
         test_suites.emit(conn, repo_root=repo_root, ctx=ctx, skip_dirs=skip_dirs, ignore=ignore)
         resolve.sweep_skip_dir_files(conn, skip_dirs, ignore)
         # Repo stamp: claim every node this member produced that isn't already
-        # owned. builtin / dependency nodes stay global (repo NULL).
+        # owned. builtin nodes stay global (repo NULL); dependency nodes are stamped by their own writers.
         conn.execute(
             "UPDATE nodes SET repo = ? WHERE repo IS NULL AND kind NOT IN ('builtin', 'dependency')",
             (repo_uri_val,),
@@ -456,13 +456,13 @@ def run_workspace(
                     )
                 all_manifests = tuple(manifest for manifests in manifests_by_repo.values() for manifest in manifests)
                 virtual_repository_dependencies = {
-                    member_uri: tuple(
+                    ctx: tuple(
                         dependency
-                        for manifest in manifests
+                        for manifest in manifests_by_repo[repo_uri(ctx)]
                         if not manifest.distributable
                         for dependency in manifest.dependencies
                     )
-                    for member_uri, manifests in manifests_by_repo.items()
+                    for ctx in (repo_context(member) for member in members)
                 }
                 dependencies.reconcile_dependencies(
                     conn,

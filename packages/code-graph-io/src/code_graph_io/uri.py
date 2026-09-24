@@ -51,8 +51,37 @@ def solution_uri(ctx: RepoContext, name: str) -> str:
     return f"solution:{ctx.org}/{ctx.repo}/{name}"
 
 
-def dependency_uri(ecosystem: str, name: str) -> str:
-    return f"dependency:{ecosystem}/{name}"
+def dependency_uri(ctx: RepoContext, ecosystem: str, name: str) -> str:
+    """Repository-scoped Dependency URI: one node per (repository, dependency).
+
+    ``org``, ``repo`` and ``ecosystem`` never contain ``/``, so the URI parses
+    left to right with ``split("/", 3)`` and a scoped npm name keeps its slash.
+    """
+    return f"dependency:{ctx.org}/{ctx.repo}/{ecosystem}/{name}"
+
+
+def dependency_path(ctx: RepoContext, ecosystem: str, name: str) -> str:
+    """Synthetic store path for a Dependency node; unique per repository."""
+    return f"dependency:{ctx.org}/{ctx.repo}:{ecosystem}:{name}"
+
+
+def dependency_identifier_from_path(path: str) -> str | None:
+    """``<org>/<repo>/<ecosystem>/<name>`` from a synthetic path, else ``None``.
+
+    Callers that hold only a ``find``-style NodeRecord (no ``uri`` column) use
+    this to build the ``gw graph describe --kind dependency`` identifier.
+    """
+    payload = path.removeprefix("dependency:")
+    if payload == path:
+        return None
+    parts = payload.split(":", 2)
+    if len(parts) != 3 or not all(parts):
+        return None
+    scope, ecosystem, name = parts
+    org, separator, repo = scope.partition("/")
+    if not separator or not org or not repo or "/" in repo:
+        return None
+    return f"{org}/{repo}/{ecosystem}/{name}"
 
 
 def builtin_uri(language: str, module_name: str) -> str:

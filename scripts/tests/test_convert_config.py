@@ -124,9 +124,7 @@ def convert_agent_workspace(tmp_path: Path, **overrides: object) -> "object":
     (root / "wiki").mkdir(exist_ok=True)
     repo = tmp_path / "graph-works"
     repo.mkdir(exist_ok=True)
-    (root / ".graph-wiki.yaml").write_bytes(
-        (FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes()
-    )
+    (root / ".graph-wiki.yaml").write_bytes((FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes())
     options = Options(repo_path=str(repo), **overrides)  # type: ignore[arg-type]
     return dispose(read_v2(root), root=root, options=options)
 
@@ -284,9 +282,7 @@ def test_state_gate_carries_when_present(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     root.mkdir()
     (root / "wiki").mkdir()
-    (root / ".graph-wiki.yaml").write_bytes(
-        (FIXTURES / "legacy-vault.graph-wiki.yaml").read_bytes()
-    )
+    (root / ".graph-wiki.yaml").write_bytes((FIXTURES / "legacy-vault.graph-wiki.yaml").read_bytes())
     repo = tmp_path / "legacy-vault"
     repo.mkdir()
     conversion = dispose(read_v2(root), root=root, options=Options(repo_path=str(repo)))
@@ -304,9 +300,7 @@ def test_plugin_block_is_dropped(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     root.mkdir()
     (root / "wiki").mkdir()
-    (root / ".graph-wiki.yaml").write_bytes(
-        (FIXTURES / "mono-repo.graph-wiki.yaml").read_bytes()
-    )
+    (root / ".graph-wiki.yaml").write_bytes((FIXTURES / "mono-repo.graph-wiki.yaml").read_bytes())
     repo = tmp_path / "mono-repo"
     repo.mkdir()
     conversion = dispose(read_v2(root), root=root, options=Options(repo_path=str(repo)))
@@ -318,12 +312,8 @@ def test_workspace_directory_is_dropped_and_reported(tmp_path: Path) -> None:
     root = tmp_path / "ws"
     root.mkdir()
     (root / "wiki").mkdir()
-    (root / ".graph-wiki.yaml").write_bytes(
-        (FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes()
-    )
-    (root / ".graph-wiki.local.yaml").write_text(
-        "workspace-directory: /somewhere/else\n", encoding="utf-8", newline=""
-    )
+    (root / ".graph-wiki.yaml").write_bytes((FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes())
+    (root / ".graph-wiki.local.yaml").write_text("workspace-directory: /somewhere/else\n", encoding="utf-8", newline="")
     repo = tmp_path / "graph-works"
     repo.mkdir()
     conversion = dispose(read_v2(root), root=root, options=Options(repo_path=str(repo)))
@@ -362,19 +352,19 @@ def written(tmp_path: Path, body: str, *, repo: bool = True) -> object:
 
 def good_body() -> str:
     return (
-        'version: 1\n'
+        "version: 1\n"
         'initialized_at: "2026-08-02"\n'
         'topic: "graph-works"\n'
-        'layout:\n'
+        "layout:\n"
         '  bundle_dir: "wiki"\n'
-        'workflow:\n'
-        '  dispatch_rules: dispatch.yaml\n'
-        '  auto_drive:\n'
-        '    max_parallel: 4\n'
-        'repositories:\n'
+        "workflow:\n"
+        "  dispatch_rules: dispatch.yaml\n"
+        "  auto_drive:\n"
+        "    max_parallel: 4\n"
+        "repositories:\n"
         '  "graph-works":\n'
         '    path: "../../graph-works"\n'
-        'ignore: []\n'
+        "ignore: []\n"
     )
 
 
@@ -443,9 +433,7 @@ import re
 import shlex
 import subprocess
 
-GW_AVAILABLE = subprocess.run(
-    shlex.split(DEFAULT_GW) + ["--help"], capture_output=True, text=True
-).returncode == 0
+GW_AVAILABLE = subprocess.run(shlex.split(DEFAULT_GW) + ["--help"], capture_output=True, text=True).returncode == 0
 needs_gw = pytest.mark.skipif(not GW_AVAILABLE, reason="the graph-works CLI is not runnable here")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -526,9 +514,7 @@ def live_workspace(tmp_path: Path) -> Path:
     root.mkdir(parents=True)
     (root / "wiki").mkdir()
     (tmp_path / "graph-works").mkdir()
-    (root / ".graph-wiki.yaml").write_bytes(
-        (FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes()
-    )
+    (root / ".graph-wiki.yaml").write_bytes((FIXTURES / "agent-workspace.graph-wiki.yaml").read_bytes())
     # Successful conversion fixtures represent explicit operator cleanup;
     # the verbatim old files remain separately covered by refusal tests.
     from ruamel.yaml import YAML
@@ -613,9 +599,7 @@ def test_write_unlinks_the_manifest_it_created_when_validation_fails(tmp_path: P
 
 
 @needs_gw
-def test_no_sync_leaves_no_projection_and_says_so(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_no_sync_leaves_no_projection_and_says_so(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     root = live_workspace(tmp_path)
     assert main([str(root), "--repo-name", "graph-works", "--write", "--no-sync"]) == 0
     assert (root / "workspace.yaml").is_file()
@@ -651,7 +635,8 @@ def test_new_conversion_seeds_consumable_dispatch_and_preserves_authored_file(tm
     (root / "wiki").mkdir()
     (root / ".graph-wiki.yaml").write_text(
         "version: 2\nrepo-directory: .\nworkflow:\n  auto_drive: {max_parallel: 4, supervise_merges: false}\n",
-        encoding="utf-8", newline="",
+        encoding="utf-8",
+        newline="",
     )
     assert main([str(root), "--write", "--no-sync"]) == 0
     layout = layout_for(root, bundle_dir="wiki")
@@ -671,7 +656,9 @@ def test_conversion_overlay_cannot_hide_retired_shared_keys(tmp_path: Path, caps
     root = tmp_path / "legacy"
     root.mkdir()
     source = root / ".graph-wiki.yaml"
-    source.write_text("version: 2\nrepo-directory: .\nworkflow: {auto_drive: {models: {}}}\n", encoding="utf-8", newline="")
+    source.write_text(
+        "version: 2\nrepo-directory: .\nworkflow: {auto_drive: {models: {}}}\n", encoding="utf-8", newline=""
+    )
     (root / ".graph-wiki.local.yaml").write_text("workflow: {}\n", encoding="utf-8", newline="")
     assert main([str(root), "--write"]) == 1
     assert str(source) in capsys.readouterr().err

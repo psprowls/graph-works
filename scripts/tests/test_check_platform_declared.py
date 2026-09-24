@@ -129,9 +129,7 @@ def test_the_named_alternate_boundary_heading_satisfies_the_gate(tmp_path: Path)
     )
     _write(
         pkg / "README.md",
-        "# workflow-local\n\n"
-        "## What this package does not do\n\n"
-        "- **It refuses to run on Windows.** See `os.kill`.\n",
+        "# workflow-local\n\n## What this package does not do\n\n- **It refuses to run on Windows.** See `os.kill`.\n",
     )
 
     assert find_violations(tmp_path) == []
@@ -147,9 +145,7 @@ def test_the_alternate_heading_without_an_explicit_windows_statement_still_fails
     )
     _write(
         pkg / "README.md",
-        "# workflow-local\n\n"
-        "## What this package does not do\n\n"
-        "- It does not provision worktrees.\n",
+        "# workflow-local\n\n## What this package does not do\n\n- It does not provision worktrees.\n",
     )
 
     violations = find_violations(tmp_path)
@@ -166,9 +162,7 @@ def test_a_package_with_no_src_directory_is_skipped(tmp_path: Path) -> None:
     assert find_violations(tmp_path) == []
 
 
-def test_main_exits_nonzero_and_names_package_construct_file_and_line(
-    tmp_path: Path, capsys
-) -> None:
+def test_main_exits_nonzero_and_names_package_construct_file_and_line(tmp_path: Path, capsys) -> None:
     pkg = _package(tmp_path, "acme-locker")
     _write(pkg / "src" / "acme_locker" / "lock.py", "import fcntl\n")
     _write(pkg / "README.md", "# acme-locker\n")

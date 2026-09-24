@@ -509,7 +509,11 @@ def test_harvested_copy_still_matches_the_package_module() -> None:
     """While both exist, a divergence is a bug. C7 deletes the package half."""
     package_module = (
         Path(__file__).resolve().parents[2]
-        / "packages" / "work-tracker-okf" / "src" / "work_tracker_okf" / "migration.py"
+        / "packages"
+        / "work-tracker-okf"
+        / "src"
+        / "work_tracker_okf"
+        / "migration.py"
     )
     if not package_module.exists():  # pragma: no cover -- post-C7
         pytest.skip("package module already removed by C7")

@@ -238,3 +238,38 @@ def test_record_apply_runs_while_the_owner_lock_is_held(tmp_path: Path, monkeypa
     monkeypatch.setattr(placement, "apply_mutation", probe)
     assert _record(layout)().written
     assert observed == [True]
+
+
+def test_guarded_preparation_waits_for_winning_stamp_and_refuses_overwrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = _layout(tmp_path)
+    expected = placement.preparation_guard(layout, ITEM)
+    entered, release = _pause(monkeypatch, placement, "apply_mutation")
+    first = _Run(_record(layout))
+    second = _Run(
+        lambda: placement.run_record_placement(
+            layout,
+            ITEM,
+            root=ITEM,
+            phase="execute",
+            worktree=WT,
+            branch="other",
+            today=TODAY,
+            dry_run=False,
+            expected_preparation=expected,
+        )
+    )
+    try:
+        first.start()
+        assert entered.wait(WAIT)
+        second.start()
+        second.join(timeout=0.5)
+        assert second.is_alive(), "preparation record must wait for the placement lock"
+    finally:
+        release.set()
+        _join_all(first, second)
+    assert first.error is None and first.result.written
+    assert isinstance(second.error, placement.WorkspaceError)
+    assert "preparation changed" in str(second.error)
+    assert load(layout.bundle_dir / f"{ITEM}.md").fm_data()["branch"] == BR

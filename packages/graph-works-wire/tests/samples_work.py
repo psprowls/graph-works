@@ -258,6 +258,19 @@ def orchestrate(*, busy: bool) -> object:
         live=("x",) if busy else (),
         dispatches=(dispatch,) if busy else (),
         plan=ns(dispatch_resolutions={dispatch.key: RESOLUTION}),
+        dispatch_repos={dispatch.key: ns(name="ui", path=Path("/ui"), source="item")},
+        preparations=(
+            ns(
+                owner_path="work/e",
+                owner_phase="execute",
+                repo=ns(name="ui", path=Path("/ui"), source="item"),
+                branch="epic/e",
+                base_branch="main",
+                worktree=worktree,
+            ),
+        )
+        if busy
+        else (),
         advances=(ns(path="work/b", reason="done", worktree="w", branch="b", mode="return"),) if busy else (),
         blocked=(ns(path="work/c", kind="dependency", reason="wait"),) if busy else (),
         decisions_owner_path="work/e",

@@ -685,6 +685,13 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         else {"name": result.code_repo_name, "path": result.code_repo, "source": result.code_repo_source},
         "dispatches": [
             {
+                "repo": {
+                    "name": result.dispatch_repos[dispatch.key].name,
+                    "path": str(result.dispatch_repos[dispatch.key].path)
+                    if result.dispatch_repos[dispatch.key].path is not None
+                    else None,
+                    "source": result.dispatch_repos[dispatch.key].source,
+                },
                 "key": dispatch.key,
                 "path": dispatch.slug,
                 "phase": dispatch.phase,
@@ -701,6 +708,21 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
                 "prompt": dispatch.prompt,
             }
             for dispatch in result.dispatches
+        ],
+        "preparations": [
+            {
+                "owner_path": preparation.owner_path,
+                "owner_phase": preparation.owner_phase,
+                "repo": {
+                    "name": preparation.repo.name,
+                    "path": str(preparation.repo.path),
+                    "source": preparation.repo.source,
+                },
+                "branch": preparation.branch,
+                "base_branch": preparation.base_branch,
+                "worktree": _worktree(preparation.worktree),
+            }
+            for preparation in result.preparations
         ],
         "advances": [
             {

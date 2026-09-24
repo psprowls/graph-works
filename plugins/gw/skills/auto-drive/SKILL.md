@@ -51,7 +51,7 @@ explanation — no degraded mode, no partial loop:
    precondition failure, not a mid-loop error.
 
 No repository selector is resolved here. A creation's repository comes from
-the plan's own top-level `repo.path` (§2.2), matched to an Orca repository by
+each dispatch's own `repo.path` (§2.2), matched to an Orca repository by
 `launch-worker.py place` at launch time (§3).
 No launch reads the coordinator's location.
 
@@ -208,7 +208,8 @@ empty live list. On success, the result contains:
 - `terminal` (bool), `max_parallel` / `slots_free` (ints), and `live` (the
   echoed input list).
 - `repo` — `{"name": "<declared name>", "path": "<code repository>", "source": "frontmatter|flag|sole|fallback"}`,
-  the repository `workspace.yaml` declares, or `null` when none resolves. A
+  root metadata for the repository `workspace.yaml` declares, or `null` when none resolves.
+  Each dispatch carries its own `repo={name,path,source}`; use that path for placement. A
   `null` repo never plans a creation: those items arrive in `blocked[]` as
   `worktree-unprovable`. `source` says why that repository was chosen;
   `frontmatter` means the item (or an ancestor) sets `repo:`.
@@ -266,6 +267,44 @@ empty live list. On success, the result contains:
   `phase` and `checkpoint` are carried. §2.5's park/skip rendering and
   §2.5.2's park handling both read `holds[]` for exactly those three fields;
   `blocked[]` has none of them.
+
+#### Prepare repository integration anchors before launching
+
+`preparations[]` contains `owner_path`, `owner_phase`, `repo`, `branch`,
+`base_branch`, and `worktree`. It reserves no worker slot. Save the complete
+plan, then process preparations **serially**:
+
+```bash
+python3 "$PLUGIN_ROOT/skills/auto-drive/references/launch-worker.py" prepare \
+  --plan-file <saved-plan.json> --owner <owner_path> --repo-name <repo.name> \
+  --workspace <workspace-path>
+```
+
+The repository name selects the emitted preparation; it never overrides an
+item's assignment. The helper captures an owner/ancestor/configuration guard,
+re-fetches `gw work orchestrate` with the same root/live keys, and refuses a
+changed preparation. It adopts one proven deterministic checkout or creates
+an explicitly repository-selected top-level worktree with setup skipped and
+no agent. A durable Orca comment marker identifies its creation across crashes.
+If Orca prefixes the name, only that marked, clean checkout at the expected
+base tip may be renamed with non-force `git branch -m`. Existing branches are
+never overwritten; ambiguous inventory, marker, or missing checkout requires
+repair. Creation errors trigger observation, never another suffixed create.
+
+The helper uses `uv run --package graph-works-core python
+<references>/record-preparation.py snapshot|record` as a thin adapter to the
+core API. The record call carries `--root <owner_path> --phase <owner_phase>
+--repo <repo.name>` and the captured guard. Core rechecks owner/ancestor and
+repository configuration bytes under the existing decision-owner lock before
+recording scalar or foreign `repo_stamps`. Orca runs outside that lock. A
+refused stamp leaves a discoverable checkout and authorizes no child launch.
+
+**Replan after every attempt**, successful or refused, before processing
+another preparation or dispatch. Launch children only from a fresh plan after
+the anchor stamp persists. Failure blocks its dependents; unrelated valid
+fresh dispatches can still consume the shared free slots. Do not manufacture
+a worker/task for preparation. Use `dispatch.repo.path` for both normal and
+retry placement arguments; the top-level plan `repo` is root metadata only.
 
 ### 2.3 Terminal?
 
@@ -555,7 +594,7 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
 
    ```
    python3 references/launch-worker.py place --dispatch <dispatch-json> \
-     --repo-path <plan repo.path> --out-placement <placement-json-file> \
+     --repo-path <dispatch repo.path> --out-placement <placement-json-file> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
 
@@ -704,11 +743,11 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 
    ```
    python3 references/launch-worker.py place --dispatch <dispatch-json> \
-     --repo-path <plan repo.path> --out-placement <placement-json> \
+     --repo-path <dispatch repo.path> --out-placement <placement-json> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
 
-   Omit `--repo-path` only when the plan's `repo` is `null` (then only `reuse`
+   Omit `--repo-path` only when the dispatch's `repo.path` is `null` (then only `reuse`
    and `main` can be planned). Create the `orca-placement/` directory first.
    The result file is durable on purpose: §5 re-reads it to repair lineage
    after a restart. A non-zero exit prints `PLACEMENT REFUSED <key>: <reason>`:
@@ -770,7 +809,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    - `fork-child` and `create-top-level` → `--worktree new-top-level --name
      <worktree.branch> --base-branch <worktree.base_branch> --repo id:<repo
      id>`, where the repo id is the single `orca repo list --json` entry whose
-     path resolves to the plan's `repo.path` (zero or several matches refuse).
+     path resolves to the dispatch's `repo.path` (zero or several matches refuse).
      Orca's caller-context child mode is never used: it takes both the
      repository and the parent from the calling terminal. For a non-null
      `worktree.parent_path`, `place` also resolves `orca worktree show

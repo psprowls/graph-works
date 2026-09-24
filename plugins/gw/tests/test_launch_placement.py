@@ -191,6 +191,13 @@ class PlacementTests(unittest.TestCase):
                 self.assertEqual(placed["placement_argv"], ["--worktree", f"path:{EPIC}"])
                 self.assertEqual(fake.calls, [])
 
+    def test_ui_dispatch_uses_ui_repository_and_refuses_root_override(self):
+        dispatch = fork(parent_path=None, action="create-top-level")
+        dispatch["repo"] = {"name": "ui", "path": WIKI, "source": "frontmatter"}
+        placed = self.place(FakeOrca(), dispatch, repo_path=WIKI)
+        self.assertEqual(placed["placement_argv"][-2:], ["--repo", f"id:{WIKI_ID}"])
+        self.assertIn("differs from dispatch", self.refused("place", FakeOrca(), dispatch, repo_path=CODE))
+
     def test_a_creation_with_no_code_repo_refuses(self):
         message = self.refused("place", FakeOrca(), fork(), repo_path=None)
         self.assertIn(f"PLACEMENT REFUSED {KEY}", message)
@@ -283,6 +290,247 @@ class PlacementTests(unittest.TestCase):
         self.assertEqual(self.settle(fake, dispatch, placed)["path"], CHILD)
         dispatch["worktree"]["path"] = EPIC
         self.assertIn("PLACEMENT MISMATCH", self.refused("settle", fake, dispatch, placed))
+
+
+class PreparationTests(unittest.TestCase):
+    setUp = PlacementTests.setUp
+    tearDown = PlacementTests.tearDown
+    write = PlacementTests.write
+    run_helper = PlacementTests.run_helper
+
+    def preparation(self):
+        return {"owner_path": "work/epic", "owner_phase": "execute",
+                "repo": {"name": "ui", "path": WIKI, "source": "frontmatter"},
+                "branch": "epic/integration", "base_branch": "main",
+                "worktree": {"action": "create-top-level", "path": None, "branch": "epic/integration",
+                             "base_branch": "main", "parent_path": None, "exists": None}}
+
+    def test_prepare_requires_a_fresh_selected_preparation_before_creation(self):
+        plan = {"path": "work/epic", "live": [], "preparations": [self.preparation()]}
+        def fake(argv, **kwargs):
+            if "snapshot" in argv:
+                return subprocess.CompletedProcess(argv, 0, '{"guard":"guard"}', "")
+            if argv[:3] == ["gw", "work", "orchestrate"]:
+                return subprocess.CompletedProcess(argv, 0, json.dumps({**plan, "preparations": []}), "")
+            raise AssertionError(argv)
+        with self.assertRaisesRegex(SystemExit, "preparation changed"):
+            self.run_helper("prepare", fake, plan_file=self.write("plan.json", plan),
+                            owner="work/epic", repo_name="ui", workspace=WIKI)
+
+class PreparationLifecycleTests(unittest.TestCase):
+    write = PlacementTests.write
+    run_helper = PlacementTests.run_helper
+
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.root = Path(self.directory.name)
+        self.repo = self.root / "ui"
+        self.repo.mkdir()
+        self.real_run = subprocess.run
+        self.git(self.repo, "init", "-b", "main")
+        self.git(self.repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "--allow-empty", "-m", "initial")
+        self.prep = {"owner_path": "work/epic", "owner_phase": "execute",
+                     "repo": {"name": "ui", "path": str(self.repo), "source": "frontmatter"},
+                     "branch": "epic/integration", "base_branch": "main",
+                     "worktree": {"action": "create-top-level", "path": None, "branch": "epic/integration",
+                                  "base_branch": "main", "parent_path": None, "exists": None}}
+        self.rows = []
+        self.calls = []
+        self.create_error = False
+        self.record_error = False
+        self.after_create = None
+        self.prefix = True
+        self.hide_comments = False
+
+    def tearDown(self):
+        self.directory.cleanup()
+
+    def git(self, path, *args):
+        result = self.real_run(["git", "-C", str(path), *args], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result.stdout.strip()
+
+    def plan(self):
+        return {"path": "work/epic", "live": ["live-key"], "preparations": [self.prep], "dispatches": []}
+
+    def fake(self, argv, **kwargs):
+        self.calls.append(argv)
+        if argv[0] == "git":
+            return self.real_run(argv, **kwargs)
+        if "snapshot" in argv:
+            return subprocess.CompletedProcess(argv, 0, '{"guard":"guard"}', "")
+        if "record" in argv:
+            if self.record_error:
+                return subprocess.CompletedProcess(argv, 1, "", "preparation changed")
+            return subprocess.CompletedProcess(argv, 0, '{"written":true}', "")
+        if argv[:3] == ["gw", "work", "orchestrate"]:
+            self.assertEqual(argv[-2:], ["--live", "live-key"])
+            return subprocess.CompletedProcess(argv, 0, json.dumps(self.plan()), "")
+        if argv[1:3] == ["repo", "list"]:
+            return FakeOrca.ok({"repos": [{"id": "ui-id", "path": str(self.repo)}]})
+        if argv[1:3] == ["worktree", "list"]:
+            rows = [{k: v for k, v in row.items() if k != "comment"} for row in self.rows] if self.hide_comments else self.rows
+            return FakeOrca.ok({"worktrees": rows, "totalCount": len(rows), "truncated": False,
+                                "hostScope": {"hostIds": ["local"], "omittedHostIds": []}})
+        if argv[1:3] == ["worktree", "show"]:
+            path = argv[argv.index("--worktree") + 1].removeprefix("path:")
+            return FakeOrca.ok({"worktree": next(row for row in self.rows if row["path"] == path)})
+        if argv[1:3] == ["worktree", "create"]:
+            self.assertIn("--no-parent", argv)
+            self.assertEqual(argv[argv.index("--setup") + 1], "skip")
+            branch = "configured/integration" if self.prefix else self.prep["branch"]
+            path = self.root / "anchor"
+            self.git(self.repo, "worktree", "add", "-b", branch, str(path), "main")
+            row = {"path": str(path), "branch": "refs/heads/" + branch, "repoId": "ui-id",
+                   "comment": argv[argv.index("--comment") + 1]}
+            self.rows.append(row)
+            if self.after_create:
+                self.after_create(row)
+            if self.create_error:
+                return FakeOrca.error()
+            return FakeOrca.ok({"worktree": row})
+        raise AssertionError(argv)
+
+    def prepare(self):
+        return self.run_helper("prepare", self.fake, plan_file=self.write("plan.json", self.plan()),
+                               owner="work/epic", repo_name="ui", workspace=WIKI)
+
+    def test_create_renames_only_owned_checkout_and_records_owner_foreign_stamp(self):
+        self.hide_comments = True
+        result = self.prepare()
+        self.assertEqual(result["branch"], "epic/integration")
+        self.assertTrue(result["replan_required"])
+        argv = next(call for call in self.calls if "record" in call)
+        for flag, expected in (("--root", "work/epic"), ("--phase", "execute"), ("--repo", "ui")):
+            self.assertEqual(argv[argv.index(flag) + 1], expected)
+        self.assertEqual(self.git(self.root / "anchor", "branch", "--show-current"), "epic/integration")
+        self.assertFalse(any("worker-start" in call or "task-create" in call for call in self.calls))
+
+    def test_failed_stamp_then_restart_adopts_without_second_create(self):
+        self.record_error = True
+        with self.assertRaisesRegex(SystemExit, "preparation changed"):
+            self.prepare()
+        self.record_error = False
+        self.prepare()
+        self.assertEqual(sum(call[1:3] == ["worktree", "create"] for call in self.calls), 1)
+
+    def test_create_error_reobserves_unique_owned_result(self):
+        self.create_error = True
+        self.prepare()
+        self.assertEqual(sum(call[1:3] == ["worktree", "create"] for call in self.calls), 1)
+
+    def test_second_creator_discovers_first_deterministic_checkout(self):
+        self.prefix = False
+        self.create_error = True
+        self.prepare()
+        self.prepare()
+        self.assertEqual(sum(call[1:3] == ["worktree", "create"] for call in self.calls), 1)
+
+    def test_phase_terminal_assignment_and_stamp_changes_never_record(self):
+        for kind in ("phase", "terminal", "assignment", "stamp"):
+            with self.subTest(kind=kind):
+                # Separate filesystem per scenario, including after a refused create.
+                self.tearDown()
+                self.setUp()
+                def change(row):
+                    if kind == "phase":
+                        self.prep["owner_phase"] = "finish"
+                    elif kind == "terminal":
+                        self.plan = lambda: {"path": "work/epic", "live": [], "preparations": []}
+                    elif kind == "assignment":
+                        self.prep["repo"]["source"] = "sole"
+                    else:
+                        self.record_error = True
+                self.after_create = change
+                with self.assertRaisesRegex(SystemExit, "preparation changed"):
+                    self.prepare()
+                self.assertFalse(any("worker-start" in call for call in self.calls))
+
+    def test_crash_before_rename_recovers_marker_without_second_create(self):
+        self.after_create = lambda row: Path(row["path"], "dirty").write_text("dirty", encoding="utf-8", newline="")
+        with self.assertRaises(SystemExit):
+            self.prepare()
+        (self.root / "anchor" / "dirty").unlink()
+        self.after_create = None
+        self.prepare()
+        self.assertEqual(sum(call[1:3] == ["worktree", "create"] for call in self.calls), 1)
+
+    def test_wrong_returned_path_is_never_stamped(self):
+        self.after_create = lambda row: row.update(path=str(self.repo))
+        with self.assertRaisesRegex(SystemExit, "branch"):
+            self.prepare()
+        self.assertFalse(any("record" in call for call in self.calls))
+
+    def test_ambiguous_markers_refuse_without_second_create(self):
+        self.after_create = lambda row: self.rows.append(dict(row))
+        with self.assertRaisesRegex(SystemExit, "ambiguous"):
+            self.prepare()
+        with self.assertRaisesRegex(SystemExit, "ambiguous"):
+            self.prepare()
+        self.assertEqual(sum(call[1:3] == ["worktree", "create"] for call in self.calls), 1)
+
+    def test_competing_creator_wins_nonforce_rename_and_is_adopted(self):
+        original = self.fake
+        raced = False
+        def race(argv, **kwargs):
+            nonlocal raced
+            if argv[0] == "git" and argv[3:5] == ["branch", "-m"] and not raced:
+                raced = True
+                self.git(self.repo, "worktree", "add", "-b", self.prep["branch"], str(self.root / "winner"), "main")
+            return original(argv, **kwargs)
+        self.fake = race
+        result = self.prepare()
+        self.assertTrue(raced)
+        self.assertEqual(os.path.realpath(result["path"]), os.path.realpath(self.root / "winner"))
+        self.assertEqual(self.git(self.root / "anchor", "branch", "--show-current"), "configured/integration")
+        self.assertEqual(sum(call[1:3] == ["worktree", "create"] for call in self.calls), 1)
+
+    def test_owned_checkout_with_work_beyond_base_is_never_renamed(self):
+        def commit(row):
+            self.git(row["path"], "-c", "user.name=Test", "-c", "user.email=test@example.com",
+                     "commit", "--allow-empty", "-m", "unexpected work")
+        self.after_create = commit
+        with self.assertRaisesRegex(SystemExit, "base tip"):
+            self.prepare()
+        self.assertFalse(any("record" in call for call in self.calls))
+
+    def test_incomplete_orca_inventory_never_creates(self):
+        original = self.fake
+        def incomplete(argv, **kwargs):
+            if argv[1:3] == ["worktree", "list"]:
+                return FakeOrca.ok({"worktrees": [], "totalCount": 1, "truncated": True,
+                                    "hostScope": {"omittedHostIds": []}})
+            return original(argv, **kwargs)
+        self.fake = incomplete
+        with self.assertRaisesRegex(SystemExit, "incomplete"):
+            self.prepare()
+        self.assertFalse(any("create" in call or "record" in call for call in self.calls))
+
+    def test_wrong_observed_repository_refuses(self):
+        self.after_create = lambda row: row.update(repoId="foreign")
+        with self.assertRaisesRegex(SystemExit, "repository"):
+            self.prepare()
+        self.assertFalse(any("record" in call for call in self.calls))
+
+    def test_ambiguous_deterministic_worktrees_refuse(self):
+        branch = self.prep["branch"]
+        self.git(self.repo, "worktree", "add", "-b", branch, str(self.root / "one"), "main")
+        self.git(self.repo, "worktree", "add", "--force", str(self.root / "two"), branch)
+        with self.assertRaisesRegex(SystemExit, "ambiguous"):
+            self.prepare()
+        self.assertFalse(any("record" in call or "create" in call for call in self.calls))
+
+    def test_branch_without_checkout_refuses(self):
+        self.git(self.repo, "branch", self.prep["branch"])
+        with self.assertRaisesRegex(SystemExit, "without a provable checkout"):
+            self.prepare()
+
+    def test_dirty_owned_create_refuses_rename_and_record(self):
+        self.after_create = lambda row: Path(row["path"], "dirty").write_text("dirty", encoding="utf-8", newline="")
+        with self.assertRaisesRegex(SystemExit, "dirty"):
+            self.prepare()
+        self.assertEqual(self.git(self.root / "anchor", "branch", "--show-current"), "configured/integration")
+        self.assertFalse(any("record" in call for call in self.calls))
 
 
 if __name__ == "__main__":

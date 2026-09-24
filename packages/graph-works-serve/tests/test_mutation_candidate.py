@@ -22,6 +22,10 @@ def test_changed_core_candidate_is_stale_before_any_serve_write(
         route, params, command = "/v1/work/archive", {}, "run_archive"
     elif operation == "advance":
         write_item(layout, path, work_status="open", phase="design", effort="medium")
+        refs = layout.bundle_dir / path / "references"
+        refs.mkdir(parents=True, exist_ok=True)
+        (refs / "01-design.md").write_text("# Design\n", encoding="utf-8", newline="")
+        (refs / "02-plan.md").write_text("# Plan\n", encoding="utf-8", newline="")
         route, params, command = "/v1/work/advance", {"path": path}, "run_stage_advance"
     else:
         write_proposal(layout, "reviewed", target="concepts/widget")

@@ -9,7 +9,7 @@ from graph_works_core.work.commands import run_next
 from test_run_next import _layout, _spec, _write
 
 
-def _git_worktree(layout, target: Path, branch: str) -> Path:
+def _init_git_repo(layout) -> Path:
     """Replace the workspace fixture's marker with a real tracked repository."""
     repo = layout.root.parent
     (repo / ".git").rmdir()
@@ -19,9 +19,20 @@ def _git_worktree(layout, target: Path, branch: str) -> Path:
         ("config", "user.name", "T"),
         ("add", "."),
         ("commit", "-m", "fixture"),
-        ("worktree", "add", "-b", branch, str(target)),
     ):
         subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True, text=True)
+    return repo
+
+
+def _git_worktree(layout, target: Path, branch: str) -> Path:
+    repo = _init_git_repo(layout)
+    subprocess.run(
+        ["git", "worktree", "add", "-b", branch, str(target)],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     return target
 
 
@@ -99,6 +110,7 @@ def test_unregistered_canonical_design_agrees_without_mutation(tmp_path):
     path = "work/feature-a"
     _write(layout, path)
     _spec(layout, path)
+    _init_git_repo(layout)
     before = (layout.bundle_dir / f"{path}.md").read_bytes()
     next_result = run_next(layout, path)
     result = run_orchestrate(layout, path)

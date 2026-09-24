@@ -64,12 +64,8 @@ def _initialized_workspace(tmp_path: Path):
 
 
 def _declare_repo(monkeypatch, tmp_path: Path) -> Path:
-    """Stand in for a declared code repository with a plain directory.
-
-    Not a git checkout, so the dirty check fails closed (the checkout is
-    withheld) and `default_base` falls back -- a cold start still mints."""
-    code = tmp_path / "code"
-    code.mkdir(parents=True, exist_ok=True)
+    """Declare a real code repository for shell dispatch tests."""
+    code = _git_repo(tmp_path / "code")
     monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo("code", code, "sole"))
     return code
 
@@ -323,6 +319,7 @@ def test_the_declared_code_repo_is_reported_even_when_its_checkout_is_withheld(t
     path = "work/feature-a"
     _write(layout, path, phase="design")
     code = _declare_repo(monkeypatch, tmp_path)
+    (code / "dirty.txt").write_text("local edit\n", encoding="utf-8")
     result = orchestrate.run_orchestrate(layout, path)
     assert result.code_repo == str(code)
     assert result.dispatches[0].worktree.action == "create-top-level"
@@ -1006,6 +1003,54 @@ def test_shell_observes_each_repository_even_when_foreign_child_is_refused(tmp_p
     assert all(
         context.inventory_known and context.inventory["main"] == (context.path,) for context in observed.values()
     )
+
+
+def test_linked_declared_checkouts_keep_separate_eligibility(tmp_path: Path, monkeypatch) -> None:
+    import subprocess
+
+    layout, code, ui = _two_repo_stamping_workspace(tmp_path)
+    linked = tmp_path / "code-linked"
+    subprocess.run(
+        ["git", "worktree", "add", "-b", "feature/linked", str(linked)],
+        cwd=code,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    manifest = layout.manifest_path.read_text(encoding="utf-8")
+    layout.manifest_path.write_text(manifest.replace(str(ui), str(linked)), encoding="utf-8")
+    _tag(layout, "work/epic-a", "code")
+    child = "work/epic-a/children/feature-a"
+    _tag(layout, child, "ui")
+    (linked / "dirty.txt").write_text("local\n", encoding="utf-8")
+    captured = {}
+    real_plan = orchestrate.plan
+
+    def capture(*args, **kwargs):
+        captured.update(kwargs)
+        return real_plan(*args, **kwargs)
+
+    monkeypatch.setattr(orchestrate, "plan", capture)
+    result = orchestrate.run_orchestrate(layout, "work/epic-a")
+    assert _kinds(result)[child] == "cross-repo-child"
+    selected = captured["item_repos"]
+    assert selected["work/epic-a"].path == code.resolve()
+    assert selected[child].path == linked.resolve()
+    (context,) = captured["repo_contexts"].values()
+    assert context.checkout_usable_by_path[str(code.resolve())] is True
+    assert context.checkout_usable_by_path[str(linked.resolve())] is False
+
+
+def test_non_git_declared_repository_refuses_fresh_root(tmp_path: Path, monkeypatch) -> None:
+    layout = _workspace(tmp_path / "workspace")
+    path = "work/feature-a"
+    _write(layout, path, phase="design")
+    code = tmp_path / "plain-directory"
+    code.mkdir()
+    monkeypatch.setattr(orchestrate, "resolve_item_repo", lambda *args, **kwargs: ItemRepo("code", code, "sole"))
+    result = orchestrate.run_orchestrate(layout, path)
+    assert result.dispatches == ()
+    assert [(b.path, b.kind) for b in result.blocked] == [(path, "worktree-unprovable")]
 
 
 def test_a_descendant_with_a_malformed_repo_surfaces_a_warning_and_is_not_blocked(tmp_path: Path) -> None:

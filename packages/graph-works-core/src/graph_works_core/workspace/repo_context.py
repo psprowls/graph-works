@@ -23,10 +23,13 @@ class RepositoryContext:
     inventory: Mapping[str, tuple[str, ...]]
     path_exists: Mapping[str, bool | None]
     inventory_known: bool
+    checkout_usable_by_path: Mapping[str, bool] = MappingProxyType({})
+    identity_known: bool = True
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "inventory", MappingProxyType(dict(self.inventory)))
         object.__setattr__(self, "path_exists", MappingProxyType(dict(self.path_exists)))
+        object.__setattr__(self, "checkout_usable_by_path", MappingProxyType(dict(self.checkout_usable_by_path)))
 
 
 def _canonical(path: Path) -> str:
@@ -40,12 +43,12 @@ def _exists(path: str) -> bool | None:
         return None
 
 
-def repository_identity(repo: Path) -> str:
-    """Canonical common directory, or a path-scoped unavailable identity."""
+def repository_identity(repo: Path) -> str | None:
+    """Canonical common directory, or `None` when Git cannot prove one."""
     common = probe_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
     if common.returncode == 0 and common.stdout.strip():
         return _canonical(Path(common.stdout.strip()))
-    return _canonical(repo)
+    return None
 
 
 def _inventory(output: str) -> Mapping[str, tuple[str, ...]]:
@@ -76,25 +79,32 @@ def _inventory(output: str) -> Mapping[str, tuple[str, ...]]:
     return MappingProxyType({name: tuple(paths) for name, paths in branches.items()})
 
 
-def observe_repository(repo: Path, *, paths: Iterable[Path] = (), identity: str | None = None) -> RepositoryContext:
+def observe_repository(
+    repo: Path, *, paths: Iterable[Path] = (), checkouts: Iterable[Path] = (), identity: str | None = None
+) -> RepositoryContext:
     """Observe identity, checkout safety, worktrees and selected stamp paths."""
     canonical = _canonical(repo)
-    identity = identity or repository_identity(repo)
-    status = probe_git(repo, "status", "--porcelain")
-    usable = status.returncode == 0 and not status.stdout.strip() and _exists(canonical) is True
+    proven_identity = identity if identity is not None else repository_identity(repo)
+    selected_checkouts = {canonical, *(_canonical(path) for path in checkouts)}
+    eligibility: dict[str, bool] = {}
+    for checkout in selected_checkouts:
+        status = probe_git(Path(checkout), "status", "--porcelain")
+        eligibility[checkout] = status.returncode == 0 and not status.stdout.strip() and _exists(checkout) is True
     listed = probe_git(repo, "worktree", "list", "--porcelain")
     known = listed.returncode == 0
     inventory = _inventory(listed.stdout) if known else MappingProxyType({})
-    candidates = {canonical, *(_canonical(path) for path in paths)}
+    candidates = selected_checkouts | {_canonical(path) for path in paths}
     for members in inventory.values():
         candidates.update(members)
     observed = MappingProxyType({path: _exists(path) for path in candidates})
     return RepositoryContext(
-        identity=identity,
+        identity=proven_identity or canonical,
         path=canonical,
         default_base=default_base(repo),
-        checkout_usable=usable,
+        checkout_usable=eligibility[canonical],
         inventory=inventory,
         path_exists=observed,
         inventory_known=known,
+        checkout_usable_by_path=eligibility,
+        identity_known=proven_identity is not None,
     )

@@ -32,6 +32,7 @@ def test_observation_distinguishes_repositories_and_canonicalizes_aliases(tmp_pa
     ui_context = observe_repository(ui)
     assert code_context.identity == alias_context.identity
     assert code_context.identity != ui_context.identity
+    assert code_context.identity_known and ui_context.identity_known
     assert code_context.path == str(code.resolve())
     assert code_context.path_exists[str(code.resolve())] is True
     assert code_context.inventory_known and ui_context.inventory_known
@@ -40,9 +41,27 @@ def test_observation_distinguishes_repositories_and_canonicalizes_aliases(tmp_pa
 
 def test_missing_git_evidence_is_marked_unknown(tmp_path: Path) -> None:
     context = observe_repository(tmp_path)
+    assert not context.identity_known
     assert not context.inventory_known
     assert not context.checkout_usable
     assert context.inventory == {}
+
+
+def test_linked_checkout_has_own_dirty_state_under_shared_identity(tmp_path: Path) -> None:
+    repo = tmp_path / "code"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    _git(repo, "config", "user.email", "t@example.com")
+    _git(repo, "config", "user.name", "T")
+    (repo / "a.txt").write_text("one\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "first")
+    linked = tmp_path / "linked"
+    _git(repo, "worktree", "add", "-b", "feature/linked", str(linked))
+    (linked / "dirty.txt").write_text("local\n", encoding="utf-8")
+    context = observe_repository(repo, checkouts=(linked,))
+    assert context.checkout_usable_by_path[str(repo.resolve())] is True
+    assert context.checkout_usable_by_path[str(linked.resolve())] is False
 
 
 def test_duplicate_branch_observations_remain_visible_to_the_planner(tmp_path: Path) -> None:

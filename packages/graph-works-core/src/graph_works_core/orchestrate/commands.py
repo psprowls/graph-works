@@ -949,7 +949,11 @@ def plan(
     # unrelated behaviour this task does not touch (see
     # `test_worktree_rule_3_forks_a_child_branch_when_the_epic_worktree_is_live`,
     # which pins the self-blocking as-is).
-    contexts_by_path = {context.path: context for context in (repo_contexts or {}).values()}
+    contexts_by_path = {
+        path: context
+        for context in (repo_contexts or {}).values()
+        for path in {context.path, *context.checkout_usable_by_path}
+    }
 
     def evidence(item: WorkItem) -> tuple[ItemRepo | None, RepositoryContext | None]:
         if item_repos is None:
@@ -1073,10 +1077,14 @@ def plan(
         local_repo_known = repo_known
         if context is not None:
             local_exists = context.path_exists
-            local_repo_path = context.path if context.checkout_usable else None
-            local_code_repo = context.path
+            selected_path = str(item_repo.path) if item_repo and item_repo.path else context.path
+            usable = context.checkout_usable_by_path.get(
+                selected_path, context.checkout_usable if selected_path == context.path else False
+            )
+            local_repo_path = selected_path if usable else None
+            local_code_repo = selected_path
             local_base = context.default_base
-            local_repo_known = bool(context.identity)
+            local_repo_known = context.identity_known and context.inventory_known
             # Foreign integration anchors are introduced by Task 2. Until
             # then, only the root repository may lend its scalar stamp.
             root_repo = item_repos.get(root) if item_repos is not None else None
@@ -1084,9 +1092,16 @@ def plan(
             if root_context is None or root_context.identity != context.identity:
                 local_epic_path = None
                 local_epic_branch = branch_name(root, root_item.type if root_item else "")
-            if not context.inventory_known and (item.worktree or local_epic_path):
+            if not usable and (item.worktree == selected_path or local_epic_path == selected_path):
                 blocked.append(
-                    BlockedItem(item.path, "worktree-unprovable", "repository worktree inventory is unavailable")
+                    BlockedItem(
+                        item.path, "worktree-unprovable", "selected checkout has uncommitted or unreadable state"
+                    )
+                )
+                continue
+            if not context.identity_known or not context.inventory_known:
+                blocked.append(
+                    BlockedItem(item.path, "worktree-unprovable", "repository Git identity or inventory is unavailable")
                 )
                 continue
             if local_epic_path is not None:
@@ -1526,31 +1541,36 @@ def run_orchestrate(
             canonical_repos[item_path] = replace(selected, path=Path(canonical_path))
         item_repos.update(canonical_repos)
         selected_by_identity: dict[str, list[tuple[str, ItemRepo]]] = {}
+        proven_identities: dict[str, str | None] = {}
         for item_path, selected in item_repos.items():
             if selected.path is not None:
-                selected_by_identity.setdefault(repository_identity(selected.path), []).append((item_path, selected))
-        for identity, selected_items in selected_by_identity.items():
+                identity = repository_identity(selected.path)
+                key = identity or str(selected.path)
+                proven_identities[key] = identity
+                selected_by_identity.setdefault(key, []).append((item_path, selected))
+        for key, selected_items in selected_by_identity.items():
             checkout = selected_items[0][1].path
             assert checkout is not None
             selected_paths = {item_path for item_path, _ in selected_items}
             context = observe_repository(
                 checkout,
                 paths=(Path(item.worktree) for item in items if item.path in selected_paths and item.worktree),
-                identity=identity,
+                checkouts=(selected.path for _, selected in selected_items if selected.path is not None),
+                identity=proven_identities[key],
             )
-            repo_contexts[identity] = context
-            for item_path, selected in selected_items:
-                item_repos[item_path] = replace(selected, path=Path(context.path))
+            repo_contexts[context.identity] = context
     selected_root = item_repos.get(path, root_repo) if item_repos is not None else root_repo
     resolved_repo, repo_note = selected_root.path, root_repo.note
     root_context = None
     if resolved_repo is not None and repo_contexts is not None:
-        root_context = next((ctx for ctx in repo_contexts.values() if ctx.path == str(resolved_repo)), None)
+        root_context = next(
+            (ctx for ctx in repo_contexts.values() if str(resolved_repo) in ctx.checkout_usable_by_path), None
+        )
 
     code_repo = str(resolved_repo) if resolved_repo is not None else None
     repo_path = code_repo
     if root_context is not None:
-        repo_path = root_context.path if root_context.checkout_usable else None
+        repo_path = code_repo if root_context.checkout_usable_by_path[str(resolved_repo)] else None
     elif resolved_repo is not None and _checkout_is_dirty(resolved_repo):
         # Withhold the checkout rather than dispatch into someone's edits.
         # `None` is the fully-supported "behave as before" value, so this

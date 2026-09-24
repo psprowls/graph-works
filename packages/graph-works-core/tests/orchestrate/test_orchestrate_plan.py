@@ -181,6 +181,68 @@ def test_unknown_live_repository_does_not_authorize_overlapping_candidate() -> N
     assert {blocked.path: blocked.kind for blocked in result.blocked}[ready] == "worktree-unprovable"
 
 
+def test_shared_git_identity_preserves_each_declared_checkout() -> None:
+    root = "work/epic-r"
+    first, second = (f"{root}/children/feature-{suffix}" for suffix in ("first", "second"))
+    items = (
+        _item(root, type="Epic", phase="execute", active_child_paths=(first, second)),
+        _item(first, phase="execute", affects=("packages/a",), worktree="/repo/primary", branch="main"),
+        _item(second, phase="execute", affects=("packages/b",), worktree="/repo/linked", branch="feature/linked"),
+    )
+    selected = {
+        first: ItemRepo("primary", Path("/repo/primary"), "frontmatter"),
+        second: ItemRepo("linked", Path("/repo/linked"), "frontmatter"),
+    }
+    context = RepositoryContext(
+        "git-common",
+        "/repo/primary",
+        "main",
+        True,
+        {"main": ("/repo/primary",), "feature/linked": ("/repo/linked",)},
+        {"/repo/primary": True, "/repo/linked": True},
+        True,
+        checkout_usable_by_path={"/repo/primary": True, "/repo/linked": True},
+    )
+    result = _plan(items, root, item_repos=selected, repo_contexts={context.identity: context})
+    assert {d.slug for d in result.dispatches} == {first, second}
+    assert {result.dispatch_repos[d.key].path for d in result.dispatches} == {
+        Path("/repo/primary"),
+        Path("/repo/linked"),
+    }
+
+
+def test_dirty_declared_checkout_cannot_reuse_its_scalar_stamp() -> None:
+    path = "work/feature-a"
+    item = _item(path, phase="execute", worktree="/repo/linked", branch="feature/linked")
+    selected = ItemRepo("linked", Path("/repo/linked"), "frontmatter")
+    context = RepositoryContext(
+        "git-common",
+        "/repo/primary",
+        "main",
+        True,
+        {"feature/linked": ("/repo/linked",)},
+        {"/repo/linked": True},
+        True,
+        checkout_usable_by_path={"/repo/primary": True, "/repo/linked": False},
+    )
+    result = _plan((item,), path, item_repos={path: selected}, repo_contexts={context.identity: context})
+    assert result.dispatches == ()
+    assert [(b.path, b.kind) for b in result.blocked] == [(path, "worktree-unprovable")]
+
+
+def test_failed_git_identity_refuses_fresh_root_creation() -> None:
+    path = "work/feature-a"
+    selected = ItemRepo("code", Path("/repo/code"), "sole")
+    context = RepositoryContext(
+        "/repo/code", "/repo/code", "main", False, {}, {"/repo/code": True}, False, identity_known=False
+    )
+    result = _plan(
+        (_item(path, phase="design"),), path, item_repos={path: selected}, repo_contexts={context.identity: context}
+    )
+    assert result.dispatches == ()
+    assert [(b.path, b.kind) for b in result.blocked] == [(path, "worktree-unprovable")]
+
+
 def test_lone_item_dispatch_key_and_prompt_use_full_path() -> None:
     path = "work/feature-a"
     result = _plan((_item(path, worktree="/wt/feature-a", branch="feature/a"),), path)

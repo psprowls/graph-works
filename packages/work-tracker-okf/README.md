@@ -120,6 +120,11 @@ artifact (`references/01-design.md` or `references/02-plan.md`) to be a regular
 file. Advancement refuses before stamping a source, adding a plan row, or
 writing the item page when the file is absent or is a directory.
 
+Completing design also requires a valid effort before the item becomes stable.
+The estimate can already be stored on the item or supplied to `gw work advance`
+with `--effort`; otherwise advancement refuses with `effort-required` before
+writing anything.
+
 ## Validation and tests
 
 `work_tracker_okf.rules.lane_rules()` composes the state, plan, graph,

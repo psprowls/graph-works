@@ -1,20 +1,7 @@
-"""Characterization of the 2026-09-17 silent double advance.
+"""Regression contract for guarded work advancement.
 
-Pins today's behaviour of `gw work advance` so the fix has a committed reproduction to
-flip. See the spike's findings at
-`work/epic-auto-drive-reliability/children/spike-reproduce-silent-double-advance`
-(`references/01-design.md`), and the Bug it re-scopes,
-`work/epic-auto-drive-reliability/children/bug-gw-work-advance-can-silently-advance`.
-
-Assertions marked `DEFECT` record the wrong outcome on purpose. Fix 3
-(routing requires effort before writing, so the planner refuses `effort-required`
-before any write) instead turns the rollback test's first call into that refusal,
-which flips its `DEFECT`-marked message assertions there. Fix 1 (a from-phase
-precondition, opt-in via `--from`/an expected-phase argument) flips nothing in this
-file, since neither test ever passes it; that fix needs its own retry-with-expected-
-phase test. Update those assertions *with* the fix, never before it. The rollback
-test's byte-for-byte equality is not a defect under any of the three: it pins the
-atomicity the Bug's original premise asked for, which already holds.
+An unsized design completion refuses before application. A retry at plan
+requires its canonical artifact, and an expected phase rejects stale retries.
 """
 
 from __future__ import annotations
@@ -71,20 +58,16 @@ def _epic_at_design(workspace: Path) -> str:
     return path
 
 
-def test_a_failed_design_to_plan_advance_rolls_back_byte_for_byte(workspace: Path) -> None:
-    """The byte-equality below is the atomicity pin (H1 refuted): the failure writes
-    nothing, and that already holds regardless of which fix the Bug chooses."""
+def test_unsized_design_completion_refuses_before_application(workspace: Path) -> None:
     path = _epic_at_design(workspace)
     before = _page(workspace, path).read_bytes()
 
     code, _, stderr = _advance(workspace, path)
 
     assert code != 0
-    # DEFECT (fix 3): postcondition failure instead of an effort-required refusal
-    assert "'effort' is a required property" in stderr
-    assert "'affects' is a required property" not in stderr
-    # DEFECT (fix 3): postcondition failure instead of an effort-required refusal
-    assert "apply was incomplete" in stderr
+    assert "effort-required" in stderr
+    assert "apply was incomplete" not in stderr
+    assert "'effort' is a required property" not in stderr
     assert _page(workspace, path).read_bytes() == before
 
 

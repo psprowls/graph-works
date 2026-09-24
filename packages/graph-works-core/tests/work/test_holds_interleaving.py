@@ -174,6 +174,34 @@ def test_stale_guard_preserves_page_artifacts_and_pointer(tmp_path: Path, dry_ru
     assert {path: path.read_bytes() for path in watched} == before
 
 
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_unsized_design_refuses_before_apply_and_supplied_effort_succeeds(
+    tmp_path: Path, monkeypatch, dry_run: bool
+) -> None:
+    layout = _layout(tmp_path)
+    page = _design_with_artifacts(layout)
+    document = load(page)
+    document.delete("effort")
+    page.write_text(document.serialize(), encoding="utf-8", newline="")
+    refs = layout.bundle_dir / ITEM / "references"
+    watched = (page, refs / "01-design.md", refs / "02-plan.md")
+    before = {path: path.read_bytes() for path in watched}
+
+    with monkeypatch.context() as patch:
+        patch.setattr(stage, "apply_mutation", lambda *a, **k: pytest.fail("must refuse before apply"))
+        refused = stage.run_stage_advance(layout, ITEM, today=TODAY, infer_worktree=False, dry_run=dry_run)
+
+    assert refused.outcome.plan.refusal == "effort-required"
+    assert refused.application is None
+    assert refused.results_path is None and refused.pointer_path is None
+    assert {path: path.read_bytes() for path in watched} == before
+
+    accepted = stage.run_stage_advance(layout, ITEM, today=TODAY, effort="medium", infer_worktree=False, dry_run=False)
+    assert accepted.outcome.plan.refusal is None
+    assert accepted.application is not None and accepted.application.ok
+    assert load(page).fm_data()["phase"] == "plan"
+
+
 def test_filing_wins_and_the_waiting_advance_is_refused(tmp_path: Path, monkeypatch) -> None:
     layout = _layout(tmp_path)
     page = layout.bundle_dir / f"{ITEM}.md"

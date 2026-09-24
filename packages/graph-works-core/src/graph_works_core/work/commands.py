@@ -251,8 +251,10 @@ def run_file(
     tags: Sequence[str] = (),
     dry_run: bool = True,
 ) -> FilingRun:
-    """Plan one graph-aware page/index/log filing and optionally apply it."""
-    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    """Plan one graph-aware page/index/log filing and optionally apply it.
+
+    Re-plans after a concurrent sibling advance (see `_until_inventory_current`).
+    """
     seed = FilingSeed(
         type=type,
         title=title,
@@ -270,24 +272,26 @@ def run_file(
         affects=tuple(affects),
         tags=tuple(tags),
     )
-    outcome = plan_file_and_reconcile(
-        bundle,
-        load_items(bundle),
-        seed,
-        load_sections(config.declarations_dir / SECTIONS_DIRNAME),
-    )
-    if dry_run or outcome.plan.refusal is not None:
-        return FilingRun(plan=outcome.plan)
+    sections = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
 
-    return FilingRun(
-        plan=outcome.plan,
-        application=apply_mutation(
-            layout,
-            _filing_mutation(bundle, outcome.plan),
-            repo_roots=_repo_roots(layout),
-            baseline_bundle=bundle,
-        ),
-    )
+    def attempt() -> FilingRun:
+        bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+        outcome = plan_file_and_reconcile(bundle, load_items(bundle), seed, sections)
+        if dry_run or outcome.plan.refusal is not None:
+            return FilingRun(plan=outcome.plan)
+        return FilingRun(
+            plan=outcome.plan,
+            application=apply_mutation(
+                layout,
+                _filing_mutation(bundle, outcome.plan),
+                repo_roots=_repo_roots(layout),
+                baseline_bundle=bundle,
+            ),
+        )
+
+    # A sibling advance between planning the parent's lane index and the
+    # locked apply rolls the filing back as stale; re-plan from a fresh load.
+    return _until_inventory_current(attempt, lambda run: run.application)
 
 
 @dataclass(frozen=True, slots=True)

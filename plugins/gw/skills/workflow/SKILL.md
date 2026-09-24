@@ -250,6 +250,8 @@ when off target (a no-op if it already landed), or confirm when already on
 target. For a discard, set
 `work_status: wontfix` instead."
 
+(For a discard, make that edit by following `references/editing-work-items.md`.)
+
 Use the target resolved by the attended rider or supplied to relay. A later
 attended merge may be a no-op if the PR already landed; no PR discovery or
 vault-recorded PR URL is required.
@@ -290,3 +292,11 @@ finish the children (`gw next <work-path> --descend`) or explicitly move a
 complete child subtree with `gw work reparent <child-path> --parent
 <new-parent-path>`. Physical placement is ownership; do not add a hierarchy
 field to frontmatter.
+
+### Editing an item by hand
+
+To change an existing item outside the pipeline's own writes — backfill
+`affects`, retitle, re-size `effort`, discard as `wontfix`, supersede, repair a
+wrong field — read `references/editing-work-items.md` first and follow its
+mandatory procedure (`updated:`, `gw work regen-index` when the title, status or
+phase changed, then `gw work lint`). There is no `gw work edit` verb.

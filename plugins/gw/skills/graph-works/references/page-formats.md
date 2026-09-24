@@ -358,4 +358,5 @@ filename-derived id. `Release` is root-only; only `Release`, `Epic`, and `Featur
 may own child lanes. Every lane and local archive carries its own Markdown
 `index.md`. There is no hierarchy frontmatter or JSON index sidecar. Live-state keys
 (`phase`, `work_status`, `worktree`, `branch`, `released_at`, …) are written by
-`gw work advance`; do not hand-edit them.
+`gw work advance`; to override one by hand, follow the workflow skill's
+`references/editing-work-items.md`.

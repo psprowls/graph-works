@@ -354,6 +354,25 @@ assert_contains "skills/workflow/SKILL.md" \
     "this finish session's own" \
     "workflow's archive offer names the finish transcript archiving-in-session drops"
 
+# work/feature-generic-work-edit-command: there is no `gw work edit` verb; the
+# editing guide is the supported path, so every place a model would look for
+# one must point at it.
+assert_contains "skills/workflow/references/editing-work-items.md" \
+    "## Procedure (mandatory)" \
+    "the editing guide carries its mandatory post-edit procedure"
+
+assert_contains "skills/workflow/SKILL.md" \
+    "references/editing-work-items.md" \
+    "the workflow skill points at the editing guide"
+
+assert_contains "skills/using-graph-works/SKILL.md" \
+    "references/editing-work-items.md" \
+    "the bootstrap skill points at the editing guide"
+
+assert_contains "skills/graph-works/references/page-formats.md" \
+    "references/editing-work-items.md" \
+    "page-formats §8 points hand overrides at the editing guide"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

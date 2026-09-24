@@ -46,6 +46,9 @@ durable state between stages. Never chain two stages in one session. Clear conte
 skill in its `action.skill` field, and that name is authoritative — invoke it as
 returned. Do not assume a stage skill lives in this plugin.
 
+**Changing an existing item** (a field, the title, discarding it): read the
+workflow skill's `references/editing-work-items.md` first.
+
 ## Where artifacts go
 
 Every work item owns a directory. Design and plan artifacts belong under its

@@ -25,6 +25,19 @@ grep -F 'Preflight — confirm the skill resolves.' "$WORKFLOW" >/dev/null || fa
 grep -F '<!-- rider-table:start -->' "$WORKFLOW" >/dev/null || fail "workflow preserves stage riders"
 grep -F 'One stage per invocation' "$WORKFLOW" >/dev/null || fail "workflow preserves one-stage advancement"
 grep -F 'This is reporting only' "$WORKFLOW" >/dev/null || fail "workflow reports routing without changing session"
+# Every executable advance site carries the phase captured for that action.
+grep -F 'JSON null maps to CLI `none`.' "$WORKFLOW" >/dev/null || fail "workflow must map absent phase"
+grep -F 'Preserve the captured expectation across retries, including sizing answers.' "$WORKFLOW" >/dev/null || fail "workflow retry expectation must stay fixed"
+grep -F 'On phase-mismatch, stop this action and replan; never retry it without a guard.' "$WORKFLOW" >/dev/null || fail "workflow must stop stale actions"
+grep -F 'gw work advance <work-path> --from <expected-phase> --effort <value>' "$WORKFLOW" >/dev/null || fail "workflow sizing must be guarded"
+grep -F 'gw work advance <work-path> --from <expected-phase>` directly (step 5)' "$WORKFLOW" >/dev/null || fail "workflow satisfied gate must be guarded"
+grep -F 'dispatching: run `gw work advance <work-path> --from <expected-phase>`' "$WORKFLOW" >/dev/null || fail "workflow dispatch must be guarded"
+grep -F 'For non-finish stages and satisfied gates, run `gw work advance <work-path> --from <expected-phase>`' "$WORKFLOW" >/dev/null || fail "workflow completion must be guarded"
+grep -F '| Attended finish | `merge` (clean merge, tests green on the merged result) | `gw work advance <work-path> --from finish --resolved-in <merge commit SHA>` |' "$WORKFLOW" >/dev/null || fail "attended merge must be guarded"
+grep -F '| Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --from finish --resolved-in <HEAD SHA>` |' "$WORKFLOW" >/dev/null || fail "attended confirm must be guarded"
+grep -F 'Revalidate the planned gate or return condition against the fresh next result before acting.' "$AUTO_DRIVE" >/dev/null || fail "fresh phase is not authorization for a stale action"
+grep -F 'gw work advance <path from entry> --from <expected-phase> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator gate must be guarded"
+grep -F 'gw work advance <work-path> --from <expected-phase> --effort <value> --no-infer-worktree' "$AUTO_DRIVE" >/dev/null || fail "coordinator sizing must be guarded"
 # Finish outcomes must not resolve unintegrated work or double-advance relay.
 RIDERS="$PLUGIN_ROOT/skills/workflow/references/brief-riders.md"
 RELAY="$PLUGIN_ROOT/skills/finishing-relay/SKILL.md"
@@ -128,7 +141,8 @@ for step in 2 5; do
 done
 
 # Scope the opt-out to R5's resolving command, retaining both integration arguments.
-sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance opts out and preserves integration arguments"
+sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance guards finish and preserves integration arguments"
+grep -F 'On phase-mismatch, report refusal and retain the guard' "$RELAY" >/dev/null || fail "relay must not claim stale settlement"
 
 
 cat >"$FIXTURE/dispatch.json" <<'JSON'

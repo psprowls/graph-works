@@ -47,6 +47,13 @@ is the one write `gw work next` performs, and it is reported precisely so it
 is never silent. All the blocker / terminal / dispatch fields the steps below
 read are unchanged from `gw work next`.
 
+Use the selected leaf's `selected_path` for `<work-path>`. After a successful
+next resolution, capture `expected-phase` from that leaf's `phase` before any
+advance or sizing question. JSON null maps to CLI `none`.
+Preserve the captured expectation across retries, including sizing answers.
+On phase-mismatch, stop this action and replan; never retry it without a guard.
+Do not replace the expectation with a fresh phase to make a stale action pass.
+
 - If `blockers` is non-empty:
   - If a blocker reports a **terminal status** (`resolved`, `wontfix`, or
     `superseded`) or **`phase=done`**, run **Terminal handling** (below): the
@@ -58,7 +65,9 @@ read are unchanged from `gw work next`.
     items, invalid enums, or unknown paths — these are human decisions.
 - If the only blocker says **effort required**: ask the user to size the item
   (xtra-small / small / medium / large / xtra-large — xtra-small/small means a bug-like item skips the planning stage),
-  then run `gw work advance <work-path> --effort <value>` and re-run `gw work next`.
+  then run `gw work advance <work-path> --from <expected-phase> --effort <value>` and re-run `gw work next`.
+  The sizing answer uses the expectation captured before asking; a successful
+  sizing transition starts a distinct action with a newly resolved expectation.
 - If `action.skill` is **null**, `blockers` is empty, and `on_complete` is
   **non-null** — this is a **satisfied gate** (an epic whose children are all
   terminal, or an epic whose finish stage is satisfied). No stage skill runs,
@@ -67,7 +76,7 @@ read are unchanged from `gw work next`.
   gate item's own phase before a child's `finish` pointer gets overwritten by
   this session's exit advance. A refusal or "not written" warning here is a
   note to relay, never a reason to stop, same as step 3. Then do not dispatch a
-  skill: run `gw work advance <work-path>` directly (step 5) — its own terminal
+  skill: run `gw work advance <work-path> --from <expected-phase>` directly (step 5) — its own terminal
   check governs what happens next (Terminal handling if the advance lands on
   `phase: done` / `work_status: resolved`, otherwise the step 6 hand-off).
 - If `action.skill` is **null** and a blocker says **"waiting on children"** —
@@ -90,10 +99,15 @@ read are unchanged from `gw work next`.
 ### 2. Apply the dispatch transition (when present)
 
 If the JSON carries a non-null `on_dispatch`, apply it mechanically **before**
-dispatching: run `gw work advance <work-path>`, supplying any flag named in
+dispatching: run `gw work advance <work-path> --from <expected-phase>`, supplying any flag named in
 `on_dispatch.requires` (e.g. `--owner <handle>` when dispatching execution —
 ask the user if no owner is known). Do not special-case stages; the CLI encodes
-which transitions happen at dispatch time.
+which transitions happen at dispatch time. After a successful dispatch, use
+that transition's resulting phase as the expectation for the stage completion.
+Do not refresh it to make a stale retry pass. If dispatch fails or its result
+is ambiguous, retain the original expectation for that action and stop to
+inspect the result before any retry. When there is no dispatch transition,
+stage completion keeps the phase captured in step 1.
 
 **Supervised dispatch.** When the prompt that launched this session carries a
 `Dispatch key:` line, a coordinator dispatched it and records where it runs.
@@ -205,7 +219,7 @@ already be there. If the skill instead wrote elsewhere, move the file to
 
 ### 5. Advance
 
-For non-finish stages and satisfied gates, run `gw work advance <work-path>`
+For non-finish stages and satisfied gates, run `gw work advance <work-path> --from <expected-phase>`
 with whatever flags the stage produced (`--effort` if the command demands it).
 Under a supervised dispatch (step 2), add `--no-infer-worktree`; this applies to the finish-outcome rows below too.
 
@@ -214,8 +228,8 @@ for every item type, using the attended rider's outcome line or relay's result:
 
 | Stage | Outcome | Step 5 does |
 |---|---|---|
-| Attended finish | `merge` (clean merge, tests green on the merged result) | `gw work advance <work-path> --resolved-in <merge commit SHA>` |
-| Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --resolved-in <HEAD SHA>` |
+| Attended finish | `merge` (clean merge, tests green on the merged result) | `gw work advance <work-path> --from finish --resolved-in <merge commit SHA>` |
+| Attended finish | `confirm` (commits already on the merge target) | `gw work advance <work-path> --from finish --resolved-in <HEAD SHA>` |
 | Attended finish | `pr`, `keep`, `discard`, `none` | **No advance** — stay at `phase: finish` and use step 6's held-item hand-off. |
 | `gw:finishing-relay` | Any | **No advance** — relay R5 already settled the item: `merge` advanced; `pr`/`hold`/`discard` held. |
 
@@ -231,7 +245,8 @@ uses step 6's held-item hand-off.
 
 Report lint findings from any advance — they are the item's health check,
 not noise. If the command errors with *effort required*, ask the user to size
-the item as in step 1 — never pick an effort yourself — then retry.
+the item as in step 1 — never pick an effort yourself — then retry with the
+same captured expectation. A phase-mismatch stops the action for replanning.
 
 If the advance lands the item at `phase: done` and `work_status: resolved`, run
 **Terminal handling** (below) instead of the step 6 hand-off.

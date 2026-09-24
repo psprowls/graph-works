@@ -204,9 +204,12 @@ integration into the merge target; PR, hold and discard do not.
   happened (or, in the trunk case, the commits were already on the target).
   `pr`, `hold` and `discard` do not resolve, so they never need a date.
   ```bash
-  gw work advance <work-path> --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]
+  gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]
   ```
-  Then send `worker_done --outcome succeeded` (this session's own dispatch
+  On phase-mismatch, report refusal and retain the guard; do not claim
+  settlement succeeded or retry using a newly observed phase. The merge may
+  already have happened, so include that fact and its SHA in the report.
+  Only after a successful advance, send `worker_done --outcome succeeded` (this session's own dispatch
   preamble command, `--task-id`/`--dispatch-id` filled in from it) with a
   body naming the merge target, the resolved-in reference, and a one-line
   summary of what shipped.

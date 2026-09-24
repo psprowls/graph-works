@@ -221,7 +221,7 @@ empty live list. On success, the result contains:
   `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main`,
   `path`, `branch`, `base_branch`, `exists`, `parent_path` — the existing
   worktree a created one is linked beneath, `null` when none), `merge_target`, `prompt`.
-- `advances[]` — each: `path`, `reason`, `worktree`/`branch` (the epic's
+- `advances[]` — each: `path`, `reason`, `mode` (`advance` or `return`), `worktree`/`branch` (the epic's
   already-known worktree, when one exists — `null` otherwise, e.g. before any
   worker has ever been dispatched for this epic).
 - `blocked[]` — each: `path`, `kind` (one of exactly `deps`, `capacity`,
@@ -275,13 +275,36 @@ Nothing else in this cycle runs.
 
 ### 2.4 Advances
 
-For every entry in `advances[]`: `gw work advance <path from entry> --no-infer-worktree`,
-adding `--worktree <entry.worktree> --branch <entry.branch>` only when the entry
+Before each entry, run `gw work next <path from entry> --json` for that exact
+path and capture `expected-phase` from its `phase` before mutating anything.
+JSON null maps to CLI `none`.
+Revalidate the planned gate or return condition against the fresh next result before acting.
+For `mode: advance`, require empty `blockers`, null `action`, and a non-null
+`on_complete` whose destination is the intended transition. For `mode:
+return`, `gw work next` does not expose `repair`: require `phase: finish`, the
+specific `waiting on children filed after finish` blocker, and a fresh
+§2.2 plan using the same root and live-key convention with a matching entry
+for this exact path, `mode: return`, and reason. That mode's defined
+transition is `finish` to `execute`; the next response alone cannot prove it.
+If the route output cannot establish the intended return condition, replan
+rather than guessing. Compare the planned mode and transition destination to
+this fresh evidence. Do not treat a newly observed phase alone as
+authorization for an entry planned earlier.
+
+For every applicable entry in `advances[]`: `gw work advance <path from entry> --from <expected-phase> --no-infer-worktree`,
+adding `--return` when `mode: return` and forwarding any other planned
+return/mode flags. Add `--worktree <entry.worktree> --branch <entry.branch>` only when the entry
 carries them (non-`null`). **`--no-infer-worktree` is what keeps it location-independent**: the advance
 never infers a placement from wherever the coordinator happens to be running.
 Only the orchestration root's entry can carry a
 pair — `plan()` never attaches the epic worktree to a descendant's advance, and
 a descendant's own recorded placement survives an advance that names none.
+Preserve the captured expectation across retries, including sizing answers.
+If the planned action is no longer applicable or advance returns phase-mismatch,
+discard the stale action and restart planning at section 2.1. Never remove the
+guard or replace its expectation merely to make a retry succeed. After any
+successful automatic advance, restart the cycle at §2.1 before considering
+another planned entry.
 
 If `advances[]` was non-empty, the plan you just read is now stale —
 restart the cycle at §2.1 (skip §2.5–2.7 this iteration; don't act on a plan
@@ -291,8 +314,14 @@ you know is out of date).
 
 - **`effort-required`**: ask the user — via `AskUserQuestion`, this is the
   coordinator's own human, not a worker relay — to size the item
-  (xtra-small / small / medium / large / xtra-large). Run
-  `gw work advance <work-path> --effort <value> --no-infer-worktree`, then restart the cycle at §2.1.
+  (xtra-small / small / medium / large / xtra-large). First run
+  `gw work next <work-path> --json` for that exact path, capture
+  `expected-phase` from its `phase`, and verify that effort sizing is still
+  required with no unrelated blocker before asking. The expectation captured
+  before the answer stays fixed. Run
+  `gw work advance <work-path> --from <expected-phase> --effort <value> --no-infer-worktree`, then restart the cycle at §2.1.
+  If sizing is no longer required or advance returns phase-mismatch, discard
+  this action and replan at §2.1 without changing the captured expectation.
   Never add `--worktree`/`--branch` to it: sizing is not a placement.
 - **Every other kind** (`deps`, `capacity`, `affects-overlap`, `decisions`,
   `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,

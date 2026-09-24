@@ -25,8 +25,11 @@ class RepositoryContext:
     inventory_known: bool
     checkout_usable_by_path: Mapping[str, bool] = MappingProxyType({})
     identity_known: bool = True
+    branches: frozenset[str] = frozenset()
+    branches_known: bool = True
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "branches", frozenset(self.branches))
         object.__setattr__(self, "inventory", MappingProxyType(dict(self.inventory)))
         object.__setattr__(self, "path_exists", MappingProxyType(dict(self.path_exists)))
         object.__setattr__(self, "checkout_usable_by_path", MappingProxyType(dict(self.checkout_usable_by_path)))
@@ -93,6 +96,7 @@ def observe_repository(
     listed = probe_git(repo, "worktree", "list", "--porcelain")
     known = listed.returncode == 0
     inventory = _inventory(listed.stdout) if known else MappingProxyType({})
+    refs = probe_git(repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/")
     candidates = selected_checkouts | {_canonical(path) for path in paths}
     for members in inventory.values():
         candidates.update(members)
@@ -107,4 +111,6 @@ def observe_repository(
         inventory_known=known,
         checkout_usable_by_path=eligibility,
         identity_known=proven_identity is not None,
+        branches=frozenset(refs.stdout.splitlines()) if refs.returncode == 0 else frozenset(),
+        branches_known=refs.returncode == 0,
     )

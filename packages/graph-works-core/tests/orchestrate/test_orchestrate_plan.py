@@ -91,6 +91,7 @@ def test_distinct_repositories_share_one_budget_without_affects_collision() -> N
         _item(ui, phase="execute", affects=("packages/a",), worktree="/wt/ui", branch="feature/ui"),
     )
     repos = {
+        root: ItemRepo("code", Path("/repo/code"), "frontmatter"),
         code: ItemRepo("code", Path("/repo/code"), "frontmatter"),
         ui: ItemRepo("ui", Path("/repo/ui"), "frontmatter"),
     }
@@ -102,6 +103,12 @@ def test_distinct_repositories_share_one_budget_without_affects_collision() -> N
             "git-ui", "/repo/ui", "main", True, {"feature/ui": ("/wt/ui",)}, {"/wt/ui": True}, True
         ),
     }
+    items = (
+        dataclasses.replace(
+            items[0], worktree="/wt/code", branch="feature/code", repo_stamps={"ui": Stamp("/wt/ui", "feature/ui")}
+        ),
+        *items[1:],
+    )
     result = _plan(items, root, item_repos=repos, repo_contexts=contexts)
     assert {d.slug for d in result.dispatches} == {code, ui}
     assert result.slots_free == 2
@@ -124,7 +131,7 @@ def test_same_repository_overlap_still_blocks_and_missing_context_is_local() -> 
         _item(second, phase="execute", worktree="/wt/two", branch="feature/two"),
         _item(missing, phase="execute", affects=("packages/b",)),
     )
-    repos = {path: ItemRepo("code", Path("/repo/code"), "frontmatter") for path in (first, second)}
+    repos = {path: ItemRepo("code", Path("/repo/code"), "frontmatter") for path in (root, first, second)}
     repos[missing] = ItemRepo("unknown", Path("/repo/unknown"), "frontmatter")
     context = RepositoryContext(
         "git-code",
@@ -135,6 +142,7 @@ def test_same_repository_overlap_still_blocks_and_missing_context_is_local() -> 
         {"/wt/one": True, "/wt/two": True},
         True,
     )
+    items = (dataclasses.replace(items[0], worktree="/wt/one", branch="feature/one"), *items[1:])
     result = _plan(items, root, item_repos=repos, repo_contexts={context.identity: context})
     assert len(result.dispatches) == 1
     blocked = {b.path: b.kind for b in result.blocked}
@@ -190,6 +198,7 @@ def test_shared_git_identity_preserves_each_declared_checkout() -> None:
         _item(second, phase="execute", affects=("packages/b",), worktree="/repo/linked", branch="feature/linked"),
     )
     selected = {
+        root: ItemRepo("primary", Path("/repo/primary"), "frontmatter"),
         first: ItemRepo("primary", Path("/repo/primary"), "frontmatter"),
         second: ItemRepo("linked", Path("/repo/linked"), "frontmatter"),
     }
@@ -202,6 +211,15 @@ def test_shared_git_identity_preserves_each_declared_checkout() -> None:
         {"/repo/primary": True, "/repo/linked": True},
         True,
         checkout_usable_by_path={"/repo/primary": True, "/repo/linked": True},
+    )
+    items = (
+        dataclasses.replace(
+            items[0],
+            worktree="/repo/primary",
+            branch="main",
+            repo_stamps={"linked": Stamp("/repo/linked", "feature/linked")},
+        ),
+        *items[1:],
     )
     result = _plan(items, root, item_repos=selected, repo_contexts={context.identity: context})
     assert {d.slug for d in result.dispatches} == {first, second}

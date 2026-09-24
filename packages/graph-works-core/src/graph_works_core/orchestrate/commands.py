@@ -39,6 +39,14 @@ from work_tracker_okf.vocabulary import (
 )
 from work_tracker_okf.workflow import RouteResult, route, state_for
 
+from graph_works_core.orchestrate.anchors import (
+    Anchor,
+    AnchorPreparation,
+    AnchorRefusal,
+    enclosing_owner,
+    integration_branch,
+    select_anchor,
+)
 from graph_works_core.workspace.decision_owner import HoldReport, holds_by_path, open_holds
 from graph_works_core.workspace.dispatch import (
     DispatchProfileError,
@@ -145,6 +153,7 @@ class OrchestratePlan:
     warnings: tuple[str, ...]
     dispatch_resolutions: Mapping[str, DispatchResolution] = MappingProxyType({})
     dispatch_repos: Mapping[str, ItemRepo] = MappingProxyType({})
+    preparations: tuple[AnchorPreparation, ...] = ()
 
 
 #: The character budget for a session name. Orca renders it in a task row and
@@ -891,13 +900,9 @@ def plan(
     to comparing against `repo_path` -- unchanged behaviour for a direct
     caller that only ever passed `repo_path`.
 
-    `repo_refusals` is `path -> BlockedItem`, one entry for every descendant
-    that resolves to another repository (`cross-repo-child`) or cannot
-    resolve its own `repo:` at all (`invalid`). `run_orchestrate` computes it,
-    because resolution reads `workspace.yaml`; a refused path is blocked with
-    that exact `BlockedItem` before any reservation and is excluded from
-    `_epic_stamp`'s descendant fallback, so a cross-repo child's scalar pair
-    can never become the epic worktree.
+    `repo_refusals` is `path -> BlockedItem` for items whose repository
+    cannot be resolved. `run_orchestrate` computes it because resolution
+    reads `workspace.yaml`; a refused path reserves nothing.
 
     `item_repos` and `repo_contexts` select independently observed Git
     evidence for each item. Contexts are keyed by canonical common-directory
@@ -974,7 +979,12 @@ def plan(
         if item.worktree:
             live_worktree_owners.setdefault(item.worktree, set()).add(item.path)
 
-    stamp = _epic_stamp(items, root_item, exclude=frozenset(repo_refusals)) if root_item is not None else None
+    stamp = None
+    if root_item is not None:
+        if item_repos is None:
+            stamp = _epic_stamp(items, root_item, exclude=frozenset(repo_refusals))
+        elif root_item.worktree and root_item.branch:
+            stamp = (root_item.worktree, root_item.branch)
     epic_worktree_path = stamp[0] if stamp else None
     epic_branch = stamp[1] if stamp else branch_name(root, root_item.type if root_item else "")
 
@@ -1000,6 +1010,7 @@ def plan(
     dispatches: list[PlannedDispatch] = []
     resolutions: dict[str, DispatchResolution] = {}
     dispatch_repos: dict[str, ItemRepo] = {}
+    preparations: dict[tuple[str, str], AnchorPreparation] = {}
     for item, result in candidates:
         repo_refusal = repo_refusals.get(item.path)
         if repo_refusal is not None:
@@ -1085,13 +1096,12 @@ def plan(
             local_code_repo = selected_path
             local_base = context.default_base
             local_repo_known = context.identity_known and context.inventory_known
-            # Foreign integration anchors are introduced by Task 2. Until
-            # then, only the root repository may lend its scalar stamp.
-            root_repo = item_repos.get(root) if item_repos is not None else None
-            root_context = contexts_by_path.get(str(root_repo.path)) if root_repo and root_repo.path else None
-            if root_context is None or root_context.identity != context.identity:
-                local_epic_path = None
-                local_epic_branch = branch_name(root, root_item.type if root_item else "")
+            owner = enclosing_owner(item, by_path)
+            local_epic_path = None
+            local_epic_branch = branch_name(item.path, item.type)
+            if owner is None and item.path == root:
+                local_epic_path = item.worktree
+                local_epic_branch = item.branch or local_epic_branch
             if not usable and (item.worktree == selected_path or local_epic_path == selected_path):
                 blocked.append(
                     BlockedItem(
@@ -1104,15 +1114,6 @@ def plan(
                     BlockedItem(item.path, "worktree-unprovable", "repository Git identity or inventory is unavailable")
                 )
                 continue
-            if local_epic_path is not None:
-                anchor_paths = context.inventory.get(local_epic_branch, ())
-                if len(anchor_paths) != 1 or local_epic_path != anchor_paths[0]:
-                    blocked.append(
-                        BlockedItem(
-                            item.path, "worktree-unprovable", "integration anchor is not verified in this repository"
-                        )
-                    )
-                    continue
             matching = context.inventory.get(item.branch or "", ())
             if item.worktree and item.branch and (len(matching) != 1 or item.worktree != matching[0]):
                 blocked.append(
@@ -1130,11 +1131,61 @@ def plan(
                     )
                 )
                 continue
+            if owner is not None and item_repo is not None and item_repos is not None:
+                selected = select_anchor(
+                    owner,
+                    items=by_path,
+                    repos=item_repos,
+                    repo=item_repo,
+                    context=context,
+                    prepare=phase not in READ_ONLY_PHASES,
+                )
+                if isinstance(selected, AnchorRefusal):
+                    blocked.append(BlockedItem(item.path, selected.kind, selected.reason))
+                    continue
+                if isinstance(selected, AnchorPreparation):
+                    if selected.worktree.path is None and not provisions_worktrees:
+                        blocked.append(
+                            BlockedItem(
+                                item.path,
+                                "worktree-unsupported",
+                                "integration preparation needs a backend that provisions worktrees",
+                            )
+                        )
+                        continue
+                    preparations.setdefault((selected.owner_path, context.identity), selected)
+                    blocked.append(
+                        BlockedItem(item.path, "worktree-pending", "repository integration anchor requires preparation")
+                    )
+                    continue
+                if isinstance(selected, Anchor):
+                    local_epic_path, local_epic_branch = selected.worktree, selected.branch
+                elif phase in READ_ONLY_PHASES:
+                    # Vault-only work needs a reading checkout, not a new owner stamp.
+                    local_epic_path = local_repo_path
+                    local_epic_branch = next(
+                        (branch for branch, paths in context.inventory.items() if local_repo_path in paths), local_base
+                    )
+            if local_epic_path is not None:
+                anchor_paths = context.inventory.get(local_epic_branch, ())
+                if len(anchor_paths) != 1 or local_epic_path != anchor_paths[0]:
+                    blocked.append(
+                        BlockedItem(
+                            item.path, "worktree-unprovable", "integration anchor is not verified in this repository"
+                        )
+                    )
+                    continue
             local_inventory = {branch: paths[0] for branch, paths in context.inventory.items() if paths}
 
         is_root = item.path == root
+        placement_item = item
+        placement_root = is_root
+        if context is not None and phase in READ_ONLY_PHASES and local_epic_path is None and not item.worktree:
+            placement_item = replace(item, phase=None)
+            placement_root = True
+            local_epic_branch = branch_name(item.path, item.type)
         action, claimed_now = _resolve_worktree(
-            item,
+            placement_item,
             epic_worktree_path=local_epic_path,
             epic_branch=local_epic_branch,
             live_worktree_owners=live_worktree_owners,
@@ -1143,7 +1194,7 @@ def plan(
             worktree_exists=local_exists,
             default_base=local_base,
             phase=phase,
-            is_root=is_root,
+            is_root=placement_root,
             repo_path=local_repo_path,
             inventory=local_inventory,
             code_repo=local_code_repo,
@@ -1202,7 +1253,8 @@ def plan(
         if action.path and (own_stamp or is_root or phase not in READ_ONLY_PHASES):
             accepted_worktrees.add(action.path)
 
-        merge_target = local_epic_branch if item.path != root else local_base
+        has_integration_owner = enclosing_owner(item, by_path) is not None if context is not None else not is_root
+        merge_target = local_epic_branch if has_integration_owner else local_base
         key = session_name(item.path, item.type, phase)
         resolutions[key] = resolution
         if item_repo is not None:
@@ -1246,6 +1298,7 @@ def plan(
         warnings=tuple(warnings),
         dispatch_resolutions=MappingProxyType(resolutions),
         dispatch_repos=MappingProxyType(dispatch_repos),
+        preparations=tuple(preparations.values()),
     )
 
 
@@ -1316,6 +1369,10 @@ class OrchestrateResult:
     @property
     def dispatch_repos(self) -> Mapping[str, ItemRepo]:
         return self.plan.dispatch_repos
+
+    @property
+    def preparations(self) -> tuple[AnchorPreparation, ...]:
+        return self.plan.preparations
 
     @property
     def advances(self) -> tuple[PlannedAdvance, ...]:
@@ -1444,27 +1501,24 @@ def _repo_refusals(
 ) -> tuple[dict[str, BlockedItem], tuple[str, ...], dict[str, ItemRepo]]:
     """Descendant refusals, notes, and each resolved `ItemRepo`.
 
-    Every descendant of *root* that does not plan in *root_repo*, plus a
-    warning for each descendant whose own resolution carried a non-`None`
-    `note` even though it did not refuse -- typically a malformed `repo:`
-    walked past as absent (`resolve_item_repo`'s `_malformed_note`). Such a
-    descendant silently inherits the root's repository; the note is the only
-    place that fact is recorded, so it must reach the caller even though the
-    descendant is not blocked.
-
-    Each descendant resolves with the root's repository as its fallback, so
-    an untagged one inherits it even when the root's came from `--repo-name`.
-    A different answer is `cross-repo-child` -- placing work in a second
-    repository is not built yet, and guessing would place it in the wrong
-    one. A descendant whose own resolution refuses (an undeclared `repo:`)
-    is `invalid` for itself only; the rest of the subtree still plans.
+    Resolve ancestors and descendants independently. Untagged descendants
+    retain the root's fallback (including `--repo-name`); malformed tags
+    surface notes, and undeclared repository names refuse only that item.
     """
     by_path = {item.path: item for item in items}
     inherited = replace(root_repo, source="fallback", note=None)
     refusals: dict[str, BlockedItem] = {}
     notes: list[str] = []
     item_repos = {root: root_repo}
-    for node in _descendants(items, root):
+    ancestors = []
+    parent = by_path.get(root)
+    seen = {root}
+    while parent is not None and parent.parent_path and parent.parent_path not in seen:
+        seen.add(parent.parent_path)
+        parent = by_path.get(parent.parent_path)
+        if parent is not None:
+            ancestors.append(parent)
+    for node in [*ancestors, *_descendants(items, root)]:
         try:
             resolved = resolve_item_repo(layout, node, by_path, fallback=lambda: inherited)
         except WorkspaceError as exc:
@@ -1473,15 +1527,6 @@ def _repo_refusals(
         if resolved.note:
             notes.append(resolved.note)
         item_repos[node.path] = resolved
-        if resolved.name != root_repo.name:
-            refusals[node.path] = BlockedItem(
-                path=node.path,
-                kind="cross-repo-child",
-                reason=(
-                    f"{node.path} resolves to repository {resolved.name!r} ({resolved.source}), "
-                    f"not {root_repo.name!r} where {root} plans; cross-repository children are not placed yet"
-                ),
-            )
     return refusals, tuple(notes), item_repos
 
 
@@ -1503,9 +1548,8 @@ def run_orchestrate(
     not the layout's `repo_root`. An explicit `repo` still wins and **skips
     that resolution entirely**: an argument is not a default. `repo_name`
     selects among several declared repositories and is ignored when `repo`
-    is given. Descendants that resolve to a different repository than the
-    root are blocked `cross-repo-child`; a descendant whose own `repo:`
-    cannot be resolved is blocked `invalid` for itself only.
+    is given. Descendants use independently observed repository contexts;
+    an undeclared `repo:` blocks only that descendant.
 
     `provisions_worktrees` passes straight through to `plan()` -- see its
     docstring; this shell resolves no backend itself; that is a caller's job.
@@ -1581,7 +1625,17 @@ def run_orchestrate(
     planning_items = items
     if item_repos is not None:
         planning_items = tuple(
-            replace(item, worktree=str(Path(item.worktree).resolve())) if item.worktree else item for item in items
+            replace(
+                item,
+                worktree=str(Path(item.worktree).resolve()) if item.worktree else None,
+                repo_stamps=MappingProxyType(
+                    {
+                        name: replace(stamp, worktree=str(Path(stamp.worktree).resolve()))
+                        for name, stamp in item.repo_stamps.items()
+                    }
+                ),
+            )
+            for item in items
         )
 
     computed = plan(
@@ -1632,12 +1686,14 @@ __all__ = [
     "DISPATCH_PHASES",
     "WORKER_PLACEMENT_LINE",
     "WORKSPACE_VAR",
+    "AnchorPreparation",
     "BlockedItem",
     "HoldReport",
     "OrchestratePlan",
     "OrchestrateResult",
     "PlannedAdvance",
     "branch_name",
+    "integration_branch",
     "plan",
     "run_orchestrate",
 ]

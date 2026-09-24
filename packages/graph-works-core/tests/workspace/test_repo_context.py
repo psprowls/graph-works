@@ -35,6 +35,7 @@ def test_observation_distinguishes_repositories_and_canonicalizes_aliases(tmp_pa
     assert code_context.identity_known and ui_context.identity_known
     assert code_context.path == str(code.resolve())
     assert code_context.path_exists[str(code.resolve())] is True
+    assert code_context.branches_known and code_context.branches == frozenset({"main"})
     assert code_context.inventory_known and ui_context.inventory_known
     assert code_context.inventory["main"] == (str(code.resolve()),)
 
@@ -42,6 +43,8 @@ def test_observation_distinguishes_repositories_and_canonicalizes_aliases(tmp_pa
 def test_missing_git_evidence_is_marked_unknown(tmp_path: Path) -> None:
     context = observe_repository(tmp_path)
     assert not context.identity_known
+    assert not context.branches_known
+    assert not context.branches
     assert not context.inventory_known
     assert not context.checkout_usable
     assert context.inventory == {}

@@ -142,7 +142,10 @@ done
 
 # Scope the opt-out to R5's resolving command, retaining both integration arguments.
 sed -n '/^## R5 — /,/^## /p' "$RELAY" | grep -F 'gw work advance <work-path> --from finish --no-infer-worktree --resolved-in <resolved_in from R4> [--released-at <date>]' >/dev/null || fail "relay R5 resolving advance guards finish and preserves integration arguments"
-grep -F 'On phase-mismatch, report refusal and retain the guard' "$RELAY" >/dev/null || fail "relay must not claim stale settlement"
+grep -F 'On phase-mismatch, enter the **Escalation path**' "$RELAY" >/dev/null || fail "relay must escalate stale settlement"
+grep -F 'include the merge SHA in the' "$RELAY" >/dev/null || fail "relay escalation must preserve merge evidence"
+grep -F 'escalation body (or say the commits were already on the target in the trunk case)' "$RELAY" >/dev/null || fail "relay escalation must cover trunk integration"
+grep -F 'Do not claim settlement or send `worker_done` while escalating' "$RELAY" >/dev/null || fail "relay must not report false settlement"
 
 
 cat >"$FIXTURE/dispatch.json" <<'JSON'

@@ -24,9 +24,10 @@ For stage completion, `gw work advance PATH --from PHASE` checks the item's curr
 the advance lock before applying a transition. Use `--from none` for an item with no phase yet;
 omitting `--from` leaves the current phase unchecked for compatibility with existing callers.
 The accepted values are `none`, `design`, `plan`, `execute`, `finish`, and `done`. A stale value
-returns `phase-mismatch` without changing the item, artifacts, or active-work pointer. This guard
-only checks the phase: it does not make repeated calls without `--from` idempotent, and it does
-not check whether a produced design or plan artifact exists.
+returns `phase-mismatch` without changing the item, artifacts, or active-work pointer. The
+`--from` guard only checks the phase and does not make repeated calls without `--from` idempotent.
+Separately, completing design or plan requires its canonical artifact to exist as a regular file;
+otherwise the command returns `artifact-missing` without advancing the item.
 
 Wiki commands:
 

@@ -42,7 +42,17 @@ GRACE_PERIOD_TAIL = (
     "while a question you asked is still unanswered."
 )
 
-ATTEND_TAIL = f"{_ATTEND_BASE}\n{GRACE_PERIOD_TAIL}"
+#: Every dispatched worker's reminder that it never commits the workspace's
+#: `main` checkout: `apply_mutation` commits each gw verb's own writes under the
+#: bundle lock (feature-single-workspace-commit-authority). Names the main
+#: checkout only -- an execute worker's commits on a workspace *branch* are the
+#: placement feature's concern. Seeded into `RELAY_TAIL_SEED` too, with the
+#: same `init`-only, no-migration caveat as the grace-period line.
+WORKSPACE_COMMIT_TAIL = (
+    "Never `git commit` in the graph-works workspace at {workspace}; gw verbs commit their own workspace writes."
+)
+
+ATTEND_TAIL = f"{_ATTEND_BASE}\n{GRACE_PERIOD_TAIL}\n{WORKSPACE_COMMIT_TAIL}"
 
 #: The obligation both execute variants carry. A packaged default rather than
 #: config for `ATTEND_TAIL`'s reason -- it names no vendor. It is *reported,
@@ -58,6 +68,7 @@ EXECUTE_TAIL = (
     "`## What this design changes` headings instead and say in the file that you did. "
     "Mark honestly -- an unchecked box is a normal, expected outcome; an inaccurate checked box "
     "is not. Pass that file's path as --report-path on your worker_done."
+    "\n" + WORKSPACE_COMMIT_TAIL
 )
 
 #: The `relay` tail a **new** workspace is seeded with, written into its
@@ -70,21 +81,22 @@ EXECUTE_TAIL = (
 #: target verbatim out of the same line. A tail carrying one without the other
 #: arms half the seam. The grace-period line is a third, independent
 #: obligation appended after both -- finishing-relay's R2 only ever reads the
-#: first line, so appending here cannot disturb it.
+#: first line, so appending here cannot disturb it. The workspace commit line
+#: follows the same init-only seed rule.
 #:
 #: **Seeding is `init`-only, and there is no migration.** `init.plan_init`
 #: writes this value into a *missing* shared dispatch document and preserves an
 #: authored one, so a workspace that already exists keeps whatever relay tail
-#: its `dispatch.yaml` was written with -- the grace-period obligation above is
+#: its `dispatch.yaml` was written with -- these appended obligations are
 #: inert for it. An operator upgrading an existing workspace must append
-#: `GRACE_PERIOD_TAIL`'s text to that file's `branch`-variant `prompt_tail`
+#: `GRACE_PERIOD_TAIL` and `WORKSPACE_COMMIT_TAIL` to that file's `branch`-variant `prompt_tail`
 #: by hand and run `gw config sync`; nothing here does it for them. Building a
 #: rewriter is deliberately out of scope: the tail is a workspace-owned value,
 #: and core does not edit values a workspace owns.
 RELAY_TAIL_SEED = (
     "Auto-drive context: relay the merge/PR/hold/discard decision to your coordinator "
     "rather than asking interactively; merge target is {merge_target}.\n"
-    f"{GRACE_PERIOD_TAIL}"
+    f"{GRACE_PERIOD_TAIL}\n{WORKSPACE_COMMIT_TAIL}"
 )
 
 
@@ -102,10 +114,10 @@ PACKAGED_PIPELINE: Mapping[str, PipelineEntry] = MappingProxyType(
     {
         "exploration": PipelineEntry("superpowers:brainstorming", "attend", ATTEND_TAIL),
         "diagnosis": PipelineEntry("superpowers:systematic-debugging", "attend", ATTEND_TAIL),
-        "reconcile": PipelineEntry("gw:reconciling-spec", "autonomous"),
+        "reconcile": PipelineEntry("gw:reconciling-spec", "autonomous", WORKSPACE_COMMIT_TAIL),
         "epic-design": PipelineEntry("gw:epic-design", "attend", ATTEND_TAIL),
-        "decompose": PipelineEntry("gw:planning-epics", "autonomous"),
-        "single": PipelineEntry("superpowers:writing-plans", "autonomous"),
+        "decompose": PipelineEntry("gw:planning-epics", "autonomous", WORKSPACE_COMMIT_TAIL),
+        "single": PipelineEntry("superpowers:writing-plans", "autonomous", WORKSPACE_COMMIT_TAIL),
         "planned": PipelineEntry("superpowers:subagent-driven-development", "autonomous", EXECUTE_TAIL),
         "unplanned": PipelineEntry("superpowers:test-driven-development", "autonomous", EXECUTE_TAIL),
         "branch": PipelineEntry("superpowers:finishing-a-development-branch", "relay"),
@@ -155,6 +167,7 @@ __all__ = [
     "EXECUTE_TAIL",
     "PACKAGED_PIPELINE",
     "RELAY_TAIL_SEED",
+    "WORKSPACE_COMMIT_TAIL",
     "PipelineEntry",
     "check_skill_name",
     "is_valid_skill_name",

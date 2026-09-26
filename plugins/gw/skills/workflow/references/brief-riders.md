@@ -277,8 +277,8 @@ resolves an item; the rider leaves the stock skill unmodified.
 >
 > `uv run --package graph-works-core python <plugin>/skills/finishing-relay/references/finish-receipt.py record <work-path> --workspace <workspace> --repo <name>`
 >
-> Commit the receipt and owner source link through the normal workspace commit
-> procedure immediately. If receipt writing fails after a merge, retry `record`:
+> `record` commits the receipt itself; do not commit the workspace.
+> If receipt writing fails after a merge, retry `record`:
 > it rediscovers source ancestry without another merge. Preserve partial receipts
 > when a later target fails. Inspect again after every target is recorded; only
 > `complete: true` allows workflow's one advance, using that inspection's

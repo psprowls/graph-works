@@ -104,7 +104,11 @@ date a new entry (`**YYYY-MM-DD** — …`).
 4. **If `title`, `work_status` or `phase` changed:** run `gw work regen-index`.
 5. **Run `gw work lint`.** Fix every finding that names this item before
    reporting done. Findings on *other* items: relay them, do not fix them.
-6. **Report** the edit and, for a consequence-class field, its consequence.
+6. **Commit only what you edited.** No gw verb commits a hand edit. Follow the
+   workspace `AGENTS.md` rule: stage and commit only the paths you changed, by
+   pathspec, with a single-line `workspace:` subject and no trailers — never
+   `git add -A` or `git commit -a`.
+7. **Report** the edit and, for a consequence-class field, its consequence.
 
 ## Gotchas
 

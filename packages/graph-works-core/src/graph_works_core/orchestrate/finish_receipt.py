@@ -13,7 +13,7 @@ from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkM
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.sources import upsert
 
-from graph_works_core.workspace.commits import WorkspaceCommit, item_stem
+from graph_works_core.workspace.commits import CommitOutcome, WorkspaceCommit, item_stem
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import (
@@ -33,6 +33,8 @@ class FinishReceiptResult:
     refusal: str | None
     changed: bool
     receipt_path: str | None
+    commit: CommitOutcome | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, today: date) -> FinishReceiptResult:
@@ -141,4 +143,4 @@ def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, tod
         )
         if not application.ok:
             return FinishReceiptResult(f"finish receipt transaction refused: {application}", False, ref.rel)
-        return FinishReceiptResult(None, True, ref.rel)
+        return FinishReceiptResult(None, True, ref.rel, commit=application.commit, warnings=application.warnings)

@@ -68,6 +68,22 @@ def test_finish_receipt_commits_owned_files(tmp_path):
     assert _git(layout.root, "status", "--porcelain", "--", "okf") == ""
 
 
+def test_failed_workspace_commit_preserves_receipt_and_warning(tmp_path):
+    layout, repos = setup(tmp_path)
+    _init_git(layout.root)
+    git(repos["code"][0], "merge", "feature")
+    (layout.root / ".git/index.lock").write_text("held\n", encoding="utf-8", newline="\n")
+
+    result = record(layout, "code")
+
+    assert result.refusal is None and result.changed
+    assert receipt_path(layout).exists()
+    assert [entry.repo for entry in inspect_finish(layout, OWNER).entries] == ["code"]
+    assert result.commit is not None and result.commit.status == "failed"
+    assert f"workspace commit failed: {result.commit.reason}" in result.warnings
+    assert _git(layout.root, "log", "-1", "--format=%s").strip() == "workspace: seed"
+
+
 def advance(layout, sha, **kwargs):
     return run_stage_advance(layout, OWNER, today=TODAY, resolved_in=sha, infer_worktree=False, **kwargs)
 

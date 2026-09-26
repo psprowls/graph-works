@@ -1441,14 +1441,50 @@ def test_a_non_canonical_target_is_absent_without_a_filesystem_read(monkeypatch,
         root.close()
 
 
-def test_a_target_under_a_file_ancestor_is_absent(tmp_path: Path) -> None:
-    """A regular-file ancestor means the target is absent, as `load_items` would agree."""
+def test_a_target_under_a_file_ancestor_propagates_anchored_refusal(tmp_path: Path) -> None:
+    """The anchored wrapper cannot distinguish a file from a symlink ancestor."""
     layout = _workspace(tmp_path)
     (layout.bundle_dir / "work").mkdir(exist_ok=True)
     (layout.bundle_dir / "work/f").write_bytes(b"not a directory")
     root = transactions._open_root(layout.bundle_dir)
     try:
-        assert transactions._baseline_target_exists(root, "work/f/children/t") is False
+        with pytest.raises(ValueError, match="unsafe ancestor") as raised:
+            transactions._baseline_target_exists(root, "work/f/children/t")
+        assert isinstance(raised.value.__cause__, NotADirectoryError)
+    finally:
+        root.close()
+
+
+def test_a_target_under_a_symlink_ancestor_propagates_anchored_refusal(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    external = tmp_path / "external"
+    (external / "children").mkdir(parents=True)
+    (layout.bundle_dir / "work/link").symlink_to(external, target_is_directory=True)
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        with pytest.raises(ValueError, match="unsafe ancestor") as raised:
+            transactions._baseline_target_exists(root, "work/link/children/t")
+        assert isinstance(raised.value.__cause__, NotADirectoryError)
+    finally:
+        root.close()
+
+
+def test_other_wrapped_target_errors_propagate(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+
+    def denied(_root, _member):  # type: ignore[no-untyped-def]
+        try:
+            raise PermissionError("denied")
+        except PermissionError as exc:
+            raise ValueError("unsafe ancestor") from exc
+
+    monkeypatch.setattr(transactions, "_lexists_at", denied)
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        with pytest.raises(ValueError, match="unsafe ancestor") as raised:
+            transactions._baseline_target_exists(root, "work/x")
+        assert isinstance(raised.value.__cause__, PermissionError)
     finally:
         root.close()
 

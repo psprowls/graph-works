@@ -2272,9 +2272,11 @@ def _condition_scope(plan: WorkMutationPlan) -> frozenset[str]:
 def _baseline_target_exists(root: Anchor, path: str) -> bool:
     """Whether a canonical item path has a page on disk through the held root.
 
-    A path rejected by `parse_item_path` cannot be in `load_items`. Treat a
-    regular-file ancestor as absent too. A page that exists but is not an item
-    makes this check conservative: the baseline withholds an allowance.
+    A path rejected by `parse_item_path` cannot be in `load_items`. A direct
+    `NotADirectoryError` means absence; an anchored `ValueError` propagates
+    because the wrapper also represents a refused symlink ancestor. A page
+    that exists but is not an item makes this check conservative: the baseline
+    withholds an allowance.
     """
     if parse_item_path(path) is None:
         return False
@@ -2282,12 +2284,6 @@ def _baseline_target_exists(root: Anchor, path: str) -> bool:
         return _lexists_at(root, f"{path}.md")
     except NotADirectoryError:
         return False
-    except ValueError as exc:
-        # `_open_parent` wraps an unsafe ancestor in ValueError. Only its
-        # NotADirectoryError case is absence; other anchored refusals fail.
-        if isinstance(exc.__cause__, NotADirectoryError):
-            return False
-        raise
 
 
 def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter[tuple[str, str]]:

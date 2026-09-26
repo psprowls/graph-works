@@ -107,7 +107,9 @@ _PRAGMA_WAL = "PRAGMA journal_mode=WAL"
 
 _RRF_K = 60
 _OVERSAMPLE = 3
-_EMBED_WARN_CHARS = 32_000
+_EMBED_MAX_CHARS = 32_000
+# Bump whenever the prefix cap or overflow recovery semantics change.
+_EMBED_POLICY = "prefix-32000-halve-v1"
 
 
 class Embedder(Protocol):
@@ -124,9 +126,24 @@ class Embedder(Protocol):
     def embed_query(self, text: str) -> list[float]: ...
 
 
+def _is_input_token_overflow(exc: Exception) -> bool:
+    """Recognize Titan's structured token rejection, never arbitrary error text."""
+    response = getattr(exc, "response", None)
+    if not isinstance(response, Mapping):
+        return False
+    error = response.get("Error")
+    if not isinstance(error, Mapping) or error.get("Code") != "ValidationException":
+        return False
+    message = error.get("Message")
+    return (
+        isinstance(message, str)
+        and re.search(r"Too many input tokens\.\s*Max input tokens:\s*\d+", message) is not None
+    )
+
+
 @dataclass(frozen=True)
 class _NamedEmbedder:
-    """The model id, carried beside a client that has no place to put it.
+    """Default Titan input policy and cache identity, beside the provider client.
 
     `make_bedrock_embeddings` is annotated `-> Embeddings`, and langchain's
     base class declares no `model_id`, so a bare return fails `mypy --strict`
@@ -135,11 +152,36 @@ class _NamedEmbedder:
     unaffected.
     """
 
-    model_id: str
+    provider_model_id: str
     delegate: Embeddings
 
+    @property
+    def model_id(self) -> str:
+        return f"{self.provider_model_id}:{_EMBED_POLICY}"
+
     def embed_query(self, text: str) -> list[float]:
-        return self.delegate.embed_query(text)
+        retained = min(len(text), _EMBED_MAX_CHARS)
+        attempts: list[int] = []
+        while True:
+            if retained < len(text):
+                logger.warning(
+                    "Truncated embedding input for %s from %d to %d characters",
+                    self.provider_model_id,
+                    len(text),
+                    retained,
+                )
+            attempts.append(retained)
+            try:
+                return self.delegate.embed_query(text[:retained])
+            except Exception as exc:
+                if not text or not _is_input_token_overflow(exc):
+                    raise
+                if retained == 1:
+                    raise QueryError(
+                        f"Embedding input token limit for {self.provider_model_id}; "
+                        f"attempted character counts: {attempts}"
+                    ) from exc
+                retained = max(1, retained // 2)
 
 
 def default_embedder() -> Embedder:
@@ -354,19 +396,18 @@ def build_index(bundle: Bundle, cache_dir: Path, *, embedder: Embedder) -> Index
         conn.executemany("DELETE FROM pages WHERE path = ?", [(path,) for path in stale])
 
         for path, text in pages:
-            if len(text) > _EMBED_WARN_CHARS:
-                logger.warning(
-                    "Page %s exceeds %d chars (%d); the embedding model may truncate it",
-                    path,
-                    _EMBED_WARN_CHARS,
-                    len(text),
-                )
             content_hash = page_hashes[path]
             row = conn.execute("SELECT content_hash FROM pages WHERE path = ?", (path,)).fetchone()
             if row is not None and row[0] == content_hash:
                 continue  # unchanged, and the manifest vouches for the vector
 
-            vec = embedder.embed_query(text)
+            try:
+                vec = embedder.embed_query(text)
+            except QueryError as exc:
+                raise QueryError(f"Page {path}: {exc}") from exc
+            except Exception:
+                logger.error("Embedding failed for page %s", path)
+                raise
             blob = struct.pack(f"{len(vec)}f", *vec)
             conn.execute(
                 "INSERT OR REPLACE INTO pages (path, content_hash, embedding) VALUES (?, ?, ?)",

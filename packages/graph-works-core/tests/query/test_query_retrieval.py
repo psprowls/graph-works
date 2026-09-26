@@ -45,7 +45,7 @@ def test_default_embedder_names_its_model(monkeypatch):
     monkeypatch.setattr(q, "make_bedrock_embeddings", _fake_make)
 
     embedder = q.default_embedder()
-    assert embedder.model_id == q.DEFAULT_EMBED_MODEL_ID
+    assert embedder.model_id.startswith(q.DEFAULT_EMBED_MODEL_ID + ":")
     assert embedder.embed_query("anything") == [1.0, 2.0, 3.0]
     assert seen == [(q.DEFAULT_EMBED_MODEL_ID, q.DEFAULT_EMBED_REGION)]
 

@@ -255,13 +255,14 @@ def run_archive(
         assert logged is not None  # narrowed by defer_log
         append_log_entry(load(bundle.root / "log.md"), logged, on=today, dry_run=False)
     # Wiki writes use doc-wiki-okf's apply path, outside the work transaction.
-    # Commit only their moved/edited members and the deferred log append.
+    # Commit only their moved/edited members, changed indexes, and deferred log append.
     wiki_commit = None
     if wiki_plan.tokens:
         wiki_paths = tuple(
             sorted(
                 _touched_members(wiki_plan.moves)
                 | {move.dest for move in wiki_plan.moves.moves}
+                | {update.path for update in wiki_result.indexes if update.changed}
                 | ({"log.md"} if defer_log else set())
             )
         )

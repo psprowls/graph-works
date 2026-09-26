@@ -243,6 +243,8 @@ def test_mixed_archive_commits_work_then_wiki(tmp_path: Path) -> None:
     wiki.parent.mkdir(parents=True)
     wiki.write_text("---\ntitle: Example\ndescription: d\nstatus: stable\n---\n", encoding="utf-8")
     _init_git(layout.root)
+    unrelated = layout.bundle_dir / "adrs/scratch.txt"
+    unrelated.write_text("unrelated\n", encoding="utf-8", newline="\n")
     result = archive.run_archive(
         layout,
         paths=(DONE,),
@@ -258,10 +260,23 @@ def test_mixed_archive_commits_work_then_wiki(tmp_path: Path) -> None:
         "workspace: archive feature-done",
     ]
     assert _git(layout.root, "log", "-2", "--format=%b").strip() == ""
-    assert _git(layout.root, "status", "--porcelain", "--", "okf/work") == ""
-    assert _git(layout.root, "status", "--porcelain", "--", "okf/adrs").splitlines() == [
-        "?? okf/adrs/_archive/index.md",
-        "?? okf/adrs/index.md",
+    expected_wiki_paths = {
+        "okf/adrs/example.md",
+        "okf/adrs/_archive/example.md",
+        "okf/adrs/index.md",
+        "okf/adrs/_archive/index.md",
+    }
+    assert {f"okf/{update.path}" for update in result.wiki.indexes if update.changed} == {
+        "okf/adrs/index.md",
+        "okf/adrs/_archive/index.md",
+    }
+    assert set(result.wiki_commit.paths) == expected_wiki_paths
+    assert (
+        set(_git(layout.root, "show", "--no-renames", "--name-only", "--format=", "HEAD").splitlines())
+        == expected_wiki_paths
+    )
+    assert _git(layout.root, "status", "--porcelain", "--", "okf/work", "okf/adrs").splitlines() == [
+        "?? okf/adrs/scratch.txt"
     ]
 
 

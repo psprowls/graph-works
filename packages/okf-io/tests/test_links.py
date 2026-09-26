@@ -319,3 +319,17 @@ def test_the_vendored_bundles_have_no_escaping_links():
     for name in ("acme_retail", "ga4"):
         graph = links.build(bundle.load(BUNDLES / name))
         assert all(link.external or link.target is not None for link in graph.links)
+
+
+def test_footnote_markers_and_bare_prose_never_create_graph_edges(tmp_path):
+    loaded = make(
+        tmp_path,
+        {
+            "citing.md": CONCEPT
+            + "Claim.[^bare] And [^linked].\n\n[^bare]: /missing.md\n\n[^linked]: [Title](/target.md)\n",
+            "target.md": CONCEPT,
+        },
+    )
+    graph = links.build(loaded)
+    assert targets(graph) == ["target.md"]
+    assert graph.broken == ()

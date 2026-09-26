@@ -295,6 +295,14 @@ def _identifiers(
     return out
 
 
+def _resource_link(resource: str | None) -> str:
+    """Render the new untitled-source link without interpreting URI punctuation."""
+    text = str(resource)
+    label = re.sub(r"([\\`*_[\]<>&])", r"\\\1", text)
+    destination = re.sub(r"([\\()<>&])", r"\\\1", text)
+    return f"[{label}]({destination})"
+
+
 def _migrate_citations(
     document: Document,
     *,
@@ -402,7 +410,9 @@ def _migrate_citations(
     # source supports, and a mechanical guess is silent misattribution.
     newline = _edit.newline_of(body)
     definitions = tuple(
-        f"[^{identifier}]: [{title}]({resource}){newline}" if title else f"[^{identifier}]: {resource}{newline}"
+        f"[^{identifier}]: [{title}]({resource}){newline}"
+        if title
+        else f"[^{identifier}]: {_resource_link(resource)}{newline}"
         for (title, resource), identifier in zip(planned, identifiers, strict=True)
     )
 

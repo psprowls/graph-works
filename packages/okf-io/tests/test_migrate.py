@@ -388,7 +388,7 @@ def test_a_bare_url_item_emits_a_resource_with_no_title(tmp_path):
     after = only(migrate(loaded)).after
     assert "sources:\n  - resource: https://x.example/docs\n    id: https-x-example-docs\n" in after
     assert "title:" not in after.split("---")[1].split("sources:")[1]
-    assert "[^https-x-example-docs]: https://x.example/docs\n" in after
+    assert "[^https-x-example-docs]: [https://x.example/docs](https://x.example/docs)\n" in after
 
 
 def test_a_prose_item_refuses_the_whole_document(tmp_path):
@@ -551,3 +551,42 @@ def test_a_blockquoted_second_citations_heading_does_not_trigger_the_refusal(tmp
     assert result.changed
     assert result.changes[0].kind == "sources"
     assert result.unmigrated == ()
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize(
+    "resource",
+    [
+        "https://x.example/docs",
+        "https://x.example/a[b]",
+        "https://x.example/a*b_",
+        "https://x.example/a)b",
+        "https://x.example/a(b",
+        "https://x.example/?q=&copy;",
+    ],
+)
+def test_untitled_migration_emits_a_real_link_and_is_idempotent(tmp_path, newline, resource):
+    from urllib.parse import unquote
+
+    from okf_io import _md
+
+    before = (
+        "---\ntype: Reference\ntitle: T\n---\n\nKeep *this* prose.\n\n# Citations\n\n- " + resource + "\n"
+    ).replace("\n", newline)
+    loaded = make(tmp_path, {"a.md": before})
+    result = only(migrate(loaded, dry_run=False))
+    doc = Document.parse(result.after)
+    source = doc.fm.sources[0]
+    assert source.title is None
+    assert source.resource == resource
+    assert source.id == result.changes[0].ids[0]
+    assert f"Keep *this* prose.{newline}" in doc.body
+    parsed = _md.parse_body(doc.body)
+    assert [unquote(link.raw) for link in parsed.links] == [resource]
+    assert parsed.footnote_labels == {source.id}
+    # The display text must preserve punctuation instead of becoming markup.
+    inline = _md._MD.parse(doc.body)[-2]
+    assert "".join(t.content for t in inline.children if t.type == "text") == f"[^{source.id}]: {resource}"
+    if newline == "\r\n":
+        assert "\n" not in result.after.replace("\r\n", "")
+    assert migrate(bundle.load(tmp_path)) == ()

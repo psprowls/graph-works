@@ -861,3 +861,46 @@ def test_set_key_declines_every_shape_that_no_longer_matches(raw, key):
     snapshot = repr(raw)
     assert _set_key(raw, key, "old", "new") is False
     assert repr(raw) == snapshot, "a declined rewrite must leave the map untouched"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("move_citing", [False, True])
+@pytest.mark.parametrize("absolute", [False, True])
+@pytest.mark.parametrize("with_sources", [False, True])
+def test_move_preserves_bare_footnotes_and_rebases_real_links(tmp_path, newline, move_citing, absolute, with_sources):
+    old = "/old/target.md" if absolute else "target.md"
+    new = "/new/target.md" if absolute else ("target.md" if move_citing else "../new/target.md")
+    header = "---\ntype: Reference\ntitle: Citing\n"
+    sources = f"sources:\n  - id: Bare\n    resource: {old}\n" if with_sources else ""
+    body = (
+        f"Claim.[^Bare] Also [direct]({old}).\n\n"
+        f"[^Bare]: {old}\n\n"
+        f"[^Linked]: [Title]({old})\n\n"
+        f"```md\n[^example]: [Example]({old})\n```\n\n"
+        f"    [^code]: [Code]({old})\n\n"
+        f"Inline `[^code]: [Code]({old})` stays.\n"
+    )
+    before = (header + sources + "---\n\n" + body).replace("\n", newline)
+    ext_helpers.write(tmp_path / "old/target.md", "---\ntype: Reference\ntitle: Target\n---\n")
+    ext_helpers.write(tmp_path / "old/citing.md", before)
+    loaded = load_bundle(tmp_path)
+    mapping = {"old/target.md": "new/target.md"}
+    citing_dest = "new/citing.md" if move_citing else "old/citing.md"
+    if move_citing:
+        mapping["old/citing.md"] = citing_dest
+    plan = plan_move_many(loaded, mapping)
+    assert plan.ok, plan.refusals
+    assert (tmp_path / "old/target.md").exists()
+    assert (tmp_path / "old/citing.md").read_bytes() == before.encode()
+    assert not (tmp_path / "new/target.md").exists()
+    result = apply(loaded, plan)
+    assert result.ok, result.failed
+    expected = before.replace(f"resource: {old}", f"resource: {new}")
+    expected = expected.replace(f"[direct]({old})", f"[direct]({new})").replace(f"[Title]({old})", f"[Title]({new})")
+    assert (tmp_path / citing_dest).read_bytes() == expected.encode()
+    assert not (tmp_path / "old/target.md").exists()
+    if move_citing:
+        assert not (tmp_path / "old/citing.md").exists()
+    graph = build_link_graph(load_bundle(tmp_path))
+    assert graph.broken == ()
+    assert [link.target for link in graph.links] == ["new/target.md", "new/target.md"]

@@ -1003,3 +1003,19 @@ def test_a_wikilink_in_a_different_normalization_form_is_still_stranded(tmp_path
     # the RAW mapping key comes back -- what a caller must use to key the
     # mapping again, per `Bundle.member_id`'s own contract
     assert plan.stranded[0].target == f"concepts/{nfd}.md"
+
+
+@pytest.mark.parametrize("used", [False, True])
+def test_plain_reference_still_refuses_beside_a_footnote(tmp_path, used):
+    ext_helpers.write(tmp_path / "target.md", "---\ntype: Reference\ntitle: T\n---\n")
+    body = "Claim.[^s]\n\n[^s]: /target.md\n\n[MiXeD]: /target.md\n"
+    if used:
+        body += "\n[MiXeD]\n"
+    ext_helpers.write(
+        tmp_path / "citing.md",
+        "---\ntype: Reference\ntitle: C\nsources:\n  - id: s\n    resource: /target.md\n---\n" + body,
+    )
+    plan = plan_move(load_bundle(tmp_path), "target.md", "new/target.md")
+    assert not plan.ok
+    assert "reference-definition" in kinds(plan)
+    assert "unlocatable-reference" in kinds(plan) if used else "unlocatable-reference" not in kinds(plan)

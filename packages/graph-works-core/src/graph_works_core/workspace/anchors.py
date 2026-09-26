@@ -159,7 +159,9 @@ def _windows_lock_within(path: Path, timeout: float) -> Iterator[None]:
             try:
                 msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined,unused-ignore]
                 break
-            except OSError:
+            except OSError as exc:
+                if exc.errno != errno.EACCES:
+                    raise
                 if time.monotonic() >= deadline:
                     raise LockTimeout(f"bundle lock not acquired within {timeout:g}s") from None
                 time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))

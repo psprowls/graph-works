@@ -9,6 +9,7 @@ dead lines against the 95% floor.
 from __future__ import annotations
 
 import ast
+import errno
 import importlib
 import importlib.util
 import os
@@ -276,7 +277,7 @@ def test_windows_exclusive_lock_honors_requested_timeout(tmp_path: Path, monkeyp
 
     def refuse(_descriptor: int, mode: int, _length: int) -> None:
         attempts.append(mode)
-        raise OSError("held")
+        raise OSError(errno.EACCES, "lock held")
 
     monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=refuse))
     anchor = anchors.open_anchor(tmp_path, platform_name="win32")
@@ -287,6 +288,32 @@ def test_windows_exclusive_lock_honors_requested_timeout(tmp_path: Path, monkeyp
         assert 0.15 <= time.monotonic() - started < 1.0
         assert len(attempts) >= 2
         assert set(attempts) == {2}
+    finally:
+        anchor.close()
+
+
+def test_windows_exclusive_lock_propagates_non_contention_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    attempts = 0
+    invalid_descriptor = OSError(errno.EBADF, "invalid descriptor")
+
+    def fail(_descriptor: int, _mode: int, _length: int) -> None:
+        nonlocal attempts
+        attempts += 1
+        raise invalid_descriptor
+
+    def unexpected_sleep(_seconds: float) -> None:
+        pytest.fail("non-contention lock error was retried")
+
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=fail))
+    monkeypatch.setattr(anchors.time, "sleep", unexpected_sleep)
+    anchor = anchors.open_anchor(tmp_path, platform_name="win32")
+    try:
+        with pytest.raises(OSError) as caught, anchor.exclusive_lock(timeout=0.2):
+            pytest.fail("acquired an invalid lock")
+        assert caught.value is invalid_descriptor
+        assert attempts == 1
     finally:
         anchor.close()
 

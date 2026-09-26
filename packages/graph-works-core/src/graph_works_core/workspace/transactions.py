@@ -2258,14 +2258,13 @@ def _condition_scope(plan: WorkMutationPlan) -> frozenset[str]:
     pre-mutation items whose conditions can ever line up with a lookup are:
 
     - every mapping source whose destination is a validate path, and
-    - every validate path that is neither a mapping source nor destination
-      (it is its own pre-image).
+    - every validate path that is not itself a mapping source (it is its own
+      pre-image).
 
     Inverting the mapping is a handful of entries; the corpus is never scanned.
     """
     validate_paths = set(plan.validate_paths)
-    moved_paths = set(plan.path_mapping) | set(plan.path_mapping.values())
-    scope = validate_paths - moved_paths
+    scope = {path for path in validate_paths if path not in plan.path_mapping}
     scope.update(source for source, destination in plan.path_mapping.items() if destination in validate_paths)
     return frozenset(scope)
 

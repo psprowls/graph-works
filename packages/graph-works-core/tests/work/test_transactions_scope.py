@@ -181,8 +181,8 @@ def test_condition_scope_without_moves_is_the_validate_paths(a_workspace: Worksp
     assert _condition_scope(plan) == frozenset({"work/a", "work/b"})
 
 
-def test_condition_scope_maps_a_moved_validate_path_back_to_its_source(a_move_plan: WorkMutationPlan) -> None:
-    assert _condition_scope(a_move_plan) == frozenset({"work/x"})
+def test_condition_scope_keeps_both_pre_images_of_a_moved_validate_path(a_move_plan: WorkMutationPlan) -> None:
+    assert _condition_scope(a_move_plan) == frozenset({"work/x", "work/p/children/x"})
 
 
 def test_condition_scope_drops_a_validate_path_that_is_itself_moved_away(a_workspace: WorkspaceLayout) -> None:

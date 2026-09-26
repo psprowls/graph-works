@@ -283,11 +283,13 @@ def run_file(
             return FilingRun(plan=outcome.plan)
         return FilingRun(
             plan=outcome.plan,
+            # commit: Task 4/5
             application=apply_mutation(
                 layout,
                 _filing_mutation(bundle, outcome.plan),
                 repo_roots=_repo_roots(layout),
                 baseline_bundle=bundle,
+                commit=None,
             ),
         )
 
@@ -594,7 +596,10 @@ def _apply_normalizations(
                     (_planned_write(member, before, document.serialize().encode("utf-8")),),
                     validate_paths=(change.path,),
                 )
-                application = apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
+                # commit: Task 4/5
+                application = apply_mutation(
+                    layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle, commit=None
+                )
                 if application.ok:
                     normalized.append(change.path)
                 else:
@@ -1106,7 +1111,10 @@ def _regen_indexes_once(layout: WorkspaceLayout, *, dry_run: bool) -> RegenIndex
         ),
     )
     application = (
-        None if dry_run else apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
+        # commit: Task 4/5
+        None
+        if dry_run
+        else apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle, commit=None)
     )
     return RegenIndexesResult(plans=plans, mutation=mutation, application=application, marker_strips=marker_strips)
 
@@ -1148,7 +1156,9 @@ def run_reparent(
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
     return PathMutationResult(
-        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout))
+        # commit: Task 4/5
+        plan,
+        None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout), commit=None),
     )
 
 
@@ -1164,7 +1174,9 @@ def run_release_adoption(
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
     return PathMutationResult(
-        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout))
+        # commit: Task 4/5
+        plan,
+        None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout), commit=None),
     )
 
 
@@ -1255,12 +1267,14 @@ def _apply_decision(
 ) -> MutationApplication | None:
     if plan.refusal is not None:
         return None
+    # commit: Task 4/5
     return apply_mutation(
         layout,
         _decision_mutation(context, plan, ledger_before, extra_writes),
         repo_roots=_repo_roots(layout),
         baseline_bundle=context.bundle,
         allowed_new_findings=allowed_new_findings,
+        commit=None,
     )
 
 
@@ -1616,7 +1630,10 @@ def run_decision_overturn(
             _decision_mutation(context, combined.decision, ledger_before),
             _filing_mutation(context.bundle, combined.filing),
         )
-        application = apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=context.bundle)
+        # commit: Task 4/5
+        application = apply_mutation(
+            layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=context.bundle, commit=None
+        )
     return OverturnResult(
         owner=context.owner,
         plan=combined,

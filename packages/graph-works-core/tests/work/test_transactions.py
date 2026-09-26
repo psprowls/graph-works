@@ -189,7 +189,7 @@ def test_success_applies_deterministic_effects_and_records_complete_journal(tmp_
         directory_preconditions=(DirectoryPrecondition("work/destination", None),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert isinstance(result, MutationApplication)
     assert result.ok is True
@@ -229,7 +229,7 @@ def test_a_mutation_refuses_before_any_effect_lands_without_hard_link_support(
 
     plan = _plan(layout, writes=(PlannedWrite("work/destination.bin", None, b"final"),))
     with pytest.raises(ValueError, match="hard link support"):
-        apply_mutation(layout, plan)
+        apply_mutation(layout, plan, commit=None)
 
     assert _snapshot(layout.bundle_dir) == before
 
@@ -244,7 +244,7 @@ def test_real_reparent_plan_applies_through_transaction_and_reloads_final_path(t
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     destination = f"{release}/children/bug-source"
     reloaded = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
@@ -286,7 +286,7 @@ def test_mid_apply_failure_restores_every_original_entry(tmp_path: Path, monkeyp
 
     monkeypatch.setattr(transactions, "_commit_effect", fail_after_move)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -311,7 +311,7 @@ def test_delete_error_after_a_write_restores_both_targets(tmp_path: Path) -> Non
         directory_preconditions=(DirectoryPrecondition("work/delete", directory_manifest_digest(delete)),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -323,7 +323,7 @@ def test_journal_and_backups_never_land_in_bundle(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     plan = _plan(layout, mkdirs=("work/new",), directory_preconditions=(DirectoryPrecondition("work/new", None),))
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     transaction_dir = result.journal.parent
     assert result.journal.relative_to(layout.cache_dir).parts[0] == "work-mutations"
@@ -361,8 +361,8 @@ def test_executor_lock_serializes_snapshot_through_terminal_state(
         return real_snapshot(plan, *args, **kwargs)
 
     monkeypatch.setattr(transactions, "_create_snapshot", pause_first)
-    first_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, first)))
-    second_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, second)))
+    first_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, first, commit=None)))
+    second_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, second, commit=None)))
     first_thread.start()
     assert first_snapshot.wait(timeout=2)
     second_thread.start()
@@ -421,8 +421,8 @@ def test_bundle_root_lock_survives_executor_lock_inode_replacement(
         return real_snapshot(plan, *args, **kwargs)
 
     monkeypatch.setattr(transactions, "_create_snapshot", replace_lock_and_pause)
-    first_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, first)))
-    second_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, second)))
+    first_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, first, commit=None)))
+    second_thread = threading.Thread(target=lambda: results.append(apply_mutation(layout, second, commit=None)))
     first_thread.start()
     assert first_snapshot.wait(timeout=2)
     second_thread.start()
@@ -464,10 +464,10 @@ def test_bundle_root_locks_do_not_serialize_different_bundles(tmp_path: Path, mo
         return real_snapshot(plan, *args, **kwargs)
 
     monkeypatch.setattr(transactions, "_create_snapshot", pause_first)
-    first_thread = threading.Thread(target=lambda: results.append(apply_mutation(first_layout, first)))
+    first_thread = threading.Thread(target=lambda: results.append(apply_mutation(first_layout, first, commit=None)))
 
     def apply_second() -> None:
-        results.append(apply_mutation(second_layout, second))
+        results.append(apply_mutation(second_layout, second, commit=None))
         second_done.set()
 
     second_thread = threading.Thread(target=apply_second)
@@ -499,7 +499,7 @@ def test_journal_records_every_effect_target_including_absent_nested_targets(tmp
         directory_preconditions=(DirectoryPrecondition("work/destination", None),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     applying = json.loads(result.journal.read_text(encoding="utf-8").splitlines()[1])
     snapshots = {entry["member"]: entry["existed"] for entry in applying["snapshots"]}
@@ -541,7 +541,7 @@ def test_stale_directory_precondition_refuses_without_live_effects(tmp_path: Pat
         (source / "late.bin").write_bytes(b"late")
     before_apply = _snapshot(layout.bundle_dir)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -575,7 +575,7 @@ def test_directory_preconditions_use_the_exported_manifest_contract(
 
     monkeypatch.setattr(transactions, "directory_manifest_digest", record_digest)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert len(calls) == 2
@@ -594,7 +594,7 @@ def test_unsafe_symlink_escape_refuses_before_touching_bundle_or_external_target
     before = _snapshot(layout.bundle_dir)
     plan = _plan(layout, writes=(PlannedWrite("work/escape/sentinel.bin", None, b"overwritten"),))
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -629,7 +629,7 @@ def test_preconditions_are_rechecked_after_snapshot_before_first_live_effect(
 
     monkeypatch.setattr(transactions, "_create_snapshot", mutate_after_snapshot)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -646,7 +646,7 @@ def test_successful_write_preserves_the_effective_preimage_mode(tmp_path: Path) 
     target.chmod(0o640)
     plan = _plan(layout, writes=(PlannedWrite("work/page.bin", _digest(b"before"), b"after"),))
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert target.read_bytes() == b"after"
@@ -678,7 +678,7 @@ def test_distinct_source_member_supplies_final_bytes_precondition_and_mode(tmp_p
         ),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     destination = layout.bundle_dir / "work/destination/page.md"
     assert result.ok is True
@@ -694,7 +694,7 @@ def test_new_write_requires_target_absence_at_final_preflight(tmp_path: Path) ->
     plan = _plan(layout, writes=(PlannedWrite("work/new.bin", None, b"planned"),))
     target.write_bytes(b"late")
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -720,7 +720,7 @@ def test_explicit_directory_conditions_do_not_lock_unrelated_work_tree_bytes(tmp
     )
     (unrelated / "late.bin").write_bytes(b"not part of this plan")
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert (unrelated / "late.bin").read_bytes() == b"not part of this plan"
@@ -741,7 +741,7 @@ def test_absent_implicit_mkdir_ancestor_is_revalidated_without_effects(tmp_path:
     (late / "authored.bin").write_bytes(b"authored")
     before = _snapshot(layout.bundle_dir)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -778,7 +778,7 @@ def test_direct_moves_preserve_symlink_target_and_empty_directory_effects(
         ),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     destination = work / "destination"
     assert result.ok is True
@@ -826,7 +826,7 @@ def test_targeted_index_validation_failure_restores_original_index(tmp_path: Pat
         validate_paths=("work/feature-target",),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -882,7 +882,7 @@ def test_targeted_index_validation_reads_the_anchored_bundle(tmp_path: Path, mon
     monkeypatch.setattr(transactions, "plan_indexes", arm_after_planning, raising=False)
     monkeypatch.setattr(Path, "read_text", swap_only_while_reading_index)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -910,7 +910,7 @@ def test_validate_path_does_not_broaden_to_an_untouched_lane_index(tmp_path: Pat
         validate_paths=("work/feature-target",),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert page.read_bytes() == before_page + b"\nBody\n"
@@ -937,7 +937,7 @@ def test_registered_references_index_is_not_mistaken_for_a_lane_index(tmp_path: 
         validate_paths=("work/feature-target",),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert attachment.read_bytes() == b"# Repaired authored attachment\n"
@@ -954,7 +954,7 @@ def test_unrelated_malformed_item_does_not_enter_targeted_postconditions(tmp_pat
         directory_preconditions=(DirectoryPrecondition("work/new-directory", None),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert (layout.bundle_dir / "work/new-directory").is_dir()
@@ -971,7 +971,7 @@ def test_removed_lane_index_is_not_revalidated_as_a_final_index(tmp_path: Path) 
         directory_preconditions=(DirectoryPrecondition("work/removed-lane", directory_manifest_digest(removed_lane)),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert not removed_lane.exists()
@@ -993,7 +993,7 @@ def test_rollback_failure_reports_original_and_recovery_errors(tmp_path: Path, m
     monkeypatch.setattr(transactions, "_commit_effect", fail_commit)
     monkeypatch.setattr(transactions, "_restore_snapshot", fail_restore)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1015,7 +1015,7 @@ def test_snapshotting_a_read_only_file_does_not_lock_the_backup_before_fsync(tmp
     try:
         plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
 
-        result = apply_mutation(layout, plan)
+        result = apply_mutation(layout, plan, commit=None)
 
         assert result.ok is True
         assert target.read_bytes() == b"after"
@@ -1045,7 +1045,7 @@ def test_rolling_back_a_committed_read_only_write_restores_the_original_bytes(
         plan = _plan(layout, writes=(PlannedWrite("work/page.md", _digest(b"before"), b"after"),))
         monkeypatch.setattr(transactions, "_validate_postconditions", lambda *_args: ("forced validation failure",))
 
-        result = apply_mutation(layout, plan)
+        result = apply_mutation(layout, plan, commit=None)
 
         assert result.ok is False
         assert result.rolled_back is True
@@ -1063,7 +1063,7 @@ def test_deleting_a_read_only_directory_via_a_mutation_plan_clears_the_attribute
     try:
         plan = _plan(layout, deletes=("work/readonly-dir",))
 
-        result = apply_mutation(layout, plan)
+        result = apply_mutation(layout, plan, commit=None)
 
         assert result.ok is True
         assert not target.exists()
@@ -1129,7 +1129,7 @@ def test_complete_journal_failure_rolls_back_live_effects(tmp_path: Path, monkey
 
     monkeypatch.setattr(transactions, "_append_journal", fail_complete)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -1154,7 +1154,7 @@ def test_late_absent_write_target_is_never_overwritten_or_removed(
 
     monkeypatch.setattr(transactions, "_append_journal", introduce_late_target)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1182,7 +1182,7 @@ def test_late_existing_write_preimage_is_cas_refused_without_overwrite(
 
     monkeypatch.setattr(transactions, "_append_journal", replace_preimage)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1211,7 +1211,7 @@ def test_late_absent_mkdir_is_refused_without_merging_or_removing_it(
 
     monkeypatch.setattr(transactions, "_append_journal", create_directory)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1234,7 +1234,7 @@ def test_late_delete_preimage_is_refused_without_unlinking_it(tmp_path: Path, mo
 
     monkeypatch.setattr(transactions, "_append_journal", replace_preimage)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1266,7 +1266,7 @@ def test_ancestor_swap_after_final_preflight_cannot_escape_bundle(
 
     monkeypatch.setattr(transactions, "_append_journal", swap_ancestor)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert "unsafe ancestor" in result.failures[0]
@@ -1298,7 +1298,7 @@ def test_symlink_move_cannot_make_a_later_effect_traverse_its_target(
     )
     monkeypatch.setattr(transactions, "_validate_postconditions", lambda *_args: ("forced validation failure",))
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -1364,7 +1364,7 @@ def test_pre_existing_error_on_a_targeted_item_is_excused_and_reported(tmp_path:
         validate_paths=(path,),
     )
 
-    result = apply_mutation(layout, plan, repo_root=repo)
+    result = apply_mutation(layout, plan, repo_root=repo, commit=None)
 
     assert result.ok is True
     assert result.failures == ()
@@ -1410,7 +1410,7 @@ def test_targeted_malformed_yaml_is_a_postcondition_failure_and_rolls_back(tmp_p
         validate_paths=(path,),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -1432,7 +1432,7 @@ def test_targeted_schema_error_is_a_postcondition_failure_and_rolls_back(tmp_pat
         validate_paths=(path,),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -1472,7 +1472,7 @@ def test_live_file_and_directory_fsync_precede_terminal_journal_state(
     if force_rollback:
         monkeypatch.setattr(transactions, "_validate_postconditions", lambda *_args: ("forced",))
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     terminal = "rolled-back" if force_rollback else "complete"
     assert result.rolled_back is force_rollback
@@ -1498,7 +1498,7 @@ def test_real_reparent_preserves_mapped_nested_and_empty_directory_modes(tmp_pat
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     destination = layout.bundle_dir / release / "children/bug-source"
     assert result.ok is True
@@ -1532,7 +1532,7 @@ def test_mapped_directory_mode_change_after_snapshot_refuses_before_effects(
 
     monkeypatch.setattr(transactions, "_create_snapshot", chmod_after_snapshot)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1567,7 +1567,7 @@ def test_mapped_directory_mode_change_refuses_a_drift_the_platform_can_only_repr
 
     monkeypatch.setattr(transactions, "_create_snapshot", chmod_after_snapshot)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1586,7 +1586,7 @@ def test_rollback_is_not_reported_complete_when_snapshot_verification_fails(
     monkeypatch.setattr(transactions, "_validate_postconditions", lambda *_args: ("forced",))
     monkeypatch.setattr(transactions, "_restore_snapshot", lambda *_args, **_kwargs: None)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1626,7 +1626,7 @@ def test_delete_takes_custody_before_check_and_preserves_a_recreated_source(
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_entry_fingerprint_at", recreate_after_custody)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     quarantines = tuple(target.parent.glob(".delete.bin.*.quarantine"))
     assert result.ok is False
@@ -1669,7 +1669,7 @@ def test_direct_move_takes_source_custody_before_check_and_preserves_recreation(
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_entry_fingerprint_at", recreate_after_custody)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     quarantines = tuple(source.parent.glob(".source.bin.*.quarantine"))
     assert result.ok is False
@@ -1714,7 +1714,7 @@ def test_direct_move_destination_open_failure_preserves_a_recreated_source(
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_open_parent", fail_destination_parent)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     quarantines = tuple(source.parent.glob(".source.bin.*.quarantine"))
     assert result.ok is False
@@ -1758,7 +1758,7 @@ def test_direct_move_destination_open_failure_restores_custody_without_residue(
     monkeypatch.setattr(transactions, "_append_journal", arm_after_preflight)
     monkeypatch.setattr(transactions, "_open_parent", fail_destination_parent)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -1793,7 +1793,7 @@ def test_direct_move_single_conflict_does_not_claim_an_absent_destination_is_ext
 
     monkeypatch.setattr(transactions, "_rename_noreplace_at", recreate_source_after_move)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     quarantines = tuple(source.parent.glob(".source.bin.*.quarantine"))
     assert result.ok is False
@@ -1843,7 +1843,7 @@ def test_existing_write_mismatch_recovery_never_exchanges_over_a_recreated_name(
     monkeypatch.setattr(transactions, "_append_journal", replace_before_commit)
     monkeypatch.setattr(transactions, "_digest_in_directory", recreate_during_mismatch)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     quarantines = tuple(target.parent.glob(".existing.bin.*.quarantine"))
     assert result.ok is False
@@ -1906,7 +1906,7 @@ def test_validation_uses_live_root_for_absolute_internal_registered_sources(
         validate_paths=(item,),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert _normalize_link_target(registered) == actual
@@ -1924,7 +1924,7 @@ def test_unrelated_unreadable_member_is_filtered_by_live_targeted_validation(tmp
         directory_preconditions=(DirectoryPrecondition("work/new", None),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert unrelated.exists()
@@ -1943,7 +1943,7 @@ def test_targeted_invalid_utf8_is_an_unreadable_postcondition_and_rolls_back(tmp
         validate_paths=(item,),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -1975,7 +1975,7 @@ def test_cache_name_swap_after_containment_never_places_transaction_in_bundle(
     monkeypatch.setattr(transactions, "_executor_lock", swap_cache_before_lock)
 
     with pytest.raises(ValueError, match=r"cache.*changed|changed.*cache"):
-        apply_mutation(layout, plan)
+        apply_mutation(layout, plan, commit=None)
 
     assert not (escaped_cache / "work-mutations").exists()
     assert not (layout.bundle_dir / "work/new").exists()
@@ -1998,7 +1998,7 @@ def test_exact_durable_journal_history_is_terminal_even_when_append_raises_after
 
     monkeypatch.setattr(transactions, "_append_journal", raise_after_persist)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert target.read_bytes() == b"after"
@@ -2146,7 +2146,7 @@ def test_corrupt_prior_journal_history_never_certifies_terminal_completion(
 
     monkeypatch.setattr(transactions, "_append_journal", persist_corrupt_history)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -2217,7 +2217,7 @@ def test_absolute_internal_symlink_moves_byte_for_byte_while_external_still_refu
         directory_preconditions=(DirectoryPrecondition("work/destination", None),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     moved = destination / "link.bin"
     assert result.ok is True
@@ -2240,7 +2240,7 @@ def test_absolute_external_symlink_move_is_refused_before_live_effects(tmp_path:
         directory_preconditions=(DirectoryPrecondition("work/destination", None),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -2284,7 +2284,7 @@ def test_root_name_loss_after_validation_prevents_a_truthy_rollback(
 
     monkeypatch.setattr(transactions, "_validate_postconditions", replace_root_name)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -2309,7 +2309,7 @@ def test_transaction_validation_survives_an_unrelated_tree_beyond_recursion_limi
     previous_limit = sys.getrecursionlimit()
     try:
         sys.setrecursionlimit(250)
-        result = apply_mutation(layout, plan)
+        result = apply_mutation(layout, plan, commit=None)
     finally:
         sys.setrecursionlimit(previous_limit)
 
@@ -2342,7 +2342,7 @@ def test_post_preflight_empty_directory_replacement_is_not_deleted(
 
     monkeypatch.setattr(transactions, "_append_journal", replace_empty_directory)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     current = target.stat()
     assert result.ok is False
@@ -2378,7 +2378,7 @@ def test_direct_move_double_conflict_preserves_source_quarantine_and_destination
 
     monkeypatch.setattr(transactions, "_rename_noreplace_at", recreate_both_vacated_names)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     quarantines = tuple(source.parent.glob(".source.bin.*.quarantine"))
     assert result.ok is False
@@ -2429,7 +2429,7 @@ def test_validation_reads_anchored_root_when_configured_name_swaps_during_load(
 
     monkeypatch.setattr(transactions, "_load_bundle_through", swap_only_while_loading)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -2477,7 +2477,7 @@ def test_executor_lock_name_swap_never_redirects_lock_io_into_bundle(
     monkeypatch.setattr(fcntl, "flock", swap_after_lock)
 
     with pytest.raises(ValueError, match=r"lock.*changed|changed.*lock"):
-        apply_mutation(layout, _plan(layout))
+        apply_mutation(layout, _plan(layout), commit=None)
 
     assert not escaped.exists()
     assert held_lock.is_file()
@@ -2515,7 +2515,7 @@ def test_journal_name_swap_never_redirects_journal_io_into_bundle(
 
     monkeypatch.setattr(transactions, "_append_journal", swap_before_applying)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -2569,7 +2569,7 @@ def test_forged_complete_record_never_certifies_success(
 
     monkeypatch.setattr(transactions, "_append_journal", persist_forgery)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -2613,7 +2613,7 @@ def test_duplicate_journal_keys_never_certify_terminal_completion(
 
     monkeypatch.setattr(transactions, "_append_journal", persist_duplicate)
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -2653,7 +2653,7 @@ def test_relative_moved_symlink_projection_follows_destination_ancestor_links(
         ),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     moved = destination_dir / "link.bin"
     if target_location == "internal":
@@ -2700,7 +2700,7 @@ def test_work_mutations_open_failure_does_not_leak_cache_descriptor(
     monkeypatch.setattr(transactions, "_open_or_create_directory", fail_work_mutations)
 
     with pytest.raises(OSError, match="injected work-mutations open failure"):
-        apply_mutation(layout, _plan(layout))
+        apply_mutation(layout, _plan(layout), commit=None)
 
     after = len(tuple(descriptor_directory.iterdir()))
     assert after == before
@@ -3218,7 +3218,7 @@ def test_pre_existing_error_survives_a_real_move_and_is_excused_at_its_new_path(
     bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
     plan = plan_reparent(bundle, load_items(bundle), source, release)
 
-    result = apply_mutation(layout, plan, repo_root=repo)
+    result = apply_mutation(layout, plan, repo_root=repo, commit=None)
 
     destination = f"{release}/children/bug-source"
     assert result.ok is True
@@ -3246,7 +3246,7 @@ def test_a_second_failure_of_the_same_code_on_the_same_page_still_fails(tmp_path
         validate_paths=(path,),
     )
 
-    result = apply_mutation(layout, plan, repo_root=repo)
+    result = apply_mutation(layout, plan, repo_root=repo, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -3277,7 +3277,7 @@ def test_pre_existing_dangling_dependency_is_excused_by_the_structural_half(tmp_
         validate_paths=(path,),
     )
 
-    result = apply_mutation(layout, plan, repo_root=repo)
+    result = apply_mutation(layout, plan, repo_root=repo, commit=None)
 
     assert result.ok is True
     assert result.failures == ()
@@ -3312,7 +3312,7 @@ def test_a_new_dangling_dependency_added_on_top_of_a_pre_existing_one_still_fail
         validate_paths=(path,),
     )
 
-    result = apply_mutation(layout, plan, repo_root=repo)
+    result = apply_mutation(layout, plan, repo_root=repo, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is True
@@ -3352,7 +3352,7 @@ def test_preflight_refuses_offending_members_staged_inside_a_validated_directory
         validate_paths=(item,),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is False
     assert result.rolled_back is False
@@ -3412,7 +3412,7 @@ def _apply_simple_mutation(layout: WorkspaceLayout, index: int) -> MutationAppli
     """
     member = f"work/retention-{index:04d}"
     plan = _plan(layout, mkdirs=(member,), directory_preconditions=(DirectoryPrecondition(member, None),))
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
     assert result.ok is True
     return result
 
@@ -3478,7 +3478,7 @@ def test_prune_removes_a_rolled_back_transaction(tmp_path: Path) -> None:
 
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(transactions, "_commit_effect", fail_second_effect)
-        rolled_back = apply_mutation(layout, plan)
+        rolled_back = apply_mutation(layout, plan, commit=None)
     assert rolled_back.ok is False
     assert rolled_back.rolled_back is True
     rolled_back_dir = rolled_back.journal.parent
@@ -3524,7 +3524,7 @@ def test_prune_failure_never_fails_the_committing_mutation(tmp_path: Path, monke
         directory_preconditions=(DirectoryPrecondition("work/prune-failure-target", None),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     assert (layout.bundle_dir / "work/prune-failure-target").is_dir()
@@ -3544,7 +3544,7 @@ def test_preflight_scratch_does_not_survive_its_transaction(tmp_path: Path) -> N
         directory_preconditions=(DirectoryPrecondition("work/source", directory_manifest_digest(source)),),
     )
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert result.ok is True
     transaction_dir = result.journal.parent
@@ -3568,7 +3568,7 @@ def test_failed_mapped_mode_change_preserves_unowned_destination(tmp_path, monke
     plan = _plan(layout, mkdirs=("work/destination",), path_mapping={"work/source": "work/destination"})
     monkeypatch.setattr(transactions, "_validate_postconditions", lambda *args, **kwargs: ("injected failure",))
 
-    result = apply_mutation(layout, plan)
+    result = apply_mutation(layout, plan, commit=None)
 
     assert not result.ok
     assert not result.rolled_back

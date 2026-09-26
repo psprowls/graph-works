@@ -181,7 +181,7 @@ def test_a_pre_existing_error_on_a_moved_document_is_excused_not_reported(
     """Design Verification 3. The child page carries a validation error before
     the mutation; reparenting it must excuse that error, not roll back."""
     layout, plan = workspace_with_a_broken_child
-    application = apply_mutation(layout, plan)
+    application = apply_mutation(layout, plan, commit=None)
     assert application.ok, application.failures
     assert not application.rolled_back
     assert any("pre-existing, not caused by this operation" in note for note in application.warnings)
@@ -213,7 +213,7 @@ def test_a_supplied_baseline_bundle_feeds_the_findings_half_but_not_the_conditio
     monkeypatch.setattr(transactions, "validate", recording_validate)
     layout = a_workspace
     reused = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    transactions.apply_mutation(layout, a_write_plan, baseline_bundle=reused)
+    transactions.apply_mutation(layout, a_write_plan, baseline_bundle=reused, commit=None)
 
     assert len(seen_bundles) == 2, "one validate() call for the baseline findings half, one for the postcondition pass"
     findings_half_bundle, postcondition_bundle = seen_bundles
@@ -238,13 +238,13 @@ def test_without_a_supplied_bundle_both_passes_still_load(monkeypatch, a_workspa
         return real(root, path, ignore=ignore)
 
     monkeypatch.setattr(transactions, "_load_bundle_through", counted)
-    transactions.apply_mutation(a_workspace, a_write_plan)
+    transactions.apply_mutation(a_workspace, a_write_plan, commit=None)
     assert len(loads) == 2
 
 
 def test_a_reused_bundle_produces_the_same_gate_outcome(a_workspace, a_write_plan):
     reused = load_bundle(a_workspace.bundle_dir, ignore=IGNORE)
-    with_reuse = apply_mutation(a_workspace, a_write_plan, baseline_bundle=reused)
+    with_reuse = apply_mutation(a_workspace, a_write_plan, baseline_bundle=reused, commit=None)
     assert with_reuse.ok, with_reuse.failures
 
 
@@ -330,7 +330,7 @@ def test_a_wholly_empty_plan_opens_the_lock_but_no_transaction_directory(
         return {entry for entry in transaction_root.glob("*") if entry.is_dir()}
 
     before = transaction_directories()
-    application = apply_mutation(a_workspace, an_empty_plan)
+    application = apply_mutation(a_workspace, an_empty_plan, commit=None)
     after = transaction_directories()
     assert after == before
     assert application.ok
@@ -348,7 +348,7 @@ def test_a_wholly_empty_plan_runs_no_validation(
         "validate",
         lambda *a, **k: pytest.fail("empty plan must not validate"),
     )
-    assert apply_mutation(a_workspace, an_empty_plan).ok
+    assert apply_mutation(a_workspace, an_empty_plan, commit=None).ok
 
 
 def test_a_plan_with_only_directory_preconditions_is_not_short_circuited(
@@ -366,5 +366,5 @@ def test_a_plan_with_only_directory_preconditions_is_not_short_circuited(
     would pass even if `directory_preconditions` were dropped from
     `_is_wholly_empty` entirely -- it wouldn't actually guard the property
     this test claims to."""
-    application = apply_mutation(a_workspace, an_empty_plan_with_directory_preconditions)
+    application = apply_mutation(a_workspace, an_empty_plan_with_directory_preconditions, commit=None)
     assert application.transaction_id != EMPTY_TRANSACTION_ID, "a plan carrying preconditions must open a transaction"

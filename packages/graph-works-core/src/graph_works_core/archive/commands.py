@@ -232,7 +232,8 @@ def run_archive(
 
     # `bundle` (line 166) was loaded with a wider ignore set than IGNORE
     # (ARCHIVE_IGNORE + WIKI_ARCHIVE_IGNORE) -- not eligible as baseline_bundle.
-    result = apply_mutation(layout, plan, repo_roots=resolve_repos(layout))
+    # commit: Task 4/5
+    result = apply_mutation(layout, plan, repo_roots=resolve_repos(layout), commit=None)
     if not result.ok:
         return ArchiveRun(plan=plan, wiki_plan=wiki_plan, result=result, logged=logged)
 

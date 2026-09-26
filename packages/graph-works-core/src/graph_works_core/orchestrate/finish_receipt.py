@@ -128,12 +128,14 @@ def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, tod
             ):
                 raise WorkspaceError("finish owner, receipt, configuration or Git evidence changed; inspect and retry")
 
+        # commit: Task 4/5
         application = apply_mutation(
             layout,
             mutation,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
             validate_read_set=validate,
+            commit=None,
         )
         if not application.ok:
             return FinishReceiptResult(f"finish receipt transaction refused: {application}", False, ref.rel)

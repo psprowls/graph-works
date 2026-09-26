@@ -179,6 +179,7 @@ def run_record_placement(
             if expected_preparation is not None and preparation_guard(layout, path) != expected_preparation:
                 raise WorkspaceError(f"{path}: preparation changed; replan before recording")
 
+        # commit: Task 4/5
         application = apply_mutation(
             layout,
             _mutation(context.bundle, plan),
@@ -186,6 +187,7 @@ def run_record_placement(
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
             validate_read_set=validate_preparation if expected_preparation is not None else None,
+            commit=None,
         )
         return PlacementRecord(plan=plan, application=application, repo_note=own.note)
 

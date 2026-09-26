@@ -221,6 +221,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
         validate_read_set=None,
+        commit=None,
     ) -> transactions.MutationApplication:
         page.write_bytes(external_edit)
         return original(
@@ -231,6 +232,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
             validate_read_set=validate_read_set,
+            commit=commit,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", edited_out_of_band)
@@ -287,6 +289,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
         validate_read_set=None,
+        commit=None,
     ) -> transactions.MutationApplication:
         assert baseline_bundle is not None
         document = baseline_bundle.concepts[CHILD]
@@ -299,6 +302,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
             validate_read_set=validate_read_set,
+            commit=commit,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", check_baseline)
@@ -676,6 +680,7 @@ def test_live_placement_uses_repository_tag_read_under_lock(tmp_path: Path, monk
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
         validate_read_set: Callable[[], None] | None = None,
+        commit=None,
     ) -> transactions.MutationApplication:
         observed.append(repo_root)
         return original_apply(
@@ -686,6 +691,7 @@ def test_live_placement_uses_repository_tag_read_under_lock(tmp_path: Path, monk
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
             validate_read_set=validate_read_set,
+            commit=commit,
         )
 
     monkeypatch.setattr(placement, "locked_decision_owner", retag_before_lock)

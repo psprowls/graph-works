@@ -475,6 +475,7 @@ def _advance(
         ):
             raise WorkspaceError("finish evidence changed; inspect and retry before advancing")
 
+    # commit: Task 4/5
     application = apply_mutation(
         layout,
         mutation,
@@ -482,6 +483,7 @@ def _advance(
         repo_roots=declared,
         baseline_bundle=bundle,
         validate_read_set=validate_finish if finish_guard is not None else None,
+        commit=None,
     )
     if application.ok:
         outcome = replace(outcome, written=True)

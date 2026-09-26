@@ -339,7 +339,7 @@ def test_preflight_refuses_before_any_effect_lands(tmp_path: Path) -> None:
     (layout.bundle_dir / "work" / "linked.md").symlink_to(layout.bundle_dir / "index.md")
     before = _snapshot(layout.bundle_dir)
     with _forced_tier("win32"):
-        result = transactions.apply_mutation(layout, _plan(layout, deletes=("work/linked.md",)))
+        result = transactions.apply_mutation(layout, _plan(layout, deletes=("work/linked.md",)), commit=None)
     assert not result.ok
     assert not result.rolled_back  # nothing was touched, so nothing was rolled back
     after = _snapshot(layout.bundle_dir)

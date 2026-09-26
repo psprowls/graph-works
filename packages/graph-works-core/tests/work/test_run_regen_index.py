@@ -7,6 +7,7 @@ import re
 from datetime import date
 
 import pytest
+from _transaction_helpers import _init_git, assert_workspace_commit
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.transactions import STALE_INVENTORY_DETAIL, MutationApplication
@@ -74,6 +75,16 @@ def test_a_real_run_writes_a_missing_index(tmp_path):
     index_path = layout.bundle_dir / "work" / "index.md"
     assert index_path.is_file()
     assert "2026-08-01-feature-a" in index_path.read_text(encoding="utf-8")
+
+
+def test_regen_indexes_commits_its_work_indexes(tmp_path):
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Work")).layout
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work/feature-a.md").write_text(_ITEM.format(slug="feature-a"), encoding="utf-8")
+    _init_git(layout.root)
+    result = work.run_regen_indexes(layout, dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert_workspace_commit(layout.root, "workspace: regenerate work indexes")
 
 
 def test_run_regen_indexes_returns_every_required_lane(tmp_path):

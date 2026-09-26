@@ -10,9 +10,12 @@ from types import SimpleNamespace
 
 import graph_works_core
 import pytest
+from _transaction_helpers import _git, _init_git
 from graph_works_core import apply_init, plan_init
 from graph_works_core.archive import commands as archive
 from graph_works_core.workspace import provenance
+from graph_works_core.workspace.commits import CommitOutcome
+from graph_works_core.workspace.errors import WorkspaceError
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.moves import Stranded
 
@@ -233,6 +236,72 @@ def test_wiki_archive_starts_only_after_successful_work_transaction(tmp_path: Pa
     assert (layout.bundle_dir / "adrs/_archive/example.md").is_file()
 
 
+def test_mixed_archive_commits_work_then_wiki(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Archive")).layout
+    _write(layout, DONE, work_status="resolved", phase="done")
+    wiki = layout.bundle_dir / "adrs/example.md"
+    wiki.parent.mkdir(parents=True)
+    wiki.write_text("---\ntitle: Example\ndescription: d\nstatus: stable\n---\n", encoding="utf-8")
+    _init_git(layout.root)
+    result = archive.run_archive(
+        layout,
+        paths=(DONE,),
+        wiki_slugs=("adrs/example",),
+        today=TODAY,
+        dry_run=False,
+    )
+    assert result.result is not None and result.result.ok
+    assert result.wiki is not None and result.wiki.ok
+    assert result.wiki_commit is not None and result.wiki_commit.status == "committed"
+    assert _git(layout.root, "log", "-2", "--format=%s").splitlines() == [
+        "workspace: archive wiki adrs/example",
+        "workspace: archive feature-done",
+    ]
+    assert _git(layout.root, "log", "-2", "--format=%b").strip() == ""
+    assert _git(layout.root, "status", "--porcelain", "--", "okf/work") == ""
+    assert _git(layout.root, "status", "--porcelain", "--", "okf/adrs").splitlines() == [
+        "?? okf/adrs/_archive/index.md",
+        "?? okf/adrs/index.md",
+    ]
+
+
+def test_mixed_archive_rejects_invalid_commit_config_before_either_apply(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Archive")).layout
+    _write(layout, DONE, work_status="resolved", phase="done")
+    wiki = layout.bundle_dir / "adrs/example.md"
+    wiki.parent.mkdir(parents=True)
+    wiki.write_text("---\ntitle: Example\ndescription: d\nstatus: stable\n---\n", encoding="utf-8")
+    before = _snapshot(layout.bundle_dir)
+    manifest = layout.manifest_path
+    original = manifest.read_text(encoding="utf-8")
+    assert "  dispatch_rules: dispatch.yaml\n" in original
+    manifest.write_text(
+        original.replace(
+            "  dispatch_rules: dispatch.yaml\n",
+            "  dispatch_rules: dispatch.yaml\n  workspace_commits: invalid\n",
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+    with pytest.raises(WorkspaceError, match="workspace_commits"):
+        archive.run_archive(layout, paths=(DONE,), wiki_slugs=("adrs/example",), today=TODAY, dry_run=False)
+    assert _snapshot(layout.bundle_dir) == before
+
+
+def test_wiki_commit_failure_is_reported_without_undoing_archive(tmp_path: Path, monkeypatch) -> None:
+    layout = _wiki_workspace(tmp_path, log_links_page=False)
+    monkeypatch.setattr(
+        archive,
+        "commit_pending",
+        lambda _layout, commit: CommitOutcome("failed", None, commit.subject, (), "hook refused"),
+    )
+    run = archive.run_archive(layout, (), ["sources/one"], today=TODAY, dry_run=False)
+    assert run.wiki is not None and run.wiki.ok
+    assert run.wiki_commit is not None and run.wiki_commit.status == "failed"
+    assert "workspace commit failed: hook refused" in archive.stranded_warnings(run)
+    assert (layout.bundle_dir / "sources/_archive/one.md").is_file()
+
+
 def test_cross_lane_touched_member_conflict_blocks_both_plans(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     wiki = layout.bundle_dir / "adrs/example.md"
@@ -264,6 +333,7 @@ def test_archive_stranded_warnings_are_projected_by_core() -> None:
     run = SimpleNamespace(
         plan=SimpleNamespace(move_plan=SimpleNamespace(stranded=(work,))),
         wiki_plan=SimpleNamespace(moves=SimpleNamespace(stranded=(wiki,))),
+        wiki_commit=None,
     )
 
     warnings = archive.stranded_warnings(run)

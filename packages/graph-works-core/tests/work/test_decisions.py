@@ -10,6 +10,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from _transaction_helpers import _init_git, assert_workspace_commit
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
@@ -490,6 +491,76 @@ def test_overturn_applies_decision_and_follow_up_in_one_journal(tmp_path: Path) 
     assert result.application.mutation.journal.is_file()
     assert (layout.bundle_dir / "work/tech-debt-repair-original-choice.md").is_file()
     assert [entry.status for entry in work.run_decision_list(layout, OWNER).entries] == ["superseded", "answered"]
+
+
+def test_each_decision_verb_commits_its_own_subject(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Decisions")).layout
+    _write(layout, "work/feature-a", "Feature")
+    _init_git(layout.root)
+    added = work.run_decision_add(
+        layout,
+        "work/feature-a",
+        question="Ship?",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert added.application is not None and added.application.ok
+    assert_workspace_commit(layout.root, "workspace: add feature-a decision D-001")
+    answered = work.run_decision_answer(
+        layout,
+        "work/feature-a",
+        "D-001",
+        answer="yes",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert answered.application is not None and answered.application.ok
+    assert_workspace_commit(layout.root, "workspace: answer feature-a decision D-001")
+    superseded = work.run_decision_supersede(
+        layout,
+        "work/feature-a",
+        "D-001",
+        question="Reconsider?",
+        answer="no",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert superseded.application is not None and superseded.application.ok
+    assert_workspace_commit(layout.root, "workspace: supersede feature-a decision D-001")
+
+
+def test_overturn_commits_decision_and_follow_up(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Decisions")).layout
+    _write(layout, "work/feature-a", "Feature")
+    _init_git(layout.root)
+    initial = work.run_decision_add(
+        layout,
+        "work/feature-a",
+        question="Original?",
+        status="answered",
+        answer="yes",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert initial.application is not None and initial.application.ok
+    result = work.run_decision_overturn(
+        layout,
+        _config(layout),
+        "work/feature-a",
+        "D-001",
+        answer="no",
+        rationale="new evidence",
+        follow_up_title="Repair original choice",
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert result.application.mutation is not None and result.application.mutation.ok
+    assert_workspace_commit(layout.root, "workspace: overturn feature-a decision D-001")
 
 
 def test_overturn_refuses_a_follow_up_target_created_after_planning(tmp_path: Path, monkeypatch) -> None:

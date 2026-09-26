@@ -6,6 +6,7 @@ import json
 from datetime import date
 
 import pytest
+from _transaction_helpers import _init_git, assert_workspace_commit
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
@@ -111,6 +112,24 @@ def test_run_file_apply_matches_its_plan(tmp_path) -> None:
     assert real.plan == dry.plan
     assert real.application is not None and real.application.ok
     assert real.plan.filing.target.is_file()
+
+
+def test_run_file_commits_its_work_and_parent_references(tmp_path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Work")).layout
+    _init_git(layout.root)
+    result = work.run_file(
+        layout,
+        _config(layout),
+        type="Feature",
+        title="New child",
+        description="d",
+        parent_path=None,
+        on=TODAY,
+        dry_run=False,
+    )
+    assert result.application is not None and result.application.ok
+    assert result.application.commit is not None and result.application.commit.status == "committed"
+    assert_workspace_commit(layout.root, "workspace: file feature-new-child")
 
 
 def test_run_file_refuses_a_target_created_after_domain_planning(tmp_path, monkeypatch) -> None:

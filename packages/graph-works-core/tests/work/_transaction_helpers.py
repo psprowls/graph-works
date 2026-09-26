@@ -155,3 +155,10 @@ def _init_git(root: Path, *, commit: bool = True) -> Path:
         _git(root, "add", "-A")
         _git(root, "commit", "-q", "--allow-empty", "-m", "workspace: seed")
     return root
+
+
+def assert_workspace_commit(root: Path, subject: str) -> None:
+    """One exact subject, no body, and no uncommitted work-lane changes."""
+    assert _git(root, "log", "-1", "--format=%s").strip() == subject
+    assert _git(root, "log", "-1", "--format=%b").strip() == ""
+    assert _git(root, "status", "--porcelain", "--", "okf/work") == ""

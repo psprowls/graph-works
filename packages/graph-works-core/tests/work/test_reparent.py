@@ -6,6 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+from _transaction_helpers import _init_git, assert_workspace_commit
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
 
@@ -60,6 +61,26 @@ def test_release_adoption_is_singular_and_source_first(tmp_path: Path) -> None:
     _write(layout, "work/epic-a", type="Epic")
     result = work.run_release_adoption(layout, "work/epic-a", "work/release-v1")
     assert result.plan.path_mapping == {"work/epic-a": "work/release-v1/children/epic-a"}
+
+
+def test_reparent_commits_moved_work_item(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Paths")).layout
+    _write(layout, "work/epic-a", type="Epic")
+    _write(layout, "work/feature-b")
+    _init_git(layout.root)
+    result = work.run_reparent(layout, "work/feature-b", "work/epic-a", dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert_workspace_commit(layout.root, "workspace: reparent feature-b under epic-a")
+
+
+def test_release_adoption_commits_moved_work_item(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Paths")).layout
+    _write(layout, "work/release-v1", type="Release")
+    _write(layout, "work/epic-a", type="Epic")
+    _init_git(layout.root)
+    result = work.run_release_adoption(layout, "work/epic-a", "work/release-v1", dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert_workspace_commit(layout.root, "workspace: adopt children into release-v1")
 
 
 def test_refused_path_mutation_never_invokes_executor(tmp_path: Path) -> None:

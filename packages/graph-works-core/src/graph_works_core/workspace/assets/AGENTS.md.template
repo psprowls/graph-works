@@ -273,8 +273,10 @@ under the workspace lock, with a single-line `workspace:` subject. Whether they 
 `workflow.workspace_commits`: `auto` (the default: only when this workspace is its own git
 repository), `on`, or `off`.
 
-Never `git commit`, `git add -A`, or `git commit -a` in this workspace's `main` checkout
-during a pipeline stage — that would sweep in another session's in-flight files.
+Never use `git add -A` or `git commit -a` in this workspace's `main` checkout.
+Never run `git commit` there during a pipeline stage, except for the pathspec-only commits
+below for writes no gw verb owns. Never manually commit gw-owned writes; a broad commit
+could sweep in another session's in-flight files.
 
 For writes no gw verb commits (scan, ingest, page edits, hand edits to work items), commit
 **only the paths you changed, by pathspec** (`git add -- <paths>` then

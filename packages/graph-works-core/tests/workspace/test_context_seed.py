@@ -88,10 +88,12 @@ def test_the_body_teaches_single_line_workspace_commit_subjects():
 
 
 def test_the_body_teaches_gw_commit_authority_and_pathspec_hand_edits():
-    text = _render()
+    text = " ".join(_render().split())
     assert "gw verbs commit their own workspace writes" in text
     assert "workflow.workspace_commits" in text
-    assert "Never `git commit`, `git add -A`, or `git commit -a`" in text
+    assert "Never use `git add -A` or `git commit -a`" in text
+    assert "except for the pathspec-only commits below for writes no gw verb owns" in text
+    assert "Never manually commit gw-owned writes" in text
     assert "no trailers" in text
 
 

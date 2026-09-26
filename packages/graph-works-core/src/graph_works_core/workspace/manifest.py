@@ -221,6 +221,16 @@ CATALOG: tuple[ConfigEntry, ...] = (
         ),
     ),
     ConfigEntry(
+        key="workflow.workspace_commits",
+        type="str",
+        default="auto",
+        description=(
+            "Whether gw verbs commit their own workspace writes: `auto` (only when the workspace is "
+            "its own git repository), `on` (in any enclosing repository, on its checked-out branch) "
+            "or `off`."
+        ),
+    ),
+    ConfigEntry(
         key="workspace.dir",
         type="str",
         default=None,

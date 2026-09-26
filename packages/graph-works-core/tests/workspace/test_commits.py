@@ -160,6 +160,21 @@ def test_foreign_staged_file_stays_staged_and_uncommitted(tmp_path: Path) -> Non
     assert "A  notes.txt" in _status(layout.root)
 
 
+def test_first_commit_in_unborn_repo_keeps_foreign_staged_file(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _init_git(layout.root, commit=False)
+    _write(layout.root, "notes.txt", "human\n")
+    _git(layout.root, "add", "notes.txt")
+    _write(layout.bundle_dir, "work/a.md", "a\n")
+
+    outcome = commit_workspace(layout, WorkspaceCommit("workspace: first"), ("work/a.md",))
+
+    assert outcome.status == "committed", outcome
+    assert outcome.sha == _git(layout.root, "rev-parse", "HEAD").strip()
+    assert _files_in_head(layout.root) == {"okf/work/a.md"}
+    assert "A  notes.txt" in _status(layout.root)
+
+
 def test_foreign_dirty_file_untouched(tmp_path: Path) -> None:
     layout = _own_repo(tmp_path)
     _write(layout.bundle_dir, "concepts/x.md", "dirty\n")
@@ -293,17 +308,18 @@ def test_literal_pathspec_does_not_include_pattern_match(tmp_path: Path) -> None
     assert "a1.md" in _status(layout.root)
 
 
-def test_path_discovery_git_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize("command", ["ls-files", "ls-tree"])
+def test_path_discovery_git_failure_is_reported(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, command: str) -> None:
     layout = _own_repo(tmp_path)
     _write(layout.bundle_dir, "work/a.md", "a\n")
     original = commits.probe_git
 
-    def fail_ls_files(cwd: Path, *args: str, **kwargs: object) -> GitOutcome:
-        if "ls-files" in args:
+    def fail_discovery(cwd: Path, *args: str, **kwargs: object) -> GitOutcome:
+        if command in args:
             return GitOutcome(128, "", "ok", "discovery failed")
         return original(cwd, *args, **kwargs)
 
-    monkeypatch.setattr(commits, "probe_git", fail_ls_files)
+    monkeypatch.setattr(commits, "probe_git", fail_discovery)
     outcome = commit_workspace(layout, WorkspaceCommit("workspace: t"), ("work/a.md",))
     assert (outcome.status, outcome.reason) == ("failed", "discovery failed")
     assert _log(layout.root) == ["workspace: seed"]

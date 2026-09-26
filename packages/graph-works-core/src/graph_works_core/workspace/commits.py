@@ -138,11 +138,21 @@ def _pathspec(toplevel: Path, candidates: Sequence[str]) -> tuple[tuple[str, ...
     tracked = _git(toplevel, "ls-files", "-z", "--", *candidates)
     if tracked.returncode != 0:
         return (), (), _reason(tracked)
-    in_head = _git(toplevel, "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *candidates)
-    if in_head.returncode != 0:
-        return (), (), _reason(in_head)
+    # An unborn branch has a symbolic HEAD but no branch ref. Skip ls-tree
+    # only in that state; any actual ls-tree failure must reach the caller.
+    head_ref = _git(toplevel, "symbolic-ref", "-q", "HEAD")
+    unborn = False
+    if head_ref.returncode == 0 and head_ref.stdout.strip():
+        ref = _git(toplevel, "show-ref", "--verify", "--quiet", head_ref.stdout.strip())
+        unborn = ref.returncode == 1
+    if unborn:
+        head: list[str] = []
+    else:
+        in_head = _git(toplevel, "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *candidates)
+        if in_head.returncode != 0:
+            return (), (), _reason(in_head)
+        head = [entry for entry in in_head.stdout.split("\0") if entry]
     known = [entry for entry in tracked.stdout.split("\0") if entry]
-    head = [entry for entry in in_head.stdout.split("\0") if entry]
     add_paths = tuple(
         candidate
         for candidate in candidates

@@ -20,6 +20,7 @@ from graph_works_core.workspace.errors import WorkspaceError
 
 from graph_works_cli import exit_codes
 from graph_works_cli.agent_config_cli.rendering import render
+from graph_works_cli.errors import exit_error
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 agent_config_app = typer.Typer(
@@ -80,6 +81,5 @@ def show(
                 user_id=user_id,
             )
     except WorkspaceError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(code=exit_codes.SCHEMA_MISMATCH) from exc
+        exit_error(str(exc), code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     typer.echo(render(report, json_output=json_output))

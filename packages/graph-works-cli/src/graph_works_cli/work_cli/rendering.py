@@ -24,6 +24,7 @@ from graph_works_core.work.commands import NextResult
 from graph_works_wire.errors import REASONS, error_envelope
 
 from graph_works_cli import exit_codes
+from graph_works_cli.errors import exit_error
 from graph_works_cli.json_output import encode
 
 # ---------------------------------------------------------------------------
@@ -109,10 +110,7 @@ def fail(
     assert mode is not None, "gw work command reached fail() without declaring --json via json_option()"
     if mode:
         emit(_envelope(reason=reason, message=message, code=code, payload=payload))
-    typer.echo(f"Error: {message}", err=True)
-    if cause is None:
-        raise typer.Exit(code=code)
-    raise typer.Exit(code=code) from cause
+    exit_error(message, code=code, cause=cause)
 
 
 def warn(message: str) -> None:

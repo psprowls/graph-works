@@ -14,6 +14,7 @@ from _transaction_helpers import _init_git, assert_workspace_commit
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
+from graph_works_core.workspace.errors import WorkspaceError
 from okf_io import load
 
 TODAY = date(2026, 8, 23)
@@ -56,6 +57,72 @@ def _config(layout) -> Config:
         repos=(),
         state_gate=StateGateConfig(enabled=False, branches=("main",)),
     )
+
+
+@pytest.mark.parametrize("verb", ("add", "answer", "supersede", "overturn"))
+def test_invalid_commit_config_precedes_decision_owner_lock(tmp_path: Path, verb: str) -> None:
+    layout = _workspace(tmp_path)
+    initial = work.run_decision_add(
+        layout,
+        OWNER,
+        question="Original?",
+        status="answered" if verb == "overturn" else "open",
+        answer="yes" if verb == "overturn" else None,
+        on=TODAY,
+        decided_by="pat",
+        dry_run=False,
+    )
+    assert initial.application is not None and initial.application.ok
+    lock = layout.cache_dir / "decisions" / f"{hashlib.sha256(OWNER.encode()).hexdigest()}.lock"
+    lock.unlink()
+    lock.parent.rmdir()
+    before = {
+        path.relative_to(layout.bundle_dir): path.read_bytes()
+        for path in layout.bundle_dir.rglob("*")
+        if path.is_file()
+    }
+    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
+
+    def call(*, dry_run: bool):
+        if verb == "add":
+            return work.run_decision_add(layout, OWNER, question="Next?", on=TODAY, decided_by="pat", dry_run=dry_run)
+        if verb == "answer":
+            return work.run_decision_answer(
+                layout, OWNER, "D-001", answer="no", on=TODAY, decided_by="pat", dry_run=dry_run
+            )
+        if verb == "supersede":
+            return work.run_decision_supersede(
+                layout, OWNER, "D-001", question="Next?", answer="no", on=TODAY, decided_by="pat", dry_run=dry_run
+            )
+        return work.run_decision_overturn(
+            layout,
+            _config(layout),
+            OWNER,
+            "D-001",
+            answer="no",
+            rationale=None,
+            follow_up_title="Next choice",
+            on=TODAY,
+            decided_by="pat",
+            dry_run=dry_run,
+        )
+
+    preview = call(dry_run=True)
+    if verb == "overturn":
+        assert preview.application.mutation is None
+    else:
+        assert preview.application is None
+    assert not lock.parent.exists()
+    with pytest.raises(WorkspaceError, match=r"workflow\.workspace_commits"):
+        call(dry_run=False)
+    assert not lock.exists()
+    assert not lock.parent.exists()
+    after = {
+        path.relative_to(layout.bundle_dir): path.read_bytes()
+        for path in layout.bundle_dir.rglob("*")
+        if path.is_file()
+    }
+    assert after == before
 
 
 def test_leaf_decision_redirects_to_nearest_feature_owner(tmp_path: Path) -> None:

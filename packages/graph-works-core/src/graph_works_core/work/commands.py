@@ -99,7 +99,13 @@ from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route
 
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
 from graph_works_core.workspace import provenance
-from graph_works_core.workspace.commits import COMMIT_FAILED_PREFIX, CommitOutcome, WorkspaceCommit, item_stem
+from graph_works_core.workspace.commits import (
+    COMMIT_FAILED_PREFIX,
+    CommitOutcome,
+    WorkspaceCommit,
+    commit_mode,
+    item_stem,
+)
 from graph_works_core.workspace.decision_owner import (
     DecisionContext,
     DecisionOwner,
@@ -1420,6 +1426,7 @@ def run_decision_add(
         plan, _extra = planned(context)
         application = None
     else:
+        commit_mode(layout)
         with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan, extra = planned(context)
@@ -1484,6 +1491,7 @@ def run_decision_answer(
         plan = planned(context)
         application = None
     else:
+        commit_mode(layout)
         with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan = planned(context)
@@ -1580,6 +1588,7 @@ def run_decision_supersede(
         plan = planned(context)
         application = None
     else:
+        commit_mode(layout)
         with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan = planned(context)
@@ -1661,6 +1670,7 @@ def run_decision_overturn(
         context = decision_context(layout, path)
         combined = planned(context)
         return OverturnResult(owner=context.owner, plan=combined)
+    commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
         ledger_before = _optional_bytes(context.owner.ledger)
         combined = planned(context)

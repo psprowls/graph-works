@@ -95,6 +95,7 @@
   "child_rollup": null,
   "descent": null,
   "normalized": null,
+  "commits": [],
   "guidance": [],
   "guidance_warnings": [
     "no code graph: run `gw scan` to build one; the closure is empty"

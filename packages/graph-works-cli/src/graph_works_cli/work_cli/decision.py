@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 from graph_works_core.work import commands as work
@@ -60,6 +61,7 @@ def _emit(payload: dict[str, object], *, verb: str, json_output: bool) -> None:
         rendering.emit(payload)
     else:
         rendering.render_decision_write(payload, verb)
+        rendering.render_commit(cast(dict[str, Any] | None, payload["commit"]))
 
 
 @decision_app.command()
@@ -278,3 +280,4 @@ def overturn(
         rendering.emit(payload)
     else:
         rendering.render_decision_write(payload, "appended")
+        rendering.render_commit(cast(dict[str, Any] | None, payload["commit"]))

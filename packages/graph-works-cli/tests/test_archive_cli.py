@@ -76,7 +76,9 @@ class _Run:
         self.conflict = conflict
         plan.path_mapping.update({path: path for path in archived})
         self.result = (
-            SimpleNamespace(ok=True, written=(), warnings=(), rolled_back=False, failures=()) if applied else None
+            SimpleNamespace(ok=True, written=(), warnings=(), rolled_back=False, failures=(), commit=None)
+            if applied
+            else None
         )
         self.wiki = (
             SimpleNamespace(
@@ -91,6 +93,7 @@ class _Run:
         )
         self.pointer_cleared = False
         self.logged = None
+        self.wiki_commit = None
 
     @property
     def ok(self) -> bool:

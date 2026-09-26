@@ -39,6 +39,7 @@ from graph_works_core.work.commands import (
     WorkItem,
 )
 from graph_works_core.work.reconcile import ReconcileContext
+from graph_works_core.workspace.commits import CommitOutcome
 from graph_works_core.workspace.dispatch import DispatchResolution
 from graph_works_core.workspace.finish import FinishTarget
 
@@ -158,6 +159,7 @@ class _RefusalView(Protocol):
 class _ApplicationView(Protocol):
     rolled_back: bool
     failures: tuple[str, ...]
+    commit: CommitOutcome | None
 
 
 class _WorktreeView(Protocol):
@@ -184,6 +186,20 @@ def _application(application: object | None) -> dict[str, Any]:
         "applied": viewed is not None,
         "rolled_back": False if viewed is None else viewed.rolled_back,
         "failures": [] if viewed is None else list(viewed.failures),
+        "commit": _commit(None if viewed is None else viewed.commit),
+    }
+
+
+def _commit(outcome: CommitOutcome | None) -> dict[str, Any] | None:
+    """Project a workspace commit outcome as plain JSON data."""
+    if outcome is None:
+        return None
+    return {
+        "status": outcome.status,
+        "sha": outcome.sha,
+        "subject": outcome.subject,
+        "paths": list(outcome.paths),
+        "reason": outcome.reason,
     }
 
 
@@ -345,6 +361,7 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "child_rollup": _rollup(result.child_rollup),
         "descent": descent_payload(result),
         "normalized": normalized_payload(result),
+        "commits": [_commit(commit) for commit in result.application.commits],
         "guidance": _guidance_entries(result.guidance),
         "guidance_warnings": [] if result.guidance is None else list(result.guidance.warnings),
         "guidance_file": None if result.guidance_file is None else str(result.guidance_file),
@@ -434,6 +451,7 @@ def advance_payload(result: StageAdvance, path: str) -> dict[str, Any]:
         "applied": application is not None,
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
+        "commit": _commit(None if application is None else application.commit),
         "warnings": list(result.warnings) + ([] if application is None else list(application.warnings)),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "results_path": None if result.results_path is None else str(result.results_path),
@@ -464,7 +482,8 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "written": result.written,
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
-        "warnings": [] if application is None else list(application.warnings),
+        "warnings": list(result.warnings),
+        "commit": _commit(application.commit if application is not None else result.pending_commit),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "repo_note": result.repo_note,
     }
@@ -503,6 +522,7 @@ def file_payload(outcome: FilingRun) -> dict[str, Any]:
         "applied": application is not None and application.ok and bool(application.written),
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
+        "commit": _commit(None if application is None else application.commit),
     }
 
 
@@ -576,6 +596,7 @@ def regen_index_payload(result: RegenIndexesResult) -> dict[str, Any]:
         "applied": application is not None,
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
+        "commit": _commit(None if application is None else application.commit),
     }
 
 
@@ -613,6 +634,7 @@ def archive_payload(run: ArchiveRun, *, dry_run: bool) -> dict[str, Any]:
         "warnings": [*run.plan.warnings, *(() if result is None else result.warnings)],
         "refusals": [_refusal(refusal) for refusal in run.plan.refusals],
         **_application(result),
+        "wiki_commit": _commit(run.wiki_commit),
         "pointer_cleared": run.pointer_cleared,
         "logged": run.logged,
         "wiki": _wiki_archive(run),

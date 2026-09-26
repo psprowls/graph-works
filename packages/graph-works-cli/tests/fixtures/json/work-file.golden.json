@@ -11,5 +11,12 @@
   "warnings": [],
   "applied": true,
   "rolled_back": false,
-  "failures": []
+  "failures": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: file feature-alpha",
+    "paths": [],
+    "reason": "not-a-repo"
+  }
 }

@@ -114,7 +114,11 @@ def _run(
         diff=lambda: diff,
         moves=SimpleNamespace(moves=(), refusals=refusals, stranded=()),
     )
-    result = SimpleNamespace(ok=True, written=(), warnings=(), rolled_back=False, failures=()) if applied else None
+    result = (
+        SimpleNamespace(ok=True, written=(), warnings=(), rolled_back=False, failures=(), commit=None)
+        if applied
+        else None
+    )
     wiki = (
         SimpleNamespace(
             ok=not failed and not refusals,
@@ -134,6 +138,7 @@ def _run(
         logged=None,
         result=result,
         wiki=wiki,
+        wiki_commit=None,
         ok=ok,
     )
 

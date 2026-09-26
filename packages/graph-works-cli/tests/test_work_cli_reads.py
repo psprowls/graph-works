@@ -91,7 +91,7 @@ def test_regen_index_applies_by_default_and_names_indexes(workspace: Path) -> No
     result = runner.invoke(app, ["work", "regen-index", "--workspace", str(workspace), "--json"])
     payload = json.loads(result.stdout)
     assert result.exit_code == 0
-    assert set(payload) == {"indexes", "warnings", "refusals", "applied", "rolled_back", "failures"}
+    assert set(payload) == {"indexes", "warnings", "refusals", "applied", "rolled_back", "failures", "commit"}
     assert payload["applied"] is True and payload["rolled_back"] is False
 
 

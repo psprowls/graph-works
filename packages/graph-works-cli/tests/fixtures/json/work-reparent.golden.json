@@ -11,5 +11,12 @@
   "refusals": [],
   "applied": true,
   "rolled_back": false,
-  "failures": []
+  "failures": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: reparent feature-alpha under epic-epic",
+    "paths": [],
+    "reason": "not-a-repo"
+  }
 }

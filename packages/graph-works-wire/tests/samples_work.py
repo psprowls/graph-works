@@ -25,7 +25,7 @@ TRANSITION = ns(
     stamp_source="plan",
 )
 ROLLUP = ns(total=2, terminal=1, open_paths=("work/e/children/a",))
-APPLICATION = ns(rolled_back=True, failures=("f",), warnings=("w",), ok=False)
+APPLICATION = ns(rolled_back=True, failures=("f",), warnings=("w",), ok=False, commit=None)
 REFUSAL = ns(path="work/a", kind="conflict", detail="changed")
 ENTRY = ns(
     id="D-001",
@@ -66,7 +66,7 @@ def next_result(*, full: bool) -> object:
             if full
             else ns(path=("work/e",), leaf=None, blocked_at="work/e", reason="blocked")
         ),
-        application=ns(normalized=("work/a",) if full else ()),
+        application=ns(normalized=("work/a",) if full else (), commits=()),
         normalizations=(kept, dropped),
         guidance=(
             ns(
@@ -137,7 +137,14 @@ def placement(*, applied: bool) -> object:
         refusal=None if applied else "stale",
         detail="d",
     )
-    return ns(plan=plan, application=APPLICATION if applied else None, written=applied, repo_note="note")
+    return ns(
+        plan=plan,
+        application=APPLICATION if applied else None,
+        written=applied,
+        repo_note="note",
+        pending_commit=None,
+        warnings=(),
+    )
 
 
 def filing(*, applied: bool) -> object:
@@ -199,12 +206,13 @@ def archive_run(*, applied: bool, wiki: bool = False) -> object:
         conflict=("work/a",),
         plan=ns(path_mapping={"work/a": "work/_archive/a"}, warnings=("p",), refusals=(REFUSAL,)),
         result=(
-            ns(written=("work/index.md", "work/a.md"), warnings=("a",), rolled_back=False, failures=())
+            ns(written=("work/index.md", "work/a.md"), warnings=("a",), rolled_back=False, failures=(), commit=None)
             if applied
             else None
         ),
         wiki_plan=wiki_plan,
         wiki=wiki_result,
+        wiki_commit=None,
         pointer_cleared=applied,
         logged="archived" if applied else None,
     )
@@ -230,7 +238,7 @@ def decision(*, planned: bool) -> object:
     return ns(
         owner=OWNER,
         plan=plan,
-        application=ns(rolled_back=False, failures=()) if planned else None,
+        application=ns(rolled_back=False, failures=(), commit=None) if planned else None,
         entries=(ENTRY,),
         counts={"answered": 1},
         warnings=("w",),
@@ -245,7 +253,7 @@ def overturn(*, applied: bool) -> object:
             filing=ns(filing=ns(path="work/t", target=Path("/ws/okf/work/t.md"))),
             refusal=None if applied else "refused",
         ),
-        application=ns(mutation=ns(rolled_back=False, failures=(), ok=True)) if applied else None,
+        application=ns(mutation=ns(rolled_back=False, failures=(), ok=True, commit=None)) if applied else None,
         warnings=(),
     )
 

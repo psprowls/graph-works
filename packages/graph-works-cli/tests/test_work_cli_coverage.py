@@ -94,6 +94,7 @@ def test_file_output_and_incomplete_paths(monkeypatch: pytest.MonkeyPatch, capsy
             "detail": "",
             "indexes": ["work/index.md"],
             "logged": "- filed",
+            "commit": None,
             "warnings": ["warn"],
             "applied": False,
             "rolled_back": False,
@@ -193,6 +194,7 @@ def test_advance_output_policy_branches(monkeypatch: pytest.MonkeyPatch, capsys:
         "failures": [],
         "warnings": ["warn"],
         "repo_note": "note",
+        "commit": None,
     }
     monkeypatch.setattr(wire_work, "advance_payload", lambda *args: payload)
     main.advance("work/a", "", "", "", "", "", "", False, "", False, False, "", True)
@@ -213,6 +215,7 @@ def test_regen_index_all_output_policies(monkeypatch: pytest.MonkeyPatch, capsys
         "rolled_back": False,
         "failures": [],
         "indexes": ["i"],
+        "commit": None,
     }
     monkeypatch.setattr(wire_work, "regen_index_payload", lambda value: payload)
     main.regen_index(True, "", False)
@@ -233,6 +236,7 @@ def test_finish_path_mutation_all_policies(capsys: pytest.CaptureFixture[str]) -
         "applied": False,
         "rolled_back": False,
         "path_mapping": {"work/a": "work/e/children/a"},
+        "commit": None,
     }
     main._finish_path_mutation(base, dry_run=True, json_output=False)
     assert "work/a ->" in capsys.readouterr().out
@@ -275,6 +279,7 @@ def test_decision_emit_policies(monkeypatch: pytest.MonkeyPatch) -> None:
         "applied": False,
         "rolled_back": False,
         "failures": [],
+        "commit": None,
     }
     decision._emit(base, verb="appended", json_output=False)
     decision._emit(base, verb="appended", json_output=True)

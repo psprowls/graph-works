@@ -8,6 +8,7 @@
   "applied": false,
   "rolled_back": false,
   "failures": [],
+  "commit": null,
   "entries": [
     {
       "id": "D-001",

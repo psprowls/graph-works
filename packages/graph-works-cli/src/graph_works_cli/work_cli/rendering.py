@@ -21,6 +21,7 @@ from typing import Any, Never, Protocol, cast
 
 import typer
 from graph_works_core.work.commands import NextResult
+from graph_works_core.workspace.commits import NOTE_REASONS
 from graph_works_wire.errors import REASONS, error_envelope
 
 from graph_works_cli import exit_codes
@@ -157,11 +158,29 @@ def _render_dispatch(profile: dict[str, Any], provenance: dict[str, Any]) -> Non
         )
 
 
+def render_commit(commit: dict[str, Any] | None) -> None:
+    """Report a made commit or the actionable embedded-workspace note."""
+    if commit is None:
+        return
+    if commit["status"] == "committed":
+        sha = commit["sha"]
+        short_sha = str(sha)[:12] if sha is not None else "unknown"
+        typer.echo(f"[ok] committed {short_sha} {commit['subject']}")
+    elif commit["status"] == "skipped" and commit["reason"] in NOTE_REASONS:
+        typer.echo(
+            f"[note] workspace not committed ({commit['reason']}); "
+            "set workflow.workspace_commits: on to commit an embedded workspace",
+            err=True,
+        )
+
+
 def render_next(result: NextResult, payload: dict[str, Any]) -> None:
     normalized = payload["normalized"]
     if normalized:
         for source in normalized:
             typer.echo(f"[fix] stamped {source['source_id']} for {source['path']}: {source['resource']}")
+    for commit in payload["commits"]:
+        render_commit(commit)
     typer.echo(
         f"{payload['selected_path']}: kind={payload['kind']} "
         f"work_status={payload['work_status']} phase={payload['phase']}"

@@ -10,5 +10,12 @@
   "refusals": [],
   "applied": true,
   "rolled_back": false,
-  "failures": []
+  "failures": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: adopt children into release-rel",
+    "paths": [],
+    "reason": "not-a-repo"
+  }
 }

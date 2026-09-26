@@ -1389,6 +1389,86 @@ def test_scoped_baseline_conditions_read_a_moved_items_source_page(tmp_path: Pat
     assert _scoped_conditions(layout, plan) == {("work/p/children/x", "dependency-missing"): 1}
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "work/schema/children/p",
+        "work/sections/children/p",
+        "work/rel/children/schema/children/p",
+        "work/_archive/sections/children/p",
+        "work/log",
+        "work/rel/children/log",
+        "work/_archive/log",
+    ],
+)
+def test_scoped_baseline_conditions_exclude_nonmember_sources(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str
+) -> None:
+    """Readable ignored pages and reserved logs cannot donate move allowances."""
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, source, type="Feature", depends_on=({"path": "work/absent", **_EDGE},))
+    assert source not in {item.path for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
+    destination = "work/_archive/p"
+    plan = _plan(layout, path_mapping={source: destination}, validate_paths=(destination,))
+
+    def forbidden(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("scoped conditions must not load the bundle or item corpus")
+
+    monkeypatch.setattr(transactions, "_load_bundle_through", forbidden)
+    monkeypatch.setattr(transactions, "load_items", forbidden)
+
+    assert _scoped_conditions(layout, plan) == {}
+
+
+@pytest.mark.parametrize("source", ["work/schema", "work/sections", "work/log/children/p"])
+def test_scoped_baseline_conditions_keep_admitted_sources(tmp_path: Path, source: str) -> None:
+    """Only ignored members and reserved pages are excluded, not similar names."""
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, source, type="Feature", depends_on=({"path": "work/absent", **_EDGE},))
+    assert source in {item.path for item in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))}
+    destination = "work/_archive/p"
+    plan = _plan(layout, path_mapping={source: destination}, validate_paths=(destination,))
+
+    expected = {(destination, "dependency-missing"): 1}
+    if source == "work/log/children/p":
+        expected[(destination, "parent-missing")] = 1
+    assert _scoped_conditions(layout, plan) == expected
+
+
+@pytest.mark.parametrize("source", ["work/schema/children/p", "work/sections/children/p", "work/log"])
+@pytest.mark.parametrize("reuse_bundle", [False, True])
+def test_archiving_a_nonmember_source_rolls_back(tmp_path: Path, source: str, reuse_bundle: bool) -> None:
+    """Archived items lack the findings dependency check: conditions must catch this."""
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/schema", type="Release")
+    _write_item(layout.bundle_dir, "work/sections", type="Release")
+    _write_item(layout.bundle_dir, source, type="Feature", depends_on=({"path": "work/absent", **_EDGE},))
+    destination = "work/_archive/p"
+    (layout.bundle_dir / destination).mkdir(parents=True)
+    before = (layout.bundle_dir / f"{source}.md").read_bytes()
+    plan = replace(
+        _plan(
+            layout,
+            moves=(Move(f"{source}.md", f"{destination}.md", False),),
+            path_mapping={source: destination},
+            validate_paths=(destination,),
+        ),
+        operation="archive",
+    )
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE) if reuse_bundle else None
+
+    result = apply_mutation(layout, plan, baseline_bundle=bundle)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert result.failures == (
+        "validation failed: work/_archive/p: dependency target 'work/absent' is missing after mutation",
+    )
+    assert (layout.bundle_dir / f"{source}.md").read_bytes() == before
+    assert not (layout.bundle_dir / f"{destination}.md").exists()
+    assert _states(result.journal) == ["planned", "applying", "validating", "rolling-back", "rolled-back"]
+
+
 def test_scoped_baseline_conditions_see_the_parent_on_disk(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     kid = "work/rel/children/kid"

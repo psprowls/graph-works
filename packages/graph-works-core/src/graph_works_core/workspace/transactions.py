@@ -39,6 +39,7 @@ from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from datetime import date
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
 from typing import IO, Literal, Protocol
 
@@ -46,6 +47,7 @@ from okf_ext.moves import Move
 from okf_ext.writing import body_digest
 from okf_io import Bundle, Rule, parse, validate
 from okf_io import load_bundle as _load_bundle
+from okf_io.bundle import LOG_NAME
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
 from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
@@ -2290,6 +2292,10 @@ def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter
     """Read only scoped pre-image pages and their targets under the held root.
 
     Read each page fresh rather than consulting a caller-supplied bundle.
+    Only sources admitted by the baseline loader may donate allowances:
+    canonical item paths already exclude indexes, .git and root dot entries;
+    also exclude IGNORE matches and reserved log pages. Unlike a non-item
+    target (which withholds an allowance), a non-item source could grant one.
     Missing or non-UTF-8 pages are not items; other read errors propagate.
     Keys use the plan's exact item-path mapping for the postcondition gate.
     """
@@ -2298,8 +2304,12 @@ def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter
         location = parse_item_path(path)
         if location is None:
             continue
+        if location.page.rsplit("/", 1)[-1] == LOG_NAME or any(
+            fnmatchcase(location.page, pattern) for pattern in IGNORE
+        ):
+            continue
         try:
-            text = _read_bytes_at(root, f"{path}.md").decode("utf-8")
+            text = _read_bytes_at(root, location.page).decode("utf-8")
         except (FileNotFoundError, NotADirectoryError, UnicodeDecodeError):
             continue
         dependencies = parse_dependencies(parse(text).fm_data(dates="iso").get("depends_on"))

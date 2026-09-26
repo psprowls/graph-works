@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from okf_ext.tables import Column, TableSpec, read_section
 from okf_io import Finding, Rule, RuleContext, Severity
@@ -42,6 +42,8 @@ PLAN_TABLE_SPEC = TableSpec(columns=(Column("action"), Column("done when"), Colu
 #: `str.split()` token at a time (see `_actions`), never against the whole cell --
 #: a `\b`-anchored search over the raw cell text lets a `https://` scheme's `://`
 #: slide past the boundary check and misdetects a URL as a bare path.
+#: This is only a candidate filter: ambiguous bare tokens need additional path
+#: evidence (a filename suffix, another separator, or an existing first directory).
 _PATH_RE = re.compile(r"/?[\w][\w.\-]*/[\w.\-/]+")
 
 
@@ -108,7 +110,12 @@ def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
     caller composing this rule passes the same value, so `gw wiki lint`,
     `gw work lint`, and the mutation gate agree on one finding.
 
-    A bare token ("Edit packages/foo/bar.py") is checked against **either**
+    Bare candidates need a filename suffix, at least two `/` separators, or a
+    first component that is a directory under an injected root. This skips
+    slash-shaped prose such as `UTF-16/32` and `input/output`, accepting that
+    an ambiguous `foo/bar` with no existing `foo/` is not checked.
+
+    A classified bare token ("Edit packages/foo/bar.py") is checked against **either**
     configured root, not just one: a hand-written action naming a code file
     resolves under a repo root, while the one boilerplate "Execute
     implementation plan: ..." row every plan-stage item carries can also name
@@ -139,6 +146,7 @@ def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
         )
         or "the repo root"
     )
+    bare_roots = repo_roots + ((vault_root,) if vault_root is not None else ())
 
     def rule(ctx: RuleContext) -> Iterable[Finding]:
         for item, document in with_documents(ctx):
@@ -162,6 +170,12 @@ def _actions(repo_roots: tuple[Path, ...], vault_root: Path | None) -> Rule:
                             item,
                             f"plan action names `{token}`, which does not exist under the vault root",
                         )
+                        continue
+                    if not (
+                        PurePosixPath(token).suffix
+                        or token.count("/") >= 2
+                        or any((root / token.split("/", 1)[0]).is_dir() for root in bare_roots)
+                    ):
                         continue
                     if any((root / token).exists() for root in repo_roots):
                         continue

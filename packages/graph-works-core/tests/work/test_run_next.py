@@ -8,8 +8,11 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from _transaction_helpers import _init_git, assert_workspace_commit
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
+from graph_works_core.workspace import transactions
+from graph_works_core.workspace.commits import CommitOutcome
 from okf_io import load
 
 TODAY = date(2026, 8, 23)
@@ -114,6 +117,55 @@ def test_live_normalization_is_one_journaled_write_and_idempotent(tmp_path: Path
     assert first.warnings == ()
     assert first.application.normalized == (CHILD,)
     assert second.application.normalized == ()
+    assert [source.id for source in load(layout.bundle_dir / f"{CHILD}.md").fm.sources] == ["design"]
+
+
+def test_live_normalization_retains_commit_outcome(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Next")).layout
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD)
+    _spec(layout, CHILD)
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    _init_git(layout.root)
+    result = work.run_next(layout, CHILD, dry_run=False)
+    assert result.application.normalized == (CHILD,)
+    assert len(result.application.commits) == 1
+    assert result.application.commits[0].status == "committed"
+    assert_workspace_commit(layout.root, "workspace: normalize feature-a sources")
+
+
+def test_descend_retains_both_normalization_commit_outcomes(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Next")).layout
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD)
+    _spec(layout, EPIC)
+    _spec(layout, CHILD)
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    _init_git(layout.root)
+    result = work.run_next(layout, EPIC, descend=True, dry_run=False)
+    assert result.application.normalized == (EPIC, CHILD)
+    assert [outcome.subject for outcome in result.application.commits] == [
+        "workspace: normalize epic-a sources",
+        "workspace: normalize feature-a sources",
+    ]
+    assert [outcome.status for outcome in result.application.commits] == ["committed", "committed"]
+
+
+def test_normalization_commit_failure_keeps_apply_success_and_warns(tmp_path: Path, monkeypatch) -> None:
+    layout = _layout(tmp_path)
+    _write(layout, EPIC, type="Epic", phase="execute")
+    _write(layout, CHILD)
+    _spec(layout, CHILD)
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    monkeypatch.setattr(
+        transactions,
+        "commit_workspace",
+        lambda _layout, commit, _paths, *, mode: CommitOutcome("failed", None, commit.subject, (), "hook refused"),
+    )
+    result = work.run_next(layout, CHILD, dry_run=False)
+    assert result.application.normalized == (CHILD,)
+    assert result.application.commits[0].status == "failed"
+    assert result.warnings == ("workspace commit failed: hook refused",)
     assert [source.id for source in load(layout.bundle_dir / f"{CHILD}.md").fm.sources] == ["design"]
 
 

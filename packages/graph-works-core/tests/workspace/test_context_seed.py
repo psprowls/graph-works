@@ -73,10 +73,10 @@ def test_an_unset_topic_renders_without_raising():
     assert "(unset)" in _render(topic=None)
 
 
-def test_the_body_teaches_atomic_workspace_commits_before_the_log_format_section():
+def test_the_body_teaches_workspace_commits_before_the_log_format_section():
     text = _render()
     assert "## Committing workspace changes" in text
-    assert "atomic" in text
+    assert "under the workspace lock" in text
     assert ".gw/cache/" in text
     assert text.index("## Committing workspace changes") < text.index("## Log format")
 
@@ -84,7 +84,17 @@ def test_the_body_teaches_atomic_workspace_commits_before_the_log_format_section
 def test_the_body_teaches_single_line_workspace_commit_subjects():
     text = _render()
     section = text[text.index("## Committing workspace changes") : text.index("## Log format")]
-    assert "single line" in section
+    assert "single-line" in section
+
+
+def test_the_body_teaches_gw_commit_authority_and_pathspec_hand_edits():
+    text = " ".join(_render().split())
+    assert "gw verbs commit their own workspace writes" in text
+    assert "workflow.workspace_commits" in text
+    assert "Never use `git add -A` or `git commit -a`" in text
+    assert "except for the pathspec-only commits below for writes no gw verb owns" in text
+    assert "Never manually commit gw-owned writes" in text
+    assert "no trailers" in text
 
 
 # --- the human tail -----------------------------------------------------------

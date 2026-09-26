@@ -36,8 +36,8 @@ import sys
 import uuid
 from collections import Counter
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from contextlib import contextmanager, suppress
-from dataclasses import dataclass
+from contextlib import ExitStack, contextmanager, suppress
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 from typing import IO, Literal, Protocol
@@ -55,12 +55,24 @@ from work_tracker_okf.paths import parse_item_path
 
 from graph_works_core.workspace import anchors
 from graph_works_core.workspace.anchors import Anchor, open_absolute_anchor, open_anchor
+from graph_works_core.workspace.commits import (
+    COMMIT_FAILED_PREFIX,
+    CommitOutcome,
+    WorkspaceCommit,
+    commit_mode,
+    commit_workspace,
+    plan_paths,
+)
 from graph_works_core.workspace.layout import WorkspaceLayout
 
 
 @dataclass(frozen=True, slots=True)
 class MutationApplication:
-    """The durable outcome of applying one immutable domain plan."""
+    """The durable outcome of applying one immutable domain plan.
+
+    *commit* is the workspace commit made after a successful apply; it is
+    `None` when not requested, or when the apply did not succeed.
+    """
 
     transaction_id: str
     journal: Path
@@ -71,6 +83,7 @@ class MutationApplication:
     failures: tuple[str, ...]
     rolled_back: bool
     snapshot_retryable: bool = False
+    commit: CommitOutcome | None = None
 
     @property
     def ok(self) -> bool:
@@ -304,9 +317,9 @@ def _executor_lock(transaction_root: Path, *, root: Anchor | None = None) -> Ite
 
 
 @contextmanager
-def _bundle_root_lock(root: Anchor) -> Iterator[None]:
+def _bundle_root_lock(root: Anchor, *, timeout: float | None = None) -> Iterator[None]:
     """Serialize every executor holding this anchored bundle directory."""
-    with root.exclusive_lock():
+    with root.exclusive_lock(timeout=timeout):
         yield
 
 
@@ -2520,6 +2533,10 @@ def _application(
 #: a value a caller can test rather than a directory it has to go looking for.
 EMPTY_TRANSACTION_ID = ""
 
+#: The one failure a `lock_timeout=` apply returns when the bundle lock stays
+#: held past its deadline. Nothing was written; the caller may retry.
+LOCK_TIMEOUT_FAILURE = "bundle-lock-timeout"
+
 #: How many terminal (complete/rolled-back) transaction directories the prune
 #: sweep keeps, newest first by `journal.jsonl` mtime. A module constant, not
 #: a literal, so tests can name it.
@@ -2997,6 +3014,8 @@ def apply_mutation(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,
     *,
+    commit: WorkspaceCommit | None,
+    lock_timeout: float | None = None,
     repo_root: Path | None = None,
     repo_roots: tuple[Path, ...] = (),
     baseline_bundle: Bundle | None = None,
@@ -3004,6 +3023,16 @@ def apply_mutation(
     validate_read_set: Callable[[], None] | None = None,
 ) -> MutationApplication:
     """Apply *plan* atomically, retaining durable recovery evidence in cache.
+
+    *commit* runs after the mutation succeeds, while the bundle lock and the
+    caller's decision-owner lock remain held (spec §4.2). Failure or rollback
+    never commits. Even an empty plan can commit dirty item `references/` or
+    `extra_paths`. A failed commit adds a warning without rolling back the
+    mutation. Commit mode is resolved before locking, so configuration errors
+    raise before any effect.
+
+    *lock_timeout* bounds the bundle-lock wait. A timeout returns the sole
+    `LOCK_TIMEOUT_FAILURE` without applying the plan or committing.
 
     *repo_root* overrides `layout.repo_root` for postcondition validation
     (e.g. `targets.affects-missing`). `layout.repo_root` is a `.git` walk-up
@@ -3064,10 +3093,20 @@ def apply_mutation(
     including why the lock/cache-open survives the short-circuit while the
     per-mutation transaction directory does not.
     """
+    mode = commit_mode(layout) if commit is not None else None
     root = _open_root(layout.bundle_dir)
     try:
-        with _bundle_root_lock(root):
-            return _apply_mutation_locked(
+        with ExitStack() as stack:
+            try:
+                stack.enter_context(_bundle_root_lock(root, timeout=lock_timeout))
+            except anchors.LockTimeout:
+                return _application(
+                    EMPTY_TRANSACTION_ID,
+                    layout.cache_dir / "work-mutations",
+                    plan,
+                    failures=(LOCK_TIMEOUT_FAILURE,),
+                )
+            application = _apply_mutation_locked(
                 layout,
                 plan,
                 root,
@@ -3077,14 +3116,44 @@ def apply_mutation(
                 allowed_new_findings=allowed_new_findings,
                 validate_read_set=validate_read_set,
             )
+            if commit is None or not application.ok:
+                return application
+            outcome = commit_workspace(layout, commit, plan_paths(plan), mode=mode)
+            warnings = application.warnings
+            if outcome.status == "failed":
+                warnings = (*warnings, f"{COMMIT_FAILED_PREFIX}{outcome.reason}")
+            return replace(application, commit=outcome, warnings=warnings)
+    finally:
+        root.close()
+
+
+def commit_pending(
+    layout: WorkspaceLayout, commit: WorkspaceCommit, *, lock_timeout: float | None = None
+) -> CommitOutcome:
+    """Commit *commit*'s items' `references/` and `extra_paths` under the bundle lock, with no plan.
+
+    For a verb whose plan is a no-op but whose item still owns freshly written
+    files (an unchanged record-placement's `orca-placement/<key>.json`), and for
+    the wiki half of `gw work archive`, which applies outside `apply_mutation`.
+    """
+    mode = commit_mode(layout)
+    root = _open_root(layout.bundle_dir)
+    try:
+        try:
+            with _bundle_root_lock(root, timeout=lock_timeout):
+                return commit_workspace(layout, commit, (), mode=mode)
+        except anchors.LockTimeout:
+            return CommitOutcome("failed", None, commit.subject, (), LOCK_TIMEOUT_FAILURE)
     finally:
         root.close()
 
 
 __all__ = [
     "EMPTY_TRANSACTION_ID",
+    "LOCK_TIMEOUT_FAILURE",
     "STALE_INVENTORY_DETAIL",
     "MutationApplication",
     "apply_mutation",
+    "commit_pending",
     "only_stale_inventory",
 ]

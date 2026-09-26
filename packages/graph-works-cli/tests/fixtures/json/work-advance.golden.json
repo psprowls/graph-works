@@ -23,6 +23,13 @@
   "applied": true,
   "rolled_back": false,
   "failures": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: advance bug-fix none -> design",
+    "paths": [],
+    "reason": "not-a-repo"
+  },
   "warnings": [],
   "refusal": null,
   "results_path": null,

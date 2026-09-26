@@ -6,6 +6,7 @@ import json
 from datetime import date
 from pathlib import Path
 
+from _transaction_helpers import _init_git, assert_workspace_commit
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
 
@@ -62,6 +63,26 @@ def test_release_adoption_is_singular_and_source_first(tmp_path: Path) -> None:
     assert result.plan.path_mapping == {"work/epic-a": "work/release-v1/children/epic-a"}
 
 
+def test_reparent_commits_moved_work_item(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Paths")).layout
+    _write(layout, "work/epic-a", type="Epic")
+    _write(layout, "work/feature-b")
+    _init_git(layout.root)
+    result = work.run_reparent(layout, "work/feature-b", "work/epic-a", dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert_workspace_commit(layout.root, "workspace: reparent feature-b under epic-a")
+
+
+def test_release_adoption_commits_moved_work_item(tmp_path: Path) -> None:
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Paths")).layout
+    _write(layout, "work/release-v1", type="Release")
+    _write(layout, "work/epic-a", type="Epic")
+    _init_git(layout.root)
+    result = work.run_release_adoption(layout, "work/epic-a", "work/release-v1", dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert_workspace_commit(layout.root, "workspace: adopt children into release-v1")
+
+
 def test_refused_path_mutation_never_invokes_executor(tmp_path: Path) -> None:
     layout = _layout(tmp_path)
     _write(layout, "work/feature-a")
@@ -100,3 +121,37 @@ def test_split_topology_adoption_validates_against_the_declared_code_repo(tmp_pa
     result = work.run_release_adoption(layout, "work/epic-a", "work/release-v1", dry_run=False)
     assert result.application is not None
     assert result.application.ok, result.application.failures
+
+
+def test_adoption_collects_release_references_but_excludes_foreign_references(tmp_path: Path) -> None:
+    from _transaction_helpers import _git
+
+    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Paths")).layout
+    for path, kind in (
+        ("work/release-v1", "Release"),
+        ("work/epic-a", "Epic"),
+        ("work/release-v1/children/epic-existing", "Epic"),
+        ("work/epic-foreign", "Epic"),
+    ):
+        _write(layout, path, type=kind)
+    _init_git(layout.root)
+    owned = "okf/work/release-v1/references/guidance-plan.md"
+    foreign = [
+        "okf/work/release-v1/children/epic-existing/references/pending.md",
+        "okf/work/epic-foreign/references/pending.md",
+    ]
+    for member in [owned, *foreign]:
+        target = layout.root / member
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("pending\n", encoding="utf-8", newline="\n")
+    _git(layout.root, "add", "--", foreign[1])
+    result = work.run_release_adoption(layout, "work/epic-a", "work/release-v1", dry_run=False)
+    assert result.application is not None and result.application.ok
+    assert result.application.commit.status == "committed"
+    changed = set(_git(layout.root, "show", "--name-only", "--format=", "HEAD").splitlines())
+    assert owned in changed
+    assert "okf/work/release-v1/children/epic-a.md" in changed
+    assert not changed.intersection(foreign)
+    assert _git(layout.root, "diff", "--cached", "--name-only").strip() == foreign[1]
+    assert (layout.root / foreign[0]).read_text(encoding="utf-8") == "pending\n"
+    assert _git(layout.root, "status", "--porcelain", "--", owned) == ""

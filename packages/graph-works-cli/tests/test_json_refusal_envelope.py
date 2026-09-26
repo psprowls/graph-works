@@ -236,6 +236,7 @@ def test_archive_json_conflict_carries_the_conflicting_paths(monkeypatch: pytest
         conflict=("log.md",),
         result=None,
         wiki=None,
+        wiki_commit=None,
         pointer_cleared=False,
         logged=None,
         ok=False,
@@ -255,7 +256,9 @@ def test_archive_json_incomplete_apply_carries_an_error_envelope(
     monkeypatch: pytest.MonkeyPatch, workspace: Path, failed_lane: str
 ) -> None:
     """A successful plan must not turn either failed application into JSON success."""
-    result = SimpleNamespace(ok=failed_lane != "work", written=(), warnings=(), rolled_back=False, failures=("disk",))
+    result = SimpleNamespace(
+        ok=failed_lane != "work", written=(), warnings=(), rolled_back=False, failures=("disk",), commit=None
+    )
     wiki = SimpleNamespace(
         ok=failed_lane != "wiki",
         archived=(),
@@ -269,6 +272,7 @@ def test_archive_json_incomplete_apply_carries_an_error_envelope(
         conflict=(),
         result=result,
         wiki=wiki,
+        wiki_commit=None,
         pointer_cleared=False,
         logged=None,
         ok=True,
@@ -299,6 +303,7 @@ def test_wiki_archive_json_refusal_carries_the_computed_refusals_in_the_envelope
         conflict=(),
         result=None,
         wiki=None,
+        wiki_commit=None,
         pointer_cleared=False,
         logged=None,
         ok=False,

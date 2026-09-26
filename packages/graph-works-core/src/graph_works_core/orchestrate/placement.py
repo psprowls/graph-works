@@ -30,21 +30,36 @@ from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.placement import PlacementPlan, apply_placement, plan_placement
 
+from graph_works_core.workspace.commits import (
+    COMMIT_FAILED_PREFIX,
+    CommitOutcome,
+    WorkspaceCommit,
+    commit_mode,
+    item_stem,
+)
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import ItemRepo, declared_repositories, resolve_item_repo, resolve_repos
-from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
+from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, commit_pending
 
 
 @dataclass(frozen=True, slots=True)
 class PlacementRecord:
-    """What one record did. `application` is `None` for a dry run, a refusal
-    and an identical pair -- the three outcomes that write nothing."""
+    """What one record did. An unchanged pair can commit pending owned files."""
 
     plan: PlacementPlan
     application: MutationApplication | None = None
     repo_note: str | None = None
+    pending_commit: CommitOutcome | None = None
+
+    @property
+    def warnings(self) -> tuple[str, ...]:
+        if self.application is not None:
+            return self.application.warnings
+        if self.pending_commit is not None and self.pending_commit.status == "failed":
+            return (f"{COMMIT_FAILED_PREFIX}{self.pending_commit.reason}",)
+        return ()
 
     @property
     def written(self) -> bool:
@@ -153,6 +168,7 @@ def run_record_placement(
             repo=repo,
         )
         return PlacementRecord(plan=plan, repo_note=own.note if own else None)
+    commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
         if (
             expected_preparation is not None
@@ -171,8 +187,13 @@ def run_record_placement(
             repo_name=repo_name,
             repo=repo,
         )
-        if plan.refusal is not None or not plan.changed:
+        workspace_commit = WorkspaceCommit(f"workspace: record {item_stem(path)} {phase} placement", items=(path,))
+        if plan.refusal is not None:
             return PlacementRecord(plan=plan, repo_note=own.note if own else None)
+        if not plan.changed:
+            return PlacementRecord(
+                plan=plan, repo_note=own.note if own else None, pending_commit=commit_pending(layout, workspace_commit)
+            )
         assert own is not None
 
         def validate_preparation() -> None:
@@ -186,6 +207,7 @@ def run_record_placement(
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
             validate_read_set=validate_preparation if expected_preparation is not None else None,
+            commit=workspace_commit,
         )
         return PlacementRecord(plan=plan, application=application, repo_note=own.note)
 

@@ -18,6 +18,13 @@
   "rolled_back": false,
   "failures": [],
   "warnings": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: record bug-fix design placement",
+    "paths": [],
+    "reason": "not-a-repo"
+  },
   "refusal": null,
   "repo_note": "<tmp>/works/workspace.yaml: declares no repositories, so no code repo was resolved"
 }

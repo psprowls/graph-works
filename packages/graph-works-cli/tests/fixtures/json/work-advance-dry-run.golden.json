@@ -23,6 +23,7 @@
   "applied": false,
   "rolled_back": false,
   "failures": [],
+  "commit": null,
   "warnings": [],
   "refusal": null,
   "results_path": null,

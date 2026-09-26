@@ -5,7 +5,7 @@ from types import MappingProxyType
 import pytest
 from graph_works_core.workspace.dispatch import parse_rules, resolve_dispatch
 from graph_works_core.workspace.errors import WorkspaceError
-from graph_works_core.workspace.pipeline import ATTEND_TAIL, EXECUTE_TAIL
+from graph_works_core.workspace.pipeline import ATTEND_TAIL, EXECUTE_TAIL, WORKSPACE_COMMIT_TAIL
 
 ATTRIBUTES = frozenset({"stage", "type", "effort", "blast_radius", "has_spec", "has_plan", "variant"})
 
@@ -87,10 +87,10 @@ def test_clearing_model_alone_retains_effort_and_is_finally_refused():
     [
         ("design", "exploration", "superpowers:brainstorming", "attend", ATTEND_TAIL),
         ("design", "diagnosis", "superpowers:systematic-debugging", "attend", ATTEND_TAIL),
-        ("design", "reconcile", "gw:reconciling-spec", "autonomous", None),
+        ("design", "reconcile", "gw:reconciling-spec", "autonomous", WORKSPACE_COMMIT_TAIL),
         ("design", "epic-design", "gw:epic-design", "attend", ATTEND_TAIL),
-        ("plan", "decompose", "gw:planning-epics", "autonomous", None),
-        ("plan", "single", "superpowers:writing-plans", "autonomous", None),
+        ("plan", "decompose", "gw:planning-epics", "autonomous", WORKSPACE_COMMIT_TAIL),
+        ("plan", "single", "superpowers:writing-plans", "autonomous", WORKSPACE_COMMIT_TAIL),
         ("execute", "planned", "superpowers:subagent-driven-development", "autonomous", EXECUTE_TAIL),
         ("execute", "unplanned", "superpowers:test-driven-development", "autonomous", EXECUTE_TAIL),
         ("finish", "branch", "superpowers:finishing-a-development-branch", "relay", "ours"),

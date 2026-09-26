@@ -662,6 +662,8 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
 
+   record-placement commits this file with the placement; never commit it yourself.
+
    `settle-placement` hard-requires `--placement-result` to exist and parse
    — even for `reuse`/`main` — so this redirect is not optional here either.
    `<placement-json-file>` holds `["--worktree", "path:<worktree.path>"]` —
@@ -810,6 +812,8 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
      --repo-path <dispatch repo.path> --out-placement <placement-json> \
      > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
    ```
+
+   record-placement commits this file with the placement; never commit it yourself.
 
    Omit `--repo-path` only when the dispatch's `repo.path` is `null` (then only `reuse`
    and `main` can be planned). Create the `orca-placement/` directory first.
@@ -1176,6 +1180,7 @@ It reads `payload` (`taskId`, `dispatchId`, `outcome`) and checks Orca's
   coordinator exception). Then run
   `orca orchestration worker-release --dispatch <dispatch_id>` (no `--run`
   flag — `worker-release` takes only `--dispatch` and `--retry-request`)
+  → The coordinator commits nothing in the workspace.
   → if this key was attend-pending (§3), flip the card back:
   `orca worktree set --worktree <selector> --workspace-status in-progress`
   → if the settled dispatch's phase was `execute`, run the coverage read
@@ -1698,7 +1703,12 @@ without launching anything), then enter the record block at its step 1.
    unmentioned at the end of the run — "epic finished with assumed decisions
    nobody looked at" is exactly the silent failure the ledger exists to
    prevent. Printing costs nothing; skip only when both lists are empty.
-4. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
+4. **Dirty-workspace check.** Run `git -C <workspace> status --porcelain -- okf/work`.
+   Non-empty → print one warning line listing the dirty paths (a verb whose commit
+   failed, or a hook that timed out). Never commit them yourself. Dirty reference
+   files for the owning item are swept by its next committing same-item gw verb;
+   for other dirty paths, retry the owning operation or run a gw verb that writes those exact paths.
+5. Stop. The coordinator performs no merge at wrap-up. A root Epic or Release
    with a scalar branch or foreign `repo_stamps` owns integration targets, so
    orchestration emits a finish dispatch. The worker consumes every
    `finish_targets` entry, records each successful repository integration and

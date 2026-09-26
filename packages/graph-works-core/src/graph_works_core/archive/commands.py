@@ -49,9 +49,10 @@ from work_tracker_okf.items import ARCHIVE_IGNORE, load_items
 from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 
 from graph_works_core.workspace import provenance
+from graph_works_core.workspace.commits import COMMIT_FAILED_PREFIX, CommitOutcome, WorkspaceCommit, item_stem
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.repos import resolve_repos
-from graph_works_core.workspace.transactions import MutationApplication, apply_mutation
+from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, commit_pending
 
 
 def _touched_members(plan: MovePlan) -> frozenset[str]:
@@ -98,6 +99,7 @@ class ArchiveRun:
     wiki: WikiArchiveResult | None = None
     pointer_cleared: bool = False
     logged: str | None = None
+    wiki_commit: CommitOutcome | None = None
 
     @property
     def ok(self) -> bool:
@@ -110,13 +112,15 @@ class ArchiveRun:
 
 
 def stranded_warnings(run: ArchiveRun) -> tuple[str, ...]:
-    """Project lane-labelled opaque wikilink diagnostics for an archive run."""
+    """Project lane-labelled wikilink diagnostics and wiki commit failures."""
     work_entries = () if run.plan.move_plan is None else run.plan.move_plan.stranded
     warnings: list[str] = []
     for label, entries in (("work items", work_entries), ("wiki pages", run.wiki_plan.moves.stranded)):
         warning = stranded_warning(entries)
         if warning is not None:
             warnings.append(f"{label}: {warning}")
+    if run.wiki_commit is not None and run.wiki_commit.status == "failed":
+        warnings.append(f"{COMMIT_FAILED_PREFIX}{run.wiki_commit.reason}")
     return tuple(warnings)
 
 
@@ -183,6 +187,8 @@ def run_archive(
     When the wiki plan rewrites a link in `log.md`, the archive entry is
     appended after the wiki apply rather than folded into the work transaction,
     because the rewrite is planned against the pre-archive snapshot.
+    Wiki writes remain outside the work mutation transaction; their own
+    commit follows the wiki apply and any deferred log append.
 
     `dry_run=True` by default, matching every writer in this workspace.
 
@@ -232,7 +238,12 @@ def run_archive(
 
     # `bundle` (line 166) was loaded with a wider ignore set than IGNORE
     # (ARCHIVE_IGNORE + WIKI_ARCHIVE_IGNORE) -- not eligible as baseline_bundle.
-    result = apply_mutation(layout, plan, repo_roots=resolve_repos(layout))
+    work_subject = (
+        f"workspace: archive {item_stem(work_roots[0])}"
+        if len(work_roots) == 1
+        else f"workspace: archive {len(work_roots)} items"
+    )
+    result = apply_mutation(layout, plan, repo_roots=resolve_repos(layout), commit=WorkspaceCommit(work_subject))
     if not result.ok:
         return ArchiveRun(plan=plan, wiki_plan=wiki_plan, result=result, logged=logged)
 
@@ -243,6 +254,24 @@ def run_archive(
     if defer_log:
         assert logged is not None  # narrowed by defer_log
         append_log_entry(load(bundle.root / "log.md"), logged, on=today, dry_run=False)
+    # Wiki writes use doc-wiki-okf's apply path, outside the work transaction.
+    # Commit only their moved/edited members, changed indexes, and deferred log append.
+    wiki_commit = None
+    if wiki_plan.tokens:
+        wiki_paths = tuple(
+            sorted(
+                _touched_members(wiki_plan.moves)
+                | {move.dest for move in wiki_plan.moves.moves}
+                | {update.path for update in wiki_result.indexes if update.changed}
+                | ({"log.md"} if defer_log else set())
+            )
+        )
+        wiki_subject = (
+            f"workspace: archive wiki {wiki_plan.tokens[0]}"
+            if len(wiki_plan.tokens) == 1
+            else f"workspace: archive {len(wiki_plan.tokens)} wiki pages"
+        )
+        wiki_commit = commit_pending(layout, WorkspaceCommit(wiki_subject, extra_paths=wiki_paths))
     # An empty set still deletes an *invalid* legacy pointer inside
     # clear_active_work; a wiki-only archive must not have that side effect.
     cleared = provenance.clear_active_work(layout, set(work_roots)) if work_roots else False
@@ -254,6 +283,7 @@ def run_archive(
         wiki=wiki_result,
         pointer_cleared=cleared,
         logged=logged,
+        wiki_commit=wiki_commit,
     )
 
 

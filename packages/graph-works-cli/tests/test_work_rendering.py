@@ -75,6 +75,7 @@ def test_render_next_uses_path_and_work_status(capsys: pytest.CaptureFixture[str
         "work_status": "open",
         "phase": "design",
         "normalized": None,
+        "commits": [],
         "descent": None,
         "dispatch": None,
         "action": None,
@@ -90,6 +91,15 @@ def test_render_next_uses_path_and_work_status(capsys: pytest.CaptureFixture[str
     assert "  guidance: none\n" in out
 
 
+def test_render_commit_handles_missing_sha_and_silent_skips(capsys: pytest.CaptureFixture[str]) -> None:
+    rendering.render_commit({"status": "committed", "sha": None, "subject": "workspace: item", "reason": None})
+    rendering.render_commit({"status": "skipped", "sha": None, "subject": "workspace: item", "reason": "disabled"})
+    rendering.render_commit({"status": "failed", "sha": None, "subject": "workspace: item", "reason": "hook-failed"})
+    captured = capsys.readouterr()
+    assert captured.out == "[ok] committed unknown workspace: item\n"
+    assert captured.err == ""
+
+
 def test_render_next_guidance_line_when_assembled_but_not_written(capsys: pytest.CaptureFixture[str]) -> None:
     entry = {"path": "/adrs/x.md", "id": "D1", "kind": "claim", "why": "w", "tokens": 5}
     payload = {
@@ -98,6 +108,7 @@ def test_render_next_guidance_line_when_assembled_but_not_written(capsys: pytest
         "work_status": "open",
         "phase": "design",
         "normalized": None,
+        "commits": [],
         "descent": None,
         "dispatch": None,
         "action": None,
@@ -143,6 +154,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
         SimpleNamespace(warnings=("careful",), guidance=SimpleNamespace(tokens=2870)),
         {
             "normalized": [{"path": "work/a", "source_id": "design", "resource": "/work/a/references/01-design.md"}],
+            "commits": [],
             "selected_path": "work/a",
             "kind": "Feature",
             "work_status": "open",

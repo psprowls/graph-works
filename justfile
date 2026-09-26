@@ -215,6 +215,8 @@ test-plugin:
     cd plugins/gw
     echo "--- test-dispatch-profile-contract"
     bash tests/test-dispatch-profile-contract.sh
+    echo "--- test-workspace-commit-authority"
+    bash tests/test-workspace-commit-authority.sh
     echo "--- test_launch_placement"
     python3 tests/test_launch_placement.py
     python3 tests/test_finish_receipt.py

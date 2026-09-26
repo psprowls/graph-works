@@ -266,20 +266,29 @@ rules. Present findings as a report with suggested actions; append a `lint` entr
 
 ## Committing workspace changes
 
-If this workspace is its own git repository (it sits outside the code repository),
-commit workspace changes **atomically**: one logical change per commit. A work-item
-transition, one ingest, one scan, one lint fix each get their own commit, made as soon
-as the change lands rather than batched at session end.
+**gw verbs commit their own workspace writes.** Every work-lane verb — `gw work file`, `advance`,
+`record-placement`, decisions, `regen-index`, `reparent`, `archive`, the finish-receipt
+`record` — and the SessionEnd transcript hook commits exactly the paths it wrote, once,
+under the workspace lock, with a single-line `workspace:` subject. Whether they commit is
+`workflow.workspace_commits`: `auto` (the default: only when this workspace is its own git
+repository), `on`, or `off`.
 
-Subject lines use the `workspace:` prefix the existing history uses, e.g.
-`workspace: advance <item> to plan`. Keep the message to that single line — these
-commits are small and self-explanatory; skip the body.
+Never use `git add -A` or `git commit -a` in this workspace's `main` checkout.
+Never run `git commit` there during a pipeline stage, except for the pathspec-only commits
+below for writes no gw verb owns. Never manually commit gw-owned writes; a broad commit
+could sweep in another session's in-flight files.
+
+For writes no gw verb commits (scan, ingest, page edits, hand edits to work items), commit
+**only the paths you changed, by pathspec** (`git add -- <paths>` then
+`git commit --only -m "<subject>" -- <paths>`), one commit per logical change, with a
+single-line `workspace:` subject — no body and no trailers.
 
 Never commit `workspace.local.yaml`, `dispatch.local.yaml`, or `{{CONFIG_DIR}}/cache/`
 (all gitignored by `gw bootstrap`).
 
-If the workspace lives inside the code repository, workspace edits ride along with that
-repository's ordinary commits; still keep them separate from code changes.
+If the workspace lives inside the code repository, gw commits nothing under the default
+`auto`; set `workflow.workspace_commits: on` to have verbs commit on that repository's
+checked-out branch, and keep workspace commits separate from code changes either way.
 
 ## Log format
 

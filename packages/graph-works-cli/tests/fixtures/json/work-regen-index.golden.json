@@ -6,5 +6,12 @@
   "refusals": [],
   "applied": true,
   "rolled_back": false,
-  "failures": []
+  "failures": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: regenerate work indexes",
+    "paths": [],
+    "reason": "not-a-repo"
+  }
 }

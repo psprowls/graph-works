@@ -20,6 +20,13 @@
   "applied": true,
   "rolled_back": false,
   "failures": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: overturn epic-epic decision D-002",
+    "paths": [],
+    "reason": "not-a-repo"
+  },
   "follow_up": {
     "path": "work/tech-debt-redo",
     "page_path": "<tmp>/works/okf/work/tech-debt-redo.md"

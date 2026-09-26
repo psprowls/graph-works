@@ -99,6 +99,13 @@ from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route
 
 from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
 from graph_works_core.workspace import provenance
+from graph_works_core.workspace.commits import (
+    COMMIT_FAILED_PREFIX,
+    CommitOutcome,
+    WorkspaceCommit,
+    commit_mode,
+    item_stem,
+)
 from graph_works_core.workspace.decision_owner import (
     DecisionContext,
     DecisionOwner,
@@ -288,6 +295,10 @@ def run_file(
                 _filing_mutation(bundle, outcome.plan),
                 repo_roots=_repo_roots(layout),
                 baseline_bundle=bundle,
+                commit=WorkspaceCommit(
+                    f"workspace: file {item_stem(outcome.plan.filing.path)}",
+                    items=tuple(p for p in (outcome.plan.filing.path, parent_path) if p),
+                ),
             ),
         )
 
@@ -538,6 +549,7 @@ class NextApplication:
     """The source normalizations that persisted during this invocation."""
 
     normalized: tuple[str, ...] = ()
+    commits: tuple[CommitOutcome, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -579,6 +591,7 @@ def _apply_normalizations(
     bundle: Bundle | None = None,
 ) -> tuple[NextApplication, tuple[str, ...]]:
     normalized: list[str] = []
+    commits: list[CommitOutcome] = []
     warnings: list[str] = []
     for change in changes:
         try:
@@ -594,9 +607,20 @@ def _apply_normalizations(
                     (_planned_write(member, before, document.serialize().encode("utf-8")),),
                     validate_paths=(change.path,),
                 )
-                application = apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
+                application = apply_mutation(
+                    layout,
+                    mutation,
+                    repo_roots=_repo_roots(layout),
+                    baseline_bundle=bundle,
+                    commit=WorkspaceCommit(
+                        f"workspace: normalize {item_stem(change.path)} sources", items=(change.path,)
+                    ),
+                )
+                if application.commit is not None:
+                    commits.append(application.commit)
                 if application.ok:
                     normalized.append(change.path)
+                    warnings.extend(w for w in application.warnings if w.startswith(COMMIT_FAILED_PREFIX))
                 else:
                     warnings.extend(
                         f"{change.path}: design source normalization failed: {failure}"
@@ -604,7 +628,7 @@ def _apply_normalizations(
                     )
         except OSError as exc:
             warnings.append(f"{change.path}: design source normalization failed: {exc}")
-    return NextApplication(normalized=tuple(normalized)), tuple(warnings)
+    return NextApplication(normalized=tuple(normalized), commits=tuple(commits)), tuple(warnings)
 
 
 def _stage_artifact(bundle_root: Path, item: WorkItem, result: RouteResult) -> ArtifactRef | None:
@@ -1106,7 +1130,15 @@ def _regen_indexes_once(layout: WorkspaceLayout, *, dry_run: bool) -> RegenIndex
         ),
     )
     application = (
-        None if dry_run else apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=bundle)
+        None
+        if dry_run
+        else apply_mutation(
+            layout,
+            mutation,
+            repo_roots=_repo_roots(layout),
+            baseline_bundle=bundle,
+            commit=WorkspaceCommit("workspace: regenerate work indexes"),
+        )
     )
     return RegenIndexesResult(plans=plans, mutation=mutation, application=application, marker_strips=marker_strips)
 
@@ -1148,7 +1180,15 @@ def run_reparent(
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_reparent(bundle, load_items(bundle), source_path, parent_path)
     return PathMutationResult(
-        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout))
+        plan,
+        None
+        if dry_run or not plan.ok
+        else apply_mutation(
+            layout,
+            plan,
+            repo_roots=_repo_roots(layout),
+            commit=WorkspaceCommit(f"workspace: reparent {item_stem(source_path)} under {item_stem(parent_path)}"),
+        ),
     )
 
 
@@ -1164,7 +1204,15 @@ def run_release_adoption(
     bundle = load_bundle(layout.bundle_dir, ignore=())
     plan = plan_release_adoption(bundle, load_items(bundle), source_path, release_path)
     return PathMutationResult(
-        plan, None if dry_run or not plan.ok else apply_mutation(layout, plan, repo_roots=_repo_roots(layout))
+        plan,
+        None
+        if dry_run or not plan.ok
+        else apply_mutation(
+            layout,
+            plan,
+            repo_roots=_repo_roots(layout),
+            commit=WorkspaceCommit(f"workspace: adopt children into {item_stem(release_path)}", items=(release_path,)),
+        ),
     )
 
 
@@ -1251,6 +1299,8 @@ def _apply_decision(
     ledger_before: bytes | None,
     extra_writes: Sequence[PlannedWrite] = (),
     *,
+    label: str,
+    verb: str,
     allowed_new_findings: tuple[tuple[str, str], ...] = (),
 ) -> MutationApplication | None:
     if plan.refusal is not None:
@@ -1261,6 +1311,10 @@ def _apply_decision(
         repo_roots=_repo_roots(layout),
         baseline_bundle=context.bundle,
         allowed_new_findings=allowed_new_findings,
+        commit=WorkspaceCommit(
+            f"workspace: {verb} {item_stem(context.owner.owner_path)} decision {label}",
+            items=(context.owner.owner_path,),
+        ),
     )
 
 
@@ -1372,6 +1426,7 @@ def run_decision_add(
         plan, _extra = planned(context)
         application = None
     else:
+        commit_mode(layout)
         with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan, extra = planned(context)
@@ -1396,7 +1451,14 @@ def run_decision_add(
             ):
                 allowed_new_findings = ((item_page(owner_path).rel, "decisions.open-at-finish"),)
             application = _apply_decision(
-                layout, context, plan, ledger_before, extra, allowed_new_findings=allowed_new_findings
+                layout,
+                context,
+                plan,
+                ledger_before,
+                extra,
+                label=plan.primary.id if plan.primary else "ledger",
+                verb="add",
+                allowed_new_findings=allowed_new_findings,
             )
     return _decision_result(context, plan, application)
 
@@ -1429,10 +1491,11 @@ def run_decision_answer(
         plan = planned(context)
         application = None
     else:
+        commit_mode(layout)
         with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan = planned(context)
-            application = _apply_decision(layout, context, plan, ledger_before)
+            application = _apply_decision(layout, context, plan, ledger_before, label=decision_id, verb="answer")
     return _decision_result(context, plan, application)
 
 
@@ -1525,10 +1588,11 @@ def run_decision_supersede(
         plan = planned(context)
         application = None
     else:
+        commit_mode(layout)
         with locked_decision_owner(layout, path) as context:
             ledger_before = _optional_bytes(context.owner.ledger)
             plan = planned(context)
-            application = _apply_decision(layout, context, plan, ledger_before)
+            application = _apply_decision(layout, context, plan, ledger_before, label=decision_id, verb="supersede")
     return _decision_result(context, plan, application)
 
 
@@ -1606,6 +1670,7 @@ def run_decision_overturn(
         context = decision_context(layout, path)
         combined = planned(context)
         return OverturnResult(owner=context.owner, plan=combined)
+    commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
         ledger_before = _optional_bytes(context.owner.ledger)
         combined = planned(context)
@@ -1616,12 +1681,21 @@ def run_decision_overturn(
             _decision_mutation(context, combined.decision, ledger_before),
             _filing_mutation(context.bundle, combined.filing),
         )
-        application = apply_mutation(layout, mutation, repo_roots=_repo_roots(layout), baseline_bundle=context.bundle)
+        application = apply_mutation(
+            layout,
+            mutation,
+            repo_roots=_repo_roots(layout),
+            baseline_bundle=context.bundle,
+            commit=WorkspaceCommit(
+                f"workspace: overturn {item_stem(context.owner.owner_path)} decision {decision_id}",
+                items=(context.owner.owner_path, combined.filing.filing.path),
+            ),
+        )
     return OverturnResult(
         owner=context.owner,
         plan=combined,
         application=OverturnApplication(mutation=application),
-        warnings=application.failures,
+        warnings=(*application.failures, *application.warnings),
     )
 
 

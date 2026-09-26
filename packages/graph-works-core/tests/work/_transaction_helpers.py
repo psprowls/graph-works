@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import stat
+import subprocess
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -135,3 +136,29 @@ def _forced_tier(platform_name: str) -> Iterator[None]:
             lambda path: anchors.open_absolute_anchor(path, platform_name=platform_name),
         )
         yield
+
+
+def _git(root: Path, *args: str) -> str:
+    return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout
+
+
+def _init_git(root: Path, *, commit: bool = True) -> Path:
+    """A real, deterministic git repo at *root*: local identity, no signing, no user hooks."""
+    hooks = root / ".no-hooks"
+    hooks.mkdir(parents=True, exist_ok=True)
+    _git(root, "init", "-q", "-b", "main")
+    _git(root, "config", "user.name", "gw-test")
+    _git(root, "config", "user.email", "gw-test@example.invalid")
+    _git(root, "config", "commit.gpgsign", "false")
+    _git(root, "config", "core.hooksPath", str(hooks))
+    if commit:
+        _git(root, "add", "-A")
+        _git(root, "commit", "-q", "--allow-empty", "-m", "workspace: seed")
+    return root
+
+
+def assert_workspace_commit(root: Path, subject: str) -> None:
+    """One exact subject, no body, and no uncommitted work-lane changes."""
+    assert _git(root, "log", "-1", "--format=%s").strip() == subject
+    assert _git(root, "log", "-1", "--format=%b").strip() == ""
+    assert _git(root, "status", "--porcelain", "--", "okf/work") == ""

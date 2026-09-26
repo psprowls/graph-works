@@ -7,8 +7,28 @@ import typing
 
 import pytest
 from graph_works_core.workspace import pipeline
+from graph_works_core.workspace.pipeline import PACKAGED_PIPELINE, RELAY_TAIL_SEED, WORKSPACE_COMMIT_TAIL
 from subagents_io.dispatch import DISPATCH_MODES
 from work_tracker_okf.workflow import Variant
+
+
+def test_workspace_commit_tail_text() -> None:
+    assert WORKSPACE_COMMIT_TAIL == (
+        "Never `git commit` in the graph-works workspace at {workspace}; gw verbs commit their own workspace writes."
+    )
+
+
+def test_every_packaged_tail_ends_with_the_commit_tail() -> None:
+    for variant, entry in PACKAGED_PIPELINE.items():
+        if variant == "branch":
+            assert entry.prompt_tail is None  # the relay tail is workspace-owned (RELAY_TAIL_SEED)
+            continue
+        assert entry.prompt_tail is not None and entry.prompt_tail.endswith(WORKSPACE_COMMIT_TAIL), variant
+
+
+def test_relay_seed_ends_with_the_commit_tail() -> None:
+    assert RELAY_TAIL_SEED.startswith("Auto-drive context: ")
+    assert RELAY_TAIL_SEED.endswith(WORKSPACE_COMMIT_TAIL)
 
 
 def test_the_packaged_table_is_total_over_variant():

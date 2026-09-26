@@ -54,8 +54,12 @@ class GitOutcome:
     stderr: str = ""
 
 
-def probe_git(cwd: Path, *args: str, executable: str = "git") -> GitOutcome:
-    """Run `git <args>` in *cwd*, retaining its exit status for state probes."""
+def probe_git(cwd: Path, *args: str, executable: str = "git", timeout: float = _GIT_TIMEOUT_SECONDS) -> GitOutcome:
+    """Run `git <args>` in *cwd*, retaining its exit status for state probes.
+
+    *timeout* defaults to the advance-path cap; `workspace.commits` passes a
+    longer one because a commit runs the user's own git hooks.
+    """
     try:
         completed = subprocess.run(
             [executable, *args],
@@ -63,7 +67,7 @@ def probe_git(cwd: Path, *args: str, executable: str = "git") -> GitOutcome:
             capture_output=True,
             text=True,
             check=False,
-            timeout=_GIT_TIMEOUT_SECONDS,
+            timeout=timeout,
         )
     except FileNotFoundError:
         return GitOutcome(None, "", "missing")

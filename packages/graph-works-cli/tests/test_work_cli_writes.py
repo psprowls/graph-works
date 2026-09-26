@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +33,50 @@ def file_item(workspace: Path, title: str, *, kind: str = "Feature", parent: str
     result = runner.invoke(app, args)
     assert result.exit_code == 0, result.output
     return str(json.loads(result.stdout)["path"])
+
+
+def test_file_human_reports_workspace_commit(workspace: Path) -> None:
+    subprocess.run(["git", "init", str(workspace)], check=True, capture_output=True)
+    subprocess.run(["git", "config", "user.name", "Test User"], cwd=workspace, check=True)
+    subprocess.run(["git", "config", "user.email", "test@example.com"], cwd=workspace, check=True)
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Committed item",
+            "--kind",
+            "Feature",
+            "--summary",
+            "d",
+            "--workspace",
+            str(workspace),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "[ok] committed " in result.stdout
+    assert "workspace: " in result.stdout
+
+
+def test_file_human_notes_non_repo_workspace(workspace: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Uncommitted item",
+            "--kind",
+            "Feature",
+            "--summary",
+            "d",
+            "--workspace",
+            str(workspace),
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert "[note] workspace not committed (not-a-repo)" in result.stderr
 
 
 def test_file_writes_a_date_free_canonical_path_and_explicit_json(workspace: Path) -> None:
@@ -372,6 +417,7 @@ def test_archive_of_a_child_is_refused_not_top_level_and_names_the_root(workspac
 def test_archive_incomplete_apply_emits_the_envelope(workspace: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     run = SimpleNamespace(
         plan=SimpleNamespace(move_plan=None),
+        wiki_commit=None,
         wiki_plan=SimpleNamespace(moves=SimpleNamespace(stranded=())),
         ok=False,
     )
@@ -701,6 +747,7 @@ def test_record_placement_distinguishes_write_replay_and_preview(workspace: Path
             "warnings",
             "refusal",
             "repo_note",
+            "commit",
         }
         assert payload["path"] == payload["root"] == path
         assert payload["expected_phase"] == payload["current_phase"] == fm_before["phase"]

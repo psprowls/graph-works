@@ -238,6 +238,24 @@
     "shadowed": null
   },
   {
+    "key": "workflow.workspace_commits",
+    "value": "auto",
+    "origin": "default",
+    "entry": {
+      "key": "workflow.workspace_commits",
+      "type": "str",
+      "default": "auto",
+      "description": "Whether gw verbs commit their own workspace writes: `auto` (only when the workspace is its own git repository), `on` (in any enclosing repository, on its checked-out branch) or `off`.",
+      "kind": "manifest",
+      "env_var": null,
+      "allowed": [],
+      "secret": false,
+      "write_policy": "writable",
+      "write_hint": null
+    },
+    "shadowed": null
+  },
+  {
     "key": "workspace.dir",
     "value": null,
     "origin": "default",

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from pathlib import Path
+from typing import Any, cast
 
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
@@ -207,6 +208,7 @@ def file(
         typer.echo(f"  reconciled {path}")
     if payload["logged"]:
         typer.echo(f"  log.md: {payload['logged'].removeprefix('- ')}")
+    rendering.render_commit(payload["commit"])
 
 
 @work_app.command()
@@ -422,6 +424,7 @@ def advance(
         typer.echo(result.outcome.plan.diff())
         return
     rendering.render_advance(payload)
+    rendering.render_commit(payload["commit"])
 
 
 @work_app.command(name="record-placement")
@@ -503,6 +506,7 @@ def record_placement(
             rendering.warn(payload["repo_note"])
         return
     rendering.render_placement(payload)
+    rendering.render_commit(payload["commit"])
 
 
 @work_app.command(name="touch-active-work")
@@ -618,6 +622,8 @@ def regen_index(
             typer.echo(f"{'would reconcile' if dry_run else 'reconciled'} {index}")
     else:
         typer.echo("nothing to do")
+    if not json_output:
+        rendering.render_commit(payload["commit"])
 
 
 @work_app.command()
@@ -688,6 +694,8 @@ def archive(
             typer.echo(f"reconciled {path}")
         if payload["logged"]:
             typer.echo(f"log.md: {payload['logged']}")
+        rendering.render_commit(payload["commit"])
+        rendering.render_commit(payload["wiki_commit"])
 
 
 def _finish_path_mutation(payload: dict[str, object], *, dry_run: bool, json_output: bool) -> None:
@@ -716,6 +724,7 @@ def _finish_path_mutation(payload: dict[str, object], *, dry_run: bool, json_out
         )
     else:
         typer.echo("[ok] work mutation applied")
+        rendering.render_commit(cast(dict[str, Any] | None, payload["commit"]))
 
 
 @work_app.command()

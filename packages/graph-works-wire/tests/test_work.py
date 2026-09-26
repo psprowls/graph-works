@@ -9,11 +9,68 @@ from types import SimpleNamespace as ns
 
 from graph_works_core.work.commands import DispatchExplanation, OpenDecision
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
+from graph_works_core.workspace.commits import CommitOutcome
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
 from graph_works_wire import config as wire_config
 from graph_works_wire import work
-from samples_work import BUNDLE, archive_run, next_result
+from samples_work import (
+    BUNDLE,
+    advance,
+    archive_run,
+    decision,
+    filing,
+    next_result,
+    overturn,
+    path_mutation,
+    placement,
+    regen,
+)
 from work_tracker_okf.decisions import Decision
+
+
+def test_commit_projection() -> None:
+    outcome = CommitOutcome("committed", "abc123", "workspace: t", ("okf/work/a.md",), None)
+    assert work._commit(outcome) == {
+        "status": "committed",
+        "sha": "abc123",
+        "subject": "workspace: t",
+        "paths": ["okf/work/a.md"],
+        "reason": None,
+    }
+    assert work._commit(None) is None
+
+
+def test_mutation_payloads_include_commit_outcome() -> None:
+    outcome = CommitOutcome("committed", "abc123", "workspace: t", ("okf/work/a.md",), None)
+    advanced = advance(applied=True)
+    advanced.application = SimpleNamespace(**vars(advanced.application))
+    advanced.application.commit = outcome
+    assert work.advance_payload(advanced, "work/a")["commit"] == work._commit(outcome)
+    assert work.advance_payload(advance(applied=False), "work/a")["commit"] is None
+    assert work.placement_payload(placement(applied=False))["commit"] is None
+    assert work.file_payload(filing(applied=False))["commit"] is None
+    assert work.regen_index_payload(regen(applied=False))["commit"] is None
+    archived = work.archive_payload(archive_run(applied=False), dry_run=True)
+    assert archived["commit"] is None and archived["wiki_commit"] is None
+    assert work.path_mutation_payload(path_mutation(applied=False))["commit"] is None
+    assert work.decision_payload(decision(planned=False))["commit"] is None
+    assert work.overturn_payload(overturn(applied=False))["commit"] is None
+
+
+def test_next_projects_normalization_commits() -> None:
+    outcome = CommitOutcome("committed", None, "workspace: normalize", ("okf/work/a.md",), None)
+    result = next_result(full=True)
+    result.application.commits = (outcome,)
+    assert work.next_payload(result, bundle_root=BUNDLE)["commits"] == [work._commit(outcome)]
+
+
+def test_placement_pending_commit_failure_warns_once() -> None:
+    result = placement(applied=False)
+    result.pending_commit = CommitOutcome("failed", None, "workspace: placement", (), "hook-failed")
+    result.warnings = ("workspace commit failed: hook-failed",)
+    payload = work.placement_payload(result)
+    assert payload["commit"] == work._commit(result.pending_commit)
+    assert payload["warnings"] == ["workspace commit failed: hook-failed"]
 
 
 def test_archive_payload_wiki_block_empty_planned_applied() -> None:
@@ -60,7 +117,7 @@ def test_normalized_payload_is_path_keyed_and_uses_canonical_source_fields() -> 
     )
     result = SimpleNamespace(
         selected_path=selected.path,
-        application=SimpleNamespace(normalized=(parent.path, selected.path)),
+        application=SimpleNamespace(normalized=(parent.path, selected.path), commits=()),
         normalizations=(parent, selected),
     )
 
@@ -104,7 +161,7 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
     assert work._transition(transition)["requires"] == ["owner"]
     assert work._finding(finding)["line"] == 7
     assert work._refusal(SimpleNamespace(path="work/a", kind="bad", detail="why"))["kind"] == "bad"
-    assert work._application(None) == {"applied": False, "rolled_back": False, "failures": []}
+    assert work._application(None) == {"applied": False, "rolled_back": False, "failures": [], "commit": None}
 
     result = SimpleNamespace(
         requested_path="work/e",
@@ -117,7 +174,7 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
     assert work.descent_payload(result)["from"] == "work/e"
     assert work.next_blockers(result)[-1] == "--descend: blocked"
 
-    application = SimpleNamespace(rolled_back=True, failures=("failed",), warnings=("warning",), ok=False)
+    application = SimpleNamespace(rolled_back=True, failures=("failed",), warnings=("warning",), ok=False, commit=None)
     update = SimpleNamespace(path=tmp_path / "index.md", changed=True)
     refusal = SimpleNamespace(path="work/a", kind="conflict", detail="changed")
     stripped = SimpleNamespace(path=tmp_path / "children" / "_archive" / "index.md", changed=True)
@@ -134,9 +191,12 @@ def test_projection_helpers_cover_live_and_preview_shapes(tmp_path: Path) -> Non
         ok=False,
         conflict=("work/a",),
         plan=SimpleNamespace(path_mapping={"work/a": "work/_archive/a"}, warnings=("p",), refusals=(refusal,)),
-        result=SimpleNamespace(written=("work/index.md", "work/a.md"), warnings=("a",), rolled_back=False, failures=()),
+        result=SimpleNamespace(
+            written=("work/index.md", "work/a.md"), warnings=("a",), rolled_back=False, failures=(), commit=None
+        ),
         wiki_plan=SimpleNamespace(tokens=(), skipped=(), moves=SimpleNamespace(moves=(), refusals=())),
         wiki=None,
+        wiki_commit=None,
         pointer_cleared=True,
         logged="archived",
     )
@@ -174,7 +234,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     decision_result = SimpleNamespace(
         owner=owner,
         plan=plan,
-        application=SimpleNamespace(rolled_back=False, failures=()),
+        application=SimpleNamespace(rolled_back=False, failures=(), commit=None),
         entries=(entry,),
         counts={"answered": 1},
         warnings=("w",),
@@ -188,7 +248,7 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
             filing=SimpleNamespace(filing=SimpleNamespace(path="work/t", target=tmp_path / "t.md")),
             refusal=None,
         ),
-        application=SimpleNamespace(mutation=SimpleNamespace(rolled_back=False, failures=(), ok=True)),
+        application=SimpleNamespace(mutation=SimpleNamespace(rolled_back=False, failures=(), ok=True, commit=None)),
         warnings=("w",),
     )
     assert work.overturn_payload(overturn)["follow_up_filed"] is True
@@ -508,3 +568,21 @@ def test_filing_applied_requires_successful_nonempty_writes():
     assert work.file_payload(outcome)["applied"] is False
     outcome.plan.refusal = "collision"
     assert work.file_payload(outcome)["applied"] is False
+
+
+def test_archive_projects_non_null_wiki_commit() -> None:
+    result = archive_run(applied=True)
+    result.wiki_commit = CommitOutcome(
+        "committed",
+        "wiki-sha",
+        "workspace: archive wiki old-page",
+        ("okf/concepts/old-page.md", "okf/archive/concepts/old-page.md"),
+        None,
+    )
+    assert work.archive_payload(result, dry_run=False)["wiki_commit"] == {
+        "status": "committed",
+        "sha": "wiki-sha",
+        "subject": "workspace: archive wiki old-page",
+        "paths": ["okf/concepts/old-page.md", "okf/archive/concepts/old-page.md"],
+        "reason": None,
+    }

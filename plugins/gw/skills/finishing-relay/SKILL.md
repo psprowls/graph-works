@@ -319,9 +319,9 @@ uv run --package graph-works-core python <plugin>/skills/finishing-relay/referen
 ```
 
 Inspect before any integration. After each repository's merge and merged-result
-checks pass, record that repository immediately, then commit the receipt and owner
-source link as workspace state using the workflow's normal workspace commit
-procedure. `record` derives commit evidence itself; never hand-author completion
+checks pass, record that repository immediately.
+`record` commits the receipt itself; do not commit the workspace.
+`record` derives commit evidence itself; never hand-author completion
 claims. Preserve source branches and worktrees until final verification.
 
 If a later repository fails, hold the entire finish and report already verified

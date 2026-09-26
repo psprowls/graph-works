@@ -58,6 +58,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "workflow.dispatch_rules",
         "workflow.auto_drive.max_parallel",
         "workflow.auto_drive.supervise_merges",
+        "workflow.workspace_commits",
         "workspace.dir",
     ]
 

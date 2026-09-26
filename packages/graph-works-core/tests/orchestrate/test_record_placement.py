@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import pytest
+from _transaction_helpers import _git, _init_git
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import placement
 from graph_works_core.orchestrate import stage_advance as stage
@@ -99,6 +100,56 @@ def _snapshot(layout: WorkspaceLayout) -> dict[str, bytes]:
     return {
         p.relative_to(layout.bundle_dir).as_posix(): p.read_bytes() for p in sorted(layout.bundle_dir.rglob("*.md"))
     }
+
+
+def test_record_placement_commits_owned_page(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _init_git(layout.root)
+
+    record = _record(layout)
+
+    assert record.application is not None and record.application.commit is not None
+    assert record.application.commit.status == "committed"
+    subject = "workspace: record feature-a execute placement"
+    assert _git(layout.root, "log", "-1", "--format=%s").strip() == subject
+    assert _git(layout.root, "show", "--format=%B", "-s", "HEAD").strip() == subject
+    assert _git(layout.root, "status", "--porcelain", "--", "okf") == ""
+
+
+def test_unchanged_placement_still_commits_placement_file(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _init_git(layout.root)
+    assert _record(layout).written
+    pending = layout.bundle_dir / CHILD / "references/orca-placement/k.json"
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    pending.write_text("{}\n", encoding="utf-8", newline="\n")
+
+    record = _record(layout)
+
+    assert not record.plan.changed
+    assert record.application is None
+    assert record.pending_commit is not None and record.pending_commit.status == "committed"
+    assert _git(layout.root, "log", "-1", "--format=%s").strip() == "workspace: record feature-a execute placement"
+    assert f"okf/{CHILD}/references/orca-placement/k.json" in _git(
+        layout.root, "show", "--name-only", "--format=", "HEAD"
+    )
+
+
+def test_unchanged_placement_reports_failed_pending_commit(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _init_git(layout.root)
+    assert _record(layout).written
+    pending = layout.bundle_dir / CHILD / "references/orca-placement/k.json"
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    pending.write_text("{}\n", encoding="utf-8", newline="\n")
+    (layout.root / ".git/index.lock").write_text("held\n", encoding="utf-8", newline="\n")
+
+    record = _record(layout)
+
+    assert record.application is None
+    assert record.pending_commit is not None and record.pending_commit.status == "failed"
+    assert any(warning.startswith("workspace commit failed: ") for warning in record.warnings)
+    assert pending.exists()
 
 
 def test_recording_changes_only_the_pair_and_updated(tmp_path: Path) -> None:
@@ -221,6 +272,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
         validate_read_set=None,
+        commit=None,
     ) -> transactions.MutationApplication:
         page.write_bytes(external_edit)
         return original(
@@ -231,6 +283,7 @@ def test_a_stale_preimage_refuses_without_a_partial_pair(tmp_path: Path, monkeyp
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
             validate_read_set=validate_read_set,
+            commit=commit,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", edited_out_of_band)
@@ -287,6 +340,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
         validate_read_set=None,
+        commit=None,
     ) -> transactions.MutationApplication:
         assert baseline_bundle is not None
         document = baseline_bundle.concepts[CHILD]
@@ -299,6 +353,7 @@ def test_the_lock_held_baseline_stays_unmutated(tmp_path: Path, monkeypatch: pyt
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
             validate_read_set=validate_read_set,
+            commit=commit,
         )
 
     monkeypatch.setattr(placement, "apply_mutation", check_baseline)
@@ -676,6 +731,7 @@ def test_live_placement_uses_repository_tag_read_under_lock(tmp_path: Path, monk
         baseline_bundle: Bundle | None = None,
         allowed_new_findings: tuple[tuple[str, str], ...] = (),
         validate_read_set: Callable[[], None] | None = None,
+        commit=None,
     ) -> transactions.MutationApplication:
         observed.append(repo_root)
         return original_apply(
@@ -686,6 +742,7 @@ def test_live_placement_uses_repository_tag_read_under_lock(tmp_path: Path, monk
             baseline_bundle=baseline_bundle,
             allowed_new_findings=allowed_new_findings,
             validate_read_set=validate_read_set,
+            commit=commit,
         )
 
     monkeypatch.setattr(placement, "locked_decision_owner", retag_before_lock)
@@ -1101,3 +1158,32 @@ def test_preparation_runtime_runs_real_adapter_from_external_cwd(tmp_path: Path)
     )
     assert recorded.returncode == 0, recorded.stderr
     assert json.loads(recorded.stdout)["written"] is True
+
+
+@pytest.mark.parametrize(
+    ("verb", "dry_run"),
+    (("advance", False), ("placement", False), ("finish", False), ("advance", True), ("placement", True)),
+)
+def test_invalid_commit_config_precedes_orchestration_effects(tmp_path: Path, verb: str, dry_run: bool) -> None:
+    from graph_works_core.orchestrate.finish_receipt import run_record_finish
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _write(layout, SOLO, type="Feature", phase="design", work_status="open")
+    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
+    before = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
+
+    def invoke():
+        if verb == "advance":
+            return stage.run_stage_advance(layout, SOLO, today=TODAY, dry_run=dry_run, infer_worktree=False)
+        if verb == "placement":
+            return _record(layout, dry_run=dry_run)
+        return run_record_finish(layout, CHILD, repo_name="code", today=TODAY)
+
+    if dry_run:
+        invoke()
+    else:
+        with pytest.raises(WorkspaceError, match="workspace_commits"):
+            invoke()
+    after = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
+    assert after == before

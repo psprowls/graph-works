@@ -13,6 +13,7 @@ from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkM
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.sources import upsert
 
+from graph_works_core.workspace.commits import CommitOutcome, WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import (
@@ -32,12 +33,15 @@ class FinishReceiptResult:
     refusal: str | None
     changed: bool
     receipt_path: str | None
+    commit: CommitOutcome | None = None
+    warnings: tuple[str, ...] = ()
 
 
 def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, today: date) -> FinishReceiptResult:
     """Callers name a target, never supply completion claims or commit identities."""
     if not any(i.path == path for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))):
         return FinishReceiptResult("unknown finish owner", False, None)
+    commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
         guard = finish_read_guard(layout, path, bundle=context.bundle)
         item = next((i for i in context.items if i.path == path), None)
@@ -134,7 +138,10 @@ def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, tod
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
             validate_read_set=validate,
+            commit=WorkspaceCommit(
+                f"workspace: record {item_stem(path)} finish receipt for {repo_name}", items=(path,)
+            ),
         )
         if not application.ok:
             return FinishReceiptResult(f"finish receipt transaction refused: {application}", False, ref.rel)
-        return FinishReceiptResult(None, True, ref.rel)
+        return FinishReceiptResult(None, True, ref.rel, commit=application.commit, warnings=application.warnings)

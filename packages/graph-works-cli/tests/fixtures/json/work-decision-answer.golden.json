@@ -20,6 +20,13 @@
   "applied": true,
   "rolled_back": false,
   "failures": [],
+  "commit": {
+    "status": "skipped",
+    "sha": null,
+    "subject": "workspace: answer epic-epic decision D-001",
+    "paths": [],
+    "reason": "not-a-repo"
+  },
   "entries": [
     {
       "id": "D-001",

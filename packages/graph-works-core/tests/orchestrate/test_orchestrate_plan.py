@@ -2057,7 +2057,7 @@ def test_dispatch_profile_errors_preserve_relay_blocker_and_do_not_claim_placeme
     root = "work/epic-a"
     child = f"{root}/children/feature-a"
     rules = parse_rules(
-        [{"match": {"variant": "single"}, "mode": "relay"}],
+        [{"match": {"variant": "single"}, "mode": "relay", "prompt_tail": None}],
         source="/ws/dispatch.yaml",
         attributes=frozenset({"variant"}),
     )
@@ -2150,7 +2150,7 @@ def test_dispatch_profile_error_reserves_no_affects() -> None:
     from graph_works_core.workspace.dispatch import parse_rules
 
     rules = parse_rules(
-        [{"match": {"type": "Bug"}, "mode": "relay"}],
+        [{"match": {"type": "Bug"}, "mode": "relay", "prompt_tail": None}],
         source="/ws/dispatch.yaml",
         attributes=frozenset({"variant", "type"}),
     )

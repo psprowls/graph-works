@@ -41,6 +41,7 @@ import errno
 import os
 import stat
 import sys
+import time
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager, suppress
 from dataclasses import dataclass
@@ -57,6 +58,10 @@ POSIX_STRONG_TIER = "posix-strong"
 
 class UnsupportedAnchorPlatform(RuntimeError):
     """No anchor implementation is registered for the requested platform."""
+
+
+class LockTimeout(TimeoutError):
+    """A bounded exclusive lock wait expired without acquiring the lock."""
 
 
 #: Win32 refuses these as filenames regardless of extension, at every path
@@ -122,6 +127,49 @@ def _flock_release(descriptor: int) -> None:
     import fcntl
 
     fcntl.flock(descriptor, fcntl.LOCK_UN)
+
+
+def _flock_exclusive_within(descriptor: int, timeout: float) -> None:
+    """Poll a nonblocking directory flock until the requested deadline."""
+    if sys.platform == "win32":
+        _posix_only("fcntl.flock")
+    import fcntl
+
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return
+        except BlockingIOError:
+            if time.monotonic() >= deadline:
+                raise LockTimeout(f"bundle lock not acquired within {timeout:g}s") from None
+            time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+
+
+@contextmanager
+def _windows_lock_within(path: Path, timeout: float) -> Iterator[None]:
+    """Poll the nonblocking Windows byte lock for the requested interval."""
+    import msvcrt
+
+    descriptor = os.open(path, os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        deadline = time.monotonic() + timeout
+        while True:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            try:
+                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined,unused-ignore]
+                break
+            except OSError:
+                if time.monotonic() >= deadline:
+                    raise LockTimeout(f"bundle lock not acquired within {timeout:g}s") from None
+                time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))
+        try:
+            yield
+        finally:
+            os.lseek(descriptor, 0, os.SEEK_SET)
+            msvcrt.locking(descriptor, msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined,unused-ignore]
+    finally:
+        os.close(descriptor)
 
 
 def set_mode(descriptor: int, path: Path | Callable[[], Path], mode: int) -> None:
@@ -248,7 +296,7 @@ class Anchor(Protocol):
     def fsync(self) -> None: ...
 
     # -- locking ------------------------------------------------------------
-    def exclusive_lock(self) -> AbstractContextManager[None]: ...
+    def exclusive_lock(self, *, timeout: float | None = None) -> AbstractContextManager[None]: ...
     def lock_file(self, name: str, *, assert_identity: bool) -> AbstractContextManager[None]: ...
 
     # -- tier contract --------------------------------------------------------
@@ -477,7 +525,7 @@ class _PosixAnchor:
     # -- locking ------------------------------------------------------------
 
     @contextmanager
-    def exclusive_lock(self) -> Iterator[None]:
+    def exclusive_lock(self, *, timeout: float | None = None) -> Iterator[None]:
         """Lock this directory *descriptor*.  From transactions.py:303.
 
         Locking the descriptor rather than the path is what makes the lock
@@ -488,7 +536,10 @@ class _PosixAnchor:
             raise NotADirectoryError("bundle root descriptor is not a directory")
         held = False
         try:
-            _flock_exclusive(self.descriptor)
+            if timeout is None:
+                _flock_exclusive(self.descriptor)
+            else:
+                _flock_exclusive_within(self.descriptor, timeout)
             held = True
             yield
         finally:
@@ -999,7 +1050,7 @@ class _WindowsAnchor:
     # -- locking ------------------------------------------------------------
 
     @contextmanager
-    def exclusive_lock(self) -> Iterator[None]:
+    def exclusive_lock(self, *, timeout: float | None = None) -> Iterator[None]:
         """Serialize every executor over this anchored directory, via a lock file.
 
         The strong tier flocks the directory DESCRIPTOR, which is immune to the
@@ -1009,7 +1060,9 @@ class _WindowsAnchor:
         acquisition time.  ADR 2026-08-27-two-declared-durability records the difference.
         """
         directory = self._revalidate()
-        with locked(directory / BUNDLE_LOCK_NAME):
+        path = directory / BUNDLE_LOCK_NAME
+        lock = locked(path) if timeout is None else _windows_lock_within(path, timeout)
+        with lock:
             yield
 
     @contextmanager
@@ -1263,6 +1316,7 @@ __all__ = [
     "WINDOWS_REVALIDATED_TIER",
     "Anchor",
     "DurabilityTier",
+    "LockTimeout",
     "RefusedShape",
     "UnsupportedAnchorPlatform",
     "anchor_tier",

@@ -14,9 +14,11 @@ import importlib.util
 import os
 import stat
 import sys
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from graph_works_core.util.platform import POSIX_ONLY_MODULES
@@ -245,6 +247,72 @@ def test_exclusive_lock_and_lock_file_round_trip(tmp_path: Path) -> None:
             assert (tmp_path / "executor.lock").is_file()
         with anchor.lock_file("executor.lock", assert_identity=False):
             pass
+    finally:
+        anchor.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX flock tier")
+def test_exclusive_lock_timeout_raises_lock_timeout(tmp_path: Path) -> None:
+    import fcntl
+    import time
+
+    holder = os.open(tmp_path, os.O_RDONLY)
+    try:
+        fcntl.flock(holder, fcntl.LOCK_EX)
+        anchor = anchors.open_anchor(tmp_path)
+        try:
+            started = time.monotonic()
+            with pytest.raises(anchors.LockTimeout), anchor.exclusive_lock(timeout=0.2):
+                pytest.fail("acquired a held lock")
+            assert time.monotonic() - started < 2.0
+        finally:
+            anchor.close()
+    finally:
+        os.close(holder)
+
+
+def test_windows_exclusive_lock_honors_requested_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    attempts: list[int] = []
+
+    def refuse(_descriptor: int, mode: int, _length: int) -> None:
+        attempts.append(mode)
+        raise OSError("held")
+
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=refuse))
+    anchor = anchors.open_anchor(tmp_path, platform_name="win32")
+    try:
+        started = time.monotonic()
+        with pytest.raises(anchors.LockTimeout), anchor.exclusive_lock(timeout=0.15):
+            pytest.fail("acquired a held lock")
+        assert 0.15 <= time.monotonic() - started < 1.0
+        assert len(attempts) >= 2
+        assert set(attempts) == {2}
+    finally:
+        anchor.close()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX flock tier")
+def test_exclusive_lock_timeout_acquires_free_lock(tmp_path: Path) -> None:
+    anchor = anchors.open_anchor(tmp_path)
+    try:
+        with anchor.exclusive_lock(timeout=0.2):
+            pass
+    finally:
+        anchor.close()
+
+
+def test_windows_exclusive_lock_timeout_releases_acquired_lock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    modes: list[int] = []
+
+    def locking(_descriptor: int, mode: int, _length: int) -> None:
+        modes.append(mode)
+
+    monkeypatch.setitem(sys.modules, "msvcrt", SimpleNamespace(LK_NBLCK=2, LK_UNLCK=0, locking=locking))
+    anchor = anchors.open_anchor(tmp_path, platform_name="win32")
+    try:
+        with anchor.exclusive_lock(timeout=0.2):
+            assert modes == [2]
+        assert modes == [2, 0]
     finally:
         anchor.close()
 

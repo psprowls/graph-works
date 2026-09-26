@@ -2248,6 +2248,28 @@ def _baseline_scope(plan: WorkMutationPlan) -> frozenset[str]:
     return frozenset(members)
 
 
+def _condition_scope(plan: WorkMutationPlan) -> frozenset[str]:
+    """The pre-mutation item paths whose structural conditions the gate will consult.
+
+    `_validate_postconditions` looks conditions up only for `plan.validate_paths`,
+    keyed `(path, kind)`, and the baseline keys each item by
+    `plan.path_mapping.get(path, path)` -- an exact-key lookup, deliberately
+    unlike the findings half's prefix-aware `_map_member`. So the only
+    pre-mutation items whose conditions can ever line up with a lookup are:
+
+    - every mapping source whose destination is a validate path, and
+    - every validate path that is neither a mapping source nor destination
+      (it is its own pre-image).
+
+    Inverting the mapping is a handful of entries; the corpus is never scanned.
+    """
+    validate_paths = set(plan.validate_paths)
+    moved_paths = set(plan.path_mapping) | set(plan.path_mapping.values())
+    scope = validate_paths - moved_paths
+    scope.update(source for source, destination in plan.path_mapping.items() if destination in validate_paths)
+    return frozenset(scope)
+
+
 def _capture_validation_state(
     layout: WorkspaceLayout,
     plan: WorkMutationPlan,

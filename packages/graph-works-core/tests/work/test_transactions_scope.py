@@ -19,6 +19,7 @@ from graph_works_core.workspace.transactions import (
     EMPTY_TRANSACTION_ID,
     _affected_index_members,
     _baseline_scope,
+    _condition_scope,
     _gate_scope,
     _map_member,
 )
@@ -173,6 +174,33 @@ def test_the_baseline_scope_names_the_source_not_the_destination(a_move_plan: Wo
     assert source in _baseline_scope(a_move_plan)
     assert dest in _gate_scope(a_move_plan)
     assert source not in _gate_scope(a_move_plan)
+
+
+def test_condition_scope_without_moves_is_the_validate_paths(a_workspace: WorkspaceLayout) -> None:
+    plan = _plan(a_workspace, validate_paths=("work/a", "work/b"))
+    assert _condition_scope(plan) == frozenset({"work/a", "work/b"})
+
+
+def test_condition_scope_maps_a_moved_validate_path_back_to_its_source(a_move_plan: WorkMutationPlan) -> None:
+    assert _condition_scope(a_move_plan) == frozenset({"work/x"})
+
+
+def test_condition_scope_drops_a_validate_path_that_is_itself_moved_away(a_workspace: WorkspaceLayout) -> None:
+    """`work/a` moves to `work/b`: nothing maps *to* `work/a`, so it has no pre-image."""
+    plan = _plan(a_workspace, path_mapping={"work/a": "work/b"}, validate_paths=("work/a",))
+    assert _condition_scope(plan) == frozenset()
+
+
+def test_condition_scope_keeps_exact_key_semantics_for_descendants(a_workspace: WorkspaceLayout) -> None:
+    """Condition keys are mapped with `path_mapping.get` (exact key), not
+    `_map_member`'s prefix match -- the spec keeps that unchanged. A validated
+    descendant of a moved item is therefore its own pre-image."""
+    plan = _plan(
+        a_workspace,
+        path_mapping={"work/x": "work/p/children/x"},
+        validate_paths=("work/p/children/x/children/y",),
+    )
+    assert _condition_scope(plan) == frozenset({"work/p/children/x/children/y"})
 
 
 def test_a_pre_existing_error_on_a_moved_document_is_excused_not_reported(

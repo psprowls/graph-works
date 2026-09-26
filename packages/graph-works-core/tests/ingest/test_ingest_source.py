@@ -914,6 +914,58 @@ async def test_text_material_still_gets_the_source_content_block(workspace, monk
     assert "Some prose about a thing." in prompt
 
 
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+@pytest.mark.parametrize("suffix", ["txt", "html"])
+async def test_unicode_models_read_extracted_text_and_copy_keeps_original_bytes(
+    workspace, monkeypatch, encoding, suffix
+):
+    layout, repo, _material = workspace
+    material = repo / "docs" / f"unicode.{suffix}"
+    text = "Café 🌍 body"
+    source = f"# A Thing\r\n\r\n{text}\r\n"
+    if suffix == "html":
+        source = f"<title>A Thing</title>\r\n<p>{text}</p>\r\n<script>SECRET</script>"
+    data = source.encode(encoding)
+    material.write_bytes(data)
+    llms = _script_llms(monkeypatch)
+
+    result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
+
+    assert result.ok, result.refusals
+    assert (layout.bundle_dir / result.copy).read_bytes() == data
+    assert set(llms) == {"ingestor", "extractor", "proposal_reasoner"}
+    # The suggestion extractor consumes the reasoner's analysis, not source text.
+    for role in ("ingestor", "proposal_reasoner"):
+        prompt = llms[role].calls[0][1].content
+        assert text in prompt
+        assert "\ufeff" not in prompt
+        assert "<p>" not in prompt
+        assert "SECRET" not in prompt
+
+
+@pytest.mark.parametrize("data", [b"caf\xe9", b"\xff\xfeA", b"\xff\xfe\x00\x00A\x00"])
+async def test_unreadable_encoding_is_recorded_honestly_without_suggestions(workspace, monkeypatch, data):
+    layout, repo, _material = workspace
+    material = repo / "docs" / "unreadable.txt"
+    material.write_bytes(data)
+    llms = _script_llms(monkeypatch)
+
+    result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
+
+    assert result.ok, result.refusals
+    assert (layout.bundle_dir / result.copy).read_bytes() == data
+    assert set(llms) == {"ingestor"}
+    assert result.proposal_status["reasoner"] == "skipped"
+    prompt = llms["ingestor"].calls[0][1].content
+    assert "has not been text-extracted" in prompt
+    assert "unsupported or invalid encoding" in prompt
+    assert "This material is binary" not in prompt
+    assert "Do not summarize contents you cannot see" in prompt
+    assert "--- Source content ---" not in prompt
+    assert "unreadable.txt" in prompt
+    assert f"Size: {len(data)} bytes" in prompt
+
+
 async def test_a_write_failure_in_the_suggest_phase_reaches_the_log(workspace, monkeypatch):
     """The count in `log.md` and in `proposal_status` is what actually landed."""
     layout, repo, material = workspace

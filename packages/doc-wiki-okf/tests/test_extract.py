@@ -5,7 +5,88 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from doc_wiki_okf.reading import extract
+
+UNICODE_ENCODINGS = [
+    (b"\xef\xbb\xbf", "utf-8"),
+    (b"\xff\xfe", "utf-16-le"),
+    (b"\xfe\xff", "utf-16-be"),
+    (b"\xff\xfe\x00\x00", "utf-32-le"),
+    (b"\x00\x00\xfe\xff", "utf-32-be"),
+]
+
+
+@pytest.mark.parametrize(("bom", "encoding"), UNICODE_ENCODINGS)
+def test_bom_text_decodes_exactly_and_finds_first_heading(tmp_path, bom, encoding):
+    source = tmp_path / "notes.txt"
+    content = "# Café 🌍\r\n\r\nBody text.\r\n"
+    source.write_bytes(bom + content.encode(encoding))
+    assert extract(source) == (content, "Café 🌍", False)
+
+
+@pytest.mark.parametrize(("bom", "encoding"), UNICODE_ENCODINGS)
+@pytest.mark.parametrize(
+    ("suffix", "content", "expected", "title"),
+    [
+        ("html", "<title>Café</title><style>hidden</style><p>🌍 body</p><script>secret</script>", "🌍 body", "Café"),
+        ("json", '{"a":1}', '{\n  "a": 1\n}', None),
+        ("csv", "row\r\n" * 51, "\n".join(["row"] * 50), None),
+        ("other", "Café 🌍\r\n", "Café 🌍\r\n", None),
+        ("md", "\n" * 20 + "# Late", "\n" * 20 + "# Late", None),
+    ],
+)
+def test_bom_formats_keep_their_existing_behavior(tmp_path, bom, encoding, suffix, content, expected, title):
+    source = tmp_path / f"source.{suffix}"
+    source.write_bytes(bom + content.encode(encoding))
+    assert extract(source) == (expected, title, False)
+
+
+@pytest.mark.parametrize(("bom", "encoding"), UNICODE_ENCODINGS)
+def test_bom_json_retains_formatting_limit(tmp_path, bom, encoding):
+    source = tmp_path / "large.json"
+    source.write_bytes(bom + json.dumps({"a": "x" * 100_000}).encode(encoding))
+    text, title, binary = extract(source)
+    assert text == '{\n  "a": "' + "x" * 99_990
+    assert title is None
+    assert binary is False
+
+
+@pytest.mark.parametrize("data", [b"", *(bom for bom, _ in UNICODE_ENCODINGS)])
+def test_empty_and_bom_only_are_valid_empty_text(tmp_path, data):
+    source = tmp_path / "empty.txt"
+    source.write_bytes(data)
+    assert extract(source) == ("", None, False)
+
+
+@pytest.mark.parametrize(("bom", "encoding"), UNICODE_ENCODINGS)
+def test_only_one_leading_bom_is_consumed(tmp_path, bom, encoding):
+    source = tmp_path / "double.txt"
+    content = "\ufeff# Content"
+    source.write_bytes(bom + content.encode(encoding))
+    assert extract(source) == (content, None, False)
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        b"caf\xe9",
+        b"\x80",
+        b"\xef\xbb\xbf\xff",
+        b"\xff\xfeA",
+        b"\xfe\xff\x00",
+        b"\xff\xfe\x00\xd8",
+        b"\xfe\xff\xd8\x00",
+        b"\xff\xfe\x00\x00A\x00",
+        b"\x00\x00\xfe\xff\x00\x00",
+        b"\xff\xfe\x00\x00\x00\x00\x11\x00",
+        b"\x00\x00\xfe\xff\x00\x11\x00\x00",
+    ],
+)
+def test_unsupported_or_malformed_unicode_never_falls_back(tmp_path, data):
+    source = tmp_path / "unreadable.txt"
+    source.write_bytes(data)
+    assert extract(source) == ("", None, True)
 
 
 def test_extract_md_returns_text_and_heading_title(tmp_path: Path) -> None:

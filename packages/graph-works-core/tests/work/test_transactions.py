@@ -1370,6 +1370,101 @@ def test_the_item_adapter_and_the_shared_predicate_agree(tmp_path: Path) -> None
     assert {"dependency-missing", "dependency-invalid-path"} <= kinds["work/dangling"]
 
 
+_EDGE = {"blocks": "execute", "needs": "resolved"}
+
+
+def _scoped_conditions(layout: WorkspaceLayout, plan: WorkMutationPlan) -> dict[tuple[str, str], int]:
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        return dict(transactions._scoped_baseline_conditions(plan, root))
+    finally:
+        root.close()
+
+
+def test_scoped_baseline_conditions_read_a_moved_items_source_page(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/x", type="Bug", depends_on=({"path": "work/absent", **_EDGE},))
+    plan = _plan(layout, path_mapping={"work/x": "work/p/children/x"}, validate_paths=("work/p/children/x",))
+
+    assert _scoped_conditions(layout, plan) == {("work/p/children/x", "dependency-missing"): 1}
+
+
+def test_scoped_baseline_conditions_see_the_parent_on_disk(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    kid = "work/rel/children/kid"
+    _write_item(layout.bundle_dir, kid, type="Feature")
+    plan = _plan(layout, validate_paths=(kid,))
+
+    assert _scoped_conditions(layout, plan) == {(kid, "parent-missing"): 1}
+    _write_item(layout.bundle_dir, "work/rel", type="Release")
+    assert _scoped_conditions(layout, plan) == {}
+
+
+def test_scoped_baseline_conditions_skip_absent_and_non_utf8_pages(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work/garbled.md").write_bytes(b"---\ntype: \xff\n---\n")
+    plan = _plan(layout, validate_paths=("work/ghost", "work/garbled"))
+
+    assert _scoped_conditions(layout, plan) == {}
+
+
+def test_scoped_baseline_conditions_read_only_the_scoped_pages(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/a", type="Feature")
+    _write_item(layout.bundle_dir, "work/unrelated/children/orphan", type="Feature")
+    read: list[str] = []
+    real = transactions._read_bytes_at
+
+    def recording(root, member):  # type: ignore[no-untyped-def]
+        read.append(member)
+        return real(root, member)
+
+    monkeypatch.setattr(transactions, "_read_bytes_at", recording)
+
+    assert _scoped_conditions(layout, _plan(layout, validate_paths=("work/a",))) == {}
+    assert read == ["work/a.md"]
+
+
+def test_a_non_canonical_target_is_absent_without_a_filesystem_read(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+
+    def forbidden(_root, member):  # type: ignore[no-untyped-def]
+        raise AssertionError(f"touched the filesystem for {member!r}")
+
+    monkeypatch.setattr(transactions, "_lexists_at", forbidden)
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        for path in ("", "../escape", "not/canonical", "work/x/grandchild"):
+            assert transactions._baseline_target_exists(root, path) is False, path
+    finally:
+        root.close()
+
+
+def test_a_target_under_a_file_ancestor_is_absent(tmp_path: Path) -> None:
+    """A regular-file ancestor means the target is absent, as `load_items` would agree."""
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work/f").write_bytes(b"not a directory")
+    root = transactions._open_root(layout.bundle_dir)
+    try:
+        assert transactions._baseline_target_exists(root, "work/f/children/t") is False
+    finally:
+        root.close()
+
+
+def test_a_scoped_read_failure_propagates(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/a", type="Feature")
+
+    def denied(_root, member):  # type: ignore[no-untyped-def]
+        raise PermissionError(f"denied: {member}")
+
+    monkeypatch.setattr(transactions, "_read_bytes_at", denied)
+    with pytest.raises(PermissionError):
+        _scoped_conditions(layout, _plan(layout, validate_paths=("work/a",)))
+
+
 def test_baseline_capture_counts_findings_under_their_post_move_paths(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     repo = tmp_path / "repo"

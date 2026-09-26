@@ -48,7 +48,7 @@ from okf_io import Bundle, Rule, parse, validate
 from okf_io import load_bundle as _load_bundle
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
-from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue
+from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue, parse_dependencies
 from work_tracker_okf.indexes import reconcile_entries, render_entry
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import WorkMutationPlan, directory_manifest_digest
@@ -2267,6 +2267,58 @@ def _condition_scope(plan: WorkMutationPlan) -> frozenset[str]:
     scope = {path for path in validate_paths if path not in plan.path_mapping}
     scope.update(source for source, destination in plan.path_mapping.items() if destination in validate_paths)
     return frozenset(scope)
+
+
+def _baseline_target_exists(root: Anchor, path: str) -> bool:
+    """Whether a canonical item path has a page on disk through the held root.
+
+    A path rejected by `parse_item_path` cannot be in `load_items`. Treat a
+    regular-file ancestor as absent too. A page that exists but is not an item
+    makes this check conservative: the baseline withholds an allowance.
+    """
+    if parse_item_path(path) is None:
+        return False
+    try:
+        return _lexists_at(root, f"{path}.md")
+    except NotADirectoryError:
+        return False
+    except ValueError as exc:
+        # `_open_parent` wraps an unsafe ancestor in ValueError. Only its
+        # NotADirectoryError case is absence; other anchored refusals fail.
+        if isinstance(exc.__cause__, NotADirectoryError):
+            return False
+        raise
+
+
+def _scoped_baseline_conditions(plan: WorkMutationPlan, root: Anchor) -> Counter[tuple[str, str]]:
+    """Read only scoped pre-image pages and their targets under the held root.
+
+    Read each page fresh rather than consulting a caller-supplied bundle.
+    Missing or non-UTF-8 pages are not items; other read errors propagate.
+    Keys use the plan's exact item-path mapping for the postcondition gate.
+    """
+    conditions: Counter[tuple[str, str]] = Counter()
+    for path in sorted(_condition_scope(plan)):
+        location = parse_item_path(path)
+        if location is None:
+            continue
+        try:
+            text = _read_bytes_at(root, f"{path}.md").decode("utf-8")
+        except (FileNotFoundError, NotADirectoryError, UnicodeDecodeError):
+            continue
+        dependencies = parse_dependencies(parse(text).fm_data(dates="iso").get("depends_on"))
+        mapped = plan.path_mapping.get(path, path)
+        conditions.update(
+            (mapped, kind)
+            for kind, _message in _conditions_for(
+                path,
+                location.parent_path,
+                dependencies.edges,
+                dependencies.issues,
+                lambda target: _baseline_target_exists(root, target),
+            )
+        )
+    return conditions
 
 
 def _capture_validation_state(

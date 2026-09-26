@@ -13,6 +13,7 @@ from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkM
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.sources import upsert
 
+from graph_works_core.workspace.commits import WorkspaceCommit, item_stem
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import (
@@ -128,14 +129,15 @@ def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, tod
             ):
                 raise WorkspaceError("finish owner, receipt, configuration or Git evidence changed; inspect and retry")
 
-        # commit: Task 4/5
         application = apply_mutation(
             layout,
             mutation,
             repo_roots=resolve_repos(layout),
             baseline_bundle=context.bundle,
             validate_read_set=validate,
-            commit=None,
+            commit=WorkspaceCommit(
+                f"workspace: record {item_stem(path)} finish receipt for {repo_name}", items=(path,)
+            ),
         )
         if not application.ok:
             return FinishReceiptResult(f"finish receipt transaction refused: {application}", False, ref.rel)

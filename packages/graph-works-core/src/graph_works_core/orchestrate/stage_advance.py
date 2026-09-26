@@ -36,6 +36,7 @@ from work_tracker_okf.results import render as render_results
 from work_tracker_okf.sources import upsert
 
 from graph_works_core.workspace import anchor, provenance
+from graph_works_core.workspace.commits import WorkspaceCommit, item_stem
 from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
@@ -475,7 +476,10 @@ def _advance(
         ):
             raise WorkspaceError("finish evidence changed; inspect and retry before advancing")
 
-    # commit: Task 4/5
+    transition = outcome.plan.transition
+    resolved = transition is not None and transition.work_status == "resolved"
+    subject = f"workspace: advance {item_stem(path)} {old_phase or 'none'} -> {new_phase or 'none'}"
+    workspace_commit = WorkspaceCommit(subject + (" (resolved)" if resolved else ""), items=(path,))
     application = apply_mutation(
         layout,
         mutation,
@@ -483,7 +487,7 @@ def _advance(
         repo_roots=declared,
         baseline_bundle=bundle,
         validate_read_set=validate_finish if finish_guard is not None else None,
-        commit=None,
+        commit=workspace_commit,
     )
     if application.ok:
         outcome = replace(outcome, written=True)

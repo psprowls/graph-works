@@ -7,6 +7,7 @@ from datetime import date
 from pathlib import Path
 
 import pytest
+from _transaction_helpers import _git, _init_git
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.orchestrate import stage_advance as stage
@@ -184,6 +185,29 @@ def test_live_stage_exit_is_journaled_and_does_not_stamp_the_pointer(tmp_path: P
     assert load(layout.bundle_dir / f"{path}.md").fm_data()["phase"] == "execute"
     assert result.pointer_path is None
     assert _pointer(layout) is None
+
+
+def test_stage_advance_commits_pending_guidance(tmp_path: Path) -> None:
+    layout = _initialized_workspace(tmp_path)
+    path = "work/feature-a"
+    _write(layout, path, phase="design")
+    _artifact(layout, path, "design")
+    from graph_works_core.work import commands as work
+
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
+    _init_git(layout.root)
+    guidance = layout.bundle_dir / path / "references/guidance-design.md"
+    guidance.write_text("# Guidance\n", encoding="utf-8", newline="\n")
+
+    result = stage.run_stage_advance(layout, path, today=TODAY, dry_run=False)
+
+    assert result.application is not None and result.application.commit is not None
+    assert result.application.commit.status == "committed"
+    subject = "workspace: advance feature-a design -> plan"
+    assert _git(layout.root, "log", "-1", "--format=%s").strip() == subject
+    assert _git(layout.root, "show", "--format=%B", "-s", "HEAD").strip() == subject
+    assert f"okf/{path}/references/guidance-design.md" in _git(layout.root, "show", "--name-only", "--format=", "HEAD")
+    assert _git(layout.root, "status", "--porcelain", "--", "okf") == ""
 
 
 def test_live_stage_exit_leaves_an_existing_pointer_on_the_session_phase(tmp_path: Path) -> None:

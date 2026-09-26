@@ -3,6 +3,7 @@
 import subprocess
 from datetime import date
 
+from _transaction_helpers import _git, _init_git
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate.finish_receipt import run_record_finish
 from graph_works_core.orchestrate.stage_advance import run_stage_advance
@@ -51,6 +52,20 @@ def setup(tmp_path):
 
 def record(layout, repo):
     return run_record_finish(layout, OWNER, repo_name=repo, today=TODAY)
+
+
+def test_finish_receipt_commits_owned_files(tmp_path):
+    layout, repos = setup(tmp_path)
+    _init_git(layout.root)
+    git(repos["code"][0], "merge", "feature")
+
+    result = record(layout, "code")
+
+    assert result.changed and result.refusal is None
+    subject = "workspace: record epic-example finish receipt for code"
+    assert _git(layout.root, "log", "-1", "--format=%s").strip() == subject
+    assert _git(layout.root, "show", "--format=%B", "-s", "HEAD").strip() == subject
+    assert _git(layout.root, "status", "--porcelain", "--", "okf") == ""
 
 
 def advance(layout, sha, **kwargs):

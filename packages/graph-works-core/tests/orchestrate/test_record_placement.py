@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import TypedDict
 
 import pytest
+from _transaction_helpers import _git, _init_git
 from graph_works_core import apply_init, plan_init
 from graph_works_core.orchestrate import placement
 from graph_works_core.orchestrate import stage_advance as stage
@@ -99,6 +100,56 @@ def _snapshot(layout: WorkspaceLayout) -> dict[str, bytes]:
     return {
         p.relative_to(layout.bundle_dir).as_posix(): p.read_bytes() for p in sorted(layout.bundle_dir.rglob("*.md"))
     }
+
+
+def test_record_placement_commits_owned_page(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _init_git(layout.root)
+
+    record = _record(layout)
+
+    assert record.application is not None and record.application.commit is not None
+    assert record.application.commit.status == "committed"
+    subject = "workspace: record feature-a execute placement"
+    assert _git(layout.root, "log", "-1", "--format=%s").strip() == subject
+    assert _git(layout.root, "show", "--format=%B", "-s", "HEAD").strip() == subject
+    assert _git(layout.root, "status", "--porcelain", "--", "okf") == ""
+
+
+def test_unchanged_placement_still_commits_placement_file(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _init_git(layout.root)
+    assert _record(layout).written
+    pending = layout.bundle_dir / CHILD / "references/orca-placement/k.json"
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    pending.write_text("{}\n", encoding="utf-8", newline="\n")
+
+    record = _record(layout)
+
+    assert not record.plan.changed
+    assert record.application is None
+    assert record.pending_commit is not None and record.pending_commit.status == "committed"
+    assert _git(layout.root, "log", "-1", "--format=%s").strip() == "workspace: record feature-a execute placement"
+    assert f"okf/{CHILD}/references/orca-placement/k.json" in _git(
+        layout.root, "show", "--name-only", "--format=", "HEAD"
+    )
+
+
+def test_unchanged_placement_reports_failed_pending_commit(tmp_path: Path) -> None:
+    layout = _vault(tmp_path)
+    _init_git(layout.root)
+    assert _record(layout).written
+    pending = layout.bundle_dir / CHILD / "references/orca-placement/k.json"
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    pending.write_text("{}\n", encoding="utf-8", newline="\n")
+    (layout.root / ".git/index.lock").write_text("held\n", encoding="utf-8", newline="\n")
+
+    record = _record(layout)
+
+    assert record.application is None
+    assert record.pending_commit is not None and record.pending_commit.status == "failed"
+    assert any(warning.startswith("workspace commit failed: ") for warning in record.warnings)
+    assert pending.exists()
 
 
 def test_recording_changes_only_the_pair_and_updated(tmp_path: Path) -> None:

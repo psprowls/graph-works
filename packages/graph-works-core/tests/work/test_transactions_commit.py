@@ -133,6 +133,45 @@ def test_commit_pending_commits_under_the_lock(tmp_path) -> None:
     assert outcome.status == "committed"
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX flock tier")
+def test_commit_pending_holds_bundle_lock(tmp_path, monkeypatch) -> None:
+    layout, _member, _target = _seed(tmp_path)
+    held: list[bool] = []
+    real = transactions.commit_workspace
+
+    def spy(*args, **kwargs):
+        probe = open_anchor(layout.bundle_dir)
+        try:
+            from graph_works_core.workspace.anchors import LockTimeout
+
+            try:
+                with probe.exclusive_lock(timeout=0.05):
+                    held.append(False)
+            except LockTimeout:
+                held.append(True)
+        finally:
+            probe.close()
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(transactions, "commit_workspace", spy)
+    outcome = commit_pending(layout, WorkspaceCommit("workspace: t", items=(ITEM,)))
+    assert outcome.status == "skipped"
+    assert held == [True]
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX flock tier")
+def test_commit_pending_lock_timeout_returns_failure(tmp_path) -> None:
+    layout, _member, _target = _seed(tmp_path)
+    holder = open_anchor(layout.bundle_dir)
+    try:
+        with holder.exclusive_lock():
+            outcome = commit_pending(layout, WorkspaceCommit("workspace: t", items=(ITEM,)), lock_timeout=0.2)
+    finally:
+        holder.close()
+    assert outcome.status == "failed"
+    assert outcome.reason == LOCK_TIMEOUT_FAILURE
+
+
 def test_commit_runs_while_bundle_lock_is_held(tmp_path, monkeypatch) -> None:
     layout, member, target = _seed(tmp_path)
     held: list[bool] = []

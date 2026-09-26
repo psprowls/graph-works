@@ -29,7 +29,12 @@ MIRROR = ns(
     skipped_repos=("r2",),
     failed_repos=(("r3", "boom"),),
 )
-STRUCTURAL = ns(entities=ENTITIES, mirror=MIRROR, errors=("packages/c: declined",))
+STRUCTURAL = ns(
+    entities=ENTITIES,
+    mirror=MIRROR,
+    errors=("packages/c: declined",),
+    warnings=("packages/old: retained entity: prose-edited",),
+)
 FINDING = ns(code="x", severity="warn", message="m", spec="s", path="a.md", line=3)
 
 

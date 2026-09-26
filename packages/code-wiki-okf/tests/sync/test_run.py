@@ -525,12 +525,17 @@ def test_non_git_skip_preserves_existing_file_pages(tmp_path: Path) -> None:
     with open_reader(graph_dir=graph_dir) as reader:
         sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
+    stale_index = bundle_root / "code-graph/demo/file-system/vanished/index.md"
+    stale_index.parent.mkdir(parents=True)
+    stale_index.write_bytes(b"## Files\n\n_(none)_\n")
     repo_root = config.repos[0].path
     (repo_root / ".git").rename(repo_root / ".git-disabled")
     with open_reader(graph_dir=graph_dir) as reader:
         result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
     assert result.mirror.skipped_repos == ("demo",)
+    assert stale_index.exists()
+    assert result.indexes.deleted == ()
     assert (bundle_root / "code-graph/demo/file-system/src/widgets.py.md").is_file()
 
 
@@ -744,3 +749,185 @@ def test_wet_sync_refuses_a_case_equivalent_entity_target_drift_between_plan_and
         sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
 
     assert _bundle_bytes(bundle_root) == captured["after_drift"]
+
+
+def test_retired_folder_indexes_are_pruned_on_sync_and_unchanged_rescan(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    repo = config.repos[0].path
+    _git(repo, "rm", "src/widgets.py")
+    _git(repo, "commit", "-qm", "retire source folder")
+    run_workspace([repo], graph_dir=graph_dir, full=True)
+    stale = "code-graph/demo/file-system/src/index.md"
+    before = _bundle_bytes(bundle_root)
+    with open_reader(graph_dir=graph_dir) as reader:
+        preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
+        assert _bundle_bytes(bundle_root) == before
+        live = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert not (bundle_root / stale).exists()
+    assert preview.indexes.deleted == live.indexes.deleted == (stale,)
+    assert "/file-system/src/index.md" not in (bundle_root / "code-graph/demo/file-system/index.md").read_text(
+        encoding="utf-8"
+    )
+
+    # Reproduce a previously stranded index without a new source commit.
+    (bundle_root / stale).write_bytes(b"# File\n\n## Files\n\n## Directories\n\n_(none)_\n")
+    with open_reader(graph_dir=graph_dir) as reader:
+        healed = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+        assert healed.indexes.deleted == (stale,)
+        before = _bundle_bytes(bundle_root)
+        preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
+        live = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert preview.indexes.deleted == live.indexes.deleted == ()
+    assert _bundle_bytes(bundle_root) == before
+
+
+def test_retained_authored_index_keeps_navigation_and_preview_parity(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    child = bundle_root / "code-graph/demo/file-system/gone/child/index.md"
+    child.parent.mkdir(parents=True)
+    child.write_bytes(b"# Notes\n\nAuthored navigation.\n")
+    before = _bundle_bytes(bundle_root)
+    with open_reader(graph_dir=graph_dir) as reader:
+        preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
+        assert _bundle_bytes(bundle_root) == before
+        live = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert preview.indexes == live.indexes
+    assert ("code-graph/demo/file-system/gone/child/index.md", "unrecognized-content") in live.indexes.declined
+    assert "Authored navigation." in child.read_text(encoding="utf-8")
+    parent = bundle_root / "code-graph/demo/file-system/gone/index.md"
+    assert parent.exists()
+    assert "/gone/child/index.md" in parent.read_text(encoding="utf-8")
+    assert "/gone/index.md" in (bundle_root / "code-graph/demo/file-system/index.md").read_text(encoding="utf-8")
+    assert preview.entities.catalog_created == live.entities.catalog_created
+    assert preview.entities.catalog_updated == live.entities.catalog_updated
+
+
+def test_authored_stale_index_bullet_is_not_laundered_by_mirror_reconciliation(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    index = bundle_root / "code-graph/demo/file-system/src/index.md"
+    index.write_bytes(b"# File\n\n* [widgets.py](widgets.py.md) - Authored explanation.\n")
+    repo = config.repos[0].path
+    _git(repo, "rm", "src/widgets.py")
+    _git(repo, "commit", "-qm", "retire folder")
+    run_workspace([repo], graph_dir=graph_dir, full=True)
+    with open_reader(graph_dir=graph_dir) as reader:
+        preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
+        live = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert preview.indexes == live.indexes
+    assert index.exists()
+    assert "Authored explanation." in index.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("annotation", [b"Human context.\n", b"<!-- handwritten note -->\n"])
+def test_declined_index_sections_are_byte_preserved_across_rescans(tmp_path: Path, annotation: bytes) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    index = bundle_root / "code-graph/demo/file-system/gone/index.md"
+    index.parent.mkdir(parents=True)
+    content = b"# File\n\n## Files\n\n" + annotation + b"\n## Directories\n\n_(none)_\n"
+    index.write_bytes(content)
+    with open_reader(graph_dir=graph_dir) as reader:
+        for _ in range(2):
+            before = _bundle_bytes(bundle_root)
+            preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
+            assert _bundle_bytes(bundle_root) == before
+            live = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+            assert preview.indexes == live.indexes
+            assert index.read_bytes() == content
+            assert ("code-graph/demo/file-system/gone/index.md", "unrecognized-content") in live.indexes.declined
+
+
+def test_late_index_edit_is_preserved_through_final_catalogs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    index = bundle_root / "code-graph/demo/file-system/gone/index.md"
+    index.parent.mkdir(parents=True)
+    index.write_bytes(b"## Files\n\n_(none)_\n\n## Directories\n\n_(none)_\n")
+    content = b"## Files\n\nLate human context.\n\n## Directories\n\n_(none)_\n"
+    apply = run_module.apply_index_prune
+
+    def edit_then_apply(root, plan):
+        index.write_bytes(content)
+        return apply(root, plan)
+
+    monkeypatch.setattr(run_module, "apply_index_prune", edit_then_apply)
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert ("code-graph/demo/file-system/gone/index.md", "changed-since-plan") in result.indexes.declined
+    assert index.read_bytes() == content
+
+
+def test_retained_authored_file_keeps_vanished_folder_navigation(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    member = "code-graph/demo/file-system/src/widgets.py.md"
+    page = bundle_root / member
+    page.write_bytes(page.read_bytes().replace(b"## Notes\n", b"## Notes\n\nAuthored context.\n"))
+    before_page = page.read_bytes()
+    repo = config.repos[0].path
+    _git(repo, "rm", "src/widgets.py")
+    _git(repo, "commit", "-qm", "retire source folder")
+    run_workspace([repo], graph_dir=graph_dir, full=True)
+    with open_reader(graph_dir=graph_dir) as reader:
+        preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
+        result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert preview.indexes == result.indexes
+    assert result.indexes.deleted == ()
+    assert page.read_bytes() == before_page
+    assert (member.removesuffix(".md"), "prose-edited") in result.entities.declined
+    assert "widgets.py.md" in (page.parent / "index.md").read_text(encoding="utf-8")
+    assert "/src/index.md" in (page.parent.parent / "index.md").read_text(encoding="utf-8")
+
+
+def test_protected_index_is_not_rewritten_as_a_move_referrer(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    index = bundle_root / "code-graph/demo/file-system/src/index.md"
+    content = b"## Files\n\n[History](widgets.py.md)\n\nAuthored context.\n"
+    index.write_bytes(content)
+    repo = config.repos[0].path
+    (repo / "dest").mkdir()
+    _git(repo, "mv", "src/widgets.py", "dest/widgets.py")
+    (repo / "src").rmdir()
+    _git(repo, "commit", "-qm", "move source folder")
+    run_workspace([repo], graph_dir=graph_dir, full=True)
+    with open_reader(graph_dir=graph_dir) as reader:
+        result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert result.ok and result.mirror.moved == 1
+    assert index.read_bytes() == content
+    assert ("code-graph/demo/file-system/src/index.md", "unrecognized-content") in result.indexes.declined
+
+
+def test_seeded_subdirectories_reconciles_after_child_index_cleanup(tmp_path: Path) -> None:
+    bundle_root, graph_dir, config = _workspace(tmp_path)
+    with open_reader(graph_dir=graph_dir) as reader:
+        sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    parent = bundle_root / "code-graph/demo/file-system/gone/index.md"
+    parent.parent.mkdir()
+    parent.write_bytes(b"# Subdirectories\n\n* [dead](dead/index.md)\n* [kept](kept/index.md)\n")
+    dead = parent.parent / "dead/index.md"
+    dead.parent.mkdir()
+    dead.write_bytes(b"## Files\n\n_(none)_\n")
+    kept = parent.parent / "kept/index.md"
+    kept.parent.mkdir()
+    kept.write_bytes(b"# Authored context\n")
+    before = _bundle_bytes(bundle_root)
+    with open_reader(graph_dir=graph_dir) as reader:
+        preview = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY, dry_run=True)
+        assert _bundle_bytes(bundle_root) == before
+        result = sync_bundle(bundle_root, config=config, reader=reader, at=_AT, today=_TODAY)
+    assert preview.indexes == result.indexes
+    assert not dead.exists()
+    assert "dead/index.md" not in parent.read_text(encoding="utf-8")
+    assert "kept/index.md" in parent.read_text(encoding="utf-8")
+    assert preview.entities.catalog_updated == result.entities.catalog_updated

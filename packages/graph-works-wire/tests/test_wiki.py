@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from types import SimpleNamespace as ns
 
+import pytest
 from code_wiki_okf.entities.sync import SyncSummary
 from code_wiki_okf.mirror.model import MirrorResult
 from code_wiki_okf.sync import MirrorSummary
@@ -244,6 +245,7 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "sections_filled",
             "stamped",
             "entity_errors",
+            "warnings",
         }
         | _MIRROR_KEYS
     )
@@ -259,6 +261,7 @@ def test_scan_payloads_have_exact_keys_and_exclude_runtime_only_values() -> None
             "entities_updated",
             "entities_deleted",
             "entity_errors",
+            "warnings",
         }
         | _MIRROR_KEYS
     )
@@ -644,3 +647,22 @@ def test_claims_closure_payload_has_exact_keys() -> None:
         "refusal": None,
         "detail": None,
     }
+
+
+@pytest.mark.parametrize(
+    "warnings", [(), ("old: retained entity: prose-edited", "old/index.md: retained index: authored")]
+)
+def test_scan_warning_payload_parity_and_apply_isolation(warnings: tuple[str, ...]) -> None:
+    structural = StructuralSummary(warnings=warnings)
+    normal = scan_normal_payload(ScanResult(structural=structural, worklist=ScanWorklist(short_head="abc123")))
+    emitted = scan_emit_payload(
+        worklist_path=Path("worklist.json"),
+        briefs_dir=Path("briefs"),
+        results_dir=Path("results"),
+        short_head="abc123",
+        structural=structural,
+    )
+    assert normal["warnings"] == emitted["warnings"] == list(warnings)
+    assert normal["ok"] is True
+    assert normal["entity_errors"] == emitted["entity_errors"] == []
+    assert scan_apply_payload(ApplyResult()).get("warnings", []) == []

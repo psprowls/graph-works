@@ -145,17 +145,26 @@ sequence:
 Both lanes' planned bundle members are cross-checked in
 `_preflight_union()` *before* either lane writes anything, catching a member
 that's filesystem-equivalent (NFC + casefold — same collision policy as
-`resources.py`) across the two lanes. `sync_bundle()` then applies entities,
-applies each repo's mirror, prunes entities/pages whose resource vanished
-(`entities/delete.py`), reloads the bundle, and only then reconciles the
+`resources.py`) across the two lanes. `sync_bundle()` then applies each repo's
+mirror before regenerating entities (move plans capture entity referrer bytes),
+prunes entities/pages whose resource vanished
+(`entities/delete.py`), removes recognizable generated folder indexes for vanished
+source directories (`entities/indexes.py`), reloads the bundle, and only then
+reconciles the
 catalogs (`entities/catalog.py`) against what's actually on disk — catalogs
 are computed last because they need to see the post-prune, post-mirror
 state, not the pre-write plan.
 
 `--dry-run` walks a parallel path that *projects* the same end state
-(`_project_catalog_pages`, `_project_mirror_indexes`) without touching disk,
+(`_project_catalog_pages`, `_project_mirror_indexes`, and `plan_index_prune`)
+without touching disk,
 so the plan it prints matches what a real run would do, including catalog
-membership after moves/creates/deletes that haven't happened yet.
+membership after moves/creates/deletes that haven't happened yet. Unknown obsolete
+index content is retained byte-for-byte and excluded from mirror/catalog rewrites;
+retained indexes keep ancestor navigation. Cleanup captures and rechecks bytes,
+and returns index members (including `.md`) separately from entity concept IDs.
+Retained authored links may remain stale: a decline reports that outcome rather
+than claiming it was healed.
 
 ### Provenance and idempotence
 

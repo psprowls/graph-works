@@ -140,5 +140,8 @@ def scan(
 
     if json_output:
         _emit_json(scan_normal_payload(result))
+    else:
+        for warning in result.structural.warnings:
+            typer.echo(f"Warning: {warning}", err=True)
     if not result.ok:
         exit_error("scan completed with entity errors")

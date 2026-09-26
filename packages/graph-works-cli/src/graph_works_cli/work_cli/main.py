@@ -188,7 +188,7 @@ def file(
         )
     failures = payload["failures"]
     assert isinstance(failures, list)
-    if payload["applied"] and (payload["rolled_back"] or failures):
+    if payload["rolled_back"] or failures:
         for failure in failures:
             rendering.warn(failure)
         blocking = failures[0] if failures else f"{payload['path']}: filing apply was incomplete"

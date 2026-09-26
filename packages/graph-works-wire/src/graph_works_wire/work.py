@@ -500,7 +500,7 @@ def file_payload(outcome: FilingRun) -> dict[str, Any]:
         "indexes": [str(update.path) for update in plan.indexes if update.changed],
         "logged": None if plan.log is None else plan.log.entry,
         "warnings": [*plan.warnings, *(() if application is None else application.warnings)],
-        "applied": application is not None,
+        "applied": application is not None and application.ok and bool(application.written),
         "rolled_back": False if application is None else application.rolled_back,
         "failures": [] if application is None else list(application.failures),
     }

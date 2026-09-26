@@ -485,3 +485,26 @@ def test_next_payload_always_carries_the_empty_guidance_form() -> None:
     payload = work.next_payload(next_result(full=False), bundle_root=BUNDLE)
     assert (payload["guidance"], payload["guidance_warnings"], payload["guidance_file"]) == ([], [], None)
     json.dumps(payload)
+
+
+def test_filing_applied_requires_successful_nonempty_writes():
+    from graph_works_core.workspace.transactions import MutationApplication
+    from samples_work import filing
+
+    for failures, rolled_back, written, expected in (
+        ((), False, ("work/a.md",), True),
+        (("preflight failed",), False, (), False),
+        (("validation failed",), True, ("work/a.md",), False),
+        (("rollback failed",), False, ("work/a.md",), False),
+        ((), False, (), False),
+    ):
+        outcome = filing(applied=False)
+        outcome.application = MutationApplication("tx", Path("/journal"), (), written, (), (), failures, rolled_back)
+        payload = work.file_payload(outcome)
+        assert payload["applied"] is expected
+        assert payload["failures"] == list(failures)
+        assert payload["rolled_back"] is rolled_back
+    outcome = filing(applied=False)
+    assert work.file_payload(outcome)["applied"] is False
+    outcome.plan.refusal = "collision"
+    assert work.file_payload(outcome)["applied"] is False

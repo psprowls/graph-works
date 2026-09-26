@@ -152,7 +152,8 @@ def test_file_refusal_emits_the_envelope(workspace: Path) -> None:
     assert "refused" in result.stderr
 
 
-def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace: Path) -> None:
+@pytest.mark.parametrize("json_mode", [False, True])
+def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace: Path, json_mode: bool) -> None:
     """§1/D-095: a CRLF-flipped `work/index.md` makes filing refuse, and the
     top-level error must name `work/index.md` -- the file actually in the way
     -- not the item being filed.
@@ -174,6 +175,7 @@ def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace:
             "d",
             "--workspace",
             str(workspace),
+            *(["--json"] if json_mode else []),
         ],
     )
 
@@ -181,6 +183,13 @@ def test_file_incomplete_apply_names_the_blocking_member_not_the_item(workspace:
     last_line = [line for line in result.stderr.splitlines() if line.strip()][-1]
     assert "work/index.md" in last_line
     assert "feature-second-item" not in last_line
+
+    assert "[ok] filed" not in result.stdout
+    if json_mode:
+        error = json.loads(result.stdout)["error"]
+        assert error["reason"] == "incomplete-apply"
+        assert error["payload"]["applied"] is False
+        assert error["payload"]["failures"]
 
 
 def test_file_json_keeps_warnings_on_stderr(workspace: Path) -> None:

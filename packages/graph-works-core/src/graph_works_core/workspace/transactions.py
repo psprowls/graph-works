@@ -70,6 +70,7 @@ class MutationApplication:
     warnings: tuple[str, ...]
     failures: tuple[str, ...]
     rolled_back: bool
+    snapshot_retryable: bool = False
 
     @property
     def ok(self) -> bool:
@@ -105,6 +106,10 @@ class _EntryIdentity:
     inode: int
     kind: int
     mode: int
+
+
+class _SnapshotUnstable(ValueError):
+    """A snapshot fingerprint changed before any domain effect."""
 
 
 class _CustodyConflict(ValueError):
@@ -960,20 +965,27 @@ def _preflight_anchored(plan: WorkMutationPlan, root: Anchor, manifest_scratch: 
         raise ValueError(f"multiple effects claim final targets: {', '.join(sorted(claimed))}")
 
 
-def _snapshot_targets(plan: WorkMutationPlan) -> tuple[str, ...]:
+def _snapshot_targets(plan: WorkMutationPlan, root: Anchor) -> tuple[str, ...]:
     members = {
-        *plan.mkdirs,
+        *(member for member in plan.mkdirs if not _lexists_at(root, member)),
         *plan.deletes,
-        *(condition.member for condition in plan.directory_preconditions),
         *(write.member for write in plan.writes),
         *(move.source for move in plan.moves),
         *(move.dest for move in plan.moves),
     }
+    # Effects may create intermediate parents not explicitly listed in mkdirs.
+    # Record their absence too so rollback removes the whole new scaffold.
+    for member in tuple(members):
+        for parent in PurePosixPath(member).parents:
+            if parent != PurePosixPath(".") and not _lexists_at(root, parent.as_posix()):
+                members.add(parent.as_posix())
     return tuple(sorted(members))
 
 
-def _snapshot_members(plan: WorkMutationPlan) -> tuple[str, ...]:
-    ordered = sorted(_snapshot_targets(plan), key=lambda member: (member.count("/"), member))
+def _snapshot_members(plan: WorkMutationPlan, root: Anchor) -> tuple[str, ...]:
+    # Existing ensure-directory parents and read-only preconditions confer no
+    # mutation custody. Actual directory moves/deletes still own their subtree.
+    ordered = sorted(_snapshot_targets(plan, root), key=lambda member: (member.count("/"), member))
     selected: list[str] = []
     for member in ordered:
         if any(member == parent or member.startswith(f"{parent}/") for parent in selected):
@@ -1125,7 +1137,7 @@ def _create_snapshot(
         root = _open_root(plan.root)
     entries: list[_SnapshotEntry] = []
     try:
-        for index, member in enumerate(_snapshot_members(plan)):
+        for index, member in enumerate(_snapshot_members(plan, root)):
             if not _lexists_at(root, member):
                 entries.append(_SnapshotEntry(member, False, None, None))
                 continue
@@ -1140,7 +1152,7 @@ def _create_snapshot(
             finally:
                 backup_root_anchor.close()
             if backup_fingerprint != fingerprint or _entry_fingerprint_at(root, member) != fingerprint:
-                raise ValueError(f"{member}: changed while snapshotting; re-plan")
+                raise _SnapshotUnstable(f"{member}: changed while snapshotting; re-plan")
             entries.append(_SnapshotEntry(member, True, backup, fingerprint))
         _fsync_directory(backup_root)
         _fsync_directory(transaction_dir)
@@ -1441,6 +1453,11 @@ def _mapped_directory_modes(plan: WorkMutationPlan, root: Anchor) -> tuple[_Dire
             if _lexists_at(root, source):
                 info = _lstat_at(root, source)
                 if stat.S_ISDIR(info.st_mode):
+                    owned = (*plan.deletes, *(move.source for move in plan.moves), *(move.dest for move in plan.moves))
+                    if _lexists_at(root, destination) and not any(
+                        destination == member or destination.startswith(f"{member}/") for member in owned
+                    ):
+                        raise ValueError(f"{destination}: mapped directory exists outside mutation ownership; re-plan")
                     modes.append(_DirectoryMode(source, destination, stat.S_IMODE(info.st_mode)))
             break
     return tuple(sorted(modes, key=lambda item: (item.destination.count("/"), item.destination)))
@@ -2483,6 +2500,7 @@ def _application(
     failures: Sequence[str] = (),
     rolled_back: bool = False,
     warnings: Sequence[str] | None = None,
+    snapshot_retryable: bool = False,
 ) -> MutationApplication:
     return MutationApplication(
         transaction_id=transaction_id,
@@ -2493,6 +2511,7 @@ def _application(
         warnings=plan.warnings if warnings is None else tuple(warnings),
         failures=tuple(failures),
         rolled_back=rolled_back,
+        snapshot_retryable=snapshot_retryable,
     )
 
 
@@ -2732,6 +2751,7 @@ def _apply_mutation_locked(
             moved: list[tuple[str, str]] = []
             written: list[str] = []
             created: list[str] = []
+            missing_directories: list[str] = []
             touched: set[str] = set()
             protected: dict[str, str] = {}
             effect_attempted = False
@@ -2749,9 +2769,10 @@ def _apply_mutation_locked(
                         _preflight(layout, plan, root, preflight_initial_scratch)
                     finally:
                         _remove_entry(preflight_initial_scratch)
-                    created = [member for member in plan.mkdirs if not _lexists_at(root, member)]
+                    missing_directories = [member for member in plan.mkdirs if not _lexists_at(root, member)]
                     snapshot_records = [
-                        {"member": member, "existed": _lexists_at(root, member)} for member in _snapshot_targets(plan)
+                        {"member": member, "existed": _lexists_at(root, member)}
+                        for member in _snapshot_targets(plan, root)
                     ]
                     directory_modes = _mapped_directory_modes(plan, root)
                     snapshots = _create_snapshot(plan, transaction_dir, root)
@@ -2832,6 +2853,7 @@ def _apply_mutation_locked(
                             touched=touched,
                             protected=protected,
                         )
+                        created = [member for member in missing_directories if member in touched]
                         if effect.kind == "move":
                             assert effect.destination is not None
                             moved.append((effect.member, effect.destination))
@@ -2899,6 +2921,7 @@ def _apply_mutation_locked(
                         warnings=(*plan.warnings, *excused),
                     )
                 except Exception as exc:
+                    created = [member for member in missing_directories if member in touched]
                     failure = f"{phase} failed: {exc}"
                     recovery_failures: list[str] = []
                     try:
@@ -2955,6 +2978,13 @@ def _apply_mutation_locked(
                         written=written,
                         created=created,
                         failures=(failure, *recovery_failures),
+                        snapshot_retryable=(
+                            isinstance(exc, _SnapshotUnstable)
+                            and phase == "preflight"
+                            and not effect_attempted
+                            and not touched
+                            and not recovery_failures
+                        ),
                         rolled_back=bool(touched) and not rollback_failures,
                         warnings=(*plan.warnings, *excused),
                     )

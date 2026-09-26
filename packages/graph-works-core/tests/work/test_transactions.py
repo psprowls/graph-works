@@ -2871,7 +2871,11 @@ def test_transaction_snapshot_and_copy_helpers_cover_nested_entries_and_special_
         mkdirs=("work/a", "work/a/nested", "work/b"),
         deletes=("work/a/file",),
     )
-    assert transactions._snapshot_members(plan) == ("work/a", "work/b")
+    root = transactions._open_root(plan.root)
+    try:
+        assert transactions._snapshot_members(plan, root) == ("work",)
+    finally:
+        root.close()
 
     source = tmp_path / "source"
     source.mkdir()
@@ -3548,3 +3552,27 @@ def test_preflight_scratch_does_not_survive_its_transaction(tmp_path: Path) -> N
     assert not (transaction_dir / "preflight-final").exists()
     assert (transaction_dir / "backups").is_dir()
     assert (transaction_dir / "journal.jsonl").is_file()
+
+
+def test_failed_mapped_mode_change_preserves_unowned_destination(tmp_path, monkeypatch):
+    layout = _workspace(tmp_path)
+    source = layout.bundle_dir / "work/source"
+    destination = layout.bundle_dir / "work/destination"
+    source.mkdir(parents=True)
+    destination.mkdir()
+    source.chmod(0o700)
+    destination.chmod(0o755)
+    before = stat.S_IMODE(destination.stat().st_mode)
+    foreign = destination / "foreign.txt"
+    foreign.write_bytes(b"foreign bytes")
+    plan = _plan(layout, mkdirs=("work/destination",), path_mapping={"work/source": "work/destination"})
+    monkeypatch.setattr(transactions, "_validate_postconditions", lambda *args, **kwargs: ("injected failure",))
+
+    result = apply_mutation(layout, plan)
+
+    assert not result.ok
+    assert not result.rolled_back
+    assert result.created_directories == ()
+    assert "outside mutation ownership" in result.failures[0]
+    assert stat.S_IMODE(destination.stat().st_mode) == before
+    assert foreign.read_bytes() == b"foreign bytes"

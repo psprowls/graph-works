@@ -49,6 +49,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import date
@@ -292,7 +293,20 @@ def run_file(
 
     # A sibling advance between planning the parent's lane index and the
     # locked apply rolls the filing back as stale; re-plan from a fresh load.
-    return _until_inventory_current(attempt, lambda run: run.application)
+    result = attempt()
+    snapshot_retries = 0
+    for _ in range(STALE_INVENTORY_ATTEMPTS - 1):
+        application = result.application
+        if application is None:
+            break
+        if application.snapshot_retryable:
+            # apply_mutation has released both locks before we wait/reload.
+            time.sleep(0.05 * (2**snapshot_retries))
+            snapshot_retries += 1
+        elif not only_stale_inventory(application):
+            break
+        result = attempt()
+    return result
 
 
 @dataclass(frozen=True, slots=True)

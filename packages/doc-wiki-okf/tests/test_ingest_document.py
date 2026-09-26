@@ -10,12 +10,60 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+import pytest
 from doc_wiki_okf.ingest.document import PREVIEW_CHARS, DocumentBrief, plan_document_brief
 from doc_wiki_okf.ingest.layout import IngestLayout
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatch
 
 DAY = date(2026, 8, 12)
 GATE = {"scanned_at": "2026-08-11", "stale": True}
+
+
+@pytest.mark.parametrize("encoding", ["utf-8-sig", "utf-16", "utf-32"])
+def test_supported_unicode_brief_keeps_preview_counts_and_data_shape(tmp_path, encoding):
+    source = tmp_path / "source.txt"
+    content = "# Café 🌍\r\n\r\nBody text.\r\n"
+    source.write_bytes(content.encode(encoding))
+    brief = plan_document_brief(
+        source, wiki=tmp_path, repo=tmp_path, workspace_root=tmp_path, today=DAY, source_kind="spec"
+    )
+    assert brief.text == content
+    assert brief.as_data() == {
+        "source_path": str(source),
+        "title": "Café 🌍",
+        "source_kind": "spec",
+        "slug": "caf",
+        "preview": content,
+        "word_count": 3,
+        "binary": False,
+        "suggested_summary_path": "sources/2026-08-caf.md",
+        "merge_mode": False,
+        "entity_match": {"uri": None, "entity_filename": None},
+        "state_gate": None,
+    }
+
+
+@pytest.mark.parametrize("data", [b"caf\xe9", b"\xff\xfeA", b"\x80"])
+def test_unreadable_unicode_brief_keeps_empty_preview_and_filename_title(tmp_path, data):
+    source = tmp_path / "source.txt"
+    source.write_bytes(data)
+    brief = plan_document_brief(
+        source, wiki=tmp_path, repo=tmp_path, workspace_root=tmp_path, today=DAY, source_kind="spec"
+    )
+    assert brief.text == ""
+    assert brief.as_data() == {
+        "source_path": str(source),
+        "title": "Source",
+        "source_kind": "spec",
+        "slug": "source",
+        "preview": "",
+        "word_count": 0,
+        "binary": True,
+        "suggested_summary_path": "sources/2026-08-source.md",
+        "merge_mode": False,
+        "entity_match": {"uri": None, "entity_filename": None},
+        "state_gate": None,
+    }
 
 
 def _gate(repo: Path, /, *, workspace: Path) -> Mapping[str, Any]:

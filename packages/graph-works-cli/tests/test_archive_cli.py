@@ -335,3 +335,68 @@ def test_json_emits_the_archive_projection(initialized_workspace: Path, dry_run:
     doc = json.loads(result.stdout)
     assert doc["dry_run"] is dry_run and doc["ok"] is True and path in doc["path_mapping"]
     assert doc["applied"] is (not dry_run) and set(doc["wiki"]) >= {"tokens", "archived"}
+
+
+@pytest.mark.parametrize("entry", ("archive", "work", "wiki"))
+@pytest.mark.parametrize("state", ("committed", "locked", "embedded", "missing"))
+def test_archive_commit_outcomes_on_real_commands(
+    initialized_workspace: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, entry: str, state: str
+) -> None:
+    import subprocess
+
+    root = initialized_workspace
+    work_path = _resolved_bug(root) if entry != "wiki" else None
+    if entry != "work":
+        source = root / "okf/proposals/one.md"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_text(
+            "---\ntype: Proposal\ntitle: One\ndescription: d\n"
+            "target: concepts/one.md\npage_status: rejected\n---\n\nbody\n",
+            encoding="utf-8",
+            newline="\n",
+        )
+    repo = tmp_path if state == "embedded" else root
+
+    def git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", str(repo), *args], check=True, capture_output=True, text=True
+        ).stdout.strip()
+
+    git("init", "-b", "main")
+    git("config", "user.name", "Test")
+    git("config", "user.email", "test@example.test")
+    git("config", "commit.gpgsign", "false")
+    git("config", "core.hooksPath", str(tmp_path / "no-hooks"))
+    git("add", "--", ".")
+    git("commit", "-m", "baseline")
+    head = git("rev-parse", "HEAD")
+    if state == "locked":
+        (repo / ".git/index.lock").write_text("held\n", encoding="utf-8", newline="\n")
+    args = ["archive"] if entry == "archive" else [entry, "archive"]
+    with monkeypatch.context() as patch:
+        if state == "missing":
+            patch.setenv("PATH", str(tmp_path / "no-executables"))
+        result = runner.invoke(app, [*args, "--workspace", str(root)])
+    assert result.exit_code == 0, result.output
+    if work_path:
+        assert not (root / "okf" / f"{work_path}.md").exists()
+        assert (root / "okf/work/_archive" / (work_path.rsplit("/", 1)[-1] + ".md")).exists()
+    if entry != "work":
+        assert not (root / "okf/proposals/one.md").exists()
+    # Wiki-only also commits its log through the work transaction, then its move.
+    count = 1 if entry == "work" else 2
+    if state == "committed":
+        assert result.stdout.count("[ok] committed") == count
+        assert "workspace commit failed" not in result.stderr
+        assert git("rev-parse", "HEAD") != head
+        assert git("status", "--porcelain") == ""
+    elif state == "locked":
+        assert result.stderr.count("[warn] workspace commit failed:") == count
+        assert "index.lock" in result.stderr
+        assert git("rev-parse", "HEAD") == head
+        assert git("status", "--porcelain")
+    else:
+        reason = "not-own-repo" if state == "embedded" else "git missing"
+        assert result.stderr.count(f"[note] workspace not committed ({reason})") == count
+        assert "workspace commit failed" not in result.stderr
+        assert git("rev-parse", "HEAD") == head

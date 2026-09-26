@@ -1211,7 +1211,7 @@ def run_release_adoption(
             layout,
             plan,
             repo_roots=_repo_roots(layout),
-            commit=WorkspaceCommit(f"workspace: adopt children into {item_stem(release_path)}"),
+            commit=WorkspaceCommit(f"workspace: adopt children into {item_stem(release_path)}", items=(release_path,)),
         ),
     )
 

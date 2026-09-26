@@ -167,11 +167,12 @@ def render_commit(commit: dict[str, Any] | None) -> None:
         short_sha = str(sha)[:12] if sha is not None else "unknown"
         typer.echo(f"[ok] committed {short_sha} {commit['subject']}")
     elif commit["status"] == "skipped" and commit["reason"] in NOTE_REASONS:
-        typer.echo(
-            f"[note] workspace not committed ({commit['reason']}); "
-            "set workflow.workspace_commits: on to commit an embedded workspace",
-            err=True,
-        )
+        advice = {
+            "not-own-repo": "; set workflow.workspace_commits: on to commit an embedded workspace",
+            "not-a-repo": "; initialize a Git repository to enable workspace commits",
+            "git missing": "; install Git to enable workspace commits",
+        }
+        typer.echo(f"[note] workspace not committed ({commit['reason']}){advice[commit['reason']]}", err=True)
 
 
 def render_next(result: NextResult, payload: dict[str, Any]) -> None:

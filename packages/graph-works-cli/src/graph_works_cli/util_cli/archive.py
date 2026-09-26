@@ -13,6 +13,7 @@ from graph_works_wire.work import archive_payload
 
 from graph_works_cli.errors import fail
 from graph_works_cli.json_output import encode
+from graph_works_cli.work_cli import rendering
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 COMMAND = "archive"
@@ -33,9 +34,11 @@ def archive(
         fail(str(exc), reason="io", json_mode=json_output, command=COMMAND, cause=exc)
 
     for warning in stranded_warnings(run):
-        typer.echo(warning, err=True)
+        rendering.warn(warning)
 
     payload = archive_payload(run, dry_run=dry_run)
+    for warning in payload["warnings"]:
+        rendering.warn(warning)
 
     if not json_output and (run.conflict or not run.ok or dry_run):
         typer.echo(
@@ -82,6 +85,8 @@ def archive(
         return
     if dry_run:
         return
+    rendering.render_commit(payload["commit"])
+    rendering.render_commit(payload["wiki_commit"])
 
     archived = [
         *(run.plan.path_mapping.values() if run.result is not None else ()),

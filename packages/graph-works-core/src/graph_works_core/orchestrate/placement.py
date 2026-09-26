@@ -30,7 +30,13 @@ from work_tracker_okf.mutation import PlannedWrite, WorkMutationPlan
 from work_tracker_okf.paths import item_page
 from work_tracker_okf.placement import PlacementPlan, apply_placement, plan_placement
 
-from graph_works_core.workspace.commits import COMMIT_FAILED_PREFIX, CommitOutcome, WorkspaceCommit, item_stem
+from graph_works_core.workspace.commits import (
+    COMMIT_FAILED_PREFIX,
+    CommitOutcome,
+    WorkspaceCommit,
+    commit_mode,
+    item_stem,
+)
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.layout import WorkspaceLayout
@@ -162,6 +168,7 @@ def run_record_placement(
             repo=repo,
         )
         return PlacementRecord(plan=plan, repo_note=own.note if own else None)
+    commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
         if (
             expected_preparation is not None

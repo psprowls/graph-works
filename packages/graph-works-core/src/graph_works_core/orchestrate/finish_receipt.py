@@ -13,7 +13,7 @@ from work_tracker_okf.mutation import DirectoryPrecondition, PlannedWrite, WorkM
 from work_tracker_okf.paths import MANAGED_ARTIFACTS, artifact_ref, item_page
 from work_tracker_okf.sources import upsert
 
-from graph_works_core.workspace.commits import CommitOutcome, WorkspaceCommit, item_stem
+from graph_works_core.workspace.commits import CommitOutcome, WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import (
@@ -41,6 +41,7 @@ def run_record_finish(layout: WorkspaceLayout, path: str, *, repo_name: str, tod
     """Callers name a target, never supply completion claims or commit identities."""
     if not any(i.path == path for i in load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))):
         return FinishReceiptResult("unknown finish owner", False, None)
+    commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
         guard = finish_read_guard(layout, path, bundle=context.bundle)
         item = next((i for i in context.items if i.path == path), None)

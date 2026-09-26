@@ -358,3 +358,18 @@ def test_head_lookup_failure_is_reported_after_commit(tmp_path: Path, monkeypatc
     outcome = commit_workspace(layout, WorkspaceCommit("workspace: t"), ("work/a.md",))
     assert (outcome.status, outcome.sha, outcome.reason) == ("committed", None, "git timeout reading HEAD")
     assert _log(layout.root)[0] == "workspace: t"
+
+
+def test_missing_executable_skips_commit(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _own_repo(tmp_path)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-executables"))
+    outcome = commit_workspace(layout, WorkspaceCommit("workspace: missing git"), ())
+    assert (outcome.status, outcome.reason) == ("skipped", "git missing")
+    assert outcome.reason in commits.NOTE_REASONS
+
+
+def test_repository_probe_error_remains_failed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _own_repo(tmp_path)
+    monkeypatch.setattr(commits, "probe_git", lambda *args, **kwargs: GitOutcome(None, "", "error"))
+    outcome = commit_workspace(layout, WorkspaceCommit("workspace: error"), ())
+    assert (outcome.status, outcome.reason) == ("failed", "git error")

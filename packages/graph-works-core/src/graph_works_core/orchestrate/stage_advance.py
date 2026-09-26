@@ -36,7 +36,7 @@ from work_tracker_okf.results import render as render_results
 from work_tracker_okf.sources import upsert
 
 from graph_works_core.workspace import anchor, provenance
-from graph_works_core.workspace.commits import WorkspaceCommit, item_stem
+from graph_works_core.workspace.commits import WorkspaceCommit, commit_mode, item_stem
 from graph_works_core.workspace.decision_owner import hold_for, hold_in, locked_decision_owner
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import finish_read_guard, inspect_finish
@@ -245,6 +245,8 @@ def run_stage_advance(
     # The whole read -> route -> gate -> write sequence shares hold filing's
     # owner lock. A waiting writer sees the hold or phase the first committed.
     # Release only after apply_mutation (and the pointer write) returns.
+    if not dry_run:
+        commit_mode(layout)
     with locked_decision_owner(layout, path) as context:
         return _advance(
             layout,

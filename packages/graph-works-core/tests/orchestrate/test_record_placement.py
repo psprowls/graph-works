@@ -1158,3 +1158,32 @@ def test_preparation_runtime_runs_real_adapter_from_external_cwd(tmp_path: Path)
     )
     assert recorded.returncode == 0, recorded.stderr
     assert json.loads(recorded.stdout)["written"] is True
+
+
+@pytest.mark.parametrize(
+    ("verb", "dry_run"),
+    (("advance", False), ("placement", False), ("finish", False), ("advance", True), ("placement", True)),
+)
+def test_invalid_commit_config_precedes_orchestration_effects(tmp_path: Path, verb: str, dry_run: bool) -> None:
+    from graph_works_core.orchestrate.finish_receipt import run_record_finish
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout = _vault(tmp_path)
+    _write(layout, SOLO, type="Feature", phase="design", work_status="open")
+    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
+    before = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
+
+    def invoke():
+        if verb == "advance":
+            return stage.run_stage_advance(layout, SOLO, today=TODAY, dry_run=dry_run, infer_worktree=False)
+        if verb == "placement":
+            return _record(layout, dry_run=dry_run)
+        return run_record_finish(layout, CHILD, repo_name="code", today=TODAY)
+
+    if dry_run:
+        invoke()
+    else:
+        with pytest.raises(WorkspaceError, match="workspace_commits"):
+            invoke()
+    after = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
+    assert after == before

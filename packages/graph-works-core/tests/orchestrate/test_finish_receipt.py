@@ -369,3 +369,20 @@ def test_malformed_entry_and_unexpected_repository_are_not_overwritten(tmp_path)
         assert record(layout, "ui").refusal
         assert not inspect_finish(layout, OWNER).complete
         assert receipt.read_bytes() == raw
+
+
+def test_invalid_commit_config_rejects_valid_finish_before_lock_and_preserves_preview(tmp_path):
+    import pytest
+    from graph_works_core.workspace.errors import WorkspaceError
+
+    layout, repos = setup(tmp_path)
+    git(repos["code"][0], "merge", "feature")
+    git(repos["ui"][0], "merge", "feature")
+    layout.local_manifest_path.write_text("workflow:\n  workspace_commits: invalid\n", encoding="utf-8", newline="\n")
+    before = {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()}
+    with pytest.raises(WorkspaceError, match="workspace_commits"):
+        record(layout, "code")
+    assert {p.relative_to(layout.root): p.read_bytes() for p in layout.root.rglob("*") if p.is_file()} == before
+    # Receipt verification previews still report domain blockers with invalid commit config.
+    preview = advance(layout, git(repos["code"][0], "rev-parse", "HEAD"), dry_run=True)
+    assert preview.outcome.plan.refusal == "finish-incomplete"

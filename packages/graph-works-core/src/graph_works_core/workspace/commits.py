@@ -38,7 +38,7 @@ MODE_KEY = "workflow.workspace_commits"
 SUBJECT_PREFIX = "workspace: "
 COMMIT_FAILED_PREFIX = "workspace commit failed: "
 #: Skip reasons worth one `[note]`: the user may have expected a commit.
-NOTE_REASONS: frozenset[str] = frozenset({"not-own-repo", "not-a-repo"})
+NOTE_REASONS: frozenset[str] = frozenset({"not-own-repo", "not-a-repo", "git missing"})
 COMMIT_TIMEOUT_SECONDS = 30.0
 _INDEX_LOCK_DELAYS: tuple[float, ...] = (0.2, 0.5, 1.0)
 #: Test seam: `monkeypatch.setattr(commits, "_sleep", ...)`.

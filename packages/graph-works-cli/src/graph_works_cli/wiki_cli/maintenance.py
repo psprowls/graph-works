@@ -14,6 +14,7 @@ from okf_io import load_bundle, update_index
 from graph_works_cli.errors import fail
 from graph_works_cli.json_output import encode
 from graph_works_cli.wiki_cli.errors import exit_error
+from graph_works_cli.work_cli import rendering
 from graph_works_cli.workspace_resolution import resolve_workspace
 
 
@@ -88,8 +89,10 @@ def archive(
         fail(str(exc), reason="io", json_mode=json_output, command=command, cause=exc)
 
     for warning in stranded_warnings(run):
-        typer.echo(warning, err=True)
+        rendering.warn(warning)
     payload = archive_payload(run, dry_run=dry_run)
+    for warning in payload["warnings"]:
+        rendering.warn(warning)
 
     if dry_run and not json_output:
         typer.echo(run.wiki_plan.diff())
@@ -108,6 +111,8 @@ def archive(
         return
     if dry_run:
         return
+    rendering.render_commit(payload["commit"])
+    rendering.render_commit(payload["wiki_commit"])
     archived = run.wiki.archived if run.wiki is not None else ()
     if archived:
         for token in archived:

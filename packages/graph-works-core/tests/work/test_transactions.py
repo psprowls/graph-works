@@ -3457,6 +3457,99 @@ def test_pre_existing_dangling_dependency_is_excused_by_the_structural_half(tmp_
     )
 
 
+_EDGE = {"blocks": "execute", "needs": "resolved"}
+
+
+def _bump(layout: WorkspaceLayout, path: str) -> PlannedWrite:
+    page = layout.bundle_dir / f"{path}.md"
+    before = page.read_bytes()
+    return PlannedWrite(f"{path}.md", _digest(before), before.replace(b"updated: 2026-08-22", b"updated: 2026-08-23"))
+
+
+def test_an_unrelated_concurrent_edit_does_not_roll_back_a_reused_baseline(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/rel", type="Release")
+    _write_item(layout.bundle_dir, "work/rel/children/kid", type="Feature")
+    _write_item(layout.bundle_dir, "work/feature", type="Feature")
+    (layout.bundle_dir / "work/feature").mkdir()
+    stale = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    (layout.bundle_dir / "work/rel.md").unlink()
+    plan = _plan(layout, writes=(_bump(layout, "work/feature"),), validate_paths=("work/feature",))
+
+    result = apply_mutation(layout, plan, baseline_bundle=stale)
+
+    assert result.ok is True, result.failures
+    assert result.rolled_back is False
+
+
+def test_removing_a_validate_paths_dependency_target_still_rolls_back(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/dep", type="Feature")
+    _write_item(layout.bundle_dir, "work/p", type="Bug", depends_on=({"path": "work/dep", **_EDGE},))
+    (layout.bundle_dir / "work/p").mkdir()
+    plan = _plan(layout, deletes=("work/dep.md",), validate_paths=("work/p",))
+
+    result = apply_mutation(layout, plan, baseline_bundle=load_bundle(layout.bundle_dir, ignore=IGNORE))
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert "dependency target 'work/dep' is missing after mutation" in result.failures[0]
+    assert (layout.bundle_dir / "work/dep.md").exists()
+
+
+def test_removing_a_validate_paths_parent_still_rolls_back(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/parent", type="Release")
+    _write_item(layout.bundle_dir, "work/parent/children/child", type="Feature")
+    plan = _plan(layout, deletes=("work/parent.md",), validate_paths=("work/parent/children/child",))
+
+    result = apply_mutation(layout, plan, baseline_bundle=load_bundle(layout.bundle_dir, ignore=IGNORE))
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert "parent" in result.failures[0]
+    assert (layout.bundle_dir / "work/parent.md").exists()
+
+
+def test_an_unloadable_dependency_target_withholds_the_baseline_allowance(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    (layout.bundle_dir / "work").mkdir(exist_ok=True)
+    (layout.bundle_dir / "work/dep.md").write_bytes(b"---\ntype: \xff\n---\n")
+    _write_item(layout.bundle_dir, "work/p", type="Bug", depends_on=({"path": "work/dep", **_EDGE},))
+    (layout.bundle_dir / "work/p").mkdir()
+    plan = _plan(layout, writes=(_bump(layout, "work/p"),), validate_paths=("work/p",))
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is False
+    assert result.rolled_back is True
+    assert "dependency target 'work/dep' is missing after mutation" in result.failures[0]
+
+
+def test_a_baseline_read_failure_falls_back_to_the_absolute_gate(monkeypatch, tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    _write_item(layout.bundle_dir, "work/p", type="Feature")
+    (layout.bundle_dir / "work/p").mkdir()
+    real = transactions._read_bytes_at
+
+    def denied_for_p(root, member):  # type: ignore[no-untyped-def]
+        if member == "work/p.md":
+            raise PermissionError("denied")
+        return real(root, member)
+
+    monkeypatch.setattr(transactions, "_read_bytes_at", denied_for_p)
+    plan = _plan(layout, writes=(PlannedWrite("work/note.bin", None, b"note"),), validate_paths=("work/p",))
+
+    result = apply_mutation(layout, plan)
+
+    assert result.ok is True, result.failures
+    assert any(
+        warning.startswith("baseline capture failed, falling back to absolute postcondition gate")
+        and "denied" in warning
+        for warning in result.warnings
+    )
+
+
 def test_a_new_dangling_dependency_added_on_top_of_a_pre_existing_one_still_fails(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     repo = tmp_path / "repo"

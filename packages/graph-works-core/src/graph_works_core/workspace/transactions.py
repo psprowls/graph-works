@@ -2331,52 +2331,28 @@ def _capture_validation_state(
     Called under the held bundle lock while the bundle is still pristine.
     Raising is safe here: no effect has been committed yet.
 
-    This function computes two different things, and they are sound for two
-    different reasons -- do not conflate them:
+    This function computes two different things with different freshness
+    guarantees -- do not conflate them:
 
-    - The **findings** half (`validate(bundle, ..., scope=_baseline_scope(plan))`)
-      may reuse a caller-supplied *bundle* (see below), because the pass is
-      scoped to `_baseline_scope(plan)` and `_preflight` digest-verifies
-      exactly those members under the held lock before any effect runs. A
-      concurrent writer can make a reused bundle stale only in regions the
-      gate no longer reads.
-    - The **conditions** half (`items = load_items(...)` feeding the
-      whole-corpus `conditions` Counter via `_item_conditions`) checks
-      `parent-missing`/`dependency-missing` against the *full* item map, not
-      scoped to the plan. A caller-supplied *bundle* is never used for this
-      half, regardless of whether one was passed in: it may have been loaded
-      before the lock was taken, and nothing digest-verifies items outside
-      `_baseline_scope(plan)`, so a concurrent edit to a wholly unrelated
-      item's parent/dependency could otherwise leave this Counter reflecting
-      stale corpus-wide state. `items` is therefore always loaded fresh, under
-      the lock, via the same `_load_bundle_through(..., ignore=IGNORE)` call
-      used when no *bundle* is supplied at all -- `load_items` is cheap
-      (~0.01s), so this costs nothing worth avoiding.
+    - The **findings** half validates a caller-supplied bundle when provided,
+      scoped to `_baseline_scope(plan)`. This preserves the existing reuse
+      contract; preflight checks the plan's effect preconditions, not every
+      member of that scope.
+    - The **conditions** half reads only `_condition_scope(plan)`'s pre-image
+      pages and checks their parent and dependency targets through the anchored
+      root under the lock. It never consults a supplied bundle, which may
+      predate a concurrent edit. Unrelated items cannot grant allowances.
 
     *bundle* lets the caller hand over a bundle it already loaded with the same
-    `ignore=IGNORE` set, skipping a second full load *for the findings half
-    only*. It was loaded before the lock was taken, which is safe there only
-    because the pass is scoped as described above. **Never pass a bundle
-    loaded with a different `ignore` set** -- that would silently validate a
-    different corpus.
+    `ignore=IGNORE` set, so this function performs no full load. Without one it
+    performs exactly one, for findings. **Never pass a bundle loaded with a
+    different `ignore` set** -- that would validate a different corpus.
     """
     validation_root = layout.bundle_dir
     _assert_root_identity(validation_root, root)
-    bundle_supplied = bundle is not None
     if bundle is None:
         bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
-    _assert_root_identity(validation_root, root)
-    # The conditions half always loads fresh under the lock -- see the
-    # docstring above. It is never derived from a caller-supplied `bundle`.
-    # When no `bundle` was supplied, the load just above already happened
-    # fresh under the lock, so it doubles as this load too -- only the
-    # caller-supplied-bundle case pays for a second one.
-    if bundle_supplied:
-        conditions_bundle = _load_bundle_through(root, validation_root, ignore=IGNORE)
         _assert_root_identity(validation_root, root)
-    else:
-        conditions_bundle = bundle
-    items = load_items(conditions_bundle)
     # `links=` deliberately left unwired: this function builds no `LinkGraph`
     # of its own before this call, and the postcondition pass in
     # `_validate_postconditions` validates a different bundle state (the
@@ -2389,16 +2365,13 @@ def _capture_validation_state(
         scope=_baseline_scope(plan),
     )
     _assert_root_identity(validation_root, root)
-    by_path = {item.path: item for item in items}
     findings = Counter(
         (_map_member(plan.path_mapping, finding.path), finding.code)
         for finding in report.errors
         if finding.path is not None
     )
-    conditions: Counter[tuple[str, str]] = Counter()
-    for item in items:
-        mapped = plan.path_mapping.get(item.path, item.path)
-        conditions.update((mapped, kind) for kind, _message in _item_conditions(item, by_path))
+    conditions = _scoped_baseline_conditions(plan, root)
+    _assert_root_identity(validation_root, root)
     return _ValidationState(findings=dict(findings), conditions=dict(conditions))
 
 
@@ -3077,9 +3050,11 @@ def apply_mutation(
 
     *baseline_bundle* is an optimisation with a hard precondition: it MUST have
     been loaded from `layout.bundle_dir` with `ignore=work_tracker_okf.items.IGNORE`.
+    Supplying it saves the baseline's only full bundle load; conditions read
+    scoped pre-image pages fresh under the lock regardless.
     Callers in `work/commands.py` that load with `ignore=()` or a lane-narrowed
     set (`run_reparent`, `run_release_adoption`) must NOT pass one; omitting
-    it restores the second load and is always correct.
+    it restores that load and is always correct.
 
     *allowed_new_findings* is an explicit operation-specific exception to
     ADR 2026-08-25-the-work-mutation's default no-surplus guarantee. Each (post-mutation member, code)

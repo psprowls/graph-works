@@ -215,44 +215,34 @@ def test_a_pre_existing_error_on_a_moved_document_is_excused_not_reported(
     assert any("pre-existing, not caused by this operation" in note for note in application.warnings)
 
 
-def test_a_supplied_baseline_bundle_feeds_the_findings_half_but_not_the_conditions_half(
-    monkeypatch, a_workspace, a_write_plan
-):
-    """What `baseline_bundle=` actually still guarantees, now that the
-    conditions half always reloads fresh under the lock (see
-    `_capture_validation_state`'s docstring): the **findings** half's
-    `validate()` call is fed the exact supplied bundle object, by identity --
-    no second load happens for that half specifically. The total *load count*
-    can no longer distinguish "reuse happened" from "reuse was silently
-    ignored", because both the reused and unreused paths now perform exactly
-    two `_load_bundle_through` calls overall (the conditions-half load plus
-    the postcondition pass's load; see `test_without_a_supplied_bundle_both_
-    passes_still_load`) -- so this test asserts object identity, not a count.
-    """
+def test_a_supplied_baseline_bundle_saves_the_baseline_load(monkeypatch, a_workspace, a_write_plan):
+    """A supplied bundle feeds findings by identity and saves the baseline load."""
     from graph_works_core.workspace import transactions
+
+    loads: list[str] = []
+    real_load = transactions._load_bundle_through
+
+    def counted(root, path, *, ignore):  # type: ignore[no-untyped-def]
+        loads.append(path.as_posix())
+        return real_load(root, path, ignore=ignore)
 
     seen_bundles: list[object] = []
     real_validate = transactions.validate
 
-    def recording_validate(bundle, **kwargs):
+    def recording_validate(bundle, **kwargs):  # type: ignore[no-untyped-def]
         seen_bundles.append(bundle)
         return real_validate(bundle, **kwargs)
 
+    monkeypatch.setattr(transactions, "_load_bundle_through", counted)
     monkeypatch.setattr(transactions, "validate", recording_validate)
-    layout = a_workspace
-    reused = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    transactions.apply_mutation(layout, a_write_plan, baseline_bundle=reused)
+    reused = load_bundle(a_workspace.bundle_dir, ignore=IGNORE)
+    result = transactions.apply_mutation(a_workspace, a_write_plan, baseline_bundle=reused)
 
-    assert len(seen_bundles) == 2, "one validate() call for the baseline findings half, one for the postcondition pass"
-    findings_half_bundle, postcondition_bundle = seen_bundles
-    assert findings_half_bundle is reused, (
-        "the findings-half validate() call must be fed the exact supplied bundle object -- "
-        "this is the one thing baseline_bundle= still saves a load for"
-    )
-    assert postcondition_bundle is not reused, (
-        "the postcondition pass validates the post-mutation bundle, which is never the "
-        "pristine pre-mutation bundle the caller supplied"
-    )
+    assert result.ok, result.failures
+    assert len(loads) == 1
+    assert len(seen_bundles) == 2
+    assert seen_bundles[0] is reused
+    assert seen_bundles[1] is not reused
 
 
 def test_without_a_supplied_bundle_both_passes_still_load(monkeypatch, a_workspace, a_write_plan):
@@ -270,73 +260,60 @@ def test_without_a_supplied_bundle_both_passes_still_load(monkeypatch, a_workspa
     assert len(loads) == 2
 
 
+@pytest.mark.parametrize("supplied, expected_loads", [(True, 0), (False, 1)])
+def test_capture_load_count_is_independent_of_the_conditions_half(
+    monkeypatch, a_workspace, a_write_plan, supplied: bool, expected_loads: int
+) -> None:
+    from graph_works_core.workspace import transactions
+
+    reused = load_bundle(a_workspace.bundle_dir, ignore=IGNORE) if supplied else None
+    loads: list[str] = []
+    real_load = transactions._load_bundle_through
+
+    def counted(root, path, *, ignore):  # type: ignore[no-untyped-def]
+        loads.append(path.as_posix())
+        return real_load(root, path, ignore=ignore)
+
+    monkeypatch.setattr(transactions, "_load_bundle_through", counted)
+    root = transactions._open_root(a_workspace.bundle_dir)
+    try:
+        transactions._capture_validation_state(a_workspace, a_write_plan, root, repo_root=None, bundle=reused)
+    finally:
+        root.close()
+
+    assert len(loads) == expected_loads
+
+
 def test_a_reused_bundle_produces_the_same_gate_outcome(a_workspace, a_write_plan):
     reused = load_bundle(a_workspace.bundle_dir, ignore=IGNORE)
     with_reuse = apply_mutation(a_workspace, a_write_plan, baseline_bundle=reused)
     assert with_reuse.ok, with_reuse.failures
 
 
-def test_the_conditions_half_is_never_derived_from_a_supplied_bundle(monkeypatch, tmp_path: Path) -> None:
-    """Finding 1 of the final whole-branch review.
-
-    A `baseline_bundle=` may be loaded before the lock is taken -- possibly by
-    a different process -- and is only safe to reuse for the per-document
-    findings half, which is scoped-and-preflight-sound. The whole-corpus
-    `conditions` Counter (`load_items`/`_item_conditions`, which checks
-    `parent-missing`/`dependency-missing` against the *full* item map) is not
-    scoped that way: a concurrent mutation to some *other* item's parent,
-    between when the supplied bundle was loaded and when
-    `_capture_validation_state` runs under the lock, must still be picked up.
-
-    This is set up directly against `_capture_validation_state` (rather than
-    threading a real race through `apply_mutation`) because the property is
-    about which bundle object feeds `load_items`, not about timing.
-    """
+def test_the_conditions_half_reads_the_validate_paths_fresh_under_the_lock(monkeypatch, tmp_path: Path) -> None:
+    """A stale supplied bundle cannot hide a missing parent of a validated child."""
     from graph_works_core.workspace import transactions
 
     layout = _workspace(tmp_path)
     _write_item(layout.bundle_dir, "work/parent", type="Release")
-    (layout.bundle_dir / "work/parent/children").mkdir(parents=True)
     _write_item(layout.bundle_dir, "work/parent/children/child", type="Feature")
-    _write_item(layout.bundle_dir, "work/other", type="Feature")
-
-    # A bundle loaded while the parent still exists -- a stand-in for a
-    # `baseline_bundle` loaded before the lock, by a different call.
+    _write_item(layout.bundle_dir, "work/unrelated/children/orphan", type="Feature")
     stale_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
-    assert not any(
-        kind == "parent-missing"
-        for item in load_items(stale_bundle)
-        for kind, _message in transactions._item_conditions(item, {i.path: i for i in load_items(stale_bundle)})
-    ), "sanity check: the stale bundle must not itself show the concurrent condition"
-
-    # A concurrent mutation to a *different* item than the one this plan
-    # validates: delete the parent, leaving its child's `parent_path` dangling.
     (layout.bundle_dir / "work/parent.md").unlink()
 
-    plan = _plan(layout, validate_paths=("work/other",))
+    def forbidden(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise AssertionError("the baseline must not load items or a bundle when one was supplied")
 
-    captured_bundles: list[object] = []
-    real_load_items = transactions.load_items
-
-    def recording_load_items(bundle):  # type: ignore[no-untyped-def]
-        captured_bundles.append(bundle)
-        return real_load_items(bundle)
-
-    monkeypatch.setattr(transactions, "load_items", recording_load_items)
-
+    monkeypatch.setattr(transactions, "load_items", forbidden)
+    monkeypatch.setattr(transactions, "_load_bundle_through", forbidden)
+    plan = _plan(layout, validate_paths=("work/parent/children/child",))
     root = transactions._open_root(layout.bundle_dir)
     try:
         state = transactions._capture_validation_state(layout, plan, root, repo_root=None, bundle=stale_bundle)
     finally:
         root.close()
 
-    assert stale_bundle not in captured_bundles, (
-        "the conditions half must never call load_items with the caller-supplied bundle"
-    )
-    assert state.conditions.get(("work/parent/children/child", "parent-missing")) == 1, (
-        "the conditions half must reflect the fresh, post-concurrent-change state, "
-        "not the stale supplied bundle's item map"
-    )
+    assert state.conditions == {("work/parent/children/child", "parent-missing"): 1}
 
 
 def test_a_wholly_empty_plan_opens_the_lock_but_no_transaction_directory(

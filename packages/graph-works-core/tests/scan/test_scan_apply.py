@@ -380,3 +380,83 @@ def test_the_index_directory_of_a_repository_page_is_the_code_graph_index():
 
     assert _index_directory("code-graph/demo.md") == "code-graph"
     assert _index_directory("code-graph/demo/entities/packages/widgets.md") == "code-graph/demo/entities/packages"
+
+
+async def test_an_over_cap_purpose_never_lands_and_the_page_keeps_its_own(synced):
+    """I1: the sanitizer emptied the answer entirely, but the task is a first
+    fill, so it still counts as a decline -- only the body is untouched."""
+    layout, config, _repo, worklist = synced
+    task = _task(worklist)
+    assert task.trigger == "first_fill"
+    before_body = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"].body
+    applied = apply_scan_results(
+        worklist,
+        _results(ProseRefreshResult(uri=PACKAGE_URI, sections={"## Purpose": "word " * 151})),
+        layout.bundle_dir,
+        config,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert any("no usable section survived sanitizing" in error for error in applied.entity_errors)
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
+    assert document.body == before_body
+    assert document.fm_raw[PROSE_ATTEMPTS_KEY] == 1
+
+
+async def test_three_over_cap_declines_exhaust_the_attempts(synced):
+    """I1: without this, a model that always overshoots the cap on a first
+    fill is re-dispatched on every scan with no limit."""
+    layout, config, _repo, worklist = synced
+    for _ in range(3):
+        apply_scan_results(
+            worklist,
+            _results(ProseRefreshResult(uri=PACKAGE_URI, sections={"## Purpose": "word " * 151})),
+            layout.bundle_dir,
+            config,
+            today=TODAY,
+            dry_run=False,
+        )
+    next_worklist, _ = await build_scan_worklist(layout, config, today=TODAY, at=AT, dry_run=False)
+    assert PACKAGE_URI not in [task.uri for task in next_worklist.prose_tasks]
+    assert ("code-graph/demo/entities/packages/widgets.md", "attempts-exhausted") in [
+        (s.page, s.reason) for s in next_worklist.skipped
+    ]
+
+
+async def test_a_diff_triggered_over_cap_answer_does_not_increment(synced):
+    """The counter bounds a first-fill *decline*. An emptied-out diff refresh
+    is a different failure and stays uncounted, mirroring
+    `test_a_partial_diff_refresh_does_not_increment`."""
+    layout, config, _repo, worklist = synced
+    from dataclasses import replace as dc_replace
+
+    diff_worklist = dc_replace(
+        worklist,
+        prose_tasks=tuple(dc_replace(t, trigger="diff") if t.uri == PACKAGE_URI else t for t in worklist.prose_tasks),
+    )
+    applied = apply_scan_results(
+        diff_worklist,
+        _results(ProseRefreshResult(uri=PACKAGE_URI, sections={"## Purpose": "word " * 151})),
+        layout.bundle_dir,
+        config,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert any("no usable section survived sanitizing" in error for error in applied.entity_errors)
+    document = load_bundle(layout.bundle_dir).concepts["code-graph/demo/entities/packages/widgets"]
+    assert PROSE_ATTEMPTS_KEY not in document.fm_raw
+
+
+async def test_an_at_cap_purpose_lands(synced):
+    layout, config, _repo, worklist = synced
+    body = " ".join(["word"] * 150)
+    applied = apply_scan_results(
+        worklist,
+        _results(ProseRefreshResult(uri=PACKAGE_URI, sections={"## Purpose": body})),
+        layout.bundle_dir,
+        config,
+        today=TODAY,
+        dry_run=False,
+    )
+    assert applied.sections_filled == 1
+    assert body in _page(layout)

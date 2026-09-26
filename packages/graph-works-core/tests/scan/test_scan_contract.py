@@ -43,11 +43,12 @@ def _task(uri: str, *, diff: str | None = "packages/widgets/src/a.py") -> ProseR
         prose_sections={"## Purpose": "> TODO: <One paragraph>", "## Public API": ""},
         graph_context="package widgets",
         owning_short_head="0123456789ab",
+        word_limits={"## Purpose": 150},
     )
 
 
-def test_schema_version_is_four():
-    assert SCHEMA_VERSION == 4
+def test_schema_version_is_five():
+    assert SCHEMA_VERSION == 5
 
 
 def test_a_schema_three_payload_is_refused_by_number():
@@ -56,7 +57,30 @@ def test_a_schema_three_payload_is_refused_by_number():
     with pytest.raises(UnsupportedWorklistSchema) as caught:
         worklist_from_payload(payload)
     assert "unsupported worklist schema: 3" in str(caught.value)
-    assert "this build reads 4" in str(caught.value)
+    assert "this build reads 5" in str(caught.value)
+
+
+def test_a_schema_four_payload_is_refused_by_number():
+    """A cached v4 worklist predates `word_limits`: read short, it would drop
+    every cap silently and let an over-cap answer land."""
+    payload = worklist_payload(ScanWorklist())
+    payload["schema_version"] = 4
+    with pytest.raises(UnsupportedWorklistSchema) as caught:
+        worklist_from_payload(payload)
+    assert "unsupported worklist schema: 4" in str(caught.value)
+    assert "this build reads 5" in str(caught.value)
+
+
+def test_word_limits_round_trip_as_plain_data():
+    worklist = ScanWorklist(prose_tasks=(_task("pkg:a/b/widgets"),))
+    payload = worklist_payload(worklist)
+    assert payload["prose_tasks"][0]["word_limits"] == {"## Purpose": 150}
+    assert worklist_from_payload(json.loads(json.dumps(payload))).prose_tasks[0].word_limits == {"## Purpose": 150}
+
+
+def test_word_limits_default_to_empty():
+    task = ProseRefreshTask(uri="u", kind="Package", name="n", page_path="p.md", entity_root="/r", trigger="diff")
+    assert dict(task.word_limits) == {}
 
 
 def test_skipped_pages_and_adoptions_round_trip():

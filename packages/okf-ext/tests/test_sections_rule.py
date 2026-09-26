@@ -1,4 +1,4 @@
-"""`section_rule`: the four codes, and everything that must *not* fire."""
+"""`section_rule`: the five codes, and everything that must *not* fire."""
 
 from __future__ import annotations
 
@@ -57,12 +57,13 @@ def test_the_topic_is_the_module_name_and_every_code_carries_it():
     assert all(code.startswith(f"{TOPIC}.") for code in CODES)
 
 
-def test_the_four_codes_are_exactly_these():
+def test_the_five_codes_are_exactly_these():
     assert CODES == (
         "sections.missing",
         "sections.unfilled",
         "sections.unexpected",
         "sections.no-declaration-for-type",
+        "sections.agent-oversize",
     )
 
 
@@ -250,3 +251,55 @@ def test_the_rule_runs_over_the_committed_corpus_without_raising():
     section_set = load_sections(SECTIONS_DIR)
     report = validate(sectioned_bundle(), today="2026-08-07", extra_rules=[section_rule(section_set)])
     assert all(f.severity == "warn" for f in report.findings if f.code.startswith("sections."))
+
+
+AGENT = """
+sections:
+  - heading: Summary
+    required: true
+    audience: agent
+    max_words: 5
+    placeholder: |
+      <!-- one paragraph: what this changes and why it matters -->
+  - heading: Background
+"""
+
+
+def oversize(bundle, section_set, **kwargs):
+    return [f for f in codes(bundle, section_set, **kwargs) if f.code == "sections.agent-oversize"]
+
+
+def test_an_over_cap_agent_section_warns_once_at_its_heading(tmp_path):
+    bundle, section_set = build(
+        tmp_path, {"a.md": doc("## Summary\n\none two three four five six\n")}, declarations=AGENT
+    )
+    (finding,) = oversize(bundle, section_set)
+    assert finding.severity == "warn"
+    assert finding.line == 7  # the `## Summary` line: 5 frontmatter lines + blank + heading
+    assert finding.spec == "Feature.yaml"
+    assert finding.message == "Agent section `Summary` is 6 words; its declaration caps it at 5."
+
+
+def test_oversize_stays_warn_even_under_severity_error(tmp_path):
+    bundle, section_set = build(
+        tmp_path, {"a.md": doc("## Summary\n\none two three four five six\n")}, declarations=AGENT
+    )
+    assert [f.severity for f in oversize(bundle, section_set, severity="error")] == ["warn"]
+
+
+def test_an_agent_section_at_its_cap_is_quiet(tmp_path):
+    bundle, section_set = build(tmp_path, {"a.md": doc("## Summary\n\none two three four five\n")}, declarations=AGENT)
+    assert oversize(bundle, section_set) == []
+
+
+def test_a_placeholder_equal_agent_section_is_never_oversize(tmp_path):
+    """The placeholder is 11 tokens, over the cap of 5 -- it is `unfilled`, not long."""
+    body = "## Summary\n\n<!-- one paragraph: what this changes and why it matters -->\n"
+    bundle, section_set = build(tmp_path, {"a.md": doc(body)}, declarations=AGENT)
+    assert [f.code for f in codes(bundle, section_set)] == ["sections.unfilled"]
+
+
+def test_a_human_section_of_any_length_is_never_oversize(tmp_path):
+    body = "## Summary\n\nShort.\n\n## Background\n\n" + "word " * 500 + "\n"
+    bundle, section_set = build(tmp_path, {"a.md": doc(body)}, declarations=AGENT)
+    assert oversize(bundle, section_set) == []

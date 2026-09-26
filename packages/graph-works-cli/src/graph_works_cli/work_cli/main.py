@@ -13,6 +13,7 @@ or `on=` and never looks it up itself.
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+from pathlib import Path
 
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
@@ -285,19 +286,29 @@ def next_stage(
     descend: bool = typer.Option(
         False, "--descend", help="When the item waits on children, switch to the next actionable child."
     ),
+    file: str = typer.Option(
+        "auto",
+        "--file",
+        help="Where to write the assembled guidance: 'auto' (the item's references/), a path, or '' to skip writing.",
+    ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the routing decision as JSON."),
 ) -> None:
     """Compute what to dispatch for PATH, and what advancing would change.
 
-    Its one permitted write is the canonical design-source repair reported as
-    `normalized` -- it is applied, not previewed, so the next read agrees with
-    this one.
+    Writes: the canonical design-source repair reported as `normalized` -- it
+    is applied, not previewed, so the next read agrees with this one -- and,
+    because `--file` defaults to `auto`, the assembled guidance file (when it
+    admitted anything and has a target) plus the claims cache under
+    `<cache_dir>/claims/`. `--file ""` skips the guidance file, not the
+    assembly.
     """
     warn_if_stale_routing()
     layout = resolve_workspace(workspace)
+    # An explicit path resolves against the cwd here, so `guidance_file` is always absolute.
+    request = work.GuidanceRequest("auto" if file == "auto" else None if file == "" else Path(file).resolve())
     try:
-        result = work.run_next(layout, path, descend=descend, dry_run=False)
+        result = work.run_next(layout, path, descend=descend, dry_run=False, guidance=request)
     except WorkspaceError as exc:
         rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
     except ValueError as exc:

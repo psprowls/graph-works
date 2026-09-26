@@ -111,3 +111,13 @@ def test_a_body_with_no_heading_has_no_sections():
 def test_prose_lines_covers_every_line_of_a_body_with_no_code():
     assert prose_lines("a\nb\nc\n") == frozenset({1, 2, 3})
     assert prose_lines("") == frozenset()
+
+
+def test_normalized_text_is_the_comparable_form_of_a_section():
+    from okf_ext.body import normalized_text
+
+    assert normalized_text("\r\n\n  > TODO: x  \r\n  more\r\n\n") == "> TODO: x\nmore"
+    assert normalized_text("a\rb") == "a\nb"
+    assert normalized_text("   \n\n") == ""
+    # Interior blank lines survive; only the edges are dropped.
+    assert normalized_text("a\n\nb\n") == "a\n\nb"

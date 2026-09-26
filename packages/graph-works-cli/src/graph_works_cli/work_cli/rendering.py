@@ -174,6 +174,14 @@ def render_next(result: NextResult, payload: dict[str, Any]) -> None:
         _render_dispatch(payload["dispatch"]["profile"], payload["dispatch"]["provenance"])
     if payload["artifact"]:
         typer.echo(f"  artifact: {payload['artifact']['path']}")
+    if payload["guidance"]:
+        tokens = result.guidance.tokens if result.guidance is not None else 0
+        where = payload["guidance_file"] or "not written"
+        typer.echo(f"  guidance: {len(payload['guidance'])} entries, {tokens:,} tokens → {where}")
+    else:
+        typer.echo("  guidance: none")
+    for warning in payload["guidance_warnings"]:
+        warn(warning)
     for blocker in payload["blockers"]:
         echo_wrapped("  blocked: ", blocker)
     for warning in result.warnings:

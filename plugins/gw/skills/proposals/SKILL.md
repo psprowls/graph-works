@@ -42,14 +42,35 @@ whatever `target` says.
 3. **Accept** → `gw wiki proposal approve <target>`.
    **Reject** → `gw wiki proposal reject <target>` (preserved; never
    re-proposed).
-4. For each accepted proposal, assign cross-page identity (any ADR number,
+4. For each accepted proposal, assign cross-page identity (an ADR's
+   `<decision_date>-<slug>` filename — ADRs are dated, never numbered — and
    any supersedes link) centrally, then **dispatch one subagent per page in a
    single message** to author the page at its recorded `target` and flip its
-   own note to `page_status: created`.
-5. Wire supersession on both pages, and mark the superseded page, yourself.
-6. `gw wiki index`, then `gw wiki lint` to verify, then `gw wiki archive
-   --dry-run` **before** `gw wiki archive` — the sweep takes `approved` notes
-   too.
+   own note to `page_status: created`. Each author's brief requires the
+   destination page's `about:`, plus `decisions:` on an ADR or `claims:` on an
+   explanation, written per `skills/graph-works/references/page-formats.md` →
+   **Curated-page claims**, before the note flips. When the note's `sources[]`
+   names a Source (`/sources/<slug>.md`), the author keeps the destination
+   page's `sources[]` citation of that Source, and **returns** — never
+   writes — one `(source, claim ordinal, landed ref)` triple per key claim its
+   new entries carry: the Source's path, the claim's ordinal (the position of
+   its top-level item under the Source's `## Key claims`, numbered from 1),
+   and `/<target>#<entry id>`. Authors must not touch the Source: parallel
+   read-modify-writes of one file lose entries, and two authors landing the
+   same claim would each append it, leaving a duplicate ordinal that
+   `gw wiki lint` reports as `sources.drain-invalid`.
+5. After every author returns, write each touched Source's `drain:` ledger
+   yourself, once, after the fan-out: one `{claim: <n>, landed: [...]}` entry
+   per ordinal, merging every ref returned for that ordinal into its one
+   `landed` list. Never add a second entry for an ordinal: one already in the
+   ledger as `landed` gets the new refs appended to its list; one already
+   `dropped` stays as is unless the user says otherwise.
+6. Wire supersession on both pages, and mark the superseded page, yourself.
+7. `gw wiki index`, then `gw wiki lint` to verify — it reports a missing
+   `about:`/`decisions:`/`claims:` field at error — then `gw wiki archive
+   --dry-run` **before** `gw wiki archive`: the no-target sweep takes
+   `approved` notes too, and drained Sources (every key claim dispositioned)
+   along with their `sources/references/` copies.
 
 ## Reference
 

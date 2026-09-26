@@ -7,6 +7,7 @@ from code_wiki_okf.init import install_bundle
 from okf_ext.render import render_rule
 from okf_ext.schemas import load_schemas, schema_rule
 from okf_ext.sections import load_sections, render_skeleton, section_rule
+from okf_ext.shape import audience_view
 from okf_io import load_bundle, validate
 
 _TODAY = date(2026, 1, 1)
@@ -248,3 +249,49 @@ def test_a_raw_skeleton_carries_no_render_breakage(tmp_path: Path, type_name: st
     )
     report = validate(load_bundle(root), today=_TODAY, extra_rules=[render_rule()])
     assert report.by_code("render.angle-bracket") == ()
+
+
+#: Design §2.4 of `feature-section-audiences-and-agent-views`: the agent
+#: sections each type declares, and their caps. Every other section is human.
+_EXPECTED_AGENT = {
+    "Package": {"Purpose": 150, "Public API": 200},
+    "File": {"Notes": 120},
+    "Dependency": {"Why we depend on this": 120, "Gotchas / workarounds": 120},
+    "App": {},
+    "TestSuite": {},
+    "Repository": {},
+    "AgentPlugin": {},
+}
+
+
+def _filled_body(declaration) -> str:
+    """Every declared section present and filled with non-placeholder text."""
+    return "".join(
+        f"{'#' * spec.level} {spec.heading}\n\nFilled {spec.heading} text.\n\n" for spec in declaration.sections
+    )
+
+
+def test_the_agent_sections_and_their_caps() -> None:
+    section_set = _seed_sections()
+    for type_name, expected in _EXPECTED_AGENT.items():
+        declaration = section_set.types[type_name]
+        found = {s.heading: s.max_words for s in declaration.sections if s.audience == "agent"}
+        assert found == expected, type_name
+        assert all(not s.phases for s in declaration.sections), type_name
+
+
+def test_audience_view_returns_exactly_the_declared_agent_sections() -> None:
+    section_set = _seed_sections()
+    for type_name, expected in _EXPECTED_AGENT.items():
+        declaration = section_set.types[type_name]
+        views = audience_view(_filled_body(declaration), declaration)
+        assert tuple(v.heading for v in views) == tuple(expected), type_name
+
+
+def test_an_unfilled_skeleton_has_no_agent_view() -> None:
+    """Every shipped agent section starts as its placeholder, so a freshly
+    scaffolded page contributes nothing to an agent's context."""
+    section_set = _seed_sections()
+    for type_name in _EXPECTED_AGENT:
+        declaration = section_set.types[type_name]
+        assert audience_view(render_skeleton(declaration), declaration) == (), type_name

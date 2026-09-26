@@ -77,7 +77,7 @@ def archive(
     json_output: bool = typer.Option(False, "--json", help="Print the archive projection instead of text."),
     workspace: str = typer.Option("", "--workspace"),
 ) -> None:
-    """Archive one curated page or sweep eligible proposal pages."""
+    """Archive one curated page, or sweep eligible proposals and drained Sources."""
     command = "wiki archive"
     layout = resolve_workspace(workspace, json_mode=json_output, command=command)
     try:

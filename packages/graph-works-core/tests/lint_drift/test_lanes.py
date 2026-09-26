@@ -124,7 +124,7 @@ def test_the_wiki_lane_carries_every_declared_capability(workspace):
     test. Here the weaker but still load-bearing claim: the composer built a
     rule for each capability whose declarations are present."""
     wiki, _work = _compose(workspace).lanes
-    assert len(wiki.rules) == 6  # health, render, schema, section, vocabulary, placement — no reader
+    assert len(wiki.rules) == 8  # health, render, schema, about, drain, section, vocabulary, placement — no reader
 
 
 def test_the_wiki_lane_accepts_canonical_nested_code_wiki_placement(workspace):
@@ -206,7 +206,7 @@ def test_a_reader_adds_the_sync_rule(workspace, monkeypatch):
 
     monkeypatch.setattr(lanes_module, "snapshot_bundle", lambda *a, **k: _EmptySnapshot())
     wiki, _work = _compose(workspace, reader=_Reader()).lanes
-    assert len(wiki.rules) == 7
+    assert len(wiki.rules) == 9
 
 
 class _EmptySnapshot:
@@ -347,6 +347,8 @@ def test_every_lane_loads_as_a_bundle(workspace):
             "health",
             "render",
             "schema",
+            "about",
+            "claims",
             "sections",
             "tags",
             "placement",
@@ -356,3 +358,112 @@ def test_every_lane_loads_as_a_bundle(workspace):
             "targets",
             "graph",
         }
+
+
+def _curated(workspace, member: str, frontmatter: str) -> None:
+    page = workspace.layout.bundle_dir / member
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(f"---\n{frontmatter}---\n\n## Context\n\nBody.\n", encoding="utf-8", newline="")
+
+
+def _wiki_report(workspace, **kwargs):
+    wiki, _work = _compose(workspace, **kwargs).lanes
+    return validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+
+
+def test_the_wiki_lane_composes_the_claims_contract_at_error(workspace):
+    """The backfill child flipped the contract from warn to error once every
+    curated page passed (epic decision D-010)."""
+    from graph_works_core.lint_drift.lanes import CONTRACT_SEVERITY
+
+    assert CONTRACT_SEVERITY == "error"
+    _curated(workspace, "docs/explanations/bare.md", "type: Explanation\ntitle: Bare\ndescription: d\n")
+    findings = [f for f in _wiki_report(workspace).findings if f.path == "docs/explanations/bare.md"]
+    contract = {(f.code, f.severity) for f in findings if f.code.startswith(("about.", "claims."))}
+    assert contract == {("about.missing", "error"), ("claims.missing", "error")}
+    assert not [f for f in findings if f.code.startswith("schemas.")]
+
+
+def test_the_claims_contract_rides_the_schema_gate(workspace):
+    config_dir = workspace.layout.config_dir
+    for child in sorted((config_dir / SCHEMA_DIRNAME).iterdir()):
+        child.unlink()
+    (config_dir / SCHEMA_DIRNAME).rmdir()
+    _curated(workspace, "docs/explanations/bare.md", "type: Explanation\ntitle: Bare\ndescription: d\n")
+    wiki = _compose(workspace).lanes[0]
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+    assert not [f for f in report.findings if f.code.startswith(("about.", "claims."))]
+
+
+def test_repo_roots_reach_the_constrains_check(workspace, tmp_path):
+    other = tmp_path / "other"
+    (other / "src").mkdir(parents=True)
+    (other / "src" / "kept.py").write_text("", encoding="utf-8", newline="")
+    _curated(
+        workspace,
+        "adrs/2026-01-01-kept.md",
+        "type: Adr\ntitle: Kept\ndescription: d\ndecision_date: 2026-01-01\nabout: [repo:acme/demo]\n"
+        "decisions:\n  - id: D1\n    claim: Keep it.\n    constrains: [src/kept.py]\n",
+    )
+
+    def constrains(**kwargs):
+        return [f.code for f in _wiki_report(workspace, **kwargs).findings if f.code == "claims.constrains-missing"]
+
+    assert constrains() == ["claims.constrains-missing"]  # only repo_root, which lacks src/kept.py
+    assert constrains(repo_roots=(other,)) == []
+
+
+def test_the_wiki_lane_composes_the_drain_rule(workspace):
+    page = workspace.layout.bundle_dir / "sources" / "2026-09-s.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Source\ntitle: S\ndescription: d\nsource_path: sources/references/2026-09-s.md\n---\n\n"
+        "## Key claims\n- One.\n\n## Where it's cited in this wiki\n\n",
+        encoding="utf-8",
+        newline="",
+    )
+    findings = [f for f in _wiki_report(workspace).findings if f.path == "sources/2026-09-s.md"]
+    assert ("sources.undrained", "warn") in {(f.code, f.severity) for f in findings}
+
+
+def test_the_drain_rule_rides_the_schema_gate(workspace):
+    config_dir = workspace.layout.config_dir
+    for child in sorted((config_dir / SCHEMA_DIRNAME).iterdir()):
+        child.unlink()
+    (config_dir / SCHEMA_DIRNAME).rmdir()
+    wiki = _compose(workspace).lanes[0]
+    report = validate(load_bundle(wiki.root, ignore=wiki.ignore), today=TODAY, extra_rules=wiki.rules)
+    assert not [f for f in report.findings if f.code.startswith("sources.")]
+
+
+def _config(workspace):
+    layout = workspace.layout
+    return load_config(
+        layout.bundle_dir,
+        config_path=layout.manifest_path,
+        graph_dir=layout.cache_dir,
+        declarations_dir=layout.config_dir,
+    )
+
+
+def test_wiki_entry_keys_is_none_rather_than_a_raise_on_a_malformed_schema(workspace):
+    """Composition already reports a malformed schema as a `wiki lane:` line;
+    the coverage helper must not re-raise it."""
+    from graph_works_core.lint_drift.lanes import wiki_entry_keys
+
+    (workspace.layout.config_dir / SCHEMA_DIRNAME / "Source.schema.json").write_text(
+        "{not json", encoding="utf-8", newline=""
+    )
+    assert wiki_entry_keys(_config(workspace)) is None
+    assert any(error.startswith("wiki lane:") for error in _compose(workspace).errors)
+
+
+def test_wiki_entry_keys_is_none_without_a_schema_directory(workspace):
+    from graph_works_core.lint_drift.lanes import wiki_entry_keys
+
+    assert wiki_entry_keys(_config(workspace))  # the seeded schemas declare entry keys
+    schema_dir = workspace.layout.config_dir / SCHEMA_DIRNAME
+    for child in sorted(schema_dir.iterdir()):
+        child.unlink()
+    schema_dir.rmdir()
+    assert wiki_entry_keys(_config(workspace)) is None

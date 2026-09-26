@@ -89,13 +89,14 @@ from work_tracker_okf.mutation import (
     PlannedWrite,
     WorkMutationPlan,
 )
-from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page
+from work_tracker_okf.paths import ArtifactRef, checkpoint_ref, child_lane, item_page, references_dir
 from work_tracker_okf.projection import ResumeSelection, Rollup, rollup, select_resume
 from work_tracker_okf.reparent import plan_release_adoption, plan_reparent
 from work_tracker_okf.sources import upsert
 from work_tracker_okf.vocabulary import PARENT_TYPES, SPEC_SOURCE_ID, TERMINAL_STATUSES
 from work_tracker_okf.workflow import RouteResult, RouteState, Transition, route, state_for
 
+from graph_works_core.guidance.assembly import Guidance, assemble_guidance, write_guidance
 from graph_works_core.workspace import provenance
 from graph_works_core.workspace.decision_owner import (
     DecisionContext,
@@ -542,6 +543,8 @@ class NextResult:
     application: NextApplication = NextApplication()
     warnings: tuple[str, ...] = ()
     finish_targets: tuple[FinishTarget, ...] = ()
+    guidance: Guidance | None = None
+    guidance_file: Path | None = None
 
 
 def _plan_source_normalization(bundle_root: Path, item: WorkItem) -> SourceNormalization | None:
@@ -693,12 +696,65 @@ def _plan_next(layout: WorkspaceLayout, path: str, *, descend: bool) -> tuple[Ne
     return preview, bundle, selected
 
 
+@dataclass(frozen=True, slots=True)
+class GuidanceRequest:
+    """Ask `run_next` to assemble guidance. `target`: `"auto"` is the selected
+    item's `references/guidance-<phase>.md`; a `Path` is used as given; `None`
+    assembles without writing."""
+
+    target: Literal["auto"] | Path | None = "auto"
+
+
+def _with_guidance(
+    layout: WorkspaceLayout,
+    result: NextResult,
+    bundle: Bundle,
+    items: Sequence[WorkItem],
+    request: GuidanceRequest | None,
+) -> NextResult:
+    """Assemble for the selected leaf at the dispatched stage -- only for a usable
+    dispatch (the same test `next_payload` uses to null `action`).
+
+    Guidance never changes routing (design spec section 3.6): an `OSError` or
+    `ValueError` escaping assembly -- e.g. the tokenizer failing to fetch its
+    encoding -- becomes an empty `Guidance` carrying one warning, and no file
+    is written."""
+    dispatch = result.route.dispatch
+    if (
+        request is None
+        or dispatch is None
+        or result.dispatch_resolution is None
+        or result.dispatch_preflight is not None
+    ):
+        return result
+    item = next((candidate for candidate in items if candidate.path == result.selected_path), None)
+    if item is None:
+        return result
+    phase = dispatch.stage
+    try:
+        guidance = assemble_guidance(layout, bundle, items, item, phase=phase)
+    except (OSError, ValueError) as exc:
+        unavailable = Guidance(phase, (), (f"guidance unavailable: {exc}",), "", 0)
+        return replace(result, guidance=unavailable, guidance_file=None)
+    target = request.target
+    if target == "auto":
+        target = layout.bundle_dir / references_dir(item.path).rel / f"guidance-{phase}.md"
+    written: Path | None = None
+    if target is not None:
+        try:
+            written = write_guidance(guidance, target)
+        except OSError as exc:
+            guidance = replace(guidance, warnings=(*guidance.warnings, f"guidance file not written: {target}: {exc}"))
+    return replace(result, guidance=guidance, guidance_file=written)
+
+
 def run_next(
     layout: WorkspaceLayout,
     path: str,
     *,
     descend: bool = False,
     dry_run: bool = True,
+    guidance: GuidanceRequest | None = None,
 ) -> NextResult:
     """Plan what to dispatch for *path* and optionally descend to its leaf.
 
@@ -710,15 +766,19 @@ def run_next(
     Dry-run is the default. An `effort=` override is not exposed here or by the
     standalone CLI.
 
-    The single write is the canonical design-source repair and nothing else;
-    `test_run_next.py`'s confinement tests pin that.
+    Writes: the canonical design-source repair (applied branch only) and,
+    only when *guidance* is passed, the assembled guidance file (when it
+    admitted anything and has a target) plus the claims cache under
+    `<cache_dir>/claims/`. With no *guidance* request it writes exactly what it
+    always did; `test_run_next.py` and `test_run_next_guidance.py` pin both.
     """
     preview, bundle, selected = _plan_next(layout, path, descend=descend)
     if dry_run:
         resolution, preflight = _resolve_next_dispatch(layout, preview.state, preview.route)
-        return replace(
+        resolved = replace(
             preview, dispatch_resolution=resolution, dispatch_preflight=preview.dispatch_preflight or preflight
         )
+        return _with_guidance(layout, resolved, bundle, tuple(load_items(bundle)) if guidance else (), guidance)
 
     application, warnings = _apply_normalizations(layout, preview.normalizations, bundle=bundle)
     persisted_bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
@@ -735,7 +795,7 @@ def run_next(
     assert persisted_state is not None
     persisted_route = route(persisted_state)
     resolution, preflight = _resolve_next_dispatch(layout, persisted_state, persisted_route)
-    return replace(
+    applied = replace(
         preview,
         dispatch_resolution=resolution,
         dispatch_preflight=preview.dispatch_preflight or preflight,
@@ -746,6 +806,7 @@ def run_next(
         application=application,
         warnings=warnings,
     )
+    return _with_guidance(layout, applied, persisted_bundle, tuple(persisted_items), guidance)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1561,6 +1622,7 @@ __all__ = [
     "DependencyParse",
     "DispatchExplanation",
     "FilingRun",
+    "GuidanceRequest",
     "IngestQueueReport",
     "NextApplication",
     "NextResult",

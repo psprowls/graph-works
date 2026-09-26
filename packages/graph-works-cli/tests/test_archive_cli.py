@@ -279,6 +279,20 @@ def test_the_verb_is_registered_at_the_root() -> None:
     assert result.exit_code == 0
 
 
+def test_the_sweep_help_names_drained_sources() -> None:
+    """The no-target wiki sweep archives drained Sources too, not only proposals."""
+    root = next(entry for entry in _surface() if entry["path"] == ["archive"])
+
+    assert "drained Source" in root["help"]
+
+
+def _surface() -> list[dict[str, Any]]:
+    result = runner.invoke(app, ["util", "describe-surface", "--json"])
+    assert result.exit_code == 0, result.stdout
+    commands: list[dict[str, Any]] = json.loads(result.stdout)["commands"]
+    return commands
+
+
 def _resolved_bug(workspace: Path) -> str:
     result = runner.invoke(
         app,

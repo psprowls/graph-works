@@ -203,6 +203,47 @@ def find_section(body: str, heading: str, *, level: int | None = None) -> Sectio
     return None
 
 
+def top_level_items(section_text: str) -> tuple[str, ...]:
+    """The text of each top-level list item in *section_text*, in order.
+
+    Ordered and bullet lists both count, and separate top-level lists keep one
+    running sequence, which is what a Source's `drain:` ordinals number.
+    Nested items belong to their parent. Items inside a code block are not
+    items, and neither are items in a blockquote: markdown-it nests those one
+    level deeper, so `level == 1` excludes them.
+    """
+    lines = split_lines(section_text)
+    found: list[str] = []
+    for token in _MD.parse(section_text):
+        if token.type != "list_item_open" or token.level != 1:
+            continue
+        span = token.map
+        assert span is not None  # markdown-it always maps a block token
+        found.append("".join(lines[span[0] : span[1]]).rstrip())
+    return tuple(found)
+
+
+def normalized_text(text: str) -> str:
+    """*text*'s comparable form: what "this section is empty" or "this section
+    still equals its placeholder" is decided against.
+
+    Line endings normalised, each line stripped, leading and trailing blank
+    lines dropped. Deliberately **not** a marker scheme: nothing leaks into the
+    rendered document, and nothing collides with `render.angle-bracket`.
+
+    Hoisted from `sections/rule.py` so the `sections` rule and
+    `okf_ext.shape.audience_view` share one definition -- a second copy is how
+    a view and a lint drift on what "unfilled" means.
+    """
+    flat = text.replace("\r\n", "\n").replace("\r", "\n")
+    lines = [line.strip() for line in flat.split("\n")]
+    while lines and not lines[0]:
+        lines.pop(0)
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines)
+
+
 def prose_lines(body: str) -> frozenset[int]:
     """Every 1-based body line the parser does **not** call code.
 
@@ -352,9 +393,11 @@ __all__ = [
     "Section",
     "Wikilink",
     "find_section",
+    "normalized_text",
     "prose_lines",
     "resolve_wikilink",
     "sections",
     "split_lines",
+    "top_level_items",
     "wikilinks",
 ]

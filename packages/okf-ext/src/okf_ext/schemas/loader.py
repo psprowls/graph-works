@@ -25,7 +25,7 @@ from referencing.jsonschema import DRAFT202012
 from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
-from okf_ext.schemas.model import SchemaError, SchemaSet
+from okf_ext.schemas.model import AboutMandate, SchemaError, SchemaSet
 
 #: The conventional directory name. A default tools may offer, never one this
 #: module reaches for.
@@ -196,4 +196,31 @@ def declared_members(schema_set: SchemaSet) -> dict[str, tuple[str, ...]]:
         )
         if fields:
             found[type_name] = fields
+    return found
+
+
+def declared_about(schema_set: SchemaSet) -> dict[str, AboutMandate]:
+    """`{type: AboutMandate}` for every type carrying an `x-okf-about` object.
+
+    `"x-okf-about": {}` mandates `about:`; `{"entries": "<key>"}` also names
+    the entry list a live page must fill. The annotation sits at the top level
+    of the schema, like `x-okf-directory`.
+
+    As with the other two annotations, an odd one is ignored rather than
+    reported: a non-object annotation, or an `entries` that is not a non-blank
+    string naming one of the type's own **top-level** `properties`, omits the
+    type. An unusable declaration declares nothing.
+    """
+    found: dict[str, AboutMandate] = {}
+    for type_name, schema in schema_set.schemas.items():
+        annotation = schema.get("x-okf-about")
+        if not isinstance(annotation, Mapping):
+            continue
+        entries = annotation.get("entries")
+        if entries is None:
+            found[type_name] = AboutMandate()
+            continue
+        properties = schema.get("properties")
+        if isinstance(entries, str) and entries.strip() and isinstance(properties, Mapping) and entries in properties:
+            found[type_name] = AboutMandate(entries=entries)
     return found

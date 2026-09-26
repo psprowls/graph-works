@@ -182,7 +182,9 @@ directly:
   `generators` needed to read the same declaration `sections` seeds/validates
   against. This is the first shared module that reads files, and the README
   is explicit that widening "shared" to include it was a deliberate,
-  written-down move, not scope creep.
+  written-down move, not scope creep. `shape/views.py` adds
+  `audience_view`/`word_count`, the agent projection of a page, and is the
+  one place `shape` imports another shared module — `okf_ext.body`.
 
 If you find yourself needing a helper that another capability already wrote
 privately, the answer is almost always "hoist it to the shared layer and add

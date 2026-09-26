@@ -4,8 +4,12 @@ frontmatter:
 sections:
   - heading: Why we depend on this
     required: true
+    audience: agent
+    max_words: 120
     placeholder: |
       > TODO: why the workspace depends on this, and what it is used for.
   - heading: Gotchas / workarounds
+    audience: agent
+    max_words: 120
     placeholder: |
       > TODO: known issues, version pins, or workarounds this dependency needs.

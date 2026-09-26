@@ -5,6 +5,7 @@ from __future__ import annotations
 import typer
 
 from graph_works_cli.wiki_cli.bootstrap import bootstrap
+from graph_works_cli.wiki_cli.claims import claims_app
 from graph_works_cli.wiki_cli.drift import drift
 from graph_works_cli.wiki_cli.ingest import ingest
 from graph_works_cli.wiki_cli.lint import lint
@@ -23,6 +24,7 @@ wiki_app.command(name="archive")(archive)
 wiki_app.add_typer(tags_app, name="tags")
 wiki_app.command(name="proposals")(proposals)
 wiki_app.add_typer(proposal_app, name="proposal")
+wiki_app.add_typer(claims_app, name="claims")
 
 
 def register_root_commands(app: typer.Typer) -> None:

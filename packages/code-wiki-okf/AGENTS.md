@@ -206,9 +206,13 @@ writers (`init`, `sync`, and okf-io's own writers underneath) default to
 
 ## Gotchas worth knowing before touching multiple files
 
-- `okf_io._rules` vs this package's own rules: `placement_rule` and
-  `sync_rule` are *extra_rules* passed into okf-io's `validate()` — they are
-  not part of okf-io's catalog and won't show up in `test_catalog.py` there.
+- `okf_io._rules` vs this package's own rules: `placement_rule`, `sync_rule`,
+  and `about_rule` are *extra_rules* passed into okf-io's `validate()` — they
+  are not part of okf-io's catalog and won't show up in `test_catalog.py`
+  there. The curated-page claims contract rule (`about_rule`, module
+  `code_wiki_okf/about.py`) checks that curated pages mandated by the
+  `x-okf-about` schema annotation carry `about:` URIs resolving to exactly one
+  code-wiki-type page, plus valid `decisions:` / `claims:` entries.
 - The mirror lane's `updates`/`creates` carry `Render` objects, not a
   `RegenerationPlan` — `plan_regenerate` can't run until after moves/creates
   land and the bundle is reloaded, which is why `sync_bundle()` interleaves

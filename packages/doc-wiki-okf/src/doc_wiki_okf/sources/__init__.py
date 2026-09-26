@@ -12,6 +12,19 @@ nothing in `ingest/` may import this one.
 
 from __future__ import annotations
 
+from doc_wiki_okf.sources.drain import (
+    DRAIN_CODES,
+    DROP_REASONS,
+    KEY_CLAIMS_HEADING,
+    DrainProblem,
+    DrainStatus,
+    drain_rule,
+    drain_status,
+    drain_statuses,
+    drop_only_ledger,
+    entry_keys_from,
+    is_source_member,
+)
 from doc_wiki_okf.sources.plan import (
     DEFAULT_SOURCE_KIND,
     DEFAULT_SUFFIX,
@@ -30,10 +43,21 @@ from doc_wiki_okf.sources.plan import (
 __all__ = [
     "DEFAULT_SOURCE_KIND",
     "DEFAULT_SUFFIX",
+    "DRAIN_CODES",
+    "DROP_REASONS",
+    "KEY_CLAIMS_HEADING",
     "REFERENCES_DIRECTORY",
     "SOURCE_TYPE",
+    "DrainProblem",
+    "DrainStatus",
     "IngestPreflight",
     "copy_target",
+    "drain_rule",
+    "drain_status",
+    "drain_statuses",
+    "drop_only_ledger",
+    "entry_keys_from",
+    "is_source_member",
     "normalize_origin",
     "page_target",
     "plan_ingest",

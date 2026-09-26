@@ -33,6 +33,7 @@ from ruamel.yaml import YAML
 from ruamel.yaml.error import YAMLError
 
 from okf_ext.shape.model import (
+    Audience,
     FrontmatterOwnership,
     Ownership,
     SectionError,
@@ -52,6 +53,9 @@ SECTION_SUFFIXES = (".yaml", ".yml")
 #: The three values `ownership` may take. A tuple rather than a set so the
 #: refusal message can list them in a stable order.
 _OWNERSHIP_VALUES: tuple[Ownership, ...] = ("prose", "generated", "template")
+
+#: The two values `audience` may take, in the order the refusal lists them.
+_AUDIENCE_VALUES: tuple[Audience, ...] = ("agent", "human")
 
 #: `sections/` is a **documented convention, not magic** -- nothing here
 #: discovers it. A caller who keeps declarations inside the bundle they
@@ -103,12 +107,18 @@ def _file_fragments(name: str, data: Mapping[str, Any]) -> dict[str, str]:
     return found
 
 
-def _key_list(where: str, raw: Any, field: str) -> tuple[str, ...]:  # noqa: ANN401 -- arbitrary parsed YAML
-    """One `owned:` / `provenance:` list, refused for every shape §4.3 names.
+def _key_list(where: str, raw: Any, field: str, *, fold_duplicates: bool = False) -> tuple[str, ...]:  # noqa: ANN401 -- arbitrary parsed YAML
+    """One `owned:` / `provenance:` / `phases:` list, refused for every shape
+    §4.3 names.
 
     A `str` is rejected explicitly: it is a `Sequence` and would iterate as
     characters -- the trap `plan_merge` already guards against with a
     `TypeError`.
+
+    `fold_duplicates=True` skips a repeat instead of raising, keeping
+    first-seen order. `phases` uses this: a repeated phase is harmless -- it
+    filters exactly as the single one does -- so it is folded, not refused,
+    unlike `owned`/`provenance`, where a duplicate key is a declaration error.
     """
     if isinstance(raw, str) or not isinstance(raw, Sequence):
         raise SectionError(f"{where}: `{field}` must be a list, got {type(raw).__name__}")
@@ -118,6 +128,8 @@ def _key_list(where: str, raw: Any, field: str) -> tuple[str, ...]:  # noqa: ANN
             raise SectionError(f"{where}: `{field}`[{position}] must be a non-empty string, got {entry!r}")
         name = entry.strip()
         if name in found:
+            if fold_duplicates:
+                continue
             raise SectionError(f"{where}: `{field}` names `{name}` twice; a duplicate key is a declaration error")
         found.append(name)
     return tuple(found)
@@ -183,6 +195,26 @@ def _section_spec(where: str, entry: Mapping[str, Any], fragments: Mapping[str, 
     # is not a fix, it is rediscovering this comment the hard way.
     ownership: Ownership = raw_ownership
 
+    raw_audience = entry.get("audience", "human")
+    if not isinstance(raw_audience, str):
+        raise SectionError(f"{where}: `audience` must be a string, got {type(raw_audience).__name__}")
+    if raw_audience not in _AUDIENCE_VALUES:
+        raise SectionError(f"{where}: `audience` must be one of {list(_AUDIENCE_VALUES)}, got {raw_audience!r}")
+    # Narrowed by the membership test, exactly as `ownership` is above.
+    audience: Audience = raw_audience
+
+    phases = _key_list(where, entry.get("phases", ()), "phases", fold_duplicates=True)
+
+    # `bool` is a subclass of `int`: `max_words: true` would read as a cap of 1.
+    max_words = entry.get("max_words")
+    if max_words is not None and (not isinstance(max_words, int) or isinstance(max_words, bool) or max_words <= 0):
+        raise SectionError(f"{where}: `max_words` must be a positive integer, got {max_words!r}")
+
+    if audience == "human" and (max_words is not None or phases):
+        # A cap or phase filter on a human section does nothing (epic decision
+        # 9 limits size to agent sections), and would read as if it did.
+        raise SectionError(f"{where}: `max_words` and `phases` apply only to an `audience: agent` section")
+
     literal = entry.get("placeholder")
     ref = entry.get("placeholder_ref")
     if literal is not None and ref is not None:
@@ -216,6 +248,9 @@ def _section_spec(where: str, entry: Mapping[str, Any], fragments: Mapping[str, 
         seeded_is_complete=seeded,
         placeholder=placeholder,
         ownership=ownership,
+        audience=audience,
+        phases=phases,
+        max_words=max_words,
     )
 
 

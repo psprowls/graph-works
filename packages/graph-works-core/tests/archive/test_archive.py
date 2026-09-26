@@ -368,7 +368,7 @@ def test_a_wiki_page_archives_against_the_workspaces_own_declared_lanes(tmp_path
     `Explanation` at `docs/explanations/`, byte-identical to what
     `_layout`/`apply_init` writes into `.gw/schema/` -- reading either gives
     the same answer, so a test built on that stock layout alone cannot tell
-    `_wiki_lanes_for` apart from a version that always used the fallback. This
+    `_wiki_schema_set` apart from a version that always used the fallback. This
     test rewrites the workspace's own copy of `Explanation.schema.json` to
     declare `docs/rationale/` instead, a directory no seeded schema names, so
     only genuinely reading `.gw/schema/` -- not the package's fallback --
@@ -393,7 +393,7 @@ def test_the_lanes_fall_back_to_the_seeded_schemas_when_the_workspace_has_none(t
     fallback is the package's own assets, which is exactly the behavior the
     deleted `WIKI_LANES` constant had.
 
-    `_wiki_lanes_for` only ever reads `layout.config_dir / SCHEMA_DIRNAME`, so
+    `_wiki_schema_set` only ever reads `layout.config_dir / SCHEMA_DIRNAME`, so
     removing that directory alone is enough to exercise its fallback branch.
     But `run_archive`'s live apply also runs the *work* lane's postcondition
     gate (`transactions._extra_rules`), which falls back to treating
@@ -402,7 +402,7 @@ def test_the_lanes_fall_back_to_the_seeded_schemas_when_the_workspace_has_none(t
     workspace shape. Mirroring the real schema/sections declarations there
     keeps that unrelated gate satisfied without touching production code
     outside this task's scope, while still leaving `.gw/schema` itself absent
-    for `_wiki_lanes_for` to fall back on.
+    for `_wiki_schema_set` to fall back on.
     """
     layout = _layout(tmp_path)
     _wiki_page(layout, "docs/explanations/foo")
@@ -414,3 +414,26 @@ def test_the_lanes_fall_back_to_the_seeded_schemas_when_the_workspace_has_none(t
 
     assert run.wiki_plan.tokens == ("docs/explanations/foo",)
     assert (layout.bundle_dir / "docs/explanations/_archive/foo.md").is_file()
+
+
+def test_a_wiki_sweep_archives_a_drained_source(tmp_path: Path) -> None:
+    layout = _layout(tmp_path)
+    root = layout.bundle_dir
+    (root / "adrs").mkdir(parents=True, exist_ok=True)
+    (root / "adrs/a.md").write_text(
+        "---\ntype: Adr\ntitle: A\ndescription: d\nstatus: accepted\ndecisions:\n  - id: D1\n    claim: One.\n"
+        "sources:\n  - id: s\n    resource: /sources/2026-09-s.md\n---\n\n## Decision\nd\n",
+        encoding="utf-8",
+    )
+    (root / "sources/references").mkdir(parents=True, exist_ok=True)
+    (root / "sources/references/2026-09-s.md").write_text("m\n", encoding="utf-8")
+    (root / "sources/2026-09-s.md").write_text(
+        "---\ntype: Source\ntitle: S\ndescription: d\nsource_path: sources/references/2026-09-s.md\n"
+        "drain:\n  - claim: 1\n    landed: [/adrs/a.md#D1]\n---\n\n## Key claims\n- One.\n\n"
+        "## Where it's cited in this wiki\n- [A](/adrs/a.md)\n",
+        encoding="utf-8",
+    )
+
+    run = archive.run_archive(layout, (), None, today=TODAY, dry_run=True)
+
+    assert "sources/2026-09-s" in run.wiki_plan.tokens

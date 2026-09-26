@@ -39,7 +39,7 @@ and lifecycle checks. Wiki rules are composed as follows:
 | --- | --- |
 | Graph-backed page sync | `sync.missing-page`, `sync.stale-page`, `sync.orphan-page`; requires a graph reader. |
 | Obsidian rendering | `render.angle-bracket`, `render.callout`, `render.wikilink`, `render.wikilink-target`, `render.table-pipe`; always included. |
-| Declared headings | `sections.missing`, `sections.unfilled`, `sections.unexpected`, `sections.no-declaration-for-type`; requires section declarations. |
+| Declared headings | `sections.missing`, `sections.unfilled`, `sections.unexpected`, `sections.no-declaration-for-type`, `sections.agent-oversize` (always warn); requires section declarations. |
 | Wiki health | `health.uncited`, `health.log-gap`; always included. |
 | Placement, schema, vocabulary | Code-wiki placement always applies; schema and vocabulary checks require their declaration files. |
 

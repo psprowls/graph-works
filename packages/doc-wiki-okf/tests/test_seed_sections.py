@@ -3,7 +3,7 @@
 import importlib.resources
 
 from okf_ext.sections import render_skeleton
-from okf_ext.shape import load_sections
+from okf_ext.shape import audience_view, load_sections
 
 _EXPECTED_HEADINGS = {
     "Tutorial": ("What you will build", "Before you start", "Steps", "What you learned"),
@@ -107,3 +107,34 @@ def test_render_skeleton_emits_every_declared_section_in_order() -> None:
         "> TODO: related pages, as root-absolute markdown links, one per line.\n"
         "\n"
     )
+
+
+_EXPECTED_AGENT = {
+    "Adr": {"Decision": 450},
+    "Explanation": {},  # its agent content is `claims:`, not a section -- see the design's §2.4
+    "Tutorial": {},
+    "HowTo": {},
+    "Reference": {},
+    "Source": {},
+}
+
+
+def test_the_agent_sections_and_their_caps() -> None:
+    section_set = _section_set()
+    for type_name, expected in _EXPECTED_AGENT.items():
+        declaration = section_set.types[type_name]
+        found = {s.heading: s.max_words for s in declaration.sections if s.audience == "agent"}
+        assert found == expected, type_name
+
+
+def test_explanation_yields_no_agent_view_even_when_filled() -> None:
+    """Pins that adding an agent section to Explanation is a deliberate act."""
+    declaration = _section_set().types["Explanation"]
+    body = "".join(f"## {spec.heading}\n\nFilled {spec.heading} text.\n\n" for spec in declaration.sections)
+    assert audience_view(body, declaration) == ()
+
+
+def test_adr_agent_view_is_the_decision_alone() -> None:
+    declaration = _section_set().types["Adr"]
+    body = "".join(f"## {spec.heading}\n\nFilled {spec.heading} text.\n\n" for spec in declaration.sections)
+    assert [v.heading for v in audience_view(body, declaration)] == ["Decision"]

@@ -52,16 +52,16 @@ def test_next_is_the_same_callback_as_work_next() -> None:
     assert registered[0].callback is aliased
 
 
-def test_next_declares_no_file_option() -> None:
-    """The contract page lists --file, but nothing in the stack can write a bundle yet."""
+def test_next_declares_the_file_option() -> None:
+    """The alias reuses `gw work next`'s callback, so it inherits `--file`."""
     result = runner.invoke(app, ["next", "--help"])
 
     assert result.exit_code == 0
-    assert "--file" not in result.stdout
+    assert "--file" in result.stdout
 
 
-def test_next_emits_no_guidance_keys(tmp_path: Path) -> None:
-    """`gw next`'s guidance half belongs to a different work item; an empty key would lie."""
+def test_next_emits_the_guidance_keys(tmp_path: Path) -> None:
+    """`gw next` always carries the three guidance keys, assembled or not."""
     workspace = tmp_path / "works"
     bootstrap = runner.invoke(app, ["bootstrap", "--topic", "Demo", "--workspace", str(workspace)])
     assert bootstrap.exit_code == 0, bootstrap.output
@@ -71,9 +71,9 @@ def test_next_emits_no_guidance_keys(tmp_path: Path) -> None:
 
     assert result.exit_code == exit_codes.SUCCESS, result.output
     payload = json.loads(result.stdout)
-    assert "guidance" not in payload
-    assert "guidance_warnings" not in payload
-    assert "guidance_file" not in payload
+    assert isinstance(payload["guidance"], list)
+    assert isinstance(payload["guidance_warnings"], list)
+    assert "guidance_file" in payload
 
 
 def test_next_and_work_next_produce_identical_json(tmp_path: Path) -> None:

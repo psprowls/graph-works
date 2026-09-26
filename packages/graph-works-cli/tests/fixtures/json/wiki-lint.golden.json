@@ -22,5 +22,13 @@
       "undated": 0
     }
   },
-  "errors": []
+  "errors": [],
+  "source_drain": {
+    "sources": 0,
+    "drained": 0,
+    "items": 0,
+    "landed": 0,
+    "dropped": 0,
+    "pending": 0
+  }
 }

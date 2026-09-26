@@ -13,9 +13,12 @@ owns their lifecycle exclusively) and `work/` (`work_tracker_okf.archive`'s
 own job) are not wiki lanes at all, so a token naming either is
 `unknown-member`, the same as a token naming nothing.
 
-**Sweep mode keeps today's actual eligible set: proposals only.**
-Concepts/sources/adrs carry no status signal to sweep against; a proposal's
-`page_status` is one, via `okf_ext.proposals.list_proposals`.
+**Sweep mode takes proposals, plus drained Sources when the caller passes
+`entry_keys`.** A proposal's `page_status` is a status signal via
+`okf_ext.proposals.list_proposals`; a Source used to have none, so it never
+swept. The `drain:` ledger (`doc_wiki_okf.sources.drain`) is that signal now
+-- a Source sweeps once every key claim is dispositioned with no problem and
+the Source is cited somewhere in the wiki.
 
 **Two lenses, like `work_tracker_okf.items.IGNORE`/`ARCHIVE_IGNORE`.**
 `okf_ext.moves` builds its mapping from `bundle.concepts` and `bundle.assets`
@@ -24,6 +27,15 @@ would leave a `sources/` page's `references/` companions behind. `ARCHIVE_IGNORE
 is the wide lens `plan_archive`'s caller must load through; `IGNORE` is the
 narrow lens `apply_archive` reconciles through, so `update_index` never wants
 an entry for `sources/references/` itself.
+
+**A Source's `source_path` follows its reference copy.** It is bundle-relative
+(`x-okf-member` in `Source.schema.json`: one optional leading `/`, never
+relative to the page), which neither of `okf_ext.moves`' `ReferenceField`
+targets means -- `"member"` resolves it against the page's own directory and
+`"concept"` drops the `.md` it names. So `plan_archive` computes that one
+frontmatter edit itself and hands it to `moves` as an ordinary `RefEdit`:
+`moves.apply` writes it with the move, the plan's `diff()` shows it, and
+`okf-ext` never learns the key's name.
 """
 
 from __future__ import annotations
@@ -34,15 +46,17 @@ from pathlib import Path, PurePosixPath
 from typing import Literal
 
 from okf_ext import moves
-from okf_ext.moves import MovePlan, MoveResult, Refusal, stranded_summary
+from okf_ext.moves import MovePlan, MoveResult, RefEdit, Refusal, stranded_summary
 from okf_ext.proposals import list_proposals
 from okf_ext.schemas import DEFAULT_IGNORE as _SCHEMA_IGNORE
 from okf_ext.schemas import SchemaSet
 from okf_ext.shape import DEFAULT_IGNORE as _SECTIONS_IGNORE
+from okf_ext.writing import body_digest
 from okf_io import Bundle, Describe, EntryTarget, IndexUpdate, load_bundle, update_index
 
 from doc_wiki_okf.diataxis.pages import directory_for
 from doc_wiki_okf.sources import REFERENCES_DIRECTORY
+from doc_wiki_okf.sources.drain import drain_statuses
 
 #: Why a named token did not move. A closed vocabulary. Narrower than
 #: `work_tracker_okf.archive.SkipReason`: targeted mode has no eligibility
@@ -67,6 +81,10 @@ WIKI_LANE_TYPES: tuple[str, ...] = (
 #: The proposal lane, trailing slash, matching `proposals.lanes.ADR_DIRECTORY`'s
 #: convention. Named once here because no schema declares it.
 PROPOSALS_DIRECTORY = "proposals/"
+
+#: The Source frontmatter key naming the page's reference copy, declared
+#: `x-okf-member` in this package's own `Source.schema.json`.
+_SOURCE_PATH_KEY = "source_path"
 
 
 def wiki_lanes(schema_set: SchemaSet) -> tuple[str, ...]:
@@ -238,10 +256,13 @@ def _select(bundle: Bundle, tokens: Sequence[str], lanes: Sequence[str]) -> tupl
     return tuple(sorted(chosen)), tuple(skipped)
 
 
-def _sweep(bundle: Bundle, lanes: Sequence[str]) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
-    """Every eligible proposal, or none. A sweep's non-candidates were never
-    candidates (matching `work_tracker_okf.archive._select`'s own C4-G), so
-    this carries no `Skipped`.
+def _sweep(
+    bundle: Bundle, lanes: Sequence[str], entry_keys: Mapping[str, str] | None
+) -> tuple[tuple[str, ...], tuple[Skipped, ...]]:
+    """Every eligible proposal and, given *entry_keys*, every drained Source.
+    A sweep's non-candidates were never candidates (matching
+    `work_tracker_okf.archive._select`'s own C4-G), so this carries no
+    `Skipped`.
 
     Eligible means a *coerced* `page_status` other than `"proposed"` -- a
     malformed proposal (`page_status is None`) has no status signal to sweep
@@ -251,15 +272,26 @@ def _sweep(bundle: Bundle, lanes: Sequence[str]) -> tuple[tuple[str, ...], tuple
     sitting outside every lane can come back; it has no lane to build an
     `_archive/` path under, and silently dropping it is what "never a
     candidate" means.
+
+    A Source is eligible when its `drain:` ledger dispositions every key
+    claim with no problem and it is cited in the wiki
+    (`doc_wiki_okf.sources.drain`). `entry_keys=None` keeps the
+    proposals-only sweep, so a caller without a schema set sees today's plan.
     """
-    chosen = sorted(
+    chosen = {
         proposal.member[:-3]  # strip ".md": member is already bundle-relative posix
         for proposal in list_proposals(bundle)
         if proposal.page_status is not None
         and proposal.page_status != "proposed"
         and _lane_of(proposal.member[:-3], lanes) is not None
-    )
-    return tuple(chosen), ()
+    }
+    if entry_keys is not None:
+        chosen.update(
+            status.member[:-3]
+            for status in drain_statuses(bundle, entry_keys)
+            if status.drained and _lane_of(status.member[:-3], lanes) is not None
+        )
+    return tuple(sorted(chosen)), ()
 
 
 def _members_under(bundle: Bundle, prefix: str) -> tuple[str, ...]:
@@ -300,8 +332,67 @@ def _mapping(tokens: Sequence[str], bundle: Bundle, lanes: Sequence[str]) -> dic
     return mapping
 
 
-def plan_archive(bundle: Bundle, tokens: Sequence[str] | None = None, *, lanes: Sequence[str]) -> ArchivePlan:
-    """Plan the archive of *tokens*, or of every eligible proposal when `None`.
+def _source_path_edits(bundle: Bundle, mapping: Mapping[str, str]) -> tuple[RefEdit, ...]:
+    """A `source_path` edit for every page whose value names a member in *mapping*.
+
+    Read the way `schemas.unresolved-member` reads an `x-okf-member` value:
+    one leading `/` stripped, nothing else normalized. The leading `/`, when
+    authored, is kept on the new value. Every page is asked, not only the
+    moving ones, so an unmoved page naming a moved copy is not left dangling
+    either. A page that failed to parse is left to `moves`' own refusal.
+    """
+    edits: list[RefEdit] = []
+    for concept_id, document in sorted(bundle.concepts.items()):
+        value = document.fm_raw.get(_SOURCE_PATH_KEY)
+        if document.parse_error is not None or not isinstance(value, str):
+            continue
+        rooted = value.startswith("/")
+        claimed = value[1:] if rooted else value
+        target = bundle.member_id(claimed) or claimed
+        moved_to = mapping.get(target)
+        if moved_to is None:
+            continue
+        edits.append(
+            RefEdit(
+                member=f"{concept_id}.md",
+                where="frontmatter",
+                target=target,
+                old=value,
+                new=f"/{moved_to}" if rooted else moved_to,
+                key=_SOURCE_PATH_KEY,
+            )
+        )
+    return tuple(edits)
+
+
+def _with_source_paths(bundle: Bundle, plan: MovePlan, mapping: Mapping[str, str]) -> MovePlan:
+    """*plan* carrying `_source_path_edits`, sorted the way `moves` sorts its own.
+
+    A page this adds is digested like any other the plan writes, so `apply`
+    refuses it as stale if its body changed after planning.
+    """
+    extra = _source_path_edits(bundle, mapping)
+    if not extra:
+        return plan
+    digests = dict(plan.digests)
+    for edit in extra:
+        digests.setdefault(edit.member, body_digest(bundle.concepts[edit.member[: -len(".md")]].body))
+    edits = sorted(
+        (*plan.edits, *extra),
+        key=lambda edit: (edit.member, edit.where, edit.line or 0, edit.column or 0, edit.key or ""),
+    )
+    return replace(plan, edits=tuple(edits), digests=digests)
+
+
+def plan_archive(
+    bundle: Bundle,
+    tokens: Sequence[str] | None = None,
+    *,
+    lanes: Sequence[str],
+    entry_keys: Mapping[str, str] | None = None,
+) -> ArchivePlan:
+    """Plan the archive of *tokens*, or of every eligible proposal and drained
+    Source when `None`.
 
     *bundle* must be loaded through `ARCHIVE_IGNORE`; through `IGNORE` a
     `sources/` page's `references/` companions are invisible to `moves` and
@@ -311,11 +402,18 @@ def plan_archive(bundle: Bundle, tokens: Sequence[str] | None = None, *, lanes: 
     required and keyword-only: a default would be a second, drifting copy of
     exactly the constant this argument replaced.
 
+    *entry_keys* (`entry_keys_from(schema_set)`) is the ledger vocabulary a
+    Source's `drain:` refs resolve against. Sweep mode only: targeted mode is
+    unconditional and never consults it. `None` keeps sweep mode to
+    proposals only -- the plan a caller with no schema set would have seen
+    before this parameter existed.
+
     Writes nothing.
     """
     resolved = tuple(lanes)
-    chosen, skipped = _sweep(bundle, resolved) if tokens is None else _select(bundle, tokens, resolved)
-    plan = moves.plan_move_many(bundle, _mapping(chosen, bundle, resolved))
+    chosen, skipped = _sweep(bundle, resolved, entry_keys) if tokens is None else _select(bundle, tokens, resolved)
+    mapping = _mapping(chosen, bundle, resolved)
+    plan = _with_source_paths(bundle, moves.plan_move_many(bundle, mapping), mapping)
     # Drop every touched lane's own index edits, active and `_archive/` form,
     # so `update_index` owns index content end to end -- the same reason
     # work_tracker_okf.archive.plan_archive filters `_LANE_INDEXES`.

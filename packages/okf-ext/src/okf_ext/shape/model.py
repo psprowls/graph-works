@@ -50,6 +50,12 @@ class SectionError(ValueError):
 #: explicit grant. It is also what keeps the field additive.
 Ownership = Literal["prose", "generated", "template"]
 
+#: Who a section is written for. `human` is the **default**, for the reason
+#: `ownership` defaults to `prose`: a declaration that says nothing grants
+#: nothing, so a section only enters an agent's view by explicit declaration
+#: (epic decision 9 of `epic-agent-facing-wiki-content`).
+Audience = Literal["agent", "human"]
+
 
 @dataclass(frozen=True, slots=True)
 class FrontmatterOwnership:
@@ -89,6 +95,11 @@ class SectionSpec:
     placeholder by construction, so without that every required template
     section would report `sections.unfilled` forever, for being in exactly
     the state it is supposed to be in.
+
+    `audience`, `phases` and `max_words` say who reads a section, when, and
+    how long it may be. `phases` carries no vocabulary here -- okf-ext may not
+    import a lane's phase literal -- and `max_words` / `phases` are refused at
+    load on a `human` section, where they would read as if they did something.
     """
 
     heading: str
@@ -97,6 +108,9 @@ class SectionSpec:
     seeded_is_complete: bool = False
     placeholder: str = ""
     ownership: Ownership = "prose"
+    audience: Audience = "human"
+    phases: tuple[str, ...] = ()  # empty = every phase; an opaque filter the caller matches
+    max_words: int | None = None  # agent sections only; `None` = uncapped
 
 
 @dataclass(frozen=True, slots=True)

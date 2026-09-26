@@ -11,6 +11,7 @@ from __future__ import annotations
 
 __version__ = "0.5.1"
 
+from code_wiki_okf.about import about_rule
 from code_wiki_okf.config import (
     Config,
     ConfigError,
@@ -72,6 +73,7 @@ __all__ = [
     "StateGate",
     "StateGateConfig",
     "__version__",
+    "about_rule",
     "affected_directories",
     "canonical_concept_id",
     "canonical_member",

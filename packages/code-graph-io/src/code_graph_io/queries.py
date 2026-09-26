@@ -887,6 +887,60 @@ def internal_dependencies_of(conn: sqlite3.Connection, *, name: str) -> list[str
     return [r[0] for r in rows]
 
 
+def internal_dependency_uris_of(conn: sqlite3.Connection, *, uri: str) -> list[str]:
+    """Repo-scoped `package`/`app` URIs the node with *uri* depends on, same repo only.
+
+    `internal_dependencies_of` keys off a bare `src.name` with no repository
+    filter, so a caller resolving its dst-names back to URIs through a
+    name-keyed index (e.g. an `affects` closure scoped to one repository) can
+    pick up a same-named package's dependencies from a *different*
+    repository. This query follows outgoing `depends_on_package` edges from
+    the `package`/`app` node whose `uri` is *uri* directly to `package`/`app`
+    destination nodes, keeping only destinations in the same repository as
+    the source (`dst.repo = src.repo`) so cross-repository leakage can't
+    happen structurally. Sorted, distinct; nodes with no `uri` are dropped;
+    `[]` for an unknown URI. `?` placeholder only; read-only.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT dst.uri FROM edges e "
+        "JOIN nodes src ON e.src = src.id "
+        "JOIN nodes dst ON e.dst = dst.id "
+        "WHERE e.kind='depends_on_package' AND src.kind IN ('package', 'app') AND src.uri = ? "
+        "AND dst.kind IN ('package', 'app') AND dst.uri IS NOT NULL AND dst.repo = src.repo "
+        "ORDER BY dst.uri",
+        (uri,),
+    ).fetchall()
+    return [str(r[0]) for r in rows]
+
+
+def external_dependencies_of(conn: sqlite3.Connection, *, uri: str) -> list[str]:
+    """Repo-scoped `dependency:` URIs the package or app with *uri* uses.
+
+    Follows outgoing `used_by` edges from the `package`/`app` node whose `uri`
+    is *uri* to `dependency`-kind nodes, keeping only dependencies scoped to
+    the source's own repository — structurally, `dep.repo = src.repo` with
+    `dep.repo` non-NULL, never by the URI's shape. Legacy unscoped
+    `dependency:{ecosystem}/{name}` nodes carry a NULL `repo`, so they are
+    dropped however many `/` their name holds (`dependency:go/github.com/x/y`);
+    another repository's scoped dependency is dropped too. Builtins share the
+    edge kind but not the node kind, so they never match. Sorted, distinct;
+    `[]` for an unknown URI. `?` placeholder only; read-only. The one forward
+    package → external-dependency query — callers must not compose it from
+    `consumer_packages`.
+    """
+    rows = conn.execute(
+        "SELECT DISTINCT dep.uri FROM edges e "
+        "JOIN nodes src ON e.src = src.id "
+        "JOIN nodes dep ON e.dst = dep.id "
+        "WHERE e.kind='used_by' AND src.kind IN ('package', 'app') AND src.uri = ? "
+        "AND dep.kind='dependency' AND dep.uri IS NOT NULL "
+        "AND dep.repo IS NOT NULL AND dep.repo = src.repo "
+        "ORDER BY dep.uri",
+        (uri,),
+    ).fetchall()
+    return [str(r[0]) for r in rows]
+
+
 def describe_app(
     conn: sqlite3.Connection,
     *,
@@ -1895,6 +1949,16 @@ def file_paths(conn: sqlite3.Connection) -> list[str]:
     """Sorted paths of all `file` nodes."""
     rows = conn.execute("SELECT path FROM nodes WHERE kind='file' AND path IS NOT NULL").fetchall()
     return sorted(r[0] for r in rows)
+
+
+def file_uris(conn: sqlite3.Connection) -> list[str]:
+    """Sorted repo-qualified URIs of all `file` nodes that carry one.
+
+    `file_paths` returns bare repo-relative paths, which collide across
+    repositories (`README.md`); a caller scoping by repository reads these.
+    """
+    rows = conn.execute("SELECT uri FROM nodes WHERE kind='file' AND uri IS NOT NULL AND uri <> ''").fetchall()
+    return sorted(str(r[0]) for r in rows)
 
 
 def file_paths_in_package(conn: sqlite3.Connection, name: str) -> list[str]:

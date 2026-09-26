@@ -94,5 +94,10 @@
   },
   "child_rollup": null,
   "descent": null,
-  "normalized": null
+  "normalized": null,
+  "guidance": [],
+  "guidance_warnings": [
+    "no code graph: run `gw scan` to build one; the closure is empty"
+  ],
+  "guidance_file": null
 }

@@ -5,7 +5,18 @@
   "properties": {
     "type": { "const": "HowTo" },
     "prerequisites": { "type": "array", "items": { "type": "string" } },
-    "outcome": { "type": "string", "minLength": 1 }
+    "outcome": { "type": "string", "minLength": 1 },
+    "claims": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "allOf": [
+          { "$ref": "_base-diataxis.schema.json#/$defs/entry" },
+          { "properties": { "id": { "pattern": "^C[1-9][0-9]*$" } } }
+        ]
+      }
+    }
   },
-  "x-okf-directory": "docs/how-tos/"
+  "x-okf-directory": "docs/how-tos/",
+  "x-okf-about": {}
 }

@@ -26,7 +26,36 @@
       }
     },
     "tags": { "type": "array", "items": { "type": "string" } },
-    "sources": { "type": "array", "items": { "type": "object" } }
+    "sources": { "type": "array", "items": { "type": "object" } },
+    "drain": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "type": "object",
+            "required": ["claim", "landed"],
+            "additionalProperties": false,
+            "properties": {
+              "claim": { "type": "integer", "minimum": 1 },
+              "landed": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "pattern": "^/.+\\.md#.+$" }
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["claim", "dropped"],
+            "additionalProperties": false,
+            "properties": {
+              "claim": { "type": "integer", "minimum": 1 },
+              "dropped": { "enum": ["history", "evidence", "duplicate", "superseded"] }
+            }
+          }
+        ]
+      }
+    }
   },
   "x-okf-directory": "sources/"
 }

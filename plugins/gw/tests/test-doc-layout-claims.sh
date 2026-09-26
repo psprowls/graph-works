@@ -451,6 +451,57 @@ assert_contains "skills/workflow/SKILL.md" \
     "**Execute-stage coverage (step 4).**" \
     "workflow step 4 reads the coverage file back and surfaces unchecked items"
 
+# --- curated-page claims contract ------------------------------------------
+# work/epic-agent-facing-wiki-content/children/feature-curated-page-claims-contract.
+# `applies_to` left the Reference seed; the readers describe `about:` and the
+# `x-okf-about` mandate instead.
+for reader in "skills/graph-works/references/wiki-schema.md" "skills/graph-works/references/page-formats.md"; do
+    assert_not_matches "$reader" "applies_to" "$reader no longer documents the retired applies_to key"
+    assert_contains "$reader" "x-okf-about" "$reader names the x-okf-about mandate"
+    assert_contains "$reader" "decisions:" "$reader documents ADR decisions entries"
+done
+
+# The curated-claims backfill made about:/decisions:/claims: required on
+# curated pages at error severity. Every authoring path that creates or
+# updates one must say so, or the next page it writes fails lint.
+# page-formats.md is checked separately below (and above, for `decisions:`) —
+# it is the schema/authoring reference, not an author dispatch path, and the
+# reader loop above already pins its `decisions:` mention.
+CLAIMS_AUTHORS=(
+    "skills/ingest/SKILL.md"
+    "skills/proposals/SKILL.md"
+)
+for author in "${CLAIMS_AUTHORS[@]}"; do
+    assert_contains "$author" "about:" \
+        "$author tells the author to write about: on a curated page"
+    assert_contains "$author" "decisions:" \
+        "$author tells the author to write decisions: on an ADR"
+    assert_contains "$author" "claims:" \
+        "$author tells the author to write claims: on an explanation"
+done
+assert_contains "skills/graph-works/references/page-formats.md" "id: D1" \
+    "page-formats' ADR template shows a decisions entry"
+assert_contains "skills/graph-works/references/page-formats.md" "id: C1" \
+    "page-formats' Explanation template shows a claims entry"
+
+# --- Source drain ledger ----------------------------------------------------
+# work/feature-source-drain-and-archive: every path that turns a Source's key
+# claims into curated entries records where they landed.
+for author in "skills/ingest/SKILL.md" "skills/proposals/SKILL.md"; do
+    assert_contains "$author" "drain:" "$author tells the author to write the Source's drain: ledger"
+done
+assert_contains "skills/ingest/SKILL.md" "dropped:" "ingest documents dropped dispositions"
+assert_contains "skills/proposals/SKILL.md" "once, after the fan-out" \
+    "proposals writes each Source's drain: ledger once, after the fan-out, not from each author"
+assert_contains "skills/proposals/SKILL.md" "drained Sources" \
+    "proposals warns that the sweep also archives drained Sources"
+assert_contains "skills/graph-works/references/page-formats.md" "drain:" \
+    "page-formats documents the Source drain ledger"
+assert_not_matches "skills/workflow/SKILL.md" "archives the source and repoints" \
+    "workflow no longer claims the ingestor archives the source"
+assert_contains "skills/workflow/SKILL.md" "drain sweep" \
+    "workflow says drained sources are archived by the sweep"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

@@ -9,7 +9,9 @@ from ext_helpers import write
 from okf_ext.schemas import (
     DEFAULT_IGNORE,
     DEFAULT_SCHEMA_DIRNAME,
+    AboutMandate,
     SchemaError,
+    declared_about,
     declared_directories,
     declared_members,
     load_schemas,
@@ -390,3 +392,72 @@ def test_a_type_with_no_member_property_is_omitted(tmp_path):
     write(root / "A.schema.json", json.dumps({"properties": {"p": {"x-okf-member": True}}}))
     write(root / "B.schema.json", json.dumps({"properties": {"p": {"type": "string"}}}))
     assert declared_members(load_schemas(root)) == {"A": ("p",)}
+
+
+# --- declared_about ---------------------------------------------------------
+
+
+def _about_set(tmp_path, annotation, *, properties=None, name="Widget"):
+    """One schema whose top-level `x-okf-about` the caller chooses; `...` omits it."""
+    root = tmp_path / "schema"
+    root.mkdir(exist_ok=True)
+    document = {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {"type": {"const": name}, **(properties or {})},
+    }
+    if annotation is not ...:
+        document["x-okf-about"] = annotation
+    write(root / f"{name}.schema.json", json.dumps(document))
+    return load_schemas(root)
+
+
+def test_declared_about_reads_an_entries_annotation(tmp_path):
+    schema_set = _about_set(tmp_path, {"entries": "claims"}, properties={"claims": {"type": "array"}})
+    assert declared_about(schema_set) == {"Widget": AboutMandate(entries="claims")}
+
+
+def test_an_empty_annotation_mandates_about_alone(tmp_path):
+    assert declared_about(_about_set(tmp_path, {})) == {"Widget": AboutMandate(entries=None)}
+
+
+def test_no_annotation_is_no_mandate(tmp_path):
+    assert declared_about(_about_set(tmp_path, ...)) == {}
+
+
+@pytest.mark.parametrize("annotation", [True, "claims", ["claims"], None])
+def test_a_non_object_annotation_is_ignored(tmp_path, annotation):
+    assert declared_about(_about_set(tmp_path, annotation)) == {}
+
+
+@pytest.mark.parametrize("entries", [1, ["claims"], True, ""])
+def test_a_non_string_or_blank_entries_is_ignored(tmp_path, entries):
+    schema_set = _about_set(tmp_path, {"entries": entries}, properties={"claims": {"type": "array"}})
+    assert declared_about(schema_set) == {}
+
+
+def test_entries_naming_an_undeclared_property_is_ignored(tmp_path):
+    assert declared_about(_about_set(tmp_path, {"entries": "claims"})) == {}
+
+
+def test_entries_reached_only_through_a_ref_is_ignored(tmp_path):
+    """Only top-level `properties` count, the boundary `declared_members` states."""
+    root = tmp_path / "schema"
+    root.mkdir()
+    write(root / "_base.schema.json", json.dumps({"properties": {"claims": {"type": "array"}}}))
+    write(
+        root / "Widget.schema.json",
+        json.dumps(
+            {
+                "$ref": "_base.schema.json",
+                "properties": {"type": {"const": "Widget"}},
+                "x-okf-about": {"entries": "claims"},
+            }
+        ),
+    )
+    assert declared_about(load_schemas(root)) == {}
+
+
+def test_about_mandate_is_frozen():
+    with pytest.raises(AttributeError):
+        AboutMandate(entries="claims").entries = "decisions"  # type: ignore[misc]

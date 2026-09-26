@@ -153,8 +153,27 @@ last_updated_commit: 3ff9f663
 ### Diátaxis pages (`Explanation`, `Reference`, `HowTo`, `Tutorial`)
 
 All four share `type`, `title`, `description`, and optionally `status`
-(`draft | stable | deprecated`), `updated`, `tags`, and `sources`. `Reference` adds
-`applies_to`; `HowTo` and `Tutorial` add `prerequisites` and `outcome`.
+(`draft | stable | deprecated`), `updated`, `tags`, `sources`, and `about`.
+`HowTo` and `Tutorial` add `prerequisites` and `outcome`.
+
+**The claims contract.** `about:` is a non-empty list of scanner resource URIs
+naming what the page is about — `repo:`, `pkg:`, `app:`, `agent_plugin:`,
+`test_suite:`, `file:`, or `dependency:{org}/{repo}/{ecosystem}/{name}`. Each
+must resolve to exactly one scanner-written page; a curated page's own
+`resource:` never counts. `Adr` pages carry `decisions:` entries (ids `D1`,
+`D2`, …); `Explanation`, `Reference` and `HowTo` carry `claims:` entries (ids
+`C1`, `C2`, …). An entry is `{id, claim, about?, constrains?, phase?}` — only
+`id` and `claim` are schema-required; `about` narrows the page's list,
+`constrains` is repo-relative paths (no leading `/`, no `..`), and `phase` is
+a list of any of `design | plan | execute | finish`. The schemas describe the
+shape only — the authoring rules for what to actually write in an entry are
+in `skills/graph-works/references/page-formats.md` → **Curated-page claims**.
+The mandate is the top-level `x-okf-about` annotation — present
+on `Adr`, `Explanation`, `Reference` and `HowTo` — which makes `about:`
+required, and on `Adr`/`Explanation` names the entry list a **live** page
+(any `status` but `draft`, `deprecated`, `superseded`; no `status` is live)
+must fill. `gw wiki lint` reports gaps as `about.*` / `claims.*`, at error.
+`Tutorial` carries no mandate.
 
 An `Explanation` is a cross-cutting technical concept — a naming convention,
 middleware shape, or contract that spans packages — or a high-level synthesis
@@ -286,14 +305,20 @@ Drift on an in-repo doc is a diff against its `sources/references/` copy; there 
 ---
 type: Adr
 title: Move to ESM
-description: One-sentence statement of the decision.
+description: Adopt ECMAScript modules in place of CommonJS across the package.
 status: stable                   # draft | stable | deprecated
 decision_date: 2026-02-14        # required; also the filename's date prefix
 deciders: ["human:psprowls"]
-supersedes: null                 # path(s) of the ADR(s) this replaces, e.g. ["/adrs/2025-11-03-use-commonjs.md"]
+supersedes: ["/adrs/2025-11-03-use-commonjs.md"]   # path(s) of the ADR(s) this replaces
 superseded_by: null              # path(s) of the ADR(s) that replace this
 tags: [build-system, modules]
 updated: 2026-04-20
+about: [pkg:acme/web/build-tools]   # scanner URIs this decision is about (required; see x-okf-about)
+decisions:                       # at least one on a live ADR
+  - id: D1
+    claim: The package ships ESM only; CommonJS entry points are removed.
+    about: [pkg:acme/web/build-tools]
+    constrains: [packages/build-tools/package.json]
 ---
 ```
 

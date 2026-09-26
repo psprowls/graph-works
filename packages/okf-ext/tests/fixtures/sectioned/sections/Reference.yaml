@@ -2,5 +2,7 @@ additional_sections: false
 sections:
   - heading: Summary
     required: true
+    audience: agent
+    max_words: 12
   - heading: Entries
     required: true

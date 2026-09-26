@@ -6,12 +6,9 @@ claims it and every declared ``prose`` section still equals its seeded
 placeholder. ``generated``/``template`` sections are never checked because
 they are not human-authored.
 
-The comparison logic mirrors `okf_ext.sections.rule._normalized` (line
-endings normalised, each line stripped, leading/trailing blank lines
-dropped) but is re-implemented here rather than imported: that function is
-private to its module, and this check additionally covers **optional**
-prose sections (`sections.unfilled` only ever considers `required` ones --
-see that rule's own `if not spec.required or spec.seeded_is_complete:
+The comparison uses `okf_ext.body.normalized_text` directly rather than
+`sections.unfilled`'s own check: that rule only ever considers `required`
+sections -- see its own `if not spec.required or spec.seeded_is_complete:
 continue` guard -- so it cannot be reused as-is for a check that must also
 protect an untouched optional section like Package's `## Public API`).
 """
@@ -22,7 +19,7 @@ from collections.abc import Mapping, Set
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from okf_ext.body import find_section
+from okf_ext.body import find_section, normalized_text
 from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import SectionSet, load_sections
 from okf_io import Bundle
@@ -34,16 +31,6 @@ from code_wiki_okf.placement import is_code_wiki_type
 class PruneResult:
     deleted: tuple[str, ...] = field(default_factory=tuple)
     declined: tuple[tuple[str, str], ...] = field(default_factory=tuple)  # (concept_id, reason)
-
-
-def _normalized(text: str) -> str:
-    flat = text.replace("\r\n", "\n").replace("\r", "\n")
-    lines = [line.strip() for line in flat.split("\n")]
-    while lines and not lines[0]:
-        lines.pop(0)
-    while lines and not lines[-1]:
-        lines.pop()
-    return "\n".join(lines)
 
 
 def _decline_reason(body: str, section_set: SectionSet, type_name: str) -> str | None:
@@ -66,8 +53,8 @@ def _decline_reason(body: str, section_set: SectionSet, type_name: str) -> str |
         found = find_section(body, spec.heading, level=spec.level)
         if found is None:
             continue  # nothing added by a human -- not a reason to decline
-        content = _normalized(found.slice(body))
-        if content and content != _normalized(spec.placeholder):
+        content = normalized_text(found.slice(body))
+        if content and content != normalized_text(spec.placeholder):
             return "prose-edited"
     return None
 

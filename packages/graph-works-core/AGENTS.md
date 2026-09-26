@@ -72,14 +72,24 @@ shell-syntax command string here.
 
 ## Architecture
 
-### Module layout (three import-linter layers, per the package `__init__.py`)
+### Module layout (four import-linter layers, per the package `__init__.py`)
 
 ```
 workspace/    layer 0 — errors, layout, manifest, discovery, init, provenance, anchor, pipeline, dispatch, dispatch_config, dispatch_projection, repos, config, context_seed, transactions, decision_owner, repo_files
 agent_config/  layer 1 — conventions resolves injected paths; git_state probes repository identity/state through provenance; local resolves Claude local-file placement/permission gates; trust reads decisions; merge models policy; read exposes project/workspace reports
 agent_substrate/ : graph/ : prompts/                                   layer 1, shared
+guidance/                                                              layer 1.5 — claims index + affects closure, between the verticals and the shared substrate
 ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/ : proposals/ : wiki_stats/ : wiki_page/ : work/ : events/ : code_read/    layer 2, independent verticals
 ```
+
+`guidance/` — deterministic guidance inputs, its own layer so any vertical
+(the `work` vertical's guidance assembly first) may import it while it imports
+only `graph/` and `workspace/` below it. `claims.py`: the claims index (every
+`decisions:`/`claims:` entry as a flat row, cached under `<cache_dir>/claims/`
+with atomic writes); `closure.py`: a work item's `affects` as tiered,
+repo-qualified graph URIs; `commands.py`: the layout-level runs behind
+`gw wiki claims refresh | show | closure`, resolving the item's repository
+with `workspace.repos`' precedence but degrading instead of refusing.
 
 Each layer-2 vertical owns one command entry point (`commands.py` when that
 name doesn't collide with the vertical's own name, otherwise a flat module

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from types import SimpleNamespace as ns
@@ -11,7 +12,7 @@ from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibl
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
 from graph_works_wire import config as wire_config
 from graph_works_wire import work
-from samples_work import archive_run
+from samples_work import BUNDLE, archive_run, next_result
 from work_tracker_okf.decisions import Decision
 
 
@@ -468,3 +469,19 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
             "target_branch": "trunk",
         },
     ]
+
+
+def test_next_payload_projects_assembled_guidance_without_text() -> None:
+    payload = work.next_payload(next_result(full=True), bundle_root=BUNDLE)
+    assert payload["guidance"] == [
+        {"path": "/adrs/x.md", "id": "D1", "kind": "claim", "why": "package directory packages/a", "tokens": 5}
+    ]
+    assert payload["guidance_warnings"] == ["no graph"]
+    assert payload["guidance_file"] == str(Path("/ws/okf/work/a/references/guidance-design.md"))
+    json.dumps(payload)
+
+
+def test_next_payload_always_carries_the_empty_guidance_form() -> None:
+    payload = work.next_payload(next_result(full=False), bundle_root=BUNDLE)
+    assert (payload["guidance"], payload["guidance_warnings"], payload["guidance_file"]) == ([], [], None)
+    json.dumps(payload)

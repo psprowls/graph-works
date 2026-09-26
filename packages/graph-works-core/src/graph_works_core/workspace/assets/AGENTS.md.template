@@ -59,7 +59,7 @@ top-level verbs:
 | `gw ingest <path>` | Ingest one source into the bundle |
 | `gw query "<q>"` | Answer one question against the bundle |
 | `gw next <path>` | Compute what to dispatch for a work item |
-| `gw archive` | Sweep eligible work items and proposals into `_archive/` |
+| `gw archive` | Sweep eligible work items, proposals and drained Sources into `_archive/` |
 | `gw wiki …` | `lint`, `stats`, `index`, `archive`, `proposals`, `proposal` |
 | `gw work …` | `file`, `status`, `next`, `advance`, `lint`, `regen-index`, `orchestrate`, `archive`, `reparent`, `adopt`, `decision` |
 | `gw config …` | `get` / `set` / `list` / `unset` / `sync` / `hooks` over the manifest |

@@ -30,11 +30,12 @@ from okf_ext.schemas.loader import (
     DEFAULT_SCHEMA_DIRNAME,
     SCHEMA_SUFFIXES,
     build_registry,
+    declared_about,
     declared_directories,
     declared_members,
     load_schemas,
 )
-from okf_ext.schemas.model import SchemaError, SchemaSet
+from okf_ext.schemas.model import AboutMandate, SchemaError, SchemaSet
 from okf_ext.schemas.rule import CODES, TOPIC, schema_rule
 
 #: `schema/` is a **documented convention, not magic** -- nothing here
@@ -54,9 +55,11 @@ __all__ = [
     "DEFAULT_SCHEMA_DIRNAME",
     "SCHEMA_SUFFIXES",
     "TOPIC",
+    "AboutMandate",
     "SchemaError",
     "SchemaSet",
     "build_registry",
+    "declared_about",
     "declared_directories",
     "declared_members",
     "load_schemas",

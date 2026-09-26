@@ -11,6 +11,9 @@ from types import SimpleNamespace as ns
 from code_wiki_okf.entities.sync import SyncSummary
 from code_wiki_okf.mirror.model import MirrorResult
 from code_wiki_okf.sync import MirrorSummary
+from graph_works_core.guidance.claims import ClaimRow, ClaimsRefresh, SkippedEntry
+from graph_works_core.guidance.closure import Closure, ClosureEntry, MatchedClaim
+from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.lint import LaneReport, LintReport, ProposalBacklog, SemanticFinding
 from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
@@ -24,6 +27,9 @@ from graph_works_wire import wiki
 from graph_works_wire.wiki import (
     bootstrap_payload,
     bootstrap_plan_payload,
+    claims_closure_payload,
+    claims_refresh_payload,
+    claims_rows_payload,
     ingest_payload,
     lint_payload,
     proposal_decide_payload,
@@ -359,6 +365,21 @@ def test_ingest_payload_has_exact_keys_and_omits_internal_proposal_status() -> N
     ]
 
 
+def test_ingest_payload_appends_notes_to_warnings() -> None:
+    result = IngestResult(
+        ok=True,
+        page="sources/demo.md",
+        copy="sources/references/demo.md",
+        title="Demo",
+        source_kind="reference",
+        notes=("ingestor drain ledger dropped: x",),
+    )
+
+    payload = ingest_payload(result)
+
+    assert payload["warnings"] == ["ingestor drain ledger dropped: x"]
+
+
 def test_lint_payload_has_exact_keys_and_explicit_nested_rows() -> None:
     report = LintReport(
         mechanical=(
@@ -392,6 +413,21 @@ def test_lint_payload_has_exact_keys_and_explicit_nested_rows() -> None:
     ]
     assert payload["semantic"] == [{"group": "quality", "message": "Clarify", "page": "demo", "model": "test-model"}]
     assert payload["open_proposals"] == {"count": 1, "oldest": "2026-08-01", "malformed": 2, "ages": {"7-30d": 1}}
+
+
+def test_lint_payload_carries_source_drain_only_when_present() -> None:
+    from graph_works_core.lint_drift.lint import SourceDrainCoverage
+
+    assert "source_drain" not in lint_payload(LintReport())
+    payload = lint_payload(LintReport(source_drain=SourceDrainCoverage(158, 12, 1159, 71, 25, 1063)))
+    assert payload["source_drain"] == {
+        "sources": 158,
+        "drained": 12,
+        "items": 1159,
+        "landed": 71,
+        "dropped": 25,
+        "pending": 1063,
+    }
 
 
 def test_stats_and_proposal_payloads_have_exact_keys() -> None:
@@ -560,4 +596,51 @@ def test_wiki_tree_payload_nests_sections() -> None:
                 ],
             }
         ]
+    }
+
+
+_ROW = ClaimRow(
+    "adrs/a", "D1", "decision", "A claim.", ("repo:o/r",), (), ("plan",), "authored", "stable", False, None, 3
+)
+
+
+def test_claims_refresh_payload_has_exact_keys() -> None:
+    result = ClaimsRefresh(True, "corpus-changed", 4, 1, 0, (SkippedEntry("e/p", "claims", 2, "missing-id"),))
+    assert claims_refresh_payload(result) == {
+        "rebuilt": True,
+        "reason": "corpus-changed",
+        "pages": 4,
+        "extracted": 1,
+        "pruned": 0,
+        "skipped": [{"page": "e/p", "key": "claims", "index": 2, "reason": "missing-id"}],
+    }
+
+
+def test_claims_rows_payload_projects_every_row_field() -> None:
+    payload = claims_rows_payload(ClaimsShow("repo:o/r", (_ROW,)))
+    assert payload == {"uri": "repo:o/r", "rows": [_ROW.to_json()]}
+
+
+def test_claims_closure_payload_has_exact_keys() -> None:
+    entry = ClosureEntry("repo:o/r", 3, "repository r")
+    run = ClaimsClosureRun(
+        "work/x",
+        "r",
+        ("README.md",),
+        Closure((entry,), ("w",)),
+        (MatchedClaim(_ROW, 3, "repo:o/r", "repository r"),),
+        3,
+        None,
+        None,
+    )
+    assert claims_closure_payload(run) == {
+        "path": "work/x",
+        "repo": "r",
+        "affects": ["README.md"],
+        "closure": [{"uri": "repo:o/r", "tier": 3, "why": "repository r"}],
+        "warnings": ["w"],
+        "matched": [{"tier": 3, "uri": "repo:o/r", "why": "repository r", "row": _ROW.to_json()}],
+        "total_tokens": 3,
+        "refusal": None,
+        "detail": None,
     }

@@ -75,6 +75,9 @@ Before writing:
 - Title, authors, date, source kind
 - 2-3 sentence TL;DR
 - Key claims (3-7 bullets)
+- **Drain ledger** — for each key claim, the curated entry it will land as
+  (`/adrs/<page>.md#D<n>`, `/docs/explanations/<page>.md#C<n>`) or the reason it is
+  dropped (`history`, `evidence`, `duplicate`, `superseded`)
 - **Which code entities and pages you'll touch** — bulleted root-absolute markdown links
 - **Any contradictions** — with other wiki pages OR with current code (spot-check the files the source mentions)
 - Whether this source captures a decision worth an ADR
@@ -99,6 +102,26 @@ gw wiki proposal file \
 ### 4. Write the source summary
 `<workspace>/okf/sources/<YYYY-MM>-<slug>.md`. Required frontmatter per `.gw/schema/Source.schema.json`: `type: Source`, `title`, `description`, `source_path`. Also set `source_kind` (the classification — see below) and the `ingested` date. `source_path` always records the copy destination `sources/references/<YYYY-MM>-<slug>.<ext>` (step 12 copies the file there) — there is no in-repo-doc exception. Also set `origin:` frontmatter to the resolved absolute path of the original source file — this is what the autonomous pipeline stamps, and what future re-ingest duplicate-detection relies on.
 
+Also write a `drain:` ledger covering every top-level item under `## Key claims`,
+numbered from 1 by position:
+
+```yaml
+drain:
+  - claim: 1
+    landed: [/adrs/2026-09-13-some-decision.md#D1]
+  - claim: 2
+    landed: [/docs/explanations/some-topic.md#C3, /adrs/2026-09-13-some-decision.md#D2]
+  - claim: 3
+    dropped: history
+```
+
+`landed` lists the root-absolute `<page>.md#<entry id>` of each `decisions:` /
+`claims:` entry step 6 or 7 writes from this claim. `dropped` is one of `history`
+(what happened, not what is true), `evidence` (supports another claim),
+`duplicate` (restates another claim or an existing entry), `superseded` (no longer
+true). Leave an item out only on purpose: it stays pending, and `gw wiki lint`
+reports the Source as `sources.undrained`.
+
 `source_kind` is a closed enum: `spec`, `article`, `ticket`, `skill`, `doc`, `transcript`, `code-review`. `gw ingest` classifies from the source's content, not from a folder path. For in-repo docs and loose files, classify from the document's content; default to `doc` for in-repo docs. A PR or review-style source classifies as `code-review`.
 
 Required section headings per `.gw/sections/Source.yaml`: `## TL;DR`, `## Key claims`, `## Touches`, `## Evidence / rationale`, `## Surprises / contradictions`, `## Decisions triggered`, `## Where it's cited in this wiki`. Additional sections are allowed.
@@ -111,12 +134,29 @@ For each code entity (package, app, dependency) the source touches, add a root-a
 ### 6. Update explanation / reference / dependency pages
 For each cross-cutting idea the source mentions: update the relevant `docs/explanations/` page's claims (why-shaped syntheses and reusable patterns both live there) or the relevant `docs/reference/` page's facts (what-is-true-of-a-thing), add a citation, or create a stub page in the appropriate Diátaxis lane — see `okf/AGENTS.md`'s lane table for the full set (`docs/explanations/`, `docs/reference/`, `docs/how-tos/`, `docs/tutorials/`). Dependency pages are graph-derived at `code-graph/<repo>/entities/dependencies/<ecosystem>/*` and are scanner-owned — never hand-edited.
 
+Every ADR, Explanation, Reference or HowTo page you create or update carries `about:`
+(the scanner URIs of the entities step 5 linked that the page is about — copy each
+verbatim from the `resource:` of that entity's code-graph page, or `repo:<org>/<repo>`
+copied from the repository's own `code-graph/<repo>.md` page for a process page), and
+an explanation carries `claims:`: add a `C<n>` entry for each claim this source adds
+and revise any entry it changes. Entry rules are in
+`skills/graph-works/references/page-formats.md` → **Curated-page claims**. Every
+page that gains a `decisions:` or `claims:` entry from this source also gets a
+`sources[]` entry `{id: <source stem>, resource: /sources/<YYYY-MM>-<slug>.md}` if
+it lacks one, and a bullet under the Source's `## Where it's cited in this wiki`.
+Lint reports a landed ref on a page that does not cite the Source as
+`sources.drain-uncited`.
+
 ### 7. Capture ADRs for decisions
 If the source proposes or documents a decision, the ADR must have appeared in
 step 3's "New pages" list — consent comes from that single confirmation, not a
-separate ask here. If confirmed: get the next ID, use the ADR template, link
-both ways. If the user declined it, file it to the ledger via `gw wiki proposal file`
-(see step 3) instead of dropping it.
+separate ask here. If confirmed: name it `adrs/<decision_date>-<slug>.md` (ADRs are
+dated, never numbered), use the ADR template, link both ways. If the user declined it,
+file it to the ledger via `gw wiki proposal file` (see step 3) instead of dropping it.
+
+The new ADR carries `about:` (from the entities step 5 linked that the page is about) and `decisions:`, with 1–5
+`D<n>` entries drawn from its `## Decision` section, one sentence each. The rules are in
+`page-formats.md` → **Curated-page claims**. Lint reports a missing field at error.
 
 ### 8. Flag contradictions
 Two kinds:
@@ -138,7 +178,8 @@ under the day's `## YYYY-MM-DD` heading in `log.md`.
 The CLI's `claude_code` backend (the default) computes a brief and writes nothing — under it, you perform this copy yourself: copy the source material to `<workspace>/okf/sources/references/<YYYY-MM>-<slug>.<ext>` (Bash `cp`, or the Write tool for text). The original file, wherever it lives, is never moved or edited. If a copy already exists at that destination, replace it (re-ingest semantics; old versions are recoverable via workspace git). The source page's `source_path` frontmatter (step 4) must equal this copy destination.
 
 ### 13. Report
-Bulleted markdown links to every touched page, plus contradictions flagged and ADRs created.
+Bulleted markdown links to every touched page, plus contradictions flagged, ADRs
+created, and the drain ledger (landed / dropped / pending counts).
 
 ## Rules
 

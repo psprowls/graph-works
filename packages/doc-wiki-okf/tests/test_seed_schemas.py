@@ -4,6 +4,7 @@ import importlib.resources
 from datetime import date
 from pathlib import Path
 
+import pytest
 from okf_ext.schemas import declared_members, load_schemas, schema_rule
 from okf_io import load_bundle
 from okf_io import validate as okf_validate
@@ -205,3 +206,163 @@ def test_an_absent_source_kind_is_no_finding(tmp_path: Path) -> None:
     """K-C: optional means an unclassified page is valid, not a warning."""
     without = _COMPLETE_SOURCE.replace("source_kind: spec\n", "")
     assert _findings(tmp_path, without, lane="sources", heading="TL;DR") == []
+
+
+# --- the curated-page claims contract (design §3) ---------------------------
+
+_PKG = "pkg:acme/demo/widgets"
+
+_CURATED = {
+    "Adr": (
+        "adrs",
+        "type: Adr\ntitle: A\ndescription: d\ndecision_date: 2026-01-01\n"
+        f"about: [{_PKG}]\n"
+        "decisions:\n  - id: D1\n    claim: Widgets are frozen.\n"
+        "    constrains: [src/widgets.py]\n    phase: [plan, execute]\n",
+    ),
+    "Explanation": (
+        "docs/explanations",
+        f"type: Explanation\ntitle: E\ndescription: d\nabout: [{_PKG}]\n"
+        "claims:\n  - id: C1\n    claim: Widgets are frozen.\n    about: [file:acme/demo/src/widgets.py]\n",
+    ),
+    "Reference": (
+        "docs/reference",
+        f"type: Reference\ntitle: R\ndescription: d\nabout: [{_PKG}]\n"
+        "claims:\n  - id: C1\n    claim: The CLI has three verbs.\n",
+    ),
+    "HowTo": (
+        "docs/how-tos",
+        f"type: HowTo\ntitle: H\ndescription: d\nabout: [{_PKG}]\nclaims:\n  - id: C1\n    claim: Run it twice.\n",
+    ),
+}
+
+
+@pytest.mark.parametrize("type_name", sorted(_CURATED))
+def test_a_well_formed_curated_page_validates_clean(tmp_path: Path, type_name: str) -> None:
+    lane, frontmatter = _CURATED[type_name]
+    assert _findings(tmp_path, frontmatter, lane=lane) == []
+
+
+@pytest.mark.parametrize("scheme", ["repo", "pkg", "app", "agent_plugin", "test_suite", "file", "dependency"])
+def test_every_scanner_scheme_is_accepted(tmp_path: Path, scheme: str) -> None:
+    lane, frontmatter = _CURATED["Reference"]
+    assert _findings(tmp_path, frontmatter.replace(_PKG, f"{scheme}:acme/demo/x"), lane=lane) == []
+
+
+def test_a_dependency_uri_carries_org_and_repo(tmp_path: Path) -> None:
+    lane, frontmatter = _CURATED["Reference"]
+    assert _findings(tmp_path, frontmatter.replace(_PKG, "dependency:acme/demo/pypi/httpx"), lane=lane) == []
+
+
+def test_about_on_a_tutorial_is_accepted_but_claims_is_not(tmp_path: Path) -> None:
+    """`about` lives on the base, so the `$ref` evaluates it; `claims` does not."""
+    assert _findings(tmp_path, _COMPLETE + f"about: [{_PKG}]\n") == []
+    messages = _findings(tmp_path, _COMPLETE + "claims:\n  - id: C1\n    claim: x\n")
+    assert any("'claims' was unexpected" in message for message in messages)
+
+
+def test_a_page_with_no_about_is_not_a_schema_finding(tmp_path: Path) -> None:
+    """D-001: presence is `about_rule`'s job, never JSON-schema `required`."""
+    for type_name, (lane, frontmatter) in _CURATED.items():
+        stripped = "".join(line + "\n" for line in frontmatter.splitlines() if not line.startswith("about:"))
+        assert _findings(tmp_path / type_name, stripped, lane=lane) == [], type_name
+
+
+def _broken(type_name: str, old: str, new: str) -> tuple[str, str]:
+    lane, frontmatter = _CURATED[type_name]
+    assert old in frontmatter, (type_name, old)
+    return lane, frontmatter.replace(old, new)
+
+
+_INVALID = {
+    "applies_to on a Reference": _broken("Reference", "about:", "applies_to: [plugin-fork-io]\nabout:"),
+    "claims on an Adr": _broken("Adr", "decisions:", "claims:"),
+    "decisions on an Explanation": _broken("Explanation", "claims:", "decisions:"),
+    "a bad scheme": _broken("Reference", _PKG, "module:acme/demo/widgets"),
+    "a scheme with no payload": _broken("Reference", _PKG, '"pkg:"'),
+    "an empty about": _broken("Reference", f"about: [{_PKG}]", "about: []"),
+    "a repeated about uri": _broken("Reference", f"about: [{_PKG}]", f"about: [{_PKG}, {_PKG}]"),
+    "an Adr entry missing claim": _broken("Adr", "    claim: Widgets are frozen.\n", ""),
+    "an Explanation entry missing claim": _broken("Explanation", "    claim: Widgets are frozen.\n", ""),
+    "a Reference entry missing claim": _broken("Reference", "    claim: The CLI has three verbs.\n", ""),
+    "a HowTo entry missing claim": _broken("HowTo", "    claim: Run it twice.\n", ""),
+    "an entry missing id": _broken("Explanation", "  - id: C1\n    claim:", "  - claim:"),
+    "an unknown entry key": _broken("Reference", "    claim: The CLI", "    status: stable\n    claim: The CLI"),
+    "an Adr id with a C": _broken("Adr", "id: D1", "id: C1"),
+    "an Adr id D0": _broken("Adr", "id: D1", "id: D0"),
+    "an Explanation id with a D": _broken("Explanation", "id: C1", "id: D1"),
+    "a constrains path with ..": _broken("Adr", "[src/widgets.py]", "[src/../../etc]"),
+    "a constrains path with a leading /": _broken("Adr", "[src/widgets.py]", "[/etc/passwd]"),
+    "an unknown phase": _broken("Adr", "[plan, execute]", "[done]"),
+    "an empty decisions list": _broken(
+        "Adr",
+        "decisions:\n  - id: D1\n    claim: Widgets are frozen.\n"
+        "    constrains: [src/widgets.py]\n    phase: [plan, execute]\n",
+        "decisions: []\n",
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(_INVALID))
+def test_a_contract_violation_is_schemas_invalid(tmp_path: Path, case: str) -> None:
+    lane, frontmatter = _INVALID[case]
+    assert _findings(tmp_path, frontmatter, lane=lane) != [], case
+
+
+def test_the_base_declares_about_and_the_entry_shape() -> None:
+    base = _schema_set().documents["_base-diataxis.schema.json"]
+    assert base["properties"]["about"] == {"$ref": "#/$defs/about"}
+    assert base["$defs"]["about"]["items"]["pattern"] == (
+        r"^(repo|pkg|app|agent_plugin|test_suite|file|dependency):\S.*$"
+    )
+    assert base["$defs"]["entry"]["required"] == ["id", "claim"]
+    assert base["$defs"]["entry"]["additionalProperties"] is False
+
+
+def test_x_okf_about_sits_on_exactly_the_four_mandated_types() -> None:
+    schema_set = _schema_set()
+    declared = {name: schema["x-okf-about"] for name, schema in schema_set.schemas.items() if "x-okf-about" in schema}
+    assert declared == {
+        "Adr": {"entries": "decisions"},
+        "Explanation": {"entries": "claims"},
+        "Reference": {},
+        "HowTo": {},
+    }
+    assert "x-okf-about" not in schema_set.documents["_base-diataxis.schema.json"]
+
+
+def test_reference_no_longer_declares_applies_to() -> None:
+    assert "applies_to" not in _schema_set().schemas["Reference"]["properties"]
+
+
+# --- the drain ledger (S-source-drain) --------------------------------------
+
+_SOURCE_HEAD = "type: Source\ntitle: S\ndescription: d\nsource_path: sources/references/s.md\n"
+
+
+@pytest.mark.parametrize(
+    "ledger",
+    [
+        "drain:\n  - claim: 1\n    landed: [/adrs/a.md#D1]\n",
+        "drain:\n  - claim: 2\n    dropped: history\n",
+        "drain:\n  - claim: 1\n    landed: [/adrs/a.md#D1, /docs/explanations/e.md#C2]\n"
+        "  - claim: 2\n    dropped: evidence\n",
+    ],
+)
+def test_the_source_seed_accepts_both_ledger_shapes(tmp_path: Path, ledger: str) -> None:
+    assert _findings(tmp_path, _SOURCE_HEAD + ledger, lane="sources", heading="TL;DR") == []
+
+
+@pytest.mark.parametrize(
+    "ledger",
+    [
+        "drain:\n  - claim: 1\n    landed: [/adrs/a.md#D1]\n    dropped: history\n",  # both
+        "drain:\n  - claim: 1\n",  # neither
+        "drain:\n  - claim: 1\n    dropped: boring\n",  # enum
+        "drain:\n  - claim: 0\n    dropped: history\n",  # minimum
+        "drain:\n  - claim: 1\n    landed: []\n",  # empty landed
+        "drain:\n  - claim: 1\n    dropped: history\n    note: x\n",  # extra key
+    ],
+)
+def test_the_source_seed_rejects_a_bad_ledger_entry(tmp_path: Path, ledger: str) -> None:
+    assert _findings(tmp_path, _SOURCE_HEAD + ledger, lane="sources", heading="TL;DR")

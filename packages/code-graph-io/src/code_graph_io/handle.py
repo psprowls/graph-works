@@ -227,6 +227,14 @@ class GraphReader:
         return queries.internal_dependencies_of(self._conn, name=name)
 
     @_locked
+    def internal_dependency_uris_of(self, *, uri: str) -> list[str]:
+        return queries.internal_dependency_uris_of(self._conn, uri=uri)
+
+    @_locked
+    def external_dependencies_of(self, *, uri: str) -> list[str]:
+        return queries.external_dependencies_of(self._conn, uri=uri)
+
+    @_locked
     def resolve_entry_point(self, raw: str) -> tuple[EntryPointDescription | None, list[str]]:
         return queries.resolve_entry_point(self._conn, raw)
 
@@ -304,6 +312,10 @@ class GraphReader:
     @_locked
     def file_paths(self) -> list[str]:
         return queries.file_paths(self._conn)
+
+    @_locked
+    def file_uris(self) -> list[str]:
+        return queries.file_uris(self._conn)
 
     @_locked
     def file_paths_in_package(self, name: str) -> list[str]:

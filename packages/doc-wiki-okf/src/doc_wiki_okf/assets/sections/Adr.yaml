@@ -5,6 +5,8 @@ sections:
       > TODO: the forces in play, and what made a decision necessary.
   - heading: Decision
     required: true
+    audience: agent
+    max_words: 450
     placeholder: |
       > TODO: what was decided, stated in the active voice.
   - heading: Consequences

@@ -395,6 +395,14 @@ def test_a_fresh_init_writes_agents_md_and_the_claude_pointer(tmp_path):
     assert agents.endswith("\n\n## Local Conventions\n")
 
 
+def test_the_rendered_archive_row_names_drained_sources(tmp_path):
+    """`gw archive`'s no-target wiki sweep also takes drained Sources."""
+    result = _init(tmp_path / "works", topic="Demo")
+    agents = (result.layout.root / "AGENTS.md").read_text(encoding="utf-8")
+    row = next(line for line in agents.splitlines() if line.startswith("| `gw archive` |"))
+    assert "drained Sources" in row
+
+
 def test_the_header_is_stable_across_reinits_on_different_days(tmp_path):
     # The rendered body must not vary run to run: `initialized_at` is read
     # back from the manifest, never from `today`.

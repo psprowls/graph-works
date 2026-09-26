@@ -389,13 +389,16 @@ def test_the_documented_schemas_surface_is_present() -> None:
     `declared_directories` is the third function, added for `okf_ext.placement`
     to compose against -- the capability may not import this one.
     `declared_members` is the fourth, and `schemas.unresolved-member` the third
-    code: the `x-okf-member` annotation, checked by `schema_rule` itself."""
+    code: the `x-okf-member` annotation, checked by `schema_rule` itself.
+    `declared_about` is the fifth: the `x-okf-about` mandate `code_wiki_okf.about_rule` composes against."""
     from okf_ext import schemas
 
     assert callable(schemas.load_schemas)
     assert callable(schemas.schema_rule)
     assert callable(schemas.declared_directories)
     assert callable(schemas.declared_members)
+    assert callable(schemas.declared_about)
+    assert dataclasses.is_dataclass(schemas.AboutMandate)
     assert schemas.TOPIC == "schemas"
     assert schemas.CODES == ("schemas.invalid", "schemas.no-schema-for-type", "schemas.unresolved-member")
     assert schemas.DEFAULT_SCHEMA_DIRNAME == "schema"
@@ -485,7 +488,7 @@ def test_the_documented_body_surface_is_present() -> None:
     `capability` fixture -- asserted here so the surface is pinned somewhere."""
     from okf_ext import body
 
-    for name in ("sections", "find_section", "prose_lines", "split_lines"):
+    for name in ("sections", "find_section", "normalized_text", "prose_lines", "split_lines"):
         assert callable(getattr(body, name))
     assert body.Section.__dataclass_fields__.keys() == {"heading", "level", "start", "body_start", "stop"}
 
@@ -544,6 +547,7 @@ def test_the_documented_sections_surface_is_present() -> None:
         "sections.unfilled",
         "sections.unexpected",
         "sections.no-declaration-for-type",
+        "sections.agent-oversize",
     )
     assert sections.DEFAULT_SECTIONS_DIRNAME == "sections"
     assert sections.SECTION_SUFFIXES == (".yaml", ".yml")
@@ -581,10 +585,16 @@ def test_the_documented_shape_surface_is_present() -> None:
         "seeded_is_complete",
         "placeholder",
         "ownership",
+        "audience",
+        "phases",
+        "max_words",
     }
     assert shape.TypeSections.__dataclass_fields__.keys() == {"sections", "additional_sections", "frontmatter"}
     assert shape.FrontmatterOwnership.__dataclass_fields__.keys() == {"owned", "provenance"}
     assert list(shape.__all__) == sorted(shape.__all__, key=lambda name: (_ruf022_group(name), name))
+    assert callable(shape.audience_view)
+    assert callable(shape.word_count)
+    assert shape.SectionView.__dataclass_fields__.keys() == {"heading", "level", "text"}
 
 
 def test_the_documented_generators_surface_is_present() -> None:

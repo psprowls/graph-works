@@ -37,6 +37,7 @@ def test_each_entry_is_the_dry_run_next_for_its_path(tmp_path: Path) -> None:
     entries = work.run_work_queue(layout)
 
     assert [entry.item.path for entry in entries] == sorted([CHILD, DESIGN, EPIC, READY, UNSIZED])
+    assert all(entry.result.guidance is None for entry in entries)
     for entry in entries:
         nexted = work.run_next(layout, entry.item.path, dry_run=True)
         assert entry.result.selected_path == entry.item.path

@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.resources
 import unicodedata
 from dataclasses import replace
+from datetime import date
 
 import pytest
 from doc_wiki_okf.archive import (
@@ -19,8 +20,9 @@ from doc_wiki_okf.archive import (
 )
 from doc_wiki_okf.diataxis.pages import directory_for
 from doc_wiki_okf.resources import seeded_schema_set
-from okf_ext.schemas import load_schemas
-from okf_io import load_bundle, update_index
+from drain_helpers import ADR, ENTRY_KEYS, source
+from okf_ext.schemas import load_schemas, schema_rule
+from okf_io import load_bundle, update_index, validate
 
 _PAGE = """---
 title: {title}
@@ -496,3 +498,138 @@ def test_the_diataxis_lanes_live_under_docs() -> None:
         "sources",
         "adrs",
     )
+
+
+# --- the sweep archives drained Sources ------------------------------------
+
+_DRAINED = (
+    "drain:\n"
+    "  - claim: 1\n    landed: [/adrs/a.md#D1]\n"
+    "  - claim: 2\n    landed: [/adrs/a.md#D2]\n"
+    "  - claim: 3\n    dropped: history\n"
+)
+_TWO_SOURCES = "/sources/2026-09-s.md\n  - id: t\n    resource: /sources/2026-09-t.md"
+
+
+def _drain_wiki(tmp_path):
+    _build(
+        tmp_path,
+        {
+            "adrs/a": ADR.replace("/sources/2026-09-s.md", _TWO_SOURCES),
+            "sources/2026-09-s": source(drain=_DRAINED),
+            "sources/2026-09-t": source(),  # undrained
+            "proposals/done": _PROPOSAL.format(status="approved"),
+        },
+    )
+    references = tmp_path / "sources" / "references"
+    references.mkdir(parents=True, exist_ok=True)
+    (references / "2026-09-s.md").write_text("material\n", encoding="utf-8")
+    (references / "2026-09-t.md").write_text("material\n", encoding="utf-8")
+    return _build(tmp_path, {})
+
+
+def test_sweep_with_entry_keys_takes_drained_sources_and_their_references(tmp_path):
+    bundle = _drain_wiki(tmp_path)
+    plan = plan_archive(bundle, lanes=_LANES, entry_keys=ENTRY_KEYS)
+    assert plan.tokens == ("proposals/done", "sources/2026-09-s")
+    result = apply_archive(bundle, plan)
+    assert result.ok
+    assert _page_path(tmp_path, "sources/2026-09-s", archived=True).is_file()
+    assert (tmp_path / "sources/references/_archive/2026-09-s.md").is_file()
+    assert _page_path(tmp_path, "sources/2026-09-t").is_file()
+    adr = (tmp_path / "adrs/a.md").read_text(encoding="utf-8")
+    assert "/sources/_archive/2026-09-s.md" in adr  # sources[].resource repaired
+
+
+def test_sweep_without_entry_keys_is_todays_plan_byte_for_byte(tmp_path):
+    bundle = _drain_wiki(tmp_path)
+    assert plan_archive(bundle, lanes=_LANES).diff() == plan_archive(bundle, lanes=_LANES, entry_keys=None).diff()
+    assert plan_archive(bundle, lanes=_LANES).tokens == ("proposals/done",)
+
+
+def test_targeted_mode_ignores_drain_state(tmp_path):
+    bundle = _drain_wiki(tmp_path)
+    plan = plan_archive(bundle, ["sources/2026-09-t"], lanes=_LANES, entry_keys=ENTRY_KEYS)
+    assert plan.tokens == ("sources/2026-09-t",)
+
+
+# --- an archived Source's `source_path` follows its reference copy ----------
+
+_S_PATH = "source_path: sources/references/2026-09-s.md\n"
+_S_ARCHIVED_PATH = "source_path: sources/references/_archive/2026-09-s.md\n"
+
+
+def _unresolved_members(root):
+    """Every `schemas.unresolved-member` finding over the bundle at *root*."""
+    report = validate(
+        load_bundle(root, ignore=IGNORE), today=date(2026, 9, 25), extra_rules=[schema_rule(_schema_set())]
+    )
+    return [finding for finding in report.findings if finding.code == "schemas.unresolved-member"]
+
+
+def test_a_targeted_archive_repoints_the_sources_source_path_to_its_archived_reference(tmp_path):
+    bundle = _drain_wiki(tmp_path)
+    before = _page_path(tmp_path, "sources/2026-09-s").read_text(encoding="utf-8")
+
+    plan = plan_archive(bundle, ["sources/2026-09-s"], lanes=_LANES)
+
+    assert (
+        "~ sources/2026-09-s.md: sources/references/2026-09-s.md -> sources/references/_archive/2026-09-s.md"
+        in plan.diff()
+    )
+    assert apply_archive(bundle, plan).ok
+    after = _page_path(tmp_path, "sources/2026-09-s", archived=True).read_text(encoding="utf-8")
+    assert after == before.replace(_S_PATH, _S_ARCHIVED_PATH)  # that one key, every other byte kept
+    assert (tmp_path / "sources/references/_archive/2026-09-s.md").is_file()
+    assert _unresolved_members(tmp_path) == []
+
+
+def test_a_sweep_repoints_every_drained_sources_source_path(tmp_path):
+    bundle = _drain_wiki(tmp_path)
+
+    plan = plan_archive(bundle, lanes=_LANES, entry_keys=ENTRY_KEYS)
+    assert apply_archive(bundle, plan).ok
+
+    after = _page_path(tmp_path, "sources/2026-09-s", archived=True).read_text(encoding="utf-8")
+    assert _S_ARCHIVED_PATH in after
+    assert _unresolved_members(tmp_path) == []
+
+
+def test_a_root_absolute_source_path_keeps_its_leading_slash(tmp_path):
+    _drain_wiki(tmp_path)
+    page = _page_path(tmp_path, "sources/2026-09-s")
+    page.write_text(
+        page.read_text(encoding="utf-8").replace(_S_PATH, "source_path: /sources/references/2026-09-s.md\n"),
+        encoding="utf-8",
+    )
+    bundle = load_bundle(tmp_path, ignore=ARCHIVE_IGNORE)
+
+    assert apply_archive(bundle, plan_archive(bundle, ["sources/2026-09-s"], lanes=_LANES)).ok
+
+    after = _page_path(tmp_path, "sources/2026-09-s", archived=True).read_text(encoding="utf-8")
+    assert "source_path: /sources/references/_archive/2026-09-s.md\n" in after
+    assert _unresolved_members(tmp_path) == []
+
+
+def test_a_source_path_naming_nothing_that_moves_is_left_alone(tmp_path):
+    _drain_wiki(tmp_path)
+    (tmp_path / "sources/references/2026-09-s.md").unlink()
+    bundle = load_bundle(tmp_path, ignore=ARCHIVE_IGNORE)
+
+    plan = plan_archive(bundle, ["sources/2026-09-s"], lanes=_LANES)
+
+    assert not any(edit.key == "source_path" for edit in plan.moves.edits)
+    assert apply_archive(bundle, plan).ok
+    after = _page_path(tmp_path, "sources/2026-09-s", archived=True).read_text(encoding="utf-8")
+    assert _S_PATH in after
+
+
+def test_an_unmoved_source_naming_a_moved_reference_is_repointed_too(tmp_path):
+    """`drain_helpers.source()` gives every Source the same `source_path`, so the
+    undrained `2026-09-t` names `2026-09-s`'s copy. It stays put, but what it
+    names moves, so it is repointed rather than left dangling."""
+    bundle = _drain_wiki(tmp_path)
+
+    assert apply_archive(bundle, plan_archive(bundle, ["sources/2026-09-s"], lanes=_LANES)).ok
+
+    assert _S_ARCHIVED_PATH in _page_path(tmp_path, "sources/2026-09-t").read_text(encoding="utf-8")

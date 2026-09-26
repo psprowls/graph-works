@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Protocol, cast
 
 from graph_works_core.archive.commands import ArchiveRun
+from graph_works_core.guidance.assembly import Guidance
 from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.placement import PlacementRecord
 from graph_works_core.orchestrate.stage_advance import StageAdvance
@@ -306,6 +307,13 @@ def _finish_target(target: FinishTarget) -> dict[str, Any]:
     }
 
 
+def _guidance_entries(guidance: Guidance | None) -> list[dict[str, Any]]:
+    """Admitted entries without their text -- the file is where the text lives."""
+    if guidance is None:
+        return []
+    return [{"path": e.path, "id": e.id, "kind": e.kind, "why": e.why, "tokens": e.tokens} for e in guidance.entries]
+
+
 def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     """The `gw work next` contract: phase, status, blockers, on_complete,
     action, normalized, child_rollup -- plus the donor-compatible additions
@@ -315,6 +323,9 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
     has a dispatch, but the skill it names is unusable, and a caller reading
     either key must not be handed a name or a transition for a dispatch that
     can never happen.
+
+    `guidance` / `guidance_warnings` / `guidance_file` are always present;
+    empty/`null` unless the caller requested assembly (only the CLI does).
     """
     resolution = _usable_resolution(result)
     return {
@@ -334,6 +345,9 @@ def next_payload(result: NextResult, *, bundle_root: Path) -> dict[str, Any]:
         "child_rollup": _rollup(result.child_rollup),
         "descent": descent_payload(result),
         "normalized": normalized_payload(result),
+        "guidance": _guidance_entries(result.guidance),
+        "guidance_warnings": [] if result.guidance is None else list(result.guidance.warnings),
+        "guidance_file": None if result.guidance_file is None else str(result.guidance_file),
     }
 
 

@@ -152,3 +152,38 @@ def test_the_truncation_marker_survives_the_prompt_character_budget():
 
     prompt = build_prose_refresh_prompt(_task(trigger="diff", diff=rendered))
     assert marker in prompt
+
+
+def test_the_system_prompt_asks_for_present_tense_and_no_history():
+    text = PROSE_REFRESHER_SYSTEM.lower()
+    assert "present tense" in text
+    assert "history" in text
+    assert "word limit" in text
+
+
+def test_the_prompt_states_each_capped_headings_limit():
+    prompt = build_prose_refresh_prompt(_task(word_limits={"## Purpose": 150}))
+    assert "## Purpose (at most 150 words)" in prompt
+    assert "## Public API (at most" not in prompt
+
+
+def test_sanitize_drops_an_over_cap_body_and_keeps_an_at_cap_one():
+    limits = {"## Purpose": 3}
+    assert sanitize_prose_result({"## Purpose": "one two three four"}, allowed=ALLOWED, word_limits=limits) == {}
+    assert sanitize_prose_result({"## Purpose": "one two three"}, allowed=ALLOWED, word_limits=limits) == {
+        "## Purpose": "one two three"
+    }
+
+
+def test_sanitize_applies_a_limit_only_to_its_own_heading():
+    cleaned = sanitize_prose_result(
+        {"## Purpose": "one two three four", "## Public API": "word " * 400},
+        allowed=ALLOWED,
+        word_limits={"## Purpose": 3},
+    )
+    assert list(cleaned) == ["## Public API"]
+
+
+def test_sanitize_without_limits_is_unchanged():
+    long = "word " * 1000
+    assert sanitize_prose_result({"## Purpose": long}, allowed=ALLOWED) == {"## Purpose": long.strip()}

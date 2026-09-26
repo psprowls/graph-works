@@ -1149,3 +1149,44 @@ async def test_the_entity_match_is_not_re_run_when_the_model_agrees(workspace, m
         origin="https://example.invalid/retitled",
     )
     assert seen == ["A Thing", "The Splicing Writer"]
+
+
+def _drain_response(drain: str) -> str:
+    """An ingestor reply with two Key-claims items and the given `drain:` block."""
+    return (
+        "---\n"
+        "title: A Thing\n"
+        "description: One line about the thing.\n"
+        "source_kind: spec\n"
+        f"{drain}"
+        "---\n\n"
+        "## TL;DR\n\nIt is a thing.\n\n"
+        "## Key claims\n\n- The thing shipped in May.\n- The thing is fast.\n\n"
+        "## Touches\n\n"
+    )
+
+
+async def test_a_dropped_only_drain_ledger_lands_in_the_written_source_page(workspace, monkeypatch):
+    from okf_io import load
+
+    layout, repo, material = workspace
+    _models(monkeypatch, ingestor=_drain_response("drain:\n- claim: 1\n  dropped: history\n"))
+    result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
+
+    assert result.ok
+    assert result.notes == ()
+    page = load(layout.bundle_dir / result.page)
+    assert page.fm_data()["drain"] == [{"claim": 1, "dropped": "history"}]
+
+
+async def test_a_landed_drain_ledger_is_dropped_with_a_note_and_the_page_still_lands(workspace, monkeypatch):
+    from okf_io import load
+
+    layout, repo, material = workspace
+    _models(monkeypatch, ingestor=_drain_response("drain:\n- claim: 1\n  landed: [/adrs/a.md#D1]\n"))
+    result = await run_ingest_source(material, layout=layout, repo=repo, today=TODAY, at=AT)
+
+    assert result.ok
+    assert len(result.notes) == 1 and result.notes[0].startswith("ingestor drain ledger dropped:")
+    page = load(layout.bundle_dir / result.page)
+    assert "drain" not in page.fm_data()

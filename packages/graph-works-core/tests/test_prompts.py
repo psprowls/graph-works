@@ -627,6 +627,19 @@ def test_the_ingestor_prompt_states_the_index_and_log_rule_once(tmp_path):
     assert "touches ≥3 files" not in system
 
 
+def test_the_ingestor_prompt_asks_for_a_dropped_only_drain_ledger(tmp_path):
+    from graph_works_core.ingest.prompts.ingestor import build_ingestor_system
+
+    system = build_ingestor_system(
+        layout=layout_for(tmp_path), kinds=("article",), schema_set=_full_schema_set(tmp_path)
+    )
+    assert "## Drain ledger" in system
+    assert "dropped:" in system
+    for reason in ("history", "evidence"):
+        assert reason in system
+    assert "landed:" not in system
+
+
 def test_the_frontmatter_fragment_names_the_keys_the_ingest_path_reads():
     # The fragment was wrong in both directions: it asked for `category`,
     # `summary`, `package_path`, `language` and `updated` — none read by

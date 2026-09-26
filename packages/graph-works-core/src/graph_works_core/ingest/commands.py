@@ -77,9 +77,18 @@ from doc_wiki_okf.ingest import DocumentBrief, plan_document_brief
 from doc_wiki_okf.ingest.layout import GRAPH_WIKI_LAYOUT, IngestLayout
 from doc_wiki_okf.ingest.seams import NO_ENTITY, EntityMatcher, StateGate
 from doc_wiki_okf.proposals.lanes import lane_set
-from doc_wiki_okf.sources import copy_target, page_target, plan_ingest, preflight_ingest, source_kinds
+from doc_wiki_okf.sources import (
+    KEY_CLAIMS_HEADING,
+    copy_target,
+    drop_only_ledger,
+    page_target,
+    plan_ingest,
+    preflight_ingest,
+    source_kinds,
+)
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
+from okf_ext.body import find_section, top_level_items
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.proposals import apply as apply_plan
 from okf_ext.schemas import SchemaSet, load_schemas
@@ -118,7 +127,10 @@ class IngestResult:
     `written` is `ApplyResult.written` -- the page and its reference copy, in
     that order. `refusals` is non-empty only when the plan was refused, in
     which case nothing landed and `ok` is `False`: the page and copy are one
-    plan precisely so there is no third outcome.
+    plan precisely so there is no third outcome. `notes` carries advisory
+    strings that are not refusals -- currently just `carried_drain`'s note
+    when the model's `drain:` could not be written as-is; the page still
+    lands without it.
     """
 
     ok: bool
@@ -133,6 +145,7 @@ class IngestResult:
     proposal_status: Mapping[str, Any] = field(default_factory=dict)
     written: tuple[str, ...] = ()
     refusals: tuple[str, ...] = ()
+    notes: tuple[str, ...] = ()
     indexes_updated: tuple[str, ...] = ()
 
 
@@ -224,6 +237,28 @@ def compose_frontmatter(
     extra: dict[str, Any] = {key: frontmatter[key] for key in CARRIED_KEYS if frontmatter.get(key) not in _BLANK}
     extra["entity_uri"] = entity_uri
     return extra
+
+
+#: The drop reasons an unattended ingest may record -- the two the ingestor
+#: prompt offers. `duplicate` and `superseded` need the rest of the wiki in
+#: view, which the single-source ingestor does not have.
+INGEST_DROP_REASONS: tuple[str, ...] = ("history", "evidence")
+
+
+def carried_drain(
+    frontmatter: Mapping[str, Any], *, body: str
+) -> tuple[tuple[dict[str, object], ...] | None, str | None]:
+    """The model's `drain:` narrowed to dropped-only entries within *body*'s Key-claims count.
+
+    Only `INGEST_DROP_REASONS` are accepted. Returns `(ledger, None)` to
+    write, `(None, None)` when the model emitted none, and `(None, note)` when
+    it emitted one this path may not write. The Source page still lands
+    without it (design §5).
+    """
+    section = find_section(body, KEY_CLAIMS_HEADING)
+    items = 0 if section is None else len(top_level_items(section.slice(body)))
+    ledger, why = drop_only_ledger(frontmatter.get("drain"), items=items, reasons=INGEST_DROP_REASONS)
+    return ledger, None if why is None else f"ingestor drain ledger dropped: {why}"
 
 
 #: An opening or closing code fence: three or more backticks or tildes, at up
@@ -611,6 +646,9 @@ async def run_ingest_source(
     )
 
     extra: dict[str, Any] = compose_frontmatter(frontmatter, entity_uri=entity_uri)
+    drain, drain_note = carried_drain(frontmatter, body=composed)
+    if drain is not None:
+        extra["drain"] = [dict(entry) for entry in drain]
     plan = plan_ingest(
         bundle,
         schema_set,
@@ -638,6 +676,7 @@ async def run_ingest_source(
         entity_page=entity_page,
         frontmatter_parsed=parsed,
         proposal_status=status,
+        notes=() if drain_note is None else (drain_note,),
     )
     if not plan.ok:
         # `apply_suggestions` is never called: the page never landed, so zero
@@ -696,8 +735,10 @@ async def run_ingest_source(
 __all__ = [
     "BUNDLE_IGNORE",
     "CARRIED_KEYS",
+    "INGEST_DROP_REASONS",
     "TOUCHES_HEADING",
     "IngestResult",
+    "carried_drain",
     "compose_body",
     "compose_frontmatter",
     "parse_ingestor_response",

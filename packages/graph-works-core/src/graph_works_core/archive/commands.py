@@ -38,9 +38,10 @@ from doc_wiki_okf.archive import apply_archive as apply_wiki_archive
 from doc_wiki_okf.archive import plan_archive as plan_wiki_archive
 from doc_wiki_okf.archive import wiki_lanes
 from doc_wiki_okf.resources import seeded_schema_set
+from doc_wiki_okf.sources import entry_keys_from
 from okf_ext.bundle import SCHEMA_DIRNAME
 from okf_ext.moves import MovePlan, stranded_warning
-from okf_ext.schemas import load_schemas
+from okf_ext.schemas import SchemaSet, load_schemas
 from okf_io import append_log_entry, load, load_bundle
 from okf_io import parse as parse_document
 from work_tracker_okf.archive import plan_archive
@@ -68,8 +69,8 @@ def _touched_members(plan: MovePlan) -> frozenset[str]:
     return frozenset({move.source for move in plan.moves} | {edit.member for edit in plan.edits})
 
 
-def _wiki_lanes_for(layout: WorkspaceLayout) -> tuple[str, ...]:
-    """The wiki lane vocabulary this workspace declares.
+def _wiki_schema_set(layout: WorkspaceLayout) -> SchemaSet:
+    """The schema set this workspace declares.
 
     The workspace's own `.gw/schema/` when it has one, so archiving follows the
     layout actually on disk rather than the installed package's assumption --
@@ -80,8 +81,7 @@ def _wiki_lanes_for(layout: WorkspaceLayout) -> tuple[str, ...]:
     constant had.
     """
     schema_dir = layout.config_dir / SCHEMA_DIRNAME
-    schema_set = load_schemas(schema_dir) if schema_dir.is_dir() else seeded_schema_set()
-    return wiki_lanes(schema_set)
+    return load_schemas(schema_dir) if schema_dir.is_dir() else seeded_schema_set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +153,7 @@ def run_archive(
 ) -> ArchiveRun:
     """Archive canonical work-item *paths*, or every eligible item when `None`.
     *wiki_slugs* (path-qualified wiki page tokens, e.g. `"adrs/2026-08-12-foo"`),
-    or every eligible proposal when `None`.
+    or every eligible proposal and drained Source when `None`.
 
     `wiki_slugs` defaults to `()` -- zero wiki involvement -- so every caller
     that predates the wiki half is unaffected.
@@ -196,7 +196,10 @@ def run_archive(
     """
     bundle = load_bundle(layout.bundle_dir, ignore=(*ARCHIVE_IGNORE, *WIKI_ARCHIVE_IGNORE))
     plan = plan_archive(bundle, load_items(bundle), paths)
-    wiki_plan = plan_wiki_archive(bundle, wiki_slugs, lanes=_wiki_lanes_for(layout))
+    schema_set = _wiki_schema_set(layout)
+    wiki_plan = plan_wiki_archive(
+        bundle, wiki_slugs, lanes=wiki_lanes(schema_set), entry_keys=entry_keys_from(schema_set)
+    )
     work_touched = {
         *(move.source for move in plan.moves),
         *(move.dest for move in plan.moves),

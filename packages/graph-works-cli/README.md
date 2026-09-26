@@ -44,6 +44,9 @@ Wiki commands:
 - `gw wiki proposal file --lane TEXT --title TEXT --id TEXT --resource PATH [--description TEXT] [--rationale TEXT] [--evidence TEXT]`
 - `gw wiki proposal approve TARGET`
 - `gw wiki proposal reject TARGET`
+- `gw wiki claims refresh [--force] [--json]`
+- `gw wiki claims show URI [--include-superseded] [--json]`
+- `gw wiki claims closure WORK_PATH [--include-superseded] [--json]`
 
 Most mutating commands apply by default; `--dry-run` is the preview option. `gw bootstrap --dry-run`
 and `gw wiki archive --dry-run` show the plan without applying. `gw wiki drift` inverts this: it
@@ -159,6 +162,14 @@ all shared/local dispatch inputs. Retired-key `gw config unset [--local]` is
 removal-only and defers sync until cleanup is complete. See the
 [dispatch guide](../graph-works-core/docs/dispatch-rules.md) for YAML examples
 and the explicit cutover procedure; no command translates old routing choices.
+
+`gw work next` (and `gw next`) also always requests guidance assembly for a
+usable dispatch: the JSON carries `guidance` (admitted entries as `{path, id,
+kind, why, tokens}`), `guidance_warnings` and `guidance_file`, and text mode
+prints one `guidance: N entries, T tokens → <file>` (or `guidance: none`)
+line. `--file` defaults to `auto` (`references/guidance-<phase>.md` under the
+item's owned directory); pass a path to write elsewhere, or `--file ""` to
+skip the write. Guidance warnings never change the exit code.
 
 ## Platform
 

@@ -1,6 +1,6 @@
 """Plain-data projections for wiki results.
 
-Bootstrap, scan, ingest, query, lint, drift, stats, proposal decide/file, tags.
+Bootstrap, scan, ingest, query, lint, drift, stats, proposal decide/file, tags, claims.
 """
 
 from __future__ import annotations
@@ -9,6 +9,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from doc_wiki_okf.ingest import DocumentBrief
+from graph_works_core.guidance.claims import ClaimRow, ClaimsRefresh
+from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
 from graph_works_core.ingest.commands import IngestResult
 from graph_works_core.lint_drift.lint import LintReport
 from graph_works_core.lint_drift.propagate_drift import DriftBrief, PropagateResult
@@ -207,6 +209,7 @@ def ingest_payload(result: IngestResult) -> dict[str, object]:
         warnings.append(f"suggestion phase degraded: {suggestion_error}")
     warnings.extend(f"suggestion apply failed: {entry}" for entry in (result.proposal_status.get("failed") or ()))
     warnings.extend(f"suggestion apply errored: {entry}" for entry in (result.proposal_status.get("errored") or ()))
+    warnings.extend(result.notes)
     proposals = [
         {key: row.get(key) for key in ("lane", "title", "target", "proposal", "status")} for row in result.proposals
     ]
@@ -274,7 +277,7 @@ def lint_payload(report: LintReport) -> dict[str, object]:
         for item in report.semantic
     ]
     backlog = report.open_proposals
-    return {
+    payload: dict[str, object] = {
         "ok": report.ok,
         "mechanical": mechanical,
         "semantic": semantic,
@@ -286,6 +289,17 @@ def lint_payload(report: LintReport) -> dict[str, object]:
         },
         "errors": list(report.errors),
     }
+    coverage = report.source_drain
+    if coverage is not None:
+        payload["source_drain"] = {
+            "sources": coverage.sources,
+            "drained": coverage.drained,
+            "items": coverage.items,
+            "landed": coverage.landed,
+            "dropped": coverage.dropped,
+            "pending": coverage.pending,
+        }
+    return payload
 
 
 def drift_brief_payload(brief: DriftBrief) -> dict[str, object]:
@@ -463,3 +477,39 @@ def _tree_node(node: TreeNode) -> dict[str, object]:
 def wiki_tree_payload(tree: WikiTree) -> dict[str, object]:
     """`/v1/wiki/tree`: the root index's sections, `###` nested under `##`."""
     return {"sections": [_tree_node(node) for node in tree.sections]}
+
+
+def _claim_row(row: ClaimRow) -> dict[str, object]:
+    return row.to_json()
+
+
+def claims_refresh_payload(result: ClaimsRefresh) -> dict[str, object]:
+    """`gw wiki claims refresh`: what the refresh did, and every skipped entry."""
+    return {
+        "rebuilt": result.rebuilt,
+        "reason": result.reason,
+        "pages": result.pages,
+        "extracted": result.extracted,
+        "pruned": result.pruned,
+        "skipped": [{"page": s.page, "key": s.key, "index": s.index, "reason": s.reason} for s in result.skipped],
+    }
+
+
+def claims_rows_payload(result: ClaimsShow) -> dict[str, object]:
+    """`gw wiki claims show <uri>`: the rows about exactly that URI."""
+    return {"uri": result.uri, "rows": [_claim_row(row) for row in result.rows]}
+
+
+def claims_closure_payload(run: ClaimsClosureRun) -> dict[str, object]:
+    """`gw wiki claims closure <work-path>`: the closure, then the rows it admits in tier order."""
+    return {
+        "path": run.path,
+        "repo": run.repo,
+        "affects": list(run.affects),
+        "closure": [{"uri": e.uri, "tier": e.tier, "why": e.why} for e in run.closure.entries],
+        "warnings": list(run.closure.warnings),
+        "matched": [{"tier": m.tier, "uri": m.uri, "why": m.why, "row": _claim_row(m.row)} for m in run.matched],
+        "total_tokens": run.total_tokens,
+        "refusal": run.refusal,
+        "detail": run.detail,
+    }

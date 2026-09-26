@@ -4,6 +4,8 @@ frontmatter:
 sections:
   - heading: Notes
     required: true
+    audience: agent
+    max_words: 120
     placeholder: |
       > TODO: anything a reader should know about this file that the generated sections below don't capture.
   - heading: Symbols

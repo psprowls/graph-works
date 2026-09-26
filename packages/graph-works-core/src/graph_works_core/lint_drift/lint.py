@@ -34,6 +34,7 @@ from types import MappingProxyType
 from code_graph_io import GraphReader
 from code_wiki_okf.config import Config
 from doc_wiki_okf.proposals import is_adr
+from doc_wiki_okf.sources import DrainStatus, drain_statuses
 from langchain_core.messages import HumanMessage, SystemMessage
 from models_io.pricing import cost_for_usage
 from okf_ext import proposals
@@ -43,7 +44,7 @@ from subagents_io import SubagentPool, TaskResult
 from subagents_io.roles import RoleBinding
 
 from graph_works_core.agent_substrate.roles import role_binding
-from graph_works_core.lint_drift.lanes import WIKI_LANE, Lane, compose_lanes
+from graph_works_core.lint_drift.lanes import WIKI_LANE, Lane, compose_lanes, wiki_entry_keys
 from graph_works_core.lint_drift.linter import (
     build_linter_adr_chain_system,
     build_linter_page_quality_system,
@@ -120,6 +121,40 @@ class ProposalBacklog:
     ages: Mapping[str, int] = _EMPTY_AGES
 
 
+@dataclass(frozen=True, slots=True)
+class SourceDrainCoverage:
+    """How much of the Source staging area has drained into curated pages.
+
+    `pending` counts key claims with no valid disposition. A ledger entry
+    whose refs dangle counts here too, because a broken ref has not landed.
+    """
+
+    sources: int
+    drained: int
+    items: int
+    landed: int
+    dropped: int
+    pending: int
+
+    @classmethod
+    def of(cls, statuses: Sequence[DrainStatus]) -> SourceDrainCoverage:
+        return cls(
+            sources=len(statuses),
+            drained=sum(1 for s in statuses if s.drained),
+            items=sum(s.items for s in statuses),
+            landed=sum(len(s.landed) for s in statuses),
+            dropped=sum(len(s.dropped) for s in statuses),
+            pending=sum(len(s.pending) for s in statuses),
+        )
+
+    def line(self) -> str:
+        done = self.landed + self.dropped
+        return (
+            f"Sources: {self.drained}/{self.sources} drained · key claims {done}/{self.items} "
+            f"dispositioned ({self.landed} landed, {self.dropped} dropped)"
+        )
+
+
 def _finding_line(finding: Finding) -> str:
     """Render one mechanical finding as a single line.
 
@@ -150,6 +185,7 @@ class LintReport:
     mechanical: tuple[LaneReport, ...] = ()
     semantic: tuple[SemanticFinding, ...] = ()
     open_proposals: ProposalBacklog = ProposalBacklog()
+    source_drain: SourceDrainCoverage | None = None
     errors: tuple[str, ...] = ()
 
     @property
@@ -186,6 +222,10 @@ class LintReport:
         semantic groups follow `SEMANTIC_GROUPS`. Re-sorting here would be one
         more thing that can disagree with the report it renders.
 
+        The source-drain coverage line, when present, follows the proposal
+        backlog footer -- one more summary line, in the same reading order a
+        reader already expects.
+
         `render()` has no say in `ok`. The gate stays mechanical-only.
         """
         blocks: list[str] = []
@@ -221,6 +261,9 @@ class LintReport:
             head += f", {backlog.malformed} malformed"
             spread = " | ".join(f"{bucket} {backlog.ages.get(bucket, 0)}" for bucket in AGE_BUCKETS)
             blocks.append(f"{head} | {spread}")
+
+        if self.source_drain is not None:
+            blocks.append(self.source_drain.line())
 
         return "\n\n".join(blocks) if blocks else "No findings."
 
@@ -309,6 +352,22 @@ def _open_proposals(bundles: dict[str, Bundle], *, today: date) -> ProposalBackl
     )
 
 
+def _source_drain(config: Config, bundles: dict[str, Bundle]) -> SourceDrainCoverage | None:
+    """Coverage over the wiki lane's walk, when the lane walked and `schema/` exists.
+
+    The lane check comes first: a wiki lane that did not compose (a malformed
+    declaration) or did not walk already has its error line, and its schemas
+    are not re-read here.
+    """
+    bundle = bundles.get(WIKI_LANE)
+    if bundle is None:
+        return None
+    entry_keys = wiki_entry_keys(config)
+    if entry_keys is None:
+        return None
+    return SourceDrainCoverage.of(drain_statuses(bundle, entry_keys))
+
+
 def run_mechanical(
     layout: WorkspaceLayout,
     config: Config,
@@ -355,6 +414,7 @@ def _run_mechanical(
             mechanical=reports,
             semantic=(),
             open_proposals=_open_proposals(bundles, today=today),
+            source_drain=_source_drain(config, bundles),
             errors=lane_set.errors + walk_errors,
         ),
         bundles,
@@ -692,6 +752,7 @@ def _with(
         mechanical=report.mechanical,
         semantic=semantic,
         open_proposals=report.open_proposals,
+        source_drain=report.source_drain,
         errors=report.errors if errors is None else errors,
     )
 
@@ -705,6 +766,7 @@ __all__ = [
     "LintReport",
     "ProposalBacklog",
     "SemanticFinding",
+    "SourceDrainCoverage",
     "run_lint",
     "run_mechanical",
 ]

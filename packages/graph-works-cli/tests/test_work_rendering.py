@@ -79,10 +79,36 @@ def test_render_next_uses_path_and_work_status(capsys: pytest.CaptureFixture[str
         "dispatch": None,
         "action": None,
         "artifact": None,
+        "guidance": [],
+        "guidance_warnings": [],
+        "guidance_file": None,
         "blockers": [],
     }
-    rendering.render_next(SimpleNamespace(warnings=()), payload)
-    assert "work/feature-a: kind=Feature work_status=open" in capsys.readouterr().out
+    rendering.render_next(SimpleNamespace(warnings=(), guidance=None), payload)
+    out = capsys.readouterr().out
+    assert "work/feature-a: kind=Feature work_status=open" in out
+    assert "  guidance: none\n" in out
+
+
+def test_render_next_guidance_line_when_assembled_but_not_written(capsys: pytest.CaptureFixture[str]) -> None:
+    entry = {"path": "/adrs/x.md", "id": "D1", "kind": "claim", "why": "w", "tokens": 5}
+    payload = {
+        "selected_path": "work/feature-a",
+        "kind": "Feature",
+        "work_status": "open",
+        "phase": "design",
+        "normalized": None,
+        "descent": None,
+        "dispatch": None,
+        "action": None,
+        "artifact": None,
+        "guidance": [entry, entry],
+        "guidance_warnings": [],
+        "guidance_file": None,
+        "blockers": [],
+    }
+    rendering.render_next(SimpleNamespace(warnings=(), guidance=SimpleNamespace(tokens=12)), payload)
+    assert "  guidance: 2 entries, 12 tokens → not written\n" in capsys.readouterr().out
 
 
 def test_render_status_uses_path_keyed_resume(capsys: pytest.CaptureFixture[str]) -> None:
@@ -114,7 +140,7 @@ def test_render_decision_names_owner_and_request(capsys: pytest.CaptureFixture[s
 def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.CaptureFixture[str]) -> None:
     rendering.echo_wrapped("  blocked: ", "first\n second")
     rendering.render_next(
-        SimpleNamespace(warnings=("careful",)),
+        SimpleNamespace(warnings=("careful",), guidance=SimpleNamespace(tokens=2870)),
         {
             "normalized": [{"path": "work/a", "source_id": "design", "resource": "/work/a/references/01-design.md"}],
             "selected_path": "work/a",
@@ -125,6 +151,9 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "dispatch": None,
             "action": {"skill": "superpowers:brainstorming", "reason": "design"},
             "artifact": {"path": "/tmp/01-design.md"},
+            "guidance": [{"path": "/adrs/x.md", "id": "D1", "kind": "claim", "why": "w", "tokens": 5}],
+            "guidance_warnings": ["no graph"],
+            "guidance_file": "/tmp/guidance-design.md",
             "blockers": ["one\ntwo"],
         },
     )
@@ -228,6 +257,8 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
     captured = capsys.readouterr()
     assert "CONTRADICTION" in captured.out
     assert "partial" in captured.err
+    assert "  guidance: 1 entries, 2,870 tokens → /tmp/guidance-design.md\n" in captured.out
+    assert "no graph" in captured.err
 
 
 def test_fail_preserves_an_explicit_cause(capsys: pytest.CaptureFixture[str]) -> None:

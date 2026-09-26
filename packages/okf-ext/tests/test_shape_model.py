@@ -38,26 +38,28 @@ def test_the_sections_shim_re_exports_the_same_objects():
         assert getattr(sections, name) is getattr(shape, name), f"sections.{name} is not shape.{name}"
 
 
-def test_shape_imports_no_other_okf_ext_module():
-    """`shape` takes its own layer line because it imports neither a
-    capability nor another shared module. The layers contract states this;
-    asserted here so a broken boundary fails the suite, not only the opt-in
-    `just contracts`."""
+#: The one other okf-ext module `shape` may import. `views.py` walks a body's
+#: headings; `okf_ext.body` sits below `shape` in the layers contract, so the
+#: edge is legal there -- this pin keeps it the *only* one.
+SHAPE_MAY_IMPORT = ("okf_ext.shape", "okf_ext.body")
+
+
+def test_shape_imports_nothing_in_okf_ext_but_body():
+    """`shape` imports neither a capability nor any shared module except
+    `okf_ext.body`. The layers contract states the direction; asserted here so
+    a broken boundary fails the suite, not only `just contracts`."""
     offenders: list[str] = []
     for path in sorted(SRC.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if (
-                isinstance(node, ast.ImportFrom)
-                and node.level == 0
-                and (node.module or "").startswith("okf_ext")
-                and not (node.module or "").startswith("okf_ext.shape")
-            ):
-                offenders.append(f"{path.name}:{node.lineno} {node.module}")
+            if isinstance(node, ast.ImportFrom) and node.level == 0:
+                module = node.module or ""
+                if module.startswith("okf_ext") and not module.startswith(SHAPE_MAY_IMPORT):
+                    offenders.append(f"{path.name}:{node.lineno} {module}")
             if isinstance(node, ast.Import):
                 offenders.extend(
                     f"{path.name}:{node.lineno} import {alias.name}"
                     for alias in node.names
-                    if alias.name.startswith("okf_ext") and not alias.name.startswith("okf_ext.shape")
+                    if alias.name.startswith("okf_ext") and not alias.name.startswith(SHAPE_MAY_IMPORT)
                 )
     assert not offenders, "\n".join(offenders)
 
@@ -84,3 +86,8 @@ def test_frontmatter_ownership_is_frozen_and_holds_tuples():
     ownership = shape.FrontmatterOwnership(owned=("title",), provenance=("content_hash",))
     with pytest.raises(AttributeError):
         ownership.owned = ()  # type: ignore[misc]
+
+
+def test_the_audience_fields_default_to_human_and_unbounded():
+    spec = shape.SectionSpec(heading="Summary")
+    assert (spec.audience, spec.phases, spec.max_words) == ("human", (), None)

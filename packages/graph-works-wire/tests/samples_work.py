@@ -68,6 +68,24 @@ def next_result(*, full: bool) -> object:
         ),
         application=ns(normalized=("work/a",) if full else ()),
         normalizations=(kept, dropped),
+        guidance=(
+            ns(
+                entries=(
+                    ns(
+                        kind="claim",
+                        path="/adrs/x.md",
+                        id="D1",
+                        why="package directory packages/a",
+                        text="- **D1** x",
+                        tokens=5,
+                    ),
+                ),
+                warnings=("no graph",),
+            )
+            if full
+            else None
+        ),
+        guidance_file=Path("/ws/okf/work/a/references/guidance-design.md") if full else None,
     )
 
 

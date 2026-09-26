@@ -25,7 +25,7 @@ def archive(
     ),
     workspace: str = typer.Option("", "--workspace", help="Workspace root; defaults to discovery."),
 ) -> None:
-    """Archive every eligible work item and every eligible wiki proposal in one sweep."""
+    """Archive every eligible work item, wiki proposal and drained Source in one sweep."""
     layout = resolve_workspace(workspace, json_mode=json_output, command=COMMAND)
     try:
         run = run_archive(layout, None, None, today=datetime.now(UTC).date(), dry_run=dry_run)

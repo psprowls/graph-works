@@ -105,6 +105,9 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
         },
         ("wiki", "proposal", "approve"): {"--dry-run", "--json", "--workspace"},
         ("wiki", "proposal", "reject"): {"--dry-run", "--json", "--workspace"},
+        ("wiki", "claims", "refresh"): {"--force", "--json", "--workspace"},
+        ("wiki", "claims", "show"): {"--include-superseded", "--json", "--workspace"},
+        ("wiki", "claims", "closure"): {"--include-superseded", "--json", "--workspace"},
     }
     for command_path, expected in expected_options.items():
         assert _option_names(_help(*command_path)) == expected
@@ -115,12 +118,24 @@ def test_help_json_freezes_the_existing_root_and_complete_c4_wiki_surface() -> N
     # every `registered_group` (sub-Typer) at a given level, regardless of source order —
     # the same reason `proposal` (a group) already sorts after `proposals` (a command).
     # `tags` is a group (four subcommands), so it lands after every plain wiki command too.
-    assert _command_names(wiki) == ["lint", "drift", "stats", "index", "archive", "proposals", "tags", "proposal"]
+    assert _command_names(wiki) == [
+        "lint",
+        "drift",
+        "stats",
+        "index",
+        "archive",
+        "proposals",
+        "tags",
+        "proposal",
+        "claims",
+    ]
     assert _command_names(proposal) == ["file", "approve", "reject"]
     assert _option_names(wiki) == set()
     assert _option_names(proposal) == set()
     assert _command_names(_help("wiki", "tags")) == ["inventory", "draft", "apply", "gate"]
     assert _option_names(_help("wiki", "tags")) == set()
+    assert _command_names(_help("wiki", "claims")) == ["refresh", "show", "closure"]
+    assert _option_names(_help("wiki", "claims")) == set()
 
     assert not {"--tool", "--force"} & _option_names(_help("bootstrap"))
     assert not {"--limit", "--all"} & _option_names(_help("ingest"))
@@ -152,6 +167,9 @@ def test_readme_documents_the_shipped_c4_surface_without_future_commands() -> No
         "gw wiki proposal file",
         "gw wiki proposal approve",
         "gw wiki proposal reject",
+        "gw wiki claims refresh",
+        "gw wiki claims show",
+        "gw wiki claims closure",
         "gw scan --emit-worklist",
         "gw scan --apply",
         "`gw bootstrap --dry-run`",

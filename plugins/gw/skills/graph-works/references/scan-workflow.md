@@ -63,10 +63,10 @@ The state gate (stamping on scan/ingest) is configurable per-workspace via the `
 Artifacts live under `<root>/state/` across the emit/apply boundary:
 
 **`worklist.json`** — written by `--emit-worklist`, consumed by `--apply-worklist` / `--results-dir`:
-- `prose_tasks` — one diff-gated `ProseRefreshTask` per stale entity: `trigger` (`first_fill` | `diff`), the scoped `diff`, `changed_files`, the current `prose_sections`, `file_map_rows`, `graph_context`, and `owning_short_head`.
+- `prose_tasks` — one diff-gated `ProseRefreshTask` per stale entity: `trigger` (`first_fill` | `diff`), the scoped `diff`, `changed_files`, the current `prose_sections`, `word_limits` (per-heading word caps for agent sections), `file_map_rows`, `graph_context`, and `owning_short_head`.
 - `propagate_tasks` — cross-page drift propagation tasks.
 - `short_head` — abbreviated HEAD SHA at emit time; passed as `--short-head` to apply so anchors are stamped to the correct commit.
-- `schema: 2`.
+- `schema_version: 5` — any other version is refused.
 
 **`briefs/<page-stem>.md`** — one self-contained refresh prompt per `prose_tasks` entry, rendered from the same system prompt and work order the Bedrock provider sends. The fan-out follows these; nothing re-derives the contract from this document.
 

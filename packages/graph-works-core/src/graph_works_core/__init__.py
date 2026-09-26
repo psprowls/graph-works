@@ -19,13 +19,19 @@ observation.
 no `graph_dir(workspace)` in this package and none below it: a consumer
 receives a `WorkspaceLayout`, or one member of it, as an argument.
 
-Three `import-linter` layers (root `pyproject.toml`, `[[tool.importlinter.contracts]]`):
+Four `import-linter` layers (root `pyproject.toml`, `[[tool.importlinter.contracts]]`):
 
     workspace/                                             # layer 0
       errors, layout, manifest, discovery, init, provenance, pipeline
     agent_substrate/ : graph/ : prompts/                   # layer 1, shared
+    guidance/                                              # between: claims index,
+                                                           #   affects closure
     ingest/ : scan/ : query/ : lint_drift/ : archive/ : orchestrate/
       wiki_stats/ : work/ : proposals/                       # layer 2, independent
+
+`guidance` sits between the verticals and the shared substrate so a vertical
+(`work`'s guidance assembly) can import it without crossing the verticals'
+independence contract.
 
 Each vertical directory owns its command entry point (renamed to
 `commands.py` when it shares the vertical's name — `ingest/commands.py`,

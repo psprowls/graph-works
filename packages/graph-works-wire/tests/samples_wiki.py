@@ -8,6 +8,9 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
+from graph_works_core.guidance.claims import ClaimRow, ClaimsRefresh, SkippedEntry
+from graph_works_core.guidance.closure import Closure, ClosureEntry, MatchedClaim
+from graph_works_core.guidance.commands import ClaimsClosureRun, ClaimsShow
 from graph_works_core.proposals import ProposalDecideRun, ProposalFileRun, ProposalRefusal
 from graph_works_core.wiki_page.citations import Citation, CitationCandidate, WikiCitations
 from graph_works_core.wiki_page.commands import PageLink, PageRead, TreeNode, TreePage, WikiTree
@@ -53,6 +56,7 @@ def ingest_result(*, degraded: bool) -> object:
         ),
         proposal_status={"error": "timeout", "failed": ["x"], "errored": ["y"]} if degraded else {},
         refusals=(),
+        notes=("ingestor drain ledger dropped: x",) if degraded else (),
     )
 
 
@@ -67,6 +71,7 @@ def lint_report(*, oldest: bool) -> object:
             malformed=0,
             ages={"proposals/a.md": 3},
         ),
+        source_drain=ns(sources=2, drained=1, items=5, landed=1, dropped=2, pending=2) if oldest else None,
         errors=("e",) if oldest else (),
     )
 
@@ -351,5 +356,72 @@ WIKI: dict[str, tuple[Callable[[], object], ...]] = {
             )
         ),
         lambda: wiki.wiki_tree_payload(WikiTree(())),
+    ),
+    "wiki.claims_refresh_payload": (
+        lambda: wiki.claims_refresh_payload(
+            ClaimsRefresh(True, "corpus-changed", 4, 1, 0, (SkippedEntry("e/p", "claims", 2, "missing-id"),))
+        ),
+        lambda: wiki.claims_refresh_payload(ClaimsRefresh(False, "no-change", 0, 0, 0, ())),
+    ),
+    "wiki.claims_rows_payload": (
+        lambda: wiki.claims_rows_payload(
+            ClaimsShow(
+                "repo:o/r",
+                (
+                    ClaimRow(
+                        "adrs/a",
+                        "D1",
+                        "decision",
+                        "A claim.",
+                        ("repo:o/r",),
+                        (),
+                        ("plan",),
+                        "authored",
+                        "stable",
+                        False,
+                        None,
+                        3,
+                    ),
+                ),
+            )
+        ),
+        lambda: wiki.claims_rows_payload(ClaimsShow("repo:o/r", ())),
+    ),
+    "wiki.claims_closure_payload": (
+        lambda: wiki.claims_closure_payload(
+            ClaimsClosureRun(
+                "work/x",
+                "r",
+                ("README.md",),
+                Closure((ClosureEntry("repo:o/r", 3, "repository r"),), ("w",)),
+                (
+                    MatchedClaim(
+                        ClaimRow(
+                            "adrs/a",
+                            "D1",
+                            "decision",
+                            "A claim.",
+                            ("repo:o/r",),
+                            (),
+                            ("plan",),
+                            "authored",
+                            "stable",
+                            False,
+                            None,
+                            3,
+                        ),
+                        3,
+                        "repo:o/r",
+                        "repository r",
+                    ),
+                ),
+                3,
+                None,
+                None,
+            )
+        ),
+        lambda: wiki.claims_closure_payload(
+            ClaimsClosureRun("work/y", "s", (), Closure((), ()), (), 0, "refusal reason", "detail")
+        ),
     ),
 }

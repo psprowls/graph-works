@@ -53,15 +53,15 @@ Coverage is gated at 95% (`just cov`), same floor as `okf-io`/`okf-ext`.
   boundary-locked to stdlib + `reading/`, and a writer needs `okf_io`/`okf_ext`.
   The dependency is one-way — `sources/` imports `ingest.layout` for the page
   template; nothing in `ingest/` imports `sources/`.
-- `src/doc_wiki_okf/assets/` — the twelve files this package installs into a
-  bundle: six `schema/` JSON schemas (a `_base-diataxis` `$ref` target plus
-  the four Diátaxis types plus `Source`) and six `sections/` declarations
-  (`_fragments.doc_wiki.yaml` plus the same five). Read through
+- `src/doc_wiki_okf/assets/` — the fourteen files this package installs into a
+  bundle: seven `schema/` JSON schemas (a `_base-diataxis` `$ref` target plus
+  `Adr`, the four Diátaxis types and `Source`) and seven `sections/` declarations
+  (`_fragments.doc_wiki.yaml` plus the same six). Read through
   `importlib.resources`; installed by `okf_ext.bundle.plan_install`.
 - `src/doc_wiki_okf/resources.py` — `SEED_RELATIVE_PATHS`, `assets_root()`,
   `seed_files()`. The asset list without the installer.
 - `src/doc_wiki_okf/init.py` — `install_bundle()` / `plan_install()`: scaffold
-  a bundle, install this package's twelve files into it, log the arrival to
+  a bundle, install this package's fourteen files into it, log the arrival to
   `log.md`. Additive and idempotent — a re-run writes nothing and refuses
   nothing; the only refusal is a file this package owns existing with content
   it did not write.
@@ -172,10 +172,14 @@ present (`has_member` counts it), it's just not a concept.
 - **The migrator never runs against the live vault.** `wiki/` is not yet an
   OKF bundle; no test or CLI default here reads `$GRAPH_WIKI_WORKSPACE`, and
   `test_migrate_fixtures.py` asserts it.
-- **`Concept` and `Adr` schemas are deliberately absent.** Only the four
-  Diátaxis types plus `Source` are declared. Retrofitting the live vault's
-  legacy `concept`/`pattern`/`architecture` pages is the cutover epic's job,
-  not this package's.
+- **The curated-page claims contract lives in the seeds, its mandate in an
+  annotation.** `_base-diataxis` declares `about:` (scanner-resource URIs) and
+  the `$defs/entry` shape; `Adr` adds `decisions:` (ids `D<n>`) and
+  `Explanation`/`Reference`/`HowTo` add `claims:` (ids `C<n>`). No schema
+  *requires* them: the top-level `x-okf-about` annotation on those four types
+  is the mandate, read by `okf_ext.schemas.declared_about` and enforced by
+  `code_wiki_okf.about_rule` at its own severity. `applies_to` is gone.
+  `Concept` has no schema; legacy `concept`/`pattern` pages are the cutover's job.
 - **This layer supplies none of `OWNED_PROVENANCE_KEYS`.** `generated`,
   `sources`, and `verified` belong to the `okf_ext.proposals` capability;
   `plan_create` raises if a caller here supplies one.

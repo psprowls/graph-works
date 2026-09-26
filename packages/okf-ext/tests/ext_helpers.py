@@ -265,7 +265,7 @@ SECTIONS_DIR = SECTIONED / "sections"
 #: What the sections walk must report over `sectioned/`, as `(code, path)`.
 #: Asserted against rather than restated inside the test, so a fixture change
 #: cannot leave a test quietly asserting the old corpus -- the habit
-#: `SCHEMA_EXPECTED` set. Every one of the four codes appears, which is what
+#: `SCHEMA_EXPECTED` set. Every one of the five codes appears, which is what
 #: makes the "every member of CODES is emitted" contract test meaningful over
 #: this one bundle.
 SECTIONS_EXPECTED = {
@@ -273,6 +273,7 @@ SECTIONS_EXPECTED = {
     ("sections.no-declaration-for-type", "undeclared.md"),
     ("sections.unexpected", "extra.md"),
     ("sections.unfilled", "unfilled.md"),
+    ("sections.agent-oversize", "oversize.md"),
 }
 
 

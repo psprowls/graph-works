@@ -125,6 +125,9 @@ Record known issues, version pins, or workarounds this dependency needs.
 A cross-cutting concept, convention, pattern, or high-level synthesis. Lives in
 `docs/explanations/`. Shared frontmatter with the other Diátaxis types: `type`, `title`,
 `description` required; `status`, `updated`, `tags`, `sources` optional.
+`about:` (scanner resource URIs, required by the `x-okf-about` mandate) and
+`claims:` (entries `{id: C<n>, claim, about?, constrains?, phase?}`, at least
+one on a live page) — see `wiki-schema.md` for the full contract.
 
 Declared headings: `## Context` (required), `## Trade-offs`, `## See also`. Extra
 headings are allowed (`additional_sections: true`).
@@ -136,6 +139,11 @@ title: Global context
 description: Request-scoped context via AsyncLocalStorage providing config, database, logger, and session.
 tags: [context, middleware]
 updated: 2026-04-20
+about: [pkg:acme/web/common-context-node-ts]
+claims:
+  - id: C1
+    claim: Request context is carried by AsyncLocalStorage, never passed as an argument.
+    about: [pkg:acme/web/common-context-node-ts]
 ---
 
 # Global context
@@ -169,15 +177,41 @@ What choosing this costs, and the alternatives.
 Tags must exist in `.gw/tags.yaml`; curated lanes enforce it. Do not add a tag to the
 vocabulary to make a page pass — pick an existing concept tag.
 
+### Curated-page claims
+
+Every ADR, Explanation, Reference and HowTo carries `about:`: a list of scanner URIs.
+The rule is always the same — copy each URI **verbatim** from the `resource:` frontmatter
+of the code-graph page it names; never retype or guess one. Shapes: `pkg:<org>/<repo>/<name>`,
+`file:<org>/<repo>/<path>`, `agent_plugin:<org>/<repo>/<name>`,
+`dependency:<org>/<repo>/<ecosystem>/<name>`, or `repo:<org>/<repo>` for a process or
+convention page — that last one copied from the repository's own `code-graph/<repo>.md`
+page. Each URI must resolve to exactly one code-graph page.
+
+An ADR carries `decisions:`; an Explanation carries `claims:`; a Reference carries
+`claims:` only when it is itself a list of rules. Keep to 1–5 decisions / 1–7 claims —
+house style, not schema-enforced (the schema only requires `minItems: 1`). Each entry
+requires `id` and `claim`; `about`, `constrains` and `phase` are schema-optional. The
+authoring rule is stricter than the schema:
+
+- `claim` is one sentence, present tense, no link or citation: the page is the citation.
+- Always write an entry `about` that is a non-empty subset of the page's `about`.
+- `constrains` only for repo-relative paths the page itself cites, and each must exist.
+- Do not author `phase`, `status` or `superseded_by` on an entry; status is inherited
+  from the page.
+
+`gw wiki lint` reports a missing or unresolved field at error.
+
 ## 4. Reference, HowTo, Tutorial
 
 Same base frontmatter as Explanation, plus:
 
 | `type` | Extra frontmatter | Required headings |
 |---|---|---|
-| `Reference` | `applies_to` | `Summary` (and optional `See also`) |
-| `HowTo` | `prerequisites`, `outcome` | `Goal`, `Assumptions`, `Steps`, `Result` |
+| `Reference` | `claims` (optional) | `Summary` (and optional `See also`) |
+| `HowTo` | `prerequisites`, `outcome`, `claims` (optional) | `Goal`, `Assumptions`, `Steps`, `Result` |
 | `Tutorial` | `prerequisites`, `outcome` | `What you will build`, `Before you start`, `Steps` (and optional `What you learned`) |
+
+Every row but `Tutorial` also requires `about:` — see **Curated-page claims** in §3.
 
 ## 5. Source summary page
 
@@ -188,7 +222,7 @@ material at `sources/references/<YYYY-MM>-<slug>.<ext>`; the original is never e
 Required frontmatter: `type`, `title`, `description`, `source_path`. Declared optional
 keys: `source_kind` (`spec | article | ticket | skill | doc | transcript | code-review`),
 `origin`, `ingested`, `updated`, `source_date`, `authors`, `entity_uri`, `tokens`,
-`tags`, `sources`. Omit an optional key rather than writing `null` or an empty value.
+`tags`, `sources`, `drain`. Omit an optional key rather than writing `null` or an empty value.
 
 Declared headings, all optional: `TL;DR`, `Key claims`, `Touches`,
 `Evidence / rationale`, `Surprises / contradictions`, `Decisions triggered`,
@@ -207,6 +241,11 @@ ingested: 2026-04-20
 updated: 2026-04-20
 authors: ["@psprowls"]
 tags: [auth]
+drain:
+  - claim: 1
+    landed: [/adrs/0014-jwt-sessions.md#D1]
+  - claim: 2
+    dropped: history
 ---
 
 # Auth Migration Spec
@@ -231,6 +270,23 @@ Two sentences max. What the source proposes, argues, or reports.
 - [0014-jwt-sessions](/adrs/0014-jwt-sessions.md) — stable
 ```
 
+### Drain ledger
+
+`drain:` covers every top-level item under `## Key claims`, numbered from 1 by
+position. Each entry is `{claim: <n>, landed: [...]}` or `{claim: <n>, dropped:
+<reason>}`. `landed` lists the root-absolute `<page>.md#<entry id>` of each
+`decisions:` / `claims:` entry the claim produced. `dropped` is one of `history`
+(what happened, not what is true), `evidence` (supports another claim),
+`duplicate` (restates another claim or an existing entry), `superseded` (no longer
+true). Leave an item out only on purpose: it stays pending, and `gw wiki lint`
+reports the Source as `sources.undrained`.
+
+A Source with at least one key claim, every one dispositioned, no ledger
+findings and a non-empty `## Where it's cited in this wiki` is *drained*, and
+`gw wiki archive` with no target moves it and its `sources/references/` copy
+to `_archive/`. A Source with no `## Key claims` items is never drained — it
+reports `sources.undrained` with reason `no-key-claims` and never sweeps.
+
 Drift on an in-repo doc is a diff against its `sources/references/` copy. There is no
 `last_sync_commit` / `last_sync_at` stamp.
 
@@ -247,7 +303,9 @@ Required frontmatter: `type: Adr`, `title` (plain — no `ADR-NNNN:` prefix),
 `description`, `decision_date`. Optional: `status` (`draft | stable | deprecated`; a
 promoted proposal starts `stable`), `deciders`, `supersedes` and `superseded_by` (a
 root-absolute path to another ADR, a list of them, or `null`), `updated`, `tags`,
-`sources`. There is no `adr_id` and no `category`.
+`sources`. There is no `adr_id` and no `category`. `decisions:` holds the
+load-bearing decisions as `{id: D<n>, claim, …}` entries — the `x-okf-about`
+mandate requires at least one on a live ADR (see **Curated-page claims** in §3).
 
 Declared headings: `Context`, `Decision`, `Consequences` (required), `Alternatives
 considered`. Extra headings are allowed.
@@ -264,6 +322,12 @@ supersedes: ["/adrs/2026-01-10-opaque-session-tokens.md"]
 superseded_by: null
 tags: [auth, sessions]
 updated: 2026-04-20
+about: [pkg:acme/web/auth]
+decisions:
+  - id: D1
+    claim: Sessions are JWTs signed with the rotating key.
+    about: [pkg:acme/web/auth]
+    constrains: [packages/auth/src/session.ts]
 ---
 
 # JWT sessions

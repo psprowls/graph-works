@@ -82,8 +82,8 @@
     },
     {
       "name": "gw archive",
-      "help": "Archive every eligible work item and every eligible wiki proposal in one sweep.",
-      "short_help": "Archive every eligible work item and every eligible wiki proposal in one sweep.",
+      "help": "Archive every eligible work item, wiki proposal and drained Source in one sweep.",
+      "short_help": "Archive every eligible work item, wiki proposal and drained Source in one sweep.",
       "usage": [
         "[OPTIONS]"
       ],
@@ -920,7 +920,7 @@
     },
     {
       "name": "gw next",
-      "help": "Compute what to dispatch for PATH, and what advancing would change.\n\nIts one permitted write is the canonical design-source repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
+      "help": "Compute what to dispatch for PATH, and what advancing would change.\n\nWrites: the canonical design-source repair reported as `normalized` -- it\nis applied, not previewed, so the next read agrees with this one -- and,\nbecause `--file` defaults to `auto`, the assembled guidance file (when it\nadmitted anything and has a target) plus the claims cache under\n`<cache_dir>/claims/`. `--file \"\"` skips the guidance file, not the\nassembly.",
       "short_help": "Compute what to dispatch for PATH, and what advancing would change.",
       "usage": [
         "[OPTIONS]",
@@ -944,6 +944,17 @@
           "required": false,
           "default": false,
           "is_flag": true
+        },
+        {
+          "name": "file",
+          "opts": [
+            "--file"
+          ],
+          "secondary_opts": [],
+          "help": "Where to write the assembled guidance: 'auto' (the item's references/), a path, or '' to skip writing.",
+          "required": false,
+          "default": "auto",
+          "is_flag": false
         },
         {
           "name": "workspace",
@@ -1462,6 +1473,7 @@
       "options": [],
       "commands": [
         "archive",
+        "claims",
         "drift",
         "index",
         "lint",
@@ -1476,8 +1488,8 @@
     },
     {
       "name": "gw wiki archive",
-      "help": "Archive one curated page or sweep eligible proposal pages.",
-      "short_help": "Archive one curated page or sweep eligible proposal pages.",
+      "help": "Archive one curated page, or sweep eligible proposals and drained Sources.",
+      "short_help": "Archive one curated page, or sweep eligible proposals and drained Sources.",
       "usage": [
         "[OPTIONS]",
         "[target]"
@@ -1528,6 +1540,190 @@
       "path": [
         "wiki",
         "archive"
+      ]
+    },
+    {
+      "name": "gw wiki claims",
+      "help": "The claims index and a work item's affects closure.",
+      "short_help": "The claims index and a work item's affects closure.",
+      "usage": [
+        "[OPTIONS]",
+        "COMMAND [ARGS]..."
+      ],
+      "arguments": [],
+      "options": [],
+      "commands": [
+        "closure",
+        "refresh",
+        "show"
+      ],
+      "path": [
+        "wiki",
+        "claims"
+      ]
+    },
+    {
+      "name": "gw wiki claims closure",
+      "help": "A work item's affects closure, then the rows it admits in tier order. Uncapped.",
+      "short_help": "A work item's affects closure, then the rows it admits in tier order.",
+      "usage": [
+        "[OPTIONS]",
+        "{WORK_PATH}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "include_superseded",
+          "opts": [
+            "--include-superseded"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "claims",
+        "closure"
+      ]
+    },
+    {
+      "name": "gw wiki claims refresh",
+      "help": "Bring the claims index up to date with the bundle.",
+      "short_help": "Bring the claims index up to date with the bundle.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "force",
+          "opts": [
+            "--force"
+          ],
+          "secondary_opts": [],
+          "help": "Rebuild even when the index is fresh.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "claims",
+        "refresh"
+      ]
+    },
+    {
+      "name": "gw wiki claims show",
+      "help": "Rows whose `about` contains exactly URI.",
+      "short_help": "Rows whose `about` contains exactly URI.",
+      "usage": [
+        "[OPTIONS]",
+        "{URI}"
+      ],
+      "arguments": [
+        {
+          "name": "uri",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "include_superseded",
+          "opts": [
+            "--include-superseded"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        }
+      ],
+      "commands": [],
+      "path": [
+        "wiki",
+        "claims",
+        "show"
       ]
     },
     {
@@ -3474,7 +3670,7 @@
     },
     {
       "name": "gw work next",
-      "help": "Compute what to dispatch for PATH, and what advancing would change.\n\nIts one permitted write is the canonical design-source repair reported as\n`normalized` -- it is applied, not previewed, so the next read agrees with\nthis one.",
+      "help": "Compute what to dispatch for PATH, and what advancing would change.\n\nWrites: the canonical design-source repair reported as `normalized` -- it\nis applied, not previewed, so the next read agrees with this one -- and,\nbecause `--file` defaults to `auto`, the assembled guidance file (when it\nadmitted anything and has a target) plus the claims cache under\n`<cache_dir>/claims/`. `--file \"\"` skips the guidance file, not the\nassembly.",
       "short_help": "Compute what to dispatch for PATH, and what advancing would change.",
       "usage": [
         "[OPTIONS]",
@@ -3498,6 +3694,17 @@
           "required": false,
           "default": false,
           "is_flag": true
+        },
+        {
+          "name": "file",
+          "opts": [
+            "--file"
+          ],
+          "secondary_opts": [],
+          "help": "Where to write the assembled guidance: 'auto' (the item's references/), a path, or '' to skip writing.",
+          "required": false,
+          "default": "auto",
+          "is_flag": false
         },
         {
           "name": "workspace",

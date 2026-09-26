@@ -13,8 +13,8 @@ from collections.abc import Iterable, Iterator
 
 from okf_io import Finding, Rule, RuleContext, Severity
 
-from okf_ext.body import Section, sections
-from okf_ext.shape import SectionSet, TypeSections
+from okf_ext.body import Section, normalized_text, sections
+from okf_ext.shape import SectionSet, TypeSections, word_count
 
 #: The topic prefix this rule set claims. `validate()` raises the moment an
 #: external rule emits a built-in prefix, and `sections` collides with none of
@@ -28,29 +28,12 @@ CODES = (
     "sections.unfilled",  # the section exists but is empty, or equals its placeholder
     "sections.unexpected",  # an undeclared heading, only under `additional_sections: false`
     "sections.no-declaration-for-type",  # the set has no declaration for this concept's type
+    "sections.agent-oversize",  # a filled agent section is longer than its declared `max_words`
 )
 
 #: Unpacked from `CODES` rather than re-typed, so a code-string edit to one
 #: cannot silently drift from the other -- the habit `tags/vocabulary.py` set.
-_CODE_MISSING, _CODE_UNFILLED, _CODE_UNEXPECTED, _CODE_NO_DECLARATION = CODES
-
-
-def _normalized(text: str) -> str:
-    """*text*'s comparable form for the unfilled check.
-
-    Line endings normalised, each line stripped, leading and trailing blank
-    lines dropped. Deliberately **not** a marker scheme: nothing leaks
-    into the rendered document, and nothing collides with
-    `render.angle-bracket`, which already flags bare `<placeholder>` text as
-    HTML that Obsidian eats.
-    """
-    flat = text.replace("\r\n", "\n").replace("\r", "\n")
-    lines = [line.strip() for line in flat.split("\n")]
-    while lines and not lines[0]:
-        lines.pop(0)
-    while lines and not lines[-1]:
-        lines.pop()
-    return "\n".join(lines)
+_CODE_MISSING, _CODE_UNFILLED, _CODE_UNEXPECTED, _CODE_NO_DECLARATION, _CODE_OVERSIZE = CODES
 
 
 def _considered(body: str, declaration: TypeSections) -> tuple[Section, ...]:
@@ -94,13 +77,30 @@ def _findings(
                     line=None,
                 )
             continue
+        if spec.audience == "agent" and spec.max_words is not None:
+            text = found.slice(body)
+            content = normalized_text(text)
+            count = word_count(text)
+            if content and content != normalized_text(spec.placeholder) and count > spec.max_words:
+                # Always `warn`, like `no-declaration-for-type`: a long agent
+                # section is a cost signal, not a shape violation.
+                yield Finding(
+                    code=_CODE_OVERSIZE,
+                    severity="warn",
+                    message=(
+                        f"Agent section `{spec.heading}` is {count} words; its declaration caps it at {spec.max_words}."
+                    ),
+                    spec=source,
+                    path=path,
+                    line=found.start + offset,
+                )
         # Optional sections are declared so a legitimate heading is not
         # "extra"; they are never scaffolded and never warned about (§3.3).
         # `seeded_is_complete` says the placeholder is a valid end state.
         if not spec.required or spec.seeded_is_complete:
             continue
-        content = _normalized(found.slice(body))
-        if content and content != _normalized(spec.placeholder):
+        content = normalized_text(found.slice(body))
+        if content and content != normalized_text(spec.placeholder):
             continue
         detail = "is empty" if not content else "still carries its placeholder"
         yield Finding(
@@ -138,7 +138,8 @@ def section_rule(section_set: SectionSet, *, severity: Severity = "warn") -> Rul
 
     `sections.no-declaration-for-type` is **always `warn`** regardless,
     mirroring `schemas.no-schema-for-type`: it reports a coverage gap in the
-    declaration set, not a violation by the document.
+    declaration set, not a violation by the document. `sections.agent-oversize`
+    is always `warn` for the same reason: it reports cost, not a violation.
 
     Line numbers are file lines, not body lines: `okf_ext.body` spans are
     body-relative and `document.body_line_offset` is what turns one into the

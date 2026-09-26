@@ -17,6 +17,8 @@ import json
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from okf_ext.shape import word_count
+
 from graph_works_core.agent_substrate.agent_tools import strip_code_fence, truncate_text
 from graph_works_core.scan.scan_contract import ProseRefreshTask
 
@@ -45,6 +47,12 @@ Rules:
 - No placeholders. If you cannot say something true and specific about a
   section, omit that heading from your answer entirely -- an omitted section is
   kept as it was; a "TODO" is thrown away and the page is retried next scan.
+- Write what the entity is and does now, in the present tense. No history, no
+  renames, no "previously" / "now" narration -- what changed belongs in the
+  scan log, not on the page.
+- Respect each heading's word limit where one is given. A body over its limit
+  is discarded whole; the section keeps its current text and is retried on a
+  later scan.
 - Cite code as backticked `path:line` relative to the entity root.
 - Markdown, no frontmatter, no top-level heading.
 
@@ -52,6 +60,10 @@ Return a single JSON object and nothing else:
 
 {"sections": {"## Heading": "body markdown", ...}}
 """
+
+
+def _limit_note(limit: int | None) -> str:
+    return "" if limit is None else f" (at most {limit} words)"
 
 
 def build_prose_refresh_prompt(task: ProseRefreshTask) -> str:
@@ -64,7 +76,8 @@ def build_prose_refresh_prompt(task: ProseRefreshTask) -> str:
     rewrite already-good prose with no statement of what had moved under it.
     """
     headings = "\n".join(
-        f"### {heading}\nCurrent body:\n{body.strip() or '(empty)'}\n" for heading, body in task.prose_sections.items()
+        f"### {heading}{_limit_note(task.word_limits.get(heading))}\nCurrent body:\n{body.strip() or '(empty)'}\n"
+        for heading, body in task.prose_sections.items()
     )
     changed = "Changed files:\n" + truncate_text(task.diff or "", MAX_PROMPT_DIFF_CHARS)
     if task.trigger == "diff" and task.diff is None:
@@ -133,19 +146,31 @@ def _is_todo_shaped(body: str) -> bool:
     return any(first.startswith(prefix) for prefix in TODO_PREFIXES)
 
 
-def sanitize_prose_result(sections: Mapping[str, str], *, allowed: Sequence[str]) -> dict[str, str]:
+def sanitize_prose_result(
+    sections: Mapping[str, str],
+    *,
+    allowed: Sequence[str],
+    word_limits: Mapping[str, int] | None = None,
+) -> dict[str, str]:
     """*sections* narrowed to what may actually land on a page.
 
-    Two filters, both provider-agnostic so the file surface gets exactly what
-    the in-process path gets: a heading the task did not declare is dropped, and
-    a body that is blank or still placeholder-shaped is dropped. Surviving
-    bodies are edge-stripped -- the splice re-terminates every line itself.
+    Three filters, all provider-agnostic so the file surface gets exactly what
+    the in-process path gets: a heading the task did not declare is dropped; a
+    body that is blank or still placeholder-shaped is dropped; and a body over
+    its heading's `word_limits` entry is dropped -- whole, never truncated, so
+    the page keeps its existing section and the heading is retried next scan.
+    `word_count` is `okf_ext.shape`'s, the definition `sections.agent-oversize`
+    uses. Surviving bodies are edge-stripped -- the splice re-terminates every
+    line itself.
     """
     permitted = set(allowed)
+    limits = word_limits or {}
     return {
         heading: body.strip()
         for heading, body in sections.items()
-        if heading in permitted and not _is_todo_shaped(body)
+        if heading in permitted
+        and not _is_todo_shaped(body)
+        and (heading not in limits or word_count(body) <= limits[heading])
     }
 
 

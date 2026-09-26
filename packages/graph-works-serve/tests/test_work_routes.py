@@ -26,7 +26,8 @@ def test_next_is_the_cli_twin_with_null_normalized(client: TestClient, workspace
     assert body["normalized"] is None
     twin = cli_json(workspace, "work", "next", path)
     assert isinstance(twin, dict)
-    assert body == {**twin, "normalized": None}
+    assert body["guidance"] == [] and body["guidance_warnings"] == [] and body["guidance_file"] is None
+    assert body == {**twin, "normalized": None, "guidance": [], "guidance_warnings": [], "guidance_file": None}
 
 
 def test_next_writes_nothing_when_a_design_source_needs_repair(client: TestClient, workspace: WorkspaceLayout) -> None:
@@ -41,6 +42,7 @@ def test_next_writes_nothing_when_a_design_source_needs_repair(client: TestClien
 
     assert item.read_bytes() == before
     assert served["normalized"] is None
+    assert not list((workspace.bundle_dir / path / "references").glob("guidance-*.md"))
     twin = cli_json(workspace, "work", "next", path)
     assert isinstance(twin, dict)
     assert served["action"] == twin["action"]

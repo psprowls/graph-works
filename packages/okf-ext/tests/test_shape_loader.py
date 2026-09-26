@@ -6,6 +6,8 @@ behaviour.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from ext_helpers import SECTIONS_BAD, SECTIONS_DIR, write, write_tree
 from okf_ext.shape import FrontmatterOwnership, SectionError, load_sections
@@ -216,3 +218,61 @@ def test_two_directory_keys_in_one_file_that_normalize_alike_raise(tmp_path):
     )
     with pytest.raises(SectionError, match="already declared in this file"):
         load_sections(root)
+
+
+def _one_spec(tmp_path, entry: str):
+    """Load a one-section declaration whose section entry is *entry* (YAML
+    mapping lines, indented four spaces under `- heading: Summary`)."""
+    root = tmp_path / "sections"
+    root.mkdir()
+    write(root / "feature.yaml", f"sections:\n  - heading: Summary\n{entry}")
+    return load_sections(root).types["feature"].sections[0]
+
+
+def test_a_declaration_without_audience_keys_is_human_and_unbounded(tmp_path):
+    spec = _one_spec(tmp_path, "    required: true\n")
+    assert (spec.audience, spec.phases, spec.max_words) == ("human", (), None)
+
+
+def test_audience_phases_and_max_words_are_read(tmp_path):
+    spec = _one_spec(
+        tmp_path,
+        "    audience: agent\n    max_words: 150\n    phases: [' plan ', execute, plan]\n",
+    )
+    assert spec.audience == "agent"
+    assert spec.max_words == 150
+    # Stripped, and deduplicated in first-seen order.
+    assert spec.phases == ("plan", "execute")
+
+
+def test_an_explicit_human_audience_loads(tmp_path):
+    assert _one_spec(tmp_path, "    audience: human\n").audience == "human"
+
+
+def test_an_agent_section_needs_neither_cap_nor_phases(tmp_path):
+    spec = _one_spec(tmp_path, "    audience: agent\n")
+    assert (spec.audience, spec.phases, spec.max_words) == ("agent", (), None)
+
+
+#: Each refusal in the design's §2.1 table, with a message fragment unique to
+#: the branch that raises it.
+BAD_AUDIENCE = {
+    "audience_not_a_string": ("    audience: 3\n", "`audience` must be a string"),
+    "audience_unknown": ("    audience: robot\n", "`audience` must be one of"),
+    "phases_not_a_list": ("    audience: agent\n    phases: plan\n", "`phases` must be a list"),
+    "phases_blank_item": ("    audience: agent\n    phases: ['']\n", "`phases`[0] must be a non-empty string"),
+    "phases_non_string_item": ("    audience: agent\n    phases: [7]\n", "`phases`[0] must be a non-empty string"),
+    "max_words_bool": ("    audience: agent\n    max_words: true\n", "`max_words` must be a positive integer"),
+    "max_words_zero": ("    audience: agent\n    max_words: 0\n", "`max_words` must be a positive integer"),
+    "max_words_negative": ("    audience: agent\n    max_words: -5\n", "`max_words` must be a positive integer"),
+    "max_words_string": ("    audience: agent\n    max_words: '150'\n", "`max_words` must be a positive integer"),
+    "max_words_on_human": ("    max_words: 150\n", "apply only to an `audience: agent` section"),
+    "phases_on_human": ("    audience: human\n    phases: [plan]\n", "apply only to an `audience: agent` section"),
+}
+
+
+@pytest.mark.parametrize(("name", "case"), sorted(BAD_AUDIENCE.items()))
+def test_every_bad_audience_key_raises_a_legible_section_error(tmp_path, name, case):
+    entry, expected = case
+    with pytest.raises(SectionError, match=re.escape(expected)):
+        _one_spec(tmp_path, entry)

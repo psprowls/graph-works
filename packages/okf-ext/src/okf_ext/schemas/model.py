@@ -25,6 +25,19 @@ class SchemaError(ValueError):
 
 
 @dataclass(frozen=True, slots=True)
+class AboutMandate:
+    """What a type's `x-okf-about` annotation declares.
+
+    Presence of the annotation means `about:` is required on that type;
+    `entries` optionally names the list a live page must hold at least one
+    entry in. The mandate is data here and a rule elsewhere
+    (`code_wiki_okf.about_rule`) -- the same split `x-okf-directory` makes.
+    """
+
+    entries: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SchemaSet:
     """A directory of JSONSchema documents, read once.
 

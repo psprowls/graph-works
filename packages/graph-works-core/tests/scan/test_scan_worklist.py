@@ -508,6 +508,23 @@ async def test_a_dry_run_reports_an_adoption_without_writing_it(scanned):
     assert path.read_text(encoding="utf-8") == before
 
 
+async def test_word_limits_come_from_the_declaration(scanned):
+    layout, config, _repo = scanned
+    worklist, _ = await _worklist(layout, config)
+    assert dict(_package_task(worklist).word_limits) == {"## Purpose": 150, "## Public API": 200}
+
+
+async def test_word_limits_cover_only_the_tasks_own_headings(scanned):
+    """A first fill of Public API alone must not advertise Purpose's limit."""
+    layout, config, _repo = scanned
+    await _worklist(layout, config)  # structural pass writes the page
+    write_page(layout, "code-graph/demo/entities/packages/widgets.md", package_page(purpose=FILLED))
+    worklist, _ = await _worklist(layout, config)
+    task = _package_task(worklist)
+    assert set(task.prose_sections) == {"## Public API"}
+    assert dict(task.word_limits) == {"## Public API": 200}
+
+
 async def test_a_page_at_the_attempt_cap_stops_being_dispatched(scanned):
     """F2/D1: the system prompt tells the model to omit a heading it cannot say
     something true about, and the refill gate refuses to stamp while any section

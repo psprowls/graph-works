@@ -41,7 +41,7 @@ change that moved it, never as an incidental side effect.
 [--json]`, and mounts six sub-apps via `add_typer()` / root-command registration:
 
 - `graph_cli` — `gw graph build|describe|find|export`, code-graph queries.
-- `wiki_cli` — `gw wiki lint|drift|stats|index|archive|proposals|proposal ...`; archive and
+- `wiki_cli` — `gw wiki lint|drift|stats|index|archive|proposals|proposal|claims ...`; archive and
   proposal mutation commands route through core's vertical calls, while index and proposal listing
   retain their lower-layer calls. Root-level aliases `gw bootstrap|scan|ingest|query` are registered
   by `wiki_cli.main.register_root_commands()`.
@@ -57,6 +57,12 @@ change that moved it, never as an incidental side effect.
   failing the command — the command owns a blockers channel and the workflow skill
   already stops on one. `gw work advance` and `gw work orchestrate` own no such
   channel and keep the `WorkspaceError` → `SCHEMA_MISMATCH` mapping.
+
+  `gw work next --file auto|<path>|""` only parses into core's `GuidanceRequest`
+  (`""` → no write); assembly and the write are `run_next`'s. With `--json` the
+  three guidance keys are payload data and nothing extra reaches stderr; text
+  mode prints one summary line and routes each guidance warning through
+  `rendering.warn`.
 - `config_cli` — `gw config get|list|set|unset|sync|hooks enable|disable`, the sole programmatic
   writer for `workspace.yaml` catalog keys. `set`/`unset --local` write the gitignored, per-machine
   `workspace.local.yaml` overlay instead. `set`/`unset` refresh `.gw/cache/config.json`

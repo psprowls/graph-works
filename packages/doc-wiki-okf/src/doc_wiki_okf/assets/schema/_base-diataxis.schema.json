@@ -11,6 +11,7 @@
     "tags": { "type": "array", "items": { "type": "string" } },
     "sources": { "type": "array", "items": { "type": "object" } },
     "tokens": { "type": "integer", "minimum": 0 },
+    "about": { "$ref": "#/$defs/about" },
     "generated": {
       "type": "object",
       "required": ["by", "at"],
@@ -29,6 +30,35 @@
         "properties": {
           "by": { "type": "string", "minLength": 1 },
           "at": { "type": "string" }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "about": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^(repo|pkg|app|agent_plugin|test_suite|file|dependency):\\S.*$"
+      }
+    },
+    "entry": {
+      "type": "object",
+      "required": ["id", "claim"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "claim": { "type": "string", "minLength": 1 },
+        "about": { "$ref": "#/$defs/about" },
+        "constrains": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^(?!/)(?!.*(^|/)\\.\\.(/|$)).+$" }
+        },
+        "phase": {
+          "type": "array",
+          "items": { "enum": ["design", "plan", "execute", "finish"] }
         }
       }
     }

@@ -8,6 +8,7 @@ from code_wiki_okf.config import Config, StateGateConfig
 from doc_wiki_okf.sources import seed_source_kinds
 from graph_works_core.ingest.commands import (
     _log_line,
+    carried_drain,
     compose_body,
     compose_frontmatter,
     parse_ingestor_response,
@@ -16,6 +17,8 @@ from graph_works_core.ingest.commands import (
 )
 
 _PAGE = "---\ntitle: A Thing\ndescription: One line.\nsource_kind: spec\n---\n\n## TL;DR\n\nIt is a thing.\n"
+
+_BODY = "## TL;DR\nt\n\n## Key claims\n- One.\n- Two.\n\n## Touches\n"
 
 
 def test_a_well_formed_response_splits_into_frontmatter_and_body():
@@ -235,3 +238,26 @@ def test_the_log_line_names_every_outcome_kind_separately():
 def test_the_log_line_omits_every_empty_outcome_kind():
     line = _log_line("sources/2026-08-a-thing.md", "A Thing", {"proposals": 0})
     assert line == "**Ingest** [A Thing](/sources/2026-08-a-thing.md) — 0 proposal(s) filed"
+
+
+def test_a_dropped_only_ledger_is_carried():
+    ledger, note = carried_drain({"drain": [{"claim": 2, "dropped": "history"}]}, body=_BODY)
+    assert ledger == ({"claim": 2, "dropped": "history"},) and note is None
+
+
+def test_no_ledger_is_silent():
+    assert carried_drain({}, body=_BODY) == (None, None)
+
+
+def test_a_landed_or_out_of_range_ledger_is_dropped_with_a_note():
+    for bad in ([{"claim": 1, "landed": ["/adrs/a.md#D1"]}], [{"claim": 3, "dropped": "history"}]):
+        ledger, note = carried_drain({"drain": bad}, body=_BODY)
+        assert ledger is None and note and note.startswith("ingestor drain ledger dropped:")
+
+
+def test_an_unattended_ingest_may_not_drop_as_superseded_or_duplicate():
+    """The ingestor prompt offers only `history` / `evidence`; the code holds the same line."""
+    for reason in ("superseded", "duplicate"):
+        ledger, note = carried_drain({"drain": [{"claim": 1, "dropped": reason}]}, body=_BODY)
+        assert ledger is None
+        assert note and note.startswith("ingestor drain ledger dropped:") and repr(reason) in note

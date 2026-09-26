@@ -334,6 +334,7 @@ type = "layers"
 containers = ["graph_works_core"]
 layers = [
     "ingest : scan : query : lint_drift : archive : orchestrate : wiki_stats : wiki_page : tag_policy : work : util : agent_config : events : proposals : code_read",
+    "guidance",
     "agent_substrate : graph : prompts",
     "workspace",
 ]

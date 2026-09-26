@@ -387,6 +387,11 @@ def _build_task(
             MAX_TASK_GRAPH_CHARS,
         ),
         owning_short_head=None if ref.head is None else ref.head[:_ABBREVIATED],
+        word_limits={
+            heading_key(spec): spec.max_words
+            for spec in headings
+            if spec.audience == "agent" and spec.max_words is not None
+        },
     )
 
 
@@ -716,6 +721,24 @@ def _log_line(applied: ApplyResult) -> str:
     )
 
 
+def _stage_decline(document: Document, *, member: str, bundle_root: Path) -> PendingWrite:
+    """Stage a first-fill answer the sanitizer emptied entirely: count it.
+
+    The model produced nothing usable, so there is no body to splice -- but an
+    answer that is silently dropped every scan is not a decline, it is an
+    unbounded retry (design spec §2.5, D1). This writes only the bumped
+    `PROSE_ATTEMPTS_KEY`; the body is untouched.
+
+    A fresh parse, not `dataclasses.replace`, for the same reason
+    `_stage_adoption` uses one: a shallow clone shares `fm_raw` with the live
+    bundle document, and a frontmatter edit through it would mutate the
+    bundle whether or not the write lands.
+    """
+    scratch = parse_document(document.raw_text, path=document.path)
+    scratch.set(PROSE_ATTEMPTS_KEY, _attempts(document) + 1)
+    return PendingWrite(member=member, path=bundle_root / member, rendered=scratch.serialize(), on_written=_noop)
+
+
 def apply_scan_results(
     worklist: ScanWorklist,
     results: ScanResults,
@@ -758,9 +781,21 @@ def apply_scan_results(
         if result.error:
             errors.append(f"{task.page_path}: {result.error}")
             continue
-        clean = sanitize_prose_result(result.sections, allowed=tuple(task.prose_sections))
+        clean = sanitize_prose_result(result.sections, allowed=tuple(task.prose_sections), word_limits=task.word_limits)
         if not clean:
             errors.append(f"{task.page_path}: no usable section survived sanitizing")
+            # An emptied-out answer to a first fill is a decline, the same as
+            # one that lands but stays a placeholder below -- count it so
+            # phase 1 eventually stops dispatching (design spec D1). A diff
+            # refresh the sanitizer emptied is not a decline of anything new
+            # and stays uncounted, matching that same reasoning. Staged
+            # outside `staged`/`pending`'s ordinary pairing: this write
+            # touches no body, so it must not inflate `narrated`,
+            # `sections_filled`, or trigger an index/log update below.
+            if task.trigger == "first_fill":
+                document = bundle.concept(task.page_path.removesuffix(".md"))
+                if document is not None and document.parse_error is None:
+                    pending.append(_stage_decline(document, member=task.page_path, bundle_root=bundle_root))
             continue
         document = bundle.concept(task.page_path.removesuffix(".md"))
         if document is None or document.parse_error is not None:

@@ -192,6 +192,44 @@ def test_open_proposals_counts_only_the_proposed_ones(workspace):
     assert _run(workspace).open_proposals.count == 2
 
 
+def test_run_mechanical_reports_source_drain_coverage(workspace):
+    from graph_works_core.lint_drift.lint import SourceDrainCoverage
+
+    page = workspace.layout.bundle_dir / "sources" / "2026-09-s.md"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text(
+        "---\ntype: Source\ntitle: S\ndescription: d\nsource_path: sources/references/2026-09-s.md\n---\n\n"
+        "## Key claims\n- One.\n\n## Where it's cited in this wiki\n\n",
+        encoding="utf-8",
+        newline="",
+    )
+    assert _run(workspace).source_drain == SourceDrainCoverage(1, 0, 1, 0, 0, 1)
+
+
+def test_a_malformed_schema_is_an_error_line_and_no_drain_coverage_rather_than_a_raise(workspace):
+    """`compose_lanes` already turns a bad schema into a `wiki lane: …` line;
+    the coverage pass must not reload it and let the `SchemaError` escape."""
+    from okf_ext.bundle import SCHEMA_DIRNAME
+
+    (workspace.layout.config_dir / SCHEMA_DIRNAME / "Source.schema.json").write_text(
+        "{not json", encoding="utf-8", newline=""
+    )
+    report = _run(workspace)
+    assert any(error.startswith("wiki lane:") for error in report.errors)
+    assert report.source_drain is None
+    assert report.ok is False
+
+
+def test_no_schema_directory_means_no_drain_coverage(workspace):
+    from okf_ext.bundle import SCHEMA_DIRNAME
+
+    schema_dir = workspace.layout.config_dir / SCHEMA_DIRNAME
+    for child in sorted(schema_dir.iterdir()):
+        child.unlink()
+    schema_dir.rmdir()
+    assert _run(workspace).source_drain is None
+
+
 def _proposal(slug: str, status: str, *, generated: str | None = None) -> str:
     stamp = "" if generated is None else f"generated:\n  at: {generated}\n"
     return (
@@ -783,6 +821,29 @@ def test_render_carries_the_whole_proposal_backlog_on_one_footer_line():
     assert "oldest" not in undated_only.render()
 
 
+def test_render_prints_the_source_drain_line_after_the_backlog():
+    from graph_works_core.lint_drift.lint import SourceDrainCoverage
+
+    coverage = SourceDrainCoverage(sources=158, drained=12, items=1159, landed=71, dropped=25, pending=1063)
+    rendered = LintReport(open_proposals=ProposalBacklog(count=1), source_drain=coverage).render()
+    line = "Sources: 12/158 drained · key claims 96/1159 dispositioned (71 landed, 25 dropped)"
+    assert line in rendered
+    assert rendered.index("proposals:") < rendered.index(line)
+
+
+def test_no_coverage_renders_no_sources_line():
+    assert "Sources:" not in LintReport().render()
+
+
+def test_coverage_of_statuses_sums_them():
+    from doc_wiki_okf.sources import DrainStatus
+    from graph_works_core.lint_drift.lint import SourceDrainCoverage
+
+    drained = DrainStatus("sources/a.md", 2, frozenset({1}), frozenset({2}), (), True, ())
+    open_ = DrainStatus("sources/b.md", 3, frozenset(), frozenset({1}), (2, 3), True, ())
+    assert SourceDrainCoverage.of((drained, open_)) == SourceDrainCoverage(2, 1, 5, 1, 2, 2)
+
+
 def test_a_report_with_nothing_to_say_renders_exactly_no_findings():
     """One line, not the empty string: empty is right for `diff()`, where
     `changed` is the guard a caller checks first. There is no such guard here,
@@ -938,7 +999,7 @@ async def test_parser_errors_propagate_without_losing_other_groups_or_mechanical
 @pytest.mark.parametrize(("head", "ok"), [("/ROOT.MD", True), ("/missing.md", False)])
 async def test_page_parser_errors_alone_fail_an_otherwise_clean_lint(workspace, monkeypatch, head, ok):
     (workspace.layout.bundle_dir / "root.md").write_text(
-        "---\ntype: Explanation\ntitle: Root\ndescription: A root page.\n---\nBody.\n",
+        "---\ntype: Tutorial\ntitle: Root\ndescription: A root page.\n---\nBody.\n",
         encoding="utf-8",
         newline="",
     )

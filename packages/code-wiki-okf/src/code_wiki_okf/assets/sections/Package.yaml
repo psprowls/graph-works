@@ -4,9 +4,13 @@ frontmatter:
 sections:
   - heading: Purpose
     required: true
+    audience: agent
+    max_words: 150
     placeholder: |
       > TODO: what this package does, who uses it, and why it exists, in one paragraph.
   - heading: Public API
+    audience: agent
+    max_words: 200
     placeholder: |
       > TODO: the main exports and when to use them. Link code with backticked `path:line` references.
   - heading: Files

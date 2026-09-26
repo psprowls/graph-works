@@ -31,20 +31,30 @@ graph-works-cli gw …"`.
 
 Run `gw next <work-path> --json`.
 
-`gw next` wraps the read-only `gw work next` and adds two keys to the JSON:
-`guidance` (ranked phase-relevant pages) and `guidance_warnings`. `--file`
-defaults to `"auto"`, which resolves beneath the item’s owned directory
-and writes the assembled guidance bodies there when any matched; pass an
-explicit `--file <work-path>` to override, or `--file ""` to skip writing entirely.
-The parent dir is created on demand. The resolved (or skipped) target comes
-back in the JSON's `guidance_file` key. `gw work next` itself may also return
+`gw next` is `gw work next`. When the item has a usable dispatch, it also
+assembles **guidance** for the stage about to run: present-tense claims and
+decisions about the code the item's `affects` touches, and the agent-facing
+sections of those pages — both filtered to the dispatched stage's phase — then
+answered entries from the item's own, its ancestors' and overlapping items'
+decision ledgers, which are not phase-filtered. The three come in that order,
+cut at 3,000 tokens at an entry boundary.
+Nothing is ranked or scored. The JSON always carries three keys: `guidance`
+(admitted entries, each `{path, id, kind, why, tokens}`), `guidance_warnings`
+(degradations such as "no code graph", and the budget cut), and
+`guidance_file`. `--file` defaults to `auto`, which writes
+`references/guidance-<phase>.md` under the item's owned directory; pass a
+filesystem path to write elsewhere, or `--file ""` to skip the write. The file
+is written only when at least one entry was admitted; otherwise
+`guidance_file` is `null`. Blocked items, gates and terminal items assemble
+nothing. `gw work next` itself may also return
 `normalized` — a list of persisted managed-source repairs, each carrying the
 canonical item `path`, canonical `source_id` (`design`), and root-absolute
 `resource`; `null` means no source was repaired. A `--descend` repair may list
 both the requested ancestor and selected leaf. Relay each entry to the user
 like any other CLI finding: it
-is the one write `gw work next` performs, and it is reported precisely so it
-is never silent. All the blocker / terminal / dispatch fields the steps below
+is one of `gw work next`'s writes — the others are the guidance file above and
+the derived claims cache under `.gw/cache/claims/` — and it is reported
+precisely so it is never silent. All the blocker / terminal / dispatch fields the steps below
 read are unchanged from `gw work next`.
 
 Use the selected leaf's `selected_path` for `<work-path>`. After a successful
@@ -158,7 +168,7 @@ another stage, same as the stock skill it replaces.
   stage starts from durable artifacts, not from memory
 - when `artifact.path` is set: "Write your output document to
   `<artifact.path>` — this overrides the skill's default location."
-- when the `gw next` output's `guidance` list is non-empty, add a
+- when the `gw next` output's `guidance_file` is non-null, add a
   `## Relevant guidance` block to the brief pointing the stage skill at the
   assembled bundle:
 
@@ -168,8 +178,8 @@ another stage, same as the stock skill it replaces.
   Read it before starting this stage.
   ```
 
-  Omit this block entirely when `guidance` is empty (guidance skipped or no
-  matches). Surface any `guidance_warnings` to the user as plain notes.
+  Omit this block entirely when `guidance_file` is null (nothing admitted,
+  `--file ""`, or the write failed). Surface any `guidance_warnings` to the user as plain notes.
 - **Execute-stage coverage (step 3).** When the stage just dispatched is
   `execute` — keyed on the stage, not on `action.skill`, which is used verbatim
   and may be any configured skill — add: "Before you advance, write
@@ -316,8 +326,9 @@ context window).
    `<workspace>/okf/<work-path>.md` and find the `sources[]` entry with
    `id: design`. If its root-absolute `resource` resolves beneath the OKF
    bundle, dispatch the ingest skill (`gw:ingest`) on that artifact inline; the ingestor runs its own
-   confirmation dialog and, on success, archives the source and repoints the
-   pointer. Skip the ingest (announce "no design to ingest") when `work_status` is
+   confirmation dialog and, on success, repoints the pointer. The ingested Source
+   stays under `sources/` until its key claims drain, and then the drain sweep
+   (`gw wiki archive` with no target) archives it. Skip the ingest (announce "no design to ingest") when `work_status` is
    `wontfix`/`superseded`, when no `design` source exists, or when the resource is already gone
    (already ingested). Ingest accepts design sources only — never hand it a
    plan artifact.

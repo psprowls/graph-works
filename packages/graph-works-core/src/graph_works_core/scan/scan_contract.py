@@ -6,7 +6,7 @@ boundary. `emit_scan_worklist` writes them; an out-of-process agent reads them;
 reads a file, so a consumer can depend on the shape without depending on the
 pipeline.
 
-`SCHEMA_VERSION` is 4. The number is monotonic rather than reset to 1 so
+`SCHEMA_VERSION` is 5. The number is monotonic rather than reset to 1 so
 `unsupported worklist schema: 3` reads unambiguously as *older than we
 support* rather than *newer than we understand*. Version 4 added
 `ScanWorklist.skipped` and `ScanWorklist.adopted`: phase 1's diagnostics are
@@ -14,6 +14,9 @@ part of the wire contract because an out-of-process agent reading
 `worklist.json` cannot re-derive why a page is missing from a list it did not
 build (design spec D3). A cached v3 artifact is refused rather than read
 short, which is the behaviour `UnsupportedWorklistSchema` exists for.
+Version 5 added `ProseRefreshTask.word_limits`: a v4 reader would drop the
+caps silently and let an over-cap answer through, so a cached v4 artifact is
+refused too.
 
 `ScanResults` here is the batch of per-entity results; `ScanResult` in
 `commands.scan` is one whole run's outcome. Both names come from the contract
@@ -28,13 +31,14 @@ from types import MappingProxyType
 from typing import Any
 
 #: The worklist artifact's version. Bump on any breaking field change.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: Why a page is in the worklist. `first_fill` wins when both apply: an unfilled
 #: section needs writing whether or not the code under it also moved.
 TRIGGERS: tuple[str, ...] = ("first_fill", "diff")
 
 _NO_SECTIONS: Mapping[str, str] = MappingProxyType({})
+_NO_LIMITS: Mapping[str, int] = MappingProxyType({})
 
 #: Why a page phase 1 walked past is not in the worklist. A closed vocabulary:
 #: the first four are read failures, `attempts-exhausted` is the bound design
@@ -95,6 +99,10 @@ class ProseRefreshTask:
     prompt and log material only -- the refill gate stamps the page's own
     `last_updated_commit`, which entity sync set to that same repo's HEAD
     earlier in this run.
+
+    `word_limits` maps a subset of `prose_sections`' keys to the declaration's
+    `max_words` for that heading's agent section. The prompt states each limit
+    and the sanitizer drops a body over it.
     """
 
     uri: str
@@ -109,6 +117,7 @@ class ProseRefreshTask:
     prose_sections: Mapping[str, str] = field(default=_NO_SECTIONS)
     graph_context: str = ""
     owning_short_head: str | None = None
+    word_limits: Mapping[str, int] = field(default=_NO_LIMITS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -192,6 +201,7 @@ def task_payload(task: ProseRefreshTask) -> dict[str, Any]:
         "prose_sections": dict(task.prose_sections),
         "graph_context": task.graph_context,
         "owning_short_head": task.owning_short_head,
+        "word_limits": dict(task.word_limits),
     }
 
 
@@ -213,6 +223,9 @@ def task_from_payload(payload: Mapping[str, Any]) -> ProseRefreshTask:
         ),
         graph_context=str(payload.get("graph_context", "")),
         owning_short_head=None if head is None else str(head),
+        word_limits=MappingProxyType(
+            {str(key): int(value) for key, value in dict(payload.get("word_limits", {})).items()}
+        ),
     )
 
 

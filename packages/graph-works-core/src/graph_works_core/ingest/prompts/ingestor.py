@@ -18,6 +18,12 @@ only tell the model to ignore something it would otherwise never see.
 declares**, so the page the model writes and the skeleton
 `doc_wiki_okf.sources` would otherwise render agree.
 
+**The LLM path records only `dropped` dispositions.** The `## Drain ledger`
+section below asks the model for a `claim`/`dropped` pair per Key-claims item
+it can classify as history or evidence, nothing more. `landed` needs a
+curated entry -- a page and an entry id -- that no unattended write creates
+(design §3.6, Q2-A); the prompt does not offer that key at all.
+
 The architecture overview is a renderer, not a constant (C2 §6.3), so this is
 `build_ingestor_system(layout=…, kinds=…)` rather than a module-level string.
 There is deliberately no `INGESTOR_SYSTEM` backward-compat constant: it could
@@ -123,6 +129,25 @@ _OUTPUT_FORMAT = (
     "Under 1500 tokens. Synthesize -- do not reproduce the source."
 )
 
+_DRAIN_LEDGER = (
+    "## Drain ledger\n\n"
+    "Each top-level item under `## Key claims` is numbered by position, from 1. Some items\n"
+    "are not present-tense truths about the code: they recount what happened, or they\n"
+    "support another claim rather than state one. For those items only, you may emit a\n"
+    "`drain` frontmatter list, one entry per item:\n\n"
+    "```yaml\n"
+    "drain:\n"
+    "  - claim: 3\n"
+    "    dropped: history\n"
+    "  - claim: 5\n"
+    "    dropped: evidence\n"
+    "```\n\n"
+    "`dropped` is `history` (what happened, not what is true) or `evidence` (supports\n"
+    "another claim). Leave every other item out: it reaches curated pages through\n"
+    "the proposal flow. An entry naming anything else, or a position with no item,\n"
+    "discards the whole list."
+)
+
 # Live ingestor runs occasionally wrap the frontmatter in a markdown code
 # fence, which is not frontmatter at all. This goes LAST in the composition so
 # it is the most recent instruction the model reads. `parse_ingestor_response`
@@ -173,6 +198,7 @@ def build_ingestor_system(
         _INGESTOR_RULES,
         _RED_FLAGS,
         _OUTPUT_FORMAT,
+        _DRAIN_LEDGER,
         _NO_CODE_FENCE,
     ]
     if project_context:

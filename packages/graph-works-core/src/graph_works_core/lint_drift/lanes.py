@@ -34,18 +34,21 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 import work_tracker_okf
 from code_graph_io import GraphReader
+from code_wiki_okf.about import about_rule
 from code_wiki_okf.config import Config, ConfigError
 from code_wiki_okf.placement import placement_rule as code_wiki_placement_rule
 from code_wiki_okf.sync.rule import sync_rule
 from code_wiki_okf.sync.snapshot import snapshot_bundle
 from config_io import PROJECTION_FILENAME
+from doc_wiki_okf.sources import drain_rule, entry_keys_from
 from okf_ext.bundle import SCHEMA_DIRNAME, SECTIONS_DIRNAME
 from okf_ext.health import health_rule
 from okf_ext.render import render_rule
-from okf_ext.schemas import SchemaError, load_schemas, schema_rule
+from okf_ext.schemas import SchemaError, SchemaSet, declared_about, load_schemas, schema_rule
 from okf_ext.sections import section_rule
 from okf_ext.shape import SectionError, load_sections
 from okf_ext.tags import VOCABULARY_FILENAME, VocabularyError, load_vocabulary, vocabulary_rule
@@ -57,6 +60,12 @@ from graph_works_core.workspace.layout import WorkspaceLayout
 #: The two lane names a default workspace composes, in report order.
 WIKI_LANE = "wiki"
 WORK_LANE = "work"
+
+#: The curated-page claims contract's severity (epic decision 010). The
+#: backfill landed — every live curated page now carries `about:` and its
+#: entries — so the contract composes at error. A composition-time knob, not
+#: a per-page override.
+CONTRACT_SEVERITY: Literal["error", "warning"] = "error"
 
 
 def _check_config_projection(layout: WorkspaceLayout) -> str | None:
@@ -117,20 +126,61 @@ def _deferred_sync_rule(config: Config, reader: GraphReader, *, at: datetime) ->
     return rule
 
 
-def _wiki_rules(config: Config, reader: GraphReader | None, *, at: datetime) -> tuple[Rule, ...]:
-    """The wiki lane's rule set: three unconditional, three declaration-gated,
+def _wiki_schema_set(config: Config) -> SchemaSet | None:
+    """This workspace's declared schema set, or None when `schema/` is absent.
+
+    Raises the loader's `SchemaError` on a malformed declaration: the wiki
+    lane's composition turns that into one lane error line.
+    """
+    schema_dir = config.declarations_dir / SCHEMA_DIRNAME
+    return load_schemas(schema_dir) if schema_dir.is_dir() else None
+
+
+def _entry_keys(schema_set: SchemaSet) -> dict[str, str]:
+    """The one derivation of `{type: entries key}`. The drain rule and the
+    coverage line both go through it, so they cannot disagree about which list
+    a ledger ref resolves under."""
+    return entry_keys_from(schema_set)
+
+
+def wiki_entry_keys(config: Config) -> dict[str, str] | None:
+    """`{type: entries key}` from this workspace's `schema/`, or None.
+
+    None when there is no `schema/`, and None when the declarations are
+    malformed -- never a raise. A malformed declaration is already one
+    `wiki lane: …` error line from `compose_lanes`, and a lane that failed to
+    compose contributed no drain rule, so there is no coverage to report.
+    """
+    try:
+        schema_set = _wiki_schema_set(config)
+    except _DECLARATION_ERRORS:
+        return None
+    return None if schema_set is None else _entry_keys(schema_set)
+
+
+def _wiki_rules(
+    config: Config, reader: GraphReader | None, *, at: datetime, repo_roots: tuple[Path, ...] = ()
+) -> tuple[Rule, ...]:
+    """The wiki lane's rule set: three unconditional, five declaration-gated,
     one reader-gated.
 
     `health` and `render` read only the bundle, so they are always on. The
     code-wiki placement rule reads resource identity and type ownership, not
-    generic schema directory prefixes, so it is unconditional too.
+    generic schema directory prefixes, so it is unconditional too. The claims
+    contract (`about_rule`) rides the schema gate: its mandate is the schema
+    set's `x-okf-about` annotation, so no schemas means no mandate, and a set
+    declaring none composes a rule that finds nothing. *repo_roots* is where
+    its `constrains` paths resolve. The drain rule rides the same gate for the
+    same reason: its entry keys come from `x-okf-about` too, so no schemas
+    means no ledger vocabulary to check refs against.
     """
     rules: list[Rule] = [health_rule(), render_rule(), code_wiki_placement_rule(severity="error")]
 
-    schema_dir = config.declarations_dir / SCHEMA_DIRNAME
-    if schema_dir.is_dir():
-        schema_set = load_schemas(schema_dir)
+    schema_set = _wiki_schema_set(config)
+    if schema_set is not None:
         rules.append(schema_rule(schema_set))
+        rules.append(about_rule(declared_about(schema_set), repo_roots=repo_roots, severity=CONTRACT_SEVERITY))
+        rules.append(drain_rule(_entry_keys(schema_set)))
 
     sections_dir = config.declarations_dir / SECTIONS_DIRNAME
     if sections_dir.is_dir():
@@ -199,8 +249,20 @@ def _work_ignore(layout: WorkspaceLayout) -> tuple[str, ...]:
     return (*siblings, *work_tracker_okf.IGNORE)
 
 
-def _compose_wiki(layout: WorkspaceLayout, config: Config, reader: GraphReader | None, *, at: datetime) -> Lane:
-    return Lane(name=WIKI_LANE, root=layout.bundle_dir, ignore=_wiki_ignore(), rules=_wiki_rules(config, reader, at=at))
+def _compose_wiki(
+    layout: WorkspaceLayout,
+    config: Config,
+    reader: GraphReader | None,
+    *,
+    at: datetime,
+    repo_roots: tuple[Path, ...] = (),
+) -> Lane:
+    return Lane(
+        name=WIKI_LANE,
+        root=layout.bundle_dir,
+        ignore=_wiki_ignore(),
+        rules=_wiki_rules(config, reader, at=at, repo_roots=repo_roots),
+    )
 
 
 def _compose_work(
@@ -259,6 +321,8 @@ def compose_lanes(
     *repo_root* and *repo_roots* are where the work lane resolves repo paths
     (`affects`, plan actions); a multi-repository workspace passes every
     declared repo as *repo_roots*, and a path under any one of them is good.
+    The wiki lane's claims contract resolves `constrains` paths against the
+    same roots.
 
     *reader* is optional because the mechanical pass is useful without a graph:
     with no reader the `sync` capability contributes no rule, exactly as an
@@ -266,8 +330,9 @@ def compose_lanes(
     """
     lanes: list[Lane] = []
     errors: list[str] = []
+    contract_roots = tuple(dict.fromkeys((*repo_roots, *((repo_root,) if repo_root is not None else ()))))
     builders: tuple[tuple[str, Callable[[], Lane]], ...] = (
-        (WIKI_LANE, lambda: _compose_wiki(layout, config, reader, at=at)),
+        (WIKI_LANE, lambda: _compose_wiki(layout, config, reader, at=at, repo_roots=contract_roots)),
         (WORK_LANE, lambda: _compose_work(layout, config, repo_root=repo_root, repo_roots=repo_roots)),
     )
     for name, build in builders:
@@ -281,4 +346,4 @@ def compose_lanes(
     return LaneSet(lanes=tuple(lanes), errors=tuple(errors))
 
 
-__all__ = ["WIKI_LANE", "WORK_LANE", "Lane", "LaneSet", "compose_lanes"]
+__all__ = ["CONTRACT_SEVERITY", "WIKI_LANE", "WORK_LANE", "Lane", "LaneSet", "compose_lanes", "wiki_entry_keys"]

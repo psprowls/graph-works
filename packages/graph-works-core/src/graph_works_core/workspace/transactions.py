@@ -48,6 +48,7 @@ from okf_io import Bundle, Rule, parse, validate
 from okf_io import load_bundle as _load_bundle
 from okf_io.bundle import _load_at as _load_bundle_at
 from work_tracker_okf.compose import rule_set
+from work_tracker_okf.dependencies import DependencyEdge, DependencyIssue
 from work_tracker_okf.indexes import reconcile_entries, render_entry
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.mutation import WorkMutationPlan, directory_manifest_digest
@@ -2129,24 +2130,43 @@ def _map_member(path_mapping: Mapping[str, str], member: str) -> str:
     return member
 
 
-def _item_conditions(item: WorkItem, by_path: dict[str, WorkItem]) -> tuple[tuple[str, str], ...]:
-    """The structural problems *item* carries, as `(kind, message)` pairs.
+def _conditions_for(
+    path: str,
+    parent_path: str | None,
+    edges: Sequence[DependencyEdge],
+    issues: Sequence[DependencyIssue],
+    exists: Callable[[str], bool],
+) -> tuple[tuple[str, str], ...]:
+    """The structural problems the item at *path* carries, as `(kind, message)` pairs.
 
     The kind is what the differential gate counts: an operation is at fault
     only when it raises the number of problems of one kind on one item.  The
     message stays free-form because it is only ever reported, never compared.
+
+    *exists* answers whether an item path names an item.  The postcondition
+    pass answers from its reloaded item map (`_item_conditions`); the baseline
+    answers from fresh anchored reads under the lock
+    (`_scoped_baseline_conditions`).  One predicate, two existence oracles, so
+    the two sides of the gate cannot drift apart on what a condition is.
     """
     conditions: list[tuple[str, str]] = []
-    if item.parent_path is not None and item.parent_path not in by_path:
-        conditions.append(("parent-missing", f"{item.path}: parent {item.parent_path!r} is missing after mutation"))
-    for edge in item.dependency_edges:
-        if edge.path not in by_path:
+    if parent_path is not None and not exists(parent_path):
+        conditions.append(("parent-missing", f"{path}: parent {parent_path!r} is missing after mutation"))
+    for edge in edges:
+        if not exists(edge.path):
             conditions.append(
-                ("dependency-missing", f"{item.path}: dependency target {edge.path!r} is missing after mutation")
+                ("dependency-missing", f"{path}: dependency target {edge.path!r} is missing after mutation")
             )
-    for issue in item.dependency_issues:
-        conditions.append((f"dependency-{issue.code}", f"{item.path}: dependency {issue.code}: {issue.detail}"))
+    for issue in issues:
+        conditions.append((f"dependency-{issue.code}", f"{path}: dependency {issue.code}: {issue.detail}"))
     return tuple(conditions)
+
+
+def _item_conditions(item: WorkItem, by_path: dict[str, WorkItem]) -> tuple[tuple[str, str], ...]:
+    """`_conditions_for` over a loaded *item*, existence answered by *by_path*."""
+    return _conditions_for(
+        item.path, item.parent_path, item.dependency_edges, item.dependency_issues, by_path.__contains__
+    )
 
 
 @dataclass(frozen=True, slots=True)

@@ -1326,6 +1326,50 @@ def test_item_conditions_are_kinded_pairs_for_parent_and_dependency_problems(tmp
     assert "work/bug-absent" in conditions[0][1]
 
 
+def test_the_item_adapter_and_the_shared_predicate_agree(tmp_path: Path) -> None:
+    """Baseline and postcondition kinds come from one implementation.
+
+    `_item_conditions` is the postcondition pass's adapter; the baseline calls
+    `_conditions_for` directly with a filesystem `exists`. Given the same
+    existence answers, the two must yield identical pairs for every item.
+    """
+    layout = _workspace(tmp_path)
+    edge = {"blocks": "execute", "needs": "resolved"}
+    _write_item(layout.bundle_dir, "work/rel", type="Release")
+    _write_item(
+        layout.bundle_dir,
+        "work/rel/children/kid",
+        type="Feature",
+        depends_on=({"path": "work/rel", **edge},),
+    )
+    _write_item(layout.bundle_dir, "work/gone/children/lost", type="Feature")
+    _write_item(
+        layout.bundle_dir,
+        "work/dangling",
+        type="Bug",
+        depends_on=({"path": "work/absent", **edge}, {"path": "not/canonical", **edge}),
+    )
+    items = load_items(load_bundle(layout.bundle_dir, ignore=IGNORE))
+    by_path = {item.path: item for item in items}
+
+    for item in items:
+        assert transactions._item_conditions(item, by_path) == transactions._conditions_for(
+            item.path,
+            item.parent_path,
+            item.dependency_edges,
+            item.dependency_issues,
+            lambda path: path in by_path,
+        ), item.path
+
+    kinds = {
+        path: {kind for kind, _message in transactions._item_conditions(by_path[path], by_path)}
+        for path in ("work/rel/children/kid", "work/gone/children/lost", "work/dangling")
+    }
+    assert kinds["work/rel/children/kid"] == set()
+    assert kinds["work/gone/children/lost"] == {"parent-missing"}
+    assert {"dependency-missing", "dependency-invalid-path"} <= kinds["work/dangling"]
+
+
 def test_baseline_capture_counts_findings_under_their_post_move_paths(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     repo = tmp_path / "repo"

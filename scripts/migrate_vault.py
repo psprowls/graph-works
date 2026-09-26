@@ -765,10 +765,11 @@ def cmd_work(args: argparse.Namespace) -> PhaseReport:
     """Phase 6. Land the work lane path-native, through the harvested migrator.
 
     `plan_migration` is the only entry point (`migration.py:698`); the plan is
-    applied through `apply_mutation(layout, plan.mutation)` -- the same call
-    `run_migrate_layout` makes (`graph_works_core/work/commands.py:574-589`).
-    That module is permanent and stays an import; only `migration.py` was
-    copied (D-013).
+    applied through `apply_mutation(layout, plan.mutation, commit=None)`.
+    This historical one-time script preserves manual per-phase commits; it
+    is explicitly exempt from the production gw workspace-commit policy.
+    The transaction executor stays a package import; only `migration.py`
+    was copied (D-013).
 
     **`plan_migration` is handed a bundle loaded with `LEGACY_IGNORE`, not the
     sweep's `ignore_patterns("work")`.** `LEGACY_IGNORE` (`work_tracker_okf.items.
@@ -833,7 +834,9 @@ def cmd_work(args: argparse.Namespace) -> PhaseReport:
         return PhaseReport(phase="work", notes=tuple([*notes, "already path-native; nothing to do"]))
 
     if args.write:
-        application = apply_mutation(_layout(vault), plan.mutation)
+        # Historical migration phases leave their changes for manual review
+        # and commit, as documented above; do not auto-commit this phase alone.
+        application = apply_mutation(_layout(vault), plan.mutation, commit=None)
         if not application.ok:
             #: `apply_mutation` can roll back *without raising* -- postcondition
             #: validation fails after the writes land, the transaction restores

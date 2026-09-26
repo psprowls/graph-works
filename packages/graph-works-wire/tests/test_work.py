@@ -568,3 +568,21 @@ def test_filing_applied_requires_successful_nonempty_writes():
     assert work.file_payload(outcome)["applied"] is False
     outcome.plan.refusal = "collision"
     assert work.file_payload(outcome)["applied"] is False
+
+
+def test_archive_projects_non_null_wiki_commit() -> None:
+    result = archive_run(applied=True)
+    result.wiki_commit = CommitOutcome(
+        "committed",
+        "wiki-sha",
+        "workspace: archive wiki old-page",
+        ("okf/concepts/old-page.md", "okf/archive/concepts/old-page.md"),
+        None,
+    )
+    assert work.archive_payload(result, dry_run=False)["wiki_commit"] == {
+        "status": "committed",
+        "sha": "wiki-sha",
+        "subject": "workspace: archive wiki old-page",
+        "paths": ["okf/concepts/old-page.md", "okf/archive/concepts/old-page.md"],
+        "reason": None,
+    }

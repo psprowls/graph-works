@@ -805,6 +805,30 @@ def test_work_phase_write_lands_the_path_native_lane(tmp_path: Path) -> None:
     assert not (root / "work/2026-08-11-epic-cutover.md").exists()
 
 
+def test_work_phase_preserves_manual_commit_policy(tmp_path: Path, monkeypatch) -> None:
+    from graph_works_core.workspace import transactions
+    from migrate_vault import cmd_work
+
+    root = vault_root(tmp_path)
+    _seed_schema(root)
+    _legacy_work_lane(root)
+    original = transactions.apply_mutation
+    applications = []
+
+    def apply_without_commit(layout, plan, *, commit):
+        assert commit is None
+        result = original(layout, plan, commit=commit)
+        applications.append(result)
+        return result
+
+    monkeypatch.setattr(transactions, "apply_mutation", apply_without_commit)
+    result = cmd_work(_args(vault=root, write=True))
+    assert result.ok, result.refusals
+    assert len(applications) == 1
+    assert applications[0].ok and applications[0].commit is None
+    assert (root / "work/epic-cutover.md").is_file()
+
+
 def test_work_phase_reports_a_refusal_when_apply_mutation_rolls_back(tmp_path: Path) -> None:
     """Deliberately skip `_seed_schema`: `apply_mutation`'s postcondition
     validation then fails with no `.gw/schema` (and no bundle-relative

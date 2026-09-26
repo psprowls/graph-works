@@ -6,7 +6,7 @@ import json
 from datetime import date
 
 import pytest
-from _transaction_helpers import _init_git, assert_workspace_commit
+from _transaction_helpers import _git, _init_git, assert_workspace_commit
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
@@ -115,21 +115,35 @@ def test_run_file_apply_matches_its_plan(tmp_path) -> None:
 
 
 def test_run_file_commits_its_work_and_parent_references(tmp_path) -> None:
-    layout = apply_init(plan_init(tmp_path / "ws", today=TODAY, topic="Work")).layout
+    layout, _ = seeded_workspace(tmp_path)
+    assert work.run_regen_indexes(layout, dry_run=False).application.ok
     _init_git(layout.root)
+    reference = layout.bundle_dir / EPIC / "references/parent-guidance.txt"
+    reference.parent.mkdir(parents=True)
+    reference.write_text("parent guidance\n", encoding="utf-8", newline="\n")
     result = work.run_file(
         layout,
         _config(layout),
         type="Feature",
         title="New child",
         description="d",
-        parent_path=None,
+        parent_path=EPIC,
         on=TODAY,
         dry_run=False,
     )
     assert result.application is not None and result.application.ok
     assert result.application.commit is not None and result.application.commit.status == "committed"
     assert_workspace_commit(layout.root, "workspace: file feature-new-child")
+    assert result.plan.filing.path == f"{EPIC}/children/feature-new-child"
+    assert set(_git(layout.root, "show", "--name-only", "--format=", "HEAD").splitlines()) == {
+        "okf/log.md",
+        f"okf/{EPIC}/children/index.md",
+        f"okf/{EPIC}/children/feature-new-child.md",
+        f"okf/{EPIC}/children/feature-new-child/children/index.md",
+        f"okf/{EPIC}/children/feature-new-child/references/.gitkeep",
+        f"okf/{EPIC}/references/parent-guidance.txt",
+    }
+    assert _git(layout.root, "status", "--porcelain") == ""
 
 
 def test_run_file_refuses_a_target_created_after_domain_planning(tmp_path, monkeypatch) -> None:

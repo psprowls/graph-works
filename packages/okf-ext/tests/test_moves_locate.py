@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ext_helpers
+import pytest
 from okf_ext.body import split_lines
 from okf_ext.moves import locate
 
@@ -247,3 +248,31 @@ def test_every_span_in_the_corpus_round_trips():
             assert text[candidate.column : candidate.column + len(candidate.text)] == candidate.text
             seen += 1
     assert seen > 10, "the corpus should exercise more than a handful of destinations"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\r\n"])
+@pytest.mark.parametrize("prefix", ["", " ", "  ", "   ", "> ", "- "])
+@pytest.mark.parametrize(
+    "content", ["/target.md", "[Title](/target.md)", "[Two words](/target.md)", "[/target.md](/target.md)"]
+)
+def test_footnote_prose_and_links_are_not_reference_definitions(newline, prefix, content):
+    body = (
+        f"Claim.[^MiXeD]\n\n{prefix}[^MiXeD]: {content}\n\n"
+        "[Ordinary]: /other.md\n\n[Ordinary]\n\n"
+        "```\n[^fenced]: [Code](/ignored.md)\n```\n\n"
+        "    [^indented]: [Code](/ignored.md)\n\n"
+        "`[^inline]: [Code](/ignored.md)`\n"
+    ).replace("\n", newline)
+    definitions = locate.reference_definitions(body)
+    assert [(d.label, d.href, d.line) for d in definitions] == [("Ordinary", "/other.md", 5)]
+    found = locate.destinations(body)
+    assert [c.text for c in found] == ([] if content == "/target.md" else ["/target.md"])
+    for candidate in found:
+        assert candidate.line == 3
+        assert body.splitlines()[2][candidate.column : candidate.column + len(candidate.text)] == "/target.md"
+
+
+def test_footnote_continuation_remains_prose_for_the_code_mask():
+    body = "[^s]: /bare.md\n    [Title](/target.md)\n"
+    assert locate.reference_definitions(body) == ()
+    assert [(c.line, c.text) for c in locate.destinations(body)] == [(2, "/target.md")]

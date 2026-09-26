@@ -37,11 +37,12 @@ from dataclasses import dataclass
 
 from markdown_it import MarkdownIt
 
-from okf_ext.body import prose_lines, split_lines
+from okf_ext.body import _reference, prose_lines, split_lines
 
 #: One shared parser. `commonmark` deliberately, matching `okf_io._md` and
 #: `okf_ext.body`: no linkify, so a bare URL in prose does not become an edge.
 _MD = MarkdownIt("commonmark")
+_MD.block.ruler.at("reference", _reference)
 
 #: Backtick spans, longest-run-first so ``` ``[^x]`` ``` is masked whole. A
 #: genuine inline span can cross a line break (```` `code\nmore` ```` is one

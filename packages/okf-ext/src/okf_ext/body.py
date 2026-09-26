@@ -40,6 +40,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_block import StateBlock, reference
 from okf_io import Bundle
 
 #: One shared parser. `commonmark` deliberately, matching `okf_io._md`: no
@@ -51,6 +52,23 @@ _MD = MarkdownIt("commonmark")
 #: `str.splitlines` also breaks on VT, FF, NEL and U+2028, which would slide
 #: every subsequent line number by one on a body containing any of them.
 _NEWLINE_RE = re.compile(r"\r\n?|\n")
+
+
+_FOOTNOTE_DEF_RE = re.compile(r"^ {0,3}\[\^([^\]\s]+)\]:")
+
+
+# OKF footnote labels join to sources; their text is prose, not a
+# CommonMark reference destination. Guard at the parser's content offset
+# so blockquotes/lists retain their own indentation and code-block rules.
+def _reference(state: StateBlock, start_line: int, end_line: int, silent: bool) -> bool:
+    position = state.bMarks[start_line] + state.tShift[start_line]
+    if _FOOTNOTE_DEF_RE.match(state.src[position : state.eMarks[start_line]]):
+        return False
+    return reference(state, start_line, end_line, silent)
+
+
+# The commonmark reference rule has no alternate chains; retain that setup.
+_MD.block.ruler.at("reference", _reference)
 
 
 def split_lines(body: str) -> tuple[str, ...]:

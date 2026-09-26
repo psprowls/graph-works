@@ -133,20 +133,27 @@ def _git(toplevel: Path, *args: str) -> GitOutcome:
     return outcome
 
 
-def _pathspec(toplevel: Path, candidates: Sequence[str]) -> tuple[tuple[str, ...], str | None]:
-    """Existing or tracked candidates, with any git discovery failure retained."""
+def _pathspec(toplevel: Path, candidates: Sequence[str]) -> tuple[tuple[str, ...], tuple[str, ...], str | None]:
+    """Requested paths to commit and paths safe to pass to `git add`."""
     tracked = _git(toplevel, "ls-files", "-z", "--", *candidates)
     if tracked.returncode != 0:
-        return (), _reason(tracked)
+        return (), (), _reason(tracked)
+    in_head = _git(toplevel, "ls-tree", "-r", "--name-only", "-z", "HEAD", "--", *candidates)
+    if in_head.returncode != 0:
+        return (), (), _reason(in_head)
     known = [entry for entry in tracked.stdout.split("\0") if entry]
-    return (
-        tuple(
-            candidate
-            for candidate in candidates
-            if (toplevel / candidate).exists() or any(k == candidate or k.startswith(f"{candidate}/") for k in known)
-        ),
-        None,
+    head = [entry for entry in in_head.stdout.split("\0") if entry]
+    add_paths = tuple(
+        candidate
+        for candidate in candidates
+        if (toplevel / candidate).exists() or any(k == candidate or k.startswith(f"{candidate}/") for k in known)
     )
+    commit_paths = tuple(
+        candidate
+        for candidate in candidates
+        if candidate in add_paths or any(k == candidate or k.startswith(f"{candidate}/") for k in head)
+    )
+    return commit_paths, add_paths, None
 
 
 def commit_workspace(
@@ -170,14 +177,15 @@ def commit_workspace(
         if not member or member == "." or relative.is_absolute() or ".." in relative.parts:
             return CommitOutcome("failed", None, commit.subject, (), f"path is outside bundle: {member!r}")
     candidates = sorted({(bundle / member).relative_to(toplevel).as_posix() for member in members})
-    pathspec, discovery_error = _pathspec(toplevel, candidates) if candidates else ((), None)
+    pathspec, add_paths, discovery_error = _pathspec(toplevel, candidates) if candidates else ((), (), None)
     if discovery_error is not None:
         return CommitOutcome("failed", None, commit.subject, (), discovery_error)
     if not pathspec:
         return CommitOutcome("skipped", None, commit.subject, (), "no-changes")
-    added = _git(toplevel, "add", "-A", "--", *pathspec)
-    if added.returncode != 0:
-        return CommitOutcome("failed", None, commit.subject, pathspec, _reason(added))
+    if add_paths:
+        added = _git(toplevel, "add", "-A", "--", *add_paths)
+        if added.returncode != 0:
+            return CommitOutcome("failed", None, commit.subject, pathspec, _reason(added))
     staged = _git(toplevel, "diff", "--cached", "--quiet", "--", *pathspec)
     if staged.returncode == 0:
         return CommitOutcome("skipped", None, commit.subject, pathspec, "no-changes")

@@ -184,6 +184,45 @@ def test_deletes_and_moves_are_staged(tmp_path: Path) -> None:
     assert _status(layout.root) == ""
 
 
+def test_already_staged_deletion_is_committed(tmp_path: Path) -> None:
+    layout = _own_repo(tmp_path)
+    _write(layout.bundle_dir, "work/gone.md", "g\n")
+    _git(layout.root, "add", "-A")
+    _git(layout.root, "commit", "-q", "-m", "workspace: seed2")
+    (layout.bundle_dir / "work/gone.md").unlink()
+    _git(layout.root, "add", "-A", "--", str(layout.bundle_dir / "work/gone.md"))
+
+    outcome = commit_workspace(layout, WorkspaceCommit("workspace: delete"), ("work/gone.md",))
+
+    assert outcome.status == "committed", outcome
+    deleted = (layout.bundle_dir / "work/gone.md").relative_to(layout.root).as_posix()
+    assert _files_in_head(layout.root) == {deleted}
+    assert _status(layout.root) == ""
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="shell hook")
+def test_rejected_move_retry_commits_source_deletion(tmp_path: Path) -> None:
+    layout = _own_repo(tmp_path)
+    _write(layout.bundle_dir, "work/old/references/r.md", "r\n")
+    _git(layout.root, "add", "-A")
+    _git(layout.root, "commit", "-q", "-m", "workspace: seed2")
+    (layout.bundle_dir / "archive").mkdir()
+    (layout.bundle_dir / "work/old").rename(layout.bundle_dir / "archive/old")
+    hook = layout.root / ".no-hooks" / "pre-commit"
+    hook.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
+    paths = ("archive/old", "work/old")
+    first = commit_workspace(layout, WorkspaceCommit("workspace: move"), paths)
+    assert first.status == "failed"
+    hook.unlink()
+
+    retried = commit_workspace(layout, WorkspaceCommit("workspace: move"), paths)
+
+    assert retried.status == "committed", retried
+    assert _status(layout.root) == ""
+    assert (layout.bundle_dir / "archive/old/references/r.md").exists()
+
+
 def test_missing_pathspec_entry_is_dropped(tmp_path: Path) -> None:
     layout = _own_repo(tmp_path)
     _write(layout.bundle_dir, "work/a.md", "a\n")

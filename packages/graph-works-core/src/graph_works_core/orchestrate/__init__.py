@@ -4,6 +4,7 @@
 `claims.py` is the pure claim model (`Claim`, `conflicts()`) `commands.plan()`
 admits every candidate through: containment-aware code scopes, observed
 worktrees, the workspace; owner self-exclusion; write-vs-write.
+`wait.py` is the coordinator's event wait (`gw work wait`) over `OrcaPort`.
 `stage_advance.py` handles stage completion; `placement.py` records observed
 placement and reader receipts, sharing `stage_advance`'s decision-owner lock,
 not its code. `anchors.py` prepares and checks worktree anchors.

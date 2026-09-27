@@ -584,3 +584,38 @@ def test_task_list_unusable_result_is_none(raw):
         return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
 
     assert OrcaCliPort(run=listing).task_list("run_1")[0]["result"] is None
+
+
+def test_liveness_projects_observation_without_binding_or_nudging():
+    from datetime import UTC, datetime
+
+    p, runner = port(
+        [
+            (("task-list",), "task_list"),
+            (("worker-list",), "worker_list"),
+            (("worker-show",), "worker_show_live_terminal"),
+            (("worker-read",), "worker_read_latest"),
+            (("worktree", "show"), "worktree_show_renamed"),
+        ]
+    )
+    [row] = p.liveness("run_observe", now=datetime(2026, 9, 27, tzinfo=UTC))
+    assert row["handle"] == "ctx_320c498114b8"
+    assert set(row) == {
+        "key",
+        "handle",
+        "state",
+        "heartbeat_at",
+        "heartbeat_age_s",
+        "transcript_at",
+        "transcript_age_s",
+        "output_at",
+        "output_age_s",
+        "worktree_path",
+        "progress",
+        "notes",
+    }
+    assert json.loads(json.dumps(row)) == row
+    assert not any(token in call for call in runner.calls for token in ("run-use", "run-create", "send", "check"))
+    for command in ("task-list", "worker-list"):
+        [call] = runner.calls_matching(command)
+        assert runner.argv_after("--run", call) == "run_observe"

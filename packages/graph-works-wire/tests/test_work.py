@@ -844,3 +844,22 @@ def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
         ReaderRecord(plan, Path("/cache/ctx_1.json"), False, False, "attempt-mismatch")
     )
     assert payload["conflict"] == "attempt-mismatch"
+
+
+def test_wait_liveness_preserves_empty_populated_and_uncomputed():
+    from graph_works_core.orchestrate.wait import WaitResult
+
+    for rows in (None, [], [{"handle": "ctx_1", "progress": None, "notes": ["no SDD ledger"]}]):
+        result = WaitResult(
+            status="event" if rows is None else "timeout",
+            run_id="run_1",
+            delivery_id=None,
+            messages=(),
+            absorbed=(),
+            self_acked=0,
+            rebound=False,
+            sleep_gap_s=None,
+            waited_s=1,
+            liveness=rows,
+        )
+        assert work.wait_payload(result)["liveness"] == rows

@@ -1,16 +1,19 @@
 """The `OrcaPort` graph-works-core declares, satisfied structurally — this module never imports core.
 
-One method per Orca call; `OrcaSession` is unchanged and does not use it.
+Most methods project one Orca call; timeout liveness reuses session observation.
 """
 
 from __future__ import annotations
 
 import json
 from collections.abc import Callable, Sequence
+from datetime import datetime
 from typing import Any, TypedDict
 
 from workflow_orca._cli import OrcaCliError, OrcaResult, _subprocess_run, unwrap
 from workflow_orca._launch import check_launch_receipt
+from workflow_orca._liveness import liveness_data
+from workflow_orca.backend import OrcaSession
 
 
 class OrcaRepo(TypedDict):
@@ -155,7 +158,12 @@ def _worktree(row: dict[str, Any]) -> OrcaWorktree:
 
 
 class OrcaCliPort:
-    """A small, typed projection of one CLI operation per port method."""
+    """Typed CLI operations and read-only liveness observation."""
+
+    def liveness(self, run_id: str, *, now: datetime) -> list[dict[str, Any]]:
+        """Observe an existing Run without binding its consumer or nudging workers."""
+        session = OrcaSession(name=run_id, run_id=run_id, run=self._run, repo_selector=None)
+        return liveness_data(session.liveness(now=now))
 
     def __init__(self, *, run: Callable[[Sequence[str]], OrcaResult] = _subprocess_run) -> None:
         self._run = run

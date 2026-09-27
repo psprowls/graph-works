@@ -70,6 +70,7 @@ def test_event_json_is_the_wire_projection(env):
     assert payload["pending_questions"] is None and payload["liveness"] is None
     acks = [kwargs["ack"] for name, _a, kwargs in port.calls if name == "check_wait"]
     assert acks[0] == "dlv_prev"
+    assert "liveness" not in port.names()
 
 
 def test_timeout_human_line(env):
@@ -188,3 +189,55 @@ def test_captured_shape_sender_survives_adapter_core_and_wire(current, historica
     clock = WaitClock(wall=lambda: datetime(2026, 9, 27, tzinfo=UTC), monotonic=lambda: 0.0)
     result = run_wait(OrcaCliPort(run=raw_check), "run_1", ack=None, timeout_s=1, clock=clock)
     assert wait_payload(result)["messages"][0]["from"] == expected
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_timeout_json_liveness_through_real_adapter(env, monkeypatch, live):
+    layout, _ = env
+    fixtures = REPO / "packages/workflow-orca/tests/fixtures"
+    calls = []
+
+    def transport(argv):
+        calls.append(tuple(argv))
+        if "check" in argv:
+            return OrcaResult(0, json.dumps({"ok": True, "result": {"messages": []}}), "")
+        names = {
+            "task-list": "task_list",
+            "worker-list": "worker_list",
+            "worker-show": "worker_show_live_terminal",
+            "worker-read": "worker_read_latest",
+        }
+        for command, name in names.items():
+            if command in argv:
+                if not live and command in ("task-list", "worker-list"):
+                    key = "tasks" if command == "task-list" else "workers"
+                    return OrcaResult(0, json.dumps({"ok": True, "result": {key: []}}), "")
+                return OrcaResult(0, (fixtures / f"{name}.json").read_text(encoding="utf-8"), "")
+        if tuple(argv[1:3]) == ("worktree", "show"):
+            return OrcaResult(0, (fixtures / "worktree_show_renamed.json").read_text(encoding="utf-8"), "")
+        raise AssertionError(argv)
+
+    monkeypatch.setattr(main, "orca_port", lambda: OrcaCliPort(run=transport))
+    result = invoke(layout, "--timeout-s", "1", "--json")
+    assert result.exit_code == 0, result.output
+    rows = json.loads(result.stdout)["liveness"]
+    assert isinstance(rows, list)
+    if live:
+        [row] = rows
+        assert set(row) == {
+            "key",
+            "handle",
+            "state",
+            "heartbeat_at",
+            "heartbeat_age_s",
+            "transcript_at",
+            "transcript_age_s",
+            "output_at",
+            "output_age_s",
+            "worktree_path",
+            "progress",
+            "notes",
+        }
+    else:
+        assert rows == []
+    assert not any(token in call for call in calls for token in ("run-use", "run-create", "send"))

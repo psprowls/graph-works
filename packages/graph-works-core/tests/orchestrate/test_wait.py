@@ -473,3 +473,45 @@ def test_absorbed_accumulates_across_loops():
     )
     result = wait(port, clock)
     assert [a.message_id for a in result.absorbed] == ["a", "b"] and result.self_acked == 2
+
+
+def test_timeout_liveness_uses_the_final_sleep_gap_sample():
+    final = T0 + timedelta(seconds=3600)
+    walls = iter([T0, final])
+    monos = iter([0.0, 0.0, 600.0])
+    port = FakeOrcaPort()
+    rows = [{"handle": "ctx_1", "heartbeat_age_s": 90}]
+
+    def observe(run_id, *, now):
+        port._record("liveness", run_id, now=now)
+        return rows
+
+    port.liveness = observe
+    result = run_wait(
+        port, "run_1", ack=None, timeout_s=600, clock=WaitClock(wall=lambda: next(walls), monotonic=lambda: next(monos))
+    )
+    assert result.sleep_gap_s == 3000 and result.waited_s == 600
+    assert result.liveness == rows
+    assert port.calls[-1] == ("liveness", ("run_1",), {"now": final})
+
+
+def test_timeout_with_no_live_workers_has_empty_liveness():
+    port = FakeOrcaPort()
+    assert wait(port, Clock()).liveness == []
+    assert port.names().count("liveness") == 1
+
+
+def test_event_has_null_liveness_without_observation():
+    port = FakeOrcaPort(deliveries=[delivery("d", msg("e", "question"))])
+    port.fail["liveness"] = AssertionError("events must not observe")
+    assert wait(port, Clock()).liveness is None
+    assert "liveness" not in port.names()
+
+
+def test_liveness_failure_is_wait_failed_without_rebinding():
+    port = FakeOrcaPort()
+    port.fail["liveness"] = Fenced("observation failed")
+    with pytest.raises(WaitFailed, match="observation failed") as caught:
+        wait(port, Clock())
+    assert caught.value.code == "consumer_fenced"
+    assert "run_use" not in port.names()

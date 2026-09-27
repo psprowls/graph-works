@@ -10,6 +10,7 @@ of annotations at runtime. Every failure crosses the seam as
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any, Protocol, TypedDict, runtime_checkable
 
 
@@ -85,6 +86,10 @@ class OrcaDelivery(TypedDict):
 
 @runtime_checkable
 class OrcaPort(Protocol):
+    def liveness(self, run_id: str, *, now: datetime) -> list[dict[str, Any]]:
+        """Observe live dispatches as JSON data, without binding or nudging."""
+        ...
+
     def repo_list(self) -> list[OrcaRepo]: ...
     def worktree_show(self, selector: str) -> OrcaWorktree | None: ...
     def worktree_list(self, repo_id: str) -> list[OrcaWorktree]: ...

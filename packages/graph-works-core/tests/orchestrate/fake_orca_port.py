@@ -52,6 +52,10 @@ class FakeOrcaPort:
     def names(self) -> list[str]:
         return [name for name, _a, _k in self.calls]
 
+    def liveness(self, run_id, *, now):
+        self._record("liveness", run_id, now=now)
+        return []
+
     def repo_list(self):
         self._record("repo_list")
         return list(self.repos)

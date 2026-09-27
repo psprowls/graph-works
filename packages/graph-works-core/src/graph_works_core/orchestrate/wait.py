@@ -4,7 +4,7 @@ Decisions only. Every Orca call goes through `OrcaPort`, whose argv lives in
 `workflow_orca.port`. Heartbeats never wake the caller. A delivery holding nothing
 real is acked here and the wait resumes for the remaining time. A delivery holding
 anything real is returned unacked, and the caller acks it on its next wait (`ack=`).
-The verb never nudges and never reads a worker, and it never reads the clock:
+The verb observes liveness only on timeout, never nudges, and never reads the clock:
 `WaitClock` is injected. Wall-minus-monotonic elapsed time is the time the host
 slept, because both macOS and Linux monotonic clocks exclude suspend.
 """
@@ -15,7 +15,7 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
-from typing import Literal, TypeVar
+from typing import Any, Literal, TypeVar
 
 from subagents_io.backend import BackendError
 
@@ -54,6 +54,7 @@ class WaitResult:
     rebound: bool
     sleep_gap_s: int | None
     waited_s: int
+    liveness: list[dict[str, Any]] | None = None
 
 
 class WaitFailed(RuntimeError):
@@ -186,7 +187,12 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
     except BackendError as exc:
         raise WaitFailed(run_id, getattr(exc, "code", None), str(exc)) from exc
     mono_elapsed = clock.monotonic() - mono0
-    gap = int((clock.wall() - wall0).total_seconds() - mono_elapsed)
+    now = clock.wall()
+    gap = int((now - wall0).total_seconds() - mono_elapsed)
+    try:
+        liveness = port.liveness(run_id, now=now) if status == "timeout" else None
+    except BackendError as exc:
+        raise WaitFailed(run_id, getattr(exc, "code", None), str(exc)) from exc
     return WaitResult(
         status=status,
         run_id=run_id,
@@ -197,4 +203,5 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
         rebound=fence.rebound,
         sleep_gap_s=gap if gap >= SLEEP_GAP_FLOOR_S else None,
         waited_s=int(mono_elapsed),
+        liveness=liveness,
     )

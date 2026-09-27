@@ -454,6 +454,41 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                 rebound=True,
                 sleep_gap_s=3000,
                 waited_s=600,
+                liveness=[],
+            )
+        ),
+        lambda: work.wait_payload(
+            WaitResult(
+                status="timeout",
+                run_id="run_1",
+                delivery_id=None,
+                messages=(),
+                absorbed=(),
+                self_acked=0,
+                rebound=False,
+                sleep_gap_s=None,
+                waited_s=600,
+                liveness=[
+                    {
+                        "key": "work/a#execute",
+                        "handle": "ctx_1",
+                        "state": "running",
+                        "heartbeat_at": "2026-09-27T12:00:00Z",
+                        "heartbeat_age_s": 90,
+                        "transcript_at": None,
+                        "transcript_age_s": None,
+                        "output_at": None,
+                        "output_age_s": None,
+                        "worktree_path": "/worktree",
+                        "progress": {
+                            "ledger": "/worktree/.superpowers/sdd/plan/progress.md",
+                            "plan": "/worktree/plan.md",
+                            "completed": 1,
+                            "total": 2,
+                        },
+                        "notes": [],
+                    }
+                ],
             )
         ),
     ),

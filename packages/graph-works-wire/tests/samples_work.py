@@ -14,6 +14,7 @@ from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResul
 from graph_works_core.orchestrate.dispatch_record import Overrides
 from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
+from graph_works_core.orchestrate.wait import Absorbed, WaitResult
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
@@ -414,6 +415,45 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                 run_id="run_2",
                 reason="retry",
                 failure=DispatchFailure("reroute", "unsent", "worker unavailable"),
+            )
+        ),
+    ),
+    "work.wait_payload": (
+        lambda: work.wait_payload(
+            WaitResult(
+                status="event",
+                run_id="run_1",
+                delivery_id="dlv_1",
+                messages=(
+                    {
+                        "id": "m1",
+                        "type": "question",
+                        "subject": "q",
+                        "body": "q",
+                        "from_": "term_1",
+                        "created_at": "t",
+                        "payload": {"question": "q"},
+                        "payload_raw": None,
+                    },
+                ),
+                absorbed=(Absorbed("m0", "worker_done", "ctx_0", "duplicate-completion"),),
+                self_acked=1,
+                rebound=False,
+                sleep_gap_s=None,
+                waited_s=12,
+            )
+        ),
+        lambda: work.wait_payload(
+            WaitResult(
+                status="timeout",
+                run_id="run_1",
+                delivery_id=None,
+                messages=(),
+                absorbed=(),
+                self_acked=0,
+                rebound=True,
+                sleep_gap_s=3000,
+                waited_s=600,
             )
         ),
     ),

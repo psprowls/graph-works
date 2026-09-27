@@ -19,9 +19,11 @@ from graph_works_core.guidance.assembly import Guidance
 from graph_works_core.orchestrate.asks import AskAnswerResult, AskResult
 from graph_works_core.orchestrate.commands import OrchestrateResult
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from graph_works_core.orchestrate.orca_port import OrcaMessage
 from graph_works_core.orchestrate.placement import PlacementRecord, ReaderRecord
 from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.orchestrate.stage_advance import StageAdvance
+from graph_works_core.orchestrate.wait import WaitResult
 from graph_works_core.work.commands import (
     ActiveWorkTouch,
     ChildRollup,
@@ -322,6 +324,39 @@ def reroute_payload(result: RerouteResult) -> dict[str, Any]:
         },
         "record_path": result.record_path,
         "failure": _dispatch_failure(result.failure),
+    }
+
+
+def _wait_message(message: OrcaMessage) -> dict[str, Any]:
+    payload = message["payload"]
+    return {
+        "id": message["id"],
+        "type": message["type"],
+        "subject": message["subject"],
+        "body": message["body"],
+        "from": message["from_"],
+        "created_at": message["created_at"],
+        "payload": dict(payload) if payload is not None else message["payload_raw"],
+    }
+
+
+def wait_payload(result: WaitResult) -> dict[str, Any]:
+    """Project one coordinator wait, including its reserved nullable slots."""
+    return {
+        "status": result.status,
+        "run_id": result.run_id,
+        "delivery_id": result.delivery_id,
+        "messages": [_wait_message(message) for message in result.messages],
+        "absorbed": [
+            {"message_id": item.message_id, "type": item.type, "dispatch_id": item.dispatch_id, "reason": item.reason}
+            for item in result.absorbed
+        ],
+        "self_acked": result.self_acked,
+        "rebound": result.rebound,
+        "sleep_gap": None if result.sleep_gap_s is None else {"seconds": result.sleep_gap_s},
+        "waited_s": result.waited_s,
+        "pending_questions": None,
+        "liveness": None,
     }
 
 

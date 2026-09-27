@@ -10,6 +10,7 @@ from types import SimpleNamespace as ns
 from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
 from graph_works_core.orchestrate.dispatch_record import Overrides
 from graph_works_core.orchestrate.reroute import RerouteResult
+from graph_works_core.orchestrate.wait import Absorbed, WaitResult
 from graph_works_core.work.commands import DispatchExplanation, OpenDecision
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
@@ -17,6 +18,78 @@ from graph_works_wire import config as wire_config
 from graph_works_wire import work
 from samples_work import BUNDLE, archive_run, next_result, status
 from work_tracker_okf.decisions import Decision
+
+
+def _wait_message(**over: object) -> dict:
+    base = {
+        "id": "m1",
+        "type": "worker_done",
+        "subject": "s",
+        "body": "b",
+        "from_": "term_1",
+        "created_at": "2026-09-27T18:00:00Z",
+        "payload": {"dispatchId": "ctx_1"},
+        "payload_raw": None,
+    }
+    return {**base, **over}
+
+
+def test_wait_payload_exact_event_shape() -> None:
+    result = WaitResult(
+        status="event",
+        run_id="run_1",
+        delivery_id="dlv_1",
+        messages=(_wait_message(),),
+        absorbed=(Absorbed("m0", "worker_done", "ctx_0", "duplicate-completion"),),
+        self_acked=1,
+        rebound=False,
+        sleep_gap_s=None,
+        waited_s=312,
+    )
+    assert work.wait_payload(result) == {
+        "status": "event",
+        "run_id": "run_1",
+        "delivery_id": "dlv_1",
+        "messages": [
+            {
+                "id": "m1",
+                "type": "worker_done",
+                "subject": "s",
+                "body": "b",
+                "from": "term_1",
+                "created_at": "2026-09-27T18:00:00Z",
+                "payload": {"dispatchId": "ctx_1"},
+            }
+        ],
+        "absorbed": [
+            {"message_id": "m0", "type": "worker_done", "dispatch_id": "ctx_0", "reason": "duplicate-completion"}
+        ],
+        "self_acked": 1,
+        "rebound": False,
+        "sleep_gap": None,
+        "waited_s": 312,
+        "pending_questions": None,
+        "liveness": None,
+    }
+
+
+def test_wait_payload_timeout_with_sleep_gap_and_raw_payload() -> None:
+    result = WaitResult(
+        status="timeout",
+        run_id="run_1",
+        delivery_id=None,
+        messages=(_wait_message(payload=None, payload_raw="{bad"),),
+        absorbed=(),
+        self_acked=0,
+        rebound=True,
+        sleep_gap_s=3000,
+        waited_s=600,
+    )
+    payload = work.wait_payload(result)
+    assert payload["sleep_gap"] == {"seconds": 3000}
+    assert payload["messages"][0]["payload"] == "{bad"
+    assert payload["rebound"] is True and payload["pending_questions"] is None and payload["liveness"] is None
+    json.dumps(payload)
 
 
 def test_worker_dispatch_payload_exact_success_shape() -> None:

@@ -12,6 +12,7 @@ from unittest import mock
 import pytest
 from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.orchestrate.commands import BlockedItem
+from graph_works_core.workspace import pipeline
 from graph_works_core.workspace.finish import FinishPlan, FinishTarget
 from graph_works_core.workspace.repo_context import RepositoryContext
 from graph_works_core.workspace.repos import ItemRepo
@@ -98,6 +99,79 @@ def _plan(items: tuple[WorkItem, ...], root: str, **overrides: object):
     }
     kwargs.update(overrides)
     return orchestrate.plan(items, root, **kwargs)  # type: ignore[arg-type]
+
+
+def _execute_item(slug: str, **overrides: object) -> WorkItem:
+    base: dict[str, object] = {
+        "phase": "execute",
+        "work_status": "in-progress",
+        "owner": "pat",
+        "has_plan_artifact": True,
+        "worktree": "/repo",
+        "branch": "main",
+    }
+    base.update(overrides)
+    return _item(slug, **base)
+
+
+def test_execute_dispatches_carry_their_item_checkpoints_and_others_carry_none() -> None:
+    slug = "work/feature-cp"
+    declared = orchestrate.HumanCheckpoints("declared", ("Task 3: human skims the diff",))
+    result = _plan(
+        (_execute_item(slug),),
+        slug,
+        worktree_exists={"/repo": True},
+        repo_path="/repo",
+        checkpoints={slug: declared},
+    )
+    [dispatch] = result.dispatches
+    assert dispatch.phase == "execute"
+    assert result.human_checkpoints == {dispatch.key: declared}
+
+    planned = _plan((_item(slug, phase="plan"),), slug, checkpoints={slug: declared})
+    [plan_dispatch] = planned.dispatches
+    assert plan_dispatch.key not in planned.human_checkpoints
+
+
+def test_plan_without_checkpoints_reports_none() -> None:
+    slug = "work/feature-cp"
+    result = _plan((_execute_item(slug),), slug, worktree_exists={"/repo": True}, repo_path="/repo")
+    assert result.human_checkpoints == {}
+
+
+@pytest.mark.parametrize(
+    ("setup", "expected"),
+    [
+        ("none", ("no-plan", ())),
+        ("absent-file", ("unreadable", ())),
+        ("binary", ("unreadable", ())),
+        ("missing", ("missing", ())),
+        ("malformed", ("malformed", ())),
+        ("declared", ("declared", ("Task 2: skim",))),
+        ("none-dot", ("declared", ())),
+    ],
+)
+def test_read_human_checkpoints_covers_every_status(
+    tmp_path: Path, setup: str, expected: tuple[str, tuple[str, ...]]
+) -> None:
+    from okf_io import Source
+
+    slug = "work/feature-cp"
+    plan_file = tmp_path / slug / "references" / "02-plan.md"
+    plan_file.parent.mkdir(parents=True)
+    body = {
+        "missing": "# Plan\n",
+        "malformed": "# Plan\n\n## Human checkpoints\n\nsome prose\n",
+        "declared": "# Plan\n\n## Human checkpoints\n\n- Task 2: skim\n",
+        "none-dot": "# Plan\n\n## Human checkpoints\n\nNone.\n",
+    }
+    if setup in body:
+        plan_file.write_text(body[setup], encoding="utf-8", newline="")
+    elif setup == "binary":
+        plan_file.write_bytes(b"\xff\xfe\x00bad")
+    sources = () if setup == "none" else (Source(id="plan", resource=f"/{slug}/references/02-plan.md"),)
+    item = _execute_item(slug, sources=sources)
+    assert orchestrate.read_human_checkpoints(tmp_path, item) == orchestrate.HumanCheckpoints(*expected)
 
 
 @pytest.mark.parametrize("code_affects", [("packages/a",), ()])
@@ -1540,6 +1614,7 @@ def test_prompt_substitutes_tail() -> None:
         workspace="/ws",
         merge_target="main",
         tail="{path} {key} {phase} {workspace} {merge_target} {literal}",
+        mode="autonomous",
     )
     assert "work/feature-a work/feature-a#execute execute /ws main {literal}" in prompt
     assert orchestrate.WORKER_PLACEMENT_LINE in prompt
@@ -1558,6 +1633,7 @@ def test_an_execute_dispatch_prompt_carries_the_coverage_obligation() -> None:
         workspace="/ws",
         merge_target="main",
         tail=EXECUTE_TAIL,
+        mode="autonomous",
     )
     assert "/ws/okf/work/feature-a/references/03-execute-coverage.md" in prompt
     assert "{workspace}" not in prompt and "{path}" not in prompt
@@ -2868,3 +2944,55 @@ def test_every_dispatch_prompt_hands_placement_to_the_coordinator(phase: str, is
     assert orchestrate.WORKER_PLACEMENT_LINE in dispatch.prompt
     assert "Record the worktree" not in dispatch.prompt
     assert "--worktree`/`--branch` explicitly" not in dispatch.prompt
+
+
+@pytest.mark.parametrize("variant", ["single", "exploration", "branch"])
+def test_planned_dispatch_reports_findings_with_or_without_a_tail(variant: str) -> None:
+    slug = "work/feature-findings"
+    item = _item(
+        slug,
+        phase={"single": "plan", "exploration": "design", "branch": "finish"}[variant],
+        has_design_artifact=variant != "exploration",
+        work_status="in-progress" if variant == "branch" else "open",
+        owner="pat" if variant == "branch" else None,
+        worktree="/repo" if variant == "branch" else None,
+        branch="main" if variant == "branch" else None,
+    )
+    dispatch = _only_dispatch(
+        _plan((item,), slug, dispatch_rules=_branch_tail_rules(), worktree_exists={"/repo": True})
+    )
+    lines = dispatch.prompt.splitlines()
+    done = lines.index("Send worker_done when the stage artifact is written and the item advanced.")
+    assert "outside this item's scope" in lines[done + 1]
+    assert lines[done + 1] == pipeline.FINDINGS_LINE
+    assert lines.count(pipeline.FINDINGS_LINE) == 1
+    if variant == "single":
+        assert pipeline.PACKAGED_PIPELINE[variant].prompt_tail is None
+    elif variant == "exploration":
+        attend = pipeline.ATTEND_TAIL.replace("{path}", slug).replace("{phase}", "design")
+        assert attend in dispatch.prompt
+        assert f'--body "{slug} design: waiting' in dispatch.prompt
+    else:
+        assert "Auto-drive context:" in dispatch.prompt
+
+
+@pytest.mark.parametrize(("variant", "expected"), [("single", 1), ("exploration", 0), ("branch", 1)])
+def test_the_ask_line_follows_findings_on_every_non_attend_dispatch(variant: str, expected: int) -> None:
+    slug = "work/feature-asks"
+    item = _item(
+        slug,
+        phase={"single": "plan", "exploration": "design", "branch": "finish"}[variant],
+        has_design_artifact=variant != "exploration",
+        work_status="in-progress" if variant == "branch" else "open",
+        owner="pat" if variant == "branch" else None,
+        worktree="/repo" if variant == "branch" else None,
+        branch="main" if variant == "branch" else None,
+    )
+    dispatch = _only_dispatch(
+        _plan((item,), slug, dispatch_rules=_branch_tail_rules(), worktree_exists={"/repo": True})
+    )
+    lines = dispatch.prompt.splitlines()
+    assert lines.count(pipeline.ASK_LINE) == expected
+    if expected:
+        assert lines[lines.index(pipeline.FINDINGS_LINE) + 1] == pipeline.ASK_LINE
+    assert dispatch.mode == {"single": "autonomous", "exploration": "attend", "branch": "relay"}[variant]

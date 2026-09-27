@@ -71,7 +71,7 @@ def test_version_is_static_and_pinned():
 
     `0.5.0` removes `health.duplicate-title` (`health.CODES` shrinks from
     three codes to two) -- a public-surface removal, so a minor."""
-    assert okf_ext.__version__ == "0.5.0"
+    assert okf_ext.__version__ == "0.5.1"
 
 
 def test_the_distribution_version_matches_the_python_attribute():

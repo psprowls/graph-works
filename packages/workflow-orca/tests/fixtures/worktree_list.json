@@ -1,0 +1,40 @@
+{
+  "id": "6f1d1c1e-9b1a-4d3e-8b7c-2a5e4f6d7c8b",
+  "ok": true,
+  "result": {
+    "worktrees": [
+      {
+        "id": "6be4952f-4076-4893-b858-0aa79c108446::/Users/pat/Personal/graph-works/gw",
+        "repoId": "6be4952f-4076-4893-b858-0aa79c108446",
+        "path": "/Users/pat/Personal/graph-works/gw",
+        "branch": "refs/heads/main",
+        "isBare": false,
+        "isMainWorktree": true,
+        "displayName": "main",
+        "parentWorktreeId": null,
+        "comment": "",
+        "workspaceStatus": "in-progress"
+      },
+      {
+        "id": "6be4952f-4076-4893-b858-0aa79c108446::/Users/pat/orca/workspaces/gw/gw-reader-3c9f2e1d",
+        "repoId": "6be4952f-4076-4893-b858-0aa79c108446",
+        "path": "/Users/pat/orca/workspaces/gw/gw-reader-3c9f2e1d",
+        "branch": null,
+        "isBare": false,
+        "isMainWorktree": false,
+        "displayName": "gw-reader-3c9f2e1d",
+        "parentWorktreeId": null,
+        "comment": "gw-reader:3c9f2e1d5b7a4c6e8d0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+        "workspaceStatus": "in-progress"
+      }
+    ],
+    "totalCount": 2,
+    "truncated": false,
+    "hostScope": {
+      "hostIds": [
+        "local"
+      ],
+      "omittedHostIds": []
+    }
+  }
+}

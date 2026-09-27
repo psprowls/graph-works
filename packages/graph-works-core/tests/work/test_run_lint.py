@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
 from code_wiki_okf.config import Config, StateGateConfig
 from graph_works_core import apply_init, plan_init
 from graph_works_core.work import commands as work
@@ -183,3 +184,55 @@ def test_lint_reports_bad_edge_without_crashing(tmp_path) -> None:
     document.save()
     report = work.run_lint(layout, _config(layout), today=TODAY)
     assert any(finding.code == "graph.depends-on-invalid" for finding in report.findings)
+
+
+def test_path_keeps_only_that_items_findings(tmp_path):
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    _write(layout, "feature-b", _FEATURE)
+    repo = layout.repo_root
+    whole = work.run_lint(layout, _config(layout), today=TODAY, repo_root=repo)
+    assert {f.path for f in whole.findings if f.code == "targets.affects-missing"} == {
+        "work/feature-a.md",
+        "work/feature-b.md",
+    }
+    one = work.run_lint(layout, _config(layout), today=TODAY, repo_root=repo, path="work/feature-a")
+    assert one.findings
+    assert all(f.path == "work/feature-a.md" or f.path.startswith("work/feature-a/") for f in one.findings)
+    assert not one.ok
+
+
+def test_path_on_a_clean_item_is_ok_even_when_a_sibling_is_dirty(tmp_path):
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    _write(layout, "epic-x", _EPIC)
+    strict = work.run_lint(layout, _config(layout), today=TODAY, strict=True, path="work/feature-a")
+    assert strict.ok
+    assert strict.findings == ()
+
+
+def test_epic_path_includes_child_findings(tmp_path):
+    layout = _workspace(tmp_path)
+    _write(layout, "epic-x", _EPIC)
+    (layout.bundle_dir / "work/epic-x/children").mkdir(parents=True, exist_ok=True)
+    _write(layout, "epic-x/children/feature-c", _FEATURE)
+    report = work.run_lint(layout, _config(layout), today=TODAY, repo_root=layout.repo_root, path="work/epic-x")
+    assert any(
+        f.code == "targets.affects-missing" and f.path == "work/epic-x/children/feature-c.md" for f in report.findings
+    )
+
+
+def test_path_without_is_unchanged(tmp_path):
+    layout = _workspace(tmp_path)
+    _write(layout, "epic-x", _EPIC)
+    assert work.run_lint(layout, _config(layout), today=TODAY) == work.run_lint(
+        layout, _config(layout), today=TODAY, path=None
+    )
+
+
+@pytest.mark.parametrize("bad", ["work/nope", "work/feature-a.md"])
+def test_unknown_path_raises_lookup_error(tmp_path, bad):
+    layout = _workspace(tmp_path)
+    _write(layout, "feature-a", _FEATURE)
+    with pytest.raises(LookupError, match="unknown work item"):
+        work.run_lint(layout, _config(layout), today=TODAY, path=bad)

@@ -210,3 +210,58 @@ def test_locked_windows_branch_contends_for_a_real_lock_across_processes(tmp_pat
     _, elapsed_str, message = output.split(" ", 2)
     assert str(lock) in message
     assert float(elapsed_str) >= 8.0
+
+
+@pytest.mark.parametrize("exception", [False, True])
+def test_nonblocking_lock_contends_and_releases(tmp_path, exception):
+    lock = tmp_path / "execution.lock"
+    try:
+        with locked(lock, blocking=False):
+            with pytest.raises(OSError), locked(lock, blocking=False):
+                pytest.fail("a second descriptor acquired an owned lock")
+            if exception:
+                raise RuntimeError("body failed")
+    except RuntimeError:
+        assert exception
+    with locked(lock, blocking=False):
+        assert lock.exists()
+
+
+def test_nonblocking_windows_uses_immediate_lock_mode(tmp_path, monkeypatch):
+    fake = _FakeMsvcrt()
+    fake.LK_NBLCK = 2
+    monkeypatch.setitem(sys.modules, "msvcrt", fake)
+    with locked(tmp_path / "execution.lock", platform_name="win32", blocking=False):
+        pass
+    assert fake.calls == [(fake.LK_NBLCK, 0), (fake.LK_UNLCK, 0)]
+
+
+def test_process_death_releases_nonblocking_execution_lock(tmp_path):
+    import subprocess
+
+    path = tmp_path / "execution.lock"
+    script = (
+        "import sys\nfrom pathlib import Path\nfrom okf_ext.locking import locked\n"
+        "with locked(Path(sys.argv[1]), blocking=False):\n"
+        "    print('owned', flush=True)\n    sys.stdin.read()\n"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-c", script, str(path)],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+    )
+    try:
+        assert child.stdout.readline() == "owned\n"
+        with pytest.raises(OSError), locked(path, blocking=False):
+            pytest.fail("another process owns this lock")
+        child.kill()
+        child.wait(timeout=10)
+        with locked(path, blocking=False):
+            assert path.exists()
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.communicate(timeout=10)

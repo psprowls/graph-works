@@ -24,7 +24,8 @@ from __future__ import annotations
 
 from workflow_orca._cli import OrcaCliError, OrcaResult
 from workflow_orca.backend import OrcaBackend, OrcaSession
+from workflow_orca.port import OrcaCliPort
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
-__all__ = ["OrcaBackend", "OrcaCliError", "OrcaResult", "OrcaSession"]
+__all__ = ["OrcaBackend", "OrcaCliError", "OrcaCliPort", "OrcaResult", "OrcaSession"]

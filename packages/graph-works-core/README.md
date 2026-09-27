@@ -504,6 +504,8 @@ An unanchored descendant or missing/ambiguous evidence refuses with
 
 The launcher prepares one dedicated detached checkout per reader dispatch,
 verifying repository identity, exact SHA and cleanliness before injection.
+`gw work dispatch` does this in process for a `pin-detached` entry and
+records a reader receipt rather than a placement stamp.
 A dirty source anchor is allowed because only its committed ref is read.
 Concurrent integration can advance that ref without changing the reader's
 checkout; pinning promises a stable baseline, not the latest tree. The baseline

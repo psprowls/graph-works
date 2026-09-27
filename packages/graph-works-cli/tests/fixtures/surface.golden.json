@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "commands": [
     {
       "name": "gw agent-config",
@@ -2461,7 +2461,10 @@
         "adopt",
         "advance",
         "archive",
+        "ask",
+        "ask-answer",
         "decision",
+        "dispatch",
         "file",
         "ingest-queue",
         "lint",
@@ -2472,6 +2475,7 @@
         "record-reader",
         "regen-index",
         "reparent",
+        "reroute",
         "status",
         "touch-active-work"
       ],
@@ -2766,6 +2770,228 @@
       "path": [
         "work",
         "archive"
+      ]
+    },
+    {
+      "name": "gw work ask",
+      "help": "Write a typed ask payload; print what to pass to `orca orchestration ask`.",
+      "short_help": "Write a typed ask payload; print what to pass to `orca orchestration ask`.",
+      "usage": [
+        "[OPTIONS]",
+        "{path}"
+      ],
+      "arguments": [
+        {
+          "name": "path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "kind",
+          "opts": [
+            "--kind"
+          ],
+          "secondary_opts": [],
+          "help": "spec-review | choice | free.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "summary",
+          "opts": [
+            "--summary"
+          ],
+          "secondary_opts": [],
+          "help": "One line, at most 300 characters; Orca carries it.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "question",
+          "opts": [
+            "--question"
+          ],
+          "secondary_opts": [],
+          "help": "The full question (markdown), stored verbatim.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "question_file",
+          "opts": [
+            "--question-file"
+          ],
+          "secondary_opts": [],
+          "help": "Read the full question from this file.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "spec",
+          "opts": [
+            "--spec"
+          ],
+          "secondary_opts": [],
+          "help": "spec-review only: the spec, as a path or root-absolute resource.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "option",
+          "opts": [
+            "--option"
+          ],
+          "secondary_opts": [],
+          "help": "choice only, repeatable: <token>=<label>.",
+          "required": false,
+          "default": [],
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Plan the payload without writing.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the payload location and the Orca strings as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "ask"
+      ]
+    },
+    {
+      "name": "gw work ask-answer",
+      "help": "Record a human's answer to a typed ask and print the reply body.",
+      "short_help": "Record a human's answer to a typed ask and print the reply body.",
+      "usage": [
+        "[OPTIONS]",
+        "{PAYLOAD}"
+      ],
+      "arguments": [
+        {
+          "name": "payload_path",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "choice",
+          "opts": [
+            "--choice"
+          ],
+          "secondary_opts": [],
+          "help": "The chosen option token (spec-review, choice).",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "effort",
+          "opts": [
+            "--effort"
+          ],
+          "secondary_opts": [],
+          "help": "spec-review approve: xtra-small|small|medium|large|xtra-large.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "notes",
+          "opts": [
+            "--notes"
+          ],
+          "secondary_opts": [],
+          "help": "Free text; the whole answer for a free ask.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "by",
+          "opts": [
+            "--by"
+          ],
+          "secondary_opts": [],
+          "help": "Who answered; the coordinator's auto-merge passes policy:auto-merge.",
+          "required": false,
+          "default": "human",
+          "is_flag": false
+        },
+        {
+          "name": "dry_run",
+          "opts": [
+            "--dry-run"
+          ],
+          "secondary_opts": [],
+          "help": "Validate the answer without recording it.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the recorded answer and reply body as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "ask-answer"
       ]
     },
     {
@@ -3380,6 +3606,95 @@
       ]
     },
     {
+      "name": "gw work dispatch",
+      "help": "Dispatch one saved planned stage, resuming a journaled attempt by key.",
+      "short_help": "Dispatch one saved planned stage, resuming a journaled attempt by key.",
+      "usage": [
+        "[OPTIONS]",
+        "{key}"
+      ],
+      "arguments": [
+        {
+          "name": "key",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "plan",
+          "opts": [
+            "--plan"
+          ],
+          "secondary_opts": [],
+          "help": "Saved `gw work orchestrate --json` output, or - for stdin.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "run",
+          "opts": [
+            "--run"
+          ],
+          "secondary_opts": [],
+          "help": "The Orca Run id.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "no_probe",
+          "opts": [
+            "--no-probe"
+          ],
+          "secondary_opts": [],
+          "help": "Skip the submission probe.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        },
+        {
+          "name": "settle_seconds",
+          "opts": [
+            "--settle-seconds"
+          ],
+          "secondary_opts": [],
+          "help": "Probe settle interval.",
+          "required": false,
+          "default": 10.0,
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the dispatch envelope as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "dispatch"
+      ]
+    },
+    {
       "name": "gw work file",
       "help": "File one work item, reconcile `work/index.md`, and log its arrival.\n\nPaths are extensionless and bundle-relative. Dependencies are complete,\npath-keyed mappings; no legacy slug shorthand is accepted.",
       "short_help": "File one work item, reconcile `work/index.md`, and log its arrival.",
@@ -3622,12 +3937,19 @@
     },
     {
       "name": "gw work lint",
-      "help": "Report work-lane conformance. Never writes.\n\nThe fast, synchronous, LLM-free work-lane check -- a sibling of\n`gw wiki lint`, not a subset of it.",
+      "help": "Report work-lane conformance. Never writes.\n\nThe fast, synchronous, LLM-free work-lane check -- a sibling of\n`gw wiki lint`, not a subset of it. With PATH, report only that item's\nfindings (its page and owned directory).",
       "short_help": "Report work-lane conformance.",
       "usage": [
-        "[OPTIONS]"
+        "[OPTIONS]",
+        "[path]"
       ],
-      "arguments": [],
+      "arguments": [
+        {
+          "name": "path",
+          "required": false,
+          "nargs": 1
+        }
+      ],
       "options": [
         {
           "name": "strict",
@@ -4250,6 +4572,106 @@
       "path": [
         "work",
         "reparent"
+      ]
+    },
+    {
+      "name": "gw work reroute",
+      "help": "Supersede a settled Task and journal overrides for its next dispatch.",
+      "short_help": "Supersede a settled Task and journal overrides for its next dispatch.",
+      "usage": [
+        "[OPTIONS]",
+        "{key}"
+      ],
+      "arguments": [
+        {
+          "name": "key",
+          "required": true,
+          "nargs": 1
+        }
+      ],
+      "options": [
+        {
+          "name": "run",
+          "opts": [
+            "--run"
+          ],
+          "secondary_opts": [],
+          "help": "The Orca Run id.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "reason",
+          "opts": [
+            "--reason"
+          ],
+          "secondary_opts": [],
+          "help": "Why the current Task is superseded.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "agent",
+          "opts": [
+            "--agent"
+          ],
+          "secondary_opts": [],
+          "help": "Replacement agent.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "model",
+          "opts": [
+            "--model"
+          ],
+          "secondary_opts": [],
+          "help": "Replacement model.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "effort",
+          "opts": [
+            "--effort"
+          ],
+          "secondary_opts": [],
+          "help": "Replacement reasoning effort.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the reroute envelope as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "reroute"
       ]
     },
     {

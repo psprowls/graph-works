@@ -196,6 +196,9 @@ without a terminal; their lifecycle and reads use orchestration only.
 with a supplied path, before task creation or worker launch: this backend
 cannot prepare and verify a detached checkout at `start_sha`.
 `provisions_worktrees=True` covers the branch-creation actions, not reader
-pinning. Graph Works auto-drive uses its separate launcher helper to prepare
-and verify each reader, then starts it at that exact path. Creation actions
+pinning. Graph Works auto-drive prepares and verifies each reader itself —
+`gw work dispatch` in process through this package's `OrcaCliPort`
+(`worktree_list` finds an attempt's marked checkout, `worktree_create` makes
+an independent, setup-skipped one; core detaches and verifies it), or the
+legacy `launch-worker.py prepare-reader` — then starts it at that exact path. Creation actions
 require a non-None branch before assembling CLI flags.

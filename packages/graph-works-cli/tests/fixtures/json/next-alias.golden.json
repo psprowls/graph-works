@@ -36,7 +36,7 @@
     "profile": {
       "skill": "superpowers:brainstorming",
       "mode": "attend",
-      "prompt_tail": "The user may join this session to answer this stage's questions; ask normally.\nIf an `orca orchestration ask` question of yours times out, follow the grace-period protocol in the `gw` plugin's `auto-drive` skill -- its `references/grace-period-protocol.md`, which you read through that installed skill rather than by repository path -- before giving up on it. Never end this Dispatch (no `worker_done`, and never call `worker-stop` or `worker-abandon` yourself -- only the coordinator may) while a question you asked is still unanswered.",
+      "prompt_tail": "This is an attended stage: the human answers its questions in this terminal. Ask them here, the ordinary way, even where your Orca preamble says to use `orca orchestration ask` -- do not route this stage's questions through the coordinator, and do not use `gw work ask`. Before your first question, send exactly one notice: `orca orchestration send --from <your --from> --dispatch-capability <yours> --type escalation --subject \"Needs you at <your --from handle>\" --body \"{path} {phase}: waiting for the human in this terminal.\" --task-id <yours> --dispatch-id <yours>`.",
       "agent": "claude",
       "model": null,
       "reasoning_effort": null

@@ -56,6 +56,7 @@ Two strictly-downward stacks, both documented in `__init__.py`:
 items -> hierarchy -> workflow -> {advance, children, placement, projection}
 paths -> {filing, sources, results, mutation, reparent, archive, decisions, checkpoints}
 decisions, checkpoints -> holds
+vocabulary -> asks
 ```
 
 `filing.apply` and `advance.apply` are deliberately different functions with

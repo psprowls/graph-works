@@ -226,6 +226,72 @@ def test_filing_omits_repo_when_unset(vault: Path, section_set) -> None:
     assert "repo" not in plan_filing(vault, (), seed(), section_set).frontmatter
 
 
+TWO = {"graph-works": "/src/gw", "gw-ui": "/src/gw-ui"}
+
+
+def test_unknown_repo_is_refused_listing_name_path_pairs(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(repo="nope", declared_repos=TWO), section_set)
+    assert plan.refusal == "unknown-repo"
+    assert "'nope'" in plan.detail
+    assert "graph-works → /src/gw, gw-ui → /src/gw-ui" in plan.detail
+    assert plan.frontmatter == {}
+
+
+def test_unknown_repo_with_nothing_declared_says_none(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(repo="nope", declared_repos={}), section_set)
+    assert plan.refusal == "unknown-repo"
+    assert plan.detail.endswith("declared: none")
+
+
+def test_declared_repo_files_without_warning(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(repo="gw-ui", declared_repos=TWO), section_set)
+    assert plan.refusal is None
+    assert plan.frontmatter["repo"] == "gw-ui"
+    assert not any(w.startswith("repo unresolved:") for w in plan.warnings)
+
+
+def test_root_item_in_two_repo_workspace_warns(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(declared_repos=TWO), section_set)
+    assert plan.refusal is None
+    [warning] = [w for w in plan.warnings if w.startswith("repo unresolved:")]
+    assert warning == (
+        "repo unresolved: workspace declares 2 repositories "
+        "(graph-works → /src/gw, gw-ui → /src/gw-ui) and neither work/feature-child "
+        "nor its parents set repo:; pass --repo <name>"
+    )
+
+
+def test_ancestor_repo_suppresses_the_warning(vault: Path, section_set) -> None:
+    root = make_item("epic-root", type="Epic", repo="gw-ui")
+    mid = make_item("epic-root/children/epic-mid", type="Epic", ancestor_paths=(root.path,))
+    plan = plan_filing(vault, (root, mid), seed(parent_path=mid.path, declared_repos=TWO), section_set)
+    assert plan.refusal is None
+    assert "repo" not in plan.frontmatter
+    assert not any(w.startswith("repo unresolved:") for w in plan.warnings)
+
+
+def test_malformed_ancestor_repo_counts_as_absent(vault: Path, section_set) -> None:
+    # A malformed `repo:` projects as `repo=None` plus an `invalid_optional_fields` entry.
+    parent = make_item("epic-bad", type="Epic", repo=None, invalid_optional_fields=("repo",))
+    plan = plan_filing(vault, (parent,), seed(parent_path=parent.path, declared_repos=TWO), section_set)
+    assert any(w.startswith("repo unresolved:") for w in plan.warnings)
+
+
+def test_one_declared_repo_never_warns(vault: Path, section_set) -> None:
+    one = {"graph-works": "/src/gw"}
+    assert not any(
+        w.startswith("repo unresolved:") for w in plan_filing(vault, (), seed(declared_repos=one), section_set).warnings
+    )
+    assert plan_filing(vault, (), seed(repo="graph-works", declared_repos=one), section_set).refusal is None
+
+
+def test_declared_repos_none_skips_every_repository_check(vault: Path, section_set) -> None:
+    plan = plan_filing(vault, (), seed(repo="anything"), section_set)
+    assert plan.refusal is None
+    assert plan.frontmatter["repo"] == "anything"
+    assert plan.warnings == ()
+
+
 def test_a_nested_leaf_filed_without_affects_gets_the_hint(vault: Path, section_set) -> None:
     parent = make_item("epic-e", type="Epic")
     plan = plan_filing(vault, (parent,), seed(parent_path=parent.path, type="Bug", affects=()), section_set)

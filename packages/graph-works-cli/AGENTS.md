@@ -51,6 +51,11 @@ change that moved it, never as an incidental side effect.
   next`'s own callback object rather than a copy (see `util_cli/main.py`'s `work_next_callback()`),
   so the two can never drift.
 
+  `gw work orchestrate` produces a saved plan; `gw work dispatch KEY --plan FILE|- --run RUN`
+  executes one selected entry through core's journal and the `work_cli/orca.py` adapter.
+  `gw work reroute KEY --run RUN --reason TEXT` supersedes a settled Task and journals
+  optional `--agent`, `--model`, and `--effort` overrides for the next dispatch.
+
   `gw work next` has one blocker source the routing table cannot see: a malformed
   configured stage skill. `entry_for()` is called under a `WorkspaceError` guard
   and its message is appended to `blockers[]` with `action` nulled, rather than

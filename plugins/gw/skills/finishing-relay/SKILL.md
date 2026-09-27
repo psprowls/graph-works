@@ -109,14 +109,32 @@ Ask once for the entire target set. Include each repository, source/target
 branch, commit summary and test result in the question. The answer applies
 to all targets; remove merge if any target is detached or unverified.
 
-Send exactly one `orca orchestration ask`, using this session's own
-`--from` / `--dispatch-capability` from its dispatch preamble:
+Prepare the ask with `gw work ask`, then send exactly the strings it prints.
+Write the full per-target detail — each repository, source/target branch,
+commit summary and test result — to a scratch markdown file, and pass it as
+the question. The summary is a one-line headline:
+
+```
+gw work ask <work-path> --kind choice \
+  --summary "Finish <work-path>: <N> commit(s) across <T> target(s); tests <pass|fail>; merge target <merge target>." \
+  --question-file <scratch>/finish-question.md \
+  --option "merge=Merge into the target branch" \
+  --option "pr=Open a pull request" \
+  --option "hold=Hold at finish" \
+  --option "discard=Discard the branch" \
+  --json
+```
+
+Drop the `merge` option when any target is detached or unverified. Then send
+one `orca orchestration ask` with this session's own `--from` /
+`--dispatch-capability` from its dispatch preamble, passing `orca.question`
+and `orca.options` from that JSON **unchanged**. Never hand-write `--options`:
 
 ```
 orca orchestration ask --from <this session's --from> \
   --dispatch-capability <this session's --dispatch-capability> \
-  --question "Finish stage for <work-path> on branch <current branch> ready to settle. <N> commit(s): <one-line summary>. Tests: <pass/fail summary>. Merge target: <merge target>. How should this be handled?" \
-  --options "<merge,pr,hold,discard — or pr,hold,discard on detached HEAD>" \
+  --question "<orca.question>" \
+  --options "<orca.options>" \
   --timeout-ms 600000
 ```
 
@@ -133,12 +151,15 @@ giving up. Do not call `worker_done` while this question is unanswered: the
 finish stage has already verified tests and detected merge state by the time
 R3 sends its ask (R1/R2), so a park's `## Completed work` section is "tests
 verified, merge target `<target>`, ready to settle" and its `## Remaining
-actions` section is "re-send R3's ask (or resume from the recorded answer)
-and execute R4/R5."
+actions` section is "re-send R3's ask (reusing its payload — never call
+`gw work ask` twice for one question), or resume from the recorded answer,
+and execute R4/R5." Reuse the prepared payload on a resume of any typed
+ask in R3, R4 or R5; never prepare a second payload for the same question.
 
-The reply body is one of the option labels (`merge`, `pr`, `hold`,
-`discard`). Any other reply text: treat it as `hold` and note the verbatim
-reply in the R5 report — don't guess at unrecognized intent.
+The reply body is JSON: read `choice` from the JSON reply (`merge`, `pr`,
+`hold` or `discard`). A reply that is not JSON, including a bare option token, is treated as `hold`.
+A `choice` that is not one of the options you sent is also treated as `hold`.
+Note the verbatim reply in the R5 report — don't guess at unrecognized intent.
 
 ## R4 — Execute the choice
 
@@ -189,21 +210,32 @@ Nothing to execute. Continue to R5.
 
 ### `discard`
 
-Send a second, option-less `ask` asking for exact confirmation:
+Send a second, option-less typed ask asking for exact confirmation:
+
+```
+gw work ask <work-path> --kind free \
+  --summary "Confirm discard of <work-path> branch <branch>." \
+  --question "Discard <work-path> branch <branch> (<N> commits: <list>). Reply exactly 'discard' to confirm; anything else cancels." \
+  --json
+```
+
+Then `orca orchestration ask` with its `orca.question` and **no `--options`**
+(a `free` ask prints `orca.options: null`), same `--from` /
+`--dispatch-capability` / `--timeout-ms 600000` as R3:
 
 ```
 orca orchestration ask --from <this session's --from> \
   --dispatch-capability <this session's --dispatch-capability> \
-  --question "Confirm discard of <work-path> branch <branch> (<N> commits: <list>). Reply exactly 'discard' to confirm, anything else cancels." \
+  --question "<orca.question>" \
   --timeout-ms 600000
 ```
 
-- Reply is exactly `discard` → confirmed. **Discard is recorded, not
-  executed**: delete nothing. Continue to R5 with the branch name and commit
+- The reply JSON's `notes` is exactly `discard` → confirmed. **Discard is
+  recorded, not executed**: delete nothing. Continue to R5 with the branch name and commit
   list for the report — the human removes the branch/worktree later, after
   Orca releases it (see Worktree & branch ownership, below).
-- Any other reply → downgrade to `hold`; say so explicitly in the R5 report
-  (state the reply that caused the downgrade).
+- Anything else (other notes, unparseable reply) → downgrade to `hold`; say
+  so explicitly in the R5 report (state the reply that caused the downgrade).
 
 ## R5 — Settle the item and report
 
@@ -220,10 +252,13 @@ integration into the merge target; PR, hold and discard do not.
   Release without `released_at`. Read the item's frontmatter first: if
   `released_at:` is set to a valid `YYYY-MM-DD` date, advance as below. A
   malformed frontmatter date enters the **Escalation path**. If the date is
-  missing, send one `orca orchestration ask` (this session's own `--from` /
-  `--dispatch-capability`) asking for the release date as `YYYY-MM-DD`, and add
-  `--released-at <date>` to the advance. Never invent a release date, and never
-  retry an advance that refused `released_at required`; a missing or malformed
+  missing, prepare a typed ask —
+  `gw work ask <work-path> --kind free --summary "Release date for <work-path> (YYYY-MM-DD)?" --question "<the merge that happened, and that a YYYY-MM-DD release date is needed to resolve>" --json`
+  — and send its `orca.question` through one `orca orchestration ask` (this
+  session's own `--from` / `--dispatch-capability`, no `--options`). Read the
+  date from the reply JSON's `notes`, and add `--released-at <date>` to the
+  advance. Never invent a release date, and never retry an advance that
+  refused `released_at required`; a missing or malformed
   reply enters the **Escalation path**, whose body must say the merge already
   happened (or, in the trunk case, the commits were already on the target).
   `pr`, `hold` and `discard` do not resolve, so they never need a date.

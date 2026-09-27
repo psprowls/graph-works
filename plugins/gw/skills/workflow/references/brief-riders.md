@@ -133,6 +133,11 @@ document to `<artifact.path>` — this overrides the skill's default location."*
 > saved and stop. Control returns to the `gw:workflow` skill, which advances the
 > item.
 >
+> The plan must contain a `## Human checkpoints` section: one bullet per point
+> where execution stops for a human (a review, a skim, a manual step), naming
+> the task and what the human does — or the single line `None.` Execute raises
+> each checkpoint with `gw work ask`.
+>
 > STOP after writing the plan — do not run the Execution Handoff. This is a
 > single pipeline stage; the workflow skill advances the item.
 

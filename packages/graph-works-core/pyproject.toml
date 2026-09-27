@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graph-works-core"
-version = "0.6.2"
+version = "0.6.3"
 description = "What a workspace is: discovery, the layout object, the manifest, and init."
 authors = [
   { name = "Patrick Sprowls", email = "psprowls@gmail.com" },
@@ -33,7 +33,7 @@ requires-python = ">=3.12"
 # `markdown-it-py` arrived with the citation routes: `wiki_page.citations` parses page bodies with the same `commonmark` preset okf-io uses, whose own helper is private.
 dependencies = [
   "okf-io>=0.2.5,<0.3",
-  "okf-ext[schemas]>=0.5.0,<0.6",
+  "okf-ext[schemas]>=0.5.1,<0.6",
   "code-wiki-okf>=0.5.1,<0.6",
   "doc-wiki-okf>=0.3.2,<0.4",
   "code-graph-io>=0.3,<0.4",

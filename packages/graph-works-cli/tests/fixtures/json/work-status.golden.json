@@ -10,6 +10,7 @@
     "Release": 1
   },
   "by_phase": {},
+  "not_started": 4,
   "children": {
     "work/epic-epic": {
       "total": 0,

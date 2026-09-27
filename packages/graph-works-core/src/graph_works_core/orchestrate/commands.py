@@ -27,7 +27,7 @@ import hashlib
 import itertools
 import re
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import Literal, cast
@@ -36,11 +36,13 @@ from okf_io import load_bundle
 from subagents_io.dispatch import PlannedDispatch, WorktreeAction
 from work_tracker_okf import decisions as _decisions
 from work_tracker_okf.affects import code_affects, touches_workspace
+from work_tracker_okf.asks import plan_checkpoints
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.hierarchy import PICK_ORDER, active_nonterminal_descendants, child_gated, decision_owner
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
 from work_tracker_okf.vocabulary import (
     PHASES,
+    PLAN_SOURCE_ID,
     SLUG_PREFIXES,
     TERMINAL_STATUSES,
 )
@@ -79,6 +81,7 @@ from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishPlan, FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
 from graph_works_core.workspace.manifest import checked_bool, checked_int
+from graph_works_core.workspace.pipeline import ASK_LINE, FINDINGS_LINE
 from graph_works_core.workspace.provenance import default_base, run_git
 from graph_works_core.workspace.repo_context import (
     RepositoryContext,
@@ -150,6 +153,27 @@ class BlockedItem:
 
 
 @dataclass(frozen=True, slots=True)
+class HumanCheckpoints:
+    """An execute plan's checkpoint reading; only `declared` has a known count."""
+
+    status: str
+    items: tuple[str, ...] = ()
+
+
+def read_human_checkpoints(bundle_root: Path, item: WorkItem) -> HumanCheckpoints:
+    """Read an item's plan source; missing sources and unreadable files stay distinct."""
+    source = next((s for s in item.sources if s.id == PLAN_SOURCE_ID and s.resource), None)
+    if source is None or source.resource is None:
+        return HumanCheckpoints("no-plan")
+    try:
+        text = (bundle_root / source.resource.removeprefix("/")).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return HumanCheckpoints("unreadable")
+    parsed = plan_checkpoints(text)
+    return HumanCheckpoints(parsed.status, parsed.items)
+
+
+@dataclass(frozen=True, slots=True)
 class _Refusal:
     """`_resolve_worktree` declining to place a dispatch, rather than guessing.
 
@@ -179,6 +203,7 @@ class OrchestratePlan:
     dispatch_repos: Mapping[str, ItemRepo] = MappingProxyType({})
     preparations: tuple[AnchorPreparation, ...] = ()
     finish_targets: Mapping[str, tuple[FinishTarget, ...]] = MappingProxyType({})
+    human_checkpoints: Mapping[str, HumanCheckpoints] = field(default_factory=lambda: MappingProxyType({}))
     max_attend: int = 1
     attend_slots_free: int = 0
 
@@ -935,9 +960,10 @@ def _prompt(
     workspace: str,
     merge_target: str,
     tail: str | None,
+    mode: str,
     reader: tuple[str, str] | None = None,
 ) -> str:
-    """Four vendor-neutral lines, the tail, reader baseline, then placement.
+    """Five vendor-neutral lines, the ask line off attend, the tail, reader baseline, then placement.
 
     The tail is substituted with `str.replace` over a fixed placeholder set
     rather than `str.format`: a tail is workspace-authored text that may
@@ -959,7 +985,10 @@ def _prompt(
         f"{WORKSPACE_VAR}={workspace}",
         f"Dispatch key: {key}",
         "Send worker_done when the stage artifact is written and the item advanced.",
+        FINDINGS_LINE,
     ]
+    if mode != "attend":
+        lines.append(ASK_LINE)
     if tail:
         for placeholder, value in (
             ("{path}", path),
@@ -1049,6 +1078,7 @@ def plan(
     item_repos: Mapping[str, ItemRepo] | None = None,
     repo_contexts: Mapping[str, RepositoryContext] | None = None,
     finish_plans: Mapping[str, FinishPlan] = MappingProxyType({}),
+    checkpoints: Mapping[str, HumanCheckpoints] = MappingProxyType({}),
 ) -> OrchestratePlan:
     """The whole dispatch plan for *root*'s subtree. Mutates nothing, reads nothing.
 
@@ -1112,6 +1142,10 @@ def plan(
     identity; the singular arguments above remain the compatibility path.
     A candidate without its own evidence refuses locally. Affects reservations
     include repository identity, while capacity and holds remain global.
+
+    `checkpoints` maps execute-phase item paths to their plan readings, collected
+    by `run_orchestrate`. Accepted execute dispatches carry those readings in
+    `OrchestratePlan.human_checkpoints`, keyed by dispatch key.
 
     A path named by a `live` key is never a dispatch candidate: it is in
     `plan.live`, holds its claims against every other candidate, and appears
@@ -1292,6 +1326,7 @@ def plan(
     resolutions: dict[str, DispatchResolution] = {}
     dispatch_repos: dict[str, ItemRepo] = {}
     finish_targets: dict[str, tuple[FinishTarget, ...]] = {}
+    human_checkpoints: dict[str, HumanCheckpoints] = {}
     preparations: dict[tuple[str, str], AnchorPreparation] = {}
 
     def _emit(
@@ -1311,6 +1346,8 @@ def plan(
         key = session_name(item.path, item.type, phase)
         resolutions[key] = resolution
         finish_targets[key] = targets
+        if phase == "execute" and item.path in checkpoints:
+            human_checkpoints[key] = checkpoints[item.path]
         accepted_worktrees.update(path for target in targets for path in _finish_worktrees(target))
         if item_repo is not None:
             dispatch_repos[key] = item_repo
@@ -1336,6 +1373,7 @@ def plan(
                     workspace=workspace,
                     merge_target=merge_target,
                     tail=entry.prompt_tail,
+                    mode=entry.mode,
                     reader=reader,
                 ),
             )
@@ -1731,6 +1769,7 @@ def plan(
         dispatch_repos=MappingProxyType(dispatch_repos),
         preparations=tuple(preparations.values()),
         finish_targets=MappingProxyType(finish_targets),
+        human_checkpoints=MappingProxyType(human_checkpoints),
         max_attend=max_attend,
         attend_slots_free=attend_slots_free,
     )
@@ -1815,6 +1854,10 @@ class OrchestrateResult:
     @property
     def finish_targets(self) -> Mapping[str, tuple[FinishTarget, ...]]:
         return self.plan.finish_targets
+
+    @property
+    def human_checkpoints(self) -> Mapping[str, HumanCheckpoints]:
+        return self.plan.human_checkpoints
 
     @property
     def preparations(self) -> tuple[AnchorPreparation, ...]:
@@ -2120,6 +2163,11 @@ def run_orchestrate(
         for item in items
         if (item.path in subtree_paths and item.phase == "finish") or item.path in live_finishes
     }
+    checkpoints = {
+        item.path: read_human_checkpoints(bundle.root, item)
+        for item in items
+        if item.path in subtree_paths and item.phase == "execute"
+    }
 
     computed = plan(
         planning_items,
@@ -2147,6 +2195,7 @@ def run_orchestrate(
         item_repos=item_repos,
         repo_contexts=repo_contexts,
         finish_plans=finish_plans,
+        checkpoints=checkpoints,
     )
 
     if repo is not None:
@@ -2185,11 +2234,13 @@ __all__ = [
     "AnchorPreparation",
     "BlockedItem",
     "HoldReport",
+    "HumanCheckpoints",
     "OrchestratePlan",
     "OrchestrateResult",
     "PlannedAdvance",
     "branch_name",
     "integration_branch",
     "plan",
+    "read_human_checkpoints",
     "run_orchestrate",
 ]

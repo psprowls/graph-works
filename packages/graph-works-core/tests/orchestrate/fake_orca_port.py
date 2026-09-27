@@ -1,0 +1,121 @@
+"""A scripted `OrcaPort`: every call is recorded, every answer is set by the test."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+
+@dataclass
+class FakeOrcaPort:
+    repos: list[dict[str, Any]] = field(default_factory=lambda: [{"id": "repo1", "path": "/repo"}])
+    worktrees: dict[str, dict[str, Any] | None] = field(default_factory=dict)
+    #: Rows `worktree_list` returns; a reader test seeds a marked checkout here.
+    listed: list[dict[str, Any]] = field(default_factory=list)
+    #: `worktree_create` calls this with its keyword arguments and returns the row it gives back.
+    create: Callable[..., dict[str, Any]] | None = None
+    tasks: list[dict[str, Any]] = field(default_factory=list)
+    workers: list[dict[str, Any]] = field(default_factory=list)
+    start: dict[str, Any] = field(
+        default_factory=lambda: {
+            "dispatch_id": "ctx_1",
+            "worktree_id": "wt1",
+            "terminal": "term_1",
+            "state": "ready",
+            "receipt_problem": None,
+        }
+    )
+    show: dict[str, Any] = field(
+        default_factory=lambda: {
+            "worktree_id": "wt1",
+            "terminal": "term_1",
+            "last_heartbeat_at": None,
+        }
+    )
+    reads: list[dict[str, Any]] = field(default_factory=lambda: [{"source": "transcript", "message_count": 1}])
+    fail: dict[str, BaseException] = field(default_factory=dict)
+    calls: list[tuple[str, tuple[Any, ...], dict[str, Any]]] = field(default_factory=list)
+    next_task: int = 1
+
+    def _record(self, name: str, *args: Any, **kwargs: Any) -> None:
+        self.calls.append((name, args, kwargs))
+        if name in self.fail:
+            raise self.fail[name]
+
+    def names(self) -> list[str]:
+        return [name for name, _a, _k in self.calls]
+
+    def repo_list(self):
+        self._record("repo_list")
+        return list(self.repos)
+
+    def worktree_show(self, selector):
+        self._record("worktree_show", selector)
+        return self.worktrees.get(selector)
+
+    def worktree_list(self, repo_id):
+        self._record("worktree_list", repo_id)
+        return [dict(row) for row in self.listed]
+
+    def worktree_create(self, *, name, repo_id, base_branch, comment):
+        self._record("worktree_create", worktree_name=name, repo_id=repo_id, base_branch=base_branch, comment=comment)
+        assert self.create is not None, "worktree_create was not scripted"
+        return self.create(name=name, repo_id=repo_id, base_branch=base_branch, comment=comment)
+
+    def worktree_set_parent(self, worktree_id, parent_id):
+        self._record("worktree_set_parent", worktree_id, parent_id)
+        row = self.worktrees.get(f"id:{worktree_id}")
+        if row is not None:
+            row["parent_id"] = parent_id
+
+    def worktree_set_status(self, worktree_id, status):
+        self._record("worktree_set_status", worktree_id, status)
+
+    def task_list(self, run_id):
+        self._record("task_list", run_id)
+        return [dict(t) for t in self.tasks]
+
+    def task_create(self, run_id, *, spec, title, display_name):
+        self._record("task_create", run_id, spec=spec, title=title, display_name=display_name)
+        task_id = f"task_{self.next_task}"
+        self.next_task += 1
+        self.tasks.append(
+            {"id": task_id, "title": title, "display_name": display_name, "status": "pending", "spec": spec}
+        )
+        return task_id
+
+    def task_update(self, run_id, task_id, status):
+        self._record("task_update", run_id, task_id, status)
+        for task in self.tasks:
+            if task["id"] == task_id:
+                task["status"] = status
+
+    def worker_start(self, run_id, task_id, *, request, placement_argv):
+        self._record("worker_start", run_id, task_id, request=request, placement_argv=placement_argv)
+        self.workers.insert(
+            0,
+            {
+                "dispatch_id": self.start["dispatch_id"],
+                "task_id": task_id,
+                "state": "running",
+                "dispatch_status": "dispatched",
+                "worktree_id": self.start["worktree_id"],
+            },
+        )
+        return dict(self.start)
+
+    def worker_list(self, run_id):
+        self._record("worker_list", run_id)
+        return [dict(w) for w in self.workers]
+
+    def worker_show(self, dispatch_id):
+        self._record("worker_show", dispatch_id)
+        return dict(self.show)
+
+    def worker_read(self, dispatch_id, *, limit):
+        self._record("worker_read", dispatch_id, limit=limit)
+        return dict(self.reads.pop(0) if len(self.reads) > 1 else self.reads[0])
+
+    def terminal_send_enter(self, terminal):
+        self._record("terminal_send_enter", terminal)

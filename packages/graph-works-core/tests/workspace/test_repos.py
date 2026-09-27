@@ -60,16 +60,27 @@ def test_resolve_repo_refuses_a_repo_name_nothing_declares(tmp_path):
     assert "nope" in str(excinfo.value)
 
 
+def test_resolve_repo_unknown_name_lists_name_path_pairs(tmp_path):
+    layout = _workspace(tmp_path)
+    one = tmp_path / "one"
+    one.mkdir()
+    _repositories(layout, f'repositories:\n  one:\n    path: "{one}"\n')
+    with pytest.raises(WorkspaceError) as excinfo:
+        repos.resolve_repo(layout, repo_name="nope")
+    assert f"one → {one.resolve()}" in str(excinfo.value)
+
+
 def test_resolve_repo_refuses_to_guess_between_several(tmp_path):
     layout = _workspace(tmp_path)
     one, two = tmp_path / "one", tmp_path / "two"
     one.mkdir()
     two.mkdir()
-    _repositories(layout, f'repositories:\n  one:\n    path: "{one}"\n  two:\n    path: "{two}"\n')
+    _repositories(layout, f'repositories:\n  two:\n    path: "{two}"\n  one:\n    path: "{one}"\n')
     with pytest.raises(WorkspaceError) as excinfo:
         repos.resolve_repo(layout)
     message = str(excinfo.value)
     assert "repo_name" in message and "one" in message and "two" in message
+    assert f"(one → {one.resolve()}, two → {two.resolve()})" in message
 
 
 def test_resolve_repo_degrades_when_none_are_declared(tmp_path):
@@ -221,6 +232,22 @@ def test_item_repo_naming_an_undeclared_repo_refuses_naming_the_setter(tmp_path)
         repos.resolve_item_repo(layout, index[CHILD], index)
     message = str(excinfo.value)
     assert CHILD in message and EPIC in message and "'nope'" in message and "one" in message
+
+
+def test_item_repo_undeclared_lists_name_path_pairs(tmp_path):
+    layout, one, two = _two(tmp_path)
+    index = _items(layout, epic="repo: nope\n")
+    with pytest.raises(WorkspaceError) as excinfo:
+        repos.resolve_item_repo(layout, index[CHILD], index)
+    assert f"one → {one}, two → {two}" in str(excinfo.value)
+
+
+def test_item_repo_ambiguous_lists_name_path_pairs(tmp_path):
+    layout, one, two = _two(tmp_path)
+    index = _items(layout)
+    with pytest.raises(WorkspaceError) as excinfo:
+        repos.resolve_item_repo(layout, index[CHILD], index)
+    assert f"(one → {one}, two → {two})" in str(excinfo.value)
 
 
 def test_item_repo_flag_conflict_refuses_naming_both(tmp_path):

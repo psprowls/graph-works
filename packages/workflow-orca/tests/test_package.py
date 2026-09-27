@@ -37,10 +37,10 @@ def test_all_is_sorted_and_bound():
         assert hasattr(workflow_orca, name), name
 
 
-def test_the_public_surface_is_exactly_four_names():
+def test_the_public_surface_is_exactly_five_names():
     # `OrcaResult` and `OrcaCliError` are surface because a caller injecting
     # its own `run=` cannot annotate the callable without the first, and
     # cannot catch this package's specific failure without the second.
     # `_map` stays private: it is translation, and a caller already has the
     # protocol's vocabulary.
-    assert set(workflow_orca.__all__) == {"OrcaBackend", "OrcaCliError", "OrcaResult", "OrcaSession"}
+    assert set(workflow_orca.__all__) == {"OrcaBackend", "OrcaCliError", "OrcaCliPort", "OrcaResult", "OrcaSession"}

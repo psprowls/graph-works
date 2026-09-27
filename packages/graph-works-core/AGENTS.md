@@ -315,8 +315,12 @@ hand. `today` is always injected; nothing in this package reads the clock.
   provision is `worktree-unsupported`, never mutable-anchor reuse. Dirty anchors
   are valid sources of committed refs: pinning promises stability, not freshness.
   The launcher prepares one dedicated detached checkout per dispatch before
-  injection. Readers claim no mutable checkout, including historical stamps,
-  and hold no `affects` claims (`claims_for`).
+  injection: `gw work dispatch` (`dispatch._prepare_reader`) creates it
+  through the Orca port with an attempt-derived marker comment, detaches
+  only that new checkout at `start_sha`, verifies it by content at settle
+  time, and records a reader receipt (`_record_reader`) instead of a
+  placement stamp. Readers claim no mutable checkout, including historical
+  stamps, and hold no `affects` claims (`claims_for`).
 
 - **Reader receipts are observations, not placement stamps.**
   `orchestrate.placement.run_record_reader` backs `gw work record-reader` and

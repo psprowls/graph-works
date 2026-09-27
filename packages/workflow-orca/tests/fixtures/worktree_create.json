@@ -1,0 +1,20 @@
+{
+  "id": "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e",
+  "ok": true,
+  "result": {
+    "worktree": {
+      "id": "6be4952f-4076-4893-b858-0aa79c108446::/Users/pat/orca/workspaces/gw/gw-reader-3c9f2e1d",
+      "repoId": "6be4952f-4076-4893-b858-0aa79c108446",
+      "path": "/Users/pat/orca/workspaces/gw/gw-reader-3c9f2e1d",
+      "branch": "refs/heads/psprowls/gw-reader-3c9f2e1d",
+      "isBare": false,
+      "isMainWorktree": false,
+      "displayName": "gw-reader-3c9f2e1d",
+      "parentWorktreeId": null,
+      "comment": "gw-reader:3c9f2e1d5b7a4c6e8d0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d",
+      "workspaceStatus": "in-progress",
+      "head": "710dc797472c0fdaa3133210139c302725a3c495",
+      "baseRef": "epic/x"
+    }
+  }
+}

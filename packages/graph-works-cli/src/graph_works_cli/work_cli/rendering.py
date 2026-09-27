@@ -264,6 +264,7 @@ def render_status(payload: dict[str, Any]) -> None:
     ):
         rendered = ", ".join(f"{name} {count}" for name, count in payload[key].items())
         typer.echo(f"  by {label}: {rendered or '-'}")
+    typer.echo(f"  not started: {payload['not_started']}")
     for path, rolled in payload["children"].items():
         typer.echo(f"  children {path}: {rolled['terminal']}/{rolled['total']} terminal")
     resume = payload["resume"]

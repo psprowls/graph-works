@@ -1,0 +1,18 @@
+{
+  "id": "8ad820fd-0a89-4c8b-aac7-3bda9a68f28d",
+  "ok": true,
+  "result": {
+    "dispatchId": "ctx_55c04ebb067c",
+    "state": "stop_unknown",
+    "alreadySettled": false,
+    "processAction": "none",
+    "lastError": "The worker terminal is user_owned; no terminal was closed.",
+    "mutation": {
+      "requestId": "d4b816e3-383a-45f7-9b67-2ece51139b13",
+      "replayed": false
+    }
+  },
+  "_meta": {
+    "runtimeId": "0993159f-bfb9-4f5f-aacc-28ffe30280e1"
+  }
+}

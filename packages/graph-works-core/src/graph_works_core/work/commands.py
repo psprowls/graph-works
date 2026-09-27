@@ -119,7 +119,7 @@ from graph_works_core.workspace.dispatch_config import load_dispatch_config
 from graph_works_core.workspace.errors import WorkspaceError
 from graph_works_core.workspace.finish import FinishTarget, resolve_finish_targets
 from graph_works_core.workspace.layout import WorkspaceLayout
-from graph_works_core.workspace.repos import resolve_repos
+from graph_works_core.workspace.repos import declared_repositories, resolve_repos
 from graph_works_core.workspace.transactions import MutationApplication, apply_mutation, only_stale_inventory
 
 
@@ -272,6 +272,7 @@ def run_file(
         depends_on=tuple(depends_on),
         affects=tuple(affects),
         tags=tuple(tags),
+        declared_repos={name: str(path) for name, path in declared_repositories(layout).items()},
     )
     sections = load_sections(config.declarations_dir / SECTIONS_DIRNAME)
 
@@ -902,6 +903,7 @@ def run_lint(
     repo_roots: tuple[Path, ...] = (),
     strict: bool = False,
     today: date,
+    path: str | None = None,
 ) -> Report:
     """Report conformance and lane findings for this workspace's work bundle.
     Never writes.
@@ -917,6 +919,11 @@ def run_lint(
     documents. `repo_roots` is every declared repo in a multi-repository
     workspace: a path resolving under any of them is good.
 
+    `path` narrows the report to one item's page and everything beneath its
+    owned directory, including a parent's subtree. Cross-document rules still
+    read the whole lane; only findings about this item are kept. An unknown
+    path raises `LookupError`.
+
     `strict=True` promotes every warning to an error first, which fails even
     a conformant vault. A caller wiring this into an acceptance gate wants
     `strict=False`.
@@ -929,7 +936,16 @@ def run_lint(
         vault_root=layout.bundle_dir,
         declarations_dir=config.declarations_dir,
     )
-    return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
+    if path is None:
+        return okf_validate(bundle, today=today, extra_rules=rules, strict=strict)
+    if path not in item_index(load_items(bundle)):
+        raise LookupError(f"unknown work item {path!r}")
+    page, owned = f"{path}.md", f"{path}/"
+    scope = frozenset(f"{cid}.md" for cid in bundle.concepts if cid == path or cid.startswith(owned))
+    report = okf_validate(bundle, today=today, extra_rules=rules, strict=strict, scope=scope)
+    return Report(
+        tuple(f for f in report.findings if f.path is not None and (f.path == page or f.path.startswith(owned)))
+    )
 
 
 def _work_only_ignore(layout: WorkspaceLayout) -> tuple[str, ...]:

@@ -118,11 +118,14 @@ def test_render_status_uses_path_keyed_resume(capsys: pytest.CaptureFixture[str]
             "by_work_status": {"open": 1},
             "by_type": {"Feature": 1},
             "by_phase": {},
+            "not_started": 2,
             "children": {},
             "resume": {"primary": {"path": "work/feature-a", "title": "A"}, "alternatives": []},
         }
     )
-    assert "resume: work/feature-a" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "  by phase: -\n  not started: 2\n" in output
+    assert "resume: work/feature-a" in output
 
 
 def test_render_decision_names_owner_and_request(capsys: pytest.CaptureFixture[str]) -> None:
@@ -175,6 +178,7 @@ def test_dense_human_renderers_cover_every_optional_group(capsys: pytest.Capture
             "by_work_status": {"open": 2},
             "by_type": {"Feature": 2},
             "by_phase": {"design": 2},
+            "not_started": 2,
             "children": {"work/e": {"terminal": 1, "total": 2}},
             "resume": {
                 "primary": {"path": "work/a", "title": "A"},

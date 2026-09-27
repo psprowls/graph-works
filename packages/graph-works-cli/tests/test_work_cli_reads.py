@@ -103,6 +103,23 @@ def test_lint_projects_findings_explicitly(workspace: Path) -> None:
     assert all(set(item) == {"code", "severity", "message", "spec", "path", "line"} for item in payload["findings"])
 
 
+def test_lint_path_scopes_to_one_item(workspace: Path) -> None:
+    alpha = file_item(workspace, "Alpha")
+    file_item(workspace, "Beta")
+    result = runner.invoke(app, ["work", "lint", alpha, "--workspace", str(workspace), "--json"])
+    payload = json.loads(result.stdout)
+    assert all(f["path"] == f"{alpha}.md" or f["path"].startswith(f"{alpha}/") for f in payload["findings"])
+    assert result.exit_code == (0 if payload["ok"] else exit_codes.GENERIC)
+
+
+@pytest.mark.parametrize("bad", ["work/nope", "work/feature-alpha.md"])
+def test_lint_unknown_path_is_unresolved(workspace: Path, bad: str) -> None:
+    file_item(workspace, "Alpha")
+    result = runner.invoke(app, ["work", "lint", bad, "--workspace", str(workspace), "--json"])
+    assert result.exit_code == exit_codes.AMBIGUOUS
+    assert json.loads(result.stdout)["error"]["reason"] == "unresolved"
+
+
 def test_orchestrate_is_path_keyed_and_read_only(workspace: Path) -> None:
     path = file_item(workspace, "Alpha")
     result = runner.invoke(app, ["work", "orchestrate", path, "--workspace", str(workspace), "--json"])

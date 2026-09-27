@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 PREFIX = "GW_LAUNCH_V1 "
-ENVELOPE_FIELDS = {
+ENVELOPE_V1_FIELDS = {
     "version",
     "dispatch_key",
     "agent",
@@ -27,6 +27,8 @@ ENVELOPE_FIELDS = {
     "reasoning_effort",
     "placement_argv",
 }
+ENVELOPE_V2_FIELDS = ENVELOPE_V1_FIELDS | {"mode", "worktree_path"}
+ENVELOPE_FIELDS_BY_VERSION = {1: ENVELOPE_V1_FIELDS, 2: ENVELOPE_V2_FIELDS}
 REJECTED_SUBJECT = "Rejected worker_done:"
 RECORD_SCHEMA = "gw-orca-settlement"
 CHECKPOINTS = (
@@ -112,18 +114,24 @@ def optional_nonblank(value: object, field: str) -> str | None:
 
 
 def validate_envelope(value: object) -> dict[str, object]:
-    if not isinstance(value, dict) or set(value) != ENVELOPE_FIELDS:
+    if not isinstance(value, dict) or type(value.get("version")) is not int:
         fail("Missing or malformed launch envelope; inspect recovery state before retrying.")
-    if type(value["version"]) is not int or value["version"] != 1:
+    fields = ENVELOPE_FIELDS_BY_VERSION.get(value["version"])
+    if fields is None:
         fail("Unsupported launch envelope version; inspect recovery state before retrying.")
-    envelope = {
-        "version": 1,
+    if set(value) != fields:
+        fail("Missing or malformed launch envelope; inspect recovery state before retrying.")
+    envelope: dict[str, object] = {
+        "version": value["version"],
         "dispatch_key": nonblank(value["dispatch_key"], "dispatch_key"),
         "agent": nonblank(value["agent"], "agent"),
         "model": optional_nonblank(value["model"], "model"),
         "reasoning_effort": optional_nonblank(value["reasoning_effort"], "reasoning_effort"),
         "placement_argv": value["placement_argv"],
     }
+    if value["version"] == 2:
+        envelope["mode"] = nonblank(value["mode"], "mode")
+        envelope["worktree_path"] = optional_nonblank(value["worktree_path"], "worktree_path")
     placement = envelope["placement_argv"]
     if not isinstance(placement, list) or not all(isinstance(arg, str) for arg in placement):
         fail("Launch envelope placement_argv must be a list of strings.")
@@ -152,14 +160,17 @@ def encode(args: argparse.Namespace) -> None:
     placement = read_json(args.placement)
     if not isinstance(dispatch, dict):
         fail("Dispatch must be a JSON object.")
+    worktree = dispatch.get("worktree")
     envelope = validate_envelope(
         {
-            "version": 1,
+            "version": 2,
             "dispatch_key": dispatch.get("key"),
             "agent": dispatch.get("agent"),
             "model": dispatch.get("model"),
             "reasoning_effort": dispatch.get("reasoning_effort"),
             "placement_argv": placement,
+            "mode": dispatch.get("mode"),
+            "worktree_path": worktree.get("path") if isinstance(worktree, dict) else None,
         }
     )
     prompt = dispatch.get("prompt")
@@ -636,6 +647,7 @@ def prepare(args: argparse.Namespace) -> None:
     guard = preparation_json([*adapter, "snapshot", *common_args], label)["guard"]
     refresh_argv = ["gw", "work", "orchestrate", text_field(plan.get("path"), label, "root"),
                     "--workspace", args.workspace, "--json"]
+    refresh_argv.extend(["--repo-name", args.repo_name])
     live = plan.get("live", [])
     if live:
         refresh_argv.extend(["--live", ",".join(live)])
@@ -1111,6 +1123,8 @@ def settlement_gap(
     task: object,
     latest: tuple[dict[str, Any] | None, str | None],
     level: int,
+    *,
+    rerouted: bool = False,
 ) -> str | None:
     """Why fresh Task/worker rows do not prove a verified checkpoint level, or None."""
     worker, ambiguity = latest
@@ -1153,7 +1167,9 @@ def settlement_gap(
             or resource.get("releaseState") != "released"
         ):
             return "terminal-not-released"
-    if level >= 3 and task.get("status") != "completed":
+    if level >= 3 and task.get("status") != "completed" and not (
+        rerouted and task.get("status") == "blocked"
+    ):
         return "task-not-completed"
     return None
 
@@ -1231,6 +1247,39 @@ def load_records(paths: list[str]) -> dict[str, list[dict[str, Any]]]:
     return by_task
 
 
+DISPATCH_RECORD_SCHEMA = "gw-orca-dispatch"
+
+
+def load_dispatch_records(paths: list[str]) -> dict[str, dict[str, Any]]:
+    """Map superseded Task IDs to reroutes, retaining identity for recovery checks."""
+    superseded: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        raw = read_json(path)
+        if (
+            not isinstance(raw, dict)
+            or raw.get("schema") != DISPATCH_RECORD_SCHEMA
+            or type(raw.get("version")) is not int
+            or raw["version"] != 1
+            or not isinstance(raw.get("reroutes"), list)
+        ):
+            fail(f"Dispatch record {path} is malformed; inspect it before restarting.")
+        for entry in raw["reroutes"]:
+            if (
+                not isinstance(entry, dict)
+                or not isinstance(entry.get("superseded_task_id"), str)
+                or not entry["superseded_task_id"]
+                or not isinstance(entry.get("reason"), str)
+                or not isinstance(entry.get("at"), str)
+            ):
+                fail(f"Dispatch record {path} has a malformed reroute; inspect it before restarting.")
+            superseded[entry["superseded_task_id"]] = {
+                "reason": entry["reason"], "at": entry["at"],
+                "dispatch_id": entry.get("superseded_dispatch_id"),
+                **{field: raw.get(field) for field in ("key", "run_id", "work_path", "phase")},
+            }
+    return superseded
+
+
 def validate_recovery_snapshot(payload: object, workers: list[object]) -> None:
     """Refuse incomplete pagination metadata when records make the snapshot authoritative."""
     result = payload.get("result") if isinstance(payload, dict) else None
@@ -1257,6 +1306,7 @@ def reconcile_records(
     *,
     base: str,
     orca: str,
+    reroute: dict[str, Any] | None = None,
 ) -> tuple[str, dict[str, object]]:
     """Let a saved recovery record refine, never override, fresh Orca evidence."""
     worker = attempt[0]
@@ -1303,7 +1353,17 @@ def reconcile_records(
             "checkpoint": checkpoint,
             "reason": "recovery-incomplete",
         }
-    gap = settlement_gap(record, task, attempt, 3) or evidence_gap(record)
+    # A completed recovery remains historical proof after durable reroute
+    # blocks its Task. Only a matching reroute explains that status change;
+    # every other settlement, identity, evidence and launch check still runs.
+    rerouted = reroute is not None and all(
+        reroute.get(source) == record[target]
+        for source, target in (
+            ("key", "dispatch_key"), ("run_id", "run_id"),
+            ("dispatch_id", "dispatch_id"), ("work_path", "work_path"), ("phase", "phase"),
+        )
+    )
+    gap = settlement_gap(record, task, attempt, 3, rerouted=rerouted) or evidence_gap(record)
     if gap is None and not verified_success(task, latest, orca=orca):
         gap = "launch-proof-unverified"
     if gap is not None:
@@ -1356,7 +1416,8 @@ def classify_restart(args: argparse.Namespace) -> None:
     workers = envelope_rows(worker_payload, "workers", "Worker-list")
     records = load_records(getattr(args, "recovery_record", None) or [])
     parked_stages = {checkpoint_stage(path) for path in getattr(args, "checkpoint", None) or []}
-    if records:
+    rerouted = load_dispatch_records(getattr(args, "dispatch_record", None) or [])
+    if records or rerouted:
         validate_recovery_snapshot(worker_payload, workers)
     rows: list[dict[str, object]] = []
     for task in tasks:
@@ -1388,11 +1449,22 @@ def classify_restart(args: argparse.Namespace) -> None:
         # dispatch key is not reversible to a path.
         if action == "deliberate-skip" and display_stage(task) in parked_stages:
             action = "parked"
+        reroute = rerouted.get(task_id)
+        if reroute is not None:
+            if action == "live":
+                action = "rerouted-but-live"
+            elif action in {"deliberate-skip", "parked"}:
+                action = "rerouted"
         row: dict[str, object] = {
             "task_id": task_id,
+            "task_title": task.get("task_title"),
+            "display_name": task.get("display_name"),
             "dispatch_id": dispatch_id,
             "action": action,
         }
+        if action == "rerouted-but-live":
+            row["action"] = "recovery-inspection"
+            row["recovery"] = {"checkpoint": None, "reason": "rerouted-but-live"}
         if attempt[1] is not None:
             row["action"] = "recovery-inspection"
             row["recovery"] = {"checkpoint": None, "reason": attempt[1]}
@@ -1403,7 +1475,15 @@ def classify_restart(args: argparse.Namespace) -> None:
                 records[task_id],
                 base=action,
                 orca=args.orca,
+                reroute=reroute,
             )
+        if reroute is not None and row["action"] == "live":
+            row["action"] = "recovery-inspection"
+            row["recovery"] = {"checkpoint": None, "reason": "rerouted-but-live"}
+        elif reroute is not None and row["action"] in {"settled", "recovered-settled"}:
+            row["action"] = "rerouted"
+        if row["action"] == "rerouted":
+            row["reroute"] = {field: reroute[field] for field in ("reason", "at")}
         rows.append(row)
     run_id = task_payload["result"].get("runId")
     listed = {row["task_id"] for row in rows}
@@ -1415,6 +1495,8 @@ def classify_restart(args: argparse.Namespace) -> None:
             rows.append(
                 {
                     "task_id": task_id,
+                    "task_title": None,
+                    "display_name": None,
                     "dispatch_id": match.get("dispatch_id"),
                     "action": "recovery-inspection",
                     "recovery": {"checkpoint": None, "reason": "record-task-not-in-run"},
@@ -1472,6 +1554,137 @@ def report_branch(message: object) -> dict[str, object]:
 
 def classify_report(args: argparse.Namespace) -> None:
     json.dump(report_branch(read_json(args.message)), sys.stdout, ensure_ascii=False, separators=(",", ":"))
+    sys.stdout.write("\n")
+
+
+def attend_target(task: dict[str, object]) -> tuple[str | None, str | None, str | None]:
+    """`(mode, worktree path, skip reason)` from a Task's frozen envelope.
+
+    Never fails: an unreadable envelope is a skip reason, so one bad row cannot
+    stop the card reconcile for every other worktree.
+    """
+    spec = task.get("spec")
+    if not isinstance(spec, str) or task.get("spec_truncated"):
+        return None, None, "spec-unreadable"
+    try:
+        envelope, _prompt = decode_spec_text(spec)
+    except SystemExit:
+        return None, None, "envelope-undecodable"
+    mode = envelope.get("mode")
+    if mode is None:
+        return None, None, "mode-unknown"
+    if mode != "attend":
+        return str(mode), None, None
+    path = envelope.get("worktree_path")
+    if not isinstance(path, str):
+        return "attend", None, "worktree-unknown"
+    return "attend", path, None
+
+
+def attend_cards_result(tasks: list[object], rows: list[object]) -> dict[str, list[Any]]:
+    """In-review worktrees and release candidates, derived from §2.1 each cycle (§2.5.3)."""
+    live_tasks = {
+        row["task_id"]
+        for row in rows
+        if isinstance(row, dict) and isinstance(row.get("task_id"), str) and row.get("action") == "live"
+    }
+    live: set[str] = set()
+    used: set[str] = set()
+    skipped: list[dict[str, object]] = []
+    for task in tasks:
+        if not isinstance(task, dict) or not isinstance(task.get("id"), str):
+            skipped.append({"task_id": None, "reason": "task-unreadable"})
+            continue
+        mode, path, reason = attend_target(task)
+        if reason is not None:
+            skipped.append({"task_id": task["id"], "reason": reason})
+            continue
+        if mode != "attend" or path is None:
+            continue
+        used.add(path)
+        if task["id"] in live_tasks:
+            live.add(path)
+    return {
+        "set_in_review": sorted(live),
+        "release_candidates": sorted(used - live),
+        "skipped": sorted(skipped, key=lambda entry: (str(entry["task_id"]), str(entry["reason"]))),
+    }
+
+
+def attend_cards(args: argparse.Namespace) -> None:
+    tasks = envelope_rows(read_json(args.tasks), "tasks", "Task-list")
+    rows = read_json(args.classification)
+    if not isinstance(rows, list):
+        fail("attend-cards --classification must be classify-restart's JSON list.")
+    json.dump(attend_cards_result(tasks, rows), sys.stdout, ensure_ascii=False, separators=(",", ":"))
+    sys.stdout.write("\n")
+
+
+LIFECYCLE_RELEASE_DONE = {"released", "already_released"}
+LIFECYCLE_RELEASE_FOLLOW = {"release_pending", "release_unknown"}
+LIFECYCLE_STOP_AUTHORITIES = {"park", "user-authorized", "exit-evidence"}
+LIFECYCLE_SETTLED_STATES = {"succeeded", "failed", "stopped", "abandoned"}
+
+
+def lifecycle_action(
+    op: str, payload: object, *, mode: str | None, authority: str | None
+) -> dict[str, object]:
+    """Classify one lifecycle receipt without performing any lifecycle action.
+
+    Unknown or malformed decision fields require inspection. A result state is
+    authoritative; only absent states can fall back to uncertain release errors.
+    """
+    result = payload.get("result") if isinstance(payload, dict) else None
+    fields = result if isinstance(result, dict) else {}
+    state = fields.get("state")
+    reason = fields.get("reason")
+    row: dict[str, object] = {
+        "op": op,
+        "state": state if isinstance(state, str) else None,
+        "reason": reason if isinstance(reason, str) else None,
+        "action": "inspect",
+    }
+    if (
+        not isinstance(payload, dict)
+        or ("result" in payload and not isinstance(result, dict))
+        or ("state" in fields and not isinstance(state, str))
+        or (reason is not None and not isinstance(reason, str))
+        or (authority is not None and not isinstance(authority, str))
+        or (mode is not None and not isinstance(mode, str))
+    ):
+        return row
+    if "state" not in fields and op == "release":
+        error = payload.get("error")
+        code = error.get("code") if isinstance(error, dict) else None
+        if isinstance(code, str) and code in LIFECYCLE_RELEASE_FOLLOW:
+            state = code
+            row["state"] = state
+    if not isinstance(state, str):
+        return row
+    if op == "release":
+        if state in LIFECYCLE_RELEASE_DONE:
+            row["action"] = "done"
+        elif state == "retained":
+            row["action"] = (
+                "close-terminal" if reason == "user_takeover" and mode == "attend" else "report-retained"
+            )
+        elif state in LIFECYCLE_RELEASE_FOLLOW:
+            row["action"] = "follow-receipt"
+    elif op == "stop":
+        if state == "stopped" or (
+            fields.get("alreadySettled") is True and state in LIFECYCLE_SETTLED_STATES
+        ):
+            row["action"] = "done"
+        elif state == "stop_unknown":
+            row["action"] = (
+                "abandon-then-close" if authority in LIFECYCLE_STOP_AUTHORITIES else "abandon-report"
+            )
+    return row
+
+
+def classify_lifecycle(args: argparse.Namespace) -> None:
+    row = lifecycle_action(args.op, read_json(args.result), mode=args.mode, authority=args.authority)
+    json.dump(row, sys.stdout, ensure_ascii=False, separators=(",", ":"))
     sys.stdout.write("\n")
 
 
@@ -1576,7 +1789,9 @@ def validate_record(value: object) -> dict[str, Any]:
         if (
             not isinstance(mutation, dict)
             or set(mutation) != {"action", "request_id", "receipt", "at"}
-            or mutation["action"] not in {"worker-stop", "worker-release", "task-update"}
+            or mutation["action"] not in {
+                "worker-stop", "worker-release", "task-update", "worker-abandon", "terminal-close"
+            }
         ):
             record_fail(f"mutations[{index}] must be {{action, request_id, receipt, at}}.")
         record_text(mutation["request_id"], f"mutations[{index}].request_id", optional=True)
@@ -1759,10 +1974,23 @@ def parser() -> argparse.ArgumentParser:
     classify_parser.add_argument("--workers", required=True)
     classify_parser.add_argument("--recovery-record", action="append", default=[])
     classify_parser.add_argument("--checkpoint", action="append", default=[])
+    classify_parser.add_argument("--dispatch-record", action="append", default=[])
     classify_parser.set_defaults(func=classify_restart)
     report_parser = commands.add_parser("classify-report")
     report_parser.add_argument("--message", required=True)
     report_parser.set_defaults(func=classify_report)
+    cards_parser = commands.add_parser("attend-cards")
+    cards_parser.add_argument("--tasks", required=True)
+    cards_parser.add_argument("--classification", required=True)
+    cards_parser.set_defaults(func=attend_cards)
+    lifecycle_parser = commands.add_parser("classify-lifecycle")
+    lifecycle_parser.add_argument("--op", required=True, choices=["release", "stop"])
+    lifecycle_parser.add_argument("--result", required=True)
+    lifecycle_parser.add_argument("--mode")
+    lifecycle_parser.add_argument(
+        "--authority", choices=["park", "user-authorized", "exit-evidence", "none"]
+    )
+    lifecycle_parser.set_defaults(func=classify_lifecycle)
     record_parser = commands.add_parser("record-write")
     record_parser.add_argument("--orca", default="orca")
     record_parser.add_argument("--path", required=True)

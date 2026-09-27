@@ -18,6 +18,25 @@ from okf_io import load
 TODAY = date(2026, 8, 23)
 
 
+def test_run_orchestrate_reads_checkpoints_for_execute_items_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    layout = _workspace(tmp_path)
+    executing, planning = "work/feature-x", "work/feature-y"
+    _write(layout, executing, phase="execute", work_status="in-progress")
+    _write(layout, planning, phase="plan")
+    captured: dict[str, object] = {}
+    real_plan = orchestrate.plan
+
+    def spy(*args: object, **kwargs: object):
+        captured.update(kwargs["checkpoints"])  # type: ignore[arg-type]
+        return real_plan(*args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(orchestrate, "plan", spy)
+    orchestrate.run_orchestrate(layout, executing)
+    assert captured == {executing: orchestrate.HumanCheckpoints("no-plan")}
+
+
 def _workspace(tmp_path: Path, manifest: str = "version: 1\n"):
     tmp_path.mkdir(parents=True, exist_ok=True)
     if "workflow:" in manifest:

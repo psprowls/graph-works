@@ -217,6 +217,11 @@ test-plugin:
     bash tests/test-dispatch-profile-contract.sh
     echo "--- test_launch_placement"
     python3 tests/test_launch_placement.py
+    echo "--- test_attend_cards"
+    python3 tests/test_attend_cards.py
+    echo "--- test_classify_lifecycle"
+    python3 tests/test_classify_lifecycle.py
+    echo "--- test_reader_pinning"
     python3 tests/test_reader_pinning.py
     python3 tests/test_finish_receipt.py
     echo "--- codex/test-marketplace-manifest"

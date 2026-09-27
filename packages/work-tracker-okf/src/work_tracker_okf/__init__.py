@@ -36,6 +36,10 @@ The layout and writer surface follows the same rule:
     from work_tracker_okf.reparent import plan_reparent
     from work_tracker_okf.archive import plan_archive
 
+`asks` stands alone beside that stack, importing only `vocabulary`: the
+typed-ask payload model (`gw.ask/1`) and a plan's `## Human checkpoints`
+parser. Pure, like everything here -- the core command writes the file.
+
 `paths.artifact_ref` returns one frozen `ArtifactRef` carrying the bundle-relative
 form, the root-absolute `sources[].resource` form, the filesystem form and the
 matching `sources[].id` — so a caller cannot obtain a resource without its id.

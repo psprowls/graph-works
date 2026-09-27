@@ -2,14 +2,16 @@
 
 Referenced by every dispatch mode whose worker may block on `orca orchestration
 ask` and a human might not answer in time (`GRACE_PERIOD_TAIL` in
-`graph_works_core.workspace.pipeline`, folded into both `ATTEND_TAIL` and
-`RELAY_TAIL_SEED`). One copy, so `finishing-relay/SKILL.md` and every
-attend-mode stage skill's dispatch prompt agree on what "the worker gives up"
-means.
+`graph_works_core.workspace.pipeline`, folded into `RELAY_TAIL_SEED`). One copy,
+so `finishing-relay/SKILL.md` and every relay dispatch prompt agree on what
+"the worker gives up" means.
+
+**Attend workers do not use this protocol.** An attended stage asks its
+questions in its own terminal (`ATTEND_TAIL`), never through `orca
+orchestration ask`, so nothing of its can time out.
 
 **Operator note — an existing workspace does not get the `relay` pointer for
-free.** `ATTEND_TAIL` is a packaged constant, so every `attend`-mode dispatch
-picks the pointer up automatically. `RELAY_TAIL_SEED` is not: core only seeds it
+free.** Core only seeds it
 into a **new** workspace's dispatch document at `gw bootstrap`/init time and
 preserves an authored one, so a workspace created before this protocol shipped
 still dispatches `relay` (finish-stage) workers with its old tail and no
@@ -82,7 +84,8 @@ and it will, once it sees you park (below).
 
    ## Question
 
-   <The exact question you asked, verbatim, including its options.>
+   <The exact question you asked, verbatim, including its options — and, for
+   a typed ask, its `gw-ask:` payload resource.>
 
    ## Placement
 

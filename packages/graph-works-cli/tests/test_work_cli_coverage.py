@@ -157,7 +157,7 @@ def test_lint_non_ok_and_json(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_next_advance_and_orchestrate_map_failures(
     monkeypatch: pytest.MonkeyPatch, error: Exception, code: int
 ) -> None:
-    monkeypatch.setattr(main, "resolve_workspace", lambda workspace: LAYOUT)
+    monkeypatch.setattr(main, "resolve_workspace", lambda workspace, **kwargs: LAYOUT)
     monkeypatch.setattr(main, "warn_if_stale_routing", lambda: None)
     for target, call in (
         ("run_next", lambda: main.next_stage("work/a", False, "", False)),

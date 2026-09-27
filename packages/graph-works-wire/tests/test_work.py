@@ -7,13 +7,166 @@ from pathlib import Path
 from types import SimpleNamespace
 from types import SimpleNamespace as ns
 
+from graph_works_core.orchestrate.dispatch import DispatchFailure, DispatchResult, ObservedPlacement
+from graph_works_core.orchestrate.dispatch_record import Overrides
+from graph_works_core.orchestrate.reroute import RerouteResult
 from graph_works_core.work.commands import DispatchExplanation, OpenDecision
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
 from graph_works_wire import config as wire_config
 from graph_works_wire import work
-from samples_work import BUNDLE, archive_run, next_result
+from samples_work import BUNDLE, archive_run, next_result, status
 from work_tracker_okf.decisions import Decision
+
+
+def test_worker_dispatch_payload_exact_success_shape() -> None:
+    result = DispatchResult(
+        status="dispatched",
+        key="work/a#execute",
+        run_id="run_1",
+        task_id="task_1",
+        task_title="Implement A",
+        display_name="A",
+        dispatch_id="ctx_1",
+        terminal="term_1",
+        placement=ObservedPlacement("create", "/wt", "feature/a", "A", "repo_1", "parent_1", True, ("created",)),
+        recorded="written",
+        probe="submitted-heartbeat",
+        record_path="/record.json",
+    )
+    payload = work.dispatch_payload(result)
+    assert set(payload) == {
+        "ok",
+        "status",
+        "key",
+        "task_id",
+        "task_title",
+        "display_name",
+        "dispatch_id",
+        "run_id",
+        "terminal",
+        "placement",
+        "recorded",
+        "probe",
+        "record_path",
+        "failure",
+    }
+    assert "error" not in payload
+    assert payload == {
+        "ok": True,
+        "status": "dispatched",
+        "key": "work/a#execute",
+        "task_id": "task_1",
+        "task_title": "Implement A",
+        "display_name": "A",
+        "dispatch_id": "ctx_1",
+        "run_id": "run_1",
+        "terminal": "term_1",
+        "placement": {
+            "action": "create",
+            "path": "/wt",
+            "branch": "feature/a",
+            "display_name": "A",
+            "repo_id": "repo_1",
+            "parent_worktree_id": "parent_1",
+            "lineage_set": True,
+            "notes": ["created"],
+            "start_sha": None,
+        },
+        "recorded": "written",
+        "probe": "submitted-heartbeat",
+        "record_path": "/record.json",
+        "failure": None,
+    }
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_dispatch_resolution_keyword_remains_supported() -> None:
+    resolution = resolve_dispatch({"variant": "single"}, rules=())
+    assert work.dispatch_payload(resolution=resolution) == work.dispatch_payload(resolution)
+
+
+def test_worker_dispatch_payload_failure_shape() -> None:
+    result = DispatchResult(
+        status=None,
+        key="work/a#execute",
+        run_id="run_1",
+        failure=DispatchFailure("launch", "unsent", "worker did not launch", task_id="task_1", refusal="unavailable"),
+    )
+    payload = work.dispatch_payload(result)
+    assert payload["ok"] is False
+    assert payload["placement"] is None
+    assert payload["failure"] == {
+        "step": "launch",
+        "reason": "unsent",
+        "detail": "worker did not launch",
+        "task_id": "task_1",
+        "dispatch_id": None,
+        "refusal": "unavailable",
+    }
+    assert "error" not in payload
+    assert json.loads(json.dumps(payload)) == payload
+
+
+def test_reroute_payload_success_and_failure_shapes() -> None:
+    success = RerouteResult(
+        status="rerouted",
+        key="work/a#execute",
+        run_id="run_2",
+        reason="retry",
+        superseded_task_id="task_1",
+        superseded_dispatch_id="ctx_1",
+        overrides=Overrides(agent="codex", model="gpt-6-sol", effort="high"),
+        record_path="/record.json",
+    )
+    payload = work.reroute_payload(success)
+    assert set(payload) == {
+        "ok",
+        "status",
+        "key",
+        "run_id",
+        "reason",
+        "superseded_task_id",
+        "superseded_dispatch_id",
+        "overrides",
+        "record_path",
+        "failure",
+    }
+    assert payload == {
+        "ok": True,
+        "status": "rerouted",
+        "key": "work/a#execute",
+        "run_id": "run_2",
+        "reason": "retry",
+        "superseded_task_id": "task_1",
+        "superseded_dispatch_id": "ctx_1",
+        "overrides": {"agent": "codex", "model": "gpt-6-sol", "effort": "high"},
+        "record_path": "/record.json",
+        "failure": None,
+    }
+    assert "error" not in payload
+    assert json.loads(json.dumps(payload)) == payload
+
+    failure = RerouteResult(
+        status=None,
+        key="work/a#execute",
+        run_id="run_2",
+        reason="retry",
+        failure=DispatchFailure("reroute", "unsent", "task unavailable"),
+    )
+    failed = work.reroute_payload(failure)
+    assert failed["ok"] is False
+    assert failed["overrides"] is None
+    assert failed["failure"] == {
+        "step": "reroute",
+        "reason": "unsent",
+        "detail": "task unavailable",
+        "task_id": None,
+        "dispatch_id": None,
+        "refusal": None,
+    }
+    assert "error" not in failed
+    assert json.loads(json.dumps(failed)) == failed
 
 
 def test_archive_payload_wiki_block_empty_planned_applied() -> None:
@@ -44,6 +197,10 @@ def test_archive_payload_wiki_block_empty_planned_applied() -> None:
 def test_rollup_projects_open_paths() -> None:
     payload = work._rollup(SimpleNamespace(total=2, terminal=1, open_paths=("work/feature-a",)))
     assert payload == {"total": 2, "terminal": 1, "open_paths": ["work/feature-a"]}
+
+
+def test_status_payload_carries_not_started() -> None:
+    assert work.status_payload(status(resume=False))["not_started"] == 2
 
 
 def test_normalized_payload_is_path_keyed_and_uses_canonical_source_fields() -> None:
@@ -231,7 +388,9 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         dispatch_repos={dispatch.key: SimpleNamespace(name="code", path=Path("/code"), source="sole")},
         preparations=(),
         plan=SimpleNamespace(
-            finish_targets={}, dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())}
+            finish_targets={},
+            dispatch_resolutions={dispatch.key: resolve_dispatch({"variant": "planned"}, rules=())},
+            human_checkpoints={},
         ),
         advances=(SimpleNamespace(path="work/b", reason="done", worktree="w", branch="b", mode="return"),),
         blocked=(SimpleNamespace(path="work/c", kind="dependency", reason="wait"),),
@@ -259,11 +418,19 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     ]
     assert orchestrate_result["dispatches"][0]["path"] == "work/a"
     assert orchestrate_result["dispatches"][0]["auto_merge"] is True
+    assert orchestrate_result["dispatches"][0]["human_checkpoints"] is None
     assert orchestrate_result["dispatches"][0]["worktree"]["parent_path"] == "/tmp/parent"
     assert orchestrate_result["advances"][0]["mode"] == "return"
     assert orchestrate_result["supervise_merges"] is False
     assert orchestrate_result["holds"] == []
     assert orchestrate_result["repo"] == {"name": "code", "path": "/code", "source": "sole"}
+
+
+def test_orchestrate_dispatches_project_human_checkpoints_or_null() -> None:
+    from samples_work import WORK
+
+    busy = WORK["work.orchestrate_payload"][0]()
+    assert busy["dispatches"][0]["human_checkpoints"] == {"status": "declared", "items": ["Task 2: skim"]}
 
 
 def test_orchestrate_payload_carries_holds() -> None:
@@ -507,6 +674,46 @@ def test_next_payload_always_carries_the_empty_guidance_form() -> None:
     payload = work.next_payload(next_result(full=False), bundle_root=BUNDLE)
     assert (payload["guidance"], payload["guidance_warnings"], payload["guidance_file"]) == ([], [], None)
     json.dumps(payload)
+
+
+def test_ask_payload_shapes_success_and_refusal() -> None:
+    from samples_work import WORK
+
+    ok = WORK["work.ask_payload"][0]()
+    assert ok == {
+        "ok": True,
+        "applied": True,
+        "payload": {
+            "path": str(Path("/ws/okf/work/a/references/asks/plan-001-choice.json")),
+            "resource": "/work/a/references/asks/plan-001-choice.json",
+        },
+        "orca": {
+            "question": "Pick.\n\ngw-ask: /work/a/references/asks/plan-001-choice.json",
+            "options": "merge,hold",
+        },
+        "refusals": [],
+    }
+    refused = WORK["work.ask_payload"][1]()
+    assert refused["ok"] is False and refused["payload"] is None and refused["orca"] is None
+    assert refused["refusals"] == ["option-count"]
+
+
+def test_ask_answer_payload_shapes_success_and_refusal() -> None:
+    from samples_work import WORK
+
+    ok = WORK["work.ask_answer_payload"][0]()
+    assert ok["ok"] is True and ok["changed"] is True and ok["applied"] is True
+    assert ok["payload"]["resource"] == "/work/a/references/asks/plan-001-choice.json"
+    assert ok["reply_body"].startswith('{"ask": ')
+    refused = WORK["work.ask_answer_payload"][1]()
+    assert refused == {
+        "ok": False,
+        "applied": False,
+        "changed": False,
+        "payload": None,
+        "reply_body": None,
+        "refusals": ["payload-invalid"],
+    }
 
 
 def test_pin_detached_worktree_projection():

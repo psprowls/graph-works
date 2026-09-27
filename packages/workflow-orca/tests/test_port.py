@@ -416,3 +416,163 @@ def test_degraded_worker_read_stays_inconclusive_without_transcript():
         return OrcaResult(0, json.dumps({"ok": True, "result": {"source": "terminal"}}), "")
 
     assert OrcaCliPort(run=response).worker_read("ctx", limit=5) == {"source": "terminal", "message_count": 0}
+
+
+def test_check_wait_argv_without_ack():
+    p, runner = port([(("check", "--wait"), "check_batch")])
+    p.check_wait("run_1", types="worker_done,escalation,question", timeout_ms=600000, ack=None)
+    assert runner.calls == [
+        (
+            "orca",
+            "orchestration",
+            "check",
+            "--run",
+            "run_1",
+            "--wait",
+            "--types",
+            "worker_done,escalation,question",
+            "--timeout-ms",
+            "600000",
+            "--json",
+        )
+    ]
+
+
+def test_check_wait_argv_with_ack():
+    p, runner = port([(("check", "--wait"), "check_batch")])
+    p.check_wait("run_1", types="worker_done", timeout_ms=5000, ack="dlv_prev")
+    assert runner.calls[-1] == (
+        "orca",
+        "orchestration",
+        "check",
+        "--run",
+        "run_1",
+        "--wait",
+        "--types",
+        "worker_done",
+        "--timeout-ms",
+        "5000",
+        "--ack",
+        "dlv_prev",
+        "--json",
+    )
+
+
+def test_check_wait_projects_messages():
+    p, _ = port([(("check", "--wait"), "check_batch")])
+    delivery = p.check_wait("run_1", types="worker_done", timeout_ms=1, ack=None)
+    assert delivery["delivery_id"] == "dlv_0000000000a1"
+    assert [m["type"] for m in delivery["messages"]] == ["worker_done", "question", "escalation", "heartbeat"]
+    first = delivery["messages"][0]
+    assert first == {
+        "id": "msg_b84fb919772e",
+        "type": "worker_done",
+        "subject": "wiki_smoke.py closes the coverage gap",
+        "body": "Added scripts/wiki_smoke.py and its tests.",
+        "from_": "term_10fb90d2-9735-42b5-84a0-dc73a7e1a66a",
+        "created_at": "2026-08-13T18:31:58Z",
+        "payload": {
+            "taskId": "task_5ca8c19ffa5e",
+            "dispatchId": "ctx_817ed5bf5986",
+            "outcome": "succeeded",
+            "filesModified": ["scripts/wiki_smoke.py", "scripts/tests/test_wiki_smoke.py"],
+            "reportPath": None,
+        },
+        "payload_raw": None,
+    }
+
+
+def test_check_wait_decodes_a_string_payload():
+    p, _ = port([(("check", "--wait"), "check_heartbeat_only")])
+    [message] = p.check_wait("run_1", types="worker_done", timeout_ms=1, ack=None)["messages"]
+    assert message["payload"] == {
+        "taskId": "task_338800a1fa14",
+        "dispatchId": "ctx_320c498114b8",
+        "phase": "implementing",
+    }
+    assert message["payload_raw"] is None
+
+
+def test_check_wait_empty_batch_has_no_delivery_id():
+    p, _ = port([(("check", "--wait"), "check_timeout")])
+    assert p.check_wait("run_1", types="worker_done", timeout_ms=1, ack=None) == {
+        "delivery_id": None,
+        "messages": [],
+    }
+
+
+@pytest.mark.parametrize(
+    ("raw", "payload", "payload_raw"),
+    [
+        ("{not json", None, "{not json"),
+        ("[1, 2]", None, "[1, 2]"),
+        (7, None, "7"),
+        (None, {}, None),
+        ({"a": 1}, {"a": 1}, None),
+    ],
+    ids=["undecodable-string", "string-non-object", "non-string-scalar", "null", "historical-mapping"],
+)
+def test_check_wait_payload_decoding(raw, payload, payload_raw):
+    def batch(argv):
+        message = {"id": "m1", "type": "worker_done", "payload": raw}
+        result = {"deliveryId": "dlv_1", "messages": [message]}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    [message] = OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)["messages"]
+    assert (message["payload"], message["payload_raw"]) == (payload, payload_raw)
+    assert (message["subject"], message["body"], message["from_"], message["created_at"]) == (None, None, None, None)
+
+
+def test_check_wait_skips_non_object_messages_and_null_delivery_id():
+    def batch(argv):
+        result = {"deliveryId": None, "messages": ["junk", {"id": "m1", "type": "heartbeat"}]}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    delivery = OrcaCliPort(run=batch).check_wait("r", types="t", timeout_ms=1, ack=None)
+    assert delivery["delivery_id"] is None
+    assert [m["id"] for m in delivery["messages"]] == ["m1"]
+
+
+def test_check_ack_argv():
+    p, runner = port([(("check", "--ack"), "terminal_send")])
+    p.check_ack("run_1", "dlv_1")
+    assert runner.calls == [("orca", "orchestration", "check", "--run", "run_1", "--ack", "dlv_1", "--json")]
+
+
+def test_run_use_argv():
+    p, runner = port([(("run-use",), "terminal_send")])
+    p.run_use("run_1")
+    assert runner.calls == [("orca", "orchestration", "run-use", "--id", "run_1", "--json")]
+
+
+def test_consumer_fenced_surfaces_as_the_error_code():
+    p, _ = port([(("check", "--wait"), "check_consumer_fenced")])
+    with pytest.raises(OrcaCliError) as caught:
+        p.check_wait("run_43b63f0bdf2b", types="worker_done", timeout_ms=1, ack=None)
+    assert caught.value.code == "consumer_fenced"
+
+
+def test_worker_list_projects_release_state_and_terminal():
+    p, _ = port([(("worker-list",), "worker_list")])
+    rows = {row["dispatch_id"]: row for row in p.worker_list("run_1")}
+    assert rows["ctx_000000000001"]["release_state"] == "released"
+    assert rows["ctx_000000000001"]["terminal"] == "term_0000000000000001"
+    assert rows["ctx_817ed5bf5986"]["release_state"] == "retained"
+    assert rows["ctx_320c498114b8"]["release_state"] == "active"
+
+
+def test_task_list_decodes_result():
+    p, _ = port([(("task-list",), "task_list")])
+    rows = {row["id"]: row for row in p.task_list("run_1")}
+    assert rows["task_5ca8c19ffa5e"]["result"] is not None
+    assert rows["task_5ca8c19ffa5e"]["result"]["provenance"] == "worker_report"
+    assert rows["task_338800a1fa14"]["result"] is None
+
+
+@pytest.mark.parametrize("raw", ["{bad", "[1]", 3, None], ids=["undecodable", "array", "number", "null"])
+def test_task_list_unusable_result_is_none(raw):
+    def listing(argv):
+        result = {"tasks": [{"id": "task_1", "result": raw}]}
+        return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+
+    assert OrcaCliPort(run=listing).task_list("run_1")[0]["result"] is None

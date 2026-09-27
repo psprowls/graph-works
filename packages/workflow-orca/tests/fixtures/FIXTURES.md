@@ -22,6 +22,8 @@ Re-capture with these commands, replacing the ids with live ones:
 | `worker_read_empty.json` | as above, against a worker that has not spoken |
 | `check_batch.json` | `orca orchestration check --run <run> --wait --types worker_done,escalation,question,heartbeat --timeout-ms 1000 --json` |
 | `check_timeout.json` | as above, with no traffic on the Run |
+| `check_heartbeat_only.json` | `orca orchestration check --run <run> --wait --types worker_done,escalation,question --timeout-ms 1000 --json` with only heartbeat traffic (hand-authored) |
+| `check_consumer_fenced.json` | the same `check` from a terminal not bound to the Run (hand-authored) |
 | `worker_show_created.json` | `orca orchestration worker-show --dispatch <ctx that provisioned a worktree> --json` |
 | `worktree_show_renamed.json` | `orca worktree show --worktree id:<repoId>::<path> --json` (note: **not** an `orchestration` subcommand) |
 | `repo_list.json` | `orca repo list --json` (hand-authored) |
@@ -30,7 +32,7 @@ Re-capture with these commands, replacing the ids with live ones:
 | `terminal_send.json` | `orca terminal send --terminal <term> --text "" --enter --json` (hand-authored) |
 | `worker_start_effects.json` | `orca orchestration worker-start --task <task> --agent claude --run <run> --json` (hand-authored from `worker_start.json` with `effects` and launch receipt, omitting `agentTerminalHandle` to exercise the live fallback) |
 
-**`check_batch.json`, `repo_list.json`, `terminal_send.json`, `worker_start_effects.json`, `worktree_list.json`, and `worktree_create.json` are hand-authored, not captured verbatim.** A `check` batch
+**`check_batch.json`, `check_heartbeat_only.json`, `check_consumer_fenced.json`, `repo_list.json`, `terminal_send.json`, `worker_start_effects.json`, `worktree_list.json`, and `worktree_create.json` are hand-authored, not captured verbatim.** A `check` batch
 requires the capturing terminal to be the Run's bound coordinator with live
 traffic, which the plan author did not have. It is hand-authored from two
 verified sources: the flag vocabulary of `orca orchestration send --help`
@@ -38,6 +40,7 @@ verified sources: the flag vocabulary of `orca orchestration send --help`
 `--phase`) and the settled-task `result` payload in `task_list.json`, whose keys
 (`outcome`, `subject`, `body`, `filesModified`, `reportPath`, `completedAt`)
 were captured live. Re-capture it at the first live run and expect field drift.
+The heartbeat-only batch has the `check_batch.json` shape with its payload as the JSON string current Orca emits; the fenced envelope uses the `consumer_fenced` code documented in `backend.py` (lines 9–12). The epic's live acceptance run is the re-capture point.
 
 `worktree_show_renamed.json` is trimmed rather than verbatim — the live
 `worktree` object carries ~30 keys (lineage, linked issue/PR fields for six

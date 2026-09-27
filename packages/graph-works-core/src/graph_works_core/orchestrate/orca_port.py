@@ -35,6 +35,7 @@ class OrcaTask(TypedDict):
     display_name: str | None
     status: str | None
     spec: str | None
+    result: dict[str, Any] | None
 
 
 class OrcaStart(TypedDict):
@@ -51,6 +52,8 @@ class OrcaWorker(TypedDict):
     state: str | None
     dispatch_status: str | None
     worktree_id: str | None
+    release_state: str | None
+    terminal: str | None
 
 
 class OrcaWorkerShow(TypedDict):
@@ -62,6 +65,22 @@ class OrcaWorkerShow(TypedDict):
 class OrcaRead(TypedDict):
     source: str | None
     message_count: int
+
+
+class OrcaMessage(TypedDict):
+    id: str
+    type: str
+    subject: str | None
+    body: str | None
+    from_: str | None
+    created_at: str | None
+    payload: dict[str, Any] | None
+    payload_raw: str | None
+
+
+class OrcaDelivery(TypedDict):
+    delivery_id: str | None
+    messages: list[OrcaMessage]
 
 
 @runtime_checkable
@@ -82,3 +101,6 @@ class OrcaPort(Protocol):
     def worker_show(self, dispatch_id: str) -> OrcaWorkerShow: ...
     def worker_read(self, dispatch_id: str, *, limit: int) -> OrcaRead: ...
     def terminal_send_enter(self, terminal: str) -> None: ...
+    def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery: ...
+    def check_ack(self, run_id: str, delivery_id: str) -> None: ...
+    def run_use(self, run_id: str) -> None: ...

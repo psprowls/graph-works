@@ -1,0 +1,20 @@
+{
+  "id": "5d1e2f30-0a1b-4c2d-8e3f-4a5b6c7d8e9f",
+  "ok": true,
+  "result": {
+    "runId": "run_43b63f0bdf2b",
+    "deliveryId": "dlv_00000000hb01",
+    "messages": [
+      {
+        "id": "msg_hb00000000a1",
+        "type": "heartbeat",
+        "subject": "alive",
+        "body": "",
+        "from": "term_ff2faacf-db5b-43ad-b05b-c6dfee58eb53",
+        "created_at": "2026-09-27T18:00:00Z",
+        "payload": "{\"taskId\":\"task_338800a1fa14\",\"dispatchId\":\"ctx_320c498114b8\",\"phase\":\"implementing\"}"
+      }
+    ],
+    "count": 1
+  }
+}

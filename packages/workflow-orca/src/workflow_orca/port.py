@@ -5,6 +5,7 @@ One method per Orca call; `OrcaSession` is unchanged and does not use it.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from typing import Any, TypedDict
 
@@ -34,6 +35,7 @@ class OrcaTask(TypedDict):
     display_name: str | None
     status: str | None
     spec: str | None
+    result: dict[str, Any] | None
 
 
 class OrcaStart(TypedDict):
@@ -50,6 +52,8 @@ class OrcaWorker(TypedDict):
     state: str | None
     dispatch_status: str | None
     worktree_id: str | None
+    release_state: str | None
+    terminal: str | None
 
 
 class OrcaWorkerShow(TypedDict):
@@ -61,6 +65,22 @@ class OrcaWorkerShow(TypedDict):
 class OrcaRead(TypedDict):
     source: str | None
     message_count: int
+
+
+class OrcaMessage(TypedDict):
+    id: str
+    type: str
+    subject: str | None
+    body: str | None
+    from_: str | None
+    created_at: str | None
+    payload: dict[str, Any] | None
+    payload_raw: str | None
+
+
+class OrcaDelivery(TypedDict):
+    delivery_id: str | None
+    messages: list[OrcaMessage]
 
 
 def _object(value: object) -> dict[str, Any]:
@@ -75,6 +95,45 @@ def _rows(value: object) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [row for row in value if isinstance(row, dict)]
+
+
+def _payload(value: object) -> tuple[dict[str, Any] | None, str | None]:
+    """Decode current JSON-string or historical mapping payloads without raising."""
+    if value is None:
+        return {}, None
+    if isinstance(value, dict):
+        return value, None
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            return None, value
+        return (decoded, None) if isinstance(decoded, dict) else (None, value)
+    return None, json.dumps(value)
+
+
+def _message(row: dict[str, Any]) -> OrcaMessage:
+    payload, raw = _payload(row.get("payload"))
+    return {
+        "id": str(row.get("id") or ""),
+        "type": str(row.get("type") or ""),
+        "subject": _string(row.get("subject")),
+        "body": _string(row.get("body")),
+        "from_": _string(row.get("from")),
+        "created_at": _string(row.get("created_at")),
+        "payload": payload,
+        "payload_raw": raw,
+    }
+
+
+def _result(value: object) -> dict[str, Any] | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError:
+        return None
+    return decoded if isinstance(decoded, dict) else None
 
 
 def _worktree(row: dict[str, Any]) -> OrcaWorktree:
@@ -193,6 +252,7 @@ class OrcaCliPort:
                 "display_name": _string(row.get("display_name")),
                 "status": _string(row.get("status")),
                 "spec": None if row.get("spec_truncated") else _string(row.get("spec")),
+                "result": _result(row.get("result")),
             }
             for row in _rows(result.get("tasks"))
         ]
@@ -278,6 +338,8 @@ class OrcaCliPort:
                         "state": _string(row.get("workerState")),
                         "dispatch_status": _string(row.get("dispatchStatus")),
                         "worktree_id": _string(row.get("worktreeId")) or _string(resource.get("worktreeId")),
+                        "release_state": _string(resource.get("releaseState")),
+                        "terminal": _string(row.get("agentTerminalHandle")),
                     }
                 )
             page = _object(result.get("page"))
@@ -339,3 +401,21 @@ class OrcaCliPort:
 
     def terminal_send_enter(self, terminal: str) -> None:
         self._call_top(("terminal", "send", "--terminal", terminal, "--text", "", "--enter"))
+
+    def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery:
+        """One blocking check; optionally acknowledge the prior delivery in the same call."""
+        argv = ["check", "--run", run_id, "--wait", "--types", types, "--timeout-ms", str(timeout_ms)]
+        if ack is not None:
+            argv.extend(("--ack", ack))
+        result = self._call(argv)
+        return {
+            "delivery_id": _string(result.get("deliveryId")),
+            "messages": [_message(row) for row in _rows(result.get("messages"))],
+        }
+
+    def check_ack(self, run_id: str, delivery_id: str) -> None:
+        self._call(("check", "--run", run_id, "--ack", delivery_id))
+
+    def run_use(self, run_id: str) -> None:
+        """Rebind this terminal as the Run's consumer after a fence."""
+        self._call(("run-use", "--id", run_id))

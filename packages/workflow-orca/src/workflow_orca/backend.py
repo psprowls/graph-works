@@ -274,21 +274,21 @@ class OrcaSession:
     def workers(self) -> list[WorkerRecord]:
         """Every worker ever launched in this session.
 
-        Costs `2 + W` calls, where `W` counts workers with handles. Full task
+        Costs `1 + P + W` calls: `P` worker-list pages and `W` workers with handles. Full task
         specs and durable worker launch receipts are required even after
         settlement. The same worker-show also supplies heartbeat and actual
         terminal proof; lifecycle never depends on the presence of a terminal.
         """
         tasks = self._call(["task-list"]).get("tasks") or []
-        rows = self._call(["worker-list"]).get("workers") or []
+        rows = self._worker_rows()
 
-        # Later rows win: retries append, so the last row for a task is the
-        # most recent attempt.
+        # Orca returns newest first, including across page boundaries.
+        # Keep the first attempt for each task; older retries cannot replace it.
         latest: dict[str, dict[str, Any]] = {}
-        for row in rows:
-            task_id = str(row.get("taskId") or "")
+        for attempt in rows:
+            task_id = str(attempt.get("taskId") or "")
             if task_id:
-                latest[task_id] = row
+                latest.setdefault(task_id, attempt)
 
         self._keys_by_task = {str(t["id"]): str(t.get("task_title") or "") for t in tasks}
         records: list[WorkerRecord] = []
@@ -346,6 +346,38 @@ class OrcaSession:
                 # enumeration is what re-earns its release obligation.
                 self._unreleased.add(handle)
         return records
+
+    def _worker_rows(self) -> list[dict[str, Any]]:
+        """Complete newest-first inventory, or an enumeration error (never partial)."""
+        rows: list[dict[str, Any]] = []
+        argv = ["worker-list"]
+        seen: set[str] = set()
+        while True:
+            result = self._call(argv)
+            rows.extend(result.get("workers") or [])
+            # Historical responses have no pagination metadata.
+            if "page" not in result and not seen:
+                return rows
+            page = result.get("page")
+            if isinstance(page, dict) and page.get("hasMore") is False:
+                return rows
+            cursor = page.get("nextCursor") if isinstance(page, dict) else None
+            if (
+                not isinstance(page, dict)
+                or page.get("hasMore") is not True
+                or not isinstance(cursor, str)
+                or not cursor.strip()
+                or cursor in seen
+            ):
+                raise OrcaCliError(
+                    (*_ORCA, *argv, "--run", self.run_id, "--json"),
+                    returncode=0,
+                    stderr="",
+                    message="worker-list page has malformed or repeated continuation",
+                    receipt={"ok": True, "result": result},
+                )
+            seen.add(cursor)
+            argv = ["worker-list", "--cursor", cursor]
 
     def describe(self, key: str) -> WorkerRecord | None:
         """`workers()` filtered to one key. Same cost, same honesty — a

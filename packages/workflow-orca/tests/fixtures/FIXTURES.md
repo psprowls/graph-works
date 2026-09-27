@@ -62,3 +62,14 @@ Sources: `.superpowers/sdd/02-plan/live-show.json` and `live-read.json`. These a
 
 - `worker_show_live_terminal.json`: `result.terminal.preview` replaced with `"(redacted)"`.
 - `worker_read_latest.json`: `result.transcript.messages[0].blocks[0].input` replaced with `"(redacted)"`.
+
+### Newest-first retry ordering (final heartbeat-progress fix)
+
+`worker_list.json` contains the synthetic failed predecessor `ctx_000000000001`
+for the captured task `task_5ca8c19ffa5e`. It now follows the captured rows, so
+the captured successful retry is selected under the installed Orca 1.4.211
+newest-first contract. This is a synthetic ordering correction, not a fresh
+live capture; all row fields are unchanged. The unedited `test_workers.py`
+retry test still pins the successful handle, although its historical name
+says "last". Focused synthetic page/retry tests pin first-attempt selection
+explicitly, including across page boundaries.

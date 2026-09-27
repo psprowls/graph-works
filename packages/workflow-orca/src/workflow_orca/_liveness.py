@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
 
@@ -83,12 +83,12 @@ def instant(value: object) -> datetime | None:
 
 
 def iso(moment: datetime) -> str:
-    return moment.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return moment.astimezone(UTC).isoformat(timespec="seconds").removesuffix("+00:00") + "Z"
 
 
 def age_s(now: datetime, moment: datetime) -> int:
     """Whole seconds, floored at 0 so clock skew never reads as negative."""
-    return max(0, int((now - moment).total_seconds()))
+    return max(0, (now - moment) // timedelta(seconds=1))
 
 
 def stamp(raw: object, field: str, now: datetime, notes: list[str]) -> tuple[str | None, int | None]:

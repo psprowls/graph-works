@@ -149,3 +149,18 @@ def test_out_of_range_and_nonfinite_values_are_unparseable(raw):
     notes: list[str] = []
     assert stamp(raw, "timestamp", MOMENT, notes) == (None, None)
     assert notes == ["timestamp unparseable"]
+
+
+def test_ancient_fractional_age_floors_exactly():
+    assert age_s(datetime(2026, 9, 27, tzinfo=UTC), datetime(1, 1, 1, microsecond=1, tzinfo=UTC)) == 63926063999
+
+
+@pytest.mark.parametrize("year", [1, 999, 1000, 9999])
+def test_iso_four_digit_year_is_independent_of_platform_strftime(year):
+    class UnpaddedYear(datetime):
+        # Model the documented libc variation on hosts that pad %Y already.
+        def strftime(self, fmt):
+            return super().strftime(fmt).replace(f"{self.year:04d}", str(self.year), 1)
+
+    moment = UnpaddedYear(year, 1, 2, 3, 4, 5, 999999, tzinfo=timezone(timedelta(hours=2)))
+    assert iso(moment) == f"{year:04d}-01-02T01:04:05Z"

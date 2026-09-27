@@ -134,6 +134,7 @@ def test_mid_fix_last_line_and_truncation(tmp_path: Path) -> None:
 def test_non_utf8_ledger_is_unreadable(tmp_path: Path) -> None:
     path = _ledger(tmp_path, "plan", "")
     path.write_bytes(b"\xff\xfe")
+    os.utime(path, (FRESH.timestamp(), FRESH.timestamp()))
     assert find_progress(tmp_path, since=SINCE) == (None, (LEDGER_UNREADABLE,))
 
 

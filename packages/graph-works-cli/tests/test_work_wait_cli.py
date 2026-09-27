@@ -241,3 +241,58 @@ def test_timeout_json_liveness_through_real_adapter(env, monkeypatch, live):
     else:
         assert rows == []
     assert not any(token in call for call in calls for token in ("run-use", "run-create", "send"))
+
+
+@pytest.mark.parametrize("scenario", ["later-live", "split-retry", "later-failure"])
+def test_timeout_liveness_pages_and_retries(env, monkeypatch, scenario):
+    layout, _ = env
+    calls = []
+    fixtures = REPO / "packages/workflow-orca/tests/fixtures"
+    live = {"taskId": "task_live", "dispatchId": "ctx_live", "workerState": "running"}
+    old = {"taskId": "task_live", "dispatchId": "ctx_old", "workerState": "failed"}
+
+    def transport(argv):
+        calls.append(tuple(argv))
+        command = argv[2]
+        if command == "check":
+            payload = {"messages": []}
+        elif command == "task-list":
+            payload = {"tasks": [{"id": "task_live", "task_title": "live"}]}
+        elif command == "worker-list":
+            if "--cursor" in argv:
+                assert argv[argv.index("--cursor") + 1] == "opaque+/="
+                if scenario == "later-failure":
+                    return OrcaResult(
+                        1, json.dumps({"ok": False, "error": {"code": "page_failed", "message": "no page"}}), ""
+                    )
+                rows = [old] if scenario == "split-retry" else [live]
+                payload = {"workers": rows, "page": {"hasMore": False}}
+            else:
+                rows = [] if scenario == "later-live" else [live]
+                payload = {"workers": rows, "page": {"hasMore": True, "nextCursor": "opaque+/="}}
+        elif command in ("worker-show", "worker-read"):
+            name = "worker_show_live_terminal" if command == "worker-show" else "worker_read_latest"
+            return OrcaResult(0, (fixtures / f"{name}.json").read_text(encoding="utf-8"), "")
+        else:
+            raise AssertionError(argv)
+        return OrcaResult(0, json.dumps({"ok": True, "result": payload}), "")
+
+    ticks = iter([0.0, 0.0, 2.0, 2.0])
+    monkeypatch.setattr(
+        main,
+        "_wait_clock",
+        lambda: WaitClock(wall=lambda: datetime(2026, 9, 27, tzinfo=UTC), monotonic=lambda: next(ticks)),
+    )
+    monkeypatch.setattr(main, "orca_port", lambda: OrcaCliPort(run=transport))
+    result = invoke(layout, "--timeout-s", "1", "--json")
+    payload = json.loads(result.stdout)
+    if scenario == "later-failure":
+        assert result.exit_code == exit_codes.GENERIC
+        assert payload["error"]["payload"]["code"] == "page_failed"
+        assert not any("worker-show" in call or "worker-read" in call for call in calls)
+    else:
+        assert result.exit_code == 0, result.output
+        assert payload["status"] == "timeout"
+        assert [row["handle"] for row in payload["liveness"]] == ["ctx_live"]
+    assert sum("worker-list" in call for call in calls) == 2
+    assert not any(token in call for call in calls for token in ("run-use", "run-create", "send", "--ack"))

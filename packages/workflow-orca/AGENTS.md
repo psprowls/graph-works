@@ -108,12 +108,15 @@ enforced here via a live Orca query rather than a local set.
   against the plan, never warns, and degrades every failure to `None`,
   because `launch()` has already started a real worker by then. Comparing
   actual against planned is a caller's business and is tracked separately.
-- **enumerate** (`workers()`): costs `2 + W` CLI calls (`task-list`,
-  `worker-list`, plus one `worker-show` per worker with a handle) — read
+- **enumerate** (`workers()`): costs `1 + P + W` CLI calls (`task-list`,
+  all `P` worker-list pages, plus one `worker-show` per worker with a handle) — read
   `WorkerRecord.last_heartbeat_at`'s and `workers()`'s docstrings in
   `backend.py` before "optimizing" this away; the per-live-worker call is
   deliberate because a nudge decision (below) treats "has ever heartbeat" as
-  a hard veto and a lazily-`None` heartbeat would silently defeat it.
+  a hard veto and a lazily-`None` heartbeat would silently defeat it. Rows are
+  newest first; the first attempt for each task wins across all pages. Failed
+  later pages or malformed/repeated continuations raise rather than returning
+  a partial inventory. Historical responses without page metadata remain valid.
 - **wait**: one blocking `check --wait --types
   worker_done,escalation,question,heartbeat --timeout-ms <ms>` call,
   translated by the pure `_map.py` (`event_from_message`) into the protocol's

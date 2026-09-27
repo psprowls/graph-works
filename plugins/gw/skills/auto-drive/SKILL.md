@@ -15,8 +15,11 @@ worktree, an agent, a model, or a stage on its own.
 loop for `<work-path>`."
 
 This session **is** the coordinator — a human-attended session, not itself a
-dispatched worker. Wherever this skill says "ask the user," that means the
-native `AskUserQuestion` tool, talking to the person running this session.
+dispatched worker. Wherever this skill says "ask the user," that means the native
+`AskUserQuestion` tool, talking to the person running this session — for the
+coordinator's **own** decisions (§2.5 blockers, the §4.1 failure question).
+A **worker's** question is never asked that way: §4.3 prints it and takes the
+human's typed answer later, so one slow decision never blocks the loop.
 `orca orchestration ask`/`send` is a *different* channel: it carries messages
 a dispatched *worker* sends up to this coordinator — it is never how this
 skill talks to its own human. The channel back down is asymmetric by message
@@ -865,10 +868,20 @@ orca orchestration check --run <run_id> --wait \
   acking. Then acknowledge with the delivery id from the response:
   `orca orchestration check --run <run_id> --ack <delivery_id>`, reading the
   id from `result.deliveryId` (a bound Run replays the same delivery until
-  acked — don't ack before every message in the batch is handled). If a
+  acked — don't ack before every message in the batch is handled). For a question, *handled* means *mirrored to the human*, not *answered*.
+  Once §4.3 has printed it, ack the delivery and keep looping; the question
+  stays pending in Orca until `reply --id` answers it or its Dispatch ends. If a
   future runtime version reports the id under a different key, read it off
   the first real `check --wait --json` response rather than trusting this
   name blindly. Restart the cycle at §2.1.
+- **Pending questions, every cycle.** After processing the delivery or the
+  timeout, read the pending set:
+  `gw work wait --run <run_id> --timeout-s 0 --json` — a zero timeout makes
+  no Orca `check` call and acks nothing; it only derives the Run's unanswered
+  questions from Orca. Print its `pending_questions` as §4.3 step 1a says,
+  and show its `warnings`. (Until `tech-debt-auto-drive-skill-orca-edge-cases`
+  replaces this section's raw `check --wait` with `gw work wait`, this is a
+  separate call; afterwards every wait result already carries the field.)
 - **Rejected or unprovable completion:** a delivery holding a
   `claimed-unconfirmed` report (§4.1) may be acked only once that report's
   recovery record is written with its identities, the evidence so far, and
@@ -1636,7 +1649,7 @@ what the options *mean*; that is the worker's job.
    check; `changed: false` alone is not a refusal. Use that `reply_body` as
    the step 2 body.
    On refusal or an unusable `reply_body`, show the result to the human
-   and ask how to recover; do not print `auto-merged`, reply,
+   and take their direction by label (step 1b); do not print `auto-merged`, reply,
    fabricate a body, overwrite the payload, or automatically resend a
    conflicting answer. For `already-answered`, read and show the recorded
    answer alongside the proposed `merge`, then let the human decide which
@@ -1648,7 +1661,7 @@ what the options *mean*; that is the worker's job.
    **On an untyped ask**, the step 2 body is the bare string `merge`, preserving
    the legacy fallback. Only after that check, print the `auto-merged` notice
    in this session (for an untyped ask, after selecting the literal body) — no
-   `AskUserQuestion`, no outward worktree comment or status push:
+   human prompt, no outward worktree comment or status push:
 
    ```
    auto-merged <work-path> -> <merge_target> (child of <root-path>; not mirrored)
@@ -1659,37 +1672,66 @@ what the options *mean*; that is the worker's job.
    answer does, and with no human watching for it. If either guard fails,
    continue to step 1 and mirror as usual.
 
-1. **Typed or untyped?** Test whether the question text's last line starts with `gw-ask: `.
+1. **Mirror it — print, never block.** Every worker question step 0 did not
+   answer is *mirrored*: printed in this session, then left pending while the
+   loop runs on. The coordinator never waits on the human for a worker
+   question; the human answers later, by label (step 1b), in any order. A
+   question's label is its `label` in `gw work wait`'s `pending_questions`
+   (`q-` plus the tail of its message id). Once printed, it is handled for
+   §2.7's ack rule.
+
+   Typed or untyped? Test whether the question text's last line starts with `gw-ask: `.
    - **Typed.** The rest of that line is the payload's root-absolute
      resource. Read the file at `$GRAPH_WORKS_DIR/okf<resource>` as JSON
      (`schema: "gw.ask/1"`).
-     1. Print the payload's `question` in this session **verbatim**. Never summarize, condense or truncate it.
-        The `AskUserQuestion` below carries only the short prompt, so no
-        length limit can cut what the human reads.
-     2. Ask by the payload's `kind`:
-        - `spec-review`: one `AskUserQuestion` with two questions. The first
-          offers **Approve** / **Request changes**. The second asks for
+     1. Print `<label> <key> — <kind>`, then the payload's `question` in this
+        session **verbatim**. Never summarize, condense or truncate it.
+     2. Print what an answer looks like, by the payload's `kind`:
+        - `spec-review`: `approve`, or `request changes: <notes>`; and an
           effort (`xtra-small`/`small`/`medium`/`large`/`xtra-large`) with
-          `current_effort` marked; it is required only when `current_effort`
-          is null. Take notes from the "Other" text or the annotation notes.
-        - `choice`: one `AskUserQuestion` with one option per `options[]`
-          entry, labelled from `label` (the answer is its `token`).
-        - `free`: no `AskUserQuestion`. Ask free-form in this session; the
-          human's text is the answer's `notes`.
-     3. Record it:
-        `gw work ask-answer <resource> [--choice <token>] [--effort <value>] [--notes "<text>"] --json`.
-        On a refusal (`answer-choice-invalid`, `answer-effort-required`,
-        `answer-effort-invalid`, `answer-notes-required`, or `answer-by-invalid`
-        for a blank `--by`), show the refusal and re-ask the human.
-        **Never fix an answer up yourself.**
-        `already-answered` means a different answer is already recorded: show
-        both and ask the human which stands; never overwrite.
-     4. The `reply_body` from that call is the step 2 `--body`.
+          `current_effort` marked — required only when `current_effort` is
+          null.
+        - `choice`: one line per `options[]` entry, `<token> — <label>`.
+        - `free`: `a free-text answer is expected`.
    - **Untyped** (no `gw-ask:` line — a worker from before typed asks):
      print `untyped ask from <key>` first, so the gap stays visible while old
-     workers drain. Then mirror the message's question text and options to
-     the user as one `AskUserQuestion`, as before, and use the human's answer
-     as the step 2 body.
+     workers drain. Then print `<label> <key> — untyped`, the question text
+     verbatim, and its options; the human's text will be the reply body.
+
+1a. **Each cycle, print the pending block.** After §2.7's pending read, for
+    each entry of `pending_questions`: one not yet printed in full in this
+    session → print it as step 1; one already printed → one line,
+    `<label> <key> — <kind>, waiting since <asked_at>`. Which questions were
+    printed is session memory only: after a restart every pending question
+    prints in full once more. `[]` prints nothing. `null` means the read
+    failed — print `pending questions: refresh failed`, keep the last printed
+    list, and show the result's `warnings`.
+
+1b. **Take a typed answer.** The human types into this terminal whenever they
+    like — `q-e862 merge`, `q-1a2b approve, effort medium`,
+    `q-77c0 request changes: tighten scope`. It reaches you at your next turn
+    boundary, when the current wait returns. Then:
+    1. **Resolve the label against a fresh `pending_questions` read** (the
+       zero-timeout `gw work wait` of §2.7), never a cached one. An unknown
+       label, or a question no longer pending, is reported back to the human
+       and nothing is sent. With no label: if exactly one question is
+       pending, it is that one; if more than one is, the answer is ambiguous
+       — print the pending labels and ask which is meant. Never guess.
+    2. **Record.** For a typed ask, map the human's words onto
+       `gw work ask-answer <resource> [--choice <token>] [--effort <value>] [--notes "<text>"] --json`
+       (default `--by human`): `--choice` takes a `choice` option's `token`,
+       or `approve`/`changes` for `spec-review`; `--effort` when the human
+       states one; `--notes` carries free text and change requests. The CLI
+       is the validator. On a refusal (`answer-choice-invalid`,
+       `answer-effort-required`, `answer-effort-invalid`,
+       `answer-notes-required`, or `answer-by-invalid` for a blank `--by`),
+       print the refusal; the question stays pending and the human answers
+       again by label. **Never fix an answer up yourself.**
+       `already-answered` means a different answer is already recorded:
+       print both and let the human say which stands; never overwrite.
+       The `reply_body` from that call is the step 2 `--body`. For an untyped
+       ask, the human's text after the label is the body.
+    3. Continue with steps 2, 2a and 3 — unchanged.
 2. Reply, and **read the response** — `--json` is not optional here:
 
    ```
@@ -1720,7 +1762,7 @@ what the options *mean*; that is the worker's job.
     2. **Re-read hold state fresh — never this cycle's snapshot.** The park
        hold is filed by the worker *after* the question was sent and *after*
        the human spent time answering, so it cannot be in a plan taken before
-       the `AskUserQuestion` was even raised. Run
+       the question was even printed. Run
        `gw work orchestrate <work-path> --json` again now (or
        `gw work decision list <owner-path> --json` when the owner is already
        known) and look for an entry naming this path with

@@ -561,6 +561,28 @@ assert_contains "skills/auto-drive/references/grace-period-protocol.md" "Attend 
 assert_contains "skills/auto-drive/references/grace-period-protocol.md" "its \`gw-ask:\` payload resource" \
     "grace-period checkpoint records the typed ask's payload resource"
 
+# feature-nonblocking-coordinator-questions: a worker question is mirrored
+# (printed), acked, and answered later by label — never a blocking prompt.
+assert_contains "skills/auto-drive/SKILL.md" \
+    'For a question, *handled* means *mirrored to the human*, not *answered*.' \
+    "auto-drive §2.7 acks a question once it is mirrored"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'gw work wait --run <run_id> --timeout-s 0 --json' \
+    "auto-drive reads pending_questions through a zero-timeout gw work wait"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'Resolve the label against a fresh `pending_questions` read' \
+    "auto-drive §4.3 resolves a typed answer against a fresh read"
+assert_contains "skills/auto-drive/SKILL.md" \
+    '<label> <key> — <kind>, waiting since <asked_at>' \
+    "auto-drive §4.3 prints an already-shown question as one line"
+section_43="$(awk '/^### 4\.3 `question`/{on=1} /^### 4\.4 /{on=0} on' "$PLUGIN_ROOT/skills/auto-drive/SKILL.md")"
+if [[ -n "$section_43" ]] && ! grep -Fq 'AskUserQuestion' <<<"$section_43"; then
+    pass "auto-drive §4.3 never routes a worker question through AskUserQuestion"
+else
+    fail "auto-drive §4.3 never routes a worker question through AskUserQuestion"
+    grep -nF 'AskUserQuestion' <<<"$section_43" | sed 's/^/      /'
+fi
+
 # Finishing-relay's three asks are typed; hand-written --options produced
 # comma-split and invented-grammar asks. Typed replies have a strict JSON body.
 assert_contains "skills/finishing-relay/SKILL.md" "gw work ask <work-path> --kind choice" \

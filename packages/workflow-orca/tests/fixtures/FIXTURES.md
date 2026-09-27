@@ -31,6 +31,10 @@ Re-capture with these commands, replacing the ids with live ones:
 | `worktree_create.json` | `orca worktree create --name <n> --repo id:<repoId> --base-branch <ref> --no-parent --setup skip --comment <marker> --json` (hand-authored from `worktree_show_renamed.json`'s row shape plus `comment`) |
 | `terminal_send.json` | `orca terminal send --terminal <term> --text "" --enter --json` (hand-authored) |
 | `worker_start_effects.json` | `orca orchestration worker-start --task <task> --agent claude --run <run> --json` (hand-authored from `worker_start.json` with `effects` and launch receipt, omitting `agentTerminalHandle` to exercise the live fallback) |
+| `inbox_run_questions.json` | `orca orchestration inbox --terminal run:<run> --limit 1000 --json` (hand-authored, trimmed) |
+| `inbox_dispatch_replies.json` | `orca orchestration inbox --terminal dispatch:<ctx> --limit 1000 --json` against a Dispatch whose question was answered (hand-authored, trimmed) |
+| `inbox_dispatch_empty.json` | as above, against a Dispatch with no replies (hand-authored) |
+| `worker_list_questions.json` | `orca orchestration worker-list --run <run> --json` (hand-authored, trimmed) |
 
 **`check_batch.json`, `check_heartbeat_only.json`, `check_consumer_fenced.json`, `repo_list.json`, `terminal_send.json`, `worker_start_effects.json`, `worktree_list.json`, and `worktree_create.json` are hand-authored, not captured verbatim.** A `check` batch
 requires the capturing terminal to be the Run's bound coordinator with live
@@ -41,6 +45,8 @@ verified sources: the flag vocabulary of `orca orchestration send --help`
 (`outcome`, `subject`, `body`, `filesModified`, `reportPath`, `completedAt`)
 were captured live. Re-capture it at the first live run and expect field drift.
 The heartbeat-only batch has the `check_batch.json` shape with its payload as the JSON string current Orca emits; the fenced envelope uses the `consumer_fenced` code documented in `backend.py` (lines 9–12). The epic's live acceptance run is the re-capture point.
+
+**The four `inbox_*`/`worker_list_questions` fixtures are hand-authored, trimmed from a live 2026-09-27 `inbox --json` read on Orca 1.4.211.** Ids are synthetic; field names, the `run:`/`dispatch:` handle shapes, the JSON-string `payload`, and the reply linkage (a `status` message, subject `Re: Question`, from `run:<id>` to `dispatch:<ctx>`, `thread_id` equal to the question id) are as observed. That linkage is Orca behaviour, not a published contract — if it changes, `test_map.py`'s join tests are where it shows.
 
 `worktree_show_renamed.json` is trimmed rather than verbatim — the live
 `worktree` object carries ~30 keys (lineage, linked issue/PR fields for six

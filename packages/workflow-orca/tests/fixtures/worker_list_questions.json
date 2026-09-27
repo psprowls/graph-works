@@ -1,0 +1,11 @@
+{
+  "id": "8c3f6d1b-4e50-4192-9dce-3f4a5b6c7d8e",
+  "ok": true,
+  "result": {
+    "workers": [
+      {"dispatchId": "ctx_aaaaaaaaaaaa", "taskId": "task_aaaaaaaaaaaa", "runId": "run_q00000000001", "workerState": "running", "dispatchStatus": "dispatched", "resource": {"id": "wtr_a", "releaseState": "active"}},
+      {"dispatchId": "ctx_bbbbbbbbbbbb", "taskId": "task_bbbbbbbbbbbb", "runId": "run_q00000000001", "workerState": "running", "dispatchStatus": "dispatched", "resource": {"id": "wtr_b", "releaseState": "active"}},
+      {"dispatchId": "ctx_dddddddddddd", "taskId": "task_dddddddddddd", "runId": "run_q00000000001", "workerState": "succeeded", "dispatchStatus": "completed", "resource": {"id": "wtr_d", "releaseState": "released"}}
+    ]
+  }
+}

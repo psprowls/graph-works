@@ -247,3 +247,180 @@ def test_initial_ack_is_sent_after_deadline_expires_during_clock_sampling():
     waits = [kwargs for name, _args, kwargs in port.calls if name == "check_wait"]
     assert len(waits) == 1 and waits[0]["ack"] == "dlv_prev"
     assert waits[0]["timeout_ms"] == 1
+
+
+def settled_run() -> dict:
+    """A single-attempt Task completed by its worker's terminal."""
+    return {
+        "workers": [
+            {
+                "dispatch_id": "ctx_1",
+                "task_id": "task_1",
+                "state": "succeeded",
+                "dispatch_status": "completed",
+                "worktree_id": None,
+                "release_state": "released",
+                "terminal": "term_1",
+            },
+        ],
+        "tasks": [
+            {
+                "id": "task_1",
+                "title": "k",
+                "display_name": "k",
+                "status": "completed",
+                "spec": None,
+                "result": {"provenance": "worker_report", "completedBy": "term_1", "outcome": "succeeded"},
+            },
+        ],
+    }
+
+
+def done(mid: str = "m_dup", **payload) -> dict:
+    return msg(mid, "worker_done", {"taskId": "task_1", "dispatchId": "ctx_1", "outcome": "succeeded", **payload})
+
+
+def test_duplicate_completion_alone_is_absorbed_and_self_acked():
+    clock = Clock()
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d_dup", done())], on_wait=lambda ms: clock.advance(700))
+    result = wait(port, clock)
+    assert result.status == "timeout" and result.messages == ()
+    assert [(a.message_id, a.type, a.dispatch_id, a.reason) for a in result.absorbed] == [
+        ("m_dup", "worker_done", "ctx_1", "duplicate-completion")
+    ]
+    assert result.self_acked == 1
+    assert port.names().count("worker_list") == port.names().count("task_list") == 1
+
+
+def test_absorbed_beside_a_real_message_leaves_delivery_unacked():
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d", done(), msg("q", "question"))])
+    result = wait(port, Clock())
+    assert [m["id"] for m in result.messages] == ["q"] and len(result.absorbed) == 1
+    assert "check_ack" not in port.names()
+
+
+def _mutate(state: dict, where: str, key: str, value) -> dict:
+    row = state["workers"][0] if where == "worker" else state["tasks"][0]
+    if value is KeyError:
+        row.pop(key)
+    else:
+        row[key] = value
+    return state
+
+
+@pytest.mark.parametrize(
+    ("where", "key", "value"),
+    [
+        ("worker", "state", "running"),
+        ("worker", "state", None),
+        ("worker", "state", []),
+        ("worker", "state", {}),
+        ("worker", "release_state", "retained"),
+        ("worker", "release_state", None),
+        ("worker", "release_state", KeyError),
+        ("worker", "terminal", None),
+        ("worker", "terminal", KeyError),
+        ("worker", "terminal", []),
+        ("worker", "terminal", {}),
+        ("worker", "task_id", None),
+        ("worker", "task_id", []),
+        ("worker", "task_id", {}),
+        ("task", "status", "dispatched"),
+        ("task", "result", None),
+        ("task", "result", KeyError),
+        ("task", "result", {"provenance": "coordinator", "completedBy": "term_1"}),
+        ("task", "result", {"provenance": "worker_report", "completedBy": "term_other"}),
+        ("task", "result", {"provenance": "worker_report"}),
+        ("task", "result", {"provenance": "worker_report", "completedBy": []}),
+        ("task", "result", {"provenance": "worker_report", "completedBy": {}}),
+    ],
+)
+def test_each_precondition_false_keeps_the_message(where, key, value):
+    port = FakeOrcaPort(**_mutate(settled_run(), where, key, value), deliveries=[delivery("d", done())])
+    result = wait(port, Clock())
+    assert result.status == "event" and result.absorbed == ()
+
+
+@pytest.mark.parametrize("dispatch_id", ["ctx_other", None, "", [], {}])
+def test_unknown_or_malformed_dispatch_is_kept(dispatch_id):
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d", done(dispatchId=dispatch_id))])
+    assert wait(port, Clock()).status == "event"
+
+
+@pytest.mark.parametrize("task_id", ["task_other", None, [], {}])
+def test_present_mismatched_task_id_is_kept(task_id):
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d", done(taskId=task_id))])
+    assert wait(port, Clock()).status == "event"
+
+
+def test_missing_payload_task_id_can_be_absorbed():
+    state = settled_run()
+    message = done()
+    message["payload"].pop("taskId")
+    port = FakeOrcaPort(**state, deliveries=[delivery("d", message)])
+    assert len(wait(port, Clock()).absorbed) == 1
+
+
+def test_missing_payload_dispatch_id_is_kept():
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d", msg("m", "worker_done", {"outcome": "succeeded"}))])
+    assert wait(port, Clock()).status == "event"
+
+
+def test_multi_attempt_task_is_kept():
+    state = settled_run()
+    state["workers"].append({**state["workers"][0], "dispatch_id": "ctx_0", "terminal": "term_0"})
+    port = FakeOrcaPort(**state, deliveries=[delivery("d", done())])
+    assert wait(port, Clock()).status == "event"
+
+
+def test_duplicated_dispatch_row_is_kept():
+    state = settled_run()
+    state["workers"].append(dict(state["workers"][0]))
+    port = FakeOrcaPort(**state, deliveries=[delivery("d", done())])
+    assert wait(port, Clock()).status == "event"
+
+
+def test_duplicated_task_row_is_kept():
+    state = settled_run()
+    state["tasks"].append(dict(state["tasks"][0]))
+    port = FakeOrcaPort(**state, deliveries=[delivery("d", done())])
+    assert wait(port, Clock()).status == "event"
+
+
+def test_stopped_released_worker_without_result_is_kept():
+    state = settled_run()
+    state["workers"][0]["state"] = "stopped"
+    state["tasks"][0].update(status="blocked", result=None)
+    port = FakeOrcaPort(**state, deliveries=[delivery("d", done())])
+    assert wait(port, Clock()).status == "event"
+
+
+@pytest.mark.parametrize("failing", ["worker_list", "task_list"])
+def test_a_failed_read_keeps_the_message(failing):
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d", done())])
+    port.fail[failing] = BackendError("unavailable")
+    result = wait(port, Clock())
+    assert result.status == "event" and result.absorbed == ()
+
+
+def test_undecodable_worker_done_skips_the_reads():
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d", msg("m", "worker_done", None, raw="{bad"))])
+    assert wait(port, Clock()).status == "event"
+    assert not {"worker_list", "task_list"} & set(port.names())
+
+
+def test_batches_without_worker_done_cost_no_reads():
+    port = FakeOrcaPort(**settled_run(), deliveries=[delivery("d", msg("e", "escalation"))])
+    wait(port, Clock())
+    assert not {"worker_list", "task_list"} & set(port.names())
+
+
+def test_absorbed_accumulates_across_loops():
+    clock = Clock()
+    port = FakeOrcaPort(
+        **settled_run(),
+        deliveries=[delivery("d1", done("a")), delivery("d2", done("b")), delivery("d3", msg("e", "escalation"))],
+        on_wait=lambda ms: clock.advance(1),
+    )
+    result = wait(port, clock)
+    assert [a.message_id for a in result.absorbed] == ["a", "b"] and result.self_acked == 2

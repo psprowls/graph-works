@@ -11,7 +11,7 @@ slept, because both macOS and Linux monotonic clocks exclude suspend.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from functools import partial
@@ -19,11 +19,13 @@ from typing import Literal, TypeVar
 
 from subagents_io.backend import BackendError
 
-from graph_works_core.orchestrate.orca_port import OrcaMessage, OrcaPort
+from graph_works_core.orchestrate.orca_port import OrcaMessage, OrcaPort, OrcaTask, OrcaWorker
 
 REAL_TYPES: tuple[str, ...] = ("worker_done", "escalation", "question")
 SLEEP_GAP_FLOOR_S = 60
 _FENCED = "consumer_fenced"
+_SETTLED = frozenset({"succeeded", "failed", "stopped"})
+_REASON = "duplicate-completion"
 _T = TypeVar("_T")
 
 
@@ -82,9 +84,63 @@ class _Fence:
         return fn()
 
 
+def _duplicate_completion(message: OrcaMessage, workers: Sequence[OrcaWorker], tasks: Sequence[OrcaTask]) -> str | None:
+    """Return the dispatch ID only for a released, single-attempt recorded completion.
+
+    Orca's Task result has no dispatch ID. The reporting terminal binds it to
+    the sole worker attempt; missing or malformed proof keeps the message.
+    """
+    payload = message["payload"]
+    if message["type"] != "worker_done" or payload is None:
+        return None
+    dispatch_id = payload.get("dispatchId")
+    if not isinstance(dispatch_id, str) or not dispatch_id:
+        return None
+    rows = [worker for worker in workers if worker.get("dispatch_id") == dispatch_id]
+    if len(rows) != 1:
+        return None
+    worker = rows[0]
+    task_id = worker.get("task_id")
+    terminal = worker.get("terminal")
+    if not isinstance(task_id, str) or not task_id or not isinstance(terminal, str) or not terminal:
+        return None
+    if "taskId" in payload and payload["taskId"] != task_id:
+        return None
+    state = worker.get("state")
+    if not isinstance(state, str) or state not in _SETTLED or worker.get("release_state") != "released":
+        return None
+    if sum(1 for other in workers if other.get("task_id") == task_id) != 1:
+        return None
+    matches = [task for task in tasks if task.get("id") == task_id]
+    if len(matches) != 1:
+        return None
+    task = matches[0]
+    result = task.get("result")
+    if task.get("status") != "completed" or not isinstance(result, Mapping):
+        return None
+    if result.get("provenance") != "worker_report" or result.get("completedBy") != terminal:
+        return None
+    return dispatch_id
+
+
 def _absorb(messages: Sequence[OrcaMessage], *, run_id: str, fence: _Fence) -> tuple[list[OrcaMessage], list[Absorbed]]:
-    """Split duplicate completions off a batch. Task 3 implements the rule."""
-    return list(messages), []
+    """Split duplicate completions off a batch. A failed read keeps everything."""
+    if not any(message["type"] == "worker_done" and message["payload"] is not None for message in messages):
+        return list(messages), []
+    try:
+        workers = fence.call(lambda: fence.port.worker_list(run_id))
+        tasks = fence.call(lambda: fence.port.task_list(run_id))
+    except BackendError:
+        return list(messages), []
+    kept: list[OrcaMessage] = []
+    absorbed: list[Absorbed] = []
+    for message in messages:
+        dispatch_id = _duplicate_completion(message, workers, tasks)
+        if dispatch_id is None:
+            kept.append(message)
+        else:
+            absorbed.append(Absorbed(message["id"], message["type"], dispatch_id, _REASON))
+    return kept, absorbed
 
 
 def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, clock: WaitClock) -> WaitResult:

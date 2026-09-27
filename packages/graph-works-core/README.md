@@ -480,22 +480,44 @@ sibling behind it can still dispatch in the same cycle. Live dispatches always
 reserve. A dispatch the coordinator chooses not to launch after planning is
 outside `plan()`'s view: it still reserved in that plan.
 
-**Placement is recorded from observation, not inferred (D-006).** Orca's actual
-worktree and branch are established by native observation, and the recorded pair
-selects every later stage's placement. The coordinator therefore records the
-observed pair with `gw work record-placement` (`orchestrate/placement.py`),
-which writes `worktree`/`branch` or the selected `repo_stamps` entry plus
-`updated`, never fires a routing transition, and runs under the same decision-owner lock as `gw work advance`.
-It refuses when the item's phase no longer matches the recorded dispatch, so a
-worker that finishes first produces a visible refusal instead of a stamp on the
-wrong stage. The subtree root is recorded at every phase — its stamp is the
-anchor descendants resolve against — and a descendant only at `execute` and
-`finish`: a `design` or `plan` stage writes only into the vault and reuses the
-epic worktree as a read context. `plan()` attaches the epic pair only to the
-root's planned advance. `run_stage_advance` infers a pair from cwd only for a
-top-level item, and never with `infer_worktree=False` (`--no-infer-worktree`),
-which every supervised worker passes. An explicit `--worktree`/`--branch` pair
-on an attended advance is still applied as stated.
+**Placement is recorded from observation, not inferred (D-006).** Code and
+integration checkouts are recorded with `gw work record-placement`
+(`orchestrate/placement.py`): the observed branch pair goes into scalar
+`worktree`/`branch` or the selected `repo_stamps` entry, plus `updated`.
+Recording never fires a routing transition and shares the decision-owner lock
+with `gw work advance`. It refuses a stale phase. The API permits root anchor
+recording at every dispatchable phase, and descendant recording only at
+`execute`/`finish`; detached reader checkouts never become these stamps.
+`plan()` attaches a known epic pair only to the root's planned advance.
+`run_stage_advance` infers a pair from cwd only for a top-level item, and never
+with `infer_worktree=False` (`--no-infer-worktree`), which every supervised
+worker passes. An explicit pair on an attended advance is still applied as stated.
+
+**Design and plan read a pinned commit.** `READER_ACTION = "pin-detached"`
+applies to roots and descendants, even when an old placement stamp exists.
+The shell observes full branch-tip IDs; the pure planner carries one immutable
+`start_sha` in the action and baseline prompt, with `path=None`, `branch=None`
+and `exists=None`. The nearest owner's verified repository-local anchor
+supplies the source ref; only an unanchored root may use its default base.
+An unanchored descendant or missing/ambiguous evidence refuses with
+`worktree-unprovable`. Provisioning gaps refuse with `worktree-unsupported`.
+
+The launcher prepares one dedicated detached checkout per reader dispatch,
+verifying repository identity, exact SHA and cleanliness before injection.
+A dirty source anchor is allowed because only its committed ref is read.
+Concurrent integration can advance that ref without changing the reader's
+checkout; pinning promises a stable baseline, not the latest tree. The baseline
+prompt asks the worker to cite the commit and make no checkout commits.
+
+**Reader receipts record observations without changing the item.**
+`gw work record-reader` records the verified checkout, `start_sha`, repo,
+task/dispatch IDs and dispatch key under `layout.cache_dir / "reader-receipts"`.
+It never changes phase, `updated`, scalar placement or `repo_stamps`, and stores
+no preamble or dispatch capability. Core revalidates eligibility under the
+same lock as advance before checking replay: an identical eligible observation
+replays without writing, a changed attempt returns `attempt-mismatch`, and a
+stale phase refuses before either. The caller must verify the Git facts;
+receipt storage does not probe Git itself.
 
 **Repository-local anchors are prepared lazily.** A runnable modifying child
 without its nearest owner's verified anchor emits a deferred `preparations[]`
@@ -505,14 +527,20 @@ its repository, branch, parent/base and cleanliness, then record the observed
 pair on `owner_path` at `owner_phase`. Own-repository pairs remain scalar;
 foreign pairs live in `repo_stamps`. A refused stamp leaves a discoverable
 worktree; replan before dispatch. Nested owners prepare from their nearest
-repository-local enclosing anchor. Read-only stages need no new anchor.
+repository-local enclosing anchor. Readers need no new integration anchor,
+but do need their dedicated detached checkout and proven source ref.
 
 **Overlap is repository-scoped; capacity is global.** Each dispatch carries
 its own resolved `repo`; top-level `repo` remains root metadata. Equal affects
 paths in independent repositories do not overlap. Linked worktrees share a
 repository identity; different identities still share one `max_parallel`
-budget. Finish reserves every verified source target, including live sources
-whose fresh admission evidence later fails.
+budget. Finish claims every verified source checkout and merge-target checkout
+(`FinishTarget.target_worktree`), including the checkout holding the default
+base for a root finish and each foreign-repository target. The shared
+`claims.conflicts()`/`first_conflicts()` gate serializes same-target finishes
+against both live and already-accepted work while allowing independent targets.
+Known live occupancy remains reserved even if fresh or partial revalidation
+fails; refused candidates reserve nothing.
 
 **Finish proves every integration before one advance.** `finish_targets`
 contains the scalar source (if any) and every foreign source, ordered by
@@ -535,8 +563,8 @@ cannot establish the required ancestry.
 quietly when unavailable; placement and finish safety checks fail closed when
 that evidence cannot be established.
 
-**Nothing Orca-shaped reaches this package's API.** The prompt `plan()`
-assembles is four vendor-neutral lines; a vendor command can only enter through
+**Nothing Orca-shaped reaches the planner's prompt.** Its base instructions
+and reader baseline are vendor-neutral; a vendor command can only enter through
 a variant's `prompt_tail`, which lives in workspace configuration.
 
 The `branch` variant has no packaged tail. Init seeds `pipeline.RELAY_TAIL_SEED`
@@ -569,9 +597,10 @@ Four limits worth knowing before you rely on the result:
   one atomic snapshot. A decision answered between them leaves the response
   internally inconsistent. Deduplicating means threading parsed ledger state
   out of the frontier walk, and is deliberately not done.
-- When the root carries no worktree stamp, "the epic worktree" is the first
-  stamped descendant in pick order. Reproducible from vault state, but it means
-  the plan's worktree decisions depend on which child happened to run first.
+- The legacy single-repository path can infer an unstamped root's epic pair
+  from the first stamped descendant in pick order. Reader source selection does
+  not use that fallback: it requires its owner's verified anchor or, for an
+  unanchored root, its default base.
 - The decision-hold scan in `graph_works_core.orchestrate.commands` walks every
   item in the vault on every plan call, regardless of root, and loads one
   decisions ledger per distinct epic. A lone item with no epic ancestor pays
@@ -579,11 +608,12 @@ Four limits worth knowing before you rely on the result:
   per call, so the pass is quadratic in vault size — negligible at present
   scale, and not fixed here because both available fixes either duplicate the
   ancestor walk or change the domain signature.
-- A read-only dispatch is a **non-exclusive** occupant: it claims no worktree
-  slot, so two `design` stages may share the epic worktree and neither blocks a
-  code stage from it. A `design` worker can therefore read a tree a concurrent
-  `execute` worker is mutating. It degrades a read; it cannot corrupt one.
-  Recorded rather than mitigated.
+- Readers claim no mutable worktree slot, including any historical stamp, but
+  still take code-affects claims and can be blocked by live code claims. The
+  sibling stage-aware-claims work owns changing that policy. Reader baseline
+  propagation beyond the dispatch prompt and receipt remains separate work;
+  checkout and temporary creation-branch cleanup remain the coordinator's and
+  Orca's lifecycle responsibility.
 
 ## Custom-type provenance
 

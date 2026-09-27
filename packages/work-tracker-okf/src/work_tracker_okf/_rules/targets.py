@@ -2,8 +2,8 @@
 
 Source confinement and existence are permanent layout concerns owned by the
 ``structure`` topic. This module retains the independent questions of whether
-an ``affects`` path exists and whether a managed artifact filename agrees with
-its source id.
+an ``affects`` path exists, whether a leaf declares any ``affects`` at all,
+and whether a managed artifact filename agrees with its source id.
 """
 
 from __future__ import annotations
@@ -14,10 +14,13 @@ from pathlib import Path, PurePosixPath
 from okf_io import Finding, Rule, RuleContext
 
 from work_tracker_okf._rules._common import LaneConfig, active
+from work_tracker_okf.affects import code_affects, needs_affects_hint
 from work_tracker_okf.paths import source_id_for_filename
+from work_tracker_okf.vocabulary import TERMINAL_STATUSES
 
 CODES: tuple[str, ...] = (
     "targets.affects-missing",
+    "targets.affects-empty",
     "targets.source-id-mismatch",
 )
 
@@ -78,12 +81,13 @@ def _affects(repo_roots: tuple[Path, ...]) -> Rule:
 
     Several roots are a multi-repository workspace: an entry is good when it
     resolves under any one of them.
+    The reserved `gw:workspace` value is not a path and is skipped; a misspelling of it is still reported.
     """
     where = "the repo root" if len(repo_roots) == 1 else "any repo root"
 
     def rule(ctx: RuleContext) -> Iterable[Finding]:
         for item in active(ctx):
-            for target in item.affects:
+            for target in code_affects(item.affects):
                 if not target or any((root / target).exists() for root in repo_roots):
                     continue
                 yield Finding(
@@ -98,9 +102,35 @@ def _affects(repo_roots: tuple[Path, ...]) -> Rule:
     return rule
 
 
+def empty(ctx: RuleContext) -> Iterable[Finding]:
+    """Warn when a non-terminal, nested leaf declares no `affects`."""
+    for item in active(ctx):
+        if item.work_status in TERMINAL_STATUSES:
+            continue
+        if not needs_affects_hint(
+            item.type,
+            has_parent=item.parent_path is not None,
+            has_children=bool(item.child_paths),
+            affects=item.affects,
+        ):
+            continue
+        yield Finding(
+            code="targets.affects-empty",
+            severity="warn",
+            message=(
+                "no `affects` declared: this item will serialize against every write in its repository; "
+                "declare the paths it changes, or `gw:workspace` if it only changes the workspace"
+            ),
+            spec=_SPEC,
+            path=item.page_path,
+            line=None,
+        )
+
+
 def rules(config: LaneConfig) -> tuple[Rule, ...]:
     """No repo root at all **skips** `targets.affects-missing`, as it skips
-    `plan.action-target-missing`, for the same reason."""
+    `plan.action-target-missing`, for the same reason. `targets.affects-empty`
+    needs no root and always runs."""
     if not config.code_roots:
-        return (artifacts,)
-    return (artifacts, _affects(config.code_roots))
+        return (artifacts, empty)
+    return (artifacts, empty, _affects(config.code_roots))

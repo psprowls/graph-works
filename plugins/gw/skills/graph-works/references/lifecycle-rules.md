@@ -55,6 +55,9 @@ stable catalog to the responsible repair.
 ## Targets
 
 - `targets.affects-missing` — correct the repository path or package name.
+- `targets.affects-empty` — declare the paths the item changes, or
+  `gw:workspace` if it only changes the workspace; until then it serializes
+  against every write in its repository.
 - `targets.source-id-mismatch` — make the source id match its managed artifact
   filename.
 

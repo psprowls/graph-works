@@ -18,10 +18,11 @@ from subagents_io.dispatch import DISPATCH_MODES, WORKTREE_ACTIONS, PlannedDispa
 WORKTREE_ACTION_FIELDS = [
     ("action", "str"),
     ("path", "str | None"),
-    ("branch", "str"),
+    ("branch", "str | None"),
     ("base_branch", "str | None"),
     ("exists", "bool | None"),
     ("parent_path", "str | None"),
+    ("start_sha", "str | None"),
 ]
 
 PLANNED_DISPATCH_FIELDS = [
@@ -67,7 +68,9 @@ def test_no_field_carries_a_default(cls):
 
 
 def test_instances_are_frozen_at_runtime():
-    action = WorktreeAction(action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True, parent_path=None)
+    action = WorktreeAction(
+        action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True, parent_path=None, start_sha=None
+    )
     with pytest.raises(AttributeError):
         action.branch = "other"  # type: ignore[misc]
 
@@ -75,7 +78,13 @@ def test_instances_are_frozen_at_runtime():
 def test_value_equality():
     def make():
         return WorktreeAction(
-            action="reuse", path="/tmp/wt", branch="b", base_branch=None, exists=True, parent_path=None
+            action="reuse",
+            path="/tmp/wt",
+            branch="b",
+            base_branch=None,
+            exists=True,
+            parent_path=None,
+            start_sha=None,
         )
 
     assert make() == make()
@@ -83,17 +92,35 @@ def test_value_equality():
 
 def test_parent_path_round_trips():
     action = WorktreeAction(
-        action="fork-child", path=None, branch="b", base_branch="epic/x", exists=None, parent_path="/wt/epic"
+        action="fork-child",
+        path=None,
+        branch="b",
+        base_branch="epic/x",
+        exists=None,
+        parent_path="/wt/epic",
+        start_sha=None,
     )
     assert action.parent_path == "/wt/epic"
     assert action != WorktreeAction(
-        action="fork-child", path=None, branch="b", base_branch="epic/x", exists=None, parent_path=None
+        action="fork-child",
+        path=None,
+        branch="b",
+        base_branch="epic/x",
+        exists=None,
+        parent_path=None,
+        start_sha=None,
     )
 
 
 def test_planned_dispatch_composes_a_worktree_action():
     worktree = WorktreeAction(
-        action="fork-child", path=None, branch="b", base_branch="main", exists=None, parent_path=None
+        action="fork-child",
+        path=None,
+        branch="b",
+        base_branch="main",
+        exists=None,
+        parent_path=None,
+        start_sha=None,
     )
     dispatch = PlannedDispatch(
         agent="arbitrary-inert-agent",
@@ -118,8 +145,14 @@ def test_planned_dispatch_composes_a_worktree_action():
 
 
 def test_worktree_actions_membership():
-    assert frozenset({"reuse", "fork-child", "create-top-level", "main"}) == WORKTREE_ACTIONS
+    assert frozenset({"reuse", "fork-child", "create-top-level", "main", "pin-detached"}) == WORKTREE_ACTIONS
 
 
 def test_dispatch_modes_membership():
     assert frozenset({"autonomous", "attend", "relay"}) == DISPATCH_MODES
+
+
+def test_pin_detached_is_a_worktree_action_with_no_branch():
+    assert "pin-detached" in WORKTREE_ACTIONS
+    action = WorktreeAction("pin-detached", None, None, "epic/x", None, "/epic", "a" * 40)
+    assert action.branch is None and action.start_sha == "a" * 40

@@ -27,6 +27,7 @@ from okf_io import Bundle, load_bundle
 from work_tracker_okf.advance import ExpectedPhase as ExpectedPhase
 from work_tracker_okf.advance import RefusalReason
 from work_tracker_okf.advance import apply as apply_advance
+from work_tracker_okf.affects import affects_drift, code_affects, plan_files, touches_workspace
 from work_tracker_okf.compose import AdvanceOutcome, advance_and_stamp, ensure_plan_row
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.items import IGNORE, WorkItem, load_items
@@ -84,6 +85,8 @@ class StageAdvance:
     came from `repo:` (frontmatter) or `repo_name` (flag) and cwd is not in
     that repository -- inference is skipped, never a silent guess, and a
     foreign checkout is never stamped.
+    At `plan -> execute` it also carries the advisory affects-drift check
+    (plan-named files outside `affects`), on a dry run too.
     """
 
     outcome: AdvanceOutcome
@@ -370,7 +373,17 @@ def _advance(
             trigger=None,
         )
         outcome = replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False)
-    candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings)
+    drift_warnings: tuple[str, ...] = ()
+    if (
+        item is not None
+        and not return_
+        and old_phase == "plan"
+        and outcome.plan.refusal is None
+        and outcome.plan.transition is not None
+        and outcome.plan.transition.phase == "execute"
+    ):
+        drift_warnings = _affects_drift_warnings(bundle.root, item)
+    candidate = StageAdvance(outcome=outcome, repo_note=repo_note, warnings=inference_warnings + drift_warnings)
     if not dry_run and before_apply is not None:
         before_apply(candidate)
     if dry_run or outcome.plan.refusal is not None or outcome.plan.transition is None:
@@ -389,7 +402,7 @@ def _advance(
             return StageAdvance(
                 outcome=replace(outcome, plan=refused, stamped=None, stamp_title=None, plan_row=False),
                 repo_note=repo_note,
-                warnings=inference_warnings + warnings,
+                warnings=inference_warnings + drift_warnings + warnings,
             )
 
     document = load_bundle(layout.bundle_dir, ignore=IGNORE).concepts[path]
@@ -412,7 +425,7 @@ def _advance(
                 facts_root,
                 phase=old_phase,
                 start_sha=effective_start_sha,
-                paths=item.affects,
+                paths=code_affects(item.affects),
                 opened=item.opened,
             )
             if facts is not None:
@@ -501,7 +514,7 @@ def _advance(
         pointer_path=pointer_path,
         repo_note=repo_note,
         application=application,
-        warnings=inference_warnings + warnings,
+        warnings=inference_warnings + drift_warnings + warnings,
     )
 
 
@@ -547,6 +560,34 @@ def _resolve_repo(
     return resolve_item_repo(layout, item, by_path, repo_name=repo_name, fallback=by_cwd), declared
 
 
+def _affects_drift_warnings(bundle_root: Path, item: WorkItem) -> tuple[str, ...]:
+    """Advisory plan-file drift, reading a registered source or managed plan artifact.
+
+    The plan-to-execute advance usually registers the source, so its managed
+    artifact is the normal fallback. The later commit gate checks actual changes.
+    """
+    registered = next((source.resource for source in item.sources if source.id == "plan" and source.resource), None)
+    plan_path = (
+        bundle_root / registered.removeprefix("/")
+        if registered
+        else artifact_ref(item.path, MANAGED_ARTIFACTS["plan"]).path(bundle_root)
+    )
+    try:
+        text = plan_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return ("affects drift: no plan artifact to read",)
+    files = plan_files(text)
+    if not files:
+        return ("affects drift: no file bullets found in the plan",)
+    drift = affects_drift(files, code_affects(item.affects))
+    if not drift.uncovered:
+        return ()
+    return (
+        f"affects drift: the plan names {len(drift.uncovered)} path(s) outside `affects`: "
+        f"{', '.join(drift.uncovered)}. Suggested widening: {', '.join(drift.widening)}",
+    )
+
+
 def _commit_gate(
     item: WorkItem, facts_root: Path | None, *, start_sha: str | None, repo_note: str | None
 ) -> tuple[RefusalReason | None, str, tuple[str, ...]]:
@@ -564,7 +605,7 @@ def _commit_gate(
     file list: commits that net out to no change under `affects` are work the
     stage cannot have landed where it said it would.
 
-    Fails **open, loudly**. No repo, no `affects`, or a `git status` that
+    Fails **open, loudly**. No repo, no `affects`, workspace-only `gw:workspace`, or a `git status` that
     itself failed all return `(None, "", (warning,))`: `gw work advance` runs
     against workspaces with no code repo at all, and a fail-closed unevaluable
     gate would break the pipeline everywhere for a condition it cannot even
@@ -578,9 +619,12 @@ def _commit_gate(
     if facts_root is None:
         note = f" ({repo_note})" if repo_note else ""
         return None, "", (f"{_GATE}: no code repository resolved{note}",)
-    if not item.affects:
+    paths = code_affects(item.affects)
+    if not paths:
+        if touches_workspace(item.affects):
+            return None, "", (f"{_GATE}: workspace-only item (`gw:workspace`), no code surface to gate",)
         return None, "", (f"{_GATE}: the item declares no `affects` paths to scope the read to",)
-    dirty = provenance.dirty_paths(facts_root, item.affects)
+    dirty = provenance.dirty_paths(facts_root, paths)
     if dirty is None:
         return None, "", (f"{_GATE}: `git status` could not be read in {facts_root}",)
     if dirty:
@@ -593,9 +637,7 @@ def _commit_gate(
         )
     if not start_sha:
         return None, "", (f"{_GATE}: no explicit `start_sha` to read the commit range from",)
-    facts = provenance.results_facts(
-        facts_root, phase="execute", start_sha=start_sha, paths=item.affects, opened=item.opened
-    )
+    facts = provenance.results_facts(facts_root, phase="execute", start_sha=start_sha, paths=paths, opened=item.opened)
     if facts is None:
         return None, "", (f"{_GATE}: no commit range readable from {start_sha}",)
     if not facts.commits:

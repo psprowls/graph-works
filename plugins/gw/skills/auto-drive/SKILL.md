@@ -222,7 +222,10 @@ Never launch workers from an error envelope.
 
 On success, the result contains:
 
-- `terminal` (bool), `max_parallel` / `slots_free` (ints), `supervise_merges`
+- `terminal` (bool), `max_parallel` / `slots_free` (ints — the autonomous/relay
+  pool only; a live attended session does not reduce it), `max_attend` /
+  `attend_slots_free` (ints — the separate pool for `mode: attend` dispatches,
+  default 1), `supervise_merges`
   (bool, default `false`; display only — §4.3 reads each dispatch's
   `auto_merge`, never this), and `live` (the echoed input list).
 - `repo` — `{"name": "<declared name>", "path": "<code repository>", "source": "frontmatter|flag|sole|fallback"}`,
@@ -237,9 +240,11 @@ On success, the result contains:
   `agent`, `model` (`null` = selected agent default, omit `--model`),
   `reasoning_effort`, `provenance` (the winning origin and reason for every
   profile field),
-  `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main`,
+  `worktree` (`action`: `reuse` | `fork-child` | `create-top-level` | `main` | `pin-detached`,
   `path`, `branch`, `base_branch`, `exists`, `parent_path` — the existing
-  worktree a created one is linked beneath, `null` when none), `merge_target`,
+  worktree a created one is linked beneath, `null` when none — and `start_sha`,
+  a full 40- or 64-character lowercase hex commit object ID for `pin-detached`,
+  `null` otherwise; `branch` is `null` for `pin-detached`, never `HEAD` or `""`), `merge_target`,
   `auto_merge` (bool — core's verdict that §4.3 step 0 may answer this
   dispatch's finish-relay `merge` question itself; true only for a non-root
   item at `finish` whose merge target is its owner's integration branch, with
@@ -289,6 +294,16 @@ On success, the result contains:
   `phase` and `checkpoint` are carried. §2.5's park/skip rendering and
   §2.5.2's park handling both read `holds[]` for exactly those three fields;
   `blocked[]` has none of them.
+
+Peak workers are `max_parallel + max_attend` (the pools are separate, epic
+decision 005). Tune either down in `workspace.local.yaml`
+(`workflow.auto_drive.max_parallel` / `workflow.auto_drive.max_attend`). The
+coordinator still passes only `--live` keys; the planner classifies them.
+For each live key, it tries every variant of that key's stage and both values
+of `has_spec` and `has_plan` with the item's current non-artifact attributes.
+If any resolution is `attend`, the live worker consumes the attend pool. This
+keeps its slot when it writes a spec or plan while still running. New
+candidates resolve against their actual current attributes.
 
 #### Prepare repository integration anchors before launching
 
@@ -392,17 +407,16 @@ you know is out of date).
   `human`, `relay-untailed`, `worktree-pending`, `worktree-unsupported`,
   `worktree-unprovable`, `worktree-ambiguous`, `cross-repo-child`, `invalid`):
   print one line each (`blocked <work-path> (<kind>): <reason>`) and take no action.
-  A `worktree-unprovable` for an unstamped root with no stale epic anchor whose
-  earlier stages all ran attended no longer occurs: an item at `design`, `plan`,
-  or `execute` with `work_status: accepted` has no code work to lose, and is
-  placed like a first dispatch. This is narrower than "read-only refusals are
-  gone": a `worktree-ambiguous` search, a stamped worktree that has vanished, and
-  a descendant at `plan`/`design` with no epic anchor ("dispatch the subtree root
-  first") still refuse. What remains of the root case is a code stage that may
-  have run whose worktree cannot be found (a lost stamp at `execute`/`finish`),
-  which is a human decision. `capacity` and
+  Readers at `design`/`plan` require provable repository and committed-ref
+  evidence for `pin-detached`; missing evidence is `worktree-unprovable` and
+  a provisioning capability gap is `worktree-unsupported`. Never fall back to
+  a mutable anchor. A code stage that may have run but whose worktree cannot
+  be found (a lost stamp at `execute`/`finish`) needs a human decision. `capacity` and
   `worktree-pending` resolve themselves next cycle as slots/worktrees free
-  up; `deps`, `affects-overlap`, `human`, `cross-repo-child`, and `invalid`
+  up. A `capacity` reason names its pool: `no worker slot free` is `max_parallel`,
+  `no attend slot free` is `max_attend`. An attend-pool block is expected while
+  a design session waits on the human; it is not a stall.
+  `deps`, `affects-overlap`, `human`, `cross-repo-child`, and `invalid`
   need a human decision outside this loop; `decisions` is a third case — it
   neither self-resolves nor needs a decision outside this loop, it's resolved
   *inside* this loop by the coordinator's own CLI call, but only once the
@@ -422,13 +436,15 @@ you know is out of date).
   orchestrate` passes `provisions_worktrees=True` today and exposes no flag
   to change it, so this kind should not reach this skill through the CLI —
   if one arrives, say so rather than working around it. Note:
-  `affects-overlap`
-  fires both on a real overlap
-  *and* on an item with an empty `affects` list (declaring `affects` is what
-  unlocks parallel dispatch) — don't report an empty-`affects` block to the
-  user as "another dispatch is using this," the reason string already says
-  which case it is. `decisions` means an open ledger entry is holding the
-  item's re-dispatch; the entry itself is named in `open_decisions[]` below,
+  `affects-overlap` means another live or already-planned dispatch holds an
+  overlapping write claim; the reason names the scope and its holder. Only
+  execute and finish hold `affects` claims, so a design or plan stage is never
+  `affects-overlap` and never causes one (it reads a pinned commit). An item
+  with empty `affects` claims its whole repository (the reason says
+  `<repo> (whole repository)`), and a `gw:workspace` item claims the
+  workspace (`workspace`), so either can serialize behind, or ahead of, its
+  executing or finishing siblings. `decisions` means an open ledger entry is
+  holding the item's re-dispatch; the entry itself is named in `open_decisions[]` below,
   and answering it clears the block on the next cycle.
 
 - **Decisions**: after the blocker lines, print one line per entry in
@@ -652,9 +668,20 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    `parked <key>: already resumed as <dispatch_id>, leaving it alone` —
    ordinary state (live, or blocked again with a *new* checkpoint and a *new*
    open decision) governs it from here.
-5. Run `place` for this cycle's own `dispatches[]` entry for this path (its
-   `action` will read `reuse`, like any other re-dispatch of an item with a
-   recorded placement), redirecting stdout exactly as §3 step 1 does:
+5. Recover the original saved dispatch evidence joined to the Task from step 2.
+   For `pin-detached`, require the original saved reader dispatch input and
+   preparation evidence, and verify that its key/repository match this Task and
+   its `start_sha` matches the baseline in the frozen Task prompt and the saved
+   preparation result. Missing, malformed or mismatched original evidence refuses
+   resume: leave the Task/checkpoint and checkout evidence intact and surface the
+   refusal for inspection. Never substitute this cycle's planner baseline, even
+   if the source branch has advanced. Use that original dispatch JSON for
+   `prepare-reader` in §3 step 1, with a fresh preparation identity and fresh
+   output path; never reuse the parked reader's checkout. Preserve the original
+   evidence before saving the new result. Require exit 0 before building the
+   resume spec or launching. For non-reader actions, resolve this cycle's own
+   `dispatches[]` entry for this path and run `place`, redirecting stdout exactly
+   as §3 step 1 does:
 
    ```
    python3 references/launch-worker.py place --dispatch <dispatch-json> \
@@ -664,7 +691,8 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
 
    `settle-placement` hard-requires `--placement-result` to exist and parse
    — even for `reuse`/`main` — so this redirect is not optional here either.
-   `<placement-json-file>` holds `["--worktree", "path:<worktree.path>"]` —
+   `<placement-json-file>` is the successful helper output (for a reader, use
+   its fresh output file), holding `["--worktree", "path:<resolved path>"]` —
    `launch --recovery-placement` opens its argument **as a path** and will
    not accept an inline JSON literal. Then build the resume spec:
    ```
@@ -707,9 +735,14 @@ classification is an ordinary fresh dispatch — run §3 unmodified.
    A non-zero exit here is a failed resume, not a cosmetic one: say so and
    route the dispatch into the failure flow (§4.2) rather than leaving a
    worker running on a prompt that does not know the answer.
-8. Continue at §3 step 4 (`settle-placement` with this cycle's `place` result
-   and `<start-json>`, then verify and record observed placement) — everything
-   from there is identical to an ordinary dispatch.
+8. Continue at §3 step 4. For readers, use
+   `settle-placement --dispatch <original-saved-reader-dispatch-json>` with
+   this resume attempt's successful preparation result and `<start-json>`.
+   Record the reader receipt with the original `start_sha`, the freshly verified
+   path and the actual resumed task/dispatch IDs; retain that evidence together.
+   Neither settlement nor recording may use this cycle's planner entry.
+   For non-readers, use this cycle's dispatch and `place` result with
+   `<start-json>`, then verify and record observed placement as usual.
 
 ### 2.6.1 Self-park: stop the run when only parked work remains
 
@@ -803,7 +836,8 @@ The executable recipe for this section is
 matches or resolves rules. Treat model IDs and effort strings as opaque.
 
 1. Save the complete `dispatches[]` entry as JSON, then resolve its placement
-   before anything is created:
+   before task-create or launch. Create the `orca-placement/` directory first.
+   For non-reader actions, run:
 
    ```
    python3 references/launch-worker.py place --dispatch <dispatch-json> \
@@ -812,7 +846,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    ```
 
    Omit `--repo-path` only when the dispatch's `repo.path` is `null` (then only `reuse`
-   and `main` can be planned). Create the `orca-placement/` directory first.
+   and `main` can be planned).
    The result file is durable on purpose: §5 re-reads it to repair lineage
    after a restart. A non-zero exit prints `PLACEMENT REFUSED <key>: <reason>`:
    nothing was created and no task exists. Print it, delete the (truncated,
@@ -827,7 +861,56 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    Never fall back to the coordinator's repository, the wiki repository or
    trunk.
 
-   Then encode the immutable task spec from the placement `place` wrote:
+   **Reader preparation (`pin-detached`).** Use `prepare-reader` in place of
+   `place`, before task-create and launch. Allocate a fresh random UUID for every new dispatch attempt
+   and durably save it before preparation under
+   `references/orca-placement/<key>/<preparation-attempt-id>/attempt.json`.
+   This preparation identity is distinct from the later Orca `dispatchId`:
+   worker-start has not assigned that ID yet. Do not synthesize a dispatch ID.
+   `--attempt-id` accepts `[A-Za-z0-9][A-Za-z0-9_.-]{0,127}`; a UUID fits.
+
+   ```
+   python3 references/launch-worker.py prepare-reader --dispatch <dispatch-json> \
+     --attempt-id <preparation-attempt-id> --out-placement <fresh-placement-json> \
+     > <workspace>/okf/<dispatch path>/references/orca-placement/<key>.json
+   ```
+
+   Use a fresh output path for every invocation, including recovery, for example
+   `references/orca-placement/<key>/<preparation-attempt-id>/placement-<invocation-uuid>.json`.
+   Save the dispatch input, attempt identity, invocation paths, exit status and
+   stdout/stderr as this attempt's evidence. Archive the previous `<key>.json`
+   under its attempt directory before another invocation redirects to that
+   exact result path. Preserve successful preparation JSON there too; it holds
+   `attempt_id`, `path`, `start_sha`, `repo_id`, `placement_argv` and `reused`.
+   Persist launch intent before launch and its actual request, task and dispatch
+   IDs and start receipt when available, joined to this preparation evidence.
+   Never store a preamble or dispatch capability in this evidence.
+
+   Require exit 0 before encode, task-create or launch. File existence alone never authorizes launch.
+   On success, `<fresh-placement-json>` contains exactly
+   `["--worktree", "path:<canonical-prepared-path>"]`; use it as `<placement-json>`
+   in encode below. Launch uses that exact prepared path. Do not substitute an
+   integration anchor, a shared epic checkout or a new-worktree creation flag.
+   The helper creates a dedicated Orca checkout with setup skipped, detaches
+   only that new checkout at `start_sha`, then verifies repository, path, HEAD
+   and cleanliness. Never `place` a reader or detach/reset any other checkout.
+   A non-zero exit refuses preparation: report
+   `PREPARATION REFUSED <key>: <reason>` (or the actual command error), do not
+   encode or start, and leave any allocated checkout visible for recovery.
+   Before task-create, use only §4.2.1's pre-task decision flow. When a Task
+   already exists (resume/retry), use the existing-Task failure question (§4.2).
+
+   Reuse this identity only to recover the same conclusively unlaunched allocation.
+   If launch is uncertain, reconcile authoritative Orca request/dispatch state
+   before proceeding; a missing response or receipt is not proof of no launch.
+   Until that state is conclusive, enter inspection without preparing or launching
+   another checkout. Never share a previously launched checkout with a later
+   dispatch, even at the same key and SHA. A later dispatch gets a new identity.
+   Recovery verifies an already clean detached checkout at the saved SHA;
+   never re-detach, reset or remove it. A create-before-detach crash leaves a
+   branched allocation that the helper refuses and an operator must inspect.
+
+   Then encode the immutable task spec from the successful placement output:
 
    ```
    python3 references/launch-worker.py encode \
@@ -862,11 +945,17 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 
    What `place` produces, and why:
 
-   `place` builds the placement argv; never assemble it by hand. No launch
+   `place` or `prepare-reader` builds the placement argv; never assemble it by hand. No launch
    reads the coordinator's location — a coordinator in the code repository's
    primary checkout, the wiki repository or the epic worktree issues identical
    calls. (Orca's caller context is the Orca terminal's worktree, not the
    shell's cwd, so `cd` would not change it either.)
+   - `pin-detached` → run `prepare-reader --dispatch <dispatch-json>
+     --attempt-id <preparation-attempt-id> --out-placement <fresh-placement-json>`
+     in place of `place` in step 1, saving stdout at the same
+     `references/orca-placement/<key>.json` result path. This dedicated,
+     verified detached checkout must be prepared successfully before encode,
+     task-create or launch; the resulting argv selects its exact path.
    - `reuse` and `main` → `--worktree path:<worktree.path>` only, with no Orca
      call — no creation flags (`--name`/`--repo`/`--base-branch`), which the
      CLI rejects for an existing worktree.
@@ -922,7 +1011,9 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    worktree set --worktree id:<created id> --parent-worktree id:<parent id>`
    exactly once and re-reads; the observed `parentWorktreeId` must then equal
    the placed parent id, or be `null` when none was placed. For `reuse`/`main`
-   it compares paths only. It prints `path`, `branch` (already stripped of
+   it compares paths only. For `pin-detached`, it compares the prepared and
+   observed paths and verifies the detached commit and clean state; it prints
+   `branch: null` and `start_sha`. It otherwise prints `path`, `branch` (already stripped of
    `refs/heads/`), `display_name`, `repo_id`, `parent_worktree_id` and
    `lineage_set`. A non-zero exit prints `PLACEMENT MISMATCH <key>: <reason>`
    — halt into §4.2 exactly as below. Re-running it is safe: it repairs a
@@ -936,6 +1027,7 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
    | Planned `worktree.action` | Assertion |
    |---|---|
    | `reuse`, `main` | `settle-placement`: the observed `path` equals the planned `worktree.path`, compared after resolving symlinks on both sides. No worktree was created, so nothing else is checked. |
+   | `pin-detached` | `settle-placement`: observed path equals the prepared path; `HEAD` equals `start_sha`; HEAD is detached; the checkout is clean. |
    | `fork-child`, `create-top-level` | `settle-placement`: observed `repoId` is the placed repository, `isMainWorktree` is false, and `parentWorktreeId` equals the placed parent (`null` when `parent_path` was `null`). Then, here: the observed `path` is not one already claimed by another dispatch this Run; and `worktree.base_branch` resolves in the observed worktree and is an ancestor of its HEAD — one `git -C <observed path> merge-base --is-ancestor <base_branch> HEAD`. |
 
    The ancestry check is what replaces the branch-name comparison: it asks
@@ -952,6 +1044,12 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
 
    ```
    dispatched <key> -> <observed path> on <observed branch>
+   ```
+
+   For readers, print the detached commit instead:
+
+   ```
+   dispatched <key> -> <observed path> detached at <start_sha>
    ```
 
    This line lets a human reading the scrollback hours later find the branch
@@ -999,24 +1097,46 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       is the frozen dispatch key. If a newer attempt supersedes it, or identity
       cannot be established, record nothing — report every ID you have and
       enter inspection.
-   2. **Verify the branch.** Normalize the readback by stripping `refs/heads/`.
+   2. **Verify the branch.** For non-reader actions, normalize the readback by stripping `refs/heads/`.
       Where the observed path is reachable from this host, run
       `git -C <observed path> branch --show-current`; it must print exactly the
       normalized branch. Empty output (detached HEAD), a missing branch, a
       disagreement or unverifiable evidence is a placement mismatch: halt into
       §4.2 as above. Never record the planned `worktree.branch` in its place.
-   3. **Record, or skip.** For the orchestration root (the dispatch `slug`
-      equals `<work-path>`) at any phase, and for a descendant dispatched at
-      `execute` or `finish`, run:
+      For `pin-detached`, require step 4's successful settlement checks instead:
+      detached HEAD, clean checkout, observed path and `start_sha` match the
+      saved preparation. An empty branch is expected only for that action.
+   3. **Record, or skip.** A `pin-detached` dispatch — root or descendant — records a reader receipt
+      instead of a placement, only after settlement and identity binding above:
+
+      ```
+      gw work record-reader <slug> --root <work-path> --phase <dispatch phase> \
+        --task-id <task_id> --dispatch-id <dispatch_id> --dispatch-key <key> \
+        --repo <dispatch repo.name> --worktree <observed path> --start-sha <start_sha> --json
+      ```
+
+      Use actual task/dispatch IDs from worker-start (or authoritative recovery
+      readback) and the SHA verified by settlement, never the preparation UUID.
+      Success is exit 0 with `written` or `replayed` true and no refusal/conflict.
+      Keep `receipt_path` and `start_sha` in this dispatch's evidence alongside
+      the preparation identity and saved result. Receipts live under
+      `layout.cache_dir / "reader-receipts"`; they never change phase, stamps or
+      `updated`. Never call `record-placement` for a `pin-detached` dispatch.
+      `refusal`/`attempt-mismatch` → `PLACEMENT UNRECORDED <key>` and inspection,
+      exactly like step 5; include the returned refusal detail or conflict.
+      Other non-success, including exit 0 without `written`/`replayed`, follows
+      step 6. Reader success goes directly to the submission probe, not the
+      scalar placement check below.
+
+      For non-reader actions, the root's placement is recorded only at `execute`/`finish`,
+      as is a descendant's. Run:
 
       ```
       gw work record-placement <slug> --root <work-path> --phase <dispatch phase> \
         --worktree <observed path> --branch <normalized branch> --json
       ```
 
-      A descendant dispatched at `design` or `plan` is never recorded: it only
-      reads from the shared epic worktree and must not be pinned to it.
-   4. **Check.** Success is exit 0 with `refusal: null` and `after` equal to the
+   4. **Check.** Scalar placements only. Success is exit 0 with `refusal: null` and `after` equal to the
       observation. A placement preview validates repository selection too.
       `--dry-run` is read-only. The live call re-reads metadata under the item
       lock, so its result is authoritative if metadata changes after a preview.
@@ -1053,14 +1173,17 @@ matches or resolves rules. Treat model IDs and effort strings as opaque.
       without the authority §4.1.1 requires. Independent items continue only
       where live-key and hold rules already allow.
 
-   A lost response is not a refusal. After a timeout, disconnect or restart,
+   A lost response is not a refusal. For scalar placements, after a timeout, disconnect or restart,
    repeat step 1 and the `--dry-run` read before recording again; an
    identical replay is a no-op only once attempt, phase and observation are
    re-established. Until then, enter inspection and preserve the task,
    dispatch key and allocated worktree. Do not call `gw work advance` to stamp it,
    do not start another fork, and do not stop or release the worker without
-   the authority §4.1.1 requires. Step 5's submission probe runs only after recording
-   succeeded, or for a read-only descendant that records nothing.
+   the authority §4.1.1 requires. For a reader, re-run `settle-placement` with its
+   saved preparation, repeat binding, and replay `record-reader` with the same
+   actual IDs, phase, path and SHA; an identical receipt returns `replayed: true`.
+   Never allocate another checkout to repair a missing receipt. Step 5's submission probe runs only after recording
+   succeeded.
 
 5. **Confirm the prompt was actually submitted when a terminal exists.** A
    terminal is optional. Worker-read/show, lifecycle state, and orchestration
@@ -1429,6 +1552,8 @@ Used from two places: `worker_done --outcome failed` (above) and a dead
 worker discovered outside any `worker_done` message (§2.1 or §2.7's
 wait-timeout `worker-show`) — the design's no-auto-retry policy applies to
 both identically, so it's specified once here, not duplicated.
+This question requires an existing Task. Reader preparation failure before
+task-create goes to §4.2.1 instead; it cannot use this question's Skip branch.
 
 One `AskUserQuestion` with exactly three options — *retry* / *skip this
 item* / *stop the run*:
@@ -1439,8 +1564,27 @@ item* / *stop the run*:
   the envelope. Missing, malformed, truncated, or wrong-key state blocks
   recovery. Never consult edited dispatch configuration or a fresh plan for
   this task. Preserve the original requested placement and observed allocated
-  resource evidence; follow Orca's recovery verdict so an allocated worktree
-  is reused rather than duplicated. Then run:
+  resource evidence. For non-reader actions, follow Orca's recovery verdict
+  so an allocated worktree is reused rather than duplicated.
+
+  For `pin-detached`, reconcile authoritative Orca request/dispatch state
+  before preparing anything. Uncertain launch stays in inspection; neither a
+  timeout nor a missing receipt proves the checkout was unlaunched. A new
+  dispatch attempt requires a fresh preparation identity: never reuse a previously launched reader checkout,
+  even if its worker has settled and the key/SHA are unchanged. Recover the
+  same conclusively unlaunched allocation only with its durably saved identity.
+  In both cases invoke §3 step 1's `prepare-reader` using the saved original
+  dispatch input and a fresh output path; require exit 0 before launch. Retain
+  the original SHA and profile. As in §2.6's reader resume, require original
+  dispatch/preparation evidence matching the frozen Task prompt's baseline;
+  missing or mismatched evidence refuses rather than using a current plan.
+  Preserve the prior preparation result under
+  its attempt directory before saving the new result at
+  `references/orca-placement/<key>.json`. Use the successful fresh argv file
+  as `<recovery-approved-placement-json>` below. Never `place` a reader or
+  derive authorization from an old output file.
+
+  For an existing Task with an authorized retry, run:
 
   ```
   python3 references/launch-worker.py launch --spec <saved-task-spec> \
@@ -1450,8 +1594,9 @@ item* / *stop the run*:
   ```
 
   `--recovery-placement` opens its argument **as a path** holding a bare JSON
-  argv list — the same shape `place --out-placement` writes, not the keyed
-  object its stdout redirect produces. Get that argv the sanctioned way: either
+  argv list — the same shape `place --out-placement` or `prepare-reader`
+  writes, not the keyed object its stdout redirect produces. Readers use only
+  the successful fresh output just prepared. For non-readers, get that argv the sanctioned way: either
   re-run `place` against the recovery-approved worktree to regenerate it, or
   lift the `placement_argv` array out of the saved `place` result
   (`references/orca-placement/<key>.json`) into its own file. Never
@@ -1465,9 +1610,13 @@ item* / *stop the run*:
   those values. Timeout, absent output, missing terminal, or ambiguous start never
   authorizes retry; preserve task/dispatch identities and follow recovery.
   An explicit reroute is a new deliberate dispatch decision and task identity.
-  Then run `settle-placement` with the original dispatch's saved `place`
-  result (`references/orca-placement/<key>.json`) and the retry's
-  `<start-json>`: the allocated worktree still owes its planned lineage. Once
+  Then run `settle-placement` with the saved `place` result for non-readers,
+  or this attempt's successful `prepare-reader` result for readers
+  (`references/orca-placement/<key>.json`), and the retry's `<start-json>`.
+  Readers pass the original saved dispatch JSON to settlement and record the
+  original `start_sha` with the retry's actual task/dispatch IDs.
+  The allocated worktree still owes its placement checks and, for a code
+  creation, planned lineage. Once
   the retry's own placement assertion passes, record its observed placement exactly as §3 step 4 does; never change its frozen envelope.
 - **Skip**: `orca orchestration task-update --id <task_id> --status blocked
   --run <run_id>`. The durable `blocked` status distinguishes this deliberate
@@ -1482,6 +1631,30 @@ item* / *stop the run*:
 
 Identical to the `outcome: failed` branch above — run the failure question.
 Triggered from §2.1's live-derivation or §2.7's wait-timeout `worker-show`.
+
+### 4.2.1 Reader preparation failure before Task creation
+
+No Task exists yet, so use a separate question with exactly two options —
+*retry preparation* / *stop the run*. Do not offer Skip, and never call
+`task-update` or invent task/dispatch IDs. Save the question and answer in the
+preparation attempt's evidence before acting. Preserve the dispatch input,
+identity, invocation paths, exit status, stdout/stderr and any preparation result;
+leave any allocated checkout visible for inspection.
+
+- **Retry preparation**: only after the user chooses it and recovery inspection
+  authorizes preparation. Follow §3 step 1's reader recovery rules: reconcile
+  authoritative launch state if uncertain, recover the same conclusively
+  unlaunched allocation only with its saved identity, or allocate a fresh
+  preparation identity for a new attempt. Retain the previous evidence and
+  allocation; never re-detach, reset or remove it. Use the saved dispatch input
+  and a fresh output path, then return to §3 step 1's preparation gate.
+  Require exit 0 before encode, task-create or launch. Another failure returns
+  to this question; uncertainty remains in inspection and authorizes no launch.
+- **Stop the run**: exit the coordinator loop using the existing Stop branch's
+  reporting and still-live-dispatch handling. Include the refused key, reason
+  and evidence paths. Do not return to planning and automatically re-propose
+  this key. A later explicitly resumed run must inspect the saved preparation
+  evidence under §3's recovery rules before trying this key again.
 
 ### 4.3 `question` (finish-stage relay)
 
@@ -1665,6 +1838,10 @@ re-run `settle-placement` against its saved
 `references/orca-placement/<key>.json` (a crash between start and the lineage
 `set` leaves a correctly based child with no parent, which this repairs
 without launching anything), then enter the record block at its step 1.
+For a reader, select the successful preparation result bound to that actual
+dispatch in its attempt evidence, using the archived copy if a later attempt
+has replaced `<key>.json`. Recheck its detached SHA and clean path, then replay
+`record-reader`; do not prepare a new checkout to repair the receipt.
 
 **Wrap-up** (§2.3 reported `terminal: true`):
 

@@ -21,6 +21,7 @@ VERBS = [
     ["work", "next"],
     ["work", "advance"],
     ["work", "record-placement"],
+    ["work", "record-reader"],
     ["work", "touch-active-work"],
     ["work", "status"],
     ["work", "lint"],
@@ -38,8 +39,8 @@ VERBS = [
 ]
 
 
-def test_the_surface_is_exactly_eighteen_verbs() -> None:
-    assert len(VERBS) == 18
+def test_the_surface_is_exactly_nineteen_verbs() -> None:
+    assert len(VERBS) == 19
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))

@@ -57,6 +57,7 @@ def test_the_catalog_carries_exactly_the_documented_keys():
         "roles.*.max_concurrency",
         "workflow.dispatch_rules",
         "workflow.auto_drive.max_parallel",
+        "workflow.auto_drive.max_attend",
         "workflow.auto_drive.supervise_merges",
         "workspace.dir",
     ]
@@ -429,6 +430,34 @@ def test_checked_int_reads_a_good_value_and_the_catalog_default(tmp_path):
     assert checked_int(_layout(tmp_path), "workflow.auto_drive.max_parallel") == 2
     layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_parallel: 5\n")
     assert checked_int(layout, "workflow.auto_drive.max_parallel") == 5
+
+
+def test_max_attend_is_an_int_defaulting_to_one():
+    entry = next(entry for entry in CATALOG if entry.key == "workflow.auto_drive.max_attend")
+    assert entry.type == "int"
+    assert entry.default == 1
+    assert "max_parallel" in entry.description
+
+
+def test_max_parallel_description_names_its_worker_pool():
+    entry = next(entry for entry in CATALOG if entry.key == "workflow.auto_drive.max_parallel")
+    assert "autonomous or relay workers" in entry.description
+
+
+def test_checked_int_reads_max_attend_default_and_override(tmp_path):
+    assert checked_int(_layout(tmp_path), "workflow.auto_drive.max_attend") == 1
+    layout = _layout(tmp_path, "version: 1\nworkflow:\n  auto_drive:\n    max_attend: 3\n")
+    assert checked_int(layout, "workflow.auto_drive.max_attend") == 3
+
+
+def test_checked_refuses_a_non_integer_max_attend(tmp_path):
+    resolved = _resolved(
+        tmp_path,
+        "workflow.auto_drive.max_attend",
+        'version: 1\nworkflow:\n  auto_drive:\n    max_attend: "1"\n',
+    )
+    with pytest.raises(WorkspaceError, match="expects an integer"):
+        checked(resolved, source=tmp_path / "workspace.yaml")
 
 
 def test_checked_int_refuses_an_explicit_null(tmp_path):

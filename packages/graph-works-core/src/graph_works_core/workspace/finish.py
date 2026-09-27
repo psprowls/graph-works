@@ -23,15 +23,24 @@ from graph_works_core.workspace.repos import ItemRepo, declared_repositories, re
 @dataclass(frozen=True, slots=True)
 class FinishTarget:
     repo: ItemRepo
-    worktree: str
+    worktree: str  # source checkout the finish worker runs in
     source_branch: str
     target_branch: str
+    target_worktree: str | None  # unique checkout holding target_branch, when one exists
+
+
+@dataclass(frozen=True, slots=True)
+class FinishOccupancy:
+    worktrees: tuple[str, ...]
+    complete: bool
 
 
 @dataclass(frozen=True, slots=True)
 class FinishPlan:
     targets: tuple[FinishTarget, ...]
     blockers: tuple[str, ...]
+    # Target evidence survives failed admission; None is legacy/absent evidence.
+    occupancy: FinishOccupancy | None = None
 
 
 def enclosing_owner(item: WorkItem, items: Mapping[str, WorkItem]) -> WorkItem | None:
@@ -66,6 +75,8 @@ def resolve_finish_targets(
     item = by_path[path]
     targets: list[FinishTarget] = []
     blockers: list[str] = []
+    occupied: set[str] = set()
+    occupancy_known = "repo_stamps" not in item.invalid_optional_fields
     if "repo_stamps" in item.invalid_optional_fields:
         blockers.append(f"{path}: repair malformed repo_stamps before finishing")
     if single_repo is not None and item.repo_stamps:
@@ -91,17 +102,20 @@ def resolve_finish_targets(
             # current branch must be observed rather than inferred from trunk.
             own_repo = single_repo or resolve_item_repo(layout, item, by_path)
             if own_repo.path is None:
+                occupancy_known = False
                 blockers.append(f"{path}: no repository checkout can be verified for unstamped finish")
             else:
                 checkout = str(own_repo.path.resolve())
                 context = context_for(own_repo)
                 branches = [branch for branch, paths in context.inventory.items() if checkout in paths]
                 if len(branches) != 1:
+                    occupancy_known = False
                     blockers.append(f"{path}: cannot verify current branch of unstamped finish checkout {checkout!r}")
                 else:
                     candidates.append((own_repo, checkout, branches[0]))
         for name, stamp in sorted(item.repo_stamps.items()):
             if name not in declared:
+                occupancy_known = False
                 blockers.append(f"{path}: stamped repo {name!r} is not declared")
             else:
                 candidates.append((ItemRepo(name, declared[name], "frontmatter"), stamp.worktree, stamp.branch))
@@ -110,20 +124,11 @@ def resolve_finish_targets(
     except WorkspaceError as exc:
         return FinishPlan((), (str(exc),))
     for repo, worktree, branch in candidates:
-        if repo.path is None or not worktree or not branch:
+        if repo.path is None:
+            occupancy_known = False
             blockers.append(f"{path}: repair incomplete finish stamp for {repo.name!r}")
             continue
-        worktree = str(Path(worktree).resolve())
         context = context_for(repo)
-        if (
-            not context.identity_known
-            or not context.inventory_known
-            or context.inventory.get(branch) != (worktree,)
-            or context.path_exists.get(worktree) is not True
-            or context.checkout_usable_by_path.get(worktree) is not True
-        ):
-            blockers.append(f"{path}: cannot verify clean worktree {worktree!r} on branch {branch!r} in {repo.name!r}")
-            continue
         target: str | None = context.default_base
         if outer is not None:
             outer_stamp = outer.repo_stamps.get(repo.name) if repo.name is not None else None
@@ -134,11 +139,16 @@ def resolve_finish_targets(
                 else ((outer_stamp.worktree, outer_stamp.branch) if outer_stamp else (None, None))
             )
             if not anchor_path or not target:
+                occupancy_known = False
                 blockers.append(
                     f"{path}: prepare enclosing integration anchor {outer.path} in {repo.name!r} before finish"
                 )
                 continue
             anchor_path = str(Path(anchor_path).resolve())
+            if context.identity_known and context.inventory_known and context.inventory.get(target) == (anchor_path,):
+                occupied.add(anchor_path)
+            else:
+                occupancy_known = False
             if (
                 "repo_stamps" in outer.invalid_optional_fields
                 or context.inventory.get(target) != (anchor_path,)
@@ -147,11 +157,35 @@ def resolve_finish_targets(
             ):
                 blockers.append(f"{path}: repair enclosing integration anchor {outer.path} in {repo.name!r}")
                 continue
+        if context.identity_known and context.inventory_known and target and context.inventory.get(target):
+            occupied.update(context.inventory.get(target, ()))
+        else:
+            occupancy_known = False
         if not target or not context.branches_known or target not in context.branches:
             blockers.append(f"{path}: cannot verify target branch {target!r} in {repo.name!r}")
             continue
-        targets.append(FinishTarget(repo, worktree, branch, target))
-    return FinishPlan(tuple(targets), tuple(blockers))
+        holders = context.inventory.get(target, ())
+        if len(holders) > 1:
+            blockers.append(f"{path}: target branch {target!r} is checked out in several worktrees in {repo.name!r}")
+            continue
+        if not worktree or not branch:
+            blockers.append(f"{path}: repair incomplete finish stamp for {repo.name!r}")
+            continue
+        worktree = str(Path(worktree).resolve())
+        if (
+            not context.identity_known
+            or not context.inventory_known
+            or context.inventory.get(branch) != (worktree,)
+            or context.path_exists.get(worktree) is not True
+            or context.checkout_usable_by_path.get(worktree) is not True
+        ):
+            blockers.append(f"{path}: cannot verify clean worktree {worktree!r} on branch {branch!r} in {repo.name!r}")
+            continue
+        target_worktree = holders[0] if holders else None
+        targets.append(FinishTarget(repo, worktree, branch, target, target_worktree))
+    return FinishPlan(
+        tuple(targets), tuple(blockers), FinishOccupancy(tuple(sorted(occupied)), occupancy_known and bool(candidates))
+    )
 
 
 @dataclass(frozen=True, slots=True)

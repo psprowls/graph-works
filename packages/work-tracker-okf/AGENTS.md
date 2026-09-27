@@ -116,6 +116,17 @@ managed-artifact and dependency-graph code from inventing ad hoc path joins.
   maps them to paths. `repo_stamps[name]` holds `{worktree, branch}` for a
   repository other than the item's own — the scalar pair keeps meaning "own".
   `plan_placement(repo=)` is passed a name only for a foreign repository.
+- Placement stamps describe code/integration checkouts only. The existing
+  `plan_placement` API permits root anchor recording at any dispatchable phase
+  and descendant recording only at `execute`/`finish`; detached `HEAD` remains
+  an invalid branch. A root reader does not turn its detached checkout into an
+  anchor stamp.
+- `placement.plan_reader_receipt` instead validates a `ReaderObservation` for
+  `design`/`plan`, for roots and descendants alike. It checks phase eligibility,
+  subtree membership, attempt identity, absolute path and a full lowercase
+  40- or 64-hex commit ID. It returns observations with no document changes:
+  no phase, `updated`, scalar placement or `repo_stamps` mutation. Core owns
+  locked receipt storage and replay checks; the caller owns Git verification.
 
 `IGNORE` is the ordinary read/validation lens (excludes `references/*`,
 `.DS_Store`, and the schema/section declaration trees). `ARCHIVE_IGNORE`
@@ -130,6 +141,10 @@ factories (state, plan, graph, structure, targets, decisions — see
 `_rules/`) into one `extra_rules=` tuple for `okf_io.validate()`. It's a
 **factory per capability**, not a module-level tuple, because `RuleContext`
 carries no filesystem and two codes need to know about a repository.
+The catalog has 42 codes across six topics; `targets` declares three:
+`targets.affects-missing`, `targets.affects-empty`, and
+`targets.source-id-mismatch`. `targets.affects-empty` warns on an active,
+non-terminal nested leaf with no `affects`, even without a repository root.
 `repo_root` and `vault_root` are two different roots in a split topology
 (workspace vs. code repo are different git repos) — either being `None`
 *skips* its rule rather than failing it, since not knowing where a root is

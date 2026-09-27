@@ -6,7 +6,7 @@ import pytest
 from okf_io import load
 from work_helpers import make_item
 from work_tracker_okf.dependencies import DependencyEdge
-from work_tracker_okf.filing import FilingSeed, apply, compose_basename, plan_filing, slugify
+from work_tracker_okf.filing import AFFECTS_HINT, FilingSeed, apply, compose_basename, plan_filing, slugify
 from work_tracker_okf.init import install_bundle
 
 TODAY = date(2026, 8, 22)
@@ -224,3 +224,27 @@ def test_filing_writes_repo_after_owner(vault: Path, section_set) -> None:
 
 def test_filing_omits_repo_when_unset(vault: Path, section_set) -> None:
     assert "repo" not in plan_filing(vault, (), seed(), section_set).frontmatter
+
+
+def test_a_nested_leaf_filed_without_affects_gets_the_hint(vault: Path, section_set) -> None:
+    parent = make_item("epic-e", type="Epic")
+    plan = plan_filing(vault, (parent,), seed(parent_path=parent.path, type="Bug", affects=()), section_set)
+    assert plan.refusal is None
+    assert AFFECTS_HINT in plan.warnings
+
+
+@pytest.mark.parametrize(
+    ("parent_type", "type_", "affects", "nested"),
+    [
+        ("Epic", "Bug", ("packages/work-tracker-okf",), True),
+        ("Epic", "Bug", ("gw:workspace",), True),
+        ("Release", "Epic", (), True),
+        (None, "Feature", (), False),
+    ],
+)
+def test_no_hint_when(vault: Path, section_set, parent_type, type_, affects, nested) -> None:
+    items = (make_item("parent-p", type=parent_type),) if nested else ()
+    parent_path = items[0].path if nested else None
+    plan = plan_filing(vault, items, seed(parent_path=parent_path, type=type_, affects=affects), section_set)
+    assert plan.refusal is None
+    assert AFFECTS_HINT not in plan.warnings

@@ -11,8 +11,9 @@ here names a skill.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Literal
 
 from work_tracker_okf.decisions import HoldFact
@@ -52,6 +53,19 @@ Stage = Literal["design", "plan", "execute", "finish"]
 Variant = Literal[
     "exploration", "diagnosis", "reconcile", "epic-design", "decompose", "single", "planned", "unplanned", "branch"
 ]
+
+#: Which variants each stage can dispatch. `route()` pairs every `Dispatch`
+#: with a variant from its own stage's tuple; orchestrate uses the mapping to
+#: classify a live key whose exact variant it cannot recover (a live key names
+#: a phase, not a variant).
+VARIANTS_BY_STAGE: Mapping[Stage, tuple[Variant, ...]] = MappingProxyType(
+    {
+        "design": ("exploration", "diagnosis", "reconcile", "epic-design"),
+        "plan": ("decompose", "single"),
+        "execute": ("planned", "unplanned"),
+        "finish": ("branch",),
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -513,6 +527,7 @@ def state_for(
 
 __all__ = [
     "PLAN_OR_EXECUTE",
+    "VARIANTS_BY_STAGE",
     "Dispatch",
     "RouteResult",
     "RouteState",

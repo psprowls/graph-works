@@ -191,3 +191,11 @@ without a terminal; their lifecycle and reads use orchestration only.
   one workspace package (`subagents_io`) and no third party at all — `orca`
   is reached only via `subprocess` inside `_cli.py`. Don't add a dependency
   here without expecting that test to fail on purpose.
+
+`pin-detached` is deliberately refused with `WorktreeNotProvisioned`, even
+with a supplied path, before task creation or worker launch: this backend
+cannot prepare and verify a detached checkout at `start_sha`.
+`provisions_worktrees=True` covers the branch-creation actions, not reader
+pinning. Graph Works auto-drive uses its separate launcher helper to prepare
+and verify each reader, then starts it at that exact path. Creation actions
+require a non-None branch before assembling CLI flags.

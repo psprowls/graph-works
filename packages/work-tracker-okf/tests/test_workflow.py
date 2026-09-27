@@ -1,16 +1,22 @@
+import ast
 import dataclasses
 import itertools
+import typing
+from pathlib import Path
 
 import pytest
+from work_tracker_okf import workflow
 from work_tracker_okf.decisions import HoldFact
 from work_tracker_okf.dependencies import DependencyEdge, DependencyFact, DependencyIssue
 from work_tracker_okf.hierarchy import ChildRollup
 from work_tracker_okf.vocabulary import EFFORTS, PHASES, TYPES, WORK_STATUSES
 from work_tracker_okf.workflow import (
     PLAN_OR_EXECUTE,
+    VARIANTS_BY_STAGE,
     Dispatch,
     RouteState,
     Transition,
+    Variant,
     hold_blocker,
     route,
 )
@@ -43,6 +49,43 @@ _PHASE_STATES = {
 def _state(**overrides) -> RouteState:
     base = {"type": "Feature", "work_status": "open"}
     return RouteState(**{**base, **overrides})
+
+
+def test_variants_by_stage_covers_every_variant_exactly_once() -> None:
+    listed = [variant for variants in VARIANTS_BY_STAGE.values() for variant in variants]
+    assert sorted(listed) == sorted(typing.get_args(Variant))
+    assert len(listed) == len(set(listed))
+    assert set(VARIANTS_BY_STAGE) == {"design", "plan", "execute", "finish"}
+
+
+def test_every_dispatch_route_pairs_a_variant_with_its_own_stage() -> None:
+    tree = ast.parse(Path(workflow.__file__).read_text(encoding="utf-8"))
+    pairs = [
+        (node.args[0].value, node.args[1].value)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "Dispatch"
+        and len(node.args) == 2
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[1], ast.Constant)
+    ]
+    assert pairs, "no literal Dispatch(...) calls found"
+    for stage, variant in pairs:
+        assert variant in VARIANTS_BY_STAGE[stage], (stage, variant)
+
+    for type_ in ("Feature", "Bug", "Epic"):
+        for has_spec_doc in (False, True):
+            dispatch = route(_state(type=type_, phase="design", has_spec_doc=has_spec_doc)).dispatch
+            assert dispatch is not None
+            assert dispatch.stage == "design"
+            assert dispatch.variant in VARIANTS_BY_STAGE[dispatch.stage]
+
+    for has_plan_doc in (False, True):
+        dispatch = route(_state(phase="execute", work_status="accepted", has_plan_doc=has_plan_doc)).dispatch
+        assert dispatch is not None
+        assert dispatch.stage == "execute"
+        assert dispatch.variant in VARIANTS_BY_STAGE[dispatch.stage]
 
 
 def state_with_edge(

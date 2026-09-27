@@ -84,6 +84,31 @@ def test_overlap_evidence_uses_shared_structural_parent_not_decision_owner(tmp_p
     assert [sibling.path for sibling in context.landed_siblings] == [LANDED]
 
 
+def test_workspace_only_siblings_are_not_overlap_evidence(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    for path in (SUBJECT, LANDED):
+        page = layout.bundle_dir / f"{path}.md"
+        text = page.read_text(encoding="utf-8").replace("affects:\n- packages/a\n", "affects:\n- gw:workspace\n")
+        if path == SUBJECT:
+            start = text.index("depends_on:\n")
+            text = text[:start] + text[text.index("affects:\n", start) :]
+        page.write_text(text, encoding="utf-8", newline="")
+    context = reconcile.run_reconcile_context(layout, SUBJECT, repo=None)
+    assert context.landed_siblings == ()
+    assert context.touched_paths == ()
+
+
+def test_reconcile_touched_paths_exclude_workspace_from_declared_siblings(tmp_path: Path) -> None:
+    layout = _workspace(tmp_path)
+    for path in (SUBJECT, LANDED):
+        page = layout.bundle_dir / f"{path}.md"
+        text = page.read_text(encoding="utf-8").replace("- packages/a\n", "- packages/a\n- gw:workspace\n")
+        page.write_text(text, encoding="utf-8", newline="")
+    context = reconcile.run_reconcile_context(layout, SUBJECT, repo=None)
+    assert [sibling.path for sibling in context.landed_siblings] == [LANDED]
+    assert context.touched_paths == ("packages/a",)
+
+
 def test_overlapping_item_under_a_different_structural_parent_is_excluded(tmp_path: Path) -> None:
     layout = _workspace(tmp_path)
     other_owner = "work/epic-b"

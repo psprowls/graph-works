@@ -3,7 +3,7 @@
 import json
 import runpy
 import subprocess
-from dataclasses import fields
+from dataclasses import fields, replace
 from pathlib import Path
 
 import pytest
@@ -146,6 +146,55 @@ def test_synced_workspace_cli_profile_reaches_orca_and_durable_receipt(workspace
     raw = {field.name: planned["path" if field.name == "slug" else field.name] for field in fields(PlannedDispatch)}
     raw["worktree"] = WorktreeAction(**raw["worktree"])
     dispatch = PlannedDispatch(**raw)
+    if stage == "design":
+        code = workspace.parent / "code"
+        sha = subprocess.run(
+            ["git", "-C", str(code), "rev-parse", "main^{commit}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert len(sha) == 40
+        assert planned["worktree"] == {
+            "action": "pin-detached",
+            "path": None,
+            "branch": None,
+            "base_branch": "main",
+            "exists": None,
+            "parent_path": None,
+            "start_sha": sha,
+        }
+        # The backend consumes a prepared checkout; preserve this test's launch
+        # profile/effective-receipt subject by preparing the pin with real Git.
+        reader = workspace / "reader"
+        subprocess.run(
+            ["git", "-C", str(code), "worktree", "add", "--detach", str(reader), sha],
+            check=True,
+            capture_output=True,
+        )
+        observed = subprocess.run(
+            ["git", "-C", str(reader), "rev-parse", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert observed == sha
+        assert (
+            subprocess.run(
+                ["git", "-C", str(reader), "symbolic-ref", "-q", "HEAD"],
+                capture_output=True,
+            ).returncode
+            == 1
+        )
+        dispatch = replace(
+            dispatch,
+            worktree=replace(
+                dispatch.worktree,
+                action="reuse",
+                path=str(reader),
+                exists=True,
+            ),
+        )
     cli = FakeOrcaCLI()
     session = OrcaBackend(run=cli, repo_selector="path:" + str(workspace)).open_session("integration-" + stage)
     record = session.launch(dispatch)

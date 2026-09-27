@@ -5,7 +5,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from graph_works_core.workspace.repo_context import _inventory, observe_repository
+import pytest
+from graph_works_core.workspace.repo_context import _inventory, observe_branch_tips, observe_repository
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -48,6 +49,30 @@ def test_missing_git_evidence_is_marked_unknown(tmp_path: Path) -> None:
     assert not context.inventory_known
     assert not context.checkout_usable
     assert context.inventory == {}
+
+
+def test_branch_tips_are_committed_refs_not_worktree_state(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-b", "main")
+    (repo / "f").write_text("a", encoding="utf-8", newline="\n")
+    _git(repo, "add", "f")
+    _git(repo, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "a")
+    tip = _git(repo, "rev-parse", "HEAD")
+    (repo / "f").write_text("dirty", encoding="utf-8", newline="\n")
+    context = observe_repository(repo)
+    assert context.branch_tips == {"main": tip}
+    assert context.branch_tips_known is True
+    assert context.branches == frozenset({"main"})
+    assert observe_branch_tips(repo) == {"main": tip}
+    with pytest.raises(TypeError):
+        context.branch_tips["main"] = "different"
+
+
+def test_branch_tips_unknown_outside_git(tmp_path: Path) -> None:
+    context = observe_repository(tmp_path)
+    assert context.branch_tips == {} and context.branch_tips_known is False
+    assert observe_branch_tips(tmp_path) is None
 
 
 def test_linked_checkout_has_own_dirty_state_under_shared_identity(tmp_path: Path) -> None:

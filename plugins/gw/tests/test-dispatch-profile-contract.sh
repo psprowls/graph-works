@@ -63,7 +63,24 @@ grep -F 'Include the merge target in every held-outcome body' "$RELAY" >/dev/nul
 grep -F '**Integration-branch case**' "$RELAY" >/dev/null || fail "relay merges any branch that differs from its target"
 grep -F 'a stamped Epic or Release root finishing its own integration branch' "$RELAY" >/dev/null || fail "relay covers a stamped root's integration branch"
 grep -F 'Never merge a branch into itself.' "$RELAY" >/dev/null || fail "relay never self-merges a same-target stamp"
-grep -F 'No worktree has the merge target checked out, or more than one does' "$RELAY" >/dev/null || fail "relay escalates an unresolvable target checkout"
+# Check R2's actual target-worktree contract, independent of prose wrapping.
+python3 - "$RELAY" <<'PY' || fail "relay validates the supplied target checkout and escalates ambiguity"
+import sys
+from pathlib import Path
+
+state = Path(sys.argv[1]).read_text(encoding="utf-8").split("## R2 — Detect state", 1)[1].split("## R3", 1)[0]
+state = " ".join(state.split())
+for requirement in (
+    "A `null` target_worktree means the target is not checked out; hold at R2 without merging.",
+    "`git worktree list --porcelain` for the block whose `branch` line reads `refs/heads/<merge target>`.",
+    "The supplied `target_worktree` must be non-null and equal the unique path found by this scan.",
+    "The R4 merge executes there, not in this worker's own worktree.",
+    "No worktree has the merge target checked out, or more than one does: enter the **Escalation path**.",
+    "A missing or mismatched supplied path also enters the **Escalation path**.",
+    "Never check the target out yourself and never merge from this worker's worktree.",
+):
+    assert requirement in state, requirement
+PY
 grep -F 'Never invent a release date' "$RELAY" >/dev/null || fail "relay obtains a real release date"
 grep -F -- '--released-at <date>' "$RELAY" >/dev/null || fail "relay passes the release date to the resolving advance"
 if grep -Fq 'Forked-child case' "$RELAY"; then fail "relay must not limit merging to forked children"; fi
@@ -115,7 +132,8 @@ WORKFLOW="$PLUGIN_ROOT/skills/workflow/SKILL.md"
 grep -F 'gw work record-placement <slug> --root <work-path> --phase <dispatch phase>' "$AUTO_DRIVE" >/dev/null || fail "auto-drive records observed placement"
 grep -F 'git -C <observed path> branch --show-current' "$AUTO_DRIVE" >/dev/null || fail "auto-drive verifies the observed branch in git"
 grep -F 'Never record the planned `worktree.branch` in its place.' "$AUTO_DRIVE" >/dev/null || fail "auto-drive records observed, not requested, branches"
-grep -F 'A descendant dispatched at `design` or `plan` is never recorded' "$AUTO_DRIVE" >/dev/null || fail "auto-drive skips read-only descendants"
+grep -F 'A `pin-detached` dispatch — root or descendant — records a reader receipt' "$AUTO_DRIVE" >/dev/null || fail "auto-drive records every detached reader"
+grep -F 'Never call `record-placement` for a `pin-detached` dispatch' "$AUTO_DRIVE" >/dev/null || fail "auto-drive keeps readers out of scalar placement"
 grep -F 'binds to this `task_id`/`dispatch_id`' "$AUTO_DRIVE" >/dev/null || fail "auto-drive binds placement to the current attempt"
 grep -F 'PLACEMENT UNRECORDED <key>' "$AUTO_DRIVE" >/dev/null || fail "auto-drive reports an unrecorded placement"
 grep -F 'Do not call `gw work advance` to stamp it' "$AUTO_DRIVE" >/dev/null || fail "phase mismatch never advances to stamp"

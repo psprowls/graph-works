@@ -10,7 +10,7 @@ from graph_works_core.orchestrate import commands as orchestrate
 from graph_works_core.work import commands as work
 from graph_works_core.workspace import decision_owner
 from okf_io import load_bundle
-from test_orchestrate_shell import _declare_repo, _workspace, _write
+from test_orchestrate_shell import _declare_repo, _git_repo, _workspace, _write
 from work_tracker_okf.items import IGNORE, load_items
 
 TODAY = date(2026, 9, 13)
@@ -42,11 +42,17 @@ def _dependent(layout) -> None:
 
 def _anchor(layout) -> None:
     checkout = layout.root / "checkout"
-    checkout.mkdir()
+    _git_repo(checkout)
+    manifest = layout.manifest_path
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") + f"repositories:\n  code:\n    path: {checkout}\n",
+        encoding="utf-8",
+        newline="",
+    )
     page = layout.bundle_dir / f"{EPIC}.md"
     text = page.read_text(encoding="utf-8")
     page.write_text(
-        text.replace("affects:", f"worktree: {checkout}\nbranch: feature/holds\naffects:", 1),
+        text.replace("affects:", f"worktree: {checkout}\nbranch: main\naffects:", 1),
         encoding="utf-8",
         newline="",
     )

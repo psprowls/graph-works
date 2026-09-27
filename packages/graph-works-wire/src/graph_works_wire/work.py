@@ -17,7 +17,7 @@ from typing import Any, Protocol, cast
 from graph_works_core.archive.commands import ArchiveRun
 from graph_works_core.guidance.assembly import Guidance
 from graph_works_core.orchestrate.commands import OrchestrateResult
-from graph_works_core.orchestrate.placement import PlacementRecord
+from graph_works_core.orchestrate.placement import PlacementRecord, ReaderRecord
 from graph_works_core.orchestrate.stage_advance import StageAdvance
 from graph_works_core.work.commands import (
     ActiveWorkTouch,
@@ -162,11 +162,12 @@ class _ApplicationView(Protocol):
 
 class _WorktreeView(Protocol):
     action: str
-    path: str
-    branch: str
+    path: str | None
+    branch: str | None
     base_branch: str | None
     exists: bool | None
     parent_path: str | None
+    start_sha: str | None
 
 
 def _refusal(value: object) -> dict[str, str]:
@@ -304,6 +305,7 @@ def _finish_target(target: FinishTarget) -> dict[str, Any]:
         "worktree": target.worktree,
         "source_branch": target.source_branch,
         "target_branch": target.target_branch,
+        "target_worktree": target.target_worktree,
     }
 
 
@@ -467,6 +469,31 @@ def placement_payload(result: PlacementRecord) -> dict[str, Any]:
         "warnings": [] if application is None else list(application.warnings),
         "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
         "repo_note": result.repo_note,
+    }
+
+
+def reader_receipt_payload(result: ReaderRecord) -> dict[str, Any]:
+    """The observed detached reader attempt and its receipt outcome."""
+    plan = result.plan
+    observation = plan.observation
+    return {
+        "path": plan.path,
+        "root": plan.root,
+        "expected_phase": plan.expected_phase,
+        "current_phase": plan.current_phase,
+        "observation": {
+            "task_id": observation.task_id,
+            "dispatch_id": observation.dispatch_id,
+            "dispatch_key": observation.dispatch_key,
+            "repo": observation.repo,
+            "worktree": observation.worktree,
+            "start_sha": observation.start_sha,
+        },
+        "receipt_path": None if result.receipt_path is None else str(result.receipt_path),
+        "written": result.written,
+        "replayed": result.replayed,
+        "conflict": result.conflict,
+        "refusal": None if plan.refusal is None else {"reason": plan.refusal, "detail": plan.detail},
     }
 
 
@@ -698,6 +725,7 @@ def _worktree(value: object) -> dict[str, Any]:
         "base_branch": action.base_branch,
         "exists": action.exists,
         "parent_path": action.parent_path,
+        "start_sha": action.start_sha,
     }
 
 
@@ -707,6 +735,8 @@ def orchestrate_payload(result: OrchestrateResult) -> dict[str, Any]:
         "terminal": result.terminal,
         "max_parallel": result.max_parallel,
         "slots_free": result.slots_free,
+        "max_attend": result.max_attend,
+        "attend_slots_free": result.attend_slots_free,
         "supervise_merges": result.supervise_merges,
         "live": list(result.live),
         "repo": None

@@ -65,7 +65,7 @@ class OrcaBackend:
     supported_modes = DISPATCH_MODES
     #: Orca's `worker-start --worktree new-top-level` creates the worktree
     #: itself, and `main`/`reuse` point at one that already exists, so this
-    #: backend handles all four WORKTREE_ACTIONS.
+    #: backend provisions branch worktrees; pin-detached is refused.
     provisions_worktrees = True
 
     def __init__(
@@ -468,6 +468,8 @@ class OrcaSession:
             # repository's own checkout: on disk already, never created here.
             return ["--worktree", f"path:{worktree.path}"]
         if worktree.action in self._PROVISIONING_ACTIONS:
+            if worktree.branch is None:
+                raise BackendError(f"{self.name}: a {worktree.action} dispatch needs a branch")
             if worktree.base_branch is None:
                 raise BackendError(f"{self.name}: a {worktree.action} dispatch needs a base_branch")
             if self._repo_selector is None:
@@ -485,6 +487,11 @@ class OrcaSession:
                 "--repo",
                 self._repo_selector,
             ]
+        if worktree.action == "pin-detached":
+            raise WorktreeNotProvisioned(
+                f"{self.name}: a pin-detached reader needs a prepared detached checkout at {worktree.start_sha}; "
+                "this backend cannot prepare one -- launch it through the auto-drive helper"
+            )
         raise BackendError(f"{self.name}: unknown worktree action {worktree.action!r}")
 
     #: The two actions where Orca provisions the worktree, and so the only

@@ -287,6 +287,34 @@ def test_overlap_compares_resolved_repos_so_an_inherited_repo_counts(tmp_path: P
     assert [c.entry.why for c in got] == ["affects overlap with work/epic-g/children/feature-h"]
 
 
+def test_workspace_only_items_never_overlap_in_the_ledger_stream(tmp_path: Path) -> None:
+    _item(tmp_path, "work/feature-ws-a", affects=("gw:workspace",))
+    _item(tmp_path, "work/feature-ws-b", affects=("gw:workspace",))
+    _ledger(tmp_path, "work/feature-ws-b", _answered(1, "B?"))
+    bundle = load_bundle(tmp_path, ignore=IGNORE)
+    items = tuple(load_items(bundle))
+    leaf = next(i for i in items if i.path == "work/feature-ws-a")
+    got, _ = ga.ledger_candidates(bundle.root, items, leaf)
+    assert got == []
+
+
+def test_guidance_closure_reads_only_code_affects(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = _ws(tmp_path)
+    _item(layout.bundle_dir, "work/feature-ws", affects=("gw:workspace", "packages/a"))
+    bundle = load_bundle(layout.bundle_dir, ignore=IGNORE)
+    items = tuple(load_items(bundle))
+    leaf = next(i for i in items if i.path == "work/feature-ws")
+    seen: list[tuple[str, ...]] = []
+
+    def capture(layout, *, repo, affects):
+        seen.append(tuple(affects))
+        return Closure((), ())
+
+    monkeypatch.setattr(ga, "open_closure", capture)
+    ga.assemble_guidance(layout, bundle, items, leaf, phase="plan")
+    assert seen == [("packages/a",)]
+
+
 def test_an_absent_ledger_is_empty_not_an_error(tmp_path: Path) -> None:
     _item(tmp_path, "work/feature-lonely")
     bundle = load_bundle(tmp_path, ignore=IGNORE)

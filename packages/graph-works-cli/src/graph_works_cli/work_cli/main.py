@@ -18,7 +18,7 @@ from pathlib import Path
 import typer
 from graph_works_core.archive.commands import run_archive, stranded_warnings
 from graph_works_core.orchestrate.commands import run_orchestrate
-from graph_works_core.orchestrate.placement import run_record_placement
+from graph_works_core.orchestrate.placement import ReaderObservation, run_record_placement, run_record_reader
 from graph_works_core.orchestrate.stage_advance import ExpectedPhase, run_stage_advance
 from graph_works_core.work import commands as work
 from graph_works_core.workspace.config import WorkspaceConfig, load_workspace_config
@@ -122,7 +122,9 @@ def file(
     title: str = typer.Option(..., "--title", help="Work item title."),
     kind: str = typer.Option(..., "--kind", help="Release | Epic | Feature | Bug | TechDebt | TestGap | Spike."),
     summary: str = typer.Option(..., "--summary", help="One-line summary for the index entry."),
-    affects: str = typer.Option("", "--affects", help="Comma-separated repo paths or package names."),
+    affects: str = typer.Option(
+        "", "--affects", help="Comma-separated repo paths or package names; gw:workspace for a workspace-only item."
+    ),
     effort: str = typer.Option("", "--effort", help="xtra-small|small|medium|large|xtra-large."),
     name: str = typer.Option("", "--name", help="Stable basename words. Defaults to the title."),
     parent_path: str = typer.Option("", "--parent-path", help="Canonical parent item path."),
@@ -503,6 +505,57 @@ def record_placement(
             rendering.warn(payload["repo_note"])
         return
     rendering.render_placement(payload)
+
+
+@work_app.command(name="record-reader")
+def record_reader(
+    path: str = typer.Argument(..., help="Extensionless bundle-relative canonical concept path."),
+    root: str = typer.Option(..., "--root", help="The orchestration subtree root this dispatch belongs to."),
+    phase: str = typer.Option(..., "--phase", help="The phase of the dispatch being recorded."),
+    task_id: str = typer.Option(..., "--task-id", help="The dispatched task identifier."),
+    dispatch_id: str = typer.Option(..., "--dispatch-id", help="The dispatch attempt identifier."),
+    dispatch_key: str = typer.Option(..., "--dispatch-key", help="The planner's dispatch key."),
+    repo: str = typer.Option(..., "--repo", help="The declared repository the reader observed."),
+    worktree: str = typer.Option(..., "--worktree", help="The observed absolute worktree path."),
+    start_sha: str = typer.Option(..., "--start-sha", help="The observed full detached commit OID."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Print the plan instead of writing."),
+    workspace: str = typer.Option("", "--workspace", help="Workspace path."),
+    json_output: bool = rendering.json_option("Emit the reader receipt as JSON."),
+) -> None:
+    """Record the detached commit a design/plan dispatch actually launched on.
+
+    Writes one receipt under the workspace cache; never the item page, never a stamp.
+    """
+    layout = resolve_workspace(workspace)
+    try:
+        result = run_record_reader(
+            layout,
+            path,
+            root=root,
+            phase=phase,
+            observation=ReaderObservation(task_id, dispatch_id, dispatch_key, repo, worktree, start_sha),
+            dry_run=dry_run,
+        )
+    except WorkspaceError as exc:
+        rendering.fail(str(exc), reason="workspace", code=exit_codes.SCHEMA_MISMATCH, cause=exc)
+    except ValueError as exc:
+        rendering.fail(str(exc), reason="unresolved", code=exit_codes.AMBIGUOUS, cause=exc)
+    except OSError as exc:
+        rendering.fail(str(exc), reason="io", cause=exc)
+
+    payload = wire_work.reader_receipt_payload(result)
+    if payload["refusal"] is not None:
+        rendering.fail(
+            f"{path}: refused ({payload['refusal']['reason']}) — {payload['refusal']['detail']}",
+            reason="refused",
+            payload=payload,
+        )
+    if payload["conflict"] is not None:
+        rendering.fail(f"{path}: attempt-mismatch", reason="attempt-mismatch", payload=payload)
+    if json_output:
+        rendering.emit(payload)
+        return
+    rendering.render_reader_receipt(payload)
 
 
 @work_app.command(name="touch-active-work")

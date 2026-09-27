@@ -7,6 +7,7 @@ import os
 import signal
 import sys
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -40,6 +41,7 @@ def dispatch(
         base_branch=None,
         exists=True,
         parent_path=None,
+        start_sha=None,
     )
     return PlannedDispatch(
         agent="claude",
@@ -514,3 +516,28 @@ def test_open_session_refuses_when_the_platform_changes_under_a_live_backend(tmp
     monkeypatch.setattr(backend_module.sys, "platform", "win32")
     with pytest.raises(BackendError):
         backend.open_session("s")
+
+
+def test_launch_refuses_pin_detached(tmp_path):
+    session = make_backend(tmp_path / "root").open_session("s")
+    action = WorktreeAction("pin-detached", None, None, "epic/x", None, None, "a" * 40)
+    planned = replace(dispatch(tmp_path, "done:succeeded"), worktree=action)
+    with pytest.raises(WorktreeNotProvisioned):
+        session.launch(planned)
+    assert session.workers() == []
+
+
+def test_launch_refuses_pin_detached_with_a_supplied_path_before_starting_a_process(tmp_path, monkeypatch):
+    from workflow_local import backend as backend_module
+
+    session = make_backend(tmp_path / "root").open_session("s")
+    action = WorktreeAction("pin-detached", str(tmp_path), None, "epic/x", None, None, "a" * 40)
+    planned = replace(dispatch(tmp_path, "done:succeeded"), worktree=action)
+
+    def fail_if_started(*args, **kwargs):
+        pytest.fail("pin-detached must be refused before subprocess launch")
+
+    monkeypatch.setattr(backend_module.subprocess, "Popen", fail_if_started)
+    with pytest.raises(WorktreeNotProvisioned, match="pin-detached"):
+        session.launch(planned)
+    assert session.workers() == []

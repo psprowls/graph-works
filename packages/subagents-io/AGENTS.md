@@ -174,7 +174,7 @@ Two halves:
   `prompt`) and its nested `WorktreeAction`. The field names spell work-item
   concepts on purpose, but this package only stores those strings — it never
   decides what a `phase` or `kind` *means*. Two closed vocabularies live here:
-  `WORKTREE_ACTIONS` (`"reuse" | "fork-child" | "create-top-level" | "main"`)
+  `WORKTREE_ACTIONS` (`"reuse" | "fork-child" | "create-top-level" | "main" | "pin-detached"`)
   and `DISPATCH_MODES` (`"autonomous" | "attend" | "relay"`). Note
   `WorktreeAction.action == "main"` still carries a concrete `path`/`branch`
   like `"reuse"` does, because a worker running in the shared main checkout
@@ -187,6 +187,17 @@ Two halves:
   backend: the existing worktree a created one is linked beneath, or `None`.
   It is data precisely so no backend derives lineage from the terminal or
   directory its caller runs in.
+
+  `pin-detached` carries a required full lowercase 40- or 64-hex commit ID in `start_sha`,
+  `path=None`, `branch=None`, `exists=None`, `base_branch=<source branch>`, and
+  `parent_path=<source anchor worktree or None>`. Exactly this action has a
+  non-None `start_sha`; every other action has `start_sha=None` and a non-None
+  `branch`. The launcher must prepare and verify a dedicated detached checkout
+  for each reader dispatch before starting the worker; the source anchor is
+  provenance, not a shared checkout or requested parent linkage. Never encode
+  detached state as a branch named `HEAD` or an empty string. A backend unable
+  to prepare and verify it must refuse even if a caller supplies a path. These
+  are planner/backend invariants, not validation in the inert value type.
 
 - `backend.py` is what a **backend** *is*: two `runtime_checkable` Protocols,
   `DispatchBackend` (`name`, `supported_modes: frozenset[str]`,

@@ -169,6 +169,11 @@ def configured_repo(ctx: Ctx) -> None:
     ctx.mp.setattr(ingest_module, "state_gate_adapter", lambda config: object())
 
 
+def reader_item(ctx: Ctx) -> None:
+    configured_repo(ctx)
+    items_advanced(ctx)
+
+
 def ingest_brief(ctx: Ctx) -> None:
     configured_repo(ctx)
     brief = SimpleNamespace(
@@ -363,6 +368,33 @@ CASES: tuple[Case, ...] = (
             *ctx.ws,
         ],
         items_advanced,
+    ),
+    Case(
+        "work-record-reader",
+        lambda ctx: [
+            "work",
+            "record-reader",
+            "work/bug-fix",
+            "--root",
+            "work/bug-fix",
+            "--phase",
+            "design",
+            "--task-id",
+            "task_reader",
+            "--dispatch-id",
+            "ctx_reader",
+            "--dispatch-key",
+            "reader-key",
+            "--repo",
+            "repo-1",
+            "--worktree",
+            str(ctx.tmp / "wt"),
+            "--start-sha",
+            "a" * 40,
+            "--json",
+            *ctx.ws,
+        ],
+        reader_item,
     ),
     Case("work-touch-active-work", _w("work", "touch-active-work", "work/bug-fix", "--json"), items_advanced),
     Case("work-status", _w("work", "status", "--json"), items),

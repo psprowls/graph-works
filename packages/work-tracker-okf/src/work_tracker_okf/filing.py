@@ -8,13 +8,14 @@ from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Literal
+from typing import Any, Final, Literal
 
 from okf_ext.sections import render_skeleton
 from okf_ext.shape import SectionSet
 from okf_io import Document, parse
 
 from work_tracker_okf._selection import path_index
+from work_tracker_okf.affects import needs_affects_hint
 from work_tracker_okf.dependencies import DependencyEdge, serialize_dependencies, validate_dependencies
 from work_tracker_okf.hierarchy import unknown_depends_on
 from work_tracker_okf.items import WorkItem
@@ -46,6 +47,11 @@ FilingRefusal = Literal[
 _NAME_RE = re.compile(r"[^a-z0-9]+")
 _MAX_WORDS_CLEAN = 4
 _MAX_WORDS_HARD_CAP = 6
+#: The filing-time twin of lint's `targets.affects-empty`: warn, never refuse.
+AFFECTS_HINT: Final = (
+    "no `affects` declared: this item will serialize against every write in its repository. "
+    "Declare the paths it changes, or `gw:workspace` if it only changes the workspace."
+)
 _KEY_ORDER: tuple[str, ...] = (
     "type",
     "title",
@@ -270,6 +276,8 @@ def plan_filing(root: Path, items: Sequence[WorkItem], seed: FilingSeed, section
             return _refused(seed, "", root, root / "work", "inactive-parent", f"parent {parent.path!r} is inactive")
 
     basename, warnings = compose_basename(seed.type, seed.title if seed.name is None else seed.name)
+    if needs_affects_hint(seed.type, has_parent=parent is not None, has_children=False, affects=seed.affects):
+        warnings = (*warnings, AFFECTS_HINT)
     lane = "work" if parent is None else child_lane(parent.path)
     path = f"{lane}/{basename}"
     target = item_page(path).path(root)

@@ -21,6 +21,13 @@ eight `DispatchSession` methods. Agent, model and reasoning effort come from eac
 and effort values are opaque. Effort without a model is refused before creating
 a task; null settings are omitted from argv.
 
+`pin-detached` is refused with `WorktreeNotProvisioned` before task creation
+or worker launch, including requests with a supplied path. This backend's
+`provisions_worktrees=True` covers branch creation, not preparing and proving
+a detached checkout at `start_sha`. Graph Works auto-drive uses its separate
+launcher helper for dedicated reader preparation and exact-path launch; it
+does not route these requests through `OrcaSession.launch`.
+
 Before worker-start, task-create persists a frozen version-1 launch envelope in
 `--spec`. The first line is `GW_LAUNCH_V1 ` followed by compact JSON containing
 `version`, `dispatch_key`, `agent`, `model`, `reasoning_effort`, and the exact

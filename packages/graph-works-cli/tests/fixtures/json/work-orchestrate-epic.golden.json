@@ -3,6 +3,8 @@
   "terminal": false,
   "max_parallel": 2,
   "slots_free": 2,
+  "max_attend": 1,
+  "attend_slots_free": 1,
   "supervise_merges": false,
   "live": [],
   "repo": null,
@@ -12,8 +14,8 @@
   "blocked": [
     {
       "path": "work/epic-epic",
-      "kind": "affects-overlap",
-      "reason": "declare affects to allow parallel dispatch"
+      "kind": "worktree-unprovable",
+      "reason": "cannot resolve 'main' to a full commit object ID in the code repository; a reader is never placed in a mutable checkout"
     }
   ],
   "decisions": {

@@ -194,7 +194,13 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
     assert work.overturn_payload(overturn)["follow_up_filed"] is True
 
     worktree = SimpleNamespace(
-        action="create", path="/tmp/w", branch="b", base_branch="main", exists=False, parent_path="/tmp/parent"
+        action="create",
+        path="/tmp/w",
+        branch="b",
+        base_branch="main",
+        exists=False,
+        parent_path="/tmp/parent",
+        start_sha=None,
     )
     dispatch = SimpleNamespace(
         key="work/a#execute",
@@ -217,6 +223,8 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         terminal=False,
         max_parallel=2,
         slots_free=1,
+        max_attend=1,
+        attend_slots_free=0,
         supervise_merges=False,
         live=("x",),
         dispatches=(dispatch,),
@@ -239,6 +247,16 @@ def test_complex_payloads_project_explicit_current_fields(tmp_path: Path) -> Non
         code_repo_source="sole",
     )
     orchestrate_result = work.orchestrate_payload(orchestration)
+    assert orchestrate_result["max_attend"] == 1
+    assert orchestrate_result["attend_slots_free"] == 0
+    assert list(orchestrate_result)[:6] == [
+        "path",
+        "terminal",
+        "max_parallel",
+        "slots_free",
+        "max_attend",
+        "attend_slots_free",
+    ]
     assert orchestrate_result["dispatches"][0]["path"] == "work/a"
     assert orchestrate_result["dispatches"][0]["auto_merge"] is True
     assert orchestrate_result["dispatches"][0]["worktree"]["parent_path"] == "/tmp/parent"
@@ -270,6 +288,8 @@ def test_orchestrate_payload_carries_holds() -> None:
         terminal=False,
         slots_free=0,
         max_parallel=1,
+        max_attend=1,
+        attend_slots_free=0,
         supervise_merges=False,
         live=(),
         dispatches=(),
@@ -451,8 +471,8 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
 
     result = next_result(full=True)
     result.finish_targets = (
-        FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main"),
-        FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk"),
+        FinishTarget(ItemRepo("core", Path("/core"), "frontmatter"), "/core/epic", "epic/a", "main", "/core"),
+        FinishTarget(ItemRepo(None, None, "sole"), "/ui/epic", "epic/a", "trunk", None),
     )
     result.state.phase = "finish"
     assert work.next_payload(result, bundle_root=BUNDLE)["finish_targets"] == [
@@ -461,12 +481,14 @@ def test_finish_target_projection_is_explicit_and_ordered() -> None:
             "worktree": "/core/epic",
             "source_branch": "epic/a",
             "target_branch": "main",
+            "target_worktree": "/core",
         },
         {
             "repo": {"name": None, "path": None, "source": "sole"},
             "worktree": "/ui/epic",
             "source_branch": "epic/a",
             "target_branch": "trunk",
+            "target_worktree": None,
         },
     ]
 
@@ -485,3 +507,60 @@ def test_next_payload_always_carries_the_empty_guidance_form() -> None:
     payload = work.next_payload(next_result(full=False), bundle_root=BUNDLE)
     assert (payload["guidance"], payload["guidance_warnings"], payload["guidance_file"]) == ([], [], None)
     json.dumps(payload)
+
+
+def test_pin_detached_worktree_projection():
+    action = SimpleNamespace(
+        action="pin-detached",
+        path=None,
+        branch=None,
+        base_branch="epic/x",
+        exists=None,
+        parent_path="/epic",
+        start_sha="a" * 40,
+    )
+    assert work._worktree(action) == {
+        "action": "pin-detached",
+        "path": None,
+        "branch": None,
+        "base_branch": "epic/x",
+        "exists": None,
+        "parent_path": "/epic",
+        "start_sha": "a" * 40,
+    }
+
+
+def test_reader_receipt_payload_freezes_attempt_and_outcome_fields() -> None:
+    from graph_works_core.orchestrate.placement import ReaderRecord
+    from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
+
+    observation = ReaderObservation("task_1", "ctx_1", "key", "repo", "/reader", "a" * 40)
+    plan = ReaderReceiptPlan("work/a", "work/a", "design", "design", observation, None, "")
+    payload = work.reader_receipt_payload(ReaderRecord(plan, Path("/cache/ctx_1.json"), True, False))
+    assert payload == {
+        "path": "work/a",
+        "root": "work/a",
+        "expected_phase": "design",
+        "current_phase": "design",
+        "observation": {
+            "task_id": "task_1",
+            "dispatch_id": "ctx_1",
+            "dispatch_key": "key",
+            "repo": "repo",
+            "worktree": "/reader",
+            "start_sha": "a" * 40,
+        },
+        "receipt_path": str(Path("/cache/ctx_1.json")),
+        "written": True,
+        "replayed": False,
+        "conflict": None,
+        "refusal": None,
+    }
+    refused = ReaderReceiptPlan("work/a", "work/a", "design", None, observation, "unknown-path", "missing")
+    payload = work.reader_receipt_payload(ReaderRecord(refused, None, False, False))
+    assert payload["receipt_path"] is None and payload["current_phase"] is None
+    assert payload["refusal"] == {"reason": "unknown-path", "detail": "missing"}
+    payload = work.reader_receipt_payload(
+        ReaderRecord(plan, Path("/cache/ctx_1.json"), False, False, "attempt-mismatch")
+    )
+    assert payload["conflict"] == "attempt-mismatch"

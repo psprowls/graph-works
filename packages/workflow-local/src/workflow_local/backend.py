@@ -152,6 +152,11 @@ class LocalSession:
         # duplicate-key refusal (subagents_io.backend.DispatchSession.launch).
         if dispatch.key in self._entries:
             raise BackendError(f"{self.name}: key {dispatch.key!r} already has a worker in this session")
+        if dispatch.worktree.action == "pin-detached":
+            raise WorktreeNotProvisioned(
+                f"{dispatch.key}: pin-detached requires a verified detached checkout at "
+                f"{dispatch.worktree.start_sha}; this backend cannot verify or prepare one"
+            )
         if dispatch.worktree.path is None:
             raise WorktreeNotProvisioned(
                 f"{dispatch.key}: worktree.path is None — this backend does not provision worktrees"

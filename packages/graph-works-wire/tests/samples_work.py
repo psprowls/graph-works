@@ -9,10 +9,12 @@ from pathlib import Path
 from types import MappingProxyType
 from types import SimpleNamespace as ns
 
+from graph_works_core.orchestrate.placement import ReaderRecord
 from graph_works_core.work.commands import DispatchExplanation, ItemRead, ItemSource
 from graph_works_core.work.reconcile import CitedDecision, CommitRef, LandedSibling, ReconcileContext
 from graph_works_core.workspace.dispatch import packaged_rule, resolve_dispatch
 from graph_works_wire import work
+from work_tracker_okf.placement import ReaderObservation, ReaderReceiptPlan
 
 BUNDLE = Path("/ws/okf")
 RESOLUTION = resolve_dispatch({"variant": "planned"}, rules=())
@@ -251,7 +253,9 @@ def overturn(*, applied: bool) -> object:
 
 
 def orchestrate(*, busy: bool) -> object:
-    worktree = ns(action="create", path="/wt", branch="b", base_branch="main", exists=False, parent_path="/p")
+    worktree = ns(
+        action="create", path="/wt", branch="b", base_branch="main", exists=False, parent_path="/p", start_sha=None
+    )
     dispatch = ns(
         key="work/a#execute",
         slug="work/a",
@@ -274,6 +278,8 @@ def orchestrate(*, busy: bool) -> object:
         terminal=not busy,
         max_parallel=2,
         slots_free=1,
+        max_attend=1,
+        attend_slots_free=1,
         supervise_merges=busy,
         live=("x",) if busy else (),
         dispatches=(dispatch,) if busy else (),
@@ -378,6 +384,25 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
     "work.advance_payload": (
         lambda: work.advance_payload(advance(applied=True), "work/a"),
         lambda: work.advance_payload(advance(applied=False), "work/a"),
+    ),
+    "work.reader_receipt_payload": tuple(
+        lambda refusal=refusal: work.reader_receipt_payload(
+            ReaderRecord(
+                ReaderReceiptPlan(
+                    "work/a",
+                    "work/a",
+                    "design",
+                    None if refusal else "design",
+                    ReaderObservation("task_1", "ctx_1", "key", "repo", "/reader", "a" * 40),
+                    refusal,
+                    "missing" if refusal else "",
+                ),
+                None if refusal else Path("/cache/ctx_1.json"),
+                not refusal,
+                False,
+            )
+        )
+        for refusal in (None, "unknown-path")
     ),
     "work.placement_payload": (
         lambda: work.placement_payload(placement(applied=True)),

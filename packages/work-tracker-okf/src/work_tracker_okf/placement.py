@@ -10,20 +10,24 @@ A placement plan never carries a routing transition. Recording where a stage
 runs is a fact about a dispatch, not a stage completion, which is why this is
 not an `advance` flag: `advance` always applies the next transition.
 
-Entitlement follows the stamp's meaning. The orchestration **root** is
-recorded at every phase -- its stamp is the anchor every descendant resolves
-against. A **descendant** is recorded only at `execute` and `finish`: a
-`design` or `plan` stage writes only into the vault, and pinning it to the
-shared epic worktree would place its later code stages there too.
+Entitlement follows the stamp's meaning. The orchestration **root** may
+record an integration anchor at every dispatchable phase. A **descendant**
+records code placement only at `execute` and `finish`. These stamps select
+later code checkouts; a design/plan reader's dedicated detached checkout must
+never replace them, even for a root reader.
 
 The phase guard compares the dispatched phase with the item's recorded phase,
 or -- for a never-entered item -- the phase its routing entry transition
 opens. It cannot tell two attempts of the same phase apart; binding an
 observation to the current attempt is the coordinator's job.
+
+Readers at design and plan are observed through a detached checkout receipt,
+not stamped onto the work item. A reader plan carries no document changes.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import MutableMapping, Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -56,6 +60,107 @@ CODE_PHASES: frozenset[str] = frozenset({"execute", "finish"})
 
 #: Every phase a stage can be dispatched at.
 _DISPATCH_PHASES: frozenset[str] = PHASES - {"done"}
+
+ReaderRefusal = Literal[
+    "unknown-path",
+    "unknown-root",
+    "outside-root",
+    "invalid-item",
+    "invalid-phase",
+    "invalid-observation",
+    "code-phase",
+    "terminal",
+    "entry-unprovable",
+    "phase-mismatch",
+]
+
+READER_REFUSALS: frozenset[str] = frozenset(get_args(ReaderRefusal))
+READER_PHASES: frozenset[str] = frozenset({"design", "plan"})
+_OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+_ATTEMPT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderObservation:
+    task_id: str
+    dispatch_id: str
+    dispatch_key: str
+    repo: str
+    worktree: str
+    start_sha: str
+
+
+@dataclass(frozen=True, slots=True)
+class ReaderReceiptPlan:
+    path: str
+    root: str
+    expected_phase: str
+    current_phase: str | None
+    observation: ReaderObservation
+    refusal: ReaderRefusal | None
+    detail: str
+
+
+def plan_reader_receipt(
+    items: Sequence[WorkItem], path: str, *, root: str, phase: str, observation: ReaderObservation
+) -> ReaderReceiptPlan:
+    """Check a design/plan reader observation without reading or writing state."""
+    index = {item.path: item for item in items}
+    item = index.get(path)
+
+    def refused(reason: ReaderRefusal, detail: str, current: str | None = None) -> ReaderReceiptPlan:
+        return ReaderReceiptPlan(path, root, phase, current, observation, reason, detail)
+
+    if item is None:
+        return refused("unknown-path", f"unknown work item {path!r}")
+    if root not in index:
+        return refused("unknown-root", f"unknown orchestration root {root!r}", item.phase)
+    if path != root and root not in item.ancestor_paths:
+        return refused("outside-root", f"{path} is not {root} or one of its descendants", item.phase)
+    for candidate in (item, index[root]):
+        problem = _item_problem(candidate)
+        if problem is not None:
+            return refused("invalid-item", problem, item.phase)
+    if phase not in _DISPATCH_PHASES:
+        return refused("invalid-phase", f"{phase!r} is not a dispatchable phase", item.phase)
+    problem = _observation_problem(observation)
+    if problem is not None:
+        return refused("invalid-observation", problem, item.phase)
+    if phase not in READER_PHASES:
+        return refused("code-phase", f"a {phase} stage writes code and has no reader receipt", item.phase)
+    if item.work_status in TERMINAL_STATUSES or item.work_status == "mitigated" or item.phase == "done":
+        return refused(
+            "terminal", f"{path} is {item.work_status} at phase {item.phase!r}; nothing is dispatched", item.phase
+        )
+    current = item.phase if item.phase is not None else _entry_phase(items, item)
+    if current is None:
+        return refused("entry-unprovable", f"{path} has no phase and its routing entry cannot be proved")
+    if current != phase:
+        return refused(
+            "phase-mismatch",
+            f"{path} is at phase {current!r}, not the dispatched {phase!r}; inspect before recording",
+            current,
+        )
+    return ReaderReceiptPlan(path, root, phase, current, observation, None, "")
+
+
+def _observation_problem(o: ReaderObservation) -> str | None:
+    for label, value in (
+        ("task_id", o.task_id),
+        ("dispatch_id", o.dispatch_id),
+        ("dispatch_key", o.dispatch_key),
+        ("repo", o.repo),
+        ("worktree", o.worktree),
+    ):
+        if not value or value != value.strip() or "\n" in value or "\r" in value:
+            return f"{label} {value!r} is blank or carries surrounding whitespace or a line break"
+    if not _ATTEMPT.fullmatch(o.dispatch_id) or ".." in o.dispatch_id:
+        return f"dispatch_id {o.dispatch_id!r} is not a plain attempt identifier"
+    if not PurePath(o.worktree).is_absolute():
+        return f"worktree {o.worktree!r} is not an absolute path on this host"
+    if not _OID.fullmatch(o.start_sha):
+        return f"start_sha {o.start_sha!r} is not a full lowercase commit object ID"
+    return None
 
 
 @dataclass(frozen=True, slots=True)
@@ -249,8 +354,14 @@ def _pair_problem(worktree: str, branch: str, repo: str | None = None) -> str | 
 __all__ = [
     "CODE_PHASES",
     "PLACEMENT_REFUSALS",
+    "READER_PHASES",
+    "READER_REFUSALS",
     "PlacementPlan",
     "PlacementRefusal",
+    "ReaderObservation",
+    "ReaderReceiptPlan",
+    "ReaderRefusal",
     "apply_placement",
     "plan_placement",
+    "plan_reader_receipt",
 ]

@@ -204,6 +204,31 @@ def test_file_json_keeps_warnings_on_stderr(workspace: Path) -> None:
     assert "words kept" in result.stderr
 
 
+def test_filing_a_child_without_affects_warns_and_succeeds(workspace: Path) -> None:
+    epic = file_item(workspace, "Parent", kind="Epic")
+    result = runner.invoke(
+        app,
+        [
+            "work",
+            "file",
+            "--title",
+            "Leaf",
+            "--kind",
+            "Bug",
+            "--summary",
+            "d",
+            "--parent-path",
+            epic,
+            "--workspace",
+            str(workspace),
+            "--json",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert any("no `affects` declared" in warning for warning in json.loads(result.stdout)["warnings"])
+    assert "no `affects` declared" in result.stderr
+
+
 def test_advance_applies_by_default_and_accepts_released_at(workspace: Path) -> None:
     path = file_item(workspace, "Alpha")
     result = runner.invoke(
@@ -213,6 +238,32 @@ def test_advance_applies_by_default_and_accepts_released_at(workspace: Path) -> 
     assert result.exit_code == 0, result.output
     assert payload["path"] == path and payload["applied"] is True
     assert "work_status" in payload
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_advance_from_plan_reports_affects_drift_and_succeeds(workspace: Path, dry_run: bool) -> None:
+    path = file_item(workspace, "Plan drift", kind="Feature")
+    page = workspace / "okf" / f"{path}.md"
+    document = load(page)
+    document.set("phase", "plan")
+    document.set("work_status", "in-progress")
+    document.set("affects", ["packages/a"])
+    document.save()
+    artifact = workspace / "okf" / path / "references" / "02-plan.md"
+    artifact.parent.mkdir(parents=True, exist_ok=True)
+    artifact.write_text("**Files:**\n- Modify: `packages/b/x.py`\n", encoding="utf-8", newline="")
+    args = ["work", "advance", path, "--from", "plan", "--workspace", str(workspace), "--json"]
+    if dry_run:
+        args.append("--dry-run")
+    result = runner.invoke(app, args)
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    warning = (
+        "affects drift: the plan names 1 path(s) outside `affects`: packages/b/x.py. Suggested widening: packages/b"
+    )
+    assert payload["warnings"] == [warning]
+    assert warning in result.stderr
+    assert _fm(workspace, path)["phase"] == ("plan" if dry_run else "execute")
 
 
 def test_invalid_date_emits_a_usage_envelope(workspace: Path) -> None:
@@ -946,3 +997,160 @@ def test_touch_active_work_human_mode_degraded_write_omits_the_phase_line(
     assert result.exit_code == 0
     assert "active-work pointer was not written" in result.stderr
     assert "->" not in result.stdout
+
+
+def _reader_args(workspace: Path, path: str, *extra: str) -> list[str]:
+    return [
+        "work",
+        "record-reader",
+        path,
+        "--root",
+        path,
+        "--phase",
+        "design",
+        "--task-id",
+        "task_reader",
+        "--dispatch-id",
+        "ctx_reader",
+        "--dispatch-key",
+        "reader-key",
+        "--repo",
+        "code",
+        "--worktree",
+        _abs("wt", "reader"),
+        "--start-sha",
+        "a" * 40,
+        "--workspace",
+        str(workspace),
+        *extra,
+    ]
+
+
+@pytest.fixture
+def reader_item(workspace: Path) -> str:
+    path = file_item(workspace, "Reader")
+    manifest = workspace / "workspace.yaml"
+    manifest.write_text(
+        f"version: 1\nrepositories:\n  code:\n    path: {json.dumps(str(workspace.parent / 'code'))}\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    document = load(workspace / "okf" / f"{path}.md")
+    document.set("phase", "design")
+    document.save()
+    return path
+
+
+@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
+@pytest.mark.parametrize("mode", ["recorded", "replayed", "would record"])
+def test_record_reader_writes_replays_and_previews_only_receipts(
+    workspace: Path, reader_item: str, mode: str, json_output: bool
+) -> None:
+    page = workspace / "okf" / f"{reader_item}.md"
+    before = page.read_bytes()
+    receipt_before = None
+    if mode == "replayed":
+        first = runner.invoke(app, _reader_args(workspace, reader_item, "--json"))
+        assert first.exit_code == 0, first.output
+        receipt_before = Path(json.loads(first.stdout)["receipt_path"]).read_bytes()
+    extra = (["--dry-run"] if mode == "would record" else []) + (["--json"] if json_output else [])
+    result = runner.invoke(app, _reader_args(workspace, reader_item, *extra))
+    assert result.exit_code == 0, result.output
+    if json_output:
+        payload = json.loads(result.stdout)
+        assert payload["written"] is (mode == "recorded")
+        assert payload["replayed"] is (mode == "replayed")
+        assert payload["conflict"] is None and payload["refusal"] is None
+        assert payload["observation"] == {
+            "task_id": "task_reader",
+            "dispatch_id": "ctx_reader",
+            "dispatch_key": "reader-key",
+            "repo": "code",
+            "worktree": _abs("wt", "reader"),
+            "start_sha": "a" * 40,
+        }
+        receipt = Path(payload["receipt_path"])
+        assert receipt.is_relative_to(resolve_workspace(str(workspace)).cache_dir)
+        assert receipt.exists() is (mode != "would record")
+        if mode != "would record":
+            assert json.loads(receipt.read_text(encoding="utf-8"))["start_sha"] == "a" * 40
+        if receipt_before is not None:
+            assert receipt.read_bytes() == receipt_before
+    else:
+        assert f": {mode} " in result.stdout
+        assert "a" * 40 in result.stdout
+    assert page.read_bytes() == before
+
+
+@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
+def test_record_reader_mismatch_preserves_original_receipt(
+    workspace: Path, reader_item: str, json_output: bool
+) -> None:
+    first = runner.invoke(app, _reader_args(workspace, reader_item, "--json"))
+    assert first.exit_code == 0, first.output
+    receipt = Path(json.loads(first.stdout)["receipt_path"])
+    before = receipt.read_bytes()
+    result = runner.invoke(
+        app, _reader_args(workspace, reader_item, "--start-sha", "b" * 40, *(["--json"] if json_output else []))
+    )
+    assert result.exit_code != 0
+    assert "attempt-mismatch" in result.stderr
+    if json_output:
+        error = json.loads(result.stdout)["error"]
+        assert error["reason"] == "attempt-mismatch"
+        assert error["payload"]["conflict"] == "attempt-mismatch"
+        assert error["payload"]["written"] is False
+    else:
+        assert result.stdout == ""
+    assert receipt.read_bytes() == before
+
+
+@pytest.mark.parametrize("unknown", [False, True])
+def test_record_reader_refusal_projects_prospective_or_null_receipt_path(
+    workspace: Path, reader_item: str, unknown: bool
+) -> None:
+    path = "work/feature-missing" if unknown else reader_item
+    before = (workspace / "okf" / f"{reader_item}.md").read_bytes()
+    result = runner.invoke(app, _reader_args(workspace, path, "--phase", "execute", "--json"))
+    assert result.exit_code != 0
+    error = json.loads(result.stdout)["error"]
+    assert error["reason"] == "refused"
+    payload = error["payload"]
+    assert payload["refusal"]["reason"] == ("unknown-path" if unknown else "code-phase")
+    assert (payload["receipt_path"] is None) is unknown
+    assert payload["written"] is False and payload["replayed"] is False
+    assert not list(resolve_workspace(str(workspace)).cache_dir.glob("reader-receipts/**/*.json"))
+    assert (workspace / "okf" / f"{reader_item}.md").read_bytes() == before
+
+
+@pytest.mark.parametrize("json_output", [False, True], ids=["text", "json"])
+@pytest.mark.parametrize(
+    ("exception", "reason", "code"),
+    [
+        (work_main.WorkspaceError("bad workspace"), "workspace", exit_codes.SCHEMA_MISMATCH),
+        (ValueError("unresolved path"), "unresolved", exit_codes.AMBIGUOUS),
+        (OSError("disk failure"), "io", exit_codes.GENERIC),
+    ],
+)
+def test_record_reader_maps_core_exceptions(
+    workspace: Path,
+    reader_item: str,
+    monkeypatch: pytest.MonkeyPatch,
+    json_output: bool,
+    exception: Exception,
+    reason: str,
+    code: int,
+) -> None:
+    def fail(*_args, **_kwargs):
+        raise exception
+
+    monkeypatch.setattr(work_main, "run_record_reader", fail, raising=False)
+    result = runner.invoke(app, _reader_args(workspace, reader_item, *(["--json"] if json_output else [])))
+    assert result.exit_code == code
+    assert str(exception) in result.stderr
+    if json_output:
+        error = json.loads(result.stdout)["error"]
+        assert error["command"] == "work record-reader"
+        assert error["reason"] == reason and error["payload"] is None
+    else:
+        assert result.stdout == ""

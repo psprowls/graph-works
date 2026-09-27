@@ -399,6 +399,22 @@ def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tu
     owner = root / "okf/work/epic-root.md"
     owner.parent.mkdir(parents=True, exist_ok=True)
     owner.write_text("---\ntype: Epic\nphase: execute\nwork_status: in-progress\n---\n", encoding="utf-8")
+    anchor = root.parent / "ui-anchor"
+    subprocess.run(
+        ["git", "-C", str(ui), "worktree", "add", "-b", "epic/root", str(anchor)],
+        check=True,
+        capture_output=True,
+    )
+    sha = subprocess.run(
+        ["git", "-C", str(ui), "rev-parse", "epic/root^{commit}"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert len(sha) == 40
+    document = load(owner)
+    document.set("repo_stamps", {"ui": {"worktree": str(anchor.resolve()), "branch": "epic/root"}})
+    document.save()
     child = root / "okf/work/epic-root/children/feature-ui.md"
     child.parent.mkdir(parents=True)
     child.write_text(
@@ -413,5 +429,13 @@ def test_root_repo_flag_does_not_override_foreign_child_assignment(two_repos: tu
     assert payload["repo"] == {"name": "code", "path": str(code.resolve()), "source": "flag"}
     [dispatch] = payload["dispatches"]
     assert dispatch["repo"] == {"name": "ui", "path": str(ui.resolve()), "source": "frontmatter"}
-    assert dispatch["worktree"]["path"] == str(ui.resolve())
+    assert dispatch["worktree"] == {
+        "action": "pin-detached",
+        "path": None,
+        "branch": None,
+        "base_branch": "epic/root",
+        "exists": None,
+        "parent_path": str(anchor.resolve()),
+        "start_sha": sha,
+    }
     assert payload["preparations"] == []

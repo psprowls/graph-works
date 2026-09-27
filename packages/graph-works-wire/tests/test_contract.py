@@ -84,6 +84,7 @@ EXPECTED: set[str] = {
     "work.overturn_payload",
     "work.path_mutation_payload",
     "work.placement_payload",
+    "work.reader_receipt_payload",
     "work.reconcile_payload",
     "work.regen_index_payload",
     "work.status_payload",

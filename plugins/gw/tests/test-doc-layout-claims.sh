@@ -502,6 +502,21 @@ assert_not_matches "skills/workflow/SKILL.md" "archives the source and repoints"
 assert_contains "skills/workflow/SKILL.md" "drain sweep" \
     "workflow says drained sources are archived by the sweep"
 
+# Reader preparation and evidence use distinct durable artifacts, not an epic stamp.
+for contract in \
+    'launch-worker.py prepare-reader --dispatch <dispatch-json>' \
+    '--attempt-id <preparation-attempt-id> --out-placement <fresh-placement-json>' \
+    'Require exit 0 before encode, task-create or launch' \
+    'File existence alone never authorizes launch' \
+    'gw work record-reader <slug> --root <work-path> --phase <dispatch phase>' \
+    'dispatched <key> -> <observed path> detached at <start_sha>' \
+    'layout.cache_dir / "reader-receipts"'; do
+    assert_contains "skills/auto-drive/SKILL.md" "$contract" "auto-drive documents reader contract: $contract"
+done
+assert_not_matches "skills/auto-drive/SKILL.md" \
+    'reads from the shared epic worktree|read-only descendant that records nothing' \
+    "auto-drive retires shared-reader placement and receipt skipping"
+
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "STATUS: FAILED ($FAILURES failure(s))"
     exit 1

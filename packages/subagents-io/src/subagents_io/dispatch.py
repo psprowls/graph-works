@@ -17,7 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 #: The legal values of `WorktreeAction.action`.
-WORKTREE_ACTIONS: frozenset[str] = frozenset({"reuse", "fork-child", "create-top-level", "main"})
+WORKTREE_ACTIONS: frozenset[str] = frozenset({"reuse", "fork-child", "create-top-level", "main", "pin-detached"})
 
 #: The legal values of `PlannedDispatch.mode`.
 DISPATCH_MODES: frozenset[str] = frozenset({"autonomous", "attend", "relay"})
@@ -36,17 +36,26 @@ class WorktreeAction:
 
     `parent_path` names the existing worktree a *created* worktree
     (`fork-child`) is to be linked beneath, as data. It is `None` for every
-    action that creates nothing, for a fresh top-level worktree, and for a
-    fork whose source is the repository's own checkout. A backend must never
+    non-reader action that creates nothing, for a fresh top-level worktree,
+    and for a fork whose source is the repository's own checkout. A backend must never
     fill it from wherever its caller happens to be running.
+
+    `pin-detached` is prepared, verified and detached by the launcher before
+    the worker starts; never a branch. The backend must refuse it if it cannot
+    prepare one. Exactly this action carries a non-None `start_sha`, with
+    `path=None`, `branch=None`, `exists=None`, `base_branch` naming the source
+    branch and `parent_path` its source anchor worktree or None. Every other
+    action carries `start_sha=None` and a non-None `branch`. Planners and
+    backends enforce this invariant; this value type remains inert.
     """
 
     action: str  # one of WORKTREE_ACTIONS
     path: str | None  # concrete for "reuse" and "main"; None until the backend creates it
-    branch: str
-    base_branch: str | None  # set for fork-child / create-top-level
+    branch: str | None
+    base_branch: str | None  # source for fork-child / create-top-level / pin-detached
     exists: bool | None  # best-effort stat; None when the path is unknown or the stat failed
     parent_path: str | None  # the worktree a created one is linked beneath; None = no lineage
+    start_sha: str | None  # full commit object ID a pin-detached reader must check out; None for every other action
 
 
 @dataclass(frozen=True)

@@ -366,6 +366,9 @@ def orca_json(orca: str, *argv: str) -> dict[str, Any]:
 
 EXISTING_ACTIONS = {"reuse", "main"}
 CREATION_ACTIONS = {"fork-child", "create-top-level"}
+READER_ACTIONS = {"pin-detached"}
+HEX_OID = re.compile(r"[0-9a-f]{40}(?:[0-9a-f]{24})?")
+ATTEMPT_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 REF_PREFIX = "refs/heads/"
 
 
@@ -395,7 +398,7 @@ def placement_dispatch(path: str, verb: str) -> tuple[str, str, dict[str, Any]]:
     key = dispatch["key"]
     label = f"PLACEMENT {verb} {key}"
     worktree = dispatch.get("worktree")
-    if not isinstance(worktree, dict) or worktree.get("action") not in EXISTING_ACTIONS | CREATION_ACTIONS:
+    if not isinstance(worktree, dict) or worktree.get("action") not in EXISTING_ACTIONS | CREATION_ACTIONS | READER_ACTIONS:
         fail(f"{label}: the dispatch worktree action is missing or unknown.")
     return key, label, worktree
 
@@ -426,6 +429,8 @@ def place(args: argparse.Namespace) -> None:
     a cosmetic link would block otherwise-correct work.
     """
     _key, label, worktree = placement_dispatch(args.dispatch, "REFUSED")
+    if worktree["action"] in READER_ACTIONS:
+        fail(f"{label}: use prepare-reader for a pin-detached dispatch")
     dispatch = read_json(args.dispatch)
     dispatch_repo = dispatch.get("repo")
     repo_path = args.repo_path
@@ -591,6 +596,28 @@ def selected_preparation(plan: dict[str, Any], owner: str, repo: str) -> dict[st
     return rows[0]
 
 
+def marked_rows(orca: str, repo_id: str, marker: str, label: str) -> list[dict[str, Any]]:
+    listing = orca_top_json(orca, ["worktree", "list", "--repo", f"id:{repo_id}"], label=label)
+    rows = listing.get("worktrees")
+    scope = listing.get("hostScope")
+    if (not isinstance(rows, list) or listing.get("truncated") is not False
+            or listing.get("totalCount") != len(rows) or not isinstance(scope, dict)
+            or scope.get("omittedHostIds") != []):
+        fail(f"{label}: incomplete worktree inventory; repair before creating")
+    observed_rows = []
+    for row in rows:
+        if not isinstance(row, dict):
+            fail(f"{label}: malformed worktree inventory")
+        if "comment" not in row:
+            row = orca_top_json(orca, ["worktree", "show", "--worktree",
+                f"path:{text_field(row.get('path'), label, 'inventory path')}"], label=label).get("worktree")
+            if not isinstance(row, dict):
+                fail(f"{label}: cannot inspect preparation marker")
+        if row.get("comment") == marker:
+            observed_rows.append(row)
+    return observed_rows
+
+
 def prepare(args: argparse.Namespace) -> None:
     """Provision one deterministic integration anchor; never start a worker.
 
@@ -648,28 +675,7 @@ def prepare(args: argparse.Namespace) -> None:
                 fail(f"{label}: cross-repository parent")
         base_tip = preparation_git(repo, "rev-parse", "--verify", f"{base}^{{commit}}")
 
-        def owned() -> list[dict[str, Any]]:
-            listing = orca_top_json(args.orca, ["worktree", "list", "--repo", f"id:{repo_id}"], label=label)
-            rows = listing.get("worktrees")
-            scope = listing.get("hostScope")
-            if (not isinstance(rows, list) or listing.get("truncated") is not False
-                    or listing.get("totalCount") != len(rows) or not isinstance(scope, dict)
-                    or scope.get("omittedHostIds") != []):
-                fail(f"{label}: incomplete worktree inventory; repair before creating")
-            observed_rows = []
-            for row in rows:
-                if not isinstance(row, dict):
-                    fail(f"{label}: malformed worktree inventory")
-                if "comment" not in row:
-                    row = orca_top_json(args.orca, ["worktree", "show", "--worktree",
-                        f"path:{text_field(row.get('path'), label, 'inventory path')}"], label=label).get("worktree")
-                    if not isinstance(row, dict):
-                        fail(f"{label}: cannot inspect preparation marker")
-                if row.get("comment") == marker:
-                    observed_rows.append(row)
-            return observed_rows
-
-        marked = owned()
+        marked = marked_rows(args.orca, repo_id, marker, label)
         if len(marked) > 1:
             fail(f"{label}: ambiguous preparation markers; repair")
         created = None
@@ -685,7 +691,7 @@ def prepare(args: argparse.Namespace) -> None:
                 # A timeout/collision may have committed the creation. Never
                 # retry create or invent a suffix; re-observe once instead.
                 created = None
-            marked = owned()
+            marked = marked_rows(args.orca, repo_id, marker, label)
         if created is not None:
             created_path = text_field(created.get("path"), label, "returned path")
             if created.get("repoId") != repo_id:
@@ -733,6 +739,150 @@ def prepare(args: argparse.Namespace) -> None:
                       "branch": branch, "record": recorded, "replan_required": True}))
 
 
+def reader_checkout_problem(repo: str, path: str, sha: str, *, detached: bool = True) -> str | None:
+    """Verify identity and content before any detach, and again after it."""
+    if not Path(path).is_absolute():
+        return "path is not absolute"
+
+    def git(root: str, *argv: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", "-C", root, *argv], check=False, capture_output=True, text=True)
+
+    try:
+        common = git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        actual = git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        if (common.returncode or actual.returncode
+                or os.path.realpath(common.stdout.strip()) != os.path.realpath(actual.stdout.strip())):
+            return "wrong observed repository"
+        top = git(path, "rev-parse", "--show-toplevel")
+        if top.returncode or os.path.realpath(top.stdout.strip()) != os.path.realpath(path):
+            return "path is not the checkout root"
+        if detached:
+            symbolic = git(path, "symbolic-ref", "-q", "HEAD")
+            if symbolic.returncode == 0:
+                return "checkout is on a branch, not detached"
+            if symbolic.returncode != 1:
+                return "cannot prove detached HEAD"
+        head = git(path, "rev-parse", "HEAD")
+        if head.returncode or head.stdout.strip() != sha:
+            return f"HEAD is {head.stdout.strip() or 'unknown'}, not {sha}"
+        status = git(path, "status", "--porcelain", "--untracked-files=all")
+        if status.returncode or status.stdout.strip():
+            return "checkout is dirty"
+    except OSError as error:
+        return f"cannot inspect Git state: {error}"
+    return None
+
+
+def reader_marker(key: str, sha: str, repo: str, attempt: str) -> str:
+    # This identity is allocated before worker-start; it is NOT an Orca dispatchId.
+    return "gw-reader:" + hashlib.sha256(
+        json.dumps([key, sha, os.path.realpath(repo), attempt], separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def prepare_reader(args: argparse.Namespace) -> None:
+    """Allocate one reader per launch attempt; recovery only verifies, never repairs.
+
+    The caller must allocate a new attempt-id for every new dispatch, persist it
+    for crash recovery before launch, and gate launch on this command's success.
+    Existing output is refused, never reused as evidence of this invocation.
+    """
+    try:
+        key, label, worktree = placement_dispatch(args.dispatch, "REFUSED")
+    except SystemExit as error:
+        fail(str(error).replace("PLACEMENT REFUSED", "PREPARATION REFUSED", 1))
+    label = f"PREPARATION REFUSED {key}"
+    if os.path.lexists(args.out_placement):
+        fail(f"{label}: output already exists; use a fresh --out-placement and require success before launch")
+    if worktree["action"] not in READER_ACTIONS:
+        fail(f"{label}: not a pin-detached reader dispatch")
+    attempt = text_field(args.attempt_id, label, "attempt-id")
+    if not ATTEMPT_ID.fullmatch(attempt):
+        fail(f"{label}: attempt-id must be 1-128 ASCII letters/digits/_.-, starting with a letter or digit")
+    sha = text_field(worktree.get("start_sha"), label, "start_sha")
+    if not HEX_OID.fullmatch(sha) or worktree.get("branch") is not None:
+        fail(f"{label}: malformed reader action")
+    base = text_field(worktree.get("base_branch"), label, "source branch")
+    dispatch = read_json(args.dispatch)
+    repo_row = dispatch.get("repo")
+    repo = text_field(repo_row.get("path") if isinstance(repo_row, dict) else None, label, "repo path")
+    if not Path(repo).is_absolute():
+        fail(f"{label}: repo path is not absolute")
+    try:
+        try:
+            commit = preparation_git(repo, "rev-parse", "--verify", f"{sha}^{{commit}}")
+        except SystemExit:
+            fail(f"{label}: commit {sha} is not in {repo}")
+        if commit != sha:
+            fail(f"{label}: start_sha is not a commit")
+        # -z includes detached worktrees and avoids quoted/escaped Git paths.
+        before = {os.path.realpath(field[len("worktree "):])
+                  for field in preparation_git(repo, "worktree", "list", "--porcelain", "-z").split("\0")
+                  if field.startswith("worktree ")}
+        before.add(os.path.realpath(repo))
+        parent = worktree.get("parent_path")
+        protected = {os.path.realpath(repo)}
+        if parent is not None:
+            protected.add(os.path.realpath(text_field(parent, label, "parent_path")))
+        repos = orca_top_json(args.orca, ["repo", "list"], label=label).get("repos", [])
+        registered = [row for row in repos if isinstance(row, dict) and isinstance(row.get("path"), str)
+                      and os.path.realpath(row["path"]) == os.path.realpath(repo)]
+        if len(registered) != 1:
+            fail(f"{label}: repository is not uniquely registered")
+        repo_id = text_field(registered[0].get("id"), label, "Orca repository id")
+        marker = reader_marker(key, sha, repo, attempt)
+        marked = marked_rows(args.orca, repo_id, marker, label)
+        if len(marked) > 1:
+            fail(f"{label}: ambiguous reader markers; repair")
+        reused = bool(marked)
+        if marked:
+            row = marked[0]
+        else:
+            base_tip = preparation_git(repo, "rev-parse", "--verify", f"{base}^{{commit}}")
+            row = orca_top_json(args.orca, ["worktree", "create", "--name", "gw-reader-" + marker.split(":")[1],
+                "--repo", f"id:{repo_id}", "--base-branch", base, "--no-parent",
+                "--setup", "skip", "--comment", marker], label=label).get("worktree")
+        if not isinstance(row, dict) or row.get("repoId") != repo_id:
+            fail(f"{label}: wrong observed repository")
+        raw_path = text_field(row.get("path"), label, "observed path")
+        if not Path(raw_path).is_absolute():
+            fail(f"{label}: observed path is not absolute")
+        path = os.path.realpath(raw_path)
+        if path in protected or row.get("isMainWorktree") is True:
+            fail(f"{label}: reader cannot enter an integration checkout {path}")
+        if not reused:
+            if path in before:
+                fail(f"{label}: Orca returned an existing checkout {path}")
+            problem = reader_checkout_problem(repo, path, base_tip, detached=False)
+            if problem is not None:
+                fail(f"{label}: newly created checkout failed verification ({problem})")
+            # No force/reset; only a new, clean, correct-repository base-tip root
+            # returned by this successful creation is eligible for mutation.
+            preparation_git(path, "checkout", "--quiet", "--detach", sha)
+        problem = reader_checkout_problem(repo, path, sha)
+        if problem is not None:
+            fail(f"{label}: reader checkout is not verified ({problem}); it is never reset -- repair")
+        argv = ["--worktree", f"path:{path}"]
+        # Publish complete JSON without replacing a racing/stale output, including
+        # dangling symlinks. A failed preparation cannot publish partial argv.
+        temporary = None
+        try:
+            with tempfile.NamedTemporaryFile(mode="w", dir=Path(args.out_placement).parent,
+                                             encoding="utf-8", newline="", delete=False) as stream:
+                temporary = stream.name
+                json.dump(argv, stream)
+            os.link(temporary, args.out_placement)
+        finally:
+            if temporary is not None:
+                os.unlink(temporary)
+    except (SystemExit, OSError) as error:
+        message = str(error)
+        fail(message if message.startswith(label) else f"{label}: {message}")
+    sys.stdout.write(json.dumps({"action": "pin-detached", "placement_argv": argv, "path": path,
+        "start_sha": sha, "repo_id": repo_id, "parent_worktree_id": None,
+        "attempt_id": attempt, "reused": reused}))
+
+
 def started_worktree_id(start: object, orca: str, label: str) -> str:
     """The created or selected worktree's `<repoId>::<path>` id."""
     result = start.get("result") if isinstance(start, dict) else None
@@ -767,7 +917,27 @@ def settle_placement(args: argparse.Namespace) -> None:
     worktree_id = started_worktree_id(read_json(args.start), args.orca, label)
     row = show_worktree(args.orca, worktree_id, label)
     lineage_set = False
-    if worktree["action"] in EXISTING_ACTIONS:
+    reader_sha = None
+    if worktree["action"] in READER_ACTIONS:
+        planned = text_field(placed.get("path"), label, "prepared path")
+        observed = text_field(row.get("path"), label, "observed path")
+        reader_sha = text_field(worktree.get("start_sha"), label, "start_sha")
+        if (placed.get("action") != "pin-detached" or placed.get("start_sha") != reader_sha
+                or not HEX_OID.fullmatch(reader_sha)):
+            fail(f"{label}: malformed reader placement result")
+        if os.path.realpath(observed) != os.path.realpath(planned):
+            fail(f"{label}: observed path differs from prepared path")
+        if row.get("repoId") != placed.get("repo_id"):
+            fail(f"{label}: wrong observed repository")
+        if row.get("parentWorktreeId") is not None:
+            fail(f"{label}: reader has unexpected parent")
+        dispatch = read_json(args.dispatch)
+        repo_row = dispatch.get("repo")
+        repo = text_field(repo_row.get("path") if isinstance(repo_row, dict) else None, label, "repo path")
+        problem = reader_checkout_problem(repo, observed, reader_sha)
+        if problem is not None:
+            fail(f"{label}: {problem}")
+    elif worktree["action"] in EXISTING_ACTIONS:
         planned = text_field(worktree.get("path"), label, "the planned worktree path")
         if os.path.realpath(str(row.get("path") or "")) != os.path.realpath(planned):
             fail(f"{label}: planned {planned}, actual {row.get('path')}.")
@@ -800,7 +970,8 @@ def settle_placement(args: argparse.Namespace) -> None:
     sys.stdout.write(json.dumps({
         "worktree_id": worktree_id,
         "path": row.get("path"),
-        "branch": short,
+        "branch": None if reader_sha is not None else short,
+        **({"start_sha": reader_sha} if reader_sha is not None else {}),
         "display_name": row.get("displayName"),
         "repo_id": row.get("repoId"),
         "parent_worktree_id": row.get("parentWorktreeId"),
@@ -1607,6 +1778,12 @@ def parser() -> argparse.ArgumentParser:
     place_parser.add_argument("--repo-path")
     place_parser.add_argument("--out-placement", required=True)
     place_parser.set_defaults(func=place)
+    reader_parser = commands.add_parser("prepare-reader")
+    reader_parser.add_argument("--orca", default="orca")
+    reader_parser.add_argument("--dispatch", required=True)
+    reader_parser.add_argument("--out-placement", required=True)
+    reader_parser.add_argument("--attempt-id", required=True)
+    reader_parser.set_defaults(func=prepare_reader)
     prepare_parser = commands.add_parser("prepare")
     prepare_parser.add_argument("--orca", default="orca")
     prepare_parser.add_argument("--plan-file", required=True)

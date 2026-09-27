@@ -48,8 +48,11 @@ body. Wait for the coordinator's instructions before doing anything else.
 
 Read the complete `finish_targets` list supplied by workflow (or from
 `gw work next <work-path> --json`). Each entry supplies repository, worktree,
-source_branch and target_branch. Validate every entry; missing evidence or
-any blocker enters the Escalation path and holds the entire finish stage.
+source_branch, target_branch and target_worktree. `worktree` is the source
+checkout; `target_worktree` is the checkout holding the merge target. Validate
+every entry; missing evidence or any blocker enters the Escalation path and
+holds the entire finish stage. A `null` target_worktree means the target is not
+checked out; hold at R2 without merging.
 Use each entry's target_branch verbatim. The scalar Auto-drive merge target
 is context only; it cannot replace this complete set or justify trunk fallback.
 
@@ -78,9 +81,12 @@ git worktree list --porcelain
   target is always that entry's `target_branch`. Find the
   worktree that has the merge target checked out by scanning
   `git worktree list --porcelain` for the block whose `branch` line reads
-  `refs/heads/<merge target>`. The R4 merge executes there, not in this
-  worker's own worktree. No worktree has the merge target checked out, or more than one does:
-  enter the **Escalation path**. Never check the target out yourself and
+  `refs/heads/<merge target>`. The supplied `target_worktree` must be non-null
+  and equal the unique path found by this scan. The R4 merge executes there,
+  not in this worker's own worktree. No worktree has the merge target checked out,
+  or more than one does:
+  enter the **Escalation path**. A missing or mismatched supplied path also
+  enters the **Escalation path**. Never check the target out yourself and
   never merge from this worker's worktree.
 
 **Dirty state blocks the whole set.** Run `git status --porcelain` in each source

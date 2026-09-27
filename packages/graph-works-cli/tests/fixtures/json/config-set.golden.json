@@ -6,7 +6,7 @@
     "key": "workflow.auto_drive.max_parallel",
     "type": "int",
     "default": 2,
-    "description": "How many workers auto-drive may have in flight at once.",
+    "description": "How many autonomous or relay workers auto-drive may have in flight at once.",
     "kind": "manifest",
     "env_var": null,
     "allowed": [],

@@ -23,6 +23,7 @@ from okf_ext.bundle import SECTIONS_DIRNAME
 from okf_ext.shape import SectionError, SectionSet, audience_view, load_sections
 from okf_io import Bundle, Document
 from work_tracker_okf import decisions as _decisions
+from work_tracker_okf.affects import code_affects
 from work_tracker_okf.decisions import ledger_ref, prose_block
 from work_tracker_okf.hierarchy import declared_repo
 from work_tracker_okf.items import WorkItem, item_index
@@ -264,7 +265,7 @@ def ledger_candidates(
         and not other.archived
         and other.work_status not in TERMINAL_STATUSES
         and resolved(other) == repo
-        and affects_overlap(other.affects, item.affects)
+        and affects_overlap(code_affects(other.affects), code_affects(item.affects))
     )
     for path in overlapping:
         why[path] = f"affects overlap with {path}"
@@ -341,7 +342,7 @@ def assemble_guidance(
         repo, repo_warning = _item_repo(layout, item, item_index(tuple(items)))
         if repo_warning is not None:
             warnings.append(repo_warning)
-        closure: Closure | None = open_closure(layout, repo=repo, affects=item.affects)
+        closure: Closure | None = open_closure(layout, repo=repo, affects=code_affects(item.affects))
     except (OSError, sqlite3.Error, WorkspaceError) as exc:
         warnings.append(f"code graph unreadable: {exc}; claims and agent sections skipped")
         closure = None

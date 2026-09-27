@@ -61,10 +61,14 @@ by name is what makes a coordinator restart a no-op rather than a second session
 
 1. Refuses a `dispatch.key` already present in this session (`BackendError`) — silently returning
    the existing record would make a re-dispatch after a failure read as a success.
-2. Refuses `dispatch.worktree.path is None` (`WorktreeNotProvisioned`) — this backend never
-   touches git; it expects a fully-resolved worktree from a band-3 planner. A `reuse` or `"main"`
-   dispatch works end-to-end here; `fork-child`/`create-top-level` don't, until something upstream
-   provisions the worktree.
+2. Refuses `pin-detached` (`WorktreeNotProvisioned`) even when a path is supplied: this backend
+   cannot verify the detached repository and SHA contract. Supplying a path
+   never bypasses that refusal; it occurs before ledger or process creation.
+   It also refuses
+   `dispatch.worktree.path is None` (`WorktreeNotProvisioned`) — it never touches git and expects
+   a fully-resolved worktree from a band-3 planner. A `reuse` or `"main"` dispatch works
+   end-to-end here; `fork-child`/`create-top-level` don't until something upstream provisions
+   the worktree.
 3. Computes a deterministic, collision-proof `handle` via `_handle_for(key)`: sanitize the key to
    filesystem-safe characters, then suffix with a 4-byte blake2s digest of the *original* key —
    deterministic because resumption looks the directory up by key with no live process to ask;

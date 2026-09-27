@@ -89,4 +89,5 @@ def test_the_golden_pins_every_verb_this_item_shipped() -> None:
         ("work", "reparent"),
         ("work", "record-placement"),
         ("work", "record-reader"),
+        ("work", "wait"),
     } <= paths

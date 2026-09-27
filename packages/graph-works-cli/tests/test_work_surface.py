@@ -32,6 +32,7 @@ VERBS = [
     ["work", "orchestrate"],
     ["work", "dispatch"],
     ["work", "reroute"],
+    ["work", "wait"],
     ["work", "reconcile-context"],
     ["work", "ask"],
     ["work", "ask-answer"],
@@ -43,8 +44,8 @@ VERBS = [
 ]
 
 
-def test_the_surface_is_exactly_twenty_three_verbs() -> None:
-    assert len(VERBS) == 23
+def test_the_surface_is_exactly_twenty_four_verbs() -> None:
+    assert len(VERBS) == 24
 
 
 @pytest.mark.parametrize("verb", VERBS, ids=lambda verb: " ".join(verb))

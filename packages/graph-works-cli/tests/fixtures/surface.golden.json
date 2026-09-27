@@ -2477,7 +2477,8 @@
         "reparent",
         "reroute",
         "status",
-        "touch-active-work"
+        "touch-active-work",
+        "wait"
       ],
       "path": [
         "work"
@@ -4755,6 +4756,77 @@
       "path": [
         "work",
         "touch-active-work"
+      ]
+    },
+    {
+      "name": "gw work wait",
+      "help": "Wait for a real coordinator event; heartbeats and duplicate completions never wake it.",
+      "short_help": "Wait for a real coordinator event; heartbeats and duplicate completions never wake it.",
+      "usage": [
+        "[OPTIONS]"
+      ],
+      "arguments": [],
+      "options": [
+        {
+          "name": "run",
+          "opts": [
+            "--run"
+          ],
+          "secondary_opts": [],
+          "help": "The Orca Run id.",
+          "required": true,
+          "default": null,
+          "is_flag": false
+        },
+        {
+          "name": "ack",
+          "opts": [
+            "--ack"
+          ],
+          "secondary_opts": [],
+          "help": "The previous event's delivery_id, acked before this wait.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "timeout_s",
+          "opts": [
+            "--timeout-s"
+          ],
+          "secondary_opts": [],
+          "help": "Seconds before returning status timeout.",
+          "required": false,
+          "default": 600.0,
+          "is_flag": false
+        },
+        {
+          "name": "workspace",
+          "opts": [
+            "--workspace"
+          ],
+          "secondary_opts": [],
+          "help": "Workspace path.",
+          "required": false,
+          "default": "",
+          "is_flag": false
+        },
+        {
+          "name": "json_output",
+          "opts": [
+            "--json"
+          ],
+          "secondary_opts": [],
+          "help": "Emit the wait result as JSON.",
+          "required": false,
+          "default": false,
+          "is_flag": true
+        }
+      ],
+      "commands": [],
+      "path": [
+        "work",
+        "wait"
       ]
     }
   ]

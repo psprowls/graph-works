@@ -167,6 +167,82 @@ cov-workflow-local:
 cov-workflow-local:
     @echo "workflow-local: coverage gate skipped — POSIX-only backend (D-002); see test_windows_guard.py"
 
+# Scoped gate for ONE package -- lint, types (both platform arms), and the
+# cov-gated test run, restricted to that package's own paths. Use this while
+# iterating; it does not touch the other 14 packages or `test-plugin`, so it
+# runs in a fraction of `just check`'s time.
+#
+# Not a substitute for `just check` -- it skips normalization/text-io/
+# line-endings/platform-declared/contracts/test-plugin entirely, and a change
+# can still break another package's types or a repo-wide check this skips. Run
+# `just check` once, at the finish gate, before advancing the item.
+#
+# PKG is the package directory name under `packages/` (e.g. `code-graph-io`).
+# `okf-io` and `okf-ext` share one root suite, so either name runs both.
+check-pkg PKG: sync
+    #!/usr/bin/env bash
+    set -euo pipefail
+    case "{{PKG}}" in
+      okf-io|okf-ext)
+        MODULES="--cov=okf_io --cov=okf_ext"; SRC="packages/okf-io/src packages/okf-ext/src"
+        TESTPATH=""; PKGFLAG=""; FLOOR=95; EXTRA="" ;;
+      code-graph-io)
+        MODULES="--cov=code_graph_io"; SRC="packages/code-graph-io/src"
+        TESTPATH="packages/code-graph-io/tests"; PKGFLAG="--package code-graph-io"; FLOOR=90; EXTRA="" ;;
+      code-wiki-okf)
+        MODULES="--cov=code_wiki_okf"; SRC="packages/code-wiki-okf/src"
+        TESTPATH="packages/code-wiki-okf/tests"; PKGFLAG="--package code-wiki-okf"; FLOOR=95; EXTRA="" ;;
+      work-tracker-okf)
+        MODULES="--cov=work_tracker_okf"; SRC="packages/work-tracker-okf/src"
+        TESTPATH="packages/work-tracker-okf/tests"; PKGFLAG="--package work-tracker-okf"; FLOOR=95; EXTRA="" ;;
+      config-io)
+        MODULES="--cov=config_io"; SRC="packages/config-io/src"
+        TESTPATH="packages/config-io/tests"; PKGFLAG="--package config-io"; FLOOR=95; EXTRA="" ;;
+      plugin-fork-io)
+        MODULES="--cov=plugin_fork_io"; SRC="packages/plugin-fork-io/src"
+        TESTPATH="packages/plugin-fork-io/tests"; PKGFLAG="--package plugin-fork-io"; FLOOR=95; EXTRA="" ;;
+      models-io)
+        MODULES="--cov=models_io"; SRC="packages/models-io/src"
+        TESTPATH="packages/models-io/tests"; PKGFLAG="--package models-io"; FLOOR=95; EXTRA="--extra bedrock --extra vercel" ;;
+      subagents-io)
+        MODULES="--cov=subagents_io"; SRC="packages/subagents-io/src"
+        TESTPATH="packages/subagents-io/tests"; PKGFLAG="--package subagents-io"; FLOOR=95; EXTRA="" ;;
+      doc-wiki-okf)
+        MODULES="--cov=doc_wiki_okf"; SRC="packages/doc-wiki-okf/src"
+        TESTPATH="packages/doc-wiki-okf/tests"; PKGFLAG="--package doc-wiki-okf"; FLOOR=95; EXTRA="" ;;
+      graph-works-core)
+        MODULES="--cov=graph_works_core"; SRC="packages/graph-works-core/src"
+        TESTPATH="packages/graph-works-core/tests"; PKGFLAG="--package graph-works-core"; FLOOR=95; EXTRA="" ;;
+      workflow-local)
+        MODULES="--cov=workflow_local"; SRC="packages/workflow-local/src"
+        TESTPATH="packages/workflow-local/tests"; PKGFLAG="--package workflow-local"; FLOOR=95; EXTRA="" ;;
+      workflow-orca)
+        MODULES="--cov=workflow_orca"; SRC="packages/workflow-orca/src"
+        TESTPATH="packages/workflow-orca/tests"; PKGFLAG="--package workflow-orca"; FLOOR=95; EXTRA="" ;;
+      graph-works-wire)
+        MODULES="--cov=graph_works_wire"; SRC="packages/graph-works-wire/src"
+        TESTPATH="packages/graph-works-wire/tests"; PKGFLAG="--package graph-works-wire"; FLOOR=95; EXTRA="" ;;
+      graph-works-cli)
+        MODULES="--cov=graph_works_cli"; SRC="packages/graph-works-cli/src"
+        TESTPATH="packages/graph-works-cli/tests"; PKGFLAG="--package graph-works-cli"; FLOOR=95; EXTRA="" ;;
+      graph-works-serve)
+        MODULES="--cov=graph_works_serve"; SRC="packages/graph-works-serve/src"
+        TESTPATH="packages/graph-works-serve/tests"; PKGFLAG="--package graph-works-serve"; FLOOR=95; EXTRA="" ;;
+      *)
+        echo "unknown package '{{PKG}}' -- see packages/ for valid names" >&2
+        exit 1 ;;
+    esac
+    LINT_PATH="packages/{{PKG}}"
+    echo "--- lint ($LINT_PATH)"
+    uv run ruff check "$LINT_PATH"
+    uv run ruff format --check "$LINT_PATH"
+    echo "--- types (linux)"
+    uv run $PKGFLAG $EXTRA mypy --strict --platform linux $SRC
+    echo "--- types (win32)"
+    uv run $PKGFLAG $EXTRA mypy --strict --platform win32 $SRC
+    echo "--- cov"
+    uv run $PKGFLAG $EXTRA pytest $TESTPATH $MODULES --cov-branch --cov-report=term-missing --cov-fail-under=$FLOOR
+
 # Everything CI will run. `cov` runs every suite, so `test` is not repeated.
 #
 # `sync` is named here as well as on `types`, deliberately. `just` runs a

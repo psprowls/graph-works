@@ -82,7 +82,22 @@ exists yet — enforcement is local, by design (ADR-0010).
 | `just test`              | `uv run pytest`, plus one `uv run --package <name> pytest packages/<name>/tests` per non-okf-io/okf-ext package                                                                                                                                                                                                                                                                                                                                           |
 | `just cov`               | Branch coverage, gated per package (95% for most, 90% for `code-graph-io`) — see the justfile for exact invocations; a failure reports only a global percentage, so start with the lowest-covered module and read `term-missing`                                                                                                                                                                                                                          |
 | `just test-plugin`       | The `gw` plugin's own test suites (bash, plus one `node --test` suite), under `plugins/gw/`                                                                                                                                                                                                                                                                                                                                                               |
+| `just check-pkg <name>`  | Scoped gate for one package: `lint` + `types` (both arms) + `cov`, restricted to `packages/<name>`. Skips `normalization`/`text-io`/`line-endings`/`platform-declared`/`contracts`/`test-plugin` — **not** a substitute for `just check`, just the fast loop while iterating |
 
+
+**Run `just check-pkg <name>` while iterating on one package; run the full `just
+check` once, at the finish gate, before advancing the work item or opening a PR.**
+Re-running the full 15-package gate on every fix attempt is the single biggest
+source of wasted time in this repo — mypy strict runs twice per package per
+platform arm, cov runs the full suite per package, and `test-plugin` alone chains
+~15 suites including a `node --test` run. A transcript survey of
+`epic-auto-drive-dispatch-correctness` (2026-08-30) found sessions re-running
+`just check` in full 3-4 times in a row to re-verify a single failing recipe
+(most often `test-plugin`'s vendored `brainstorm-server` suite failing on a
+stray leftover Node process squatting on its port — unrelated to the code under
+test). Isolate the failing recipe (`just test-plugin`, `just check-pkg <name>`,
+or a direct `uv run --package <name> pytest ...`) and rerun only that; save the
+full gate for the final confirmation.
 
 Every suite `just check` runs is Python, bash, or — for the plugin's
 `tests/pi` extension suite alone — `node --test`. Node 23.6+ is required for

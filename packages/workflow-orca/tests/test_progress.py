@@ -91,6 +91,18 @@ def test_missing_or_empty_plan_keeps_ledger_facts(tmp_path: Path) -> None:
     assert find_progress(tmp_path, since=SINCE)[1] == (PLAN_UNREADABLE,)
 
 
+def test_malformed_plan_path_keeps_ledger_facts(tmp_path: Path) -> None:
+    ledger = _ledger(
+        tmp_path,
+        "plan",
+        "# SDD ledger — plan: docs/\x00plan.md\nTask 1: complete\nTask 2: fix round 1\n",
+    )
+    assert find_progress(tmp_path, since=SINCE) == (
+        SddProgress(str(ledger), "docs/\x00plan.md", 1, None, "Task 2: fix round 1"),
+        (PLAN_UNREADABLE,),
+    )
+
+
 @pytest.mark.parametrize("first_line", ["not a header", "", "  "])
 def test_actual_first_line_must_be_header(tmp_path: Path, first_line: str) -> None:
     _ledger(tmp_path, "plan", first_line + "\n# SDD ledger — plan: docs/plan.md\nTask 1: complete\n")

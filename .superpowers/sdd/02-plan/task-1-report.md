@@ -71,3 +71,32 @@ Self-review: checked the change against the brief's Task 1 interface and file sc
 The liveness row and wait verb integration belong to later tasks. No live Orca probe was run for this pure filesystem reader. No broad workspace gate was run; verification is limited to the workflow-orca package, scoped Ruff, and its two mypy platform arms.
 
 Commit message: `feat(workflow-orca): read SDD ledger progress from a dispatch worktree`.
+
+## Fix round 1 — Important I1 only
+
+Added a real-filesystem regression with `docs/\x00plan.md` in a fresh UTF-8 ledger header. It asserts the retained ledger path, plan metadata, completed count, and last line, together with `total=None` and `plan unreadable`. The minimal source fix catches `ValueError` at the plan read boundary; this also covers `UnicodeDecodeError`, its subclass, preserving the existing decode-failure handling.
+
+RED, before the source fix:
+
+```text
+uv run --package workflow-orca pytest packages/workflow-orca/tests/test_progress.py -k malformed_plan_path -q
+Exit 1
+FAILED packages/workflow-orca/tests/test_progress.py::test_malformed_plan_path_keeps_ledger_facts
+E       ValueError: embedded null byte
+1 failed, 18 deselected in 0.09s
+```
+
+GREEN, after the source fix:
+
+```text
+uv run --package workflow-orca pytest packages/workflow-orca/tests/test_progress.py packages/workflow-orca/tests/test_boundaries.py -q
+Exit 0
+36 passed in 0.10s
+
+git diff --check
+Exit 0, no output
+```
+
+Self-review: only the plan-read exception handler and the new regression changed in code. Minor M1 remains deferred to final review. No full package/workspace suites, coverage, mypy, or live probe were rerun in this fix round; the earlier gates above remain historical implementation evidence. No subagents or work-item advancement were used.
+
+Fix commit message: `fix(workflow-orca): degrade malformed progress plan paths`.

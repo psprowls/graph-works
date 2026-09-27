@@ -75,7 +75,7 @@ def _plan_total(worktree: Path, plan: str) -> int | None:
         path = worktree / path
     try:
         text = path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
+    except (OSError, ValueError):
         return None
     numbers = {int(match["n"]) for line in text.splitlines() if (match := _PLAN_TASK.match(line))}
     return len(numbers) or None

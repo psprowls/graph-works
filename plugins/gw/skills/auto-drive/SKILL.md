@@ -870,18 +870,74 @@ orca orchestration check --run <run_id> --wait \
   in §4.3; suffix collisions can change labels between reads.
   Never invent a label or reuse a cached label when the refresh fails.
   If `pending_questions` is `null`, or a question needing mirroring has no
-  matching entry, report the failed refresh or missing entry and defer that
-  question's mirroring until a successful fresh read supplies its label.
-  An unprinted question is not mirrored; leave its delivery unacked for replay.
+  matching entry, report the failed refresh or missing entry and inspect the
+  disposition below: answered and ended questions will never regain a label.
+  Without positive closure/reply evidence, leave its delivery unacked for replay.
+  Defer mirroring until a successful fresh read supplies a label; an unprinted
+  question is not mirrored.
   Continue handling other messages under §4, including the existing step 0
-  policy-answer path and its reply guards; do not count a deferred question
-  as handled. A successfully policy-answered question needs no mirroring.
+  policy-answer path and its reply guards for questions not proven closed;
+  do not count a deferred question as handled. A successfully policy-answered
+  question needs no mirroring.
+- **Missing delivery question: prove disposition before ack.** Use the original
+  delivered message id and sender `dispatch:<dispatch_id>`, not a label or a
+  guessed current attempt. Read
+  `orca orchestration worker-show --dispatch <dispatch_id> --json` successfully.
+  Match `result.dispatch.id`, `runId`, and `taskId` to the delivered
+  question's Dispatch, this Run, and its Task (join through §2.1's complete
+  worker-list when the payload lacks `taskId`). Conflicting or unprovable
+  identities mean inspection and deferral, never acknowledgment.
+  With those identities proved, either of these is positive evidence:
+  - **Already answered:** read
+    `orca orchestration inbox --terminal dispatch:<dispatch_id> --limit 1000 --json`.
+    Require an actual reply row with
+    `thread_id == <message_id>`, `from_handle == run:<run_id>`,
+    `to_handle == dispatch:<dispatch_id>`, and `type == status`
+    (the existing `reply --id` linkage, subject `Re: Question`). Report the
+    matching message id and that its question was already answered, including
+    after restart; a typed answer file alone does not prove delivery to Orca.
+  - **Dispatch ended:** require matching `result.worker.dispatchId` and that
+    `result.worker.state` is `succeeded`, `failed`, or `stopped`.
+    PTY exit, a missing worker, or an omitted pending entry is not this proof.
+    Report the original message id, Dispatch id and observed terminal state.
+  Absence, a warning, a failed/truncated read, or an unknown state alone
+  never proves closure. A matching positive row still proves its own fact in
+  a bounded read; missing rows prove nothing. Show warnings and retain an
+  inconclusive question for replay while handling other messages.
+
+  For a positively ended Dispatch with no proven reply, apply §4.3 step 2a's
+  path resolution and fresh park check before counting the question handled.
+  A matching park/checkpoint is reported with its decision id as awaiting a
+  decision; without a human answer, do not write a decision answer or claim
+  the item is resumable. If an actual human answer is available, save it only
+  to that verified hold as step 2a requires. No park → route through §4.2's
+  failure flow, even for an ended success with an unanswered question.
+  An already-answered question does not waive any failed/stopped Dispatch's
+  recovery or any completion validation. If recovery remains unresolved,
+  preserve the applicable §4 recovery record before any ack; that record
+  cannot substitute for the positive question-disposition evidence above.
+  After reporting the evidence and completing the required routing, count
+  this question as handled without mirroring it as pending or re-running
+  §4.3 step 0's policy answer.
+  Do not create a label, send a new reply, or require a new answer.
+  Closure handles only this question; every other batch message still needs
+  its handling and recovery record under the next two bullets before ack.
+  These checks use Orca reads and session memory only, not a new pending file.
+
+  Protocol scenarios (all retain the batch-wide ack gate):
+  - Ended-before-mirror: positive ended evidence → fresh park/failure routing
+    → report closure → question handled without a pending label.
+  - Answered-before-ack/restart: matching reply evidence → report already answered
+    → question handled without another reply or a remembered label.
+  - Inconclusive read: no matching positive evidence → defer, keep delivery unacked
+    → handle other messages and retry the reads on replay.
 - **Handle, then acknowledge:** process **every** message in the batch (§4)
   before acking, preserving the recovery-record requirement below. Only when
   every message is handled, acknowledge with the delivery id from the response:
   `orca orchestration check --run <run_id> --ack <delivery_id>`, reading the
   id from `result.deliveryId` (a bound Run replays the same delivery until
   acked — don't ack before every message in the batch is handled). For a question, *handled* means *mirrored to the human*, not *answered*.
+  The positive closure/reply path above also handles an already closed question.
   Once §4.3 has printed it, it satisfies the mirroring requirement; the question
   stays pending in Orca until `reply --id` answers it or its Dispatch ends. If a
   future runtime version reports the id under a different key, read it off
@@ -918,7 +974,8 @@ orca orchestration check --run <run_id> --wait \
   Run's unanswered questions from Orca. Print its `pending_questions` as
   §4.3 step 1a says, and show its `warnings`. A failed read prints the refresh
   failure notice, not an invented pending list. If this display finally mirrors
-  a deferred delivery question, acknowledge only after every message meets
+  a deferred delivery question, or positive evidence handles its closure,
+  acknowledge only after every message meets
   the handling and recovery-record safeguards above.
   Only after the pending display, restart the cycle at §2.1.
   (Until `tech-debt-auto-drive-skill-orca-edge-cases` replaces this section's
@@ -1690,14 +1747,15 @@ what the options *mean*; that is the worker's job.
    answer does, and with no human watching for it. If either guard fails,
    continue to step 1 and mirror as usual.
 
-1. **Mirror it — print, never block.** Every worker question step 0 did not
+1. **Mirror it — print, never block.** Every still-pending worker question step 0 did not
    answer is *mirrored*: printed in this session, then left pending while the
    loop runs on. The coordinator never waits on the human for a worker
    question; the human answers later, by label (step 1b), in any order. A
    question's label is its `label` in `gw work wait`'s `pending_questions`
    (an opaque, collision-aware label). Use §2.7's fresh read before delivery
    mirroring, matching by `message_id`; never derive the label yourself. If
-   that read fails or has no matching entry, follow §2.7's deferral rule.
+   that read fails or has no matching entry, follow §2.7's positive-evidence
+   disposition path; defer if inconclusive. Proven closed questions need no mirror.
    Once printed, it is handled for §2.7's ack rule.
 
    Typed or untyped? Test whether the question text's last line starts with `gw-ask: `.

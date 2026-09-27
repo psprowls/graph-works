@@ -26,6 +26,14 @@ FakeOrcaPort = runpy.run_path(str(REPO / "packages/graph-works-core/tests/orches
 runner = CliRunner()
 
 
+def test_wait_help_explains_zero_timeout_does_not_ack():
+    result = runner.invoke(app, ["help", "work", "wait", "--json"])
+    assert result.exit_code == 0, result.output
+    options = {option["name"]: option["help"] for option in json.loads(result.output)["options"]}
+    assert "ignored when --timeout-s is 0" in options["ack"]
+    assert "0 reads pending questions only, without consuming or acknowledging deliveries" in options["timeout_s"]
+
+
 class Refused(BackendError):
     code = "run_not_found"
 

@@ -4784,7 +4784,7 @@
             "--ack"
           ],
           "secondary_opts": [],
-          "help": "The previous event's delivery_id, acked before this wait.",
+          "help": "The previous event's delivery_id, acked before waiting; ignored when --timeout-s is 0.",
           "required": false,
           "default": "",
           "is_flag": false
@@ -4795,7 +4795,7 @@
             "--timeout-s"
           ],
           "secondary_opts": [],
-          "help": "Seconds before returning status timeout.",
+          "help": "Seconds before timeout; 0 reads pending questions only, without consuming or acknowledging deliveries.",
           "required": false,
           "default": 600.0,
           "is_flag": false

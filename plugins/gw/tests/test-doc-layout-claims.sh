@@ -591,7 +591,7 @@ assert_contains "skills/auto-drive/SKILL.md" \
     'Never invent a label or reuse a cached label when the refresh fails.' \
     "auto-drive I1 rejects invented or stale labels on refresh failure"
 assert_contains "skills/auto-drive/SKILL.md" \
-    'An unprinted question is not mirrored; leave its delivery unacked for replay.' \
+    'Without positive closure/reply evidence, leave its delivery unacked for replay.' \
     "auto-drive I1 preserves unprinted questions for replay"
 assert_contains "skills/auto-drive/SKILL.md" \
     '**On both delivery and timeout, display pending before restarting.**' \
@@ -599,6 +599,27 @@ assert_contains "skills/auto-drive/SKILL.md" \
 assert_contains "skills/auto-drive/SKILL.md" \
     'Only after the pending display, restart the cycle at §2.1.' \
     "auto-drive I1 restarts only after the pending display"
+
+# Final review F1: missing pending entries include terminal questions, not
+# just transient refresh failures. These are prose-contract checks, not a
+# simulation of Orca or proof that an agent executed the protocol.
+for contract in \
+    '**Missing delivery question: prove disposition before ack.**' \
+    'Match `result.dispatch.id`, `runId`, and `taskId` to the delivered' \
+    'orca orchestration inbox --terminal dispatch:<dispatch_id> --limit 1000 --json' \
+    '`thread_id == <message_id>`, `from_handle == run:<run_id>`,' \
+    '`to_handle == dispatch:<dispatch_id>`, and `type == status`' \
+    '`result.worker.state` is `succeeded`, `failed`, or `stopped`' \
+    'Absence, a warning, a failed/truncated read, or an unknown state alone' \
+    'Do not create a label, send a new reply, or require a new answer.' \
+    'Ended-before-mirror: positive ended evidence → fresh park/failure routing' \
+    'Answered-before-ack/restart: matching reply evidence → report already answered' \
+    'Inconclusive read: no matching positive evidence → defer, keep delivery unacked' \
+    'Closure handles only this question; every other batch message still needs'
+do
+    assert_contains "skills/auto-drive/SKILL.md" "$contract" \
+        "auto-drive F1 disposition contract: $contract"
+done
 
 # Finishing-relay's three asks are typed; hand-written --options produced
 # comma-split and invented-grammar asks. Typed replies have a strict JSON body.

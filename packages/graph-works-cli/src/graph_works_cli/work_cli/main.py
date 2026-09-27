@@ -766,8 +766,15 @@ def reroute(
 @work_app.command()
 def wait(
     run: str = typer.Option(..., "--run", help="The Orca Run id."),
-    ack: str = typer.Option("", "--ack", help="The previous event's delivery_id, acked before this wait."),
-    timeout_s: float = typer.Option(600.0, "--timeout-s", min=0, help="Seconds before returning status timeout."),
+    ack: str = typer.Option(
+        "", "--ack", help="The previous event's delivery_id, acked before waiting; ignored when --timeout-s is 0."
+    ),
+    timeout_s: float = typer.Option(
+        600.0,
+        "--timeout-s",
+        min=0,
+        help="Seconds before timeout; 0 reads pending questions only, without consuming or acknowledging deliveries.",
+    ),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the wait result as JSON."),
 ) -> None:

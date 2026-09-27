@@ -9,7 +9,8 @@ reloaded.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
+from dataclasses import replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 
@@ -202,6 +203,7 @@ def apply_mirror(
     *,
     today: date,
     declarations_dir: Path | None = None,
+    protected_indexes: Collection[str] = (),
 ) -> MirrorResult:
     """Apply exactly *plan*'s canonical members against *bundle_root*."""
     _ = today
@@ -263,7 +265,10 @@ def apply_mirror(
     section_set = load_sections(declarations_root / SECTIONS_DIRNAME)
     move_result: MoveResult = MoveResult(moved=(), written=(), failed=(), pruned=())
     if not plan.moves.is_empty:
-        move_result = moves.apply(bundle, plan.moves)
+        move_plan = replace(
+            plan.moves, edits=tuple(edit for edit in plan.moves.edits if edit.member not in protected_indexes)
+        )
+        move_result = moves.apply(bundle, move_plan)
 
     created: list[str] = []
     created_ids: set[str] = set()
@@ -317,7 +322,14 @@ def apply_mirror(
     # entry nor notice the file backing it is gone. Only that case pays for
     # the extra reload.
     final_bundle = load_bundle(bundle_root) if plan.deletions else reloaded
-    directories = tuple(dict.fromkeys(directory for context in contexts for directory in affected_directories(context)))
+    directories = tuple(
+        dict.fromkeys(
+            directory
+            for context in contexts
+            for directory in affected_directories(context)
+            if f"{directory}/index.md" not in protected_indexes
+        )
+    )
     index_updates = (
         update_index(final_bundle, directories=directories, create_missing=True, dry_run=False) if directories else ()
     )

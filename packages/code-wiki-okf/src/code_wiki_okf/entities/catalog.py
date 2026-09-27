@@ -16,21 +16,22 @@ claimed.**
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import date
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 
 from okf_ext.bundle import SECTIONS_DIRNAME
-from okf_ext.generators import Render, plan_regenerate
+from okf_ext.generators import Regeneration, RegenerationPlan, Render, SectionEdit, plan_regenerate
 from okf_ext.generators import apply as apply_regenerations
 from okf_ext.render import escape_angle_brackets
 from okf_ext.sections import render_skeleton
 from okf_ext.shape import SectionSet, SectionSpec, TypeSections, load_sections
-from okf_ext.writing import ApplyResult, PendingWrite, write_all
+from okf_ext.writing import ApplyResult, PendingWrite, body_digest, write_all
 from okf_io import Bundle, Document, load_bundle
 
+from code_wiki_okf.entities.indexes import is_generated_folder_index
 from code_wiki_okf.placement import (
     CODE_GRAPH_LANE,
     PlacementContext,
@@ -206,6 +207,7 @@ def _entries_of(items: Sequence[CatalogPage], type_name: str) -> tuple[CatalogEn
 
 def _required_catalogs(
     classified: Sequence[CatalogPage],
+    retained_directories: Sequence[str] = (),
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, Render], dict[str, Render]]:
     """Return declarations, index renders, and Repository-page renders.
 
@@ -272,9 +274,10 @@ def _required_catalogs(
         file_items = tuple(item for item in items if item.type_name == "File")
         file_root = file_system_directory(repository)
         file_directories = {file_root}
-        for item in file_items:
-            parent = PurePosixPath(item.entry.concept_id).parent.as_posix()
-            while parent.startswith(file_root):
+        directories = [PurePosixPath(item.entry.concept_id).parent.as_posix() for item in file_items]
+        directories.extend(directory for directory in retained_directories if directory.startswith(file_root + "/"))
+        for parent in directories:
+            while parent == file_root or parent.startswith(file_root + "/"):
                 file_directories.add(parent)
                 if parent == file_root:
                     break
@@ -382,15 +385,54 @@ def _projected_bundle(
     )
 
 
+def _catalog_regeneration(
+    bundle: Bundle,
+    section_set: SectionSet,
+    concept_renders: Mapping[str, Render],
+    index_renders: Mapping[str, Render],
+    pages: Sequence[CatalogPage],
+) -> RegenerationPlan:
+    """Normalize only proven generated folder stubs to the current catalog.
+
+    The mirror writer also seeds File/Subdirectories headings. Retaining those
+    alongside Files/Directories would leave stale links after child cleanup.
+    Unknown content always stays on the ordinary ownership-preserving path.
+    """
+    plan = plan_regenerate(bundle, section_set, concept_renders, index_renders=index_renders)
+    regenerations = {item.path: item for item in plan.regenerations}
+    file_roots = {file_system_directory(page.context.repository) for page in pages if page.context.repository}
+    for directory, render in index_renders.items():
+        file_root = next((root for root in file_roots if directory == root or directory.startswith(root + "/")), None)
+        document = bundle.indexes.get(directory)
+        if file_root is None or document is None or not is_generated_folder_index(document, directory, file_root):
+            continue
+        after = "\n\n".join(f"## {heading}\n\n{body.strip()}" for heading, body in render.sections.items()) + "\n"
+        member = f"{directory}/index.md"
+        if after == document.body:
+            regenerations.pop(member, None)
+            continue
+        regenerations[member] = Regeneration(
+            concept_id="",
+            path=member,
+            key_edits=(),
+            section_edits=tuple(SectionEdit(heading=heading, line=1) for heading in render.sections),
+            digest=body_digest(document.body),
+            after=after,
+        )
+    return replace(plan, regenerations=tuple(regenerations[key] for key in sorted(regenerations)))
+
+
 def plan_catalogs(
     bundle: Bundle,
     *,
     pages: Sequence[CatalogPage] | None = None,
     declarations_dir: Path | None = None,
+    protected_indexes: Collection[str] = (),
 ) -> CatalogPlan:
     """Preview catalog creates and regenerations without touching disk."""
     projected_pages = catalog_pages(bundle) if pages is None else tuple(pages)
-    headings, index_renders, concept_renders = _required_catalogs(projected_pages)
+    headings, index_renders, concept_renders = _required_catalogs(projected_pages, tuple(bundle.indexes))
+    index_renders = {key: render for key, render in index_renders.items() if f"{key}/index.md" not in protected_indexes}
     declarations_root = bundle.root if declarations_dir is None else declarations_dir
     section_set = _catalog_section_set(load_sections(declarations_root / SECTIONS_DIRNAME), headings)
     created = tuple(
@@ -400,7 +442,7 @@ def plan_catalogs(
     )
     created_set = set(created)
     projected = _projected_bundle(bundle, projected_pages, section_set, headings)
-    regeneration = plan_regenerate(projected, section_set, concept_renders, index_renders=index_renders)
+    regeneration = _catalog_regeneration(projected, section_set, concept_renders, index_renders, projected_pages)
     return CatalogPlan(
         created=created,
         updated=tuple(item.path for item in regeneration.regenerations if item.path not in created_set),
@@ -413,11 +455,13 @@ def reconcile_catalogs(
     *,
     today: date,
     declarations_dir: Path | None = None,
+    protected_indexes: Collection[str] = (),
 ) -> ApplyResult:
     """Reconcile every catalog from canonical pages retained on actual disk."""
     _ = today
     classified = catalog_pages(bundle)
-    headings, index_renders, concept_renders = _required_catalogs(classified)
+    headings, index_renders, concept_renders = _required_catalogs(classified, tuple(bundle.indexes))
+    index_renders = {key: render for key, render in index_renders.items() if f"{key}/index.md" not in protected_indexes}
     declarations_root = bundle.root if declarations_dir is None else declarations_dir
     section_set = _catalog_section_set(load_sections(declarations_root / SECTIONS_DIRNAME), headings)
 
@@ -437,7 +481,7 @@ def reconcile_catalogs(
         return created
 
     current = load_bundle(bundle.root) if created.written else bundle
-    plan = plan_regenerate(current, section_set, concept_renders, index_renders=index_renders)
+    plan = _catalog_regeneration(current, section_set, concept_renders, index_renders, classified)
     regenerated = apply_regenerations(current, plan)
     return ApplyResult(
         written=created.written + regenerated.written,

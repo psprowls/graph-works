@@ -25,6 +25,7 @@ from code_wiki_okf.entities.catalog import (
     reconcile_catalogs,
 )
 from code_wiki_okf.entities.delete import PruneResult, plan_prune_entities, prune_entities
+from code_wiki_okf.entities.indexes import IndexPruneResult, apply_index_prune, bundle_members, plan_index_prune
 from code_wiki_okf.entities.sync import (
     EntityPlan,
     EntityWrite,
@@ -96,6 +97,7 @@ class SyncResult:
     mirror: MirrorSummary
     warnings: tuple[str, ...]
     dry_run: bool
+    indexes: IndexPruneResult = field(default_factory=IndexPruneResult)
 
     @property
     def ok(self) -> bool:
@@ -390,6 +392,12 @@ def sync_bundle(
     plan = plan_sync(bundle_root, config=config, reader=reader, at=at)
     bundle = load_bundle(bundle_root)
     skipped_repos = tuple(repo.name for repo in config.repos if repo.name not in {item.repo for item in plan.mirrors})
+    eligible_repos = tuple(repo for repo in config.repos if repo.name not in skipped_repos)
+    # Preserve uncertain ownership before mirror reconciliation can prune an
+    # authored annotation together with its dead generated link.
+    protected_indexes = tuple(
+        member for member, _reason in plan_index_prune(bundle, repos=eligible_repos, members=()).result.declined
+    )
     if dry_run:
         entities = summary_for_entity_plan(bundle, plan.entities, declarations_dir=config.declarations_dir)
         raw_prune = plan_prune_entities(
@@ -400,9 +408,28 @@ def sync_bundle(
         mirror_removed = _mirror_removed_concepts(plan.mirrors)
         prune = replace(raw_prune, deleted=tuple(item for item in raw_prune.deleted if item not in mirror_removed))
         catalog_bundle = _project_mirror_indexes(bundle, plan.mirrors)
+        members = set(bundle_members(catalog_bundle))
+        members.difference_update(f"{item}.md" for item in (*raw_prune.deleted, *mirror_removed))
+        members.update(write.member for write in plan.entities.writes)
+        for mirror_plan in plan.mirrors:
+            members.update(mirror_plan.target_for(path).member for path in mirror_plan.creates)
+            members.update(move.dest for move in mirror_plan.moves.moves)
+        index_prune = plan_index_prune(catalog_bundle, repos=eligible_repos, members=members)
+        removed_indexes = set(index_prune.result.deleted)
+        catalog_bundle = replace(
+            catalog_bundle,
+            indexes=MappingProxyType(
+                {
+                    key: value
+                    for key, value in catalog_bundle.indexes.items()
+                    if f"{key}/index.md" not in removed_indexes
+                }
+            ),
+        )
         catalog_plan = plan_catalogs(
             catalog_bundle,
             pages=_project_catalog_pages(bundle, plan, raw_prune),
+            protected_indexes=protected_indexes,
             declarations_dir=config.declarations_dir,
         )
         return SyncResult(
@@ -419,18 +446,13 @@ def sync_bundle(
             mirror=MirrorSummary(plans=plan.mirrors, skipped_repos=skipped_repos),
             warnings=plan.warnings,
             dry_run=True,
+            indexes=index_prune.result,
         )
 
     _preflight_live_entity_filesystem_conflicts(bundle_root, plan.entities)
     for mirror_plan in plan.mirrors:
         if not mirror_plan.is_empty:
             preflight_mirror_live(bundle_root, mirror_plan)
-    entities = apply_entities(
-        bundle_root,
-        plan.entities,
-        today=today,
-        declarations_dir=config.declarations_dir,
-    )
     results: list[MirrorResult] = []
     failed: list[tuple[str, str]] = []
     for item in plan.mirrors:
@@ -451,6 +473,7 @@ def sync_bundle(
             result = apply_mirror(
                 bundle_root,
                 item,
+                protected_indexes=protected_indexes,
                 today=today,
                 declarations_dir=config.declarations_dir,
             )
@@ -465,15 +488,35 @@ def sync_bundle(
         skipped_repos=skipped_repos,
         failed_repos=tuple(failed),
     )
+    # Move plans capture referrer bytes, including entity File maps. Apply
+    # them before entity regeneration changes those captured referrers.
+    entities = apply_entities(
+        bundle_root,
+        plan.entities,
+        today=today,
+        declarations_dir=config.declarations_dir,
+    )
     prune_result = prune_entities(
         load_bundle(bundle_root),
         plan.entities.current_resources,
         declarations_dir=config.declarations_dir,
     )
     post_prune = load_bundle(bundle_root)
-    catalog_plan = plan_catalogs(post_prune, declarations_dir=config.declarations_dir)
-    catalogs = reconcile_catalogs(post_prune, today=today, declarations_dir=config.declarations_dir)
-    return combine_results(entities, mirror, prune_result, catalogs, catalog_plan, plan.warnings)
+    index_plan = plan_index_prune(
+        post_prune, repos=tuple(repo for repo in eligible_repos if repo.name not in dict(failed))
+    )
+    indexes = apply_index_prune(bundle_root, index_plan)
+    protected_indexes = tuple(sorted(set(protected_indexes) | {member for member, _reason in indexes.declined}))
+    post_prune = load_bundle(bundle_root)
+    catalog_plan = plan_catalogs(
+        post_prune, declarations_dir=config.declarations_dir, protected_indexes=protected_indexes
+    )
+    catalogs = reconcile_catalogs(
+        post_prune, today=today, declarations_dir=config.declarations_dir, protected_indexes=protected_indexes
+    )
+    return replace(
+        combine_results(entities, mirror, prune_result, catalogs, catalog_plan, plan.warnings), indexes=indexes
+    )
 
 
 __all__ = [

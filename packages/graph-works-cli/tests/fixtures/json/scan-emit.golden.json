@@ -10,6 +10,7 @@
   "entities_updated": [],
   "entities_deleted": [],
   "entity_errors": [],
+  "warnings": [],
   "mirror_created": 0,
   "mirror_updated": 0,
   "mirror_moved": 0,

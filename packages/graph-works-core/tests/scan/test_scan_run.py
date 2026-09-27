@@ -288,3 +288,54 @@ async def test_apply_previews_its_counts_without_touching_a_file(ready):
     assert applied.stamped == 1
     assert page.read_text(encoding="utf-8") == before_page
     assert log.read_text(encoding="utf-8") == before_log
+
+
+async def test_retained_orphans_warn_on_preview_apply_and_unchanged_rescan(ready):
+    """Safe retention remains visible on every pass without failing the scan."""
+    from scan_helpers import PACKAGE_URI, package_page, write_page
+
+    layout, config = ready
+    await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=False)
+    paths = ("code-graph/demo/entities/packages/z-old.md", "code-graph/demo/entities/packages/a-old.md")
+    for path in paths:
+        write_page(layout, path, package_page(purpose=FILLED).replace(PACKAGE_URI, f"pkg:gone/{path}"))
+    index_path = "code-graph/demo/file-system/retired/index.md"
+    write_page(layout, index_path, "# File\n\nAuthored navigation notes.\n")
+    paths += (index_path,)
+    before = {path: (layout.bundle_dir / path).read_bytes() for path in paths}
+    expected = (
+        "code-graph/demo/entities/packages/a-old: retained entity: prose-edited",
+        "code-graph/demo/entities/packages/z-old: retained entity: prose-edited",
+        "code-graph/demo/file-system/retired/index.md: retained index: unrecognized-content",
+    )
+    for dry_run in (True, False, False):
+        result = await scan.run_scan(layout, config, today=TODAY, at=AT, narrate=False, dry_run=dry_run)
+        assert result.structural.warnings == expected
+        assert result.errors == ()
+        assert result.ok
+        assert {path: (layout.bundle_dir / path).read_bytes() for path in paths} == before
+
+
+def test_retention_warning_order_is_independent_of_domain_result_order():
+    from code_wiki_okf.entities.indexes import IndexPruneResult
+    from code_wiki_okf.entities.sync import SyncSummary
+    from code_wiki_okf.sync import MirrorSummary, SyncResult
+
+    domain = SyncResult(
+        entities=SyncSummary(declined=(("z/entity", "not-generated"), ("a/entity", "prose-edited"))),
+        mirror=MirrorSummary(),
+        warnings=(),
+        dry_run=True,
+        indexes=IndexPruneResult(
+            declined=(("y/index.md", "changed-since-plan"), ("b/index.md", "unrecognized-content"))
+        ),
+    )
+    summary = scan.StructuralSummary.from_sync_result(domain)
+    assert summary.warnings == (
+        "a/entity: retained entity: prose-edited",
+        "b/index.md: retained index: unrecognized-content",
+        "y/index.md: retained index: changed-since-plan",
+        "z/entity: retained entity: not-generated",
+    )
+    assert summary.errors == ()
+    assert scan.StructuralSummary().warnings == ()

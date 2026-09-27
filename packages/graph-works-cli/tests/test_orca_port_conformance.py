@@ -19,6 +19,8 @@ PAIRS = (
     "OrcaWorker",
     "OrcaWorkerShow",
     "OrcaRead",
+    "OrcaPendingQuestion",
+    "OrcaPendingQuestions",
     "OrcaMessage",
     "OrcaDelivery",
 )
@@ -52,6 +54,12 @@ def test_the_wait_surface_is_on_both_sides() -> None:
         assert name in core.OrcaPort.__dict__, name
         assert callable(getattr(vendor.OrcaCliPort, name)), name
         assert _hints(getattr(core.OrcaPort, name)) == _hints(getattr(vendor.OrcaCliPort, name)), name
+
+
+def test_the_pending_questions_surface_is_on_both_sides() -> None:
+    assert "pending_questions" in core.OrcaPort.__dict__
+    assert callable(vendor.OrcaCliPort.pending_questions)
+    assert _hints(core.OrcaPort.pending_questions) == _hints(vendor.OrcaCliPort.pending_questions)
 
 
 def test_core_and_vendor_encode_the_same_envelope() -> None:

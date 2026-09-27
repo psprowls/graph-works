@@ -34,6 +34,7 @@ class FakeOrcaPort:
         }
     )
     reads: list[dict[str, Any]] = field(default_factory=lambda: [{"source": "transcript", "message_count": 1}])
+    pending: dict[str, Any] = field(default_factory=lambda: {"questions": [], "truncated": False, "warnings": []})
     #: Deliveries `check_wait` returns in order; an exhausted script returns an empty batch.
     deliveries: list[dict[str, Any]] = field(default_factory=list)
     #: `check_wait` raises these, in order, before consuming a delivery.
@@ -126,6 +127,14 @@ class FakeOrcaPort:
     def worker_read(self, dispatch_id, *, limit):
         self._record("worker_read", dispatch_id, limit=limit)
         return dict(self.reads.pop(0) if len(self.reads) > 1 else self.reads[0])
+
+    def pending_questions(self, run_id):
+        self._record("pending_questions", run_id)
+        return {
+            "questions": [dict(q) for q in self.pending["questions"]],
+            "truncated": self.pending["truncated"],
+            "warnings": list(self.pending["warnings"]),
+        }
 
     def terminal_send_enter(self, terminal):
         self._record("terminal_send_enter", terminal)

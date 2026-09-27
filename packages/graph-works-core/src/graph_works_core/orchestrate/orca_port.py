@@ -68,6 +68,23 @@ class OrcaRead(TypedDict):
     message_count: int
 
 
+class OrcaPendingQuestion(TypedDict):
+    message_id: str
+    label: str
+    dispatch_id: str | None
+    task_id: str | None
+    question: str
+    options: list[str]
+    ask_resource: str | None
+    asked_at: str
+
+
+class OrcaPendingQuestions(TypedDict):
+    questions: list[OrcaPendingQuestion]
+    truncated: bool
+    warnings: list[str]
+
+
 class OrcaMessage(TypedDict):
     id: str
     type: str
@@ -105,6 +122,7 @@ class OrcaPort(Protocol):
     def worker_list(self, run_id: str) -> list[OrcaWorker]: ...
     def worker_show(self, dispatch_id: str) -> OrcaWorkerShow: ...
     def worker_read(self, dispatch_id: str, *, limit: int) -> OrcaRead: ...
+    def pending_questions(self, run_id: str) -> OrcaPendingQuestions: ...
     def terminal_send_enter(self, terminal: str) -> None: ...
     def check_wait(self, run_id: str, *, types: str, timeout_ms: int, ack: str | None) -> OrcaDelivery: ...
     def check_ack(self, run_id: str, delivery_id: str) -> None: ...

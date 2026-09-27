@@ -156,6 +156,27 @@ requires an actual `worker-show.terminal` whose handle matches worker-list's
 terminal cannot leave stale proof. Structured workers may have an agent handle
 without a terminal; their lifecycle and reads use orchestration only.
 
+### Liveness rows
+
+`OrcaSession.liveness(now=…)` returns one `LivenessRow` per live (`pending` /
+`running`) dispatch with a handle: facts, never a verdict. It is available for
+coordinators after a timeout; wait-verb integration is a separate task, and the
+landed wait verb never nudges. Liveness itself neither nudges nor marks nudged.
+It reuses `workers()`' per-handle worker-show cache (`_shown` /
+`_show_failures`, refreshed with `_agent_terminals`), then adds one
+`worker-read --limit 1` per live dispatch. Transcript age comes only from a
+`source == "transcript"` read; terminal fallback is a note, never a stand-in.
+When terminal worktree path is unavailable, it falls back to `worktree show`
+using `worker.worktreeId`. Invalid path values are unknown, not stringified.
+`progress` comes from `_progress.find_progress` over
+`<worktree>/.superpowers/sdd/*/progress.md`, ignoring ledgers older than the
+dispatch's `createdAt`. Worker read failures produce null fields plus notes;
+only failed task/worker enumeration raises `OrcaCliError`. Malformed dispatch,
+terminal and transcript shapes are treated as unavailable. `now` is required
+and must be timezone-aware (otherwise `ValueError`, before any CLI call); this
+method never reads the clock. `LivenessRow`, `SddProgress` and `liveness_data`
+are public package exports; the protocol remains unchanged.
+
 ### Other gotchas that need cross-file reading
 
 - `run-use --id <id>` is called only on the *reuse* path in `open_session`;

@@ -48,3 +48,17 @@ forges, UI sort state) that this package never reads. What it preserves
 exactly is the pair the fixture exists for: `displayName` holding the
 requested `--name` verbatim while `branch` holds Orca's own
 `refs/heads/<user>/<slug>` derivation.
+
+## Liveness captures (2026-09-27)
+
+Captured from live dispatch `ctx_259a906bc061` on Orca 1.4.211 by the coordinator, using these exact commands (no new capture in Task 3):
+
+| File | Command |
+|---|---|
+| `worker_show_live_terminal.json` | `orca orchestration worker-show --dispatch ctx_259a906bc061 --json` |
+| `worker_read_latest.json` | `orca orchestration worker-read --dispatch ctx_259a906bc061 --limit 1 --json` |
+
+Sources: `.superpowers/sdd/02-plan/live-show.json` and `live-read.json`. These are live captures with approved redactions, not synthetic fixtures. Camel-case fields, timestamps, identities, paths, cursors, and structural fields are retained; the historical snake-case fixture remains unchanged. JSON is reserialized with two-space indentation and a final newline. Every content edit is listed below; no lifecycle authority/capability token remains in the committed captures.
+
+- `worker_show_live_terminal.json`: `result.terminal.preview` replaced with `"(redacted)"`.
+- `worker_read_latest.json`: `result.transcript.messages[0].blocks[0].input` replaced with `"(redacted)"`.

@@ -202,3 +202,12 @@ pinning. Graph Works auto-drive prepares and verifies each reader itself —
 an independent, setup-skipped one; core detaches and verifies it), or the
 legacy `launch-worker.py prepare-reader` — then starts it at that exact path. Creation actions
 require a non-None branch before assembling CLI flags.
+
+`port.py` is the structural `OrcaPort` implementation for core's coordinator
+logic. Its `check_wait` builds one blocking `check --wait` call with optional
+`--ack`, `check_ack` acknowledges a delivery separately, and `run_use` rebinds
+the Run's consumer. The port adds `OrcaTask.result`,
+`OrcaWorker.release_state` / `terminal`, and message `payload_raw` to its
+normalized rows so core can inspect duplicate completions without losing
+malformed payload evidence. Unlike `OrcaSession`, the port rebinds only when
+the caller's core logic asks it to.

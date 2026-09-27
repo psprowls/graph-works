@@ -422,7 +422,7 @@ dev = [
 
 [[package]]
 name = "graph-works-cli"
-version = "0.3.5"
+version = "0.3.6"
 source = { editable = "packages/graph-works-cli" }
 dependencies = [
     { name = "click" },
@@ -459,7 +459,7 @@ requires-dist = [
 
 [[package]]
 name = "graph-works-core"
-version = "0.6.3"
+version = "0.6.4"
 source = { editable = "packages/graph-works-core" }
 dependencies = [
     { name = "code-graph-io" },
@@ -503,7 +503,7 @@ provides-extras = ["vercel"]
 
 [[package]]
 name = "graph-works-serve"
-version = "0.3.5"
+version = "0.3.6"
 source = { editable = "packages/graph-works-serve" }
 dependencies = [
     { name = "config-io" },
@@ -534,7 +534,7 @@ dev = [{ name = "graph-works-cli", editable = "packages/graph-works-cli" }]
 
 [[package]]
 name = "graph-works-wire"
-version = "0.1.3"
+version = "0.1.4"
 source = { editable = "packages/graph-works-wire" }
 dependencies = [
     { name = "config-io" },
@@ -2349,7 +2349,7 @@ requires-dist = [{ name = "subagents-io", editable = "packages/subagents-io" }]
 
 [[package]]
 name = "workflow-orca"
-version = "0.2.0"
+version = "0.2.1"
 source = { editable = "packages/workflow-orca" }
 dependencies = [
     { name = "subagents-io" },

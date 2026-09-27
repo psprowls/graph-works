@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "cli": "graph-works-cli",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "commands": [
     {
       "name": "gw agent-config",

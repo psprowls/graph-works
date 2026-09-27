@@ -273,6 +273,12 @@ hand. `today` is always injected; nothing in this package reads the clock.
   whole vault and reads the owning epic's decisions ledger twice (routing and
   plan fields); those reads are not one atomic snapshot.
 
+- **`orchestrate/wait.py` owns the coordinator wait**: it filters heartbeats,
+  acknowledges deliveries with no real event, and returns real deliveries
+  unacknowledged. It never nudges or calls `worker_read` / `worker_show`, and
+  takes an injected `WaitClock` instead of reading the clock itself. It can
+  inspect worker and task lists to recognize already released completions.
+
 - **Orchestrate admission is one claim gate** (`orchestrate/claims.py`).
   `affects` overlap is segment containment (`packages/a` holds
   `packages/a/src`, not `packages/ab`), checked against live and

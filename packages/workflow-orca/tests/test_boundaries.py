@@ -25,7 +25,16 @@ import pytest
 SRC = Path(__file__).resolve().parents[1] / "src" / "workflow_orca"
 PACKAGES_DIR = Path(__file__).resolve().parents[3] / "packages"
 
-ALL_MODULES = ("__init__.py", "_cli.py", "_map.py", "_launch.py", "_progress.py", "backend.py", "port.py")
+ALL_MODULES = (
+    "__init__.py",
+    "_cli.py",
+    "_liveness.py",
+    "_map.py",
+    "_launch.py",
+    "_progress.py",
+    "backend.py",
+    "port.py",
+)
 
 #: The one workspace package this may import. There is no third-party
 #: allowlist because the list is empty.

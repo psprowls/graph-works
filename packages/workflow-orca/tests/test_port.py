@@ -6,6 +6,7 @@ import json
 
 import pytest
 from orca_fakes import FakeRunner
+from subagents_io.backend import BackendError
 from workflow_orca._cli import OrcaCliError, OrcaResult
 from workflow_orca.port import OrcaCliPort
 
@@ -619,3 +620,136 @@ def test_liveness_projects_observation_without_binding_or_nudging():
     for command in ("task-list", "worker-list"):
         [call] = runner.calls_matching(command)
         assert runner.argv_after("--run", call) == "run_observe"
+
+
+RUN_Q = "run_q00000000001"
+
+
+def question_port():
+    return port(
+        [
+            (("inbox", "--terminal", f"run:{RUN_Q}"), "inbox_run_questions"),
+            (("inbox", "--terminal", "dispatch:ctx_aaaaaaaaaaaa"), "inbox_dispatch_replies"),
+            (("inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb"), "inbox_dispatch_empty"),
+            (("worker-list",), "worker_list_questions"),
+        ]
+    )
+
+
+def test_pending_questions_reads_run_inbox_workers_then_live_asker_inboxes():
+    p, runner = question_port()
+    p.pending_questions(RUN_Q)
+    assert runner.calls == [
+        ("orca", "orchestration", "inbox", "--terminal", f"run:{RUN_Q}", "--limit", "1000", "--json"),
+        ("orca", "orchestration", "worker-list", "--run", RUN_Q, "--json"),
+        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_aaaaaaaaaaaa", "--limit", "1000", "--json"),
+        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb", "--limit", "1000", "--json"),
+    ]
+    # ctx_dddddddddddd has ended: its inbox is never read.
+
+
+def test_pending_questions_projects_the_join():
+    p, _runner = question_port()
+    result = p.pending_questions(RUN_Q)
+    assert result["truncated"] is False
+    assert [(q["label"], q["dispatch_id"], q["options"]) for q in result["questions"]] == [
+        ("q-00b2", "ctx_bbbbbbbbbbbb", ["merge", "pr", "hold", "discard"]),
+        ("q-00c3", "ctx_aaaaaaaaaaaa", ["approve", "changes"]),
+    ]
+    assert result["questions"][1]["ask_resource"] == "/work/feature-x/references/asks/spec-review-1.json"
+    assert len(result["warnings"]) == 1 and "msg_0000000000d4" in result["warnings"][0]
+
+
+def test_pending_a_full_dispatch_inbox_marks_the_read_truncated():
+    def runner(argv):
+        if "dispatch:ctx_aaaaaaaaaaaa" in argv:
+            return OrcaResult(0, json.dumps({"ok": True, "result": {"messages": [], "count": 1000}}), "")
+        return question_port()[1](argv)
+
+    assert OrcaCliPort(run=runner).pending_questions(RUN_Q)["truncated"] is True
+
+
+def test_pending_a_question_with_no_dispatch_reads_no_dispatch_inbox():
+    inbox = {
+        "messages": [
+            {"id": "msg_nodisp1", "type": "question", "to_handle": f"run:{RUN_Q}", "body": "?", "payload": "{}"}
+        ],
+        "count": 1,
+    }
+    calls = []
+
+    def runner(argv):
+        calls.append(tuple(argv))
+        if "inbox" in argv:
+            return OrcaResult(0, json.dumps({"ok": True, "result": inbox}), "")
+        return OrcaResult(0, json.dumps({"ok": True, "result": {"workers": []}}), "")
+
+    result = OrcaCliPort(run=runner).pending_questions(RUN_Q)
+    assert [q["dispatch_id"] for q in result["questions"]] == [None]
+    assert [c for c in calls if any(str(a).startswith("dispatch:") for a in c)] == []
+
+
+def test_pending_any_failed_read_raises_backend_error():
+    for failing in ("run:", "worker-list", "dispatch:ctx_aaaaaaaaaaaa"):
+
+        def runner(argv, failing=failing):
+            if any(failing in str(a) for a in argv):
+                return OrcaResult(1, json.dumps({"ok": False, "error": {"code": "boom", "message": "x"}}), "")
+            return question_port()[1](argv)
+
+        with pytest.raises(BackendError):
+            OrcaCliPort(run=runner).pending_questions(RUN_Q)
+
+
+@pytest.mark.parametrize("state", [None, "future-state"])
+def test_pending_reads_unknown_state_askers_from_later_worker_pages(state):
+    calls = []
+    base = question_port()[1]
+
+    def runner(argv):
+        calls.append(tuple(argv))
+        if "worker-list" in argv:
+            later = "--cursor" in argv
+            result = {
+                "workers": [{"dispatchId": "ctx_bbbbbbbbbbbb", "workerState": state}] if later else [],
+                "page": {"hasMore": not later, "nextCursor": None if later else "page_2"},
+            }
+            return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+        return base(argv)
+
+    result = OrcaCliPort(run=runner).pending_questions(RUN_Q)
+    assert [q["dispatch_id"] for q in result["questions"]] == ["ctx_bbbbbbbbbbbb"]
+    assert calls[2] == ("orca", "orchestration", "worker-list", "--run", RUN_Q, "--cursor", "page_2", "--json")
+    assert calls[3:] == [
+        ("orca", "orchestration", "inbox", "--terminal", "dispatch:ctx_bbbbbbbbbbbb", "--limit", "1000", "--json")
+    ]
+
+
+def test_pending_failed_later_worker_page_raises_before_dispatch_reads():
+    base = question_port()[1]
+
+    def runner(argv):
+        if "--cursor" in argv:
+            return OrcaResult(1, '{"ok": false, "error": {"message": "later page failed"}}', "")
+        if "worker-list" in argv:
+            result = {"workers": [], "page": {"hasMore": True, "nextCursor": "page_2"}}
+            return OrcaResult(0, json.dumps({"ok": True, "result": result}), "")
+        assert f"run:{RUN_Q}" in argv
+        return base(argv)
+
+    with pytest.raises(BackendError, match="later page failed"):
+        OrcaCliPort(run=runner).pending_questions(RUN_Q)
+
+
+def test_pending_full_run_inbox_preserves_truncation_after_dispatch_reads():
+    base = question_port()[1]
+
+    def runner(argv):
+        response = base(argv)
+        if f"run:{RUN_Q}" in argv:
+            body = json.loads(response.stdout)
+            body["result"]["count"] = 1000
+            return OrcaResult(0, json.dumps(body), "")
+        return response
+
+    assert OrcaCliPort(run=runner).pending_questions(RUN_Q)["truncated"] is True

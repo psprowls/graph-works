@@ -13,7 +13,32 @@ from typing import Any, TypedDict
 from workflow_orca._cli import OrcaCliError, OrcaResult, _subprocess_run, unwrap
 from workflow_orca._launch import check_launch_receipt
 from workflow_orca._liveness import liveness_data
+from workflow_orca._map import (
+    INBOX_LIMIT,
+    SETTLED_ORCA_STATES,
+    OrcaPendingQuestion,
+    OrcaPendingQuestions,
+    inbox_truncated,
+    join_pending_questions,
+    reply_threads,
+    run_questions,
+)
 from workflow_orca.backend import OrcaSession
+
+__all__ = [
+    "OrcaCliPort",
+    "OrcaDelivery",
+    "OrcaMessage",
+    "OrcaPendingQuestion",
+    "OrcaPendingQuestions",
+    "OrcaRead",
+    "OrcaRepo",
+    "OrcaStart",
+    "OrcaTask",
+    "OrcaWorker",
+    "OrcaWorkerShow",
+    "OrcaWorktree",
+]
 
 
 class OrcaRepo(TypedDict):
@@ -409,6 +434,33 @@ class OrcaCliPort:
             "source": _string(result.get("source")),
             "message_count": len(messages) if isinstance(messages, list) else 0,
         }
+
+    def pending_questions(self, run_id: str) -> OrcaPendingQuestions:
+        """Questions on the Run with no reply in their thread from a still-live Dispatch.
+
+        Three reads: the Run mailbox, `worker-list`, then each live asker's own
+        mailbox, where `reply --id` lands. An ended asker's mailbox is not read:
+        its question is closed whatever it holds. The join is `_map`'s.
+        """
+        run_inbox = self._call(("inbox", "--terminal", f"run:{run_id}", "--limit", str(INBOX_LIMIT)))
+        questions = run_questions(run_id, run_inbox)
+        states = {worker["dispatch_id"]: worker["state"] for worker in self.worker_list(run_id)}
+        truncated = inbox_truncated(run_inbox)
+        replied: set[str] = set()
+        live_askers = sorted(
+            {
+                q.dispatch_id
+                for q in questions
+                if q.dispatch_id is not None
+                and q.dispatch_id in states
+                and states[q.dispatch_id] not in SETTLED_ORCA_STATES
+            }
+        )
+        for dispatch_id in live_askers:
+            inbox = self._call(("inbox", "--terminal", f"dispatch:{dispatch_id}", "--limit", str(INBOX_LIMIT)))
+            replied |= reply_threads(run_id, inbox)
+            truncated = truncated or inbox_truncated(inbox)
+        return join_pending_questions(questions, worker_states=states, replied=replied, truncated=truncated)
 
     def terminal_send_enter(self, terminal: str) -> None:
         self._call_top(("terminal", "send", "--terminal", terminal, "--text", "", "--enter"))

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 from types import SimpleNamespace as ns
@@ -69,6 +70,7 @@ def test_wait_payload_exact_event_shape() -> None:
         "sleep_gap": None,
         "waited_s": 312,
         "pending_questions": None,
+        "warnings": [],
         "liveness": None,
     }
 
@@ -863,3 +865,23 @@ def test_wait_liveness_preserves_empty_populated_and_uncomputed():
             liveness=rows,
         )
         assert work.wait_payload(result)["liveness"] == rows
+
+
+QUESTION = {
+    "message_id": "msg_0000000000b2",
+    "label": "q-00b2",
+    "dispatch_id": "ctx_b",
+    "task_id": "task_b",
+    "question": "Merge?",
+    "options": ["merge", "hold"],
+    "ask_resource": None,
+    "asked_at": "2026-09-27T15:30:00Z",
+}
+
+
+def test_wait_payload_projects_pending_questions_and_null():
+    base = WaitResult("timeout", "run_1", None, (), (), 0, False, None, 0)
+    assert work.wait_payload(replace(base, pending_questions=(QUESTION,)))["pending_questions"] == [QUESTION]
+    assert work.wait_payload(replace(base, pending_questions=()))["pending_questions"] == []
+    assert work.wait_payload(replace(base, pending_questions=None))["pending_questions"] is None
+    assert work.wait_payload(replace(base, warnings=("w",)))["warnings"] == ["w"]

@@ -67,7 +67,7 @@ def test_event_json_is_the_wire_projection(env):
     assert payload["status"] == "event" and payload["delivery_id"] == "dlv_1"
     assert [m["id"] for m in payload["messages"]] == ["e"]
     assert payload["self_acked"] == 1
-    assert payload["pending_questions"] is None and payload["liveness"] is None
+    assert payload["pending_questions"] == [] and payload["liveness"] is None
     acks = [kwargs["ack"] for name, _a, kwargs in port.calls if name == "check_wait"]
     assert acks[0] == "dlv_prev"
     assert "liveness" not in port.names()
@@ -122,11 +122,11 @@ def test_orca_failure_is_a_refusal_envelope(env):
     assert "check_ack" not in port.names()
 
 
-def test_timeout_below_one_is_usage_error(env):
+def test_negative_timeout_is_usage_error(env):
     layout, port = env
-    result = invoke(layout, "--timeout-s", "0")
+    result = invoke(layout, "--timeout-s", "-1")
     assert result.exit_code != 0
-    assert "--timeout-s" in result.output and "1" in result.output
+    assert "--timeout-s" in result.output and "0" in result.output
     assert "check_wait" not in port.names()
 
 
@@ -199,6 +199,8 @@ def test_timeout_json_liveness_through_real_adapter(env, monkeypatch, live):
 
     def transport(argv):
         calls.append(tuple(argv))
+        if "inbox" in argv:
+            return OrcaResult(0, json.dumps({"ok": True, "result": {"messages": []}}), "")
         if "check" in argv:
             return OrcaResult(0, json.dumps({"ok": True, "result": {"messages": []}}), "")
         names = {
@@ -254,7 +256,7 @@ def test_timeout_liveness_pages_and_retries(env, monkeypatch, scenario):
     def transport(argv):
         calls.append(tuple(argv))
         command = argv[2]
-        if command == "check":
+        if command == "check" or command == "inbox":
             payload = {"messages": []}
         elif command == "task-list":
             payload = {"tasks": [{"id": "task_live", "task_title": "live"}]}
@@ -294,5 +296,54 @@ def test_timeout_liveness_pages_and_retries(env, monkeypatch, scenario):
         assert result.exit_code == 0, result.output
         assert payload["status"] == "timeout"
         assert [row["handle"] for row in payload["liveness"]] == ["ctx_live"]
-    assert sum("worker-list" in call for call in calls) == 2
+    # Liveness pages once; the independent pending read pages again on success.
+    assert sum("worker-list" in call for call in calls) == (2 if scenario == "later-failure" else 4)
     assert not any(token in call for call in calls for token in ("run-use", "run-create", "send", "--ack"))
+
+
+QUESTION = {
+    "message_id": "msg_0000000000b2",
+    "label": "q-00b2",
+    "dispatch_id": "ctx_b",
+    "task_id": "task_b",
+    "question": "Merge?",
+    "options": ["merge", "hold"],
+    "ask_resource": None,
+    "asked_at": "2026-09-27T15:30:00Z",
+}
+
+
+@pytest.mark.parametrize("ack", [(), ("--ack", "dlv_prev")])
+def test_zero_timeout_json_pending_questions_is_a_pure_read(env, ack):
+    layout, port = env
+    port.pending = {"questions": [QUESTION], "truncated": False, "warnings": []}
+    result = invoke(layout, "--timeout-s", "0", "--json", *ack)
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["pending_questions"] == [QUESTION]
+    assert payload["pending_questions"][0]["label"] == "q-00b2"
+    assert payload["warnings"] == [] and payload["liveness"] is None
+    assert payload["status"] == "timeout" and payload["delivery_id"] is None
+    assert payload["self_acked"] == 0 and payload["rebound"] is False
+    assert port.calls == [("pending_questions", ("run_1",), {})]
+
+
+def test_pending_read_failure_human_warning(env):
+    layout, port = env
+    port.fail["pending_questions"] = BackendError("x")
+    result = invoke(layout, "--timeout-s", "1")
+    assert result.exit_code == 0, result.output
+    assert result.output.splitlines() == [
+        "timeout after 0s",
+        "warning: pending questions unavailable: x",
+    ]
+
+
+def test_pending_read_failure_json_is_null_with_warning(env):
+    layout, port = env
+    port.fail["pending_questions"] = BackendError("x")
+    result = invoke(layout, "--timeout-s", "1", "--json")
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["pending_questions"] is None
+    assert payload["warnings"] == ["pending questions unavailable: x"]

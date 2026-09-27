@@ -767,7 +767,7 @@ def reroute(
 def wait(
     run: str = typer.Option(..., "--run", help="The Orca Run id."),
     ack: str = typer.Option("", "--ack", help="The previous event's delivery_id, acked before this wait."),
-    timeout_s: float = typer.Option(600.0, "--timeout-s", min=1, help="Seconds before returning status timeout."),
+    timeout_s: float = typer.Option(600.0, "--timeout-s", min=0, help="Seconds before returning status timeout."),
     workspace: str = typer.Option("", "--workspace", help="Workspace path."),
     json_output: bool = rendering.json_option("Emit the wait result as JSON."),
 ) -> None:
@@ -795,6 +795,8 @@ def wait(
     if payload["rebound"]:
         line += "; rebound"
     typer.echo(line)
+    for warning in result.warnings:
+        typer.echo(f"warning: {warning}")
 
 
 @work_app.command(name="regen-index")

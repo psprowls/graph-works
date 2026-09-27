@@ -355,7 +355,10 @@ def wait_payload(result: WaitResult) -> dict[str, Any]:
         "rebound": result.rebound,
         "sleep_gap": None if result.sleep_gap_s is None else {"seconds": result.sleep_gap_s},
         "waited_s": result.waited_s,
-        "pending_questions": None,
+        "pending_questions": (
+            None if result.pending_questions is None else [dict(q) for q in result.pending_questions]
+        ),
+        "warnings": list(result.warnings),
         "liveness": result.liveness,
     }
 

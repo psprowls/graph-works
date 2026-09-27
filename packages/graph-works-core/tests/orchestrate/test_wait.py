@@ -155,8 +155,8 @@ def test_filtered_batch_without_delivery_id_is_not_acked():
     assert "check_ack" not in port.names()
 
 
-@pytest.mark.parametrize("timeout_s", [0, -1])
-def test_non_positive_timeout_is_refused(timeout_s):
+@pytest.mark.parametrize("timeout_s", [-1, -0.5])
+def test_negative_timeout_is_refused(timeout_s):
     with pytest.raises(ValueError, match="timeout_s"):
         wait(FakeOrcaPort(), Clock(), timeout_s=timeout_s)
 
@@ -492,7 +492,7 @@ def test_timeout_liveness_uses_the_final_sleep_gap_sample():
     )
     assert result.sleep_gap_s == 3000 and result.waited_s == 600
     assert result.liveness == rows
-    assert port.calls[-1] == ("liveness", ("run_1",), {"now": final})
+    assert [c for c in port.calls if c[0] == "liveness"] == [("liveness", ("run_1",), {"now": final})]
 
 
 def test_timeout_with_no_live_workers_has_empty_liveness():
@@ -515,3 +515,72 @@ def test_liveness_failure_is_wait_failed_without_rebinding():
         wait(port, Clock())
     assert caught.value.code == "consumer_fenced"
     assert "run_use" not in port.names()
+
+
+QUESTION = {
+    "message_id": "msg_0000000000b2",
+    "label": "q-00b2",
+    "dispatch_id": "ctx_b",
+    "task_id": "task_b",
+    "question": "Merge?",
+    "options": ["merge", "hold"],
+    "ask_resource": None,
+    "asked_at": "2026-09-27T15:30:00Z",
+}
+
+
+@pytest.mark.parametrize("event", [False, True])
+@pytest.mark.parametrize("slept", [0, 3000])
+def test_pending_questions_on_event_timeout_and_sleep_gap(event, slept):
+    clock = Clock()
+    port = FakeOrcaPort(
+        deliveries=[delivery("hb", hb("h")), delivery("real", done())] if event else [],
+        on_wait=lambda ms: clock.advance(1 if event else ms / 1000, slept=slept),
+    )
+    port.pending = {"questions": [QUESTION], "truncated": False, "warnings": []}
+    result = wait(port, clock, timeout_s=5)
+    assert result.status == ("event" if event else "timeout")
+    assert result.pending_questions == (QUESTION,)
+    assert result.warnings == ()
+    assert port.names().count("pending_questions") == 1
+    assert port.calls[-1] == ("pending_questions", ("run_1",), {})
+    assert result.sleep_gap_s == (slept * (2 if event else 1) or None)
+    if event:
+        assert result.delivery_id == "real" and result.self_acked == 1
+        assert [c[1][1] for c in port.calls if c[0] == "check_ack"] == ["hb"]
+    else:
+        assert port.names().count("liveness") == 1
+
+
+@pytest.mark.parametrize("ack", [None, "dlv_prev"])
+def test_zero_timeout_is_a_pure_pending_read_even_with_ack(ack):
+    port = FakeOrcaPort()
+    port.pending = {"questions": [QUESTION], "truncated": False, "warnings": []}
+    result = wait(port, Clock(), timeout_s=0, ack=ack)
+    assert result.status == "timeout" and result.pending_questions == (QUESTION,)
+    assert result.delivery_id is None and result.messages == () and result.absorbed == ()
+    assert result.self_acked == 0 and not result.rebound and result.waited_s == 0
+    assert result.liveness is None
+    assert port.calls == [("pending_questions", ("run_1",), {})]
+
+
+@pytest.mark.parametrize("timeout_s", [0, 5])
+@pytest.mark.parametrize("event", [False, True])
+def test_failed_pending_read_is_null_plus_warning_without_fence_retry(timeout_s, event):
+    port = FakeOrcaPort(deliveries=[delivery("d", msg("e", "question"))] if event else [])
+    port.fail["pending_questions"] = Fenced("inbox refused")
+    result = wait(port, Clock(), timeout_s=timeout_s)
+    assert result.status == ("event" if event and timeout_s else "timeout")
+    assert result.pending_questions is None
+    assert result.warnings == ("pending questions unavailable: inbox refused",)
+    assert port.names().count("pending_questions") == 1
+    assert "run_use" not in port.names() and "check_ack" not in port.names()
+
+
+def test_pending_truncation_and_derivation_warnings_are_merged():
+    port = FakeOrcaPort()
+    port.pending = {"questions": [], "truncated": True, "warnings": ["question msg_d left out: ..."]}
+    result = wait(port, Clock(), timeout_s=5)
+    assert result.pending_questions == ()
+    assert "question msg_d left out: ..." in result.warnings
+    assert any("may be incomplete" in w for w in result.warnings)

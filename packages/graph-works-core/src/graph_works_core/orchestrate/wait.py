@@ -19,7 +19,14 @@ from typing import Any, Literal, TypeVar
 
 from subagents_io.backend import BackendError
 
-from graph_works_core.orchestrate.orca_port import OrcaDelivery, OrcaMessage, OrcaPort, OrcaTask, OrcaWorker
+from graph_works_core.orchestrate.orca_port import (
+    OrcaDelivery,
+    OrcaMessage,
+    OrcaPendingQuestion,
+    OrcaPort,
+    OrcaTask,
+    OrcaWorker,
+)
 
 REAL_TYPES: tuple[str, ...] = ("worker_done", "escalation", "question")
 SLEEP_GAP_FLOOR_S = 60
@@ -55,6 +62,8 @@ class WaitResult:
     sleep_gap_s: int | None
     waited_s: int
     liveness: list[dict[str, Any]] | None = None
+    pending_questions: tuple[OrcaPendingQuestion, ...] | None = None
+    warnings: tuple[str, ...] = ()
 
 
 class WaitFailed(RuntimeError):
@@ -144,9 +153,21 @@ def _absorb(messages: Sequence[OrcaMessage], *, run_id: str, fence: _Fence) -> t
     return kept, absorbed
 
 
+def _pending_questions(port: OrcaPort, run_id: str) -> tuple[tuple[OrcaPendingQuestion, ...] | None, tuple[str, ...]]:
+    """Re-derive questions on every return; failed reads are unknown, never empty."""
+    try:
+        read = port.pending_questions(run_id)
+    except BackendError as exc:
+        return None, (f"pending questions unavailable: {exc}",)
+    warnings = list(read["warnings"])
+    if read["truncated"]:
+        warnings.append("pending questions may be incomplete: an Orca inbox read reached its limit")
+    return tuple(read["questions"]), tuple(warnings)
+
+
 def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, clock: WaitClock) -> WaitResult:
-    if timeout_s <= 0:
-        raise ValueError(f"timeout_s must be positive, got {timeout_s!r}")
+    if timeout_s < 0:
+        raise ValueError(f"timeout_s must be non-negative, got {timeout_s!r}")
     fence = _Fence(port, run_id)
     wall0, mono0 = clock.wall(), clock.monotonic()
     deadline = mono0 + timeout_s
@@ -157,7 +178,8 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
     delivery_id: str | None = None
     messages: tuple[OrcaMessage, ...] = ()
     try:
-        while True:
+        # Zero is a pure pending-question read, even when the caller supplied an ack.
+        while timeout_s > 0:
             sent_ack = pending_ack
 
             def check_with_remaining_budget(ack_to_send: str | None = sent_ack) -> OrcaDelivery | None:
@@ -190,9 +212,10 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
     now = clock.wall()
     gap = int((now - wall0).total_seconds() - mono_elapsed)
     try:
-        liveness = port.liveness(run_id, now=now) if status == "timeout" else None
+        liveness = port.liveness(run_id, now=now) if status == "timeout" and timeout_s > 0 else None
     except BackendError as exc:
         raise WaitFailed(run_id, getattr(exc, "code", None), str(exc)) from exc
+    pending_questions, warnings = _pending_questions(port, run_id)
     return WaitResult(
         status=status,
         run_id=run_id,
@@ -204,4 +227,6 @@ def run_wait(port: OrcaPort, run_id: str, *, ack: str | None, timeout_s: float, 
         sleep_gap_s=gap if gap >= SLEEP_GAP_FLOOR_S else None,
         waited_s=int(mono_elapsed),
         liveness=liveness,
+        pending_questions=pending_questions,
+        warnings=warnings,
     )

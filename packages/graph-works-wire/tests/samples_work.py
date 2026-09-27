@@ -441,6 +441,19 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                 rebound=False,
                 sleep_gap_s=None,
                 waited_s=12,
+                pending_questions=(
+                    {
+                        "message_id": "msg_0000000000b2",
+                        "label": "q-00b2",
+                        "dispatch_id": "ctx_b",
+                        "task_id": "task_b",
+                        "question": "Merge?",
+                        "options": ["merge", "hold"],
+                        "ask_resource": None,
+                        "asked_at": "2026-09-27T15:30:00Z",
+                    },
+                ),
+                warnings=("partial read",),
             )
         ),
         lambda: work.wait_payload(
@@ -455,6 +468,7 @@ WORK: dict[str, tuple[Callable[[], object], ...]] = {
                 sleep_gap_s=3000,
                 waited_s=600,
                 liveness=[],
+                pending_questions=(),
             )
         ),
         lambda: work.wait_payload(

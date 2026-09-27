@@ -583,6 +583,23 @@ else
     grep -nF 'AskUserQuestion' <<<"$section_43" | sed 's/^/      /'
 fi
 
+# Task 5 I1: pin the explicit ordering and fail-closed label contract.
+assert_contains "skills/auto-drive/SKILL.md" \
+    '**On delivery, before mirroring:** obtain fresh pending labels with' \
+    "auto-drive I1 reads fresh labels before delivery mirroring"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'Never invent a label or reuse a cached label when the refresh fails.' \
+    "auto-drive I1 rejects invented or stale labels on refresh failure"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'An unprinted question is not mirrored; leave its delivery unacked for replay.' \
+    "auto-drive I1 preserves unprinted questions for replay"
+assert_contains "skills/auto-drive/SKILL.md" \
+    '**On both delivery and timeout, display pending before restarting.**' \
+    "auto-drive I1 displays pending on both paths before restart"
+assert_contains "skills/auto-drive/SKILL.md" \
+    'Only after the pending display, restart the cycle at §2.1.' \
+    "auto-drive I1 restarts only after the pending display"
+
 # Finishing-relay's three asks are typed; hand-written --options produced
 # comma-split and invented-grammar asks. Typed replies have a strict JSON body.
 assert_contains "skills/finishing-relay/SKILL.md" "gw work ask <work-path> --kind choice" \

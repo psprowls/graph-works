@@ -864,24 +864,29 @@ orca orchestration check --run <run_id> --wait \
   --types worker_done,escalation,question --timeout-ms 600000 --json
 ```
 
-- **On delivery:** process **every** message in the batch (§4) before
-  acking. Then acknowledge with the delivery id from the response:
+- **On delivery, before mirroring:** obtain fresh pending labels with
+  `gw work wait --run <run_id> --timeout-s 0 --json`. Match each question's
+  `message_id` to this read's `pending_questions` entry and use its `label`
+  in §4.3; suffix collisions can change labels between reads.
+  Never invent a label or reuse a cached label when the refresh fails.
+  If `pending_questions` is `null`, or a question needing mirroring has no
+  matching entry, report the failed refresh or missing entry and defer that
+  question's mirroring until a successful fresh read supplies its label.
+  An unprinted question is not mirrored; leave its delivery unacked for replay.
+  Continue handling other messages under §4, including the existing step 0
+  policy-answer path and its reply guards; do not count a deferred question
+  as handled. A successfully policy-answered question needs no mirroring.
+- **Handle, then acknowledge:** process **every** message in the batch (§4)
+  before acking, preserving the recovery-record requirement below. Only when
+  every message is handled, acknowledge with the delivery id from the response:
   `orca orchestration check --run <run_id> --ack <delivery_id>`, reading the
   id from `result.deliveryId` (a bound Run replays the same delivery until
   acked — don't ack before every message in the batch is handled). For a question, *handled* means *mirrored to the human*, not *answered*.
-  Once §4.3 has printed it, ack the delivery and keep looping; the question
+  Once §4.3 has printed it, it satisfies the mirroring requirement; the question
   stays pending in Orca until `reply --id` answers it or its Dispatch ends. If a
   future runtime version reports the id under a different key, read it off
   the first real `check --wait --json` response rather than trusting this
-  name blindly. Restart the cycle at §2.1.
-- **Pending questions, every cycle.** After processing the delivery or the
-  timeout, read the pending set:
-  `gw work wait --run <run_id> --timeout-s 0 --json` — a zero timeout makes
-  no Orca `check` call and acks nothing; it only derives the Run's unanswered
-  questions from Orca. Print its `pending_questions` as §4.3 step 1a says,
-  and show its `warnings`. (Until `tech-debt-auto-drive-skill-orca-edge-cases`
-  replaces this section's raw `check --wait` with `gw work wait`, this is a
-  separate call; afterwards every wait result already carries the field.)
+  name blindly. Continue to the pending display below, even if ack was deferred.
 - **Rejected or unprovable completion:** a delivery holding a
   `claimed-unconfirmed` report (§4.1) may be acked only once that report's
   recovery record is written with its identities, the evidence so far, and
@@ -900,12 +905,25 @@ orca orchestration check --run <run_id> --wait \
 - **On timeout with nothing delivered:**
   `orca orchestration worker-show --dispatch <id> --json` for every
   still-live dispatch. Any `failed`/`stopped` → failure flow
-  (§4.2), then restart the cycle at §2.1. An unsuccessful or uncertain read
+  (§4.2), then continue to the pending display below. An unsuccessful or uncertain read
   enters inspection without nudging. Still `ready`/`running` → before
   looping back into another `--wait`, run §3's **Manual ordered probe** on
   each still-live dispatch. An `attend` dispatch may legitimately be waiting
   on a dialog, while an unsent prompt can report `running` indefinitely;
   elapsed idle time decides neither case.
+- **On both delivery and timeout, display pending before restarting.**
+  After the handling above, read (or refresh after delivery processing) the
+  pending set: `gw work wait --run <run_id> --timeout-s 0 --json` — a zero
+  timeout makes no Orca `check` call and acks nothing; it only derives the
+  Run's unanswered questions from Orca. Print its `pending_questions` as
+  §4.3 step 1a says, and show its `warnings`. A failed read prints the refresh
+  failure notice, not an invented pending list. If this display finally mirrors
+  a deferred delivery question, acknowledge only after every message meets
+  the handling and recovery-record safeguards above.
+  Only after the pending display, restart the cycle at §2.1.
+  (Until `tech-debt-auto-drive-skill-orca-edge-cases` replaces this section's
+  raw `check --wait` with `gw work wait`, the pending reads are separate calls;
+  afterwards every wait result already carries the field.)
 
 ## 3. Dispatch mechanics
 
@@ -1677,8 +1695,10 @@ what the options *mean*; that is the worker's job.
    loop runs on. The coordinator never waits on the human for a worker
    question; the human answers later, by label (step 1b), in any order. A
    question's label is its `label` in `gw work wait`'s `pending_questions`
-   (`q-` plus the tail of its message id). Once printed, it is handled for
-   §2.7's ack rule.
+   (an opaque, collision-aware label). Use §2.7's fresh read before delivery
+   mirroring, matching by `message_id`; never derive the label yourself. If
+   that read fails or has no matching entry, follow §2.7's deferral rule.
+   Once printed, it is handled for §2.7's ack rule.
 
    Typed or untyped? Test whether the question text's last line starts with `gw-ask: `.
    - **Typed.** The rest of that line is the payload's root-absolute
@@ -1705,7 +1725,10 @@ what the options *mean*; that is the worker's job.
     printed is session memory only: after a restart every pending question
     prints in full once more. `[]` prints nothing. `null` means the read
     failed — print `pending questions: refresh failed`, keep the last printed
-    list, and show the result's `warnings`.
+    list as historical display only, and show the result's `warnings`. Do not
+    use that list's labels to mirror a new delivery or mark an unprinted
+    question as mirrored. Track printed questions by `message_id`, not label,
+    so reminders use the current read's label even when suffixes collide.
 
 1b. **Take a typed answer.** The human types into this terminal whenever they
     like — `q-e862 merge`, `q-1a2b approve, effort medium`,
